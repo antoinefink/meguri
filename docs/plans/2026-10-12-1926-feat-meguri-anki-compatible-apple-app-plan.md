@@ -14,7 +14,7 @@ deepened: 2026-10-12
 ## Goal Capsule
 
 - **Objective:** Antoine studies every day on Mac, iPhone, iPad and foldable iPhone with an app that does everything he relies on Anki for, looks and behaves like a first-party Apple app, never makes him wait (the next card is on screen the moment he answers), and keeps his Anki collection and sync history fully intact and interoperable.
-- **Means:** Meguri, a native SwiftUI app on a newly written Rust core that reads and writes Anki collections, schedules with FSRS through fsrs-rs, and syncs with AnkiWeb and self-hosted Anki sync servers (KTD1–KTD3, KTD9–KTD11).
+- **Means:** Meguri, a native SwiftUI app on a newly written Rust core that reads and writes Anki collections, schedules with FSRS through fsrs-rs, uses private CloudKit sync between Meguri devices, and supports manual import/export through Anki files and Anki sync servers in Settings (KTD1–KTD3, KTD25, KTD26).
 - **Product authority:** Antoine (sole user and decision-maker). Anki's observable behavior is the reference for everything in scope unless a requirement marks a deliberate deviation. Out-of-scope Anki features are listed under Scope Boundaries and their data is preserved, not supported.
 - **Execution profile:** autonomous Codex execution; never use Claude or Opus (Antoine, 2026-10-18). Core capabilities run in the clean-room spec-writer then implementer roles (KTD1). Each unit is implemented, reviewed and fixed for up to six rounds, then committed once `tools/mg gate` passes. Milestones M0, M1R and M1–M5 close through `tools/mg milestone-gate` (Delivery Milestones).
 - **Stop conditions:** pause for Antoine only when:
@@ -24,7 +24,7 @@ deepened: 2026-10-12
 
   Everything else proceeds on the plan's defaults (Assumptions).
 - **Who finishes:** agents build, verify and commit every unit. Antoine performs the one-time setup steps, milestone device runs, signature-screen variant picks and the 30-day daily-driver trial.
-- **Open blockers:** None for planning. AnkiWeb permission for a public App Store build and the foldable-iPhone simulator (expected with Xcode 27.1) are tracked under Dependencies and do not block planning or personal builds.
+- **Open blockers:** No product decision blocks this update. CloudKit contract/spec work, container provisioning and signed multi-device verification remain prerequisites to implementing and accepting the new sync path. AnkiWeb permission for a public App Store build and the foldable-iPhone simulator (expected with Xcode 27.1) are tracked under Dependencies and do not block planning or personal builds.
 
 ---
 
@@ -32,7 +32,7 @@ deepened: 2026-10-12
 
 ### Summary
 
-Meguri is a single-window native app for macOS 27, iOS 27, iPadOS 27 and the foldable iPhone that replaces Anki desktop and AnkiMobile for one learner. It keeps Anki's structure and vocabulary, works on real Anki collections and sync, schedules only with FSRS (parameters fully automatic), and is built for instant response. On the Mac it also stands in for the Migaku add-on and AnkiConnect so existing card-creation tools keep working.
+Meguri is a single-window native app for macOS 27, iOS 27, iPadOS 27 and the foldable iPhone that replaces Anki desktop and AnkiMobile for one learner. It keeps Anki's structure and vocabulary, works on real Anki collections, uses iCloud for routine sync, supports manual Anki migration, schedules only with FSRS (parameters fully automatic), and is built for instant response. On the Mac it also stands in for the Migaku add-on and AnkiConnect so existing card-creation tools keep working.
 
 ### Problem Frame
 
@@ -48,7 +48,7 @@ Anki's own code cannot simply be reused: it is AGPL-3.0, which conflicts with Ap
 - **Rust core, native SwiftUI interface.** One newly written Rust engine shared by every platform, with every screen built in SwiftUI (AppKit/UIKit only where SwiftUI falls short) using Apple's own stack. (session-settled: user-approved — chosen over Rust everywhere and Swift everywhere: native Apple behavior plus a headless, Docker-testable engine.) Governs R15.
 - **FSRS only, through fsrs-rs at Anki's exact version.** No SM-2 or legacy scheduler; collections with FSRS off are switched to FSRS; FSRS upgrades follow Anki releases only. (session-settled: user-directed — chosen over keeping SM-2 for migrating users: Meguri is for one user who already uses FSRS.) Governs R646, R702, R2022.
 - **FSRS parameters are automatic; desired retention stays visible.** Parameters are re-optimized in the background, adopted only when they fit better, and never shown; refreshing memory states never mass-reschedules. (session-settled: user-directed — chosen over Anki's manual parameter and Optimize controls: nobody should have to think about parameters.) Governs R691, R692, R736.
-- **Sync with AnkiWeb and self-hosted servers; AnkiWeb behind a build switch; honest identity.** One protocol implementation serves both; App Store builds offer AnkiWeb only with Ankitects' permission; Meguri never impersonates an official client, and automated tests never touch AnkiWeb. (session-settled: user-approved — chosen over AnkiWeb-only and self-hosted-only: build as if permitted, ship publicly only what is permitted.) Governs R1497, R1509, R2031.
+- **CloudKit for routine sync; Anki transfers in Settings.** Private CloudKit sync connects the user's Meguri devices through their Apple account. Anki server access is an explicit manual import or export for moving into or away from Meguri, with a successful-transfer cooldown. Existing build availability rules remain R1497 and R2031–R2033. (session-settled: user-directed, 2026-10-18.) Governs R2043–R2066, KTD25, KTD26.
 - **The Anki collection is the single source of truth.** Meguri's speed comes from derived indexes kept alongside it that can always be deleted and rebuilt; data for features Meguri does not offer is preserved, never dropped. Governs R1488, R1483, R1484, R1466.
 - **Full replacement on the Mac includes Migaku- and AnkiConnect-compatible servers.** Meguri receives Migaku cards itself and routes them by language automatically; HyperTTS, Kanji Grid and the Migaku add-on are not carried over. (session-settled: user-directed — chosen over keeping desktop Anki around for add-on jobs: Meguri fully replaces Anki.) Governs R1663, R1710.
 - **Close to Anki's structure, in one window.** Anki's screens and vocabulary stay recognizable, with selective changes; every feature opens inside the single main window. (session-settled: user-directed — chosen over a from-scratch redesign: closer to Anki, minimal where possible, dense where needed.) Governs R6.
@@ -59,7 +59,7 @@ Anki's own code cannot simply be reused: it is AGPL-3.0, which conflicts with Ap
 - **Heatmap and streaks follow the Review Heatmap add-on; the widget shows only heatmap and streak data.** What Antoine sees today stays the same, and the add-on's synced settings are honored. (session-settled: user-approved — chosen over Anki's stats-screen day rule; widget scope chosen by the user.) Governs R1270, R312.
 - **On the review path, the instant next card outranks Anki's single-page script timing.** The next card's question runs in a second alternating page before the answer, while both sides of a card share one page and every rendered card must still match the oracle; answer-side scripts run at reveal within a 50 ms budget. Governs R445, R465, R468, R347, R1807, R1808.
 - **Meguri is licensed under MPL-2.0.** Changes to Meguri's own files stay open while the App Store remains possible. (session-settled: user-directed — chosen over Apache-2.0 and AGPL-3.0 with a contributor agreement: the middle ground.) Governs R155, R2025.
-- **Sync stays close to live during review.** About every 60 seconds and on leaving the app, holding back only the newest answer so the back button keeps working. (session-settled: user-directed — chosen over deferring all syncs until the session ends: other devices stay current.) Governs R88, R365, R726, R1520.
+- **Sync stays close to live during review.** Eligible committed changes are offered to CloudKit promptly, with a foreground flush target of about 60 seconds and a best-effort flush on leaving the app. Apple controls automatic delivery timing. The newest answer remains held back for undo. (session-settled: user-directed.) Governs R88, R365, R726, R2047.
 - **Search ignores letter case for every alphabet.** `über` finds "Über" in plain and field searches, unlike Anki's ASCII-only folding; AnkiConnect searches follow the same rule. (session-settled: user-directed — chosen over matching Anki's ASCII-only case folding: a German and Spanish learner expects accented capitals to match.) Governs R1036, R1085, R1777, R1916.
 - **Real Anki is the test oracle; Anki's tests become neutral scenarios.** Expected results always come from running the pinned Anki release headless in Docker, never from copied assertions, and the oracle never ships. (session-settled: user-approved — chosen over copying Anki's test code: keeps parity proof without AGPL code.) Governs R1868, R1869, R1878, R1879.
 
@@ -67,8 +67,8 @@ Anki's own code cannot simply be reused: it is AGPL-3.0, which conflicts with Ap
 
 - A1. Antoine: the learner and only user; reviews daily on iPhone, adds and maintains cards mostly on Mac.
 - A2. Meguri app: one product on Mac, iPhone, iPad and foldable iPhone, sharing one core.
-- A3. Sync server: AnkiWeb (personal builds, and public builds only with permission) or a self-hosted Anki sync server; also the channel through which other Anki clients exchange changes.
-- A4. Other Anki clients: AnkiMobile and desktop Anki, still in use during the transition and syncing to the same account.
+- A3. Apple iCloud account and private CloudKit database: routine synchronization between Meguri installations signed into the same Apple account; no separate Meguri signup service.
+- A4. Anki desktop, AnkiMobile and Anki sync servers: external migration endpoints reached through manual Settings transfers or compatible package files; they do not participate in Meguri's routine CloudKit sync.
 - A5. Migaku browser extension: sends new cards (fields, audio, images) to the local Migaku-compatible server on the Mac; it does not query word statuses.
 - A6. AnkiConnect clients: Claude Code sessions and Antoine's scripts calling the local AnkiConnect-compatible server on the Mac.
 - A7. Test oracle: real Anki run headless in Docker during development only; never shipped.
@@ -77,9 +77,11 @@ Anki's own code cannot simply be reused: it is AGPL-3.0, which conflicts with Ap
 ```mermaid
 flowchart TB
   C[(Anki collection file<br/>source of truth)] --> I[Meguri derived indexes<br/>counts, queues, search, daily stats<br/>always rebuildable]
-  C --> S[Sync engine]
-  S <--> SV[AnkiWeb or self-hosted server]
-  SV <--> O[AnkiMobile / desktop Anki]
+  C <--> S[Swift CloudKit adapter / CKSyncEngine]
+  S <--> SV[Private CloudKit database]
+  SV <--> O[Other Meguri devices]
+  C <--> T[Settings: manual import / export]
+  T <--> AS[Anki files / Anki sync servers]
   I --> U1[Home and deck list]
   I --> U2[Review]
   I --> U3[Browser and search]
@@ -145,7 +147,7 @@ flowchart TB
 - R47. The per-deck menu contains, in this order: Study, Overview, Add Note, Browse, Stats, Deck Options, Rename, New Subdeck, Description, Export, Unbury (only when the deck subtree has buried cards), and Delete (separated, destructive style).
 - R48. "Add Note" from a deck menu opens Add with that deck preselected regardless of the "default deck" preference; "Browse" opens Browse with the search `deck:"<full name>"`; "Stats" opens Stats scoped to that deck.
 - R49. On iPhone, swiping a deck row reveals Options and More only, never Delete (deviation: AnkiMobile shows Delete first on swipe).
-- R50. Home has a bottom-of-list "Create Deck" and "Import File" pair of actions on all layouts, plus "Get Decks" (opens the AnkiWeb shared-deck page in the default browser) only in builds where AnkiWeb is enabled.
+- R50. Home has Create Deck and Import File actions. The optional Get Decks action opens the shared-deck site in the default browser and uses no Anki credentials or sync endpoint; it is present only when its existing build availability rules allow it.
 - R51. Dropping an `.apkg` (or any file type the import area accepts) onto the Mac window, the Dock icon, the iPad window or the deck list starts the import flow; unsupported files show a short message naming the accepted types.
 - R52. Opening a supported file from Finder, Files, Mail or the share sheet ("Open in Meguri") starts the import flow over the current screen; if a review is in progress, the review stays underneath and resumes on the same card after the import sheet closes.
 - R53. Filtered decks present in a synced collection appear in the tree in a distinct style with their counts, but cannot be studied; tapping one explains that filtered decks are not supported yet, and its menu offers only Rename and Delete.
@@ -189,8 +191,8 @@ flowchart TB
 - R85. Closing a review (✕, Esc, or navigating away) needs no confirmation and loses nothing, because each answer is saved when given.
 - R86. The timebox uses the collection's `timeLim` (seconds; 0 = off): after the answer that crosses the limit, Meguri shows "N cards studied in M minutes" with Continue (restarts the timer) and Finish (opens the session summary).
 - R87. At the day rollover during a review, the session continues with a rebuilt queue for the new day and the streak/heatmap move to the new day, without interrupting the current card.
-- R88. During an active review session Meguri syncs incrementally about every 60 seconds and immediately when the app leaves the foreground, always holding the most recent answer back from the upload so the back button can still undo it (R365).
-- R89. The Sync command is disabled during an active review session, with a tooltip explaining that sync runs when the session ends (deviation: Anki allows syncing from the reviewer and resets to the deck list).
+- R88. During an active review, eligible committed changes are offered to CloudKit promptly, with an app-controlled foreground flush target of about 60 seconds and a best-effort flush on backgrounding. The newest undoable answer and its dependent top-of-stack changes remain held back (R365). Automatic delivery has no fixed completion deadline.
+- R89. The Sync Now command remains disabled during an active review, with a tooltip explaining that automatic iCloud sync continues and ending the session enables a manual sync. Manual Anki transfers are also unavailable during review.
 - R90. Pressing D (Home), B (Browse) or T (Stats) during review ends the session and navigates; A (Add) opens Add over the review without ending it.
 
 **End-of-session summary**
@@ -207,12 +209,12 @@ flowchart TB
 - R101. The summary is dismissed with Done, Return, Esc, or a tap on ✕, and returns to the screen from which the review started.
 
 **Toolbar actions and sync status**
-- R102. A Sync button sits in the main toolbar (sidebar layout) and in the Decks tab's navigation bar (iPhone layout) and is hidden only when no sync account is configured, replaced by "Log In".
-- R103. The Sync button shows distinct states: up to date; local or remote changes waiting (normal sync); one-way (full) sync required; syncing (with progress); and needs attention (error or login expired), each with a text label for accessibility.
-- R104. The one-way-sync-required state uses a warning colour (Anki: red) and the normal-changes state an accent colour (Anki: blue), and the button never relies on colour alone.
-- R105. Clicking the Sync button starts a sync; while a sync runs, clicking it shows a popover with the stage (collection, media), files remaining for media, last successful sync time, and the last error if any.
+- R102. An iCloud Sync button sits in the main toolbar (sidebar) and Decks navigation bar (compact). When iCloud is unavailable it opens an explanation and system-account guidance; it never opens Anki credentials.
+- R103. The iCloud indicator distinguishes up to date as of a completed exchange, local changes waiting, syncing, media pending, offline, paused and needs attention. It does not infer CloudKit state from Anki mod/scm/ls/usn fields.
+- R104. Pending changes and needs-attention states have distinct symbols and text and never rely on colour alone. An Anki one-way-transfer warning belongs only to its Settings workflow.
+- R105. Clicking Sync Now requests a foreground CloudKit exchange; while running it opens progress. The popover shows collection and media progress separately, last completed exchange, pending/held-back work and the latest error. Completion follows R2048–R2050.
 - R106. Media sync progress is shown as a quiet secondary indicator ("Syncing media, N files left") that never blocks studying, browsing or editing.
-- R107. The button's "remote changes waiting" state is refreshed when the app comes to the foreground and at most every 10 minutes while online, never on every screen change.
+- R107. CloudKit change events and foreground fetch results refresh sync status, with no per-screen polling and no Anki meta probes for routine sync. Status names its last confirmed exchange rather than claiming knowledge of every remote device.
 - R108. The undo-capable toast (operation name + Undo) appears after every destructive or bulk operation outside review, lasts at least 5 seconds, never covers the answer buttons, and is reachable by VoiceOver.
 
 **Settings — structure and storage rules**
@@ -226,17 +228,17 @@ flowchart TB
 - R116. Collection config keys that Meguri does not show (including add-on keys and keys of out-of-scope features) are preserved unchanged.
 
 **Settings — Account & Sync**
-- R117. Log In / Log Out for AnkiWeb appears only in builds where AnkiWeb is enabled; the account row shows the user name and the server in use.
-- R118. "Self-hosted sync server" accepts a custom URL (with an optional path prefix) and is available in every build.
-- R119. Login exchanges the user name and password for a sync key; the password is never stored, and the key and user name are kept in the Keychain (device-local, not synced through iCloud Keychain).
-- R120. Changing the sync server URL logs the user out and requires a new login, so a key issued by one server is never sent to another.
-- R121. After a successful first login, Meguri offers to sync now.
-- R122. "Sync audio and images" (device-local, default on) controls media sync.
-- R123. "Sync automatically" (device-local, default on) syncs on launch, on returning to the foreground after at least 5 minutes away, and when the app goes to the background or quits (Anki: sync on profile open/close).
-- R124. "Sync media periodically" (device-local, default every 15 minutes, 0 = off) runs a background media sync while the app is open (Anki: `autoSyncMediaMinutes`).
-- R125. "Force a one-way sync on next sync" (collection-level change) marks the collection so the next sync asks the user to choose upload or download, with the same confirmation as Anki.
-- R126. "Network timeout" (device-local, default 60 seconds) applies to every sync request.
-- R127. On Mac, quitting with automatic sync on and local changes pending runs the sync with a small progress sheet offering "Quit Without Syncing"; on iOS the background sync runs within the system's background-task time.
+- R117. Account & Sync shows iCloud availability, whether this collection is connected, storage/quota errors and Enable/Pause iCloud Sync controls. Apple-account sign-in and sign-out happen through system settings; Meguri never asks for an Apple password.
+- R118. Settings contains an Anki Transfers section with explicit Import from Anki and Export to Anki actions, plus file import/export. A self-hosted Anki server URL (optional path prefix) is available there in every build; AnkiWeb availability follows R1497 and R2031.
+- R119. Manual Anki server login exchanges a username and password for a sync key; the password is never stored. The key and username remain in the device-local, non-synchronizable Keychain. CloudKit uses Apple-managed authentication.
+- R120. Changing the Anki transfer endpoint clears its credentials and redirected endpoint before any request to the new endpoint. It does not change the iCloud account or automatically transfer a collection.
+- R121. After Anki login, return to the selected manual import/export preview; login alone never starts a transfer or configures a recurring sync.
+- R122. Sync audio and images (device-local, default on) controls CloudKit asset transfer; collection records continue syncing when media is paused. Manual Anki transfers have their own include-media choice.
+- R123. Sync automatically (device-local, default on after explicit collection connection) enables CKSyncEngine automatic scheduling and best-effort foreground/background flushes. It never schedules Anki server requests.
+- R124. CloudKit media transfers resume opportunistically and show their own progress. There is no Anki media polling interval in routine sync settings.
+- R125. Replace local collection from iCloud and Replace iCloud collection are separate advanced recovery actions with previews, backups and explicit confirmation (R2056). The Anki force-one-way option exists only inside a manual server transfer.
+- R126. Manual Anki requests retain the adjustable 60-second inactivity timeout. CloudKit uses Apple retry/throttling behavior; cancellation and a waiting state are available without pretending that this timeout controls Apple's scheduler.
+- R127. On Mac quit, persist pending work and attempt a bounded CloudKit flush with a Quit Without Syncing option. On iOS use permitted background time, then persist and suspend cleanly; neither platform waits indefinitely or labels pending changes as synced.
 
 **Settings — Review**
 - R128. "Next day starts at" (collection `rollover`, hour 0–23, default 4) sets the daily rollover used by scheduling, counts, studied-today, heatmap and widgets.
@@ -278,8 +280,8 @@ flowchart TB
 - R156. The app name, icon, subtitle and every screen avoid the word "Anki" as a product name; compatibility is stated only as plain facts (e.g. "Syncs with Anki sync servers", "Opens .apkg files").
 
 **First launch and onboarding**
-- R157. With no collection on the device, Meguri shows a welcome screen with: "Log In to AnkiWeb" (only when AnkiWeb is enabled in the build), "Use a Sync Server" (custom URL + credentials), "Import a File" (.apkg and the file types the import area accepts), and "Start Empty".
-- R158. When the local collection is empty and the server has a collection, the first sync downloads it without the upload/download conflict prompt, as Anki does.
+- R157. With no collection, welcome offers Connect to iCloud, Import a File and Start Empty. Anki server import is reached through the Settings Anki Transfers workflow; it is never an onboarding account provider.
+- R158. Connecting an empty local installation to an existing iCloud collection downloads a coherent collection before activating it; media can continue afterward. Two non-empty collections are never silently merged or overwritten (R2055).
 - R159. After the first download or import, Meguri confirms what arrived in one line (e.g. "12,533 notes · 22 decks · 115,764 reviews") and opens Home.
 - R160. Studying, browsing and editing work while the first media download continues in the background; cards whose media has not arrived yet show a placeholder instead of an error.
 - R161. "Start Empty" creates a new collection containing only the Default deck and Anki's stock note types, and Home shows an empty state with Add Note, Create Deck, Import File and Log In.
@@ -981,7 +983,7 @@ flowchart TB
 - R696. Adopted parameters are written only to `fsrsParams6`, leaving `fsrsParams5` and `fsrsWeights` untouched, and must be accepted by Anki desktop's own validation.
 - R697. After adoption Meguri refreshes memory states for that preset's cards (R686) and never reschedules: no due date or interval changes and no Rescheduled revlog rows.
 - R698. Optimization never blocks the UI: on Mac it runs at background priority while Meguri is open; on iPhone/iPad it runs as a background processing task when the system allows (preferring charging and idle), or at low priority in the app; it is abortable, and an interrupted run writes nothing.
-- R699. Optimization never runs while a review session is active and starts only right after a successful incremental sync; it then writes the adopted parameters and refreshed memory states and syncs again in the same uninterrupted run (never a one-way sync), abandoning the run without writing anything if the first sync fails, the server collection changed since that sync, or a review session starts; if the second sync fails, the written result uploads with the next sync.
+- R699. Optimization never runs during review. For a connected collection, it starts after a successful CloudKit collection exchange, trains from a captured local revision, fetches/reconciles again and adopts only if its input revision and session guards remain valid. It then queues the adopted result for CloudKit; a later failure leaves that result pending. Fetching is not a distributed lock; concurrent optimizer writes follow the reviewed convergence policy. Local-only optimization may run under the same local revision/session guards without a cloud prerequisite.
 - R700. When the global `fsrsHealthCheck` key is on (default true) and a preset has more than 300 items, Meguri runs Anki's health check after optimization and records the result (good/bad fit) for the diagnostics view (deviation: no dialog at optimize time).
 - R701. Settings → Advanced contains a read-only "Scheduler diagnostics" view listing, per preset, the last optimization date, review count used, whether new parameters were adopted, and the health result, plus an "Optimize now" action for support cases (deviation: replaces Anki's parameter UI).
 
@@ -1023,7 +1025,7 @@ flowchart TB
 - R723. The review screen's always-visible undo button undoes the most recent undoable step of any kind (an answer, a bury, a suspend…), and is disabled when nothing can be undone.
 - R724. Undo and redo are available as ⌘Z / ⇧⌘Z on Mac and iPad keyboards and via the menu bar on Mac, and redo is in the review ⋯ menu on iPhone.
 - R725. Day rollover, a one-way sync, Check Database and any other action that changes data outside undo tracking clear the whole undo and redo history; a sync that applies changes clears it except for the held-back steps kept by R1520.
-- R726. Automatic incremental syncs during a review session follow R88 (about every 60 seconds, plus on leaving the foreground), each holding back the newest answer so it stays undoable (deviation: Anki does not sync mid-session).
+- R726. Automatic CloudKit synchronization during review follows R88: an app-controlled flush target near 60 seconds and a best-effort background flush, preserving newest-answer hold-back. Apple controls delivery timing.
 
 **Stale-state protection**
 
@@ -1036,7 +1038,7 @@ flowchart TB
 - R730. Deck options open for one deck from the deck ⋯ menu, the deck page and the review ⋯ menu (for the current card's home deck); on Mac and iPad they appear in the main window's detail area, and on iPhone as a full-screen pushed view.
 - R731. The top of the screen shows the preset picker listing each preset as "name (used by N decks)", and selecting another preset assigns it to this deck on save.
 - R732. The preset menu offers Add preset (from defaults, name prompt), Clone preset (copy of the selected one, name prompt), Rename preset, Remove preset, and Save to all subdecks (assigns the preset to the deck and every descendant).
-- R733. The Default preset (id 1) cannot be removed; removing any other preset first warns that the next sync must be a one-way sync, then reassigns every deck that used it to the preset being saved.
+- R733. The Default preset (id 1) cannot be removed. Removing another preset confirms which decks are reassigned, then reassigns them to the preset being saved. Coherent CloudKit publication follows R2053; Anki full-transfer warnings are confined to a subsequent manual Anki transfer.
 - R734. Save is ⌘↩ / ⌘S on keyboards; dismissing with unsaved changes asks to Discard or Keep editing; each option has a "restore default" control shown when it differs from default, and a help popover written by Meguri.
 - R735. Collection-wide options are marked with a "Global" badge, because they apply to all presets.
 - R736. The first section ("Essentials") shows New cards/day, Maximum reviews/day, Desired retention and Don't play audio automatically; everything else sits behind an "Advanced" disclosure using Anki's option names and sections (Daily Limits, New Cards, Lapses, Display Order, Burying, Audio, Timers, Auto Advance, Advanced).
@@ -1364,7 +1366,7 @@ flowchart TB
 
 - R949. Adding, deleting or reordering fields, changing the sort field, adding, deleting or reordering templates, deleting a note type, Change Note Type, and Restore to Default when it changes structure mark the collection schema as modified.
 - R950. Renaming fields, templates or note types, field options, template text, styling, deck override, browser appearance and adding or cloning note types are not schema changes.
-- R951. Before the first schema change since the last sync, Meguri warns that the next sync must upload the whole collection and that unsynced changes on other devices will be lost, and does not ask again until the next sync.
+- R951. Schema changes update Anki compatibility bookkeeping while publishing coherent CloudKit generations (R1475, R2053). Ordinary edits show no Anki full-upload warning; the warning and direction choice belong to a later explicit manual transfer preview (R1476).
 
 **Empty Cards (card-generation side)**
 
@@ -1684,7 +1686,7 @@ flowchart TB
 **Bulk actions: deck, notetype, tags, mark**
 - R1187. Change Deck opens a filterable deck chooser preselecting the current card's deck, can create a new deck inline, excludes filtered decks as targets, returns cards in filtered decks home first, and skips cards already in the target.
 - R1188. Moving cards recomputes their FSRS memory state with the target preset's parameters and desired retention without rescheduling them, and remaps remaining learning steps to the target preset.
-- R1189. Change Note Type requires all selected notes to share one notetype, maps fields and templates (by name, then position, with "nothing" allowed), and warns that it requires a one-way full sync before applying.
+- R1189. Change Note Type requires one shared notetype, maps fields/templates by name then position with nothing allowed, and previews destructive mappings before applying. It publishes a coherent CloudKit generation; any Anki full-transfer warning is deferred to a manual transfer.
 - R1190. Add Tags and Remove Tags open a tag entry with autocomplete from the tag registry, split on whitespace, adopt the casing of existing tags, and ignore duplicates.
 - R1191. Clear Unused Tags removes from the tag registry every tag no note uses and reports the count.
 - R1192. Toggle Mark adds the `marked` tag to all selected notes when the current note is unmarked, else removes it from all.
@@ -2011,7 +2013,7 @@ flowchart TB
 - R1433. The app writes a small snapshot (per-day review totals for the shown range, per-day forecast, today's studied count and time, due today, streak stats, theme, rollover hour, time zone, generation time, and the values precomputed for after the next rollover) atomically to the App Group, and the widget reads only that snapshot, never the collection database.
 - R1434. The snapshot is rewritten after a review session ends, after an undo, after a sync, when the app goes to the background, at rollover, and (debounced) after any other change that alters what the widget shows, such as heatmap settings, scheduling changes, deck changes, imports and one-way syncs; the widget reload is requested only when the snapshot changed, to stay inside the reload budget.
 - R1435. The widget's timeline includes an entry at each upcoming rollover, so today's cell empties and the current streak is re-evaluated (R1330) on time even if Meguri is not opened.
-- R1436. The widget shows data as of Meguri's last review or sync; reviews made in other Anki clients appear only after Meguri syncs, and the widget shows a quiet "Updated …" note when its data is more than a day old.
+- R1436. The widget shows data as of Meguri's last local update or CloudKit exchange. Anki-client reviews arrive only through a manual import; a quiet Updated … note appears when the snapshot is more than a day old.
 - R1437. Heatmap levels stay distinguishable in accented (tinted) and clear widget modes by using opacity steps of the accent colour instead of hues.
 - R1438. Tapping the widget opens Meguri on Home; the widget shows no card content; with no collection yet it shows "Open Meguri to get started".
 
@@ -2033,7 +2035,7 @@ flowchart TB
 
 **Collection file and storage engine**
 - R1449. Meguri stores the collection as one SQLite file at schema version 18 that real Anki 26.09+ and AnkiMobile can open, read and write without any conversion.
-- R1450. Meguri owns its own copy of the collection inside its app container and never opens a collection that another Anki client may have open (for example desktop Anki's profile folder); other clients' data arrives only through sync or package import.
+- R1450. Meguri owns its collection inside the app container and never opens another client's live file. Other Meguri devices deliver records through CloudKit; Anki data arrives through explicit manual transfers or package import.
 - R1451. Every SQLite connection Meguri opens registers a collation named `unicase` that compares by Unicode case folding exactly like Anki (full folding, so `ß` equals `ss`), so names in `decks`, `notetypes`, `fields`, `templates`, `tags` and `deck_config` sort and collide identically.
 - R1452. Meguri runs the collection in WAL mode with one writer and concurrent readers inside the app, and does not use SQLite exclusive locking mode. (deviation: Anki locks the file against every other reader, including the user's scripts)
 - R1453. When Meguri detects that another process changed the collection file (data-version change while open, or `col.mod`/`scm` differing from its sidecar state at open), it reloads affected state and rebuilds derived indexes instead of trusting stale caches.
@@ -2064,8 +2066,8 @@ flowchart TB
 - R1474. Changing the current deck or any other synced config counts as a collection change for sync status, as in Anki.
 
 **Operations that force a one-way sync**
-- R1475. Meguri sets `scm` to now (forcing a one-way sync next time) for exactly the operations Anki treats as schema changes: adding, removing or reordering fields; changing the sort field; adding, removing or reordering templates; deleting a notetype; changing the notetype of notes; deleting a deck preset; importing a `.colpkg` or restoring a backup; merging notetypes during `.apkg` import; the Check Database fixes listed below; a failed sync sanity check; a one-way upload; and the "force one-way sync" setting.
-- R1476. Before the first schema-changing operation since the last sync (`scm <= ls`), Meguri asks the user to confirm that the change will require a one-way sync, and does nothing if they cancel.
+- R1475. Meguri preserves Anki scm bookkeeping for the listed schema-changing operations (field/template structure, notetype changes, preset deletion, collection replacement/import, repairs and one-way transfers). This affects the next manual Anki transfer, not ordinary CloudKit sync, which uses coherent structural generations (R2053).
+- R1476. Structural edits do not interrupt the user with an Anki full-sync warning during normal Meguri use. Any Anki one-way warning and direction confirmation appears in the explicit manual transfer preview before changes are sent or local data is replaced.
 - R1477. Meguri never sends a notetype whose field or template count changed through a normal sync without having set `scm` first.
 
 **Schema versions, upgrades and refusals**
@@ -2094,18 +2096,20 @@ flowchart TB
 - R1494. Long operations (sync, import, export, backup, Check Database, Check Media, optimize) never block the UI thread, and the review screen stays usable while they run.
 - R1495. Answers and edits made while a normal sync runs are committed at once, never wait for the sync, are reconciled with the incoming changes when the sync commits, and sync on the next sync. (deviation: Anki blocks the collection during sync)
 
-**Accounts and server settings**
-- R1496. The Sync settings offer two server choices, AnkiWeb and "Self-hosted sync server" with a URL field, plus account status, Log in and Log out.
-- R1497. A build-time switch controls whether AnkiWeb is offered; when it is off, AnkiWeb is absent from the UI, no AnkiWeb URL is ever contacted, and sync works only with a custom server.
+**Manual Anki server transfers: accounts and settings**
+
+R1498–R1502 and R1504–R1546 describe the retained Anki protocol used only inside an explicit Settings transfer. R1563–R1566 and R1575–R1582 likewise apply to that transfer. None defines routine CloudKit behavior. The incremental path may reconcile a transfer baseline; it never establishes a continuing Anki sync relationship. Import and export previews must disclose every local or remote change required by the protocol (R2061).
+- R1496. Routine sync settings configure iCloud. The separate Anki Transfers section offers manual file transfers and server import/export, with endpoint/account status and login/logout confined to that workflow.
+- R1497. A build-time switch controls AnkiWeb availability inside manual Anki Transfers. When off, no AnkiWeb option, wording or default endpoint ships or is contacted; custom-server transfers and CloudKit remain available.
 - R1498. Login sends the username and password to `hostKey`, stores only the returned host key in the Keychain (device-only, available after first unlock), and never stores the password.
 - R1499. A 403 on any request clears the stored host key and asks the user to log in again with "Email or password was incorrect" wording.
 - R1500. A custom server URL accepts `http://` and `https://`, may contain a subpath, and is normalised to end with `/`.
 - R1501. Meguri allows plain-HTTP connections to a user-entered custom server and requests Local Network permission on iOS/iPadOS with an explanation when the server is on the local network.
 - R1502. Changing the server or logging out clears the stored host key and any redirected endpoint, and resets media sync state so the next media sync re-checks every file against the server without re-transferring identical files.
-- R1503. The UI says clearly that only one Meguri collection per account is supported and that syncing two different collections to one account will overwrite one of them.
+- R1503. One active collection per Meguri installation and one active collection per Apple account are supported. Connecting two existing collections requires an explicit choice with previews and backups, never an automatic overwrite.
 - R1504. The network stall timeout (no bytes moving) defaults to 60 seconds and is adjustable in an advanced sync setting.
 
-**Sync transport (protocol v11)**
+**Manual Anki transfer transport (protocol v11)**
 - R1505. Meguri speaks only sync protocol version 11: every request is an HTTP POST to `{base}sync/{method}` or `{base}msync/{method}` with `Content-Type: application/octet-stream`.
 - R1506. Every request carries the `anki-sync` header JSON `{"v":11,"k":hostkey,"c":client-version,"s":session-key}`, with an empty `k` for login and a new random session key per sync.
 - R1507. Request bodies are zstd-compressed JSON (or zstd-compressed raw bytes for `upload` and the media upload zip), and methods without arguments send `{}`.
@@ -2115,7 +2119,7 @@ flowchart TB
 - R1511. Only `meta` follows redirects; a redirect on any other method is an error.
 - R1512. Meguri uses the system proxy settings and system certificate store.
 
-**Status check (`meta`)**
+**Manual Anki transfer status check (`meta`)**
 - R1513. `meta` sends `{"v":11,"cv":client-version}` and reads `mod`, `scm`, `usn`, `ts`, `msg`, `cont`, `empty` and `media_usn`.
 - R1514. If `cont` is false, Meguri stops and shows the server message.
 - R1515. If the server time differs from the device clock by more than 300 seconds, Meguri refuses to sync and tells the user to fix the device date, time and time zone.
@@ -2123,7 +2127,7 @@ flowchart TB
 - R1517. Equal `mod` means no changes; differing `scm` means a one-way sync is required; otherwise a normal sync runs.
 - R1518. When a one-way sync is required and the local collection has no cards, the only offered direction is download; when the server reports `empty`, the only offered direction is upload.
 
-**Normal sync**
+**Incremental reconciliation inside a manual Anki transfer**
 - R1519. A normal sync runs `meta`, `start`, `applyGraves`, `applyChanges`, `chunk` until done, `applyChunk` until done, `sanityCheck2` and `finish`, and commits the merged result as one local transaction.
 - R1520. Around a normal sync Meguri refreshes cached queues in the background (keeping the shown card and still-valid pre-rendered cards, R457) and clears the undo history for every step that the sync uploads or that incoming changes touch, keeping only the held-back newest answer undoable, and if the scheduler day rolled over since the last unbury it unburies as Anki does.
 - R1521. `start` sends `{"minUsn":local usn,"lnewer":local mod > server mod,"graves":null}` and applies the returned server graves by deleting those cards, notes and decks locally and recording graves with the server USN.
@@ -2142,7 +2146,7 @@ flowchart TB
 - R1534. After a successful normal sync with media sync enabled, a media sync starts in the background using the media USN from `meta`.
 - R1535. Sync progress shows the stage (connecting, syncing, finalising) and counts of objects sent and received.
 
-**One-way sync (full upload and download)**
+**Whole-collection Anki transfers (full upload and download)**
 - R1536. When a one-way sync is required and both sides have cards, Meguri shows a choice of Upload, Download or Cancel, with Cancel as the default and never chosen automatically.
 - R1537. The choice shows each side's facts: last modified time of both sides, last successful sync time, and the local card, note and review counts plus how many local reviews and edits are not yet on the server.
 - R1538. The choice warns in plain words what each direction discards: Download discards the listed unsynced local changes; Upload replaces the server collection for all other devices.
@@ -2154,25 +2158,25 @@ flowchart TB
 - R1544. A failed or interrupted download leaves the existing local collection untouched.
 - R1545. One-way sync progress shows bytes transferred and total, then a "Checking…" stage.
 - R1546. One-way syncs never change media; a media sync with merge semantics follows them.
-- R1547. The Sync settings include "Force a one-way sync on next sync", which sets `scm` and then shows the Upload/Download choice at the next sync.
-- R1548. After a backup restore or `.colpkg` import, automatic syncs pause until the user runs a sync and makes the one-way choice. (note: Anki disables auto sync until restart)
+- R1547. Force a one-way Anki transfer is available only in the manual Anki Transfers workflow. It never changes CloudKit scheduling or appears in the main sync popover.
+- R1548. After restore, whole-collection import or manual Anki import, pause CloudKit publication until the user confirms whether the imported collection replaces the connected cloud collection or remains local. Persist the decision requirement; existing remote data is not overwritten on relaunch.
 
-**Sync triggers**
-- R1549. Meguri syncs automatically when the app opens or returns to the foreground (outside a session, after the R123 absence threshold), when it goes to the background or quits, after each review session ends, and every 15 minutes while open and idle, if the user is logged in and automatic sync is on (default on).
-- R1550. Automatic syncs never start while the editor has unsaved changes; during review they follow R88, and a sync's effect on undo follows R365.
-- R1551. The user can start a sync manually from a sync button on every platform and with the `Y` key on Mac and iPad keyboards.
+**Routine CloudKit sync triggers**
+- R1549. Routine automatic synchronization uses CloudKit only: on eligible committed changes, launch, foreground, background and session end, subject to Apple scheduling, account state, the automatic-sync toggle and R1548. None of these triggers contacts an Anki server.
+- R1550. Only committed editor changes enter the CloudKit queue. During review preserve R88 hold-back and R365 undo behavior; unrelated committed records may continue syncing while a draft is open.
+- R1551. The user can request a foreground CloudKit exchange from Sync Now on every platform and Y on Mac/iPad keyboards, subject to R89. Anki import/export requires its explicit Settings action and confirmation.
 - R1552. On iOS/iPadOS, Meguri asks for background execution time when it goes to the background so a running sync can finish.
-- R1553. On iOS/iPadOS, Meguri schedules background tasks that run a normal sync and continue media sync when the system allows (network available; long media work preferably while charging).
-- R1554. If the system ends background time mid-sync, a normal sync rolls back and aborts cleanly, media sync keeps every completed batch, and both resume on the next sync.
-- R1555. A failed automatic sync retries later with backoff and shows only a quiet status, while a failed manual sync shows the error.
-- R1556. An HTTP 409 (another client is syncing) during an automatic sync retries after a delay without a dialog.
+- R1553. Allow CKSyncEngine to schedule automatic work with the required CloudKit and remote-notification capabilities. Any additional background processing is opportunistic and uses the single U154 registration owner; it never promises a periodic delivery deadline or starts Anki transfers.
+- R1554. When background time expires, retain durable pending work and completed CloudKit batches and suspend within the OS deadline. Resume/reconcile idempotently on the next opportunity; do not roll back previously acknowledged cloud records.
+- R1555. CloudKit transient failures retry according to Apple guidance and retry-after values, with quiet status. A user-started exchange reports failure or waiting without discarding queued work. Anki transfers retry/resume only inside their explicit manual operation.
+- R1556. CloudKit conflicts and throttling follow the typed CloudKit policy (R2052–R2054); HTTP 409 handling is confined to an active manual Anki transfer and never starts an unattended server sync.
 - R1557. On Mac, quitting waits for an in-progress close-time sync with a visible status and a "Quit now" option that safely aborts it.
 
-**Sync status UI and errors**
-- R1558. A sync indicator on every platform shows one of: in sync, local changes pending (normal sync needed), one-way sync needed, syncing (with progress), media syncing, offline, error, or not logged in.
-- R1559. Status is computed offline when possible: never synced means unknown, `scm > ls` means one-way sync needed, `mod > ls` means changes pending, otherwise Meguri asks the server and caches the answer for 300 seconds.
-- R1560. A sync status view shows the last successful sync time, the server in use, the current or last media sync counts (checked, added, removed) and the last error.
-- R1561. Errors map to clear messages: 403 wrong credentials, 409 another device is syncing, 501 server requires a newer client, 500/502/503/504 server problem, 400 "run Check Database, then sync again, or force a one-way sync", 407 proxy authentication, timeout or offline network problem, and TLS failure with a hint about HTTPS/TLS 1.2 for self-hosted servers.
+**Routine CloudKit status UI and errors**
+- R1558. Routine sync status is one of iCloud unavailable, local only, paused, up to date as of a completed exchange, changes pending, syncing collection, syncing media, offline or needs attention. Anki transfer status is separate.
+- R1559. Compute pending state from durable CloudKit tracking and acknowledged revisions, not Anki scm/mod/ls/usn. A successful collection exchange may still have pending media, newer local edits or review hold-back; report those separately.
+- R1560. The iCloud status view shows the last completed exchange, current account/connection state, collection and media progress, pending work and error. Anki endpoint, credentials and last manual-transfer result appear only in Settings Anki Transfers.
+- R1561. Routine-sync errors distinguish no iCloud account, account changed, offline, throttling/retry time, quota full, local storage full, conflict/recovery needed and unsupported schema. Anki HTTP error mappings remain within manual server transfers.
 - R1562. No sync error ever crashes the app or leaves a modal that blocks study. (note: the user's Anki crashed while showing a sync error)
 
 **AnkiWeb limits and policy**
@@ -2188,8 +2192,8 @@ flowchart TB
 - R1570. When a new media name differs only by letter case from an existing file, Meguri uses the existing file's canonical name if the content matches and a new unique name if it differs, so no file is ever overwritten on a case-insensitive volume.
 - R1571. Meguri never rewrites a media file whose content is unchanged, so its mtime and sync state stay the same.
 
-**Media sync**
-- R1572. Media sync is a separate process with its own server USN, runs in the background after collection sync, and can run, pause and resume independently of reviewing.
+**Media sync and Anki transfer compatibility**
+- R1572. Routine media sync uses CloudKit assets with durable per-file progress, independent of reviewing and collection-record progress. Anki media USN state is separate and used only during a manual server transfer.
 - R1573. Local change detection uses Meguri's own record of the writes it makes plus a cheap folder-level check, and rehashes only files whose size or mtime changed. (deviation: Anki rescans the whole folder whenever the folder mtime changes)
 - R1574. Change detection skips `.DS_Store` and `thumbs.db`, non-UTF-8 names, empty files and files over 100 MB, and converts NFD names to NFC on Apple file systems.
 - R1575. Meguri gets the server media USN from `meta` (or `msync/begin`) and pulls `mediaChanges` batches from its last USN until a batch is empty.
@@ -2210,7 +2214,7 @@ flowchart TB
 - R1588. A mass media change (for example re-encoding 19,000 audio files) syncs in the background with progress, resumes after interruption, and never blocks study.
 
 **Coexistence and migration**
-- R1589. Meguri can sync the same account as desktop Anki 26.09+ and current AnkiMobile during the transition, and every change it syncs is accepted and readable by those clients.
+- R1589. Anki desktop and AnkiMobile can read every supported manual transfer result. Meguri-to-Meguri routine synchronization uses CloudKit, and continued use of an Anki client requires another explicit manual import/export rather than automatic coexistence.
 - R1590. Meguri never causes a one-way sync for an operation that Anki performs incrementally, and never edits notetypes, presets or config on its own except FSRS parameter updates that the scheduler requires.
 - R1591. On first launch, Meguri offers three paths: log in and download the server collection (then media), import a `.colpkg` file, or start with an empty collection.
 - R1592. The first-launch download lets the user study as soon as the collection is downloaded, while media continues in the background.
@@ -2228,7 +2232,7 @@ flowchart TB
 - R1602. Notes are matched by GUID: unknown GUIDs are added, and existing ones are updated per the "Update notes" rule (if newer: existing mtime older; always: mtimes differ; never) keeping the incoming mtime, otherwise logged as duplicates.
 - R1603. A matching GUID whose notetype differs and cannot be merged is logged as conflicting and not changed.
 - R1604. Each imported notetype records its source id as original id; a new id is added with a unique name, an existing id with the same schema is updated per "Update note types", and an existing id with a different schema reuses an earlier copy with the same original id and schema or is added as a new copy.
-- R1605. With "Merge note types" on, fields and templates merge by their ids (falling back to names), note fields and card ordinals are remapped, emptied merged copies are removed, and the user is warned first that this requires a one-way sync.
+- R1605. With Merge note types on, fields/templates merge by ids then names, note fields/card ordinals are remapped and emptied merged copies removed. Preview destructive mappings before import, publish a coherent CloudKit generation, and defer Anki full-transfer warnings to explicit manual server transfers.
 - R1606. A cloze notetype and a standard notetype never merge, and that attempt reports an error.
 - R1607. Decks are matched by name case-insensitively (parents first); a same-kind match is updated, a kind mismatch is renamed with a timestamp suffix, and missing parent decks are created.
 - R1608. Cards are added only for newly imported notes, skipping existing (note, template) pairs, and existing cards are never changed.
@@ -2651,9 +2655,9 @@ flowchart TB
 - R1841. Card info and "previous card info" open within 100 ms, including cards with 500 review-log entries.
 
 **Performance: sync, import/export, maintenance and FSRS**
-- R1842. Syncing a typical day (about 410 reviews and a few dozen note edits) with a self-hosted server on the local network takes at most 1 s of local work and 3 s end to end, excluding media.
+- R1842. A typical day of about 410 reviews and a few dozen edits requires at most 1 second of local collection-sync work, excluding network/Apple scheduling. Manual self-hosted Anki transfers retain the local-network 3-second end-to-end benchmark excluding media; CloudKit convergence latency is measured separately without a fixed delivery guarantee.
 - R1843. A full upload or full download of the user's collection takes at most 3 s of local work excluding transfer time, and at most 10 s at 150k cards, with memory use bounded by streaming.
-- R1844. Media sync of the user's 28.8k files (1.4 GB) is limited only by network speed and server protocol limits, resumes after interruption or relaunch, and never blocks reviewing.
+- R1844. CloudKit media transfer of the 28.8k-file, 1.4 GB fixture resumes after interruption/relaunch with bounded local work and never blocks review. Measure network/service delay separately from local overhead; manual Anki media transfers retain their protocol budgets.
 - R1845. The user can review, browse and edit during any sync; changes made during a sync are kept and sync on the next round.
 - R1846. Importing an `.apkg` with 10k notes takes at most 3 s excluding media copying; importing the user's collection as `.colpkg` takes at most 10 s excluding media.
 - R1847. Check Database on a healthy 150k-card collection takes at most 5 s, runs in the background with progress, and blocks only conflicting writes.
@@ -2693,7 +2697,7 @@ flowchart TB
 - R1873. The code that drives the oracle is the only code that uses Anki; it lives in its own directory under the AGPL license, and Meguri's test runner talks to it only through the neutral protocol.
 - R1874. Updating the pinned Anki version is a separate change that regenerates all golden files and presents the behavior differences for review; Meguri adopts Anki behavior changes only through such a change.
 - R1875. Meguri's core takes time and randomness from injected sources, so the test runner can give Meguri and the oracle the same instants and seeds.
-- R1876. No automated test, script, CI job or agent ever contacts AnkiWeb; all sync testing uses a local self-hosted Anki sync server.
+- R1876. No automated test, script, CI job or agent contacts AnkiWeb. Anki transfer tests use the local official server; CloudKit verification uses deterministic fakes and separately identified signed development-container integration runs.
 
 **Harvested Anki tests**
 - R1877. Every behavior test in Anki's source at the pinned release (counted at the 26.09.3 tag and recorded in the coverage report; about 673 Rust, 225 Python and 34 TypeScript tests) is inventoried and turned into one or more neutral scenario files written in Meguri's own words, with inputs only.
@@ -2867,7 +2871,7 @@ flowchart TB
 - R2007. On iOS, Meguri never holds database locks while suspended and finishes pending writes before suspension.
 - R2008. An automatic backup is made before every one-way sync (upload or download), `.colpkg` import, Check Database, Empty Cards deletion, deleting unused media, deleting a deck that contains cards, deleting a note type and any operation that forces a full sync (deviation: Anki backs up only before full download, colpkg import and Check Database).
 - R2009. Periodic backups use Anki's backup file format and default retention (one at most every 30 minutes when changed; all of today and yesterday, then 12 daily, 10 weekly, 9 monthly), so the backups can be restored in Anki.
-- R2010. Restoring a backup is tested end to end, and after a restore automatic sync stays off until the user chooses a sync direction.
+- R2010. Restore is tested end to end. After restoring, CloudKit publication remains paused until the user explicitly chooses whether to replace the connected cloud collection or keep the restored collection local (R1548, R2056). A successful Anki transfer does not resolve this cloud decision.
 - R2011. Meguri checks database integrity after an unclean shutdown, after a full download, and periodically when idle (on iOS when the system grants background processing), and a quick check never blocks the UI.
 - R2012. When corruption is detected, Meguri stops writing, never uploads the collection, and offers to restore the most recent good backup or to run Check Database.
 - R2013. Meguri refuses to open a collection whose schema is newer than it supports, and never downgrades a schema silently.
@@ -2892,7 +2896,7 @@ flowchart TB
 - R2028. The product name, subtitle, icon, bundle id and App Store keywords never contain "Anki", and the Anki logo is never used.
 - R2029. Compatibility is described only factually (for example "works with Anki collections (.apkg, .colpkg) and self-hosted Anki sync servers"), together with a note that Meguri is independent and not affiliated with or endorsed by Ankitects or AnkiHub, in the About screen and the store description.
 - R2030. Meguri identifies itself honestly as Meguri in every sync request and never presents itself as an Anki client.
-- R2031. A build switch controls whether AnkiWeb sync is offered; personal builds have it on, and App Store builds have it off unless Ankitects or AnkiHub grants written permission.
+- R2031. A build switch controls whether AnkiWeb manual transfers are offered; personal builds have it on, and App Store builds have it off unless Ankitects or AnkiHub grants written permission. It never enables routine AnkiWeb synchronization.
 - R2032. With the switch off, the app contains no AnkiWeb option, wording or default endpoint, and CI checks the App Store configuration for this.
 - R2033. AnkiWeb sync is never claimed in store text or marketing unless written permission exists.
 
@@ -2900,12 +2904,39 @@ flowchart TB
 - R2034. The app and every bundled framework that uses required-reason APIs ship a privacy manifest declaring at least file timestamps (reason C617.1) and system boot time (reason 35F9.1), plus disk space (E174.1) if free space is checked and user defaults (CA92.1, or the app-group reason) if used.
 - R2035. CI inspects the final binaries for required-reason API symbols and fails if any is used without a matching declaration.
 - R2036. Meguri collects no data and contains no analytics, tracking or third-party SDKs that phone home, so its privacy label is "Data Not Collected".
-- R2037. Meguri makes network requests only to the sync server the user configured, to AnkiWeb when enabled, and to remote URLs that the user's own card content references.
+- R2037. Network requests are limited to Apple CloudKit services, explicitly selected Anki transfer endpoints, and remote URLs referenced by the user's card content. No Meguri account service or hosted sync storage is required for routine sync.
 - R2038. Card templates run only inside the web view's sandbox; the bridge from card scripts to native code is limited to card-scoped actions (show answer, play audio, typed answer, Anki-compatible shims) and exposes no general native API.
 - R2039. Meguri never downloads or runs executable code beyond the user's own card templates, and has no add-on system.
 - R2040. Web inspection of card content is never available in App Store builds; elsewhere it follows the R523 setting.
-- R2041. The Mac build is Apple-silicon only, and the sandboxed Mac app requests only the network-server capability needed for its two loopback servers.
+- R2041. The Mac build is Apple-silicon only. Alongside sandbox, network client/server, user-selected files, bookmarks and App Group capabilities, signed builds add the CloudKit container and remote-notification capabilities required for iCloud sync (KTD22, KTD25).
 - R2042. App Store builds meet current submission rules: built with the 27 SDKs, Liquid Glass adopted, foldable iPhone screenshots supplied once required, and export-compliance answers that match the TLS stack actually used.
+
+
+**Apple synchronization and manual migration**
+- R2043. Routine Meguri-to-Meguri synchronization uses the user's private CloudKit database, one active collection per Apple account, with Apple-managed authentication. No separate Meguri signup, backend database, object-storage service or sync server is required.
+- R2044. The local Anki-compatible SQLite collection remains authoritative for offline use. Synchronize logical records and media assets, never repeatedly upload the live SQLite file or place it in iCloud Drive. Keep the Rust core and SwiftUI architecture.
+- R2045. Notes, cards, review history, decks, presets, notetypes/templates, tags and synced config follow the collection through CloudKit, including unknown Anki data that must round-trip. Device settings, credentials, derived caches, undo stacks and local diagnostics do not.
+- R2046. Enable iCloud sync with an explicit connection action. With no account, no network, quota exhaustion, a paused connection or a missing entitlement, local study, editing, backups and file export continue to work; pending changes remain durable.
+- R2047. The active review's newest answer and dependent held-back changes must not be published through any CloudKit callback. The previous eligible state may be sent, or the affected record may be deferred. Session end releases the hold-back. Incoming conflicts invalidate affected undo entries explicitly.
+- R2048. Sync Now captures a finite local revision boundary, fetches and durably applies available remote changes, sends eligible changes through that boundary, then performs a final fetch/reconciliation. Operations run outside delegate event handling. New concurrent edits remain pending for a later exchange.
+- R2049. Report collection exchange complete only after awaited send/fetch operations, delegate processing, local durable application and state persistence finish and every selected record's result is accounted for. Per-record failures, retryable conflicts and outstanding selected records prevent success. Cancellation and partial success retain recoverable pending work.
+- R2050. Completion means this device has completed its requested exchange with CloudKit. It does not prove another device received it or that no newer remote changes exist. Media completion is separate; a collection-only exchange says that media is still pending or paused.
+- R2051. Committed local changes and deletions cannot be lost between a SQLite commit, event notification, outbox persistence and CKSyncEngine scheduling. Persist or reconstruct pending work after every crash window. Never advance a fetch cursor beyond durably applied data; replay is idempotent. Disposable derived data is not the sole source of synchronization progress.
+- R2052. Give records stable, collection-scoped identities and retain deletion knowledge so an offline device cannot resurrect deleted objects. Do not use wall-clock last-write-wins as the sole conflict rule. Concurrent reviews retain both history events; conflicting card scheduling is reconciled from the resulting history under a deterministic, tested policy.
+- R2053. Notetype/field/template changes, imports and whole-collection replacements become visible only as a validated coherent generation. Incomplete cloud batches never expose cards referencing missing notes, notetypes or decks. CloudKit's per-batch atomicity is not assumed to cover a large import or every record zone.
+- R2054. Conflicting edits preserve a recoverable copy when automatic reconciliation cannot preserve both intents. Quota, throttling, token expiry, deleted zones and partial failures do not silently clear pending changes or recreate deleted content. Recovery is explicit when intent is ambiguous.
+- R2055. Bind local tracking to the CloudKit environment, Apple account and collection identity. On sign-out or account change stop the old engine and isolate its pending work; preserve local data and never upload it into the new account automatically. Reconnection requires an explicit collection choice.
+- R2056. Before replacing an existing local or cloud collection, show direction, counts and pending work, retain recoverable backups of each side being replaced, and require confirmation. Restore/import creates a new publication generation; it never blindly replays stale queued records from the replaced generation.
+- R2057. Media uses CKAsset and durable content identity, with filename mapping, deduplication, deletion handling and resumable progress. Transfer collection records before bulk media, prioritize missing assets needed by visible cards, and bound staging disk space/memory. Interrupted asset installation leaves the existing valid file intact.
+- R2058. Card text, templates, collection settings and media filenames use encrypted record values from the initial CloudKit schema; assets use CloudKit asset encryption. Keep routing metadata minimal. Product copy states private iCloud storage accurately; end-to-end protection of encrypted fields/assets depends on Advanced Data Protection and does not cover all CloudKit metadata.
+- R2059. Private CloudKit data uses the user's iCloud quota. Show actionable quota-full status without deleting local data, and keep file export and backup available. Do not impose the earlier server-storage sizing ideas as new collection limits.
+- R2060. Settings Anki Transfers offers manual Import from Anki and Export to Anki, through compatible package files or an explicitly selected server. These actions are for occasional migration into or away from Meguri. The main Sync Now command, timers, background tasks and integrations never invoke them.
+- R2061. Server import/export has an explicit direction preview and confirmation, safety backups, progress, cancel/resume and a final collection/media result. Import stages and validates before local replacement; export previews remote replacement and never silently imports remote edits as a side effect. Any protocol reconciliation that would change the opposite side is disclosed and requires a new explicit decision. Publication to iCloud after import follows R1548.
+- R2062. A completed server import or export starts a persisted 60-minute cooldown shared by both directions for that endpoint/account in this installation. Failed or cancelled transfers do not consume the cooldown; resuming the same incomplete operation is not a new transfer. Show the next eligible time. File import/export and CloudKit are not rate-limited by this rule.
+- R2063. The cooldown is a device-local product rule, not an account-wide guarantee: reinstalling or using another device may have independent state. An account-wide service or signup system is not added for cooldown enforcement. Repeated clicks cannot create overlapping transfers or bypass an in-progress operation.
+- R2064. Anki protocol compatibility and CloudKit convergence are distinct verification areas. Anki-oracle/local-server results prove manual transfer compatibility; they do not prove Apple's delivery, account isolation, quota recovery or CKAsset behavior. Automated tests never contact AnkiWeb.
+- R2065. CloudKit schema/environment/container setup and signed multi-device tests are explicit prerequisites. Development/test identifiers and CloudKit containers are isolated from the daily-driver app and production data. Agents do not perform one-time Apple account or developer-portal setup.
+- R2066. The complete CloudKit record/conflict/recovery contract and durable tracking design must be written and reviewed before implementation. Existing Anki-sync specs and historical gate receipts cannot be treated as this contract or as evidence that CloudKit has been implemented.
 
 ### Key Flows
 
@@ -2930,11 +2961,11 @@ flowchart TB
 - F4. First launch and migration
   - **Trigger:** First run of a personal build on a new device.
   - **Actors:** A1, A2, A3
-  - **Steps:** Meguri offers "Sign in to sync" (AnkiWeb or custom server) or "Import a collection package"; on sign-in it downloads the full collection and media with visible progress, keeping the app usable for already-downloaded data; from then on, normal incremental sync runs automatically.
-  - **Outcome:** His full collection, history, settings and media are on the device, and AnkiMobile and desktop Anki keep syncing with it.
+  - **Steps:** Welcome offers Connect to iCloud, Import a File and Start Empty. An existing cloud collection downloads coherently, with media progress separate. To migrate from Anki, he imports a package or opens Settings → Anki Transfers → Import from Anki, reviews the source and replacement preview, confirms, then chooses whether to publish that imported collection to iCloud. Routine sync thereafter uses CloudKit.
+  - **Outcome:** His collection, history, settings and media are available on his Meguri devices. Anki clients receive later changes only through another explicit manual export.
   - **Covered by:** R1591, R1543, R163
-- F5. Sync conflict that needs a one-way sync
-  - **Trigger:** A change on another client forced a full sync (for example, a field was added to a note type) while Meguri also has unsynced changes.
+- F5. Manual Anki transfer that needs a full-collection choice
+  - **Trigger:** The user starts a Settings Anki transfer whose source and destination have diverged, including structural changes.
   - **Actors:** A1, A2, A3, A4
   - **Steps:** Meguri explains in plain language that the two sides can't be merged, shows what each side has (cards, last change, device), makes a backup automatically, and asks which side to keep; it never proceeds without his choice.
   - **Outcome:** No silent data loss; the discarded side remains recoverable from the backup.
@@ -2942,7 +2973,7 @@ flowchart TB
 - F6. Editing a note type's template
   - **Trigger:** Antoine wants to change the back template of a note type on his iPad.
   - **Actors:** A1, A2
-  - **Steps:** He opens the note type from the browser sidebar or settings, edits the back template and styling with a live preview of a real note (both sides, light and dark, iPhone/iPad/Mac classes), and saves; if the change requires a full sync, Meguri asks first.
+  - **Steps:** He opens the note type from the browser sidebar or settings, edits the back template and styling with a live preview of a real note (both sides, light and dark, iPhone/iPad/Mac classes), and saves; the coherent structural generation propagates through CloudKit. Any full-transfer warning is deferred to a later explicit Anki transfer.
   - **Outcome:** Updated cards render identically in Meguri and in other Anki clients.
   - **Covered by:** R938, R939, R948, R951
 
@@ -2956,7 +2987,7 @@ flowchart TB
 - AE6. **Covers R290, R291.** Given the user did a manual Set Due Date on 45 cards today (revlog type 4, ease 0) and reviewed 10 cards, when "exclude manual reschedules" is on, then today's cell shows 10; when it is turned off, then it shows 55; given one of the 10 reviewed cards is later deleted, then the Home heatmap still shows 10 and the deck page heatmap shows 9.
 - AE7. **Covers R5, R9.** Given the foldable iPhone folded with the answer side of a card showing and the tap zones active, when the user unfolds it, then the layout switches to the sidebar layout with review still filling the detail area, the same card stays on the answer side, no answer is recorded, and no button sits on the fold.
 - AE8. **Covers R114, R116, R147.** Given the collection config has `heatmap` with an extra sub-key unknown to Meguri, when the user opens Settings, changes nothing and closes it, then the collection's modification time and pending-sync state are unchanged; when the user changes one heatmap setting, then only that setting's sub-key of `heatmap` changes and the unknown sub-key is still present after sync.
-- AE9. **Covers R88, R365, R123.** Given automatic sync is on and the user has answered 30 cards in an open review, when 60 seconds pass, then Meguri syncs every answer except the most recent one, and the back button still undoes that most recent answer; when the user then switches to another app, Meguri syncs immediately, again holding back the newest answer.
+- AE9. **Covers R88, R365, R123, R2047.** Given automatic iCloud sync and 30 answers in an active review, eligible changes are offered for sending within the foreground flush target; the latest answer remains undoable and unpublished. On background, a best-effort flush retains that hold-back. Apple scheduling or suspension can delay delivery without losing queued work.
 - AE10. **Covers R197, R198, R200.** Given a Korean keyboard layout is active and a card's question side is shown, when the user presses the physical key labelled E, then the note editor opens; given the editor field has focus, when the user types "e", then the letter is inserted and no shortcut fires; given Browse is visible, ⌥⌘N resets the selected cards and does not create a deck.
 - AE11. **Covers R402, R403, R405, R406.** Given a Tobira card on its answer side with a `<details class="ref"><summary>source</summary>…</details>` block on the left half, when the user taps the summary, then the disclosure toggles, no tint appears and no answer is recorded; when the user then presses and holds plain text on the left half, then the left half tints red while the finger is down, and on lift the card is answered Again.
 - AE12. **Covers R414, R415, R416, R445.** Given an answer side on iPhone with Double Tap Prevention at 250 ms, when the user taps the right half twice 120 ms apart, then the first tap answers Good, the next card's question is on screen in the following frame, and the second tap does nothing; a third tap 400 ms after the first reveals the new card's answer.
@@ -2986,7 +3017,7 @@ flowchart TB
 - AE36. **Covers R980, R981, R982.** Given the media folder holds `photo.jpg`, when the user attaches `Photo.JPG` with the same bytes then the field references `photo.jpg` and nothing is written; with different bytes it is stored as `photo-<40-hex sha1>.jpg`; and a new `Diagram.PNG` is stored as `diagram.png`.
 - AE37. **Covers R892, R885.** Given the collection has tag `German::Verb`, when the user types `german`, `::`, `verb`, `::`, `modal` and presses Space, then the note is saved with tag `German::Verb::modal` and the tag input starts a new empty tag.
 - AE38. **Covers R1010, R1012, R1015, R1019.** Given a Tobira Occlusion note with masks c1–c7 and audio clozes c1–c7 in A01–A07, when the user moves mask c4 and deletes mask c6, then mask c4 is saved as c4 with new coordinates, the editor warns that A06 still references c6, card 6 still exists, and the other masks are written byte-identical.
-- AE39. **Covers R951, R949, R950.** Given the collection was just synced, when the user renames a field, no warning appears; when the user then adds a field, the full-upload warning appears once; and when the user then reorders templates before syncing, no second warning appears.
+- AE39. **Covers R951, R949, R950, R2053.** Rename a field, add a field and reorder templates: no Anki full-upload warning interrupts ordinary editing. CloudKit exposes each validated structural generation coherently; a later manual Anki transfer previews its full-transfer consequence before confirmation.
 - AE40. **Covers R776, R823.** Given a Migaku note opened in the Edit panel, when the user closes the panel without typing, then the note's modification time and sync marker are unchanged; and when the user edits only the Translation field, the Sentence field is saved byte-identical.
 - AE41. **Covers R1024, R1076.** Given the user types `dog cat or  fish` and presses Return, when the search commits, then it matches notes containing (dog AND cat) OR fish, and the field shows `dog cat OR fish`, identical to Anki's canonical text.
 - AE42. **Covers R1107, R1108.** Given results for `deck:Japanese` are showing, when the user types ` tag:"wk-lev`, then results stay those of `deck:Japanese` with no error; when the user then presses Return with the quote still open, then an inline "unclosed quote" error underlines `"wk-lev` and the dimmed old results remain.
@@ -3008,16 +3039,16 @@ flowchart TB
 - AE58. **Covers R1269, R1271, R1384.** Given Europe/Paris, rollover 4, and a review at 03:30 CEST on the morning after the clocks went forward (spring-forward Sunday), when both views are compared, then the Stats Calendar and the Home heatmap may place that review on different dates, each matching its oracle (Anki for the Calendar, the add-on for the heatmap), and the test suite asserts both.
 - AE59. **Covers R1367, R1406.** Given history set to "last 12 months", when the Retention table shows, then it has no All time row and the Reviews range picker has no "all"; when the user switches to "all history", then the All time row appears and Reviews, Hourly Breakdown and Answer Buttons switch to "all".
 - AE60. **Covers R1417, R1393.** Given Deck scope on "Japanese" with Separate suspended/buried on, when the user clicks the Young label in Card Counts, then the Browser opens with `(deck:"Japanese") AND ("is:review" AND -"is:learn") AND "prop:ivl<21" AND -("is:buried" OR "is:suspended")`, and the card count equals the Young row.
-- AE61. **Covers R1527, R1529.** Given card X was answered on the phone at 10:00:05 (pending) and the same card was edited on desktop and synced to the server with mtime 10:00:05, when the phone syncs, then the phone keeps its local version (tie goes to local), uploads it, and the server ends with the phone's version.
-- AE62. **Covers R1536, R1537, R1538, R1539, R1540.** Given the user added a field to a notetype on Mac (scm changed) while the phone has 120 unsynced reviews, when the phone syncs, then it shows Upload / Download / Cancel with both sides' modification times and "120 reviews not on the server", Cancel is the default, and choosing Download first creates a local backup and only then replaces the collection.
-- AE63. **Covers R1515.** Given the device clock is 6 minutes ahead of the server, when a sync starts, then nothing is changed locally or remotely and the user sees a message to correct the date, time and time zone.
-- AE64. **Covers R1530, R1533.** Given the server answers `sanityCheck2` with "bad", when the sync ends, then all local changes from that sync are rolled back, `abort` is sent, `scm` is set, and the next sync asks for a one-way choice.
+- AE61. **Covers R1527, R1529.** In a user-started Settings Anki transfer, Given card X was answered on the phone at 10:00:05 (pending) and the same card was edited on desktop and synced to the server with mtime 10:00:05, when the phone syncs, then the phone keeps its local version (tie goes to local), uploads it, and the server ends with the phone's version.
+- AE62. **Covers R1536, R1537, R1538, R1539, R1540.** In a user-started Settings Anki transfer, Given the user added a field to a notetype on Mac (scm changed) while the phone has 120 unsynced reviews, when the phone syncs, then it shows Upload / Download / Cancel with both sides' modification times and "120 reviews not on the server", Cancel is the default, and choosing Download first creates a local backup and only then replaces the collection.
+- AE63. **Covers R1515.** In a user-started Settings Anki transfer, Given the device clock is 6 minutes ahead of the server, when a sync starts, then nothing is changed locally or remotely and the user sees a message to correct the date, time and time zone.
+- AE64. **Covers R1530, R1533.** In a user-started Settings Anki transfer, Given the server answers `sanityCheck2` with "bad", when the sync ends, then all local changes from that sync are rolled back, `abort` is sent, `scm` is set, and the next sync asks for a one-way choice.
 - AE65. **Covers R1576, R1585.** Given the user deleted `a.mp3` locally before the first media sync finished and the server still has `a.mp3`, when media sync runs, then `a.mp3` is downloaded again and no deletion is sent.
 - AE66. **Covers R1586, R1587, R1472.** Given Meguri relaunches 100 times with the Migaku integration on and no content changes, when the user then syncs, then no notetype, config or media file is uploaded and the media change check reports zero changes.
 - AE67. **Covers R1602, R1612.** Given an `.apkg` with a note whose GUID exists locally with an older mtime and an image `cat.jpg` whose content differs from the local `cat.jpg`, when imported with "Update notes: if newer", then the local note is updated with the incoming fields and mtime, the image is saved as `cat-<sha1>.jpg`, and the updated note references the new name.
 - AE68. **Covers R1495, R1550.** Given a manual sync is running, when the user answers three cards, then each answer appears at once in the UI, is committed at once, and uploads on the next sync; given a review session is active, the Sync command stays disabled (R89) and automatic syncs follow R88.
 - AE69. **Covers R1633.** Given backups exist from every hour for 400 days, when retention runs on default settings, then all backups from today and yesterday remain plus the newest backup of each of the 12 previous days with backups, the 10 previous weeks and the 9 previous months, and all others are deleted.
-- AE70. **Covers R1510.** Given AnkiWeb answers `meta` with 308 to `https://sync20.ankiweb.net/`, when the sync continues, then every later request of this sync and of future syncs goes to that base URL until the user changes server or logs out.
+- AE70. **Covers R1510.** In a user-started Settings Anki transfer, Given AnkiWeb answers `meta` with 308 to `https://sync20.ankiweb.net/`, when the sync continues, then every later request of this sync and of future syncs goes to that base URL until the user changes server or logs out.
 - AE71. **Covers R1717, R1718, R1719.** Given profiles for German, Spanish and Japanese, and a German card received 10 minutes ago, when `/receive` arrives with `targetWord` "streng[streng,adj,|streng,adv,]" and sentence "Streng vertraulich." (a scoring tie), then the card is created in 🇩🇪 German::Mining, flagged Uncertain/Fallback in Received, and the sidebar badge increments.
 - AE72. **Covers R1713, R1712, R1704.** Given the Japanese profile, when `/receive` arrives with a kana sentence, two sentence-audio data URLs and one image, then a Migaku Japanese Custom note is created as follows, and the reply is `{"success": true, "created": true, "id": <nid>}`:
   - Sentence Audio = `[sound:<id1>.m4a]\n<br>\n[sound:<id2>.m4a]`
@@ -3041,14 +3072,22 @@ flowchart TB
 - AE86. **Covers R2004, R2005, R2003.** Given a full download of a 150k-card collection in progress, when the app is killed at 50% of the transfer, then on relaunch the previous collection opens unchanged, passes an integrity check, contains every review committed before the download began, and no partial file has replaced it.
 - AE87. **Covers R1947.** Given payloads rebuilt from the user's 1,260 Migaku notes created through `/receive`, when each is posted to Meguri's Migaku server with no destination chosen, then every Japanese payload (CJK target word) goes to the Japanese mining deck, every German one (tags such as nn, prep, nnp) to German::Mining and every Spanish one (tags such as n, adp, propn) to Spanish::Mining, each with the right note type and default flags.
 - AE88. **Covers R1977, R1978, R1981.** Given the review screen showing the answer side at the largest accessibility text size, in dark mode with Increase Contrast, when the accessibility audit and the VoiceOver test run, then the audit reports no unsuppressed issue and VoiceOver reaches the card content, then Again, Hard, Good and Easy each spoken with its interval, then undo, close and the ⋯ menu.
-- AE89. **Covers R2031, R2032.** Given the App Store build configuration, when it is built, then the binary contains no AnkiWeb host name or sign-in option and the sync settings offer only a custom server URL; given the personal build configuration, the AnkiWeb option is present.
+- AE89. **Covers R2031, R2032, R2043, R2060.** The App Store configuration has no AnkiWeb host/sign-in option under the existing build rules; it offers iCloud sync and manual file/self-hosted transfers. The personal configuration exposes the build-enabled AnkiWeb option only inside Settings Anki Transfers, never as a routine sync provider.
 - AE90. **Covers R1983, R1985, R1994.** Given a change that puts a glass background on the card face, when the gates run, then the lint gate fails first; and given a screen where a long deck name is cut off at the largest text size, the critic reports a high-severity truncation issue with its rubric rule and region, and the screen stays out of "verified" until a re-check by a new critic passes.
+
+- AE91. **Covers R2048–R2050.** Sync Now sends and fetches successfully but one selected card save fails: the result is needs attention, the card remains pending and no complete state is shown. A later successful exchange reports this device complete while another offline device remains unacknowledged and media is still pending.
+- AE92. **Covers R2051, R2052, R2055.** Kill after a local commit but before engine-state persistence; relaunch recovers the pending change exactly once. Switch Apple accounts while it is pending: the old collection remains local and is never uploaded into the new account without an explicit connection decision.
+- AE93. **Covers R2052–R2054.** Two offline devices review the same card and one changes a notetype. After reconnection both review events survive, card state converges deterministically, and no partial structural generation becomes visible. A delayed third device does not resurrect a deleted card.
+- AE94. **Covers R2057, R2059.** Cloud quota fills during media upload: committed study remains usable, collection/media progress is separate, pending assets survive restart, file export still works and completing the transfer after quota recovery does not duplicate files.
+- AE95. **Covers R2060–R2063.** A confirmed server import completes at 10:00; import and export for that endpoint/account show 11:00 as next eligible time, including after relaunch. A failed attempt consumes no cooldown, resuming an incomplete transfer is allowed, and CloudKit/file export continue. Launch, foreground, timers and AnkiConnect sync make zero Anki-server calls.
+
+- AE96. **Covers R2058, R2065.** Schema review finds card text, templates, synced settings and media filenames only in encrypted values, with opaque routing identifiers and encrypted assets. Privacy copy qualifies end-to-end protection by Advanced Data Protection and metadata exclusions. Test builds cannot address the production container.
 
 ### Success Criteria
 
 - **Instant review:** on Antoine's own iPhone, iPad and Mac, the next card meets the one-frame budget of R1807 across his heaviest Migaku, image-occlusion and type-in cards, and he never perceives a wait between cards.
 - **Instant everywhere else:** the deck list, search-as-you-type, browser scrolling, stats and sync meet the budgets in the Performance requirement groups (R1807 onward) on a synthetic collection of about 150k cards and 1.2M reviews, ten times his own.
-- **Zero-difference compatibility:** for every card in Antoine's collection, Meguri and the pinned Anki release produce identical next intervals for all four buttons at a frozen instant, identical queue order per deck, identical rendered card HTML, and identical search results for the harvested query corpus; sync round-trips with AnkiMobile and desktop Anki lose or alter nothing.
+- **Zero-difference compatibility:** for every card in Antoine's collection, Meguri and the pinned Anki release produce identical next intervals for all four buttons at a frozen instant, identical queue order per deck, identical rendered card HTML, and identical search results for the harvested query corpus; manual file/server round-trips with Anki lose or alter nothing, and Meguri devices converge through CloudKit without losing offline changes or review history.
 - **Daily-driver test:** Antoine uses Meguri as his only study app for 30 consecutive days without falling back to Anki or AnkiMobile for any in-scope task.
 - **Design quality:** every screen passes the automated accessibility audit, the snapshot matrix (appearance, text size, contrast, device class) and the critic rubric, and Antoine signs off on each signature screen (home, review, browser, deck options, stats) from a set of variants.
 - **Buildable in one go:** a planning agent can turn this contract into an implementation plan without inventing behavior, scope or success criteria, and the verification loop lets build agents prove each requirement without asking Antoine.
@@ -3199,7 +3238,7 @@ flowchart TB
 - The `anki` Python package for the current Anki release (26.09.x at the time of writing) stays installable on Linux arm64/x86_64 so the oracle can run in Docker.
 - AnkiWeb keeps accepting sync protocol version 11 from clients that behave like the official ones; its minimum accepted version is unpublished.
 - Ankitects has not granted AnkiWeb access for a public Meguri build; personal builds connect to AnkiWeb at Antoine's own risk under AnkiWeb's terms.
-- AnkiMobile and desktop Anki continue to sync with the same account while Meguri is being built; Meguri must coexist with them from its first sync, so Antoine keeps them on releases that still write FSRS-6 parameters until Meguri re-pins to a newer FSRS.
+- Anki interoperability is verified through manual file/server transfers against the pinned release. Daily study and card creation move to Meguri; CloudKit does not synchronize unmodified Anki clients.
 - Xcode 27.0 has no foldable-iPhone simulator; foldable layouts are verified once Apple ships one (reported for Xcode 27.1), and on resizable iPhone windows in the meantime.
 - The Migaku browser extension keeps its current local protocol (port 44432, `/receive`, `/srs-check`, WebSocket); a change on Migaku's side would need a follow-up.
 - Antoine's real collection is available locally (gitignored) as the primary regression and performance fixture; an anonymized clone is used anywhere it might leave the machine.
@@ -3218,9 +3257,9 @@ Planning resolved these:
 - editor Return markup: observed goldens (U190);
 - ⌘1–⌘7: no app-level ⌘-number shortcuts, so Browse and Review flags own them (U218, U181);
 - `rid:` search: not supported (U81);
-- background refresh: off;
+- background refresh: no separate app-refresh polling; CloudKit scheduling and silent change notifications remain enabled;
 - server backup before a one-way upload: self-hosted servers only;
-- first media download: in USN order;
+- first media download: CloudKit collection records before bulk assets; Anki transfer media retains protocol ordering;
 - the Migaku pending reply: verified before use, else HTTP 400 (U139);
 - extension language hints: the heuristic stays (U138);
 - App Store naming of the Migaku feature: one string key (U144).
@@ -3229,6 +3268,12 @@ Still open for Antoine:
 - Verify with his personal account that AnkiWeb accepts Meguri's honest client identifier (R1509). If it does not, AnkiWeb sync is unavailable and self-hosted sync is the only option, never impersonation.
 
 ### Sources / Research
+
+- [Apple CKSyncEngine](https://developer.apple.com/documentation/cloudkit/cksyncengine-5sie5): custom persistence, automatic scheduling and account events.
+- [Apple sendChanges](https://developer.apple.com/documentation/cloudkit/cksyncengine-5sie5/sendchanges(_:)) and [fetchChanges](https://developer.apple.com/documentation/cloudkit/cksyncengine-5sie5/fetchchanges(_:)): manual operation completion after delegate event handling.
+- [Apple state persistence](https://developer.apple.com/documentation/cloudkit/cksyncenginestateupdateevent) and [account changes](https://developer.apple.com/documentation/cloudkit/cksyncengine-5sie5/event/accountchange): application-owned durability and account isolation.
+- [Apple private database](https://developer.apple.com/documentation/cloudkit/ckcontainer/privateclouddatabase), [encrypted values](https://developer.apple.com/documentation/cloudkit/ckrecord/encryptedvalues) and [iCloud security](https://support.apple.com/en-us/102651): storage ownership/quota and encryption boundaries.
+
 
 All research lives in the gitignored `local-data/research/` folder (it quotes Anki source and describes Antoine's personal collection, so it is never committed and implementer agents in the clean-room process do not read it directly):
 
@@ -3253,7 +3298,9 @@ All research lives in the gitignored `local-data/research/` folder (it quotes An
 
 ## Planning Contract
 
-Product Contract preservation: changed, reconciling internal contradictions found during planning with no scope change. The edits:
+Product Contract updated 2026-10-18 for CloudKit routine sync and Settings-only manual Anki migration (R2043–R2066). Stable requirement/unit identities and existing implementation history are retained. Earlier planning corrections below remain recorded; affected normative sync specs must be updated before implementation.
+
+Earlier Product Contract corrections: The edits:
 - R14: the collection lives in the private container.
 - R99: the session ends when the summary is dismissed.
 - R315, R317, R1433 and R1434: one widget-snapshot definition.
@@ -3353,16 +3400,16 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - The suspend protocol (C8, R2006, R2007) is three control-lane calls, `flush_for_background()`, `suspend(deadline)` and `resume()`, defined in U32. The Swift sequences around them are U151's.
   - **Core decides, Swift schedules.** Core policies (U40 day clock, U113 sync and optimizer eligibility, U127 backup) are pure and return actions plus `next_deadline`. Swift arms exactly one timer per policy, in one owner:
     - day clock: U51 `DayClockMonitor`;
-    - sync: U151 `SyncCoordinator`, which only executes U113 actions;
+    - sync: U151 `SyncCoordinator`, which executes core eligibility actions through the Swift CloudKit adapter; CKSyncEngine owns Apple network scheduling, retries and event delivery (KTD25);
     - optimizer: U47's `OptimizerCoordinator` (app-side leg), started only by U113's optimizer action;
     - backups: U154 `BackupTrigger`, armed at U127's deadline.
     U154 alone registers background-task identifiers. Session state reaches U113 inside the core from U43's events; Swift never forwards it. Core-internal debounces (U100's 2 s) stay in the core as suspend participants.
 - KTD6. **Hold-back sync is snapshot-and-stage.**
   - A normal sync reads outgoing rows from a read snapshot taken at sync start. It substitutes before-images for rows touched by the held-back run: the active session's contiguous top-of-stack steps that are not yet uploaded, down to and including the latest such answer (U25 defines it).
-  - It computes sanity-check counts from that virtual state and stages incoming changes.
-  - At the end, one write transaction commits the merge using the pending-and-newer-mtime rule. Only keys untouched since the snapshot and outside the held-back run get the server USN (U107 step 6). `col.mod` is bumped after `finish` when pending rows remain.
+  - CloudKit callbacks use the same eligible snapshot/hold-back boundary, never unrestricted live-row reads. They persist sent revisions separately from Anki USNs. Manual Anki reconciliation additionally computes protocol sanity counts and stages incoming changes.
+  - CloudKit incoming batches apply through engine ops with generation and revision checks; retries/replay are idempotent and acknowledgement never clears a newer local revision. Its conflict contract is R2052–R2054. The pending-and-newer-mtime merge, server USNs and `finish` bookkeeping belong only to U107 manual Anki reconciliation.
   - Answers commit at once (durable within 1 s) and never wait for a sync. Any non-exclusive op whose declared write phase exceeds about 200 ms publishes the delay; U24 owns the list (for example Check Database vacuum and repairs, a large `.apkg` apply, a large SyncIncoming merge). Answers accepted meanwhile stay in the session's in-memory overlay and are also appended to U43's pending-answer journal, so they are durable within 1 s (R2006, R1491); they commit as soon as the writer is free.
-  - Hold-back applies only while the undo stack can outlive the sync. Before the Mac quit-time sync the session is ended (U151, U43), so the newest answer uploads (R127).
+  - Hold-back applies only while the undo stack can outlive the sync. Before the Mac quit-time sync the session is ended (U151, U43), so the newest answer becomes eligible and is durably queued for a bounded best-effort cloud flush (R127); quitting does not guarantee delivery.
   - Governs R88, R726, R1495, R1519, R1520 together with R99.
 - KTD7. **Undo and queues around sync.**
   - Applying incoming changes clears undo and redo except the held-back run and the entries created after the sync's snapshot (R1520 clears only steps the sync uploads or incoming changes touch; R365 keeps the newest answer undoable). Any of these kept entries is also dropped when a staged incoming row or grave targets a key in its touched set (card, note, deck, deck config, notetype or config key), whether or not the merge applied it.
@@ -3374,7 +3421,7 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - **Optimizer commit gate:**
     - training runs only when no session is active, and a session start cancels it;
     - training ends in `AwaitingGate` and writes nothing. The core never calls the network for the optimizer;
-    - U47's app-side `OptimizerCoordinator` runs the gate as a U113 action: a fresh `meta` with auth (U114), then `optimizer_commit`, which writes only if the server is unchanged since the first sync and no session is active or started since training (U47);
+    - U47's app-side `OptimizerCoordinator` runs a CloudKit fetch/reconciliation barrier and then an engine revision/session check through U113/U114. Training records its input revision; abandon stale results after incoming or local changes. A fetch is not a distributed lock: concurrent devices use R2052–R2054 convergence, never an Anki `meta` probe;
     - parameters, memory states and the last-optimized date commit in one Optimizer op, which then requests a sync that SyncCoordinator runs under the normal policy (R699; U47).
   - Two Meguri devices optimizing the same day is an accepted small race; the next run converges.
 - KTD24. **Floating-point determinism follows the platform, as Anki does.**
@@ -3391,7 +3438,7 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - Bindings come from an in-repo `uniffi-bindgen-swift` pinned `=0.32.2`, not cargo-swift.
   - The generated Swift compiles in its own Swift 5 language-mode target, `MeguriCoreBindings`, over the binary module `MeguriCoreFFI`. The Swift 6 `CoreBridge` wraps it.
   - Within one build configuration the exported surface is identical on every slice. Platform features gate implementations, never exports: on iOS slices the server exports (U135) are stubs that return `Unsupported`. Bindings are generated once per configuration from the macOS slice, and the build checks that every slice exports the same `uniffi_*` symbol set (U6).
-  - **Jobs.** Collection open, login, the `meta` probe (U114), normal, one-way and media sync, optimizer training, import and export, backup, Check Database, Check Media, Empty Cards, and browser bulk ops (U86's framework: U87's card and note actions, Find and Replace, Edit Field) with the undo and redo of their entries (U25) are jobs. A short `start_*` export returns `JobHandle{id, cancel, progress}` at once. The work runs on core-owned threads (tokio for sync and media, a bounded job pool otherwise), and completion arrives as a `JobFinished{id, outcome}` event. U24's C7 arbitration decides concurrency: normal and media sync may overlap; exclusive jobs refuse others with `Busy` (R171).
+  - **Jobs.** Collection open, manual Anki transfer login/meta/reconciliation/full/media jobs, optimizer training, import and export, backup, Check Database, Check Media, Empty Cards, and browser bulk ops (U86's framework: U87's card and note actions, Find and Replace, Edit Field) with the undo and redo of their entries (U25) are jobs. A short `start_*` export returns `JobHandle{id, cancel, progress}` at once. The work runs on core-owned threads (tokio for manual Anki transfer network/media work, a bounded job pool otherwise), and completion arrives as a `JobFinished{id, outcome}` event. U24's C7 arbitration decides core concurrency: manual Anki collection/media jobs may overlap where safe; exclusive jobs refuse others with Busy (R171). CloudKit network/event operations run in U114's Swift actor and use short/cancellable core calls, with separate progress/completion and generation fencing (KTD25).
   - **Lanes** carry only short calls. CoreBridge uses actors with custom serial executors on `DispatchSerialQueue` lanes:
     - interactive: review, render, undo, edits;
     - query: reads, pages, stats, and `qa_cells` with cancel;
@@ -3428,7 +3475,8 @@ The plan was written without a synchronous user checkpoint, at the user's instru
 - KTD12. **Where data lives.**
   - The collection, media, media DB and derived store sit in the app's private Application Support. Backups go to `Documents/Backups` on iOS and iPadOS, where the Files app shows them (R1629), and to the private container on the Mac, with a Show Backups action.
   - The App Group holds only `widget-snapshot.json`.
-  - Device-only state never enters the collection (R1468): the host key (Keychain), server endpoint, sync progress, the auto-sync pause flag (U124a core sidecar, the only copy), optimizer run diagnostics (U47 derived-store table) and UI state.
+  - CloudKit pending work, record system fields/change tags, cursors, engine serialization, account binding and generation recovery metadata live in durable app-private tracking storage (KTD25); this is not a disposable derived cache.
+  - Device-only state never enters the collection (R1468): the host key (Keychain), server endpoint, sync progress, the generation-bound cloud publication decision (U124a/U114 durable tracking, separate from legacy Anki recovery), optimizer run diagnostics (U47 derived-store table) and UI state.
   - `lastFsrsOptimize` is a synced collection config key, written only by the U47 commit op and read by U113's optimizer gate.
 - KTD13. **Local servers in Rust (`meguri-servers`, axum on tokio), started and stopped by the Mac app over FFI.**
   - Body limits as R1678 sets them (256 MB for AnkiConnect, 128 MB for Migaku).
@@ -3436,7 +3484,7 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - CORS and Host checks in a hand-rolled tower layer.
   - Binds loopback only: `127.0.0.1`, then `[::1]` once the IPv4 bind succeeded (R1673); never a wildcard or LAN address.
   - Contract transcripts replay headless in Docker.
-- KTD14. **Sync transport.**
+- KTD14. **Manual Anki transfer transport only.** Routine sync uses KTD25, not reqwest.
   - reqwest 0.13 with rustls and the platform verifier. reqwest reads system proxies only on macOS and without PAC, so Swift resolves the system proxy per job (PAC included) and passes it in (U114, U105; R1512).
   - Redirects are disabled; a 308 is handled by hand on `meta` only.
   - zstd is applied by hand. Bodies stream.
@@ -3445,9 +3493,9 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - A `SyncTransport` seam allows a future URLSession background transfer.
 - KTD15. **Background work.**
   - iOS:
-    - `BGProcessingTask` for optimization, idle integrity checks, and the R1553 normal sync with media continuation (network required). No `BGAppRefreshTask`: this is how the plan reads "background refresh: off" together with R1553;
+    - `BGProcessingTask` for optimization and idle integrity checks. CKSyncEngine owns opportunistic automatic cloud work with remote notifications; no custom app-refresh polling and no scheduled Anki transfers;
     - `BGContinuedProcessingTask` for a user-started one-way sync or import, with progress;
-    - `beginBackgroundTask` when leaving the app, covering the incremental sync, snapshot write and WAL checkpoint.
+    - `beginBackgroundTask` when leaving the app, covering a bounded CloudKit flush, durable tracking, snapshot write and WAL checkpoint; expiry persists/resumes rather than waiting for network completion.
   - macOS: `NSBackgroundActivityScheduler` and `ProcessInfo` activities.
   - The foreground-return and background sequences are U151's, built on U32's three C8 calls; U154 owns every task registration (KTD5).
 - KTD16. **The widget snapshot is built in the core (`meguri-stats`) to the single schema of R1433.**
@@ -3477,8 +3525,8 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - Text uses only system text styles.
   - The `tools/mg lint-ui` gate bans raw colors, hex literals, fixed font sizes, untokenized spacing and glass on content (R1992–R1999).
   - The component gallery screen exists in debug builds.
-- KTD21. **AnkiWeb build switch** (R1497, R2031, R2032): the Swift condition `ANKIWEB_ENABLED` plus the Rust feature `ankiweb`. Personal builds have it on and the App Store configuration has it off, which a CI script checks. Swift packages build Release and AppStore alike and never see app compilation conditions, so every AnkiWeb view, string reference and endpoint default lives in the app target under the condition and reaches MeguriKit only through an injected `AnkiWebProvider` (login rows, Get Decks, the onboarding option). MeguriKit contains no AnkiWeb identifiers or wording.
-- KTD22. **Mac distribution**: Apple-silicon only, sandboxed with `network.server` and `network.client`, plus `com.apple.security.files.user-selected.read-write` and `com.apple.security.files.bookmarks.app-scope`, without which a sandboxed app cannot show open and save panels or keep security-scoped bookmarks (R1624, R1770, R1772); the App Group is added when signed. The plan reads R2041 as "no capability beyond these": no other network, hardware or file capability. Hardened runtime for direct builds.
+- KTD21. **AnkiWeb build switch** (R1497, R2031, R2032): the Swift condition `ANKIWEB_ENABLED` plus the Rust feature `ankiweb`. Personal builds have it on and the App Store configuration has it off, which a CI script checks. Swift packages build Release and AppStore alike and never see app compilation conditions, so every AnkiWeb view, string reference and endpoint default lives in the app target under the condition and reaches MeguriKit only through an injected `AnkiWebProvider` (manual transfer login rows only). MeguriKit contains no AnkiWeb identifiers or wording. Provider injection is confined to Settings Anki Transfers; onboarding and the main Sync Now action use iCloud.
+- KTD22. **Mac distribution**: Apple-silicon only, sandboxed with `network.server` and `network.client`, plus `com.apple.security.files.user-selected.read-write` and `com.apple.security.files.bookmarks.app-scope`, without which a sandboxed app cannot show open and save panels or keep security-scoped bookmarks (R1624, R1770, R1772); the App Group is added when signed. Signed builds also include CloudKit container/services and remote-notification capabilities (R2041, R2065). The test and production container/environment split is verified before any real-account run. Hardened runtime for direct builds.
 - KTD23. **Oracle harness.**
   - Long-lived `docker run -i` oracle workers, one per time zone, speak JSON lines in batch mode (about 100 ms per scenario).
   - libfaketime is driven by a timestamp file with `DONT_FAKE_MONOTONIC=1`.
@@ -3489,6 +3537,17 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - Tier T1: live-oracle suites where Meguri's output is the oracle's input (export→import, Check Database, sync).
   - Nightly: differential fuzzing, about 40k programs in 30 minutes.
 
+- KTD25. **CloudKit adapter over the Rust collection.** A Swift actor owns CKSyncEngine and the private CloudKit database; Rust retains collection mutation, eligible snapshots, hold-back, deterministic merge validation and generation checks. CKRecord payloads represent logical collection objects and CKAsset stores media; no SwiftData/Core Data migration and no SQLite-file synchronization.
+  - Custom collection and media zones permit collection-first work and independent asset progress. Opaque record identifiers do not expose note text or filenames; encrypted values hold content. The exact record mapping, conflict semantics, tombstone retention and coherent-generation protocol are implementation prerequisites (R2066), not inferred from Anki USNs.
+  - The engine change stream is post-commit notification, not a durable outbox. Before implementation, specify a crash-safe journal/reconciliation handshake across collection and tracking storage, including file replacement and account changes. Separate SQLite files are not assumed to commit atomically. No CloudKit progress depends solely on meguri-derived.db, nor are tracking tables added to the interoperable collection.
+  - Persist incoming application and engine state with a replay-safe order; a persisted cursor never outruns applied records. Persist selected record revisions and outcomes for idempotent send acknowledgement. Keep unsent edits/deletions reconstructible even when a callback or persistence step fails.
+  - Sync Now orchestrates fetch → validated local apply → eligible send → final fetch/reconciliation outside delegate callbacks. Await delegate processing and durable writes; inspect per-record results and remaining selected work. Bounded attempts expose waiting/failure rather than looping indefinitely under continual edits or throttling. Collection success and media success are separate.
+  - Keep engine/account state isolated by app configuration, CloudKit environment, Apple account and collection generation. Development and daily-driver builds use separate containers. Actual identifiers, entitlements, production schema promotion and signed testing are user setup/deployment prerequisites, never invented or provisioned by an agent.
+- KTD26. **Manual Anki migration workflows.** U105–U111 remain the clean-room protocol implementation for Settings transfers; U113/U114 route it only from explicit transfer commands, never automatic policy. Package file compatibility remains unchanged.
+  - Import/export staging uses U124a verified replacement and U126 backups. Preview direction and all affected sides; incremental reconciliation cannot silently turn export into import or import into publishing local changes. Upload/download and media merge semantics are disclosed before confirmation.
+  - A durable operation record stores endpoint/account identity, direction, resumable stage, collection generation, outcome and the successful-transfer timestamp. Both server directions share a 60-minute local cooldown; failures/cancellation do not start it. Serialize operations and preserve the cooldown across logout/relaunch. File transfers and iCloud remain independent.
+  - A successful Anki import enters R1548's cloud-publication decision, not an automatic overwrite of connected devices. Anki transfer bookkeeping stays separate from CloudKit revisions, tokens and account identity.
+
 ### High-Level Technical Design
 
 **Components and layering** (solid arrows mean "depends on"; each crate may also use any crate below it, per the KTD2 table; dashed arrows are file I/O)
@@ -3498,6 +3557,7 @@ flowchart TB
   subgraph Apple["Apple app (SwiftUI)"]
     Features["Features: Home, Review, Browse, Editor, NoteTypes, ImageOcclusion, DeckOptions, Stats, Settings, Onboarding, Integrations"]
     Shell["App shell: scenes, navigation, CollectionStore, SyncCoordinator"]
+    Cloud["Swift CloudKit adapter / CKSyncEngine"]
     CardR["CardRendering: 2 x WKWebView, meguri-media scheme, native audio"]
     DS["DesignSystem: tokens, components, gallery"]
     Bridge["MeguriCore: CoreBridge lanes (interactive, query, maintenance, control) + MeguriCoreFFI (UniFFI)"]
@@ -3507,7 +3567,7 @@ flowchart TB
     FFI["meguri-ffi: exports, CoreEvent dispatcher"]
     Servers["meguri-servers (axum, Mac only)"]
     Host["meguri-host: CoreHost::open, port wiring"]
-    Sync["meguri-sync (reqwest, tokio)"]
+    Sync["meguri-sync: manual Anki transfers + core eligibility/merge contracts"]
     Stats["meguri-stats (+ widget snapshot)"]
     Pkg["meguri-package"]
     Engine["meguri-engine: ops, change stream, undo, lifecycle, jobs, review session, ports"]
@@ -3524,6 +3584,9 @@ flowchart TB
   Features --> CardR
   Features --> DS
   Shell --> Bridge
+  Shell --> Cloud
+  Cloud --> Bridge
+  Cloud <--> CK[(Private CloudKit database)]
   CardR --> Bridge
   Bridge --> FFI
   FFI --> Servers
@@ -3554,7 +3617,7 @@ sequenceDiagram
   participant Br as CoreBridge (interactive lane)
   participant Ss as Core review session (U43)
   participant En as Engine executor
-  participant Sy as Sync job (core thread)
+  participant Sy as CloudKit adapter (Swift actor)
   UI->>CR: input (button/zone/key)
   CR->>CR: swap to settled page N+1 (same frame)
   UI->>Br: answer(sessionId, cardId, rating, stateToken)
@@ -3568,7 +3631,7 @@ sequenceDiagram
   En-->>Ss: OpResult(seq, ChangeSet, undo entry)
   Note over En: committed, durable within 1 s
   Sy->>En: read snapshot (held-back run substituted by before-images)
-  Sy->>Sy: meta, start, graves, changes, chunks, sanity, finish
+  Sy->>Sy: CloudKit record send/fetch, persist per-record outcomes
   Sy->>En: stage incoming, then one SyncIncoming commit op
   En-->>UI: CoreEvent Changes(source=SyncIncoming), undo cleared except held-back run
 ```
@@ -3580,8 +3643,8 @@ stateDiagram-v2
   [*] --> Undoable: op committed (user, undoable)
   Undoable --> HeldBack: in active session's top run at sync start
   Undoable --> UploadPending: in the snapshot of a running sync
-  UploadPending --> Uploaded: finish request sent
-  UploadPending --> Undoable: sync failed before finish was sent
+  UploadPending --> Uploaded: selected CloudKit revision acknowledged
+  UploadPending --> Undoable: definitively unsent; ambiguous sends require reconciliation
   HeldBack --> Undoable: sync finished, no staged incoming key in its touched set
   HeldBack --> Dropped: a staged incoming row or grave targets its touched set
   Undoable --> Dropped: rollover, one-way sync, Check DB, API intersect, non-undoable op, normal sync applied incoming changes (unless created after the snapshot and untouched, KTD7)
@@ -3608,7 +3671,7 @@ flowchart TB
 ```mermaid
 flowchart TB
   M0["M0 Foundations: repo, oracle, scenarios, workspace, FFI, Xcode project, verify loop, design system, generator, perf harness, sync server"] --> M1R
-  M1R["M1R Reviews first: storage, engine, exact scheduling, rendering, AnkiWeb sync, backups and integrity, Home, deck page, review on iPhone/iPad/Mac"] --> M1
+  M1R["M1R Reviews first: storage, engine, exact scheduling, rendering, CloudKit sync, backups and integrity, Home, deck page, review on iPhone/iPad/Mac"] --> M1
   M1["M1 Daily review driver: editor and Add, Browser, Card Info, Stats and heatmap, deck options, import/export, Check Database, note type changes, automatic optimizer"] --> M2
   M2["M2 Creation and maintenance: editor media and paste, edit flows, note type and template editors, image occlusion editor, browser table, search field, sidebar and bulk actions, video"] --> M3
   M3["M3 Stats graphs, widget, deck options sections"] --> M4
@@ -3768,13 +3831,13 @@ app/
 
 ### Delivery Milestones
 
-Each unit belongs to the earliest milestone that needs it, so every milestone is closed under its dependencies. M1R "Reviews first" sits between M0 and M1; Antoine chose it on 2026-10-16. It holds what a daily review session on his real collection needs: the collection engine, exact scheduling, card rendering, sync with AnkiWeb (normal and one-way), backups and integrity protection, the deck list and deck page, the review screen, first launch and login, and the safety suites that protect the real collection. Card creation stays in desktop Anki until M1, so Meguri replaces AnkiMobile first. To keep M1R closed, entry points into deferred features (the editor and Add, the Browser, Card Info, Stats, the deck options screen, import and export, Check Database, note type changes, the automatic optimizer) were cut with U152's attach pattern: the M1R unit ships without the entry point, and the deferred unit attaches it when it lands. Until the deferred unit lands, every control, tab or section that would reach it stays hidden (U152's attach registry), so M1R ships no control that does nothing. Where an M1R unit needed only part of a deferred unit, that part was split out as its own unit (U82a, U85a, U124a, U133a, U163a, U228a). The cross-cutting suite units (U241–U257) and the gate wiring (U19) grow with each milestone; their listed milestone is where they first run. Execution order within a milestone follows the Dependencies fields. For U19 and the suite units, a dependency that sits in a later milestone (marked "wires in when landed" in U19) does not block scheduling: the unit starts on its other dependencies and adds that leg when the unit it names lands.
+Each unit belongs to the earliest milestone that needs it, so every milestone is closed under its dependencies. M1R "Reviews first" sits between M0 and M1; Antoine chose it on 2026-10-16. It holds what a daily review session on his real collection needs: the collection engine, exact scheduling, card rendering, private CloudKit record/media sync plus manual Anki migration, backups and integrity protection, the deck list and deck page, the review screen, first launch and login, and the safety suites that protect the real collection. M1R studies an initially imported collection across Meguri devices; M1 adds card creation. Moving new content from Anki before that is an explicit manual transfer, never a continuing sync relationship. To keep M1R closed, entry points into deferred features (the editor and Add, the Browser, Card Info, Stats, the deck options screen, import and export, Check Database, note type changes, the automatic optimizer) were cut with U152's attach pattern: the M1R unit ships without the entry point, and the deferred unit attaches it when it lands. Until the deferred unit lands, every control, tab or section that would reach it stays hidden (U152's attach registry), so M1R ships no control that does nothing. Where an M1R unit needed only part of a deferred unit, that part was split out as its own unit (U82a, U85a, U124a, U133a, U163a, U228a). The cross-cutting suite units (U241–U257) and the gate wiring (U19) grow with each milestone; their listed milestone is where they first run. Execution order within a milestone follows the Dependencies fields. For U19 and the suite units, a dependency that sits in a later milestone (marked "wires in when landed" in U19) does not block scheduling: the unit starts on its other dependencies and adds that leg when the unit it names lands.
 
 | Milestone | Units | Closing gate (all suites on one commit) | User steps |
 |---|---|---|---|
 | **M0 Foundations** | U1, U2, U3, U4, U5, U6, U7, U8, U8b, U8c, U9, U10, U11, U12, U13, U19, U20, U21, U22, U23, U240, U241 | The oracle image builds and records the first goldens: the 10k fuzz table, id allocation and a rollover×TZ subset (U3, U4). T0 runs them, with id allocation passing (U23) and the fuzz-table and rollover scenarios reported pending until U45 and U40 land in M1R. The similarity scan and provenance-trailer check are enforced (U2). The XCFramework builds, and the app launches on iPhone and iPad simulators and on the Mac with a fixture, giving a screenshot and hierarchy (U6–U8). The `lint-ui` gate is active (U9). A stub screen emits a named interval that U241 evaluates (U12). A two-client full upload and download runs under a frozen clock (U13). | Xcode license, simulator runtime and Xcode agent access (R1969) |
-| **M1R Reviews first** | U8d, U19b, U240r, U14, U15, U24, U25, U26, U27, U28, U29, U30, U31, U32, U36, U37, U38, U40, U41, U42, U43, U44, U45, U46, U48, U49, U50, U51, U60, U61, U62, U63, U64, U65, U66, U67, U68, U70, U80, U82a, U85a, U105, U106, U107, U109, U110, U111, U113, U114, U117, U118, U124a, U126, U127, U132, U133a, U150, U151, U152, U153, U154, U155, U157, U158, U160, U161, U163a, U166, U175, U176, U177, U178, U179, U180, U181, U182, U185, U186, U187, U188, U228a, U243, U246, U248, U249, U250, U251, U256 | U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on the Mac host and simulators, gated by U241 against the review-loop budgets (R1807–R1817). U248 coexistence soak (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210). U36 preservation suite (R2017). U250 fault classes: review, sync, full download, backup (AE86). U251's M1R legs: kill during review, during a sync and during the first full download (AE86), background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names. U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check), and U176's snapshot-swap fallback exists behind its flag. | Before U68: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure). U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks). The first real sync with AnkiWeb, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, U248, U250 sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, cards created in desktop Anki) |
-| **M1 Daily review driver** | U18, U33, U34, U35, U47, U81, U82, U83, U84, U85, U88, U92, U95, U96, U97, U98, U99, U100, U101, U103, U120, U121, U122, U123, U124, U128, U129, U130, U131, U133, U156, U159, U162, U163, U183, U184, U190, U191, U192, U193, U195, U210, U222, U225, U227, U228, U229, U232, U242, U244, U245, U252, U253, U254 | Cumulative over M1R: the full daily-driver gate. U246: areas storage, sched (R1890–R1903, R1906), the optimizer (R1904, R1905; U47 ships here), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on the Mac host and simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U244 launch and Home group (R1818–R1822). U245 review and memory subset. U248 coexistence soak, with its two-device optimizer race. U36 preservation suite (R2017). U250 fault classes: review, sync, full download, backup, optimizer write (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review, including U253's sweep of those screens. U38's `wiring/pending.rs` is empty, and U176's snapshot-swap fallback exists behind its flag. | U256 device run on iPhone, iPad and Mac (AE81). Variant picks for Home, deck page and review (U254). A 7-day trial: all reviews in Meguri, cards created in desktop Anki, no data incident, logged |
+| **M1R Reviews first** | U8d, U19b, U240r, U14, U15, U24, U25, U26, U27, U28, U29, U30, U31, U32, U36, U37, U38, U40, U41, U42, U43, U44, U45, U46, U48, U49, U50, U51, U60, U61, U62, U63, U64, U65, U66, U67, U68, U70, U80, U82a, U85a, U105, U106, U107, U109, U110, U111, U113, U114, U117, U118, U124a, U126, U127, U132, U133a, U150, U151, U152, U153, U154, U155, U157, U158, U160, U161, U163a, U166, U175, U176, U177, U178, U179, U180, U181, U182, U185, U186, U187, U188, U228a, U243, U246, U248, U249, U250, U251, U256 | U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on the Mac host and simulators, gated by U241 against the review-loop budgets (R1807–R1817). U248 CloudKit convergence soak with signed development-container evidence (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210). U36 preservation suite (R2017). U250 fault classes: review, sync, full download, backup (AE86). U251's M1R legs: kill during review, during a sync and during the first full download (AE86), background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names. U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check), and U176's snapshot-swap fallback exists behind its flag. | Before U68: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure). U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks). The first real sync with CloudKit, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, U248 CloudKit lane, U250 cloud sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, existing imported cards) |
+| **M1 Daily review driver** | U18, U33, U34, U35, U47, U81, U82, U83, U84, U85, U88, U92, U95, U96, U97, U98, U99, U100, U101, U103, U120, U121, U122, U123, U124, U128, U129, U130, U131, U133, U156, U159, U162, U163, U183, U184, U190, U191, U192, U193, U195, U210, U222, U225, U227, U228, U229, U232, U242, U244, U245, U252, U253, U254 | Cumulative over M1R: the full daily-driver gate. U246: areas storage, sched (R1890–R1903, R1906), the optimizer (R1904, R1905; U47 ships here), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on the Mac host and simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U244 launch and Home group (R1818–R1822). U245 review and memory subset. U248 CloudKit convergence soak with signed development-container evidence, with its two-device optimizer race. U36 preservation suite (R2017). U250 fault classes: review, sync, full download, backup, optimizer write (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review, including U253's sweep of those screens. U38's `wiring/pending.rs` is empty, and U176's snapshot-swap fallback exists behind its flag. | U256 device run on iPhone, iPad and Mac (AE81). Variant picks for Home, deck page and review (U254). A 7-day trial: all reviews and new cards in Meguri, no data incident, logged |
 | **M2 Creation and maintenance** | U69, U71, U86, U87, U90, U91, U194, U196, U197, U200, U201, U202, U203, U205, U206, U207, U211, U212, U213, U214, U215, U216, U217, U218, U219, U220, U221, U223, U247 | U246: areas search (R1916–R1920), packages and maintenance (R1922–R1925), notes and rendering of editor previews. U249 adds saved searches, browser sorts and apkg/colpkg round trips. U244 browser, search and editor groups (R1824–R1836). U242 bulk, import, backup and Check DB (R1831, R1832, R1846–R1848). U250 classes: edit, bulk, import, export, Check DB. U251 disk-full and kill during import. U252–U254 for browser, editor, note types and IO editor. U253 VoiceOver for browser and editor. | Variant picks for browser and editor. Device run (browser and editor budgets). One-time capture of the Word, Google Docs, Safari, Chrome and Yomitan clipboard payloads for U197's paste corpus (Google Docs needs Antoine's account, a stop condition for agents) |
 | **M3 Stats graphs, widget, deck options** | U104, U165, U226, U230, U231, U233, U234, U236, U237 | U246: stats (R1921); the optimizer area (R1904, R1905) already gates M1. U249 adds stats per deck. U244 stats group (R1837–R1839, R1841). U242 memory states and optimizer (R1849, R1850). U245 widget memory (R1840). U252–U254 for stats, deck options and widget. | Variant picks for stats and deck options. Device run |
 | **M4 Mac integration servers** | U135, U136, U137, U138, U139, U140, U141, U142, U143, U144, U145, U146, U147, U164, U255 | U246: server contract suites (R1944–R1946, R1948, R1949) from the Mac-servers area. U249 Migaku routing replay (AE87). U250 class for server writes during edit and review. U255 Mac entitlement and loopback checks. | The firewall check on a clean user account (spike in the servers area). Device run (U256) on iPhone, iPad and Mac |
@@ -3847,9 +3910,11 @@ Deferred product decisions for Antoine. The plan follows each default until he a
 - Year-mode column count. R1302 says 53 week columns, but a leap year that starts on the last weekday needs 54 to show January 1 through December 31 (2012 and 2040 with Monday weeks, 2000 and 2028 with Sunday weeks). Default: the column count is computed per year, 53 or 54 (U227).
 - Card Info display strings. R1448 shows the core's Anki-format text, which conflicts with R191 and R192's locale formatting. Default: the core strings are shown verbatim in every locale (U92, U222).
 - Signature-screen matrix size. R1972's "full matrix" read as the full product of R1971's axes is about 2,500 images per state per screen. Default: U252's counted covering set (the full product of appearance, text size and Increase Contrast per device class, plus one-axis-at-a-time cells for Reduce Transparency, Reduce Motion, glass look and transparency extremes) for the typical and overflow states, pairwise for the other states.
-- Sync before the first schema change (spec-flow Q9). Default: not offered; the schema-change gate shows only the full-upload warning (U29).
+- Ordinary structural edits use coherent CloudKit publication and destructive-mapping previews (R951); the earlier spec-flow Q9 Anki full-upload interruption is superseded.
 
 ### Sources and Research
+
+The 2026-10-12 sync/flow dossiers describe the earlier Anki-server architecture. Their protocol facts remain references for manual transfers; their routine-sync architecture and contracts are superseded by R2043–R2066, KTD25/KTD26 and the revised units below. Update normative sync specs before implementation.
 
 - Planning dossiers, committed under `docs/plans/research/`. Units cite them by short name:
   - `spec-flow`: cross-area flows and core contracts C1–C10;
@@ -3978,8 +4043,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U109 | One-way sync (full upload and download) | `core/crates/meguri-sync/src/oneway/`<br>`core/crates/meguri-sync/tests/one_way.rs`<br>`specs/sync/one-way.md` | U22, U24, U26, U29, U32, U43, U105, U106, U107, U111, U124a, U126, U127 |
 | U110 | Media sync state and change tracking | `core/crates/meguri-sync/src/media/`<br>`core/crates/meguri-sync/tests/media_tracker.rs`<br>`specs/sync/media-tracking.md` | U22, U31 |
 | U111 | Media sync | `core/crates/meguri-sync/src/media/syncer.rs`<br>`core/fuzz/fuzz_targets/media_zip.rs`<br>`core/crates/meguri-sync/tests/media_sync.rs` | U24, U31, U105, U106, U110 |
-| U113 | Sync policy and status model | `core/crates/meguri-sync/src/policy/`<br>`core/crates/meguri-sync/tests/policy.rs`<br>`specs/sync/policy.md` | U24, U38, U43, U106, U107, U109, U111 |
-| U114 | Sync FFI surface and CoreBridge sync service | `core/crates/meguri-ffi/src/sync.rs`<br>`app/Packages/MeguriCore/Sources/CoreBridge/Sync/`<br>`tools/scripts/sync-e2e-swift.sh` | U6, U12, U24, U105, U106, U107, U109, U110, U111, U113 |
+| U113 | CloudKit eligibility policy and manual-transfer isolation | `core/crates/meguri-sync/src/policy/`<br>`core/crates/meguri-sync/tests/policy.rs`<br>`specs/sync/policy.md` | U24, U38, U43, U106, U107, U109, U111 |
+| U114 | CloudKit bridge, Swift adapter and manual-transfer service | `core/crates/meguri-ffi/src/sync.rs`<br>`app/Packages/MeguriCore/Sources/CoreBridge/Sync/`<br>`tools/scripts/sync-e2e-swift.sh` | U6, U12, U24, U105, U106, U107, U109, U110, U111, U113 |
 | U116 | AnkiWeb build switch and identity checks | `app/Config/Release.xcconfig`<br>`app/Config/AppStore.xcconfig`<br>`app/Meguri/AnkiWeb.xcstrings` | U6, U7, U105, U114, U150, U160 |
 | U117 | Sync conformance suites (two-client and oracle) | `core/crates/meguri-testkit/src/sync/`<br>`core/tools/meguri-cli/src/commands/sync.rs`<br>`conformance/scenarios/sync/normal/` | U3, U4, U11, U13, U31, U38, U43, U107, U109, U111 |
 | U118 | Sync robustness, property tests and budgets | `core/crates/meguri-testkit/src/sync/`<br>`core/crates/meguri-sync/tests/holdback_property.rs`<br>`core/crates/meguri-sync/benches/sync_day.rs` | U11, U12, U13, U107, U109, U111, U113, U117, U250 |
@@ -4022,13 +4087,13 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U158 | Keyboard shortcut engine, catalog and deck-list keys | `app/Packages/MeguriKit/Sources/AppModel/Keyboard/KeyStroke.swift`<br>`app/Meguri/Shell/Keyboard/`<br>`app/Meguri/Shell/KeyboardShortcutsHelpView.swift` | U150, U152 |
 | U159 | Menu bar commands, global shortcuts and undo/redo routing | `app/Meguri/Commands/MeguriCommands.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Commands/FocusedActions.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Undo/UndoStore.swift` | U25, U37, U150, U151, U156, U157, U158, U160, U161, U162, U163, U181 |
 | U160 | Settings framework and preference pages | `app/Packages/MeguriKit/Sources/Features/Settings/SettingsRoot.swift`<br>`app/Packages/MeguriKit/Sources/Features/Settings/Pages/ReviewSettingsPage.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/SettingsStoreTests.swift` | U23, U150, U151, U153, U158 |
-| U161 | Sync status UI, account login and one-way choice | `app/Packages/MeguriKit/Sources/Features/Settings/Sync/SyncButton.swift`<br>`app/Meguri/Mac/QuitSyncSheet.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/SyncButtonStateTests.swift` | U20, U105, U107, U109, U111, U151, U153, U160 |
+| U161 | iCloud sync status and Settings Anki Transfers | `app/Packages/MeguriKit/Sources/Features/Settings/Sync/SyncButton.swift`<br>`app/Meguri/Mac/QuitSyncSheet.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/SyncButtonStateTests.swift` | U20, U105, U107, U109, U111, U151, U153, U160 |
 | U162 | Import and export UI | `app/Packages/MeguriKit/Sources/Features/Settings/Collection/FileIntake.swift`<br>`app/Meguri/Shell/FileDropTargets.swift`<br>`app/Meguri/Mac/AppDelegate.swift` | U120, U122, U124, U133, U151, U153, U154, U157, U166 |
 | U163a | Backups page and restore | `app/Packages/MeguriKit/Sources/Features/Settings/Collection/BackupsPage.swift`<br>`app/Packages/MeguriKit/Sources/Features/Settings/Collection/RestoreSheet.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/BackupsPageTests.swift` | U7, U126, U127, U133a, U150, U152, U153, U154, U160 |
 | U163 | Maintenance UI and repair reports | `app/Packages/MeguriKit/Sources/Features/Settings/Collection/MaintenancePage.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/MaintenanceFlowTests.swift`<br>`app/MeguriUITests/MaintenanceTests.swift` | U7, U126, U127, U128, U130, U131, U133, U133a, U152, U153, U154, U160, U163a |
 | U164 | Mac integrations settings entry and Tools menu item | `app/Packages/MeguriKit/Sources/Features/Settings/Integrations/IntegrationsSectionEntry.swift`<br>`app/Meguri/Commands/IntegrationsCommands.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/IntegrationsEntryTests.swift` | U144, U150, U160 |
 | U165 | Heatmap and streak widget extension | `app/MeguriWidget/MeguriWidgetBundle.swift`<br>`app/MeguriWidget/Views/SmallWidgetView.swift`<br>`app/MeguriWidget/Info.plist` | U7, U100, U103, U150, U151, U227 |
-| U166 | First launch and onboarding | `app/Packages/MeguriKit/Sources/Features/Onboarding/WelcomeView.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Tips/OneTimeTips.swift`<br>`app/Packages/MeguriKit/Tests/OnboardingTests/OnboardingFlowTests.swift` | U22, U29, U109, U111, U151, U152, U153, U154, U161 |
+| U166 | First launch and iCloud connection | `app/Packages/MeguriKit/Sources/Features/Onboarding/WelcomeView.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Tips/OneTimeTips.swift`<br>`app/Packages/MeguriKit/Tests/OnboardingTests/OnboardingFlowTests.swift` | U22, U29, U109, U111, U151, U152, U153, U154, U161 |
 | U167 | Appearance, accessibility and localization conformance for the shell | `app/Meguri/AppIcon.icon`<br>`tools/scripts/lint-strings`<br>`app/MeguriUITests/ShellAccessibilityAuditTests.swift` | U9, U10, U150, U152, U155, U157, U160 |
 | U168 | Foldable iPhone adaptations | `app/Meguri/Shell/FoldAwareLayout.swift`<br>`app/MeguriUITests/FoldableTests.swift`<br>`app/MeguriSnapshotTests/FoldableSnapshotTests.swift` | U150, U167, U175 |
 | U175 | Review screen and session controller | `app/Packages/MeguriKit/Sources/AppModel/Review/ReviewCoordinator.swift`<br>`app/Packages/MeguriKit/Sources/Features/Review/Session/`<br>`app/Packages/MeguriKit/Sources/Features/Review/Screen/ReviewScreen.swift` | U6, U7, U9, U24, U43, U44, U67, U150, U151 |
@@ -4096,7 +4161,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U245 | Resource and main-thread discipline suite | `app/Packages/MeguriKit/Sources/AppModel/Diagnostics/`<br>`tools/scripts/lint-bridge-usage`<br>`app/MeguriUITests/Performance/` | U6, U12, U24, U25, U43, U47, U67, U86, U100, U107, U120, U126, U128, U151, U165, U241 |
 | U246 | Conformance aggregate gate and requirement coverage report | `core/crates/meguri-testkit/src/coverage/`<br>`tools/mg`<br>`conformance/catalog/requirements-matrix.yaml` | U3, U4, U8, U14, U40, U41, U44, U45, U46, U47, U60, U61, U64, U80, U84, U95, U98, U105, U107, U109, U111, U120, U122, U124, U128, U135, U137, U141, U240 |
 | U247 | Nightly T2: differential fuzzing, query fuzzing, long simulations and Anki timing ratio | `core/crates/meguri-testkit/src/difffuzz/`<br>`core/tools/meguri-cli/src/fuzz_diff.rs`<br>`tools/scripts/nightly` | U2, U3, U4, U11, U18, U40, U41, U44, U45, U80, U91, U107, U120, U122, U241, U242, U246 |
-| U248 | Multi-client sync coexistence soak | `conformance/scenarios/soak/`<br>`tools/mg`<br>`app/MeguriUITests/Sync/` | U3, U4, U13, U25, U43, U47, U107, U109, U111, U118, U151, U175, U210, U246 |
+| U248 | CloudKit convergence soak and manual Anki transfer round trips | `conformance/scenarios/soak/`<br>`tools/mg`<br>`app/MeguriUITests/Sync/` | U3, U4, U13, U25, U43, U47, U107, U109, U111, U118, U151, U175, U210, U246 |
 | U249 | Private real-collection suite and anonymizer (T3) | `core/tools/meguri-cli/src/private_suite/`<br>`conformance/reports/private/<milestone>.json` | U3, U4, U11, U15, U18, U41, U44, U45, U46, U47, U60, U80, U84, U98, U107, U109, U111, U120, U122, U124, U137, U138, U242, U246 |
 | U250 | Core fault-injection and data-safety suite | `core/crates/meguri-testkit/src/fault/`<br>`core/tools/meguri-cli/src/fault.rs`<br>`core/crates/meguri-engine/tests/fault_injection.rs` | U3, U4, U13, U22, U23, U24, U25, U26, U31, U32, U38, U47, U107, U109, U111, U120, U122, U124, U124a, U126, U127, U128, U130, U131, U132, U246 |
 | U251 | App-level kill, disk-full and restore end-to-end suite | `tools/scripts/kill-app`<br>`tools/mg`<br>`app/MeguriUITests/Safety/` | U7, U8, U109, U124, U126, U128, U130, U151, U152, U153, U156, U160, U161, U162, U163, U163a, U175, U190, U210, U250 |
@@ -4387,7 +4452,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Bundle ids: Debug and Profile set the `.dev` bundle ids and App Groups (Assumptions) in their xcconfig files, so they get their own container, Keychain items and App Group. `FixtureInstaller` refuses to run unless the bundle id ends in `.dev`.
 - Launch options (R1963): fixture collection path (copied into the app container on launch), AnkiConnect and Migaku ports (so app-level server tests never bind 8765 or 44432 while the daily-driver app holds them), fixed instant, time zone, locale, animations off, Reduce Motion/Reduce Transparency overrides (mapped onto SwiftUI's underscored environment values), Mac window size, and a target route (screen plus state such as `review/answer`, menus, sheets, error states). Routes are registered by each UI area in `RouteRegistry`; this unit provides the registry, the parser and three sample routes.
 - Info.plist baseline keys other areas rely on: `NSAllowsArbitraryLoadsInWebContent` (http subresources in card web content, R499, U66/U67), and on iOS `UIFileSharingEnabled` plus `LSSupportsOpeningDocumentsInPlace` so the Files app shows `Documents/Backups` (KTD12, R1629, U163a). Areas add their own keys (scenes, URL scheme, document types, BG task ids) in their units.
-- Settings live in xcconfig files; per-platform entitlements are selected by `[sdk=macosx*]`. iOS: App Group `group.com.antoinefink.meguri`. macOS: App Sandbox, `network.client`, `network.server`, `files.user-selected.read-write`, `files.bookmarks.app-scope`, App Group `DNQ34W43XX.com.antoinefink.meguri`; arm64 only (KTD22, R2041). `Signing.xcconfig` defaults to ad-hoc for macOS and to no signing for simulators until the user adds the Xcode account (one-time step in U1); an ad-hoc Mac variant omits the App Group entitlement, so App Group and widget behavior on the Mac is verified only after signing is configured.
+- Settings live in xcconfig files; per-platform entitlements are selected by `[sdk=macosx*]`. iOS: App Group `group.com.antoinefink.meguri`. macOS: App Sandbox, `network.client`, `network.server`, `files.user-selected.read-write`, `files.bookmarks.app-scope`, App Group `DNQ34W43XX.com.antoinefink.meguri`; signed configurations also add CloudKit and remote notifications with isolated dev/production containers; arm64 only (KTD22, R2041). `Signing.xcconfig` defaults to ad-hoc for macOS and to no signing for simulators until the user adds the Xcode account (one-time step in U1); an ad-hoc Mac variant omits the App Group entitlement, so App Group and widget behavior on the Mac is verified only after signing is configured.
 - `app/AGENTS.md`: accessibility identifiers follow `area.screen.element[.id]` (R1964); never edit `project.pbxproj` for files (folder-synchronized groups); settings go in xcconfig; test-hook code only under `app/Meguri/TestHooks/`.
 - Test plans fix R1866 options for Performance (no coverage, no sanitizers, parallel off, no screenshots) and turn off automatic test retries in all plans (R1953).
 
@@ -4861,7 +4926,7 @@ Amended 2026-10-16 after U14's review (`docs/process/review-log/U14.md`, A2). Th
   - No tracking (R2036, R2037): no analytics/tracking SDKs in the dependency inventory; tracking flag false; URL/host strings found in binaries limited to an allow-list (user-configured server placeholder, AnkiWeb hosts only in personal builds).
   - No executable downloads or add-ons (R2039): no dynamic loading of non-embedded code, no script evaluation outside the card web view; card bridge message names limited to the allow-list published by the rendering units (R2038).
   - Web inspection (R2040): the inspectable flag is set only in Debug builds (string/symbol check plus source lint).
-  - Mac (R2041, KTD22): arm64-only slices; entitlements exactly sandbox, network.client, network.server, files.user-selected.read-write, files.bookmarks.app-scope and the App Group.
+  - Mac (R2041, KTD22): arm64-only slices; entitlements include the existing sandbox/network/files/App Group set plus the approved CloudKit containers/services and remote-notification capability, isolated by configuration (R2041, R2065).
   - SDK and submission (R2042): products built with the 27 SDKs (build-version load commands); export compliance answer present in Info.plist and consistent with the TLS stack (rustls with aws-lc-rs used only for HTTPS).
   - Hooks and oracle absent (R1967, R1869): no test-hook symbols or launch-option strings in Release/AppStore; no oracle files, Python or AGPL material in any bundle; the license gate (U5/U16) shows no GPL/AGPL/LGPL-only code in shipped targets (R2021).
 - Results list each check with pass/fail and evidence (symbol, string offset, file).
@@ -4869,7 +4934,7 @@ Amended 2026-10-16 after U14's review (`docs/process/review-log/U14.md`, A2). Th
 **Patterns to follow:** research note 08 §A4–§A5; KTD21; U1 result contract.
 
 **Test scenarios:**
-- Covers AE89. AppStore configuration build → no AnkiWeb host string or sign-in option in binaries or String Catalog; the sync settings offer only the custom server URL (string inventory); Release build → AnkiWeb option present.
+- Covers AE89. AppStore configuration build → no AnkiWeb host string or sign-in option in binaries or String Catalog; routine sync settings offer iCloud and Anki Transfers offers files/custom servers (string inventory); Release build → AnkiWeb option present.
 - Fixture binary using a file-timestamp API with no declared reason → fails naming the symbol and reason code C617.1.
 - Fixture `app-store-metadata.md` with keyword "anki flashcards" → fails `trademark-keywords`.
 - Fixture Info.plist display name "Meguri for Anki" → fails.
@@ -5245,6 +5310,8 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 
 ### U25. Undo manager (C3)
 
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
+
 **Goal:** In-core undo and redo built from op before-images, with named steps, disabled reasons, the held-back run for sync, and the core invariant that no uploaded step is ever undoable.
 
 **Requirements:** R719, R720, R721, R725 (as reconciled by KTD7), R1795 (API ops not recorded), R1796 (truncation per KTD7), R2020 (op catalog classification); supports R365, R366, R370, R371, R723, R726, R1811.
@@ -5471,7 +5538,7 @@ Amended 2026-10-16 after U25's review (`docs/process/review-log/U25.md`, A1). Th
 - New field and template ids are random 64-bit; clone keeps field/template ids, resets `originalId` and names "<X> copy" (R905, R916).
 - Stock kinds: template text and CSS are written fresh by Meguri (R908 deviation; similarity scan applies); names, field names, counts, kind and `originalStockKind` values match Anki (R909–R911). The image-occlusion templates implement the runtime contract in R912, agreed with U64/U66. New collections get all six (R913, used by U28 bootstrap); an IO type is added on demand when missing.
 - Validation (R942, R943) uses U60's parser and AST.
-- Schema gate: ops declare a schema-change reason; when `scm <= ls` and the op carries no confirmation, the executor returns `NeedsSchemaConfirmation{reason}` without writing. Every schema-classified op that commits sets `scm = now` inside its own transaction, whether it carried a confirmation or ran with `scm > ls` already (R1475, R1476). Since `scm > ls` afterwards, later schema ops before the next sync need no confirmation (R951). The classification table (R949, R950, R1475) lives here. Consumers: U34, U35, U28 (preset delete), U124/U127, U128, U107 (sanity failure), U109 (upload), U160 (force one-way setting). The UI prompt is the caller's (U200, U210). Spec-flow Q9's "sync first when online" is not adopted (Open Questions).
+- Structural gate: classify schema changes and retain Anki scm stamping inside the collection transaction (R1475), without asking for an Anki upload confirmation in ordinary edits (R1476, R951). Validate destructive field/template mappings and publish a coherent CloudKit generation (R2053). Update the earlier schema-gate spec/API before adapting callers U34/U35/U28, package/restore/repair paths and U200/U210. Only the explicit manual Anki transfer previews any required full transfer.
 - Storage guard (R1477), defined on the post-commit state: a write that changes a notetype's field or template count commits only if `scm > ls` once the transaction ends. The one exception is the undo or redo of an un-uploaded step that restores that step's `col.scm` before-image along with the count.
 - Meguri never writes notetypes on its own (R1590): no launch-time or timer writes exist in the op catalog.
 
@@ -5482,8 +5549,8 @@ Amended 2026-10-16 after U25's review (`docs/process/review-log/U25.md`, A1). Th
 **Test scenarios:**
 - Saving an unchanged notetype → no row changes; changing only CSS → notetype row mtime changes, `scm` unchanged (R950).
 - Creating `basic` when `Basic` exists → named `basic+`; an NFD name is stored NFC.
-- Covers AE39 (core gate). After a sync: renaming a field returns no confirmation request; adding a field returns `NeedsSchemaConfirmation` and writes nothing; resubmitted confirmed → field added and `scm` set; reordering templates next → no confirmation request.
-- A non-schema op that would change field count while `scm <= ls` → rejected by the storage guard. After a confirmed field add, a second field add needs no confirmation, commits and sets `scm` again; undo and redo of a template add both commit.
+- Covers AE39 (core validation). Rename/add/reorder validates the resulting structure, stamps scm where appropriate and emits coherent publication work. No Anki upload confirmation is requested. Invalid/destructive mappings still require their own validation/preview.
+- An op that changes field count without declaring a structural change → rejected by the storage guard. Validated field/template changes stamp scm inside the transaction; undo/redo retain coherent-generation publication and do not display Anki upload warnings.
 - Renaming a field, or changing only a field option → the `notetypes` row gets `usn = -1`, and the next normal sync uploads that notetype.
 - Stock Basic (optional reversed card) → fields Front, Back, Add Reverse; `originalStockKind` 3; the oracle opens a Meguri-created collection and reports the same kinds, field names and counts (T1).
 - Stock Image Occlusion → cloze kind; fields carry tags 0–3 with protection, Comments tag 4 unprotected and on no template; templates contain the required element ids and setup call.
@@ -5620,7 +5687,7 @@ Amended 2026-10-16 after U25's review (`docs/process/review-log/U25.md`, A1). Th
 - Delete a deck with 2 subdecks and 120 cards → decks, cards and graves; change set lists their ids; undo restores everything.
 - Delete Default with cards and children → Default (id 1) remains, named "Default", its cards and children gone.
 - Delete a filtered deck → cards back in their `odid` decks with `odue` restored; no card deleted.
-- Remove a preset after a sync → `NeedsSchemaConfirmation`; confirmed → decks using it move to the fallback preset.
+- Remove a preset → preview affected deck reassignment; after confirmation the decks use the fallback preset and a coherent CloudKit generation is pending. No Anki upload warning appears.
 - A deck with `browser_collapsed`, legacy `extendNew`, shared-deck provenance and unknown JSON keys, renamed → all preserved (dump vs golden).
 - Collapse a deck in the browser scope → only `browser_collapsed` changes, `study_collapsed` untouched; `peek` names "Expand/Collapse" and an earlier deck delete is still undoable below it.
 - Emoji and mixed-script deck names round-trip unchanged.
@@ -5744,7 +5811,7 @@ Amended 2026-10-16 after U25's review (`docs/process/review-log/U25.md`, A1). Th
 
 **Approach:**
 - Info op: for note ids sharing one notetype and a target, return the default field map (exact names, then unused old fields in order) and template map (hidden when either side is cloze), plus the discard preview (fields losing content, cards to remove) and the current `scm` (R945–R947). It also returns counts that do not depend on the mapping: per old field, how many selected notes have content in it, and per old template ordinal, how many cards exist, so U203 computes R947's loss summary for any map the user edits.
-- Commit (R948): requires schema confirmation and the `scm` captured by the info op (refused if it changed); removes unmapped cards with graves, renumbers remapped ordinals, remaps fields, sets the notetype, regenerates cards with the last-deck rule; undoable; returns the note count. Field remaps follow the U24 write-phase rule.
+- Commit (R948): requires validated destructive mappings and the captured structural revision (refused if it changed); removes unmapped cards with graves, renumbers remapped ordinals, remaps fields, sets the notetype, regenerates cards with the last-deck rule; undoable; returns the note count. Field remaps follow the U24 write-phase rule.
 - Empty Cards (R952): a cancellable scan with progress over each notetype lists cards whose ordinal would no longer be generated (front predicate or missing cloze number) and flags notes that would lose all cards; the delete op takes the scanned card ids and the keep option. Inside its write transaction it re-evaluates each listed card's ordinal against the live note and notetype with U27's evaluator, deletes only cards that still would not be generated (cards already gone are skipped), applies "keep notes with no valid cards" (keeping the card the oracle keeps) to that live result, and returns the count of listed cards kept because they became valid (U24 write-phase rule). It is one undoable step. This unit's spec writer owns `specs/notes/empty-cards.md` and its scenario tree for scan, keep and delete. U131 owns the maintenance report flow and the delete op's safety-backup call; the UI is U163's. U87 (Browse) and U203 (Notes UI) invoke the change-notetype op.
 - FFI (attach, as in U152): U37 ships without Change Note Type. When this unit lands, it adds the info query and the commit to U37's `core/crates/meguri-ffi/src/notetypes.rs` and `NotetypeService`. The commit is a KTD9 job with progress, which U203 runs on the maintenance lane, and it returns U37's `OpResult` summary. Empty Cards scan and delete reach Swift through U131 and U133, not through U37.
 
@@ -6440,7 +6507,7 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
   - DR bands (R742), max interval bands (R751), max answer seconds above 600 (R749);
   - ignore-before: no future dates (R690).
   The editor shows them; save rejects errors.
-- Preset management (add from defaults, clone, rename, remove, save to all subdecks, R732–R733) is staged in the draft and applied by the save op. Removing the Default preset is refused. Removing another preset goes through U29's schema-change confirmation (the next sync becomes one-way).
+- Preset management (add from defaults, clone, rename, remove, save to all subdecks, R732–R733) is staged in the draft and applied by the save op. Removing the Default preset is refused. Removing another preset validates/reassigns affected decks, preserves scm bookkeeping and publishes a coherent generation without an Anki warning (R733).
 - The save op is one undoable "Deck Options" step in the R737 order:
   1. apply preset removals;
   2. validate;
@@ -6476,6 +6543,8 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
 
 ### U47. Automatic FSRS optimizer job and its app-side coordination
 
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
+
 **Goal:** Re-optimize every preset's FSRS parameters in the background, adopt only better fits, refresh memory states without rescheduling, and commit only through the KTD8 commit gate.
 
 **Requirements:** R691–R697, R698 (core side, and platform scheduling moved from U51), R699 (as amended by KTD8, including gate execution moved from U51), R700, R701 (data, Optimize now, and the view moved from U51); AE28 (core part and end to end); budgets R1850, R1852.
@@ -6504,7 +6573,7 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
 
 **Approach:**
 - Job states: `Idle → Training(preset k of n) → AwaitingGate{jobId, adoptedPresets} → Writing → Done{adopted, skipped}`, plus `Cancelled` and `Abandoned(reason)`. The engine holds at most one job (KTD9 job registry); a new optimizer start abandons a job still in `AwaitingGate` (`superseded`). U43's session-start hook cancels a job in `Training` (`Cancelled`) and marks a job in `AwaitingGate`, so its commit abandons with `sessionActive` even if that session has ended by then (R699).
-- Trigger: the app-side `OptimizerCoordinator` (below) starts it only when executing U113's optimizer action (no session, today − `lastFsrsOptimize` ≥ 30, R692). "Optimize now" (R701) is U113's `optimizeNowRequested` input, whose optimizer action bypasses only the 30-day check. At start the job records the collection's `ls`, the server `mod` as of sync 1 (U107).
+- Trigger: the app-side `OptimizerCoordinator` (below) starts it only when executing U113's optimizer action (no session, today − `lastFsrsOptimize` ≥ 30, R692). "Optimize now" (R701) is U113's `optimizeNowRequested` input, whose optimizer action bypasses only the 30-day check. At start the job records its local input revision and collection/account generation, after a CloudKit reconciliation when connected; a local-only collection uses local guards.
 - Background entry point (attached when this unit lands; U152's attach pattern): U154 ships without the optimizer's processing task. The app-side `OptimizerCoordinator` (below) adds it through U154's registry slot: the optimizer identifier in `BackgroundTaskIdentifiers.swift` and the iOS plist, the request submitted on U113's `optimizerDue` (network required, external power preferred), and its handler. It also holds the macOS `ProcessInfo` activity. U154 is a dependency of the app-side leg only; the core crates of this unit never depend on an app unit (KTD2).
 - Per preset. A preset for which U45 returns `UnsupportedParams` is skipped first (R704): no item build, training, evaluation, `fsrsParams6` write or memory-state refresh, and diagnostics record `unsupported`. Other presets proceed.
   1. Build items with U46 from the preset's search, or its stored `weightSearch` (R694), executed by U80.
@@ -6515,42 +6584,42 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
 - Training runs on the optimizer's own rayon pool at utility QoS (KTD8, `optimizer/pool.rs`). The CancelToken sets fsrs's abort flag, and `Interrupted` maps to `Cancelled` with nothing written (R698). The job is a `SuspendParticipant` (U32): suspend cancels training.
 - Commit gate (KTD8); the core never calls the network:
   1. Training ends in `AwaitingGate{jobId, adoptedPresets}` and writes nothing.
-  2. The app-side `OptimizerCoordinator` (below), executing U113's `optimizerGate` action, starts the U114 meta-probe job with auth, awaits its `JobFinished`, then calls `optimizer_commit(jobId, serverMod)` with the probe's plain `mod` value, converted in meguri-ffi so no meguri-sync type reaches the engine (KTD2). A failed or cancelled probe makes it call `optimizer_abandon(jobId)`: the job ends `Abandoned(gateFailed)` with nothing written.
-  3. `optimizer_commit` abandons without writing if `serverMod` differs from the `ls` recorded at start, or a session is active or started after training. Every run reaches this step, even with no adopted preset; the op then writes only `lastFsrsOptimize` (R692). Otherwise it runs one op with source `Optimizer`: `fsrsParams6` only for adopted presets (R696), memory states refreshed for their cards through U46 without rescheduling (R697), and `lastFsrsOptimize` set to today (R692).
+  2. OptimizerCoordinator requests U114 CloudKit fetch/reconciliation when connected and then asks the core to validate the captured input revision and generation. A failed/cancelled exchange abandons adoption. Local-only operation skips the exchange and retains the same local revision/session checks. No Anki endpoint, credential or meta request participates.
+  3. `optimizer_commit` abandons without writing if its captured input revision/account/collection generation changed, or a session is active or started after training. Every run reaches this step, even with no adopted preset; the op then writes only `lastFsrsOptimize` (R692). Otherwise it runs one op with source `Optimizer`: `fsrsParams6` only for adopted presets (R696), memory states refreshed for their cards through U46 without rescheduling (R697), and `lastFsrsOptimize` set to today (R692).
   4. The commit emits U113's `syncRequested(optimizerAdopted)` input, so SyncCoordinator runs sync 2 under the normal policy. If sync 2 fails, the write stays and uploads with the next normal sync.
 - Diagnostics (R701) are stored per preset in a U26 derived-store table: last run date, review count used, adopted or not, health result. This data is device-local and rebuildable as empty (KTD12). An FFI read serves the app-side leg's `SchedulerDiagnosticsView`.
 - Policy branch (attached to U113 when this unit lands; attach pattern as in U152): add the optimizer inputs, actions, sync-2 exemption, `optimizerDue` flag and refusal reasons listed in U113's Approach to `meguri-sync/src/policy/`. Feed this job's `AwaitingGate` and commit events through `meguri-host/src/wiring/sync.rs`, and add the two Swift-originated inputs to U114's policy-event export. U47's spec writer adds the optimizer section to `specs/sync/policy.md`.
-- App-side leg (attached from U51 when this unit lands; attach pattern as in U152; Default execution with no spec-writer pass, since this is Meguri-defined behavior). `OptimizerCoordinator` (MainActor, owned by U151's CollectionStore) executes U113's optimizer actions, which U114's `SyncPolicyDriver` hands to it, and nothing else starts the optimizer (KTD5). On the optimizer action it starts the core job (a KTD9 job). On `optimizerGate` it runs commit-gate step 2: the U114 meta-probe job, then `optimizer_commit`, or `optimizer_abandon` when the probe fails. On macOS it starts the job in the same turn as the action and holds a `ProcessInfo` background activity for the job's lifetime against App Nap; it does not use `NSBackgroundActivityScheduler`, whose deferral would break R699's right-after-sync rule. On iOS and iPadOS it attaches the optimizer's processing task through U154's registry slot, as the background entry point above states (KTD15): it submits the request when the app backgrounds while U113's status reports `optimizerDue`; on launch the handler sends U113 `processingTaskLaunched(optimizer)`, SyncCoordinator and this coordinator execute the returned actions, and task expiration cancels the job's CancelToken. The core enforces the session rule (U43), so no lock is needed. `SchedulerDiagnosticsView` is read-only: per preset, last run, review count, adopted and health, with Optimize now (sends U113's `optimizeNowRequested` and shows U113's refusal reason) and no parameter values (R691, R701). It has previews for the empty, typical, overflow, error and loading states (R1970). This leg registers it as the destination of the scheduler-diagnostics intent that U163's Maintenance page row emits.
+- App-side leg (attached from U51 when this unit lands; attach pattern as in U152; Default execution with no spec-writer pass, since this is Meguri-defined behavior). `OptimizerCoordinator` (MainActor, owned by U151's CollectionStore) executes U113's optimizer actions, which U114's `SyncPolicyDriver` hands to it, and nothing else starts the optimizer (KTD5). On the optimizer action it starts the core job (a KTD9 job). On `optimizerGate` it runs commit-gate step 2: the U114 CloudKit reconciliation barrier and core revision check, then `optimizer_commit`, or `optimizer_abandon` when the barrier/guard fails. On macOS it starts the job in the same turn as the action and holds a `ProcessInfo` background activity for the job's lifetime against App Nap; it does not use `NSBackgroundActivityScheduler`, whose deferral would break R699's right-after-sync rule. On iOS and iPadOS it attaches the optimizer's processing task through U154's registry slot, as the background entry point above states (KTD15): it submits the request when the app backgrounds while U113's status reports `optimizerDue`; on launch the handler sends U113 `processingTaskLaunched(optimizer)`, SyncCoordinator and this coordinator execute the returned actions, and task expiration cancels the job's CancelToken. The core enforces the session rule (U43), so no lock is needed. `SchedulerDiagnosticsView` is read-only: per preset, last run, review count, adopted and health, with Optimize now (sends U113's `optimizeNowRequested` and shows U113's refusal reason) and no parameter values (R691, R701). It has previews for the empty, typical, overflow, error and loading states (R1970). This leg registers it as the destination of the scheduler-diagnostics intent that U163's Maintenance page row emits.
 
 **Execution note:** Spec writer first: training data selection and the adoption rule. The implementer validates against oracle-computed params for fixed revlog fixtures with a declared tolerance. A T1 live check confirms that Anki accepts the written params. Stop condition: if the `realistic-500k` peak exceeds 300 MB without changing the item set, stop and report the R1852 conflict to Antoine (Open Questions); never trim items, because that breaks FSRS parity (R1902).
 
 **Patterns to follow:** KTD8; rust-stack §2 (fsrs API, abort, pool); KTD5 CancelToken/progress; KTD9 lanes and CancelToken; KTD10; KTD15; KTD20; identifiers `settings.diagnostics.*`.
 
 **Test scenarios:**
-- Covers AE28 (core part; the end-to-end test is in the app-side leg). `lastFsrsOptimize` 31 days ago, preset A whose optimized params do not beat current, preset B whose do: training ends in `AwaitingGate` with nothing written; `optimizer_commit` with an unchanged server: A is not written; B gets new `fsrsParams6` and refreshed memory states; no card due or interval changes (digest); `lastFsrsOptimize` = today.
+- Covers AE28 (core part; the end-to-end test is in the app-side leg). `lastFsrsOptimize` 31 days ago, preset A whose optimized params do not beat current, preset B whose do: training ends in `AwaitingGate` with nothing written; `optimizer_commit` with an unchanged input revision/generation: A is not written; B gets new `fsrsParams6` and refreshed memory states; no card due or interval changes (digest); `lastFsrsOptimize` = today.
 - A preset with 63 items is skipped and keeps its params.
 - `fsrsParams5` and `fsrsWeights` stay byte-identical after B is adopted.
 - A stored `weightSearch` overrides the default preset search.
 - Cancel during training: the result is `Cancelled`, and the collection digest is unchanged.
 - A session starts during training: the job is cancelled by U43, and nothing is written.
-- `optimizer_commit` with a server `mod` that differs from the recorded `ls`: `Abandoned(serverChanged)`, nothing written; another client's sync between sync 1 and the gate gives the same result even when this device synced again in between. Held-back local rows alone (local `mod` > `ls`) do not abandon. With a session started after training, even one that has ended by the commit: `Abandoned(sessionActive)`, nothing written.
+- optimizer_commit after an input revision/account/collection generation change → Abandoned(inputChanged), nothing written. No Anki mod/ls comparison participates. A session started after training, even if ended before adoption, yields Abandoned(sessionActive). A local-only run applies the same local revision/session guards.
 - `optimizer_abandon` on an `AwaitingGate` job → `Abandoned(gateFailed)`, nothing written; the next optimizer start runs.
 - A 34-parameter preset plus a normal preset whose new params win → the normal preset is adopted; the unsupported preset's bytes and its cards' `data` are unchanged; the job ends `Done`.
 - No preset adopted (every preset below 64 items or not better) → the commit still runs: `lastFsrsOptimize` = today, no preset bytes change.
 - A successful commit emits `syncRequested(optimizerAdopted)` and the job ends `Done` without running any sync itself.
 - Health check enabled with 350 items: a result is recorded; with 250 items, none.
 - T1 live: the oracle opens the collection after adoption and constructs FSRS from every preset's params without error (R696).
-- Two Meguri clients both past 30 days (U13 sync rig): both converge after syncing; the accepted race is documented in the spec.
+- Two Meguri clients both past 30 days (CloudKit fake plus signed lane): concurrent optimizer results converge under the reviewed conflict policy; U13 proves only independent Anki transfer compatibility.
 - Bench, with `fsrsHealthCheck` on and a preset above 300 items, so the timing covers training, evaluation and the health check: 1M revlog entries ≤ 30 s (R1850), and `realistic-500k` (about 4M revlog rows) peak footprint ≤ 300 MB (R1852), measured through `meguri-cli bench optimizer`; the item builder's reported bytes are recorded per preset.
 - Policy branch (from U113): session ended → sync action, then an optimizer start action after success; if a new session starts first → no optimizer action; optimizer awaiting its gate → `optimizerGate`; `syncRequested(optimizerAdopted)` → a normal sync action under the usual gates except auto sync off.
-- Policy branch (from U113): `optimizeNowRequested` 10 days after the last run → a sync action, then an optimizer start after success; while not logged in → a refusal reason and no action. `processingTaskLaunched(optimizer)` with the 30-day condition → the same pair.
+- Policy branch (from U113): optimizeNowRequested bypasses the cadence. A connected collection requires the CloudKit exchange/revision gate; a local-only collection uses local revision/session checks without an Anki login. The automatic processing task retains the 30-day condition.
 - Policy branch (from U113): after a run that adopted nothing, the next successful sync emits no optimizer action.
 - U113's property test, with the optimizer inputs added to its generator, still finds no two concurrent sync actions and no one-way start during a session.
 - App-side leg (from U51): `OptimizerCoordinator` starts the job only on U113's optimizer action; a sync result alone starts nothing. On macOS the start happens in the same turn as the action.
-- App-side leg (from U51): the gate's meta-probe job fails (offline, then a 403) → `optimizer_abandon` is called, nothing is written, and the next qualifying sync starts a new job.
-- App-side leg (from U51): "Optimize now" while not logged in → the diagnostics view shows U113's refusal reason and no job starts.
-- Covers AE28 (end to end, U13 server; from U51): sync 1, training, gate with a fresh meta, commit, then sync 2 run by SyncCoordinator; the server holds B's new `fsrsParams6` and `lastFsrsOptimize`.
-- App-side leg (from U51): another client syncs between sync 1 and the gate (U13) → `Abandoned(serverChanged)`, nothing written locally or uploaded.
+- App-side leg (from U51): the gate's CloudKit reconciliation fails (offline, then account unavailable) → `optimizer_abandon` is called, nothing is written, and the next qualifying sync starts a new job.
+- App-side leg (from U51): Optimize now on a local-only collection uses local revision/session guards; a connected collection with a failed cloud barrier defers adoption and reports the reason.
+- Covers AE28 (CloudKit fake plus signed lane): collection exchange, training, fresh reconciliation/revision guard, commit and queued cloud send. A receiving Meguri device has the adopted fsrsParams6 and lastFsrsOptimize. The independent Anki transfer lane verifies those values remain readable by the oracle.
+- App-side leg (from U51): a remote/local update changes the input revision before adoption → Abandoned(inputChanged), nothing written; simultaneous remote optimizer writes converge under the reviewed conflict policy.
 - App-side leg (from U51): a BG task expiration handler cancels the job token; the core reports `Cancelled`. The handler is attached through U154's registry slot (no second identifier registration).
 - App-side leg (from U154): processing task launched while a review session is active → optimizer not started; task completes immediately.
 - App-side leg (from U154): backgrounding with `optimizerDue` set → one optimizer processing request submitted, network required; with it clear → none.
@@ -6605,6 +6674,8 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
 
 ### U51. App-side scheduling coordination: day clock monitor and FSRS policy sheet
 
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
+
 **Goal:** Wire the core day clock and FSRS policy into the app lifecycle on every platform without polling.
 
 **Requirements:** R597 (triggers), R702 and R703 (sheet), R704 (study-state copy hand-off); supports R459, R464, R1854. R698 (platform scheduling), R699 (gate execution) and R701 (view), and AE28 (end to end), move to U47's app-side leg.
@@ -6625,7 +6696,7 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
   - on each trigger calls `checkRollover()` on the interactive lane (KTD9) and re-arms from the result.
   It is the only owner of the day-clock timer (KTD5) and never polls (R1854). On foreground, U151's `resume()` performs the rollover check; the monitor re-arms from the `nextDayAt` in the returned `ResumeReport` (U32), and also on U40's `NextDayAtChanged` event (for example a synced `rollover` change).
 - `FsrsPolicyCoordinator` checks `fsrsPolicyStatus()` after open and after syncs; a non-`ok` status found during a review session waits for the session to end (U50). It shows `FsrsEnabledSheet` once per event, with first-time or re-enabled copy (R702/R703), then runs `enableFsrs` with progress. Study entry points wait until it completes.
-- This unit ships without optimizer coordination (attach pattern as in U152). `OptimizerCoordinator`, its iOS BGProcessingTask handler, Optimize now and `SchedulerDiagnosticsView` form U47's app-side leg and attach when U47 lands. Until then U113 emits no optimizer action, `SyncPolicyDriver` hands actions only to SyncCoordinator, and no optimizer job starts; FSRS parameters optimized in desktop Anki arrive by sync. This unit mounts no row on U163's Maintenance page; U163 owns the Scheduler diagnostics row and U47 attaches its destination.
+- This unit ships without optimizer coordination (attach pattern as in U152). `OptimizerCoordinator`, its iOS BGProcessingTask handler, Optimize now and `SchedulerDiagnosticsView` form U47's app-side leg and attach when U47 lands. Until then U113 emits no optimizer action, `SyncPolicyDriver` hands actions only to SyncCoordinator, and no optimizer job starts; FSRS parameters already imported from Anki remain in use; cloud-delivered parameter updates follow the reviewed conflict policy. This unit mounts no row on U163's Maintenance page; U163 owns the Scheduler diagnostics row and U47 attaches its destination.
 - The R704 "This preset needs a newer Meguri" copy is provided as a String Catalog entry consumed by U175/U152 when `PresetUnsupported` is returned.
 
 **Execution note:** Default (no spec-writer pass; Meguri-defined behavior from the Product Contract).
@@ -7705,7 +7776,7 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 **Approach:**
 - **Toggle actions.** Mark, Suspend, Bury and Flag N take the current row's id and decide the direction from that item's state (R1192–R1195). In notes mode, card-level actions target all cards of the selected notes (R1117).
 - **Change Deck** excludes filtered decks as targets. It returns filtered cards home first, skips cards already in the target, and calls U49's memory-state and step-remap routine for preset changes (R1187/R1188, R645). Inline deck creation goes through U28 in the same undo step.
-- **Change Note Type** validates that all selected notes share one notetype, then defers to U35's change-notetype op. That op owns the mapping defaults (R945/R946) and the one-way-sync warning (R949).
+- **Change Note Type** validates that all selected notes share one notetype, then defers to U35's change-notetype op. That op owns mapping defaults (R945/R946), destructive-mapping validation and coherent-generation publication; Anki transfer warnings remain in Settings.
 - **Set Due Date, Reset and Grade Now** parse and validate input with the sched area's grammar (R1196–R1199). Set Due Date and Reset take the input string and toggles and write `setDueBrowser`, `restorePositionBrowser` and `resetCountsBrowser`, when changed, inside their own transaction, as U48's ops do for the reviewer keys. The write is part of that op's undo entry and is never a separate UserNonUndoable write that would clear the stack (U25).
 - **Delete Notes** is one undoable op returning a count (R1212).
 - **Export Notes** hands a note-id set to U122 (R1213).
@@ -8372,6 +8443,8 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 
 ### U105. Sync transport, login and endpoints
 
+**Scope:** Retained Anki protocol compatibility for explicit Settings import/export only (KTD26). Routine CloudKit sync uses U113/U114 and KTD25; timers and lifecycle events never invoke this unit's transport. Any Anki hold-back/USN rules below describe protocol reconciliation, not CloudKit state.
+
 **Goal:** Give the core one honest, cancellable protocol-v11 HTTP client that every sync path (collection, one-way, media) uses, plus login and endpoint handling.
 
 **Requirements:** R1496 (core: server choices offered by the build), R1497 (Rust side), R1498 (core: login returns the host key only), R1499 (core: 403 classified as auth failure), R1500, R1501 (core: plain HTTP allowed), R1502 (core holds no endpoint state), R1504, R1505–R1512, R2030, R2031–R2032 (Rust side); AE70 (transport half).
@@ -8436,6 +8509,8 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 
 ### U106. Sync messages, `meta` status check and error taxonomy
 
+**Scope:** Retained Anki protocol compatibility for explicit Settings import/export only (KTD26). Routine CloudKit sync uses U113/U114 and KTD25; timers and lifecycle events never invoke this unit's transport. Any Anki hold-back/USN rules below describe protocol reconciliation, not CloudKit state.
+
 **Goal:** Encode and decode every v11 body, run `meta` and the offline/online status check, and classify every sync failure into one taxonomy that Swift can present.
 
 **Requirements:** R1513–R1518, R1559 (computation), R1561 (classification), R1499 (kind), R1516 (core passes the message through), R1562 (core side: no panic or crash path), R1464 (sync flattening, with U21), R1523 (JSON shapes); AE63.
@@ -8477,6 +8552,8 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). This line first asked for the meta scenarios to pass against U13. They are actor scenarios: a Meguri actor uploads, downloads and runs normal syncs in them, and Meguri's executor gets the `sync` op only with U117 (after U107 and U109), so T0 reports them `pending` (`specs/conformance/sync-ops.md` S10.2). U106 checks its own calls on the rig's official server instead. `tools/mg sync-rig up` refuses a unit branch whose `oracle/` differs from the main worktree's, so those tests run at the integrated head.
 
 ### U107. Normal sync with hold-back
+
+**Scope:** Retained Anki protocol compatibility for explicit Settings import/export only (KTD26). Routine CloudKit sync uses U113/U114 and KTD25; timers and lifecycle events never invoke this unit's transport. Any Anki hold-back/USN rules below describe protocol reconciliation, not CloudKit state.
 
 **Goal:** Run the incremental sync of R1519–R1535 as a snapshot-and-stage job (KTD6) that keeps the newest answer run undoable, never blocks answers, and reconciles undo and queues per KTD7.
 
@@ -8563,6 +8640,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 ### U109. One-way sync (full upload and download)
 
+**Scope:** Retained Anki protocol compatibility for explicit Settings import/export only (KTD26). Routine CloudKit sync uses U113/U114 and KTD25; timers and lifecycle events never invoke this unit's transport. Any Anki hold-back/USN rules below describe protocol reconciliation, not CloudKit state.
+
 **Goal:** Perform full upload and download per R1536–R1548 with the choice facts, backups, AnkiWeb limits and the exclusive phase (KTD17), leaving the local collection untouched on any failure.
 
 **Requirements:** R1518 (directions in the flow), R1536–R1548, R1563, R1564, R2019, R158 and R1593 (download without a prompt when the local side is empty), R1554 (one-way part), R1655 (compaction before upload), R2015 (disk-space precheck for full sync); AE62, AE86 (sync part).
@@ -8605,7 +8684,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   - CollectionReplaced(generation + 1), and the whole undo history cleared (R725);
   - derived store rebuilt (R1489, U26) or revalidated after an upload swap;
   - media untouched during the one-way, then a media merge sync follows (R1546, U111);
-  - the auto-sync pause of R1548 is lifted only by a successful one-way that the user started: this unit clears U124a's sidecar `oneWayChoicePending` and the stored sanity counts on that success (U113 reads the flag).
+  - A successful manual one-way transfer clears its Anki sanity/reconciliation state only. It never resolves the separate R1548 CloudKit publication decision; imported/replaced data remains fenced until that decision completes.
 - R1547: "Force a one-way sync on next sync" sets `scm` through U29's schema-change path.
 - iOS: a user-started one-way sync runs under BGContinuedProcessingTask with this unit's byte progress (KTD15, U151). An interrupted download restarts from scratch; the transport seam keeps a later URLSession transfer possible.
 
@@ -8633,6 +8712,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Verification:** `sync/oneway` scenarios pass in T1; the U118 kill matrix for one-way phases is green.
 
 ### U110. Media sync state and change tracking
+
+**Scope:** Retained Anki protocol compatibility for explicit Settings import/export only (KTD26). Routine CloudKit sync uses U113/U114 and KTD25; timers and lifecycle events never invoke this unit's transport. Any Anki hold-back/USN rules below describe protocol reconciliation, not CloudKit state.
 
 **Goal:** Detect local media changes cheaply and keep the persistent per-file sync state that media sync builds on.
 
@@ -8670,6 +8751,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Verification:** Tracking scenarios pass; the no-change benchmark is recorded in the perf report (iPhone figures from U245 on the simulator and U256 on device).
 
 ### U111. Media sync
+
+**Scope:** Retained Anki protocol compatibility for explicit Settings import/export only (KTD26). Routine CloudKit sync uses U113/U114 and KTD25; timers and lifecycle events never invoke this unit's transport. Any Anki hold-back/USN rules below describe protocol reconciliation, not CloudKit state.
 
 **Goal:** Run background, resumable media sync per R1575–R1581 with merge semantics, progress, and quiet placeholders while files are still arriving.
 
@@ -8719,126 +8802,65 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Verification:** `sync/media` scenarios pass in T1 against U13; the `media_zip` fuzz target runs nightly.
 
-### U113. Sync policy and status model
+### U113. CloudKit eligibility policy and manual-transfer isolation
 
-**Goal:** Decide in the core, headless and testable, when automatic syncs run, how failures back off, and what the single sync status is. Swift (U151) only executes the actions and arms the returned deadline (KTD5). Optimizer steps join this policy when U47 attaches them.
+**Goal:** Keep collection eligibility, review hold-back, recovery publication decisions and optimizer gates headless in Rust, while CKSyncEngine owns cloud network scheduling. Separate the explicit manual Anki transfer state machine.
 
-**Requirements:** R1549, R1550, R1555, R1556, R1558, R1559 (status emission), R1560 (data), R1561 and R1562 (presentation class), R1548 (pause semantics), R1534 (media trigger), R88, R726, R89, R458, R123, R124, R127 (decision part); AE9 (cadence), AE68 (second clause as amended; see coverage).
+**Requirements:** R88, R89, R123–R127, R1548–R1562, R2047–R2056, R2060–R2066.
 
-**Dependencies:** U106, U107, U109, U111, U24 (lifecycle, change stream), U38 (host wiring), U43 (session start and end events).
+**Dependencies:** U106, U107, U109, U111, U24, U38, U43.
 
 **Files:**
-- `core/crates/meguri-sync/src/policy/mod.rs`, `policy/events.rs`, `policy/backoff.rs`, `policy/status_model.rs`
-- `core/crates/meguri-host/src/wiring/sync.rs` (feeds U43's session events and the lifecycle into the policy, and emits `SyncPolicyOutput`; U47 adds its AwaitingGate and commit events when it lands)
-- `core/crates/meguri-sync/tests/policy.rs`
-- `specs/sync/policy.md`
+- `specs/sync/policy.md`, `specs/sync/cloudkit-records.md`, `specs/sync/cloudkit-recovery.md`, `specs/sync/anki-transfers.md`
+- `core/crates/meguri-sync/src/policy/`, `core/crates/meguri-sync/tests/policy.rs`
+- `core/crates/meguri-host/src/wiring/sync.rs`
 
 **Approach:**
-- A pure state machine with an injected clock and no I/O.
-  - Inputs: launch; foreground (with time away); background; quit requested; session started and session ended (summary dismissed, KTD6), taken from U43's Session events inside the core and never from Swift; editor dirty or clean; timer fired; sync finished (outcome); manual sync requested; login changed; preferences (auto sync, media sync, media interval, R122–R124); auto-sync paused (R1548); reachability; lifecycle exclusive; local change; `processingTaskLaunched(sync)` (U154).
-  - Outputs: actions (start a normal sync with automatic hold-back; start a media sync; offer the one-way choice, for manual syncs only; surface an error, for manual syncs only), plus `next_deadline` for Swift's single timer (never polling, R1854) and a status snapshot.
-  - Delivery: outputs caused by core-internal inputs (U43 session events) reach Swift as a `SyncPolicyOutput{actions, nextDeadline}` CoreEvent variant, which `wiring/sync.rs` emits whenever such an input changes the output. Swift-originated inputs return the same output from the U114 call.
-- Cadence:
-  - in a session, about 60 s after the last sync ended, and immediately on background (R88, R726);
-  - idle, every 15 min (R1549);
-  - foreground after at least 5 min away (R123; see coverage);
-  - launch;
-  - background or quit when changes are pending (R127);
-  - after the session ends;
-  - media every N minutes (R124) and after every collection sync (R1534).
-- Gates:
-  - not logged in, or auto sync off;
-  - paused after a restore or `.colpkg` import until a user-run one-way sync completes (R1548). The only persisted flag is U124a's core-sidecar `oneWayChoicePending`, read here inside the core;
-  - exclusive phase;
-  - editor dirty: defer until it is clean (R1550);
-  - offline: defer until reachability returns;
-  - one-way required: never prompt from an automatic sync; status plus banner only, and skip quit and background syncs (spec-flow Q8);
-  - manual sync disabled during a session, with a reason (R89);
-  - never start a one-way sync in a session (R458).
-- Backoff (proposed constants, fixed in policy.md):
-  - automatic failures back off exponentially from 1 min to a 30 min cap, reset by a success, a manual sync or a login (R1555);
-  - a 409 retries silently after 15 s up to 3 times, then follows the regular backoff (R1556);
-  - an auth failure stops automatic syncs until the next login.
-- Status model (R1558): NotLoggedIn, InSync, PendingChanges, OneWayNeeded, Syncing(stage, counts), MediaSyncing(files left), Offline, Error(kind, class, time). Details for the status view (R1560): last success (`ls`), server label, last media counts, last error. StatusChanged is emitted only on change. Automatic failures map to the quiet "needs attention" state (R166); manual failures are surfaced (R1555).
-- Optimizer branch (attach pattern as in U152): this unit ships without optimizer inputs or actions, so in M1R the policy never starts the optimizer and its status carries no `optimizerDue` flag. U47 attaches the branch when it lands: the inputs (job awaiting its gate, `syncRequested(optimizerAdopted)`, `optimizeNowRequested`, `processingTaskLaunched(optimizer)`); the actions (optimizer start after a successful incremental sync with no session when today − `lastFsrsOptimize` ≥ 30, per R699, and `optimizerGate` when the job awaits its gate); the auto-sync-off exemption for that sync; the `optimizerDue` status flag for U154; and the refusal reasons (session active, not logged in, offline). U47's events reach the policy through `wiring/sync.rs`. The cadence, gates and backoff above do not change.
-- Why in the core: Docker tests cover the whole trigger matrix once, and every platform shares one behaviour. Swift (U151) translates platform events into inputs and executes actions.
-
-**Execution note:** Meguri-original behaviour. The spec writer writes policy.md from this unit and the requirements (no Anki reference); the implementer writes table and property tests first.
-
-**Patterns to follow:** C6 single-timer rule (R1854); KTD5 lifecycle states; pure-core/imperative-shell split.
+- Specify the record, revision, conflict, tombstone, structural-generation and durable tracking contract first (R2066). The contract includes every crash boundary across separate collection/tracking files, incoming apply/cursor persistence, account changes, whole-collection replacement and acknowledged deletions. Do not reinterpret existing Anki specs as CloudKit specs.
+- Core policy owns the eligible revision frontier, session hold-back and pause-after-import decision. Session events arrive directly from U43; Swift cannot supply fabricated session state. Outputs request cloud work, expose pending/held-back records and carry generation/revision guards.
+- App lifecycle and the automatic toggle request best-effort cloud work; CKSyncEngine manages Apple scheduling/backoff. No Rust policy pretends it can enforce a delivery interval or CloudKit retry timer. A single app flush deadline covers the foreground target only.
+- Core policy never emits an Anki transfer action on launch, timer, foreground/background, review completion, optimizer adoption, AnkiConnect sync or network recovery. Transfer starts require the explicit Settings operation identifier and confirmation.
+- Manual transfer policy persists operation stage/cooldown and checks endpoint/account identity, generation, review/exclusive state and recovery decisions. Retries resume only the same explicitly started operation.
+- U47 attaches optimizer eligibility and a CloudKit reconciliation/revision gate when it lands. No Anki authentication or meta probe is required to optimize a CloudKit-connected collection.
 
 **Test scenarios:**
-- Covers AE9 (cadence). Session active, answers over 60 s → exactly one sync action with automatic hold-back at about 60 s; a background event → an immediate sync action.
-- Session ended → a sync action; the policy emits no optimizer action (that branch attaches with U47).
-- `endSession` inside the core → a `SyncPolicyOutput` event carrying the session-end sync action and the re-armed deadline, with no Swift policy call.
-- A `SessionStarted` event from U43 reaches the policy through the host wiring; the policy API has no Swift input for session state.
-- Editor dirty at the 15-minute idle mark → no sync. Editor clean → the sync starts on that event.
-- Manual request during a session → refused with reason; manual request while idle → sync.
-- An automatic sync returns OneWayRequired → status OneWayNeeded, no prompt action; a later quit → no sync action.
-- Paused after a restore: launch, foreground and timers → no sync. Manual → one-way prompt. After a successful one-way → pause lifted.
-- 409 three times, then success → retries 15 s apart; no error surfaced.
-- Repeated network errors → retry delays 1, 2, 4, … capped at 30 min; a manual success resets them.
-- Foreground after 3 min away → no sync; after 6 min → sync.
-- Offline → status Offline; sync deferred until the reachability event.
-- A local edit after a sync → PendingChanges with no network call.
-- Property test: no generated event sequence produces two concurrent sync actions or a one-way start during a session.
+- Table/property tests exercise all lifecycle inputs and prove zero automatic Anki-transfer starts.
+- Every send callback respects the latest held-back answer even after newer edits, undo, crash and restart.
+- Restore/import pause survives restart; explicit publication choice starts a new generation and fences old queued records.
+- Acknowledgement of revision N cannot clear revision N+1; incoming replays are idempotent.
+- 60-minute endpoint/account cooldown survives relaunch/logout, serializes both directions and excludes failed/cancelled operations and file transfers.
 
-**Verification:** Policy tests pass in Docker; policy.md lists every constant and gate.
+**Verification:** Rust policy/recovery tests run in Docker through tools/mg; a reviewed CloudKit contract and transfer contract precede implementation.
 
-### U114. Sync FFI surface and CoreBridge sync service
+### U114. CloudKit bridge, Swift adapter and manual-transfer service
 
-**Goal:** Expose contract C4, the media sync controls and the policy/status model to Swift as KTD9 jobs and short exports behind a CoreBridge actor, plus a fake for UI work.
+**Goal:** Bridge durable Rust collection operations to a Swift CloudKit actor, and expose Anki protocol jobs through a separate manual-transfer service.
 
-**Requirements:** R1494 and R1857 (off the main thread), R1535 and R1545 (progress delivery), R1558–R1560 (data for U151/U160), R1562 (typed errors, no crash), R1496 (server-choice list), R1861 (sync signpost); contract C4.
+**Requirements:** R1494, R1857–R1861, R2043–R2059, R2061, R2064–R2066.
 
-**Dependencies:** U6, U105, U106, U107, U109, U110, U111, U113, U24 (CancelToken, progress callback, change stream), U12 (signposts).
+**Dependencies:** U6, U105, U106, U107, U109, U110, U111, U113, U24, U12.
 
 **Files:**
 - `core/crates/meguri-ffi/src/sync.rs`
-- `app/Packages/MeguriCore/Sources/CoreBridge/Sync/SyncService.swift`
-- `app/Packages/MeguriCore/Sources/CoreBridge/Sync/SyncModels.swift`
-- `app/Packages/MeguriCore/Sources/CoreBridge/Sync/SyncPolicyDriver.swift`
-- `app/Packages/MeguriCore/Sources/CoreBridge/Sync/FakeSyncService.swift`
-- `app/Packages/MeguriCore/Tests/CoreBridgeTests/SyncServiceTests.swift`
-- `tools/scripts/sync-e2e-swift.sh` (a `tools/mg` job that starts the U13 server and runs the gated Swift integration tests)
+- `app/Packages/MeguriCore/Sources/CoreBridge/Sync/CloudKitSyncAdapter.swift`, `CloudKitTrackingStore.swift`, `SyncModels.swift`, `AnkiTransferService.swift`
+- `app/Packages/MeguriCore/Tests/CoreBridgeTests/CloudKitSyncTests.swift`, `AnkiTransferServiceTests.swift`
 
 **Approach:**
-- Exported operations:
-  - `start_login` → `JobHandle`, the host key in `JobFinished` (login is network work, KTD9);
-  - available servers;
-  - status snapshot;
-  - `start_normal_sync` (auth = host key + endpoint; hold-back automatic or none) → `JobHandle`; its `JobFinished` outcome is NoChanges, Synced (incoming summary), OneWayRequired (facts, allowed directions) or Failed (error), plus server message, `newEndpoint` and media USN;
-  - `start_one_way_sync(direction)` → `JobHandle`;
-  - `start_media_sync` → `JobHandle`, media status, media-state reset;
-  - force one-way on next sync;
-  - `start_meta_probe` → `JobHandle`: U106's online check with auth, its server `mod` and status in `JobFinished`;
-  - policy: handle an event, returning actions and status. Outputs caused by core-internal inputs arrive as U113's `SyncPolicyOutput` CoreEvent variant, which `SyncPolicyDriver` consumes and hands to SyncCoordinator, and to U47's OptimizerCoordinator once U47 lands.
-- Auth is passed on every call, and the core persists none of it (KTD12). Before each job start, `SyncService` resolves the system proxy for the job's base URL (`CFNetworkCopySystemProxySettings`, then `CFNetworkCopyProxiesForURL`, running a PAC script when one is configured) and passes it with the auth (R1512, KTD14). U151 keeps the host key and user name in the Keychain (this device only, after first unlock, not synchronizable, R119). It keeps the endpoint, any redirected endpoint and the flags in app-private storage, and persists `newEndpoint` when one is returned (AE70).
-- CoreBridge `SyncService` actor (KTD9): job starts (login and the meta probe included) and policy calls on the maintenance lane; cancels on the control lane. No lane call waits on the network. Normal and media sync jobs may overlap (U24 arbitration):
-  - progress callbacks (throttled to 10 Hz or less in Rust) bridge to an AsyncStream with bufferingNewest(1);
-  - status and MediaArrived arrive as SyncStatus and MediaArrived variants of the CoreEvent stream;
-  - a signpost interval covers sync start→end (R1861);
-  - policy calls are microsecond-cheap but go through the same actor for ordering.
-- Errors map to one Swift enum carrying kind, class and parameters, with a String Catalog key per kind (strings owned by U151/U160).
-- `FakeSyncService` implements the same protocol with scripted outcomes (every R1558 state, progress, OneWay facts, each error class), so U151 and U160 can build previews and snapshots (R1970) without the core.
-- With MEGURI_TEST_HOOKS, launch arguments can point at the Docker server on 127.0.0.1 with fixture credentials (KTD18).
-
-**Execution note:** No spec-writer pass (no Anki behaviour). Build after U107/U109/U111 expose stable Rust APIs; U151 can start earlier against `FakeSyncService`.
-
-**Patterns to follow:** KTD9 (blocking exports, lane actors, explicit CancelToken, sync callbacks only, generated bindings in the Swift 5 target), bridge-build.md.
+- New short/off-main-thread core operations expose eligible snapshots/revisions, incoming apply, send acknowledgement, reconciliation, media staging and account/generation fencing. Long core work remains cancellable jobs; Apple network operations run in Swift, not a Rust worker waiting for a callback.
+- A Swift actor implements CKSyncEngineDelegate. Persist record system fields and engine serialization, inspect saved/failed/deleted outcomes, and acknowledge exactly the sent revision. Delegate handling durably applies fetched data before allowing cursor advancement. Never call sendChanges/fetchChanges recursively from event handling.
+- Implement the reviewed R2051 recovery handshake; inject write failures/crashes at every commit/persistence boundary. Durable tracking is separate from disposable derived data and Anki server USNs.
+- Sync Now captures its boundary and awaits fetch/apply, eligible send and final fetch/apply with bounded conflict attempts. Success requires all selected outcomes and durable persistence; collection and media results differ. New edits remain pending without extending this request forever.
+- CKAsset files are staged with bounded resources, validated and atomically installed. Distinct zone scopes prioritize collection changes; encrypted payloads and opaque identifiers follow the initial schema contract.
+- AnkiTransferService wraps U105–U111 jobs, resolves system proxy/PAC and Keychain credentials and exposes only confirmed Settings transfers. Use separate fake cloud and transfer services for previews and deterministic tests.
 
 **Test scenarios:**
-- Swift, gated on the server: login, initial download, then a second sync → NoChanges; the progress stream yields at least one value and finishes.
-- Cancelling the token during a stub-slowed download → Cancelled within 250 ms; local collection unchanged.
-- A sync started from a MainActor context runs off the main thread (dispatch precondition through a test hook).
-- While a normal sync job runs, a media sync job starts alongside it, and a control-lane `suspend` call is not queued behind the sync.
-- A Rust panic injected via test hook → Swift receives an internal-error value; the process survives.
-- A 308 from the stub → `newEndpoint` present on the Swift outcome (AE70, Swift half).
-- With the stub stalling `meta` for 30 s, a deck-options config call and a backup listing on the maintenance lane each return within 50 ms, and cancelling the probe job returns `Cancelled` within 250 ms.
-- A local proxy set as the system proxy, on the Mac host and the iOS simulator → a sync to the U13 server goes through it; a PAC configuration resolves to the same proxy.
-- `FakeSyncService` produces each R1558 state in order for a snapshot test fixture.
+- Cloud fake returns partial save failure after a successful API return: selected work remains pending and completion is not shown.
+- Crash after collection commit/before tracking update, after incoming apply/before cursor save, and after remote acknowledgement/before local acknowledgement: restart converges without loss/duplication.
+- Account switch mid-operation fences late callbacks; production and test environments cannot share tracking state.
+- New local edits during Sync Now remain pending after the captured boundary completes; media-paused state reports collection success separately.
+- Manual Anki integration uses only U13's local Docker server; CloudKit tests use a fake plus separately identified signed Apple integration runs.
 
-**Verification:** The MeguriCore `swift test` run passes on the host (integration tests run through the tools/mg job); bindings compile in the Swift 5 target; U151 builds its coordinator against the fake.
+**Verification:** tools/mg core and Swift bridge suites, then signed development-container multi-device evidence. Fake/local-server passes alone do not close the real CloudKit lane.
 
 ### U116. AnkiWeb build switch and identity checks
 
@@ -8869,12 +8891,14 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Patterns to follow:** KTD21; `tools/mg` jobs emit JSON results (KTD19).
 
 **Test scenarios:**
-- Covers AE89. The App Store build contains no AnkiWeb host name or sign-in option, and its settings offer only a custom URL (U161 snapshot with no `AnkiWebProvider` injected). The personal build offers AnkiWeb.
+- Covers AE89. The App Store build contains no AnkiWeb host name or sign-in option, and its settings offer iCloud sync plus file/self-hosted transfers (U161 snapshot with no AnkiWebProvider injected). The personal build offers AnkiWeb.
 - Self-test: a fixture that adds an AnkiWeb string to the main catalog makes the check fail.
 
 **Verification:** The check job passes for both configurations in CI.
 
 ### U117. Sync conformance suites (two-client and oracle)
+
+**CloudKit acceptance extension:** In addition to retained manual-transfer tests, cover R2047–R2059 and R2064–R2066: durable outbox/cursor crash windows, account changes and late callbacks, concurrent/offline review reconciliation, tombstone replay, coherent structural generations, quota/throttling/partial-record failures and CKAsset staging recovery. Distinguish fake tests from signed Apple integration evidence; an Anki server/oracle result cannot satisfy the CloudKit lane.
 
 **Goal:** Prove interoperability with real Anki clients through the local sync server on every sync path, with three-party convergence as the main assertion.
 
@@ -8921,6 +8945,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Verification:** All `conformance/scenarios/sync/**` suites pass in T1 in Docker, `sync/meta/` included (its Meguri runs moved from U106, amended 2026-10-16; `docs/process/review-log/U106.md`, A2); the exchange comparison has no unexplained differences; a once-per-milestone manual AnkiMobile check is recorded (see coverage).
 
 ### U118. Sync robustness, property tests and budgets
+
+**CloudKit acceptance extension:** In addition to retained manual-transfer tests, cover R2047–R2059 and R2064–R2066: durable outbox/cursor crash windows, account changes and late callbacks, concurrent/offline review reconciliation, tombstone replay, coherent structural generations, quota/throttling/partial-record failures and CKAsset staging recovery. Distinguish fake tests from signed Apple integration evidence; an Anki server/oracle result cannot satisfy the CloudKit lane.
 
 **Goal:** Show that every sync path survives drops, kills, clock skew, busy servers and a full disk; that hold-back never causes a sanity failure; and that sync meets its time and memory budgets.
 
@@ -9066,7 +9092,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 ### U121. Note type merging on `.apkg` import
 
-**Goal:** Implement the "Merge note types" import option, including its one-way-sync warning, the safety backup, and refusal of cloze/standard merges.
+**Goal:** Implement Merge note types with destructive-mapping preview, coherent CloudKit publication, safety backup and refusal of cloze/standard merges; retain Anki schema bookkeeping for a later manual transfer.
 
 **Requirements:** R1605, R1606; R1475 and R1476 for the import-merge case; R2008 for the import-merge case.
 
@@ -9183,6 +9209,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 ### U124a. Collection package container, collection-only `.colpkg` and verified collection replace
 
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
+
 **Goal:**
 - Create the `meguri-package` crate with the latest-format package container (writer and bounded reader) for collection-only packages.
 - Write a whole-collection, latest-format `.colpkg` without media for backups (U126) and server copies (U109). The source is a consistent snapshot of the live collection or a standalone file the caller has verified.
@@ -9230,7 +9258,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   2. Run the U22 open gate: the two-phase probe, the R1479/R1482/R2013 refusals, the R1478 upgrade on the copy and the R2016 expected-object check. Then run `integrity_check`.
   3. Return the card, note and review counts and the `scm` that the replacement will carry.
   Any failure returns a typed error (`Corrupt`, `TooNew`, `SchemaUnsupported` or `UnsupportedFormat`), removes staging and changes nothing (the data side of R1638).
-- **Verified-replace primitive** (`lifecycle/replace.rs`). It is the only swap path. Its input is a staging file plus a `ReplaceReason`: Restore, FullDownload, FullUpload or ColpkgImport. The ColpkgImport caller and its pre-swap mutation land with U124.
+- **Verified-replace primitive** (`lifecycle/replace.rs`). It is the only swap path. Its input is a staging file plus a `ReplaceReason`: Restore, FullDownload, FullUpload or ColpkgImport. The minimal M1R ColpkgImport caller and required scm/mod mutation are owned by U166 over this primitive; U124 later supplies the complete media/package flow.
   1. Run the U22 open gate on the staging file for every reason: the two-phase probe with the R1479/R1482/R2013 refusals, the R1478 upgrade of schemas 11–17 applied to the staging copy, the R2016 expected-object check, then the integrity check (R2005).
   2. Apply the reason-specific pre-swap mutation, which belongs to the caller: `ls = mod` for a full download is U109's (R1543), and `scm`/`mod` for a `.colpkg` import is U124's.
   3. Finalise the staging file: run `wal_checkpoint(TRUNCATE)`, set `journal_mode=DELETE`, close every staging connection, and assert that no `-wal`, `-shm` or `-journal` sibling exists. Then run the integrity check again on the closed file.
@@ -9240,11 +9268,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   7. Mark the derived store stale for rebuild (U26, R1489).
   Any failure before the rename leaves the old file and generation intact.
 - **Device-local state:** `device_state.rs` reads and writes its fields in U32's `meguri-sidecar.json` (KTD12). These fields are never synced, and there is no second sidecar.
-  - Fields: `oneWayChoicePending`, the last-backup `mod` and timestamps, and the last check, optimize and quick-check results (used by U127 and U132).
+  - Fields: generation/account-bound `cloudPublicationPending` with replacement recovery metadata, the last-backup `mod` and timestamps, and the last check, optimize and quick-check results (used by U127 and U132).
   - For a restore (and a `.colpkg` import once U124 lands), the flag is written before the rename, together with the `scm` the replacement will carry, so a crash cannot lose it.
-  - A failure or cancel before the rename clears the flag. At open, a flag whose recorded `scm` differs from the live one is cleared, because that replacement never happened.
+  - A failed/cancelled replacement restores the prior publication decision only after the recovery journal proves which generation remains live. Reopen reconciles account/collection generation and replacement journal; scm alone cannot clear a CloudKit publication fence. Preserve a pre-existing pending decision and default to paused when recovery is ambiguous (R2051, R2056).
   - The sidecar keeps the server counts from the last failed sanity check (U107, R2019) until a one-way sync succeeds.
-  - It is the only persisted copy of the auto-sync pause. U113's gate and U107 read it, and U109 clears it after a user-run one-way sync succeeds (R1548, R2010).
+  - cloudPublicationPending is the new durable CloudKit publication decision keyed by collection/account generation; U113/U114 alone resolve it after explicit cloud/local choice (R1548, R2010). Legacy Anki oneWayChoicePending recovery bookkeeping remains separate and a manual Anki transfer cannot clear the cloud decision. Specify the exact replacement/tracking crash handshake before implementation (R2066).
 
 **Execution note:**
 - The spec writer goes first. They record the latest-format container facts for collection-only packages in Meguri's own words (`specs/package/container.md`) and write the replacement contract (`specs/engine/collection-replace.md`).
@@ -9266,8 +9294,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - A package written during an active review session on the interactive lane → answers keep committing. The package passes the integrity check and contains every review committed before the snapshot.
 - A disk-full failpoint during the package write → no destination file, the temp file is removed, and a typed error is returned.
 - Injected low free space → `InsufficientSpace{needed, available}` before any write.
-- After a `Restore` replace → `CollectionReplaced(gen+1)` is emitted once, previous-generation reader connections are closed, the derived store is marked stale, and the sidecar has `oneWayChoicePending = true`.
-- Failpoint kill before the rename → the relaunch opens the old collection unchanged and clears `oneWayChoicePending`, so automatic sync resumes. A cancel before the rename clears the flag at once.
+- After a `Restore` replace → `CollectionReplaced(gen+1)` is emitted once, previous-generation reader connections are closed, the derived store is marked stale, and the sidecar has `cloudPublicationPending = true`.
+- Failpoint kill before the rename → the relaunch opens the old collection unchanged and clears `cloudPublicationPending`, so automatic sync resumes. A cancel before the rename clears the flag at once.
 - Kill after the rename → the relaunch opens the new collection, which passes the integrity check. This is the R2003/R2004 subset and the restore analogue of AE86.
 - `ReplaceReason::FullDownload` with a truncated staging file → refused by the integrity gate; the old collection is unchanged (R2005; U109 reuses this fixture).
 - A schema-11 staging file under `FullDownload` → upgraded on the staging copy. A kill right after the rename → the reopened collection is schema 18.
@@ -9305,7 +9333,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   3. *Safety backup:* after the drain, a forced backup of the current collection through the engine `BackupService` hook (R1631/R2008, implemented in U126/U127).
   4. *Prepare:* set `scm` and `mod` on the staging copy (R1626).
   5. *Media merge (R1627):* latest format skips files whose SHA-1 matches, legacy skips equal sizes, and existing files are never deleted. New files go through U31 temp-then-rename, and the media index is updated. Media is merged before the swap, so a cancel leaves the collection untouched (merged files are harmless). Same-name-different-content handling follows the oracle.
-  6. *Swap:* U124a's verified-replace primitive with `ReplaceReason::ColpkgImport`. This unit supplies the pre-swap mutation (`scm`/`mod`, R1626). Before the rename, it writes `oneWayChoicePending` and the new `scm` through U124a's device-state accessor.
+  6. *Swap:* U124a's verified-replace primitive with `ReplaceReason::ColpkgImport`. This unit supplies the pre-swap mutation (`scm`/`mod`, R1626). Before the rename, it writes `cloudPublicationPending` and the new `scm` through U124a's device-state accessor.
 - **Disk preflight:** staging collection plus incoming media plus the backup estimate.
 
 **Execution note:** Spec writer first (colpkg import semantics), then implementer test-first. U124a supplies the container, inspect, replace primitive and sidecar.
@@ -9317,9 +9345,9 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Legacy `.colpkg` (schema 11) → upgraded on staging, imported, golden matches.
 - Package whose collection is schema 12 → refused; live collection hash unchanged; no backup made.
 - Package whose collection fails `integrity_check` (corrupted page) → `Corrupt` at inspect; nothing changed (R1628).
-- After a successful import → `CollectionReplaced(gen+1)` emitted once; previous-generation reader connections closed; derived store marked stale; sidecar `oneWayChoicePending = true`; a pre-import backup exists.
+- After a successful import → `CollectionReplaced(gen+1)` emitted once; previous-generation reader connections closed; derived store marked stale; sidecar `cloudPublicationPending = true`; a pre-import backup exists.
 - Cancel during media merge → collection, generation and lifecycle restored to Ready; no backup cleanup needed.
-- Failpoint kill before the rename → relaunch opens the old collection unchanged, and `oneWayChoicePending` is cleared there, so automatic sync resumes; a cancel before the rename clears it at once. Kill after the rename → relaunch opens the new collection, which passes integrity check (R2003/R2004 subset, the colpkg analogue of AE86).
+- Failpoint kill before the rename → relaunch opens the old collection unchanged, and `cloudPublicationPending` is cleared there, so automatic sync resumes; a cancel before the rename clears it at once. Kill after the rename → relaunch opens the new collection, which passes integrity check (R2003/R2004 subset, the colpkg analogue of AE86).
 - A schema-11 `.colpkg` is upgraded and its `scm` set, then the process is killed right after the rename → the reopened collection is schema 18 with the new `scm`.
 - `.colpkg` export with Include media during an active review session on the interactive lane → answers keep committing; the exported file passes integrity check and contains every review committed before the snapshot.
 - T1: Meguri `.colpkg` export → oracle import → dumps equal (R1922).
@@ -9375,6 +9403,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 ### U127. Backup triggers, safety backups and restore
 
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
+
 **Goal:** Decide when backups happen: event-driven periodic backups, forced safety backups before destructive operations, "Back Up Now", and restore through the verified-replace pipeline.
 
 **Requirements:** R1630, R1631, R1632, R1637 (core; list and flow UI in U160), R1638, R2008, R2010, R2020 (backup side), R1662 (backups only while running), R1539 (backup provided to U109).
@@ -9415,7 +9445,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   4. Enter `ExclusiveBusy{op: Restore}`; U24 drains queued writes and flushes U43's overlay first (from `Failed(Corrupt)` as U132 allows).
   5. Take a forced backup of the current collection.
   6. Run U124a's verified-replace primitive with `ReplaceReason::Restore`.
-  7. Return a result with `oneWayChoicePending` set in the sidecar; auto-sync stays off until the user chooses (R2010, enforced by U113/U107).
+  7. Return a result with `cloudPublicationPending` set in the sidecar; CloudKit publication stays off until an explicit cloud/local choice (R2010, enforced by U113/U114), independently of any Anki transfer.
   A cancel or failure before the rename returns the lifecycle to its previous state with the same generation.
   Periodic backups are suppressed during the exclusive phase.
 
@@ -9434,9 +9464,9 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - A forced backup of a page-corrupted collection succeeds as a byte copy with a matching SHA-1, and retention keeps it.
 - End to end (R2010):
   1. Back up, then answer 5 cards, then restore that backup.
-  2. The 5 reviews are absent, `scm` has changed, `CollectionReplaced` was emitted, and `oneWayChoicePending` is true.
+  2. The 5 reviews are absent, `scm` has changed, `CollectionReplaced` was emitted, and `cloudPublicationPending` is true.
   3. A pre-restore backup containing the 5 reviews exists.
-  4. In the U13 harness, the next automatic sync does not run and a manual sync asks for the one-way choice.
+  4. In the CloudKit recovery harness, automatic publication stays paused after restart and after an Anki transfer. The user can explicitly publish the restored generation with the required backups or keep it local; Sync Now cannot bypass this decision.
 - Quit trigger on Mac with a due backup → backup completes within the R1848 budget before the quit acknowledgement.
 
 **Verification:**
@@ -9705,7 +9735,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
     - `start_create_backup` (Back Up Now, R1632): forced; returns the file name and size.
     - List backups: the U126 listing, newest first, with the server-copy and unverified labels.
     - Get and set backup limits through U126's config op.
-    - `start_restore_backup(name)`: runs U127's restore flow; the result carries `oneWayChoicePending`.
+    - `start_restore_backup(name)`: runs U127's restore flow; the result carries `cloudPublicationPending`.
   - Maintenance:
     - Maintenance status: U132's record (R1657 data).
     - `run_due_maintenance(trigger)`, with trigger `Opened | Background | Quit | BackgroundProcessing | Deadline`. It returns the next `MaintenanceDeadline` (U127). `Deadline` comes from U154's `BackupTrigger`, `Background` and `Quit` from the U151/U154 sequences, and `BackgroundProcessing` from U154's processing task and Mac activity.
@@ -9722,7 +9752,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Test scenarios:**
 - `start_create_backup` → the progress stream is monotonic and ends with a result naming `backup-YYYY-MM-DD-HH.MM.SS.colpkg` and its size. The listing returns that file first.
-- Restore of a fixture backup → success, with `CollectionReplaced(gen+1)` on the event stream, `oneWayChoicePending` in the result and a pre-restore backup in the listing.
+- Restore of a fixture backup → success, with `CollectionReplaced(gen+1)` on the event stream, `cloudPublicationPending` in the result and a pre-restore backup in the listing.
 - Restore of a backup with a corrupted page → `Corrupt`; the generation is unchanged (R1638).
 - Restore while a review session is open → the session-active refusal.
 - Restore while a one-way sync holds the exclusive phase → `Busy{runningOp}` naming the one-way sync.
@@ -10319,7 +10349,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Rust side validates parameters and does the collection work (`guiBrowse` computes card ids with the search engine; `guiEditNote` checks the note exists; `guiAddCards` resolves notetype/deck and stores attachment media through U143 before the panel opens), then raises a GUI interaction and awaits the Swift outcome (10 s timeout → error).
 - Swift `GuiActionHandler` uses navigation intents on `AppNavigation` (contracts with U150/U210/U195): show Browse with query and Anki column reorder, select a card, read selected note ids, open the editor for a note, present the Add panel with prefill and `closeAfterAdding`. It refuses with "cannot navigate: close the open sheet first" when a sheet has unsaved changes (R1787), offers "Replace draft / Keep draft" when the Add panel holds an unsaved draft (R1785), leaves an active review exactly as a user switch to Browse does (R1788), and brings the window to front and unminimizes it when the setting is on (R1787).
 - Mapping of Anki browser column ids to Meguri columns is owned by U84/U210; this unit only passes them through.
-- `sync` (R1754): a Sync interaction handled by U151's sync coordinator as a normal sync (hold-back rules intact); reply null on success or the coordinator's error string, including "not configured".
+- `sync` (R1754): request the U151 foreground CloudKit exchange, subject to review/connection gates; reply null only after its selected collection exchange completes, or the typed error. It never invokes Anki Transfers; media completion is separate.
 - Cross-area contracts: `AppNavigation` intents (U150), Browse query/selection/editor API (U210), Add panel prefill + draft state (U195), sync coordinator entry point with a result (U151).
 
 **Execution note:** Spec writer first for the Rust reply shapes; Swift handler needs no spec pass (Meguri-specific behavior from the Product Contract).
@@ -10334,7 +10364,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - With an unsaved deck-options sheet open, any GUI action → `cannot navigate: close the open sheet first` and the sheet is unchanged.
 - During a review session, `guiBrowse` ends the session the same way as the user switching to Browse; returning to the deck resumes.
 - Bring-to-front on: minimized window is restored and activated; off: window state unchanged.
-- `sync` with no server configured → error string; with the Docker sync server → null after completion and the server has the change.
+- `sync` with no iCloud connection → error; with the cloud fake/signed lane → null after the selected exchange completes, with zero Anki-server requests.
 - `/create` `searchNote` → Browse on `nid:<id>`.
 
 **Verification:** UI tests drive each GUI action through a real HTTP request from the test runner to 127.0.0.1:8765 against a fixture collection and assert window state by accessibility ids.
@@ -10434,6 +10464,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 ### U151. CollectionStore, lifecycle and sync coordinator
 
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
+
 **Goal:** The Swift-side owner of the open collection: mirrors core lifecycle and generation, fans out the core event stream, runs the foreground and background sequences in a fixed order, and executes the sync policy's actions.
 
 **Requirements:** R14, R15 (no main-thread core work), R45 (refresh triggers), R87 (day-clock side), R88, R107 (refresh cadence), R114 (no-op writes reach core only on change), R123, R124, R126, R127 (execution), R324 (device-local storage); UI-independent parts of R1548–R1550, R1552, R1555–R1557, R1559 (status computation consumer); F1; spec-flow flows 1, 3 and 6 (lifecycle states).
@@ -10455,13 +10487,13 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - All core calls go through CoreBridge lanes (KTD9); stores hold value snapshots only. A debug assertion fails any bridge call made on the main thread.
 - Foreground-return sequence (flow 1, spec-flow Q16; owner of the order, KTD15), strictly ordered: `resume()` (U32: external-change check, then rollover; its `ResumeReport` reaches U51's day-clock monitor) → notify review to refresh the queue head (U175 hook) → U113 foreground event, which yields a sync action only when the policy says so (R123). The core widget snapshot flush on the control lane (KTD9) wires in when U100 lands, as the last step of this sequence.
 - Background sequence (flow 1 step 4; KTD15): notify review to pause its timer, stop audio and persist the session record (U175 hooks) → await the open editor's `flush()` (U190 hook) → `flush_for_background()` → sync with hold-back as a U113 action, inside a background-task assertion from U154 → `suspend(deadline)`, called again when it returns `Deferred` and the continued-processing job ends or its task expires (U32, U154). The core widget snapshot flush wires in when U100 lands, at three points: the last step of the foreground-return sequence, between the sync step and `suspend` here, and at session end (KTD16). A flush that returns `changed` then calls `WidgetCenter.reloadAllTimelines()` before `suspend`. U165, the snapshot's only reader, adds these calls at the positions fixed here through U103's `flushWidgetSnapshot`. Until then the core writes no snapshot, and the App Group snapshot path is still passed at open. The collection is in app-private storage (KTD12), so no App Group lock release is needed beyond C8.
-- `SyncCoordinator` executes U113's actions and nothing else (KTD5): it translates platform events (launch, foreground with time away, background, quit, timer fired, reachability, login, preferences, editor dirty flag from U190) into policy inputs, runs the returned actions as U114 jobs, and arms one timer at the returned `next_deadline`. Trigger cadence, backoff, 409 retries, one-way suppression and the session rules are U113's; session state never passes through Swift. Manual sync during a session is refused with U113's reason (R89, exposed to U161/U159). The auto-sync pause after restore or `.colpkg` import is U124a's core-sidecar `oneWayChoicePending`, which U113 reads inside the core; this unit keeps no copy (R1548, KTD12).
+- `SyncCoordinator` executes U113 eligibility/recovery actions through U114's CloudKit adapter, forwards lifecycle/account events and mirrors durable pending/acknowledged state. CKSyncEngine owns network scheduling; the core owns session/hold-back and generation guards. AnkiTransferService is called only by Settings confirmation. The persisted post-import publication decision gates cloud sending until resolved (R1548).
 - The optimizer starts only from U113's optimizer action, executed by U47's `OptimizerCoordinator` once U47 lands.
-- Quit on Mac: delegate returns `.terminateLater` while a close-time sync runs; an open review session is ended first through U175's `ReviewCoordinator` (U43, KTD6), so the newest answer uploads; U161 shows the sheet; "Quit Without Syncing" cancels via CancelToken.
-- `SyncStatusModel` mirrors U113's status snapshot (R1559) and requests remote state on foreground and at most every 10 min while online (R107), never on navigation.
+- Quit on Mac: delegate returns `.terminateLater` while a close-time sync runs; an open review session is ended first through U175's `ReviewCoordinator` (U43, KTD6), so the newest answer becomes eligible and durably queued; a bounded best-effort cloud flush follows, and U161 shows the sheet; "Quit Without Syncing" cancels via CancelToken.
+- `SyncStatusModel` combines core eligible/held-back revisions with Apple account/operation state and acknowledged results. It never probes Anki meta for toolbar status or infers CloudKit success from col.ls/scm/mod.
 - `DeviceSettings` (app-private defaults suite, never iCloud) holds every device-local setting; `CredentialStore` holds host key and user name in the Keychain, not synchronizable, accessible after first unlock (R119, KTD12). Nothing here writes collection config (R324).
 
-**Execution note:** Test-first against `FakeCore` (generated UniFFI protocols from U6) for ordering and action execution; then one integration pass against the U13 sync server container.
+**Execution note:** Test-first against `FakeCore` (generated UniFFI protocols from U6) for ordering and action execution; then distinct CloudKit fake/signed integration passes; U13 covers the explicit Anki transfer service separately.
 
 **Patterns to follow:** KTD5 (C1–C8 contracts, core decides and Swift schedules), KTD6, KTD9 lanes and event rules, KTD12, KTD15, KTD17; spec-flow Q2, Q8, Q16.
 
@@ -10470,14 +10502,14 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Background on iOS with a pending editor edit → review pause/persist hooks, the editor `flush()` (the edit commits), then `flush_for_background`, the sync inside the background assertion, then `suspend`. Background expiry mid-sync → sync job cancelled, `suspend` still called within the deadline.
 - `CollectionReplaced(generation: 2)` while Browse has a path and an Add sheet is open → paths cleared, sheet route nil, section Home, every registered store reports generation 2.
 - Event burst of 50 card changes in 100 ms → each subscriber receives ≤ 2 coalesced deliveries; a `CommitFailed` inside the burst is delivered unmerged.
-- U113 returns a sync action → exactly one U114 job started; U113 returns `next_deadline` → exactly one timer armed; no Swift code decides cadence (FakeCore policy scripted).
-- Manual sync request during a session → refused with U113's reason "session active" (R89).
-- Auto sync result `oneWayRequired` → status `oneWayNeeded`, banner raised, no sheet route; the following background event → no sync attempted (policy action absent).
-- Pause flag set after restore → automatic triggers produce no action; a manual sync is allowed and clears the flag after the one-way choice completes.
+- U113 permits a cloud flush → exactly one adapter request, while CKSyncEngine owns delivery scheduling; core generation/session guards cannot be bypassed by Apple callbacks. The app-controlled foreground flush target has one timer owner.
+- Sync Now during a session → disabled with the R89 iCloud/hold-back explanation; automatic CloudKit work continues. Settings transfers remain unavailable until review ends.
+- A pending cloud publication/recovery decision → paused status, no automatic overwrite and no Anki one-way sheet; background cannot bypass the decision.
+- After restore, a user must explicitly choose cloud replacement or local-only use. Sync Now alone cannot clear the publication fence; the choice survives relaunch and any Anki transfer.
 - `CredentialStore` writes with non-synchronizable, after-first-unlock attributes; server URL change clears the stored key.
-- Integration (U13 server): two-client run where this coordinator syncs on foreground and at session end; the server shows the uploaded revlog rows except the held-back one until the summary is dismissed.
+- Integration: CloudKit fake and signed development-container multi-device runs exercise foreground/session-end sending, hold-back and durable completion; U13 server integration is a separate explicitly invoked transfer test.
 
-**Verification:** Order and action-execution suites green under `swift test`; integration test green against the local sync server; no main-thread bridge assertion fires in UI test runs.
+**Verification:** tools/mg runs ordering, core-boundary and CloudKit fake suites; the signed cloud integration lane is recorded separately from local-Anki-server transfer tests. No main-thread bridge assertion fires.
 
 ### U152. Home and deck list
 
@@ -10506,7 +10538,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Disclosure toggles `study_collapsed` through a U28 op (never `browser_collapsed`); ⌥-click applies to descendants; scroll position preserved.
 - Selection semantics: sidebar layout single click → deck page (U155) and sets `curDeck`/`activeDecks` through a non-undoable U28 op that writes only on change (R41, R42); double-click or Return → U157 start study. On the Home table (R74) the first click opens the deck page at once and never waits for the double-click timeout. A second click or tap within the system double-click interval is handed to the newly shown deck page, which starts study of that deck through U157. Compact tap → U157 start study. The deck page is reached from the row's context menu (long press) item Overview and from the row's Overview accessibility action; both emit the open-deck-page intent that U155 attaches. Until U156 lands, that menu holds Study and Overview only; U156 replaces it with its full `DeckMenu` in R47 order. Tapping a filtered deck explains filtered decks are unsupported.
 - Toolbar "+" (R24) emits an AppNavigation add intent with no deck; U195 attaches the Add destination, and the button is hidden until then.
-- Bottom actions: Create Deck (U156 sheet) and Import File (U162), each shown once that unit attaches it; Get Decks only when the app target injects the `AnkiWebProvider` (KTD21), opening the shared-deck page in the default browser.
+- Bottom actions: Create Deck (U156 sheet) and Import File (U162), each shown once that unit attaches it; Get Decks follows R50 build availability and opens the shared-deck page in the default browser without the transfer credential provider.
 - Row actions emit intents through `AppNavigation` (open deck page, start study, open menu action), so this unit lands before U155–U157 and those units attach the destinations.
 - Attach registry (the runtime half of the attach pattern): `AppNavigation` keeps a registry of attached destinations, keyed by route and sheet route. A feature unit registers its destination when it lands, and `isAttached(_:)` is observable. Every control, tab, sidebar section or menu item that emits an intent stays hidden while its destination is unattached, and an intent with no attached destination is a no-op. This unit adds the registry to U150's `AppNavigation` and applies it to the shell: the compact Browse and Stats tabs and the sidebar Browse, Stats and Note Types sections show once U210, U225 and U200 attach them. U153, U155, U157, U160, U161, U163, U163a and U166 use the same registry.
 - Deck row accessibility: one element with name, parent/depth, the three counts with names and collapsed state, plus custom actions Study (U157), Overview (U155) and Collapse/Expand (this unit), and Options, Rename and Delete once U232 and U156 attach them.
@@ -10576,6 +10608,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 ### U154. Background execution and scheduled work
 
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
+
 **Goal:** Platform-specific background execution so sync, backups and integrity checks run when the system allows, without polling. The FSRS optimizer's background task attaches with U47's app-side leg when U47 lands.
 
 **Requirements:** R14 (background assertion), R127 (iOS side), R1455 (file protection on app-created directories), and the platform side of R1552–R1554, R1630, R1656 (owned by sync/packages areas); KTD15.
@@ -10590,7 +10624,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Approach:**
 - This unit alone registers background-task identifiers (`BackgroundTaskIdentifiers.swift`, KTD5); other units attach handlers through it, so no identifier is registered twice. The registry exposes an attach slot (identifier, request policy, submit condition, handler) that later units fill. It stays the only registration point, and the plist lists exactly the registered identifiers.
-- iOS: `BGProcessingTask` identifiers for the daily quick integrity check and the 14-day optimize (R1656, R1655; the task sends `run_due_maintenance(BackgroundProcessing)`, U132), and a network-requiring sync task that sends U113 `processingTaskLaunched(sync)` and runs the resulting normal sync plus media continuation as U113 actions executed by U151 (R1553; long media work is requested with external power preferred). No `BGAppRefreshTask` is registered (Assumptions: background refresh off; KTD15); `BGContinuedProcessingTask` only for user-started one-way sync, first download and `.colpkg`/`.apkg` import, reporting `NSProgress` from core progress; `beginBackgroundTask` wrapper (`ForegroundAssertion`) used by U151's background sequence. Every task handler runs its work between `resume()` and `suspend(deadline)` (C8, U32). Expiry handlers cancel through CancelToken (R1554 semantics in core). This unit ships without the optimizer's processing task. U47's app-side leg adds it through the attach slot when U47 lands (U152's attach pattern).
+- iOS: register processing tasks for maintenance and the later U47 optimizer through this single registry. Enable remote-notification delivery for CKSyncEngine; any cloud continuation respects Apple scheduling and persists pending work on expiry. No timer/task starts an Anki transfer. User-started import/transfer work uses supported continued-processing facilities; expiry cancels safely and preserves resumable state. Every handler brackets core access with resume/suspend, without holding database locks for network waits.
 - macOS: `NSBackgroundActivityScheduler` (utility QoS) for the daily integrity check and the 14-day optimize, whose activity sends `run_due_maintenance(BackgroundProcessing)` (U132). `ProcessInfo` activities around sync and import avoid App Nap (U47's app-side `OptimizerCoordinator` holds its own around the optimizer job).
 - The daily quick check and the 14-day optimize are U132's: U132 owns the vacuum-and-analyze primitive. This unit reaches them only through `run_due_maintenance(BackgroundProcessing)` (U133a). Check Database is user-started (U163) and never scheduled here. When U128 lands, its results reach U132's maintenance status through the same call, and this unit wires nothing in.
 - `BackupTrigger`: arms the single timer at the deadline that U127's scheduler publishes in its `MaintenanceDeadline` event (KTD5) and calls `run_due_maintenance(Deadline)` (U133a) when it fires; it also sends the Background and Quit triggers (R1630 with R1854). It computes no deadline itself. The backup itself is U126.
@@ -10600,7 +10634,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Test scenarios:**
 - Registration list equals the plist identifiers (unit test reading the bundle plist) and contains no app-refresh identifier; a second registration of any identifier fails the test.
-- The sync processing task fires with changes pending → one U113 normal-sync action, then a media-continuation action, both executed by U151 (R1553).
+- An allowed cloud continuation with pending changes resumes only CloudKit; background expiry retains pending work and reaches suspend within deadline.
 - An identifier registered through the attach slot appears once in the registration list and must be in the plist; a second registration fails the test.
 - The Mac background activity fires → `run_due_maintenance(BackgroundProcessing)` is sent once (FakeCore call log).
 - Continued-processing expiry during a one-way download → CancelToken cancelled; collection generation unchanged (FakeCore).
@@ -10715,7 +10749,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Approach:**
 - Attach pattern (as in U152): the missed-card Edit Note, Card Info and Browse actions are AppNavigation intents that U184, U222 and U210 attach, and U186 attaches the preview player. Each control stays hidden until its destination is attached (U152's registry).
 - `StudyLauncher.start(deckId)`: sets `curDeck`/`activeDecks` (U152 op), reads U41's `DeckStudyState` through U37's `deck_study_state`; nothing to study → finished state on the deck page or a sheet in compact (R77); otherwise asks U175 to start a session and U150 to present it. No collection-wide entry point exists (R76).
-- `SessionShell` tracks `active → summary → ended` for the UI only. The core session, and with it hold-back, ends when the summary is dismissed (KTD6). The 60 s cadence, the R89 disabled reason and the session-end sync action (and, once U47 attaches its policy branch, the optimizer actions) come from U113, which learns session start and end from U43 inside the core; U151 executes those actions and never reads `SessionShell` (KTD5).
+- `SessionShell` tracks `active → summary → ended` for the UI only. The core session, and with it hold-back, ends when the summary is dismissed (KTD6). The app-controlled foreground flush target, the R89 disabled reason and the session-end cloud flush action (and, once U47 attaches its policy branch, the optimizer actions) come from U113, which learns session start and end from U43 inside the core; U151 executes those actions and never reads `SessionShell` (KTD5).
 - End reasons and outcomes (R91): queue exhausted, timebox Finish, ✕/Esc after ≥1 answer → summary; sidebar selection, D/B/T, starting another deck → navigate with no summary (A opens Add over review without ending it); ✕/Esc with zero answers → return without summary. Closing never asks for confirmation (R85).
 - Every exit from the summary is a dismissal (R99). Before AppNavigation leaves the summary, `SessionShell` calls `ReviewCoordinator.dismissSummary()` exactly once and then navigates. This covers Done, Return, Esc, ✕, Browse missed cards, Continue, sidebar, section or tab selection, D/B/T/S, ⌘F, deep links, the widget URL and starting another deck. Continue then starts a new session on the same deck. Summary Undo and Unbury are not exits: both resume the open core session (U179, U186).
 - Read-only mode: U155's "Last session" link opens the summary of a session that already ended. It has no Undo, Continue or Unbury, never calls `dismissSummary()`, and leaves the record in place until the next session (R91).
@@ -10805,7 +10839,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Menus defined once with `.commands` on the scene (Mac and iPadOS menu bar share them): Meguri (About, Settings… ⌘, selecting the Settings section, Services, Hide, Quit), File, Edit, View, Deck, Card, Tools, Window (system items plus "Meguri" from the `Window` scene), Help (Keyboard Shortcuts ⌘/, Meguri Help, Copy Debug Info).
 - Routing: screens publish action targets via `focusedSceneValue` (`DeckCommandTarget` from Home/deck page, `CardCommandTarget` from review/preview/Browse, `BrowseCommandTarget`, `SearchFocusTarget`, `ZoomTarget`); an item is enabled only when its target exists and reports the action applicable (R278). Card-menu actions are implemented by U175/U210; flag names come from collection config.
 - Key equivalents come from `ShortcutCatalog` (U158); context-specific overrides (e.g. File > New Deck keeps no shortcut while review or Browse is shown, R238) are expressed in the catalog.
-- Global single keys D, A, B, T, Y, S, `/` are registered in the global context: D/B/T navigate (ending a review per U157), A opens Add, Y requests a manual sync (disabled during a session, R89), `/` opens Go to Deck. ⌘F focuses the current search or opens Browse with search focused (R216). ⌃⌘S sidebar (the Browse context overrides it to toggle the filter column, U216), ⌃⌘F full screen. ⌘+/⌘−/⌘0 change device-local card zoom (R143, applied by U67). ⌘W closes the topmost sheet/panel, else the window.
+- Global single keys D, A, B, T, Y, S, `/` are registered in the global context: D/B/T navigate (ending a review per U157), A opens Add, Y requests a CloudKit Sync Now (disabled during a session, R89), `/` opens Go to Deck. ⌘F focuses the current search or opens Browse with search focused (R216). ⌃⌘S sidebar (the Browse context overrides it to toggle the filter column, U216), ⌃⌘F full screen. ⌘+/⌘−/⌘0 change device-local card zoom (R143, applied by U67). ⌘W closes the topmost sheet/panel, else the window.
 - `UndoStore` observes core undo `peek(Global)` (C3, U37's `UndoService`) through change events and publishes "Undo <op>"/"Redo <op>" titles or plain disabled titles (R173). Edit > Undo/Redo: if the first responder is a text input, forward to its undo manager; otherwise, when the focused screen publishes a focused undo target (review, congrats and the summary, through U181 and U179), call it; otherwise call collection `undo(Global)`/`redo(Global)` (R174). ⌘Z and ⇧⌘Z are bound only here.
 - `CollectionUndoManager`: an `UndoManager` subclass installed on the root responder so iOS three-finger gestures reach the collection stack when no text field is focused (R175).
 - Review commands (attach, U181): mounts U181's `ReviewCommands` in the Card menu and publishes `ReviewActions` as `CardCommandTarget` (R284, R339, iPad overlay R428). Binds U181's focused undo target to U179 for ⌘Z/⇧⌘Z (R229, R421). Brings ⌘1–⌘7, ⌘⌫ and ⌘+/−/0 to review (R233, R423, R424); ⇧⌘D, ⌥⌘N, ⌥⌘E and ⌥⌘I are enabled once U183 attaches their panels. Applies U181's S3 choice for unmodified-key menu items.
@@ -10878,48 +10912,36 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Verification:** Settings suites and snapshots green; AE8 integration test passes against the local sync server.
 
-### U161. Sync status UI, account login and one-way choice
+### U161. iCloud sync status and Settings Anki Transfers
 
-**Goal:** The Sync button and status popover, the Account & Sync settings page with login for AnkiWeb (build-gated) and self-hosted servers, the one-way choice sheet, sync errors and the Mac quit-sync sheet.
+**Goal:** Present iCloud as routine sync, with a separate Settings-only manual Anki migration workflow.
 
-**Requirements:** R89 (disabled state and tooltip), R102–R106, R117–R127, R168; UI side of R1496–R1502, R1535–R1540, R1545, R1557, R1558, R1560–R1562 (rules owned by sync area); F5 (presentation); AE9 (status side); also R1503, R1551.
+**Requirements:** R89, R102–R107, R117–R127, R1496–R1504, R1536–R1548, R1558–R1562, R2046, R2048–R2050, R2055–R2063; AE89, AE91, AE94, AE95.
 
 **Dependencies:** U151, U153, U160, U105, U107, U109, U111, U20.
 
 **Files:**
-- `app/Packages/MeguriKit/Sources/Features/Settings/Sync/SyncButton.swift`, `SyncStatusPopover.swift`, `MediaSyncIndicator.swift`, `AccountSyncPage.swift`, `LoginSheet.swift`, `OneWayChoiceSheet.swift`, `SyncProgressView.swift`, `SyncErrorPresenter.swift`, `ServerMessageView.swift`
-- `app/Meguri/Mac/QuitSyncSheet.swift`
-- `app/Meguri/AnkiWeb/AnkiWebProvider.swift` (app target, `#if ANKIWEB_ENABLED`: the AnkiWeb login rows, Get Decks action and onboarding option injected into MeguriKit at launch; KTD21)
-- `app/Packages/MeguriKit/Tests/SettingsTests/SyncButtonStateTests.swift`, `LoginFlowTests.swift`, `OneWayChoiceModelTests.swift`, `SyncErrorPresenterTests.swift`
-- `app/MeguriUITests/SyncUITests.swift`
-- `app/MeguriSnapshotTests/SyncSnapshotTests.swift`
+- `app/Packages/MeguriKit/Sources/Features/Sync/SyncButton.swift`, `SyncStatusPopover.swift`, `CloudKitConnectionView.swift`
+- `app/Packages/MeguriKit/Sources/Features/Settings/AnkiTransfersView.swift`, `AnkiTransferPreview.swift`, `AnkiTransferProgress.swift`
+- `app/Meguri/AnkiWeb/AnkiWebProvider.swift` (build-gated Settings provider)
+- `app/Packages/MeguriKit/Tests/SyncUITests/`
 
 **Approach:**
-- `SyncButton` sits in the main toolbar (sidebar layout) and the Decks tab navigation bar (compact); replaced by "Log In" when no account. States map from `SyncStatusModel` (U151): up to date, changes waiting, one-way required (warning token), syncing with progress, media syncing (secondary), offline, needs attention; each has a distinct SF Symbol and text label (R103, R104, R187). Click starts a sync, or while syncing opens the popover with stage, media files remaining, last success, last error (R105, R1560). Disabled during a session with the R89 tooltip.
-- Media sync shows a quiet secondary indicator "Syncing media, N files left" that never blocks (R106).
-- Account & Sync page: AnkiWeb Log In/Out only when the `AnkiWebProvider` is injected (KTD21); self-hosted URL field (http/https, subpath, normalized by core); account row shows user and server; toggles for media sync, automatic sync, periodic media interval, network timeout (device-local); "Force a one-way sync on next sync" (collection-level op). Changing the server URL logs out (R120); after the first successful login, offer "Sync now" (R121).
-- `LoginSheet` exchanges credentials through core `hostKey` (U105); the password is never persisted; the key goes to `CredentialStore`. Self-hosted local-network servers trigger the iOS Local Network prompt with the plist usage string (R1501).
-- `OneWayChoiceSheet` (F5) presents core-provided facts for both sides (last modified, last sync, local counts, unsynced reviews/edits) and plain-language consequences; Cancel is the default and Return/Esc never confirms; confirming enters the exclusive phase (U153) and shows bytes progress then "Checking…". Only manual syncs ever present it (U151 rule).
-- `SyncErrorPresenter` maps core sync errors to messages (R1561) via U153 classes; manual sync failures show alerts, automatic ones only status (R1555, R1562). Server messages render as sanitized rich text with links opening in the default browser (R168; sanitizer from U20, same as deck descriptions).
-- Mac quit: `QuitSyncSheet` shows progress with "Quit Without Syncing" while U151 holds termination (R127, R1557).
-- Recovery download (R169, R2012): this unit attaches the Download from Server action of U153's blocking screen, shown only while an account exists. A confirmation says that the server copy replaces the damaged collection and that a byte copy of the damaged file is kept; confirming requests a one-way download through U151's SyncCoordinator, which the core runs from `Failed(Corrupt)` as U132's recovery download (no upload, verified replace, then `Ready(gen+1)` and Home).
-
-**Patterns to follow:** KTD21 compile condition; U153 classification; glass only on the toolbar button.
+- Main sync control connects to iCloud only. It shows captured-exchange completion, pending work, held-back review answer, separate media status and the last confirmed time. Sync Now remains disabled during review with the accurate R89 explanation.
+- Account & Sync shows Apple-account availability, Enable/Pause, media toggle, quota/errors, recovery and local-only use; system settings own Apple sign-in. Never display Anki credentials or endpoint as the routine sync account.
+- Anki Transfers contains file import/export plus explicit server Import from Anki / Export to Anki. Configure endpoint and credentials there. Existing build-gated AnkiWeb rows appear here only; the home toolbar and onboarding have none.
+- Direction preview identifies every affected side, counts, pending edits/reviews, media scope and safety backup. No ambiguous merge/replacement starts without confirmation. A completed import enters the separate iCloud publication choice; cancelling it keeps the imported data local and remote data intact.
+- Show last manual transfer, active/resumable operation, cooldown and next eligible time. Both directions share the persisted local endpoint/account cooldown. Failed/cancelled operations can retry without consuming it. File export remains accessible even when CloudKit or server transfers cannot run.
+- Recovery download/replace actions use the correct source (iCloud vs manually selected Anki server), preview/back up affected data and respect review/exclusive gates. Mac quit offers bounded flush progress and Quit Without Syncing.
 
 **Test scenarios:**
-- State matrix: each `SyncStatusModel` state → expected symbol, label, colour token; one-way required uses the warning token and still has a text label (snapshot with Differentiate Without Colour).
-- No account → button replaced by "Log In"; tapping opens login.
-- Covers AE9 (status). Session active → button disabled with tooltip; after the summary is dismissed → enabled.
-- App Store configuration build → Account page has no AnkiWeb rows; only the server URL field (partial AE89).
-- Login success → host key stored, password absent from defaults and Keychain dumps; "Sync now?" offered once.
-- Server URL changed → logged out, media sync state reset requested (core call recorded).
-- One-way choice → Cancel focused by default; pressing Return without moving focus → cancelled; Download chosen → exclusive phase entered and progress shows bytes then "Checking…".
-- Manual sync 403 → alert "Email or password was incorrect" and re-login; automatic 503 → no alert, status needs attention.
-- Server message `<b>Maintenance</b><script>x()</script><a href="https://x">info</a>` → bold text and link, no script.
-- Mac quit with pending changes → sheet appears; "Quit Without Syncing" → app terminates and the sync was cancelled.
-- `Failed(corrupt)` with an account, against the U13 server: Download from Server on the blocking screen, then confirm → the server log shows zero upload requests, the backups folder holds a byte copy of the damaged file, and the app lands on Home with generation +1. Cancel on the confirmation → nothing is requested.
+- Snapshots cover no account, local-only, connected, quota full, syncing collection, media pending, partial failure, paused and recovered states.
+- Toolbar Sync Now, Y and integration sync never open Anki login or make Anki-server calls.
+- A completed API call with pending selected records never displays complete. Another device offline does not change this device's truthful completion wording.
+- Settings import/export confirmation, direction, backups, post-import publication choice, resume and cooldown survive relaunch; keyboard/VoiceOver paths match touch.
+- AppStore and personal configurations obey AE89; transfer availability never changes CloudKit controls.
 
-**Verification:** Sync UI suites and snapshots green; UI test logs in to the U13 server, syncs and shows "up to date".
+**Verification:** tools/mg Swift tests, off-screen snapshots and VM UI suites; signed CloudKit status/error scenarios are recorded separately.
 
 ### U162. Import and export UI
 
@@ -10943,7 +10965,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `.colpkg`: confirmation that the whole collection is replaced → exclusive phase (U153) → core import with forced backup → `CollectionReplaced` → auto-sync pause (U151) → Home. Corrupt packages show a clear error and change nothing (R1628). Long imports run under a continued-processing task on iOS (U154).
 - Export sheet: scope (collection, deck from the deck menu or Deck > Export Deck, browser selection passed by U210), format and options per R1617/R1618/R1625 remembered where required; Mac ends in a save panel, iOS in the share sheet or a Files location (R1624).
 - Placement: Settings page entries on iPhone; Settings section plus File menu on iPad/Mac (R1660, R1661).
-- Onboarding (attach, U166): inserts Import a File into WelcomeView's option list in R157 order. Path b (.colpkg): no backup applies; import → replaced collection → auto-sync paused (U151); a later login leads to the one-way choice. Path c (.apkg): U166's Start Empty creation first, then this import flow; a later login always requires the one-way choice. Both paths end with U166's ArrivalSummaryLine, then Home. This unit also attaches the import intent emitted by U166's empty-state Import File action and by U152's Import File button.
+- Onboarding (attach, U166): inserts Import a File into WelcomeView's option list in R157 order. Path b (.colpkg): no backup applies; import → replaced collection → auto-sync paused (U151); later iCloud connection uses the explicit cloud/local publication choice. Path c (.apkg): U166's Start Empty creation first, then this import flow; later iCloud connection previews any existing cloud collection before publication. Both paths show import completion and then Home; neither configures an Anki sync provider. This unit also attaches the import intent emitted by U166's empty-state Import File action and by U152's Import File button.
 
 **Patterns to follow:** KTD17 for collection replacement; U153 activities.
 
@@ -10957,11 +10979,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Corrupt `.colpkg` → error alert, generation unchanged.
 - Export deck "Japanese" from deck menu → sheet preselects deck scope; Mac → save panel; iOS → share sheet with an `.apkg` file.
 - ⇧⌘I and ⌘E open import/export; Export disabled during the exclusive phase.
-- Welcome: App Store configuration → three options with Import a File in R157 order; personal build → four.
-- Path b → Home, auto-sync paused flag set; a following manual sync presents the one-way choice.
-- Path c → empty collection created, then import sheet; after import, login → one-way choice required.
+- Welcome: both build configurations offer the same Connect to iCloud, Import a File and Start Empty choices once file import attaches.
+- Whole-collection file import → Home with CloudKit publication paused; an explicit cloud/local choice is required before sending that generation.
+- Deck package into an empty local collection → import result; later iCloud connection previews any existing cloud data, without an Anki login or mandatory Anki one-way choice.
 
-**Verification:** Import/export UI tests pass on Mac and iPhone with fixture packages; intake classification tests green. Onboarding paths b and c pass on iPhone and Mac against the local sync server.
+**Verification:** Import/export UI tests pass on Mac and iPhone with fixture packages; intake classification tests green. File-import onboarding (the extended U162 paths over U166's minimal M1R importer) and iCloud connection decisions pass on iPhone and Mac against the fake cloud service, with the signed connection lane recorded separately.
 
 ### U163a. Backups page and restore
 
@@ -10980,7 +11002,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Approach:**
 - Backups page (R150, R1634, R1636), mounted by U160 on every platform: edits the synced `backups` key (interval, daily, weekly, monthly) through U133a's limits call via `SettingsStore`, writing only on change. The no-media note (R1636) is shown; its "Export collection with media" pointer is an AppNavigation intent that U162 attaches, hidden until then.
 - Back Up Now (R1632): U133a's `start_create_backup` as a U153 activity; reports the created file name and size.
-- Restore from Backup… (R1637, R1638, R2010): lists U133a's listing newest first (date, time, size; server copies and unverified backups labelled). The confirmation says that the current collection is backed up first and that the next sync will be one-way. Confirming runs `start_restore_backup` in the exclusive phase (U153), with progress and Cancel until the rename. An integrity failure is refused with the current collection unchanged; success lands on Home with U151's one-way banner. During a review session the action is refused with the session-active reason.
+- Restore from Backup… (R1637, R1638, R2010): lists U133a's listing newest first (date, time, size; server copies and unverified backups labelled). The confirmation says the current collection is backed up and the restored generation remains local until an explicit iCloud publication choice. Confirming runs `start_restore_backup` in the exclusive phase (U153), with progress and Cancel until the rename. An integrity failure is refused with the current collection unchanged; success lands on Home with the paused-iCloud publication choice visible. During a review session the action is refused with the session-active reason.
 - Restore remedy (R169, U132): this unit registers `RestoreSheet` as the destination of the restore intent that U153's blocking screen emits. Opened from `Failed(Corrupt)`, it preselects the newest backup that is not a `corrupt-…` recovery artifact; if that backup fails its integrity check, the refusal names it and the next-newest is offered, as U132's "most recent backup that passes an integrity check" remedy requires.
 - Show Backups (R151): reveals the private-container backups folder in Finder on the Mac and opens the Files app at `Documents/Backups` on iOS and iPadOS (KTD12; Files access keys set in U7).
 - The Tools menu (R285) has no backup item, so this unit adds no menu.
@@ -10992,7 +11014,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Test scenarios:**
 - Backups page shows 30/12/10/9 from a default fixture; changing daily to 14 writes only `backups.daily`.
 - Back Up Now → activity then "Created backup-YYYY-MM-DD-HH.MM.SS.colpkg" message with its size.
-- Restore of a valid backup → the confirmation names the one-way consequence; exclusive phase, generation +1, Home, one-way notice; restore of a corrupt backup → refusal and unchanged generation.
+- Restore of a valid backup → backup confirmation, exclusive phase, generation +1, Home and paused-iCloud publication choice; restore of a corrupt backup → refusal and unchanged generation.
 - Restore while a review session is open → the session-active refusal; nothing is replaced.
 - `Failed(corrupt)` → the blocking screen shows Restore from Backup; it opens this sheet with the newest non-recovery backup preselected; restoring it lands on Home in `Ready(gen+1)` with automatic sync paused (U251 repeats this on the simulator).
 - `Failed(corrupt)` where the newest backup fails its integrity check → refusal naming it, the next-newest offered, generation unchanged until a good one is restored.
@@ -11112,40 +11134,30 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Verification:** Widget snapshots pass for all families and modes on iOS and macOS; decoding test uses the core golden; extension binary does not link the core.
 
-### U166. First launch and onboarding
+### U166. First launch and iCloud connection
 
-**Goal:** A welcome flow covering every way to get a collection onto a new device, with honest progress and one-line confirmation, and the three one-time tips.
+**Goal:** Start locally or connect to an existing private iCloud collection, without making Anki a routine account provider.
 
-**Requirements:** R157–R163; UI side of R1591–R1593 and R1501; F4; spec-flow flow 6 paths a and d. Attach split: R157's Import a File option, R159 after an import, R161's Import File action, R1591's .colpkg path and flow 6 paths b and c land when U162 attaches them.
+**Requirements:** R157–R163, R158, R2043–R2046, R2055, R2056, R2065.
 
-**Dependencies:** U151, U152 (attach registry), U153, U154, U161, U22, U29, U109, U111. The Import a File option (paths b and c) attaches to this unit later (see Approach).
+**Dependencies:** U150, U151, U161, U124a.
 
 **Files:**
-- `app/Packages/MeguriKit/Sources/Features/Onboarding/WelcomeView.swift`, `OnboardingFlow.swift`, `FirstDownloadProgressView.swift`, `ArrivalSummaryLine.swift`, `EmptyCollectionHome.swift`
-- `app/Packages/MeguriKit/Sources/AppModel/Tips/OneTimeTips.swift`
-- `app/Packages/MeguriKit/Tests/OnboardingTests/OnboardingFlowTests.swift`, `app/Packages/MeguriKit/Tests/AppModelTests/OneTimeTipsTests.swift`
-- `app/MeguriUITests/OnboardingTests.swift`
-- `app/MeguriSnapshotTests/OnboardingSnapshotTests.swift`
+- `app/Packages/MeguriKit/Sources/Features/Onboarding/WelcomeView.swift`, `CloudKitConnectionFlow.swift`
+- `app/Packages/MeguriKit/Tests/OnboardingTests/`
 
 **Approach:**
-- Shown when C7 is `NoCollection`. WelcomeView renders an ordered option list: Log In to AnkiWeb (only when the `AnkiWebProvider` is injected, KTD21), Use a Sync Server (URL + credentials via U161's login sheet), Start Empty. Attach pattern (as in U152): U162 inserts Import a File in R157 order when it lands and owns paths b and c. Until then, a new device gets its collection through path a, or through path d followed by login.
-- Path a (login): host key → `meta` → server non-empty and local empty → full download with no conflict prompt (core decision) under a continued-processing task (U154); onboarding owns the progress UI (not the toolbar glyph). If the task expires or the app is killed, the temp download is discarded and the flow restarts at next launch (R1493 cleanup by core).
-- Paths b (.colpkg) and c (.apkg) belong to U162. This unit provides the parts they reuse: Start Empty creation (path c's first step) and ArrivalSummaryLine (R159).
-- Path d (Start Empty): core creates a collection with only the Default deck and stock note types (contract with U22/U29); Home shows the empty state with Log In, plus Add Note and Create Deck once U195 and U156 attach them (U152's registry). Its Import File action emits the same AppNavigation import intent as U152's Import File button and is shown once U162 attaches that intent. A later login offers download without the upload question.
-- This unit calls no package or maintenance service (U133). Path a is sync (U109, U111), and path d is core collection creation (U22, U29). The .colpkg and .apkg paths reach U133 only through U162's import flow, which attaches them to this unit.
-- After download or import, show "12,533 notes · 22 decks · 115,764 reviews" style line from core counts (plural rules), then Home. Studying works while media continues in the background; missing media render as quiet placeholders (U67).
-- `OneTimeTips` (device-local) tracks the `::` tip (shown by U156), the double-click/Return tip (sidebar layout, shown on first deck-page visit) and the tap-zones tip (shown by U175 on the first answer side, never on the first card). No other onboarding (R163).
-
-**Patterns to follow:** spec-flow flow 6; KTD15 continued processing; KTD21.
+- Welcome offers Connect to iCloud, Import a File and Start Empty. This unit owns a minimal collection-only .colpkg picker/staged import over U124a for M1R, including the short/job FFI binding if it is not yet exposed. U162 later extends file intake/options to the full package surface. Never require an Apple account to create/open a local collection.
+- An existing cloud collection downloads into a staged validated generation before activation; show collection and media progress separately. Two existing collections require an explicit connection/replacement decision with recoverable backups.
+- Anki server migration lives in Settings Anki Transfers after starting locally, not a welcome login choice. Both the minimal collection-only file picker and U161 server import work before M1R; the complete deck-package import/export UI remains U162.
+- Missing account/container/signing capability gives a local-only path and actionable status. Do not create a container, change system accounts or perform one-time user setup automatically.
 
 **Test scenarios:**
-- App Store configuration → welcome offers Use a Sync Server and Start Empty (no AnkiWeb); personal build → Log In to AnkiWeb is added first. Import a File joins in R157 order when U162 attaches it (U162 scenario).
-- Path a against the U13 server holding a fixture collection → no upload/download prompt, progress shown, arrival line counts match the fixture, Home shown; a review can start before media completes and a missing image shows the placeholder.
-- Path a interrupted (test hook kills the download at 50 %) → relaunch shows welcome again with no partial collection.
-- Path d → Default deck plus stock note types only; the empty state shows Log In, and Add Note, Create Deck and Import File only when test destinations are registered for them; login to a server with data → download offered without the upload question.
-- Tips: `::` tip shown once on first Create Deck, never again after dismissal; tap-zone tip not shown during the first card of a session.
+- New install connects to existing cloud content without an Upload/Download Anki prompt; interrupted initial download leaves the prior local generation valid.
+- New install with no account starts locally, later connection previews any existing cloud collection.
+- Personal and AppStore welcome show the same iCloud/local choices, with no Anki login entry.
 
-**Verification:** Onboarding UI tests for paths a and d pass on iPhone and Mac against the local sync server; paths b and c pass with U162.
+**Verification:** tools/mg Swift tests and VM onboarding suites; signed development-container connection is a separate prerequisite.
 
 ### U167. Appearance, accessibility and localization conformance for the shell
 
@@ -11821,6 +11833,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 ### U187. Session continuity: background, page termination, relaunch and external changes
 
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
+
 **Goal:** Keep the session exactly where it was across backgrounding, web content process termination, app termination, and changes from sync, local servers or other screens, never interrupting the card on screen without cause.
 
 **Requirements:** R452, R453, R454, R455, R456, R457, R458; AE20; also R679.
@@ -12386,7 +12400,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   - Add lists "Add: <stock kind>" and "Clone: <name>" ("<name> copy"), then asks for a name and selects the new type (R916).
   - Rename (R917). Delete with the R918 rules and messages.
   - Row actions: Fields (U201), Cards, Restore to Default (R919). Restore confirms with default No, then asks for a kind when the original kind is unknown (R914 rules owned by U34).
-- **`SchemaChangeGate`** (AppModel, shared with U201, U203 and import's merge option) asks U29 whether confirmation is needed (R951 rule owned there). It shows the full-upload warning once and passes `schemaConfirmed` to the op.
+- **Structural change validation** (shared with U201, U203 and import merging) asks U29 to validate mappings and coherent-generation publication. Preview destructive mappings; do not show an Anki full-upload warning in ordinary editing. Anki scm bookkeeping remains intact for a future explicit transfer (R951).
 - **Template editor (R929).**
   - `NotetypeDraft` is the editable copy. Front, Back and Styling are switched with ⌘1/⌘2/⌘3.
   - `TemplateCodeEditor` is native TextKit 2: monospaced, with quote, dash and text substitutions and autocorrect off. Tab inserts 4 spaces. ⌘F finds (NSTextFinder / UIFindInteraction).
@@ -12453,7 +12467,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Rename Back to Answer and save → front, back and browser templates now reference `Answer`, including `{{#Answer}}…{{/Answer}}` and `{{text:Answer}}` (U34 integration).
 - One draft that renames a field, adds one and reorders → one save; one undo step restores all three.
 - Delete the only field referenced by Front → after save, Front contains the first remaining field reference (R924, U34).
-- Covers AE39 (field part). Right after a sync, renaming a field shows no warning. Adding a field shows the full-upload warning once.
+- Covers AE39 (field part). Renaming or adding a field shows no Anki upload warning; validated generations remain coherent on a receiving Meguri device.
 - Reorder fields on a type with 20k notes (synthetic fixture) → progress shows and the UI stays interactive (no hitch over one frame in the hitch metric). The notes are rewritten.
 - Set "Sort by this field" on field 2 → the radio moves and the Browse sort column values change after save.
 
@@ -13099,7 +13113,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Approach:**
 - Change Deck (R1187, R1268): chooser preselects the current card's deck, filters by any path component, can create a deck inline, shows filtered decks disabled as targets; U87's Change Deck op returns filtered cards home, skips cards already in the target and recomputes memory state without rescheduling (R1188 core-owned).
-- Change Note Type (R1189): enabled only when U86's `selection_summary` reports one notetype; opens the U203 change-notetype screen in-window with the note ids; that screen owns mapping, the one-way-sync warning and saving.
+- Change Note Type (R1189): enabled only when U86's `selection_summary` reports one notetype; opens the U203 change-notetype screen in-window with the note ids; that screen owns mapping, destructive-mapping preview and coherent CloudKit publication.
 - Set Due Date (R1196): text input prefilled from synced `setDueBrowser`, validated live through the core's parser for `N`, `N-M`, `!` (inline error, no submit when invalid); on apply the input goes to U87's op, which stores `setDueBrowser` itself. FSRS interval semantics are core (R1197).
 - Reset (R1198): two toggles prefilled from `restorePositionBrowser` (default on) and `resetCountsBrowser` (default off), passed to U87's op, which stores them when changed. The sheets never write these keys themselves.
 - Grade Now (R1199): four buttons; keys 1–4 always work, and the user's configured answer keys (R135) work too when they differ; answers every selected card via the core.
@@ -13697,7 +13711,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Approach:**
 - Spec writer (KTD1) writes `specs/deckconfig/options-ui.md`: option labels and section membership in Anki's names, enum choice lists and display names, which review-sort orders show under FSRS-only, limit-tab default/clear semantics, and Anki's warning conditions; help texts are Meguri-written (R734).
 - Route `.deckOptions(deckId)` registered with U150: detail area on Mac/iPad, full-screen pushed view on iPhone (R730). Entry points are owned by U152 (deck ⋯ menu), U155 (the deck page's Deck Options button and the finished state's limit links), U175 (review ⋯ menu, current card's home deck) and U150 (Deck ▸ Deck Options… ⌥⌘O). U155's controls emit `.deckOptions(deckId)` intents and show only once this route is registered. This unit attaches the destination to them when it lands, following U152's attach pattern.
-- `DeckOptionsModel` loads one snapshot from U49 over U28's records (presets with use counts, the deck's preset id, deck-level limit/retention overrides, global options, defaults and valid ranges) on the interactive lane and keeps a pristine copy plus an editable value-type `DeckOptionsDraft`. All preset operations (add from defaults with name prompt, clone with name prompt, rename, remove, select, save-to-all-subdecks mode) change only the draft until Save (R731, R732). Default (id 1) shows no Remove; removing another preset asks for confirmation that the next sync must be one-way (R733).
+- `DeckOptionsModel` loads one snapshot from U49 over U28's records (presets with use counts, the deck's preset id, deck-level limit/retention overrides, global options, defaults and valid ranges) on the interactive lane and keeps a pristine copy plus an editable value-type `DeckOptionsDraft`. All preset operations (add from defaults with name prompt, clone with name prompt, rename, remove, select, save-to-all-subdecks mode) change only the draft until Save (R731, R732). Default (id 1) shows no Remove; removing another preset confirms the affected deck reassignment (R733), without an Anki upload warning.
 - Save (button, ⌘↩, ⌘S) sends one save request to U49's save op (over U28's preset ops), which applies R737's ordered steps as one undoable "Deck Options" op and rebuilds the queue; the UI then dismisses or stays per platform and the undo title reflects "Deck Options" (R737, R719). Dismissing with unsaved changes asks Discard / Keep editing, including sidebar navigation away on Mac/iPad via a U150 leave-guard (R734).
 - `OptionRow` chrome: label, control, inline warning slot (normal/strong styling), a restore-default control when the value differs from default, a help popover, and a "Global" badge for collection-wide options (R734, R735). Controls only accept in-range values using the core-supplied ranges (R753); defaults come from the core, never duplicated in Swift.
 - Structure: preset bar on top, "Essentials" section first, everything else in an "Advanced" disclosure grouped in Anki's sections and order (R736); each option appears exactly once. Hidden SM-2/parameter options are never rendered (R752); their stored values round-trip via U28.
@@ -13712,7 +13726,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Open for deck "Spanish" using preset "Languages" (used by 4 decks) → picker reads "Languages (used by 4 decks)".
 - Select preset "Default" and save → Spanish uses Default; ⌘Z → back to "Languages" with one undo step named "Deck Options".
 - Add preset "Test" (from defaults), cancel with Discard → no preset created in the collection.
-- Remove preset "Old" used by 2 decks → confirmation mentions one-way sync; after Save both decks use the selected preset and sync status reports one-way needed.
+- Remove preset "Old" used by 2 decks → confirmation names those decks; after Save both use the selected preset and the coherent generation is pending for CloudKit.
 - Default preset selected → Remove absent from the menu.
 - Save to all subdecks on "Japanese" with 3 descendants → all 4 decks use the preset.
 - Edit New cards/day then tap Back (iPhone) or click another sidebar item (Mac) → Discard / Keep editing prompt; Keep editing stays with the draft intact.
@@ -13868,6 +13882,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 ### U240. Delivery milestones and milestone gate runner
 
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
+
 **Goal:** Define milestones M0, M1R and M1–M5 as a machine-readable manifest: the anchor units in each, the suites that close it, and the steps the user performs. The order M0, M1R, M1, M2, M3, M4, M5 is one list in the manifest that `tools/mg milestone` (U19's `tools/mg.d/milestone.sh`, modified here) and `milestone-gate` read; no tool matches `M<digit>`. Provide one command that evaluates a milestone gate from suite results.
 
 **Requirements:** Success Criteria (all six, through the M5 gate); the milestone cadence that R1863, R1943 and R1950 refer to ("Delivery order and milestones" in Deferred to Planning); the M1R "Reviews first" row that Antoine chose on 2026-10-16.
@@ -13891,7 +13907,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
     - trial: the log covers the stated window of consecutive days with no fallback and no data incident;
     - device-session: U254's rule;
     - capture: the reference index lists every R1913 case id;
-    - first-sync (M1R): the evidence names the commit and dirty flag of the build that made the first real sync with AnkiWeb, the sync's start time, the U246 sync-area, U248 soak and U250 sync-class results it relied on (job, commit, finish time, outcome), and the backup of the real collection taken before it (file name and time). It passes only when the build is from a clean tree, all three results are passes recorded on that build's commit and finished before the sync started, and the backup predates the sync; anything else fails. It is not compared with the gate commit: fixes made during the trial move the gate commit, and the first sync cannot be redone.
+    - first-sync (M1R): the evidence names the commit and dirty flag of the build that made the first real sync with CloudKit, the cloud exchange's start time, the U246 transfer-compatibility, U248 cloudkit-signed and U250 sync-class results it relied on (job, commit, finish time, outcome), and the backup of the real collection taken before it (file name and time). It passes only when the build is from a clean tree, all three results are passes recorded on that build's commit and finished before the sync started, and the backup predates the sync; anything else fails. It is not compared with the gate commit: fixes made during the trial move the gate commit, and the historical first exchange is not overwritten by later trial fixes.
   - M1R has one device-run step per device (iPhone, iPad, Mac). A step whose evidence is absent reports `awaiting_user` naming it, so M1R never passes without all three; Antoine's Apple account in Xcode is their precondition (Risks).
   - `deferred`: items gated on an external dependency, such as foldable layouts on the Xcode 27.1 SDK. Each names its dependency from a fixed list, a machine-checkable condition (for the foldable lane, U8's `sim-setup` still reports `unavailable: toolchain`) and `approved_by: antoine`, written only from Antoine's chat approval as for quarantine (U19). The evaluator rejects any other entry, and fails the gate once the condition no longer holds while the deferred cells are not green.
   - `global`: conditions every milestone gate checks, outside the table-equality test: U19's rule that no conformance, sync or data-safety test is quarantined, zero untriaged nightly divergences (U247), and the native-oracle result attached from M1R (U246).
@@ -13925,6 +13941,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - The manifest names every anchor unit in exactly one milestone, checked by a test that compares it with the unit map.
 
 ### U240r. Reviews-first milestone in the running manifest
+
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
 
 **Goal:** Bring the milestone manifest and the milestone jobs in line with this plan's Delivery Milestones table (M0, M1R, M1–M5) when U240 was built before the reviews-first change reached the integration branch. U240 sat in the build batch that was running when Antoine chose reviews first (2026-10-16), so it may have landed with M0–M5 only. This unit lands the reviews-first plan change and the matching manifest in one merge, so U240's equality test never fails on the integration branch.
 
@@ -14239,6 +14257,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 ### U246. Conformance aggregate gate and requirement coverage report
 
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
+
 **Goal:** Aggregate every area's conformance scenarios into tiered gates and a requirement-level coverage report, so that no R1890–R1949 matrix dimension is silently missing. Run the macOS-native oracle check that KTD24 requires.
 
 **Requirements:**
@@ -14355,61 +14375,31 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `tools/mg nightly` produces one summary JSON with fuzz programs run, divergences, new regressions, invariant failures, ratio table and robustness-fuzz crashes.
 - Zero untriaged divergences are required at each milestone gate.
 
-### U248. Multi-client sync coexistence soak
+### U248. CloudKit convergence soak and manual Anki transfer round trips
 
-**Goal:** Prove that Meguri coexists with AnkiMobile and desktop Anki through one server over simulated weeks. Use three-party convergence (oracle clients as stand-ins), active-session sync, media resume and the two-device optimizer race, at core level and end to end from the app.
+**Goal:** Prove prolonged offline/online Meguri convergence independently from Anki migration compatibility.
 
-**Requirements:**
-- R1844 and R1845 (owned here as end-to-end checks).
-- Soak-level aggregation of R1926–R1933.
-- The sync part of the "zero-difference compatibility" Success Criterion.
-- AE9 and AE27 end to end.
+**Requirements:** R88, R365, R699, R1495, R2047–R2066, R1926–R1933 (manual-transfer lane).
 
-**Dependencies:**
-- U13, U3, U4, U118 (sync fuzz generator, hold-back property), U246
-- U107, U109, U111, U25, U43, U151, U175
-- Wires in when landed (Delivery Milestones): U47 (the two-device optimizer race), U210 (the Browse edit during a sync)
+**Dependencies:** U3, U4, U13, U25, U43, U47, U107, U109, U111, U118, U151, U175, U210, U246. U47/U210 legs wire in when landed.
 
 **Files:**
-- `conformance/scenarios/soak/` (fixed soak programs)
-- `core/crates/meguri-testkit/src/sync/fuzz.rs` (extend: time advance, party roles, schema-change event)
-- `app/MeguriUITests/Sync/CoexistenceSoakTests.swift`
-- `app/MeguriUITests/Sync/SessionSyncTests.swift`
-- `tools/mg` (jobs `soak`, `soak-app`)
+- `conformance/scenarios/soak/`, `conformance/scenarios/sync/`
+- `app/MeguriUITests/Sync/`, `app/Packages/MeguriCore/Tests/CoreBridgeTests/CloudKitSoakTests.swift`
+- `tools/mg` job registrations and result contracts for distinct cloud and transfer lanes
 
 **Approach:**
-- Core soak (Docker, weekly and at milestones):
-  - Parties: oracle client A ("desktop", creates and edits notes, changes presets), oracle client B ("AnkiMobile", reviews), Meguri, and a fresh oracle client C doing a full download at the end.
-  - The program covers 30 simulated days with rollovers and DST, with interleaved syncs, conflicts and a forced schema change. Programs come from U118's `sync/fuzz.rs` generator, which this unit extends with time advance (rollovers and DST), scripted party roles and a forced schema-change event, and run on U13's executor and convergence observation; this unit adds no checker of its own.
-  - Main assertion: the normalized dumps of A, B, Meguri and C converge, and C's Check Database finds zero problems.
-- Media: a synthetic 28.8k-file set. The transfer is interrupted at random points through toxiproxy `reset_peer`, and the app relaunches mid-transfer (process restart). The run resumes without re-downloading completed files, and reviewing continues during it (R1844).
-- Active-session scenarios (spec-flow recommendation), while Meguri has a session open:
-  - (a) Client A changes the current card and a queued card, both outside the held-back run's touched set. Assert the C5 events and the R727/R728 outcomes, and that the held-back answer stays undoable until the session ends and is never uploaded before that.
-  - (b) Client A changes the held-back card. After that sync the held-back run is cleared (`ClearedBySync`, KTD7, U25), undo is disabled with that reason, the card row follows R1527's newer-mtime rule, the answer's revlog row uploads on the next sync, and the four parties still converge.
-  - Assert that sanity checks never fail across 1,000 interleaved answers, undos and syncs, by running U118's hold-back property test at soak length (KTD6, KTD7).
-- Two-device optimizer: two Meguri cores both past 30 days, both out of session, optimize before either syncs. Every party converges to identical dumps, `sanityCheck2` never fails, and no device commits a partial parameter set; mixed memory states after the race are KTD8's accepted case.
-- App end to end (host): the iPhone simulator app syncs to U13's `syncserver` compose service (real clock), published on 127.0.0.1; the oracle-worker child server stays with the Docker core soak. It reviews 30 cards with auto-sync, backgrounds the app, and, once U210 lands, edits in Browse during a sync. The oracle client then verifies the uploaded state.
-- AnkiWeb is never contacted: the soak runner refuses non-private endpoints (R1876).
+- Cloud lane: multiple Meguri devices, offline study on each, delayed/reordered notifications, same-card reviews, concurrent note/config changes, structural generations, deletion and delayed offline-device rejoin. Assert deterministic convergence, preserved history, no resurrection, bounded memory/staging and hold-back behavior.
+- Include account change with in-flight callbacks, expired cursors/deleted zones, quota exhaustion, throttling, partial save failures, kill/relaunch at every durable boundary and interrupted assets. Two-device optimizer races join with U47; Browse edits during cloud exchange join with U210.
+- Run deterministic fake-service churn first, then a signed development-container Apple multi-device soak; identify which evidence uses real CloudKit. Never use a developer's production/private collection as test data or present fake delivery as Apple delivery evidence.
+- Transfer lane: explicitly invoke import/export against U13's local official Anki server and fresh oracle clients. Verify notes/cards/history/unknown fields/media survive round trips, transfer direction/backup safety and persisted cooldown. No automated AnkiWeb contact.
+- Result details separate CloudKit convergence from protocol conformance and include build commit, environment/container, fixture, duration, failure/recovery events and final content comparison. A pass on one lane cannot fill a missing result on the other.
 
-**Patterns to follow:**
-- Oracle-harness research §3 (server as a child of the oracle worker, toxiproxy topology).
-- KTD6, KTD7, KTD8.
-
-**Test scenarios:**
-- A 30-day, 3-party program with 2,000 ops: all four normalized dumps converge, and C's Check Database reports zero problems.
-- Client A adds a field to a note type (schema change) while Meguri has 20 unsynced answers. Meguri reports one-way required, makes a backup, and makes no silent overwrite. After the user picks download, the backup contains the 20 answers.
-- Covers AE9 end to end. 30 answers in an open review with auto-sync on: after 60 s the server holds 29 revlog rows, and undo of the 30th works. Backgrounding syncs immediately, again holding back the newest answer.
-- Covers AE27 end to end. Client A changes card X while X shows its answer side. Tapping Good writes nothing, labels refresh, and the next tap answers with the fresh state.
-- The media transfer is reset at 40% and the app is relaunched: the transfer resumes, files already downloaded are not fetched again (request log), and a review answered during the transfer commits ≤ 1 s (R1844, R1845).
-- The user edits a note in Browse during a sync that brings an incoming change to another note: both changes survive, and the local edit uploads on the next round (R1845). Wires in with U210.
-- Two Meguri devices, both out of session, optimize concurrently: after the next syncs all parties hold identical dumps, and neither device ever committed a partial parameter set (KTD8). Wires in with U47.
-- Client A edits the held-back card during an open session → after the sync `peek` reports `ClearedBySync`, and the answer's revlog row reaches the server on the next sync.
-
-**Verification:**
-- `tools/mg soak` (core) and `tools/mg soak-app` (host) are green at M1R and later.
-- A weekly run summary is in the nightly report.
+**Verification:** tools/mg runs deterministic lanes and records signed integration prerequisites; CloudKit soak evidence is required before the real multi-device trial.
 
 ### U249. Private real-collection suite and anonymizer (T3)
+
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
 
 **Goal:** Run the private suite on a read-only copy of the user's collection at each milestone and release, record only aggregates, and provide the anonymized clone for anything that might leave the machine.
 
@@ -14461,6 +14451,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `conformance/reports/private/M1R.json` (and later milestones) shows 100% agreement for next states, queues and renders, and documented outliers only for memory states; from M1 (U18's timing baseline) it also shows ratios < 1.0 against Anki for every timed operation.
 
 ### U250. Core fault-injection and data-safety suite
+
+**CloudKit acceptance extension:** In addition to retained manual-transfer tests, cover R2047–R2059 and R2064–R2066: durable outbox/cursor crash windows, account changes and late callbacks, concurrent/offline review reconciliation, tombstone replay, coherent structural generations, quota/throttling/partial-record failures and CKAsset staging recovery. Distinguish fake tests from signed Apple integration evidence; an Anki server/oracle result cannot satisfy the CloudKit lane.
 
 **Goal:** Prove the data-safety guarantees at the core level. Kill at named and random points during every write path, fill the disk, corrupt the file, and contend for the lock. Each must leave an openable, integrity-checked collection with every committed operation present.
 
@@ -14525,6 +14517,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Verification:** `tools/mg fault` passes every operation class in the current milestone with ≥ 200 random kills per class nightly and all named points per change.
 
 ### U251. App-level kill, disk-full and restore end-to-end suite
+
+**CloudKit acceptance extension:** In addition to retained manual-transfer tests, cover R2047–R2059 and R2064–R2066: durable outbox/cursor crash windows, account changes and late callbacks, concurrent/offline review reconciliation, tombstone replay, coherent structural generations, quota/throttling/partial-record failures and CKAsset staging recovery. Distinguish fake tests from signed Apple integration evidence; an Anki server/oracle result cannot satisfy the CloudKit lane.
 
 **Goal:** Prove the same guarantees through the real app on simulators and the Mac: kills during UI-driven operations, the suspend protocol, a disk-full message, corruption UX, media trash, destructive-op confirmation, and backup restore end to end.
 
@@ -14725,6 +14719,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 ### U255. Release configuration validation
 
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
+
 **Goal:** Check every shipped build configuration mechanically: the personal build and the App Store build, iOS and Mac. Cover the AnkiWeb switch, privacy manifest and required-reason symbols, test-hook absence, entitlements, architecture, network endpoints, naming, and acknowledgements completeness, so release readiness is a command, not a checklist.
 
 **Requirements:**
@@ -14747,7 +14743,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   - No "Anki" in product name, display name, bundle ids or icon asset names (R2028).
   - The sync client identifier string starts with "Meguri" (R2030).
   - Web inspection is disabled in Release (R2040).
-  - The Mac binary is arm64 only, with entitlements exactly the KTD22 set: sandbox + network.server + network.client + files.user-selected.read-write + files.bookmarks.app-scope, plus the App Group when signed (U7) (R2041).
+  - The Mac binary is arm64 only, with the KTD22 entitlement set: sandbox + network.server + network.client + files.user-selected.read-write + files.bookmarks.app-scope, plus App Group, CloudKit container/services and remote notifications when signed (U7, R2041, R2065). CloudKit test/production isolation is checked; unexpected additional capabilities still fail.
   - The widget does not link the core.
 - Required-reason APIs (R2034, R2035): the symbol scan of the app, extension and the static core lists used APIs. Each must have a matching declaration in the privacy manifests (file timestamps C617.1, boot time 35F9.1, disk space E174.1, user defaults CA92.1 or the app-group reason).
 - No analytics and no unexpected network (R2036, R2037): a link-map scan finds no third-party networking SDKs. A string scan finds no URLs beyond the sync-server configuration and documented endpoints.
@@ -14759,7 +14755,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `app/Config/*.xcconfig`.
 
 **Test scenarios:**
-- Covers AE89. The App Store build's binaries contain no `ankiweb.net` or AnkiWeb sign-in string, and the Settings sync section offers only a custom server URL (checked by a UI test under that config). The personal build shows the AnkiWeb option.
+- Covers AE89. The App Store build's binaries contain no `ankiweb.net` or AnkiWeb sign-in string, and Settings offers iCloud sync plus file/custom-server Anki transfers (checked by a UI test under that config). The personal build shows the AnkiWeb option.
 - A planted call to `stat` modification-date APIs with C617.1 removed from the manifest: `release-check` fails, naming the symbol and the missing reason.
 - A test-hook launch-argument handler accidentally compiled into Release: the symbol scan fails.
 - The Mac entitlements gain `com.apple.security.files.downloads.read-write`: the check fails with the unexpected key.
@@ -14768,6 +14764,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Verification:** `tools/mg release-check personal` and `tools/mg release-check appstore` are green for iOS and macOS at M5. Both run on every change to `app/Config/` or entitlements.
 
 ### U256. Milestone device runs (user-performed)
+
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
 
 **Goal:** Give Antoine one documented, mostly automated procedure to run the performance, VoiceOver and feel checks on his real iPhone 17 Pro, 2025 iPad and M3 Max Mac at each milestone. Results are recorded as evidence that the milestone gate reads.
 
@@ -14785,10 +14783,10 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - The user connects and trusts devices and handles signing (user-performed). The agent prepares the Profile build (U7's R1866 reading: Release optimization plus test hooks) and the runbook.
 - The script installs the Profile build with the perf test bundle. It loads the synthetic 150k and 500k fixtures through the test hooks. It then runs the U243–U245 suites with device rules in U241 (absolute budgets).
 - Real-collection leg (AE81). The real collection never leaves the Mac as a copy of `local-data/` (root AGENTS.md, Goal Capsule stop condition), unless Antoine approves a pushed copy (Open Questions). The automated session must never sync, because its scripted answers would reach his account (R1876, R1938):
-  1. The script resets the `.dev` container first, so the one-way prompt offers download only (R1518).
-  2. The user signs in to his own sync account in that build and runs the full download.
-  3. The script then launches with a Profile-only test-hook launch argument (KTD18) that turns automatic and manual sync off, and the run log records every network request.
-  4. At teardown the script deletes the collection and the stored sync login (Keychain item) from the container.
+  1. The script resets the .dev app container and disables all CloudKit sending/fetching and Anki transfers before any fixture arrives. Test signing never connects to the production CloudKit container.
+  2. The private real-collection leg stays on the Mac unless Antoine explicitly approves a scoped device copy; any approved copy uses local file import, not a test-cloud download. Otherwise report the device private-fixture leg awaiting_user and continue with synthetic fixtures.
+  3. The Profile-only test hook verifies that every cloud/Anki network path remains disabled before scripted answers begin; record attempted requests and fail on any enabled sync path.
+  4. At teardown remove the test collection and tracking/credential state from the isolated app container. Production data and the daily-driver app are untouched.
 - VoiceOver (R1978) runs with real VoiceOver when the simulator fallback was used.
 - Feel session checklist (R1990): reveal, answer → next, undo, sheet, glass and haptics. The user records pass/notes per signature screen; the result also counts as that month's device session (U254).
 - R1913 capture (an M1R user step before U68): hand-capture reference screenshots from AnkiMobile and Anki desktop for the R1913 corpus cases into the rendering area's reference directory, whose index lists every case id. On desktop, a separate Anki profile imports the corpus package. On AnkiMobile, sync stays off from before the corpus import until the pre-import state is restored from AnkiMobile's backup, so no test note reaches his collection.
@@ -14809,6 +14807,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Verification:** Evidence files exist for the iPhone, iPad and Mac at each milestone from M1R, all budgets pass, and the M5 run covers every budget group.
 
 ### U257. Release readiness and 30-day daily-driver gate
+
+**Sync integration contract:** Routine synchronization and its acceptance follow R2043–R2066 and KTD25. Any retained Anki endpoint, meta, USN or full-sync procedure below is manual-transfer compatibility only (KTD26). Update this unit's normative specs and tests to the CloudKit bridge/recovery contract before implementation; earlier Anki-only evidence does not close the new cloud work.
 
 **Goal:** Close the product with one release gate that aggregates every suite and the user's 30-day daily-driver trial against the Success Criteria.
 
@@ -14853,6 +14853,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 ## Verification Contract
 
+CloudKit acceptance is new work. U113/U114/U117/U118/U248/U250/U251 must define the reviewed cloud contract, deterministic fixtures, actual tools/mg jobs/result scopes and signed Apple integration lane before these requirements can pass. Existing Anki-only results remain transfer evidence. The milestone manifest mirrors the revised product checkpoints; implementing the required cloud result scopes/validators is implementation work, not evidence that the new backend is ready.
+
+The manifest requires U248 cloudkit-signed (and later cloudkit-two-device-optimizer) scope items; older coexistence receipts cannot satisfy them. U248 must validate signed container/environment provenance and final multi-device content convergence. Required cloud evidence covers AE91–AE94 and AE96, real signed multi-device convergence and the R2051 crash matrix. Manual-transfer evidence covers AE95 plus the retained local-Anki-server round trips. Core tests stay in Docker; Apple UI runs stay in the macOS test VM. A missing signed environment is recorded as a prerequisite, never silently substituted with fake/local-Anki-server results.
+
+
 All verification runs through `tools/mg <job>` (U1). Each job writes `build/mg/<job>/<run-id>/result.json` and exits with its status. Jobs run in Docker or on the host, as KTD19 places them.
 
 | Gate | Command | Runs | Proves |
@@ -14863,7 +14868,7 @@ All verification runs through `tools/mg <job>` (U1). Each job writes `build/mg/<
 | App build and drive | `tools/mg build-app`, `tools/mg sim-setup`, `tools/mg drive` | every app change | iPhone and iPad simulators and Mac build, launch, screenshot and hierarchy (R1961–R1966) |
 | Visual | `tools/mg snapshots`, `tools/mg motion`, `tools/mg critic`, `tools/mg gallery` | touched screens; weekly gallery | snapshot matrix, contact sheets and critic rubric (R1970–R1991) |
 | Performance | `tools/mg ui-perf`, `tools/mg bench`, `tools/mg bench-icount`, `tools/mg bench-mac`, `tools/mg perf-gate`, `tools/mg perf-ratio` | smoke per change; full at milestones | budgets R1807–R1866; 10% regression rule (R1863, R1864) |
-| Sync rig | `tools/mg sync-rig`, `tools/mg soak` | sync rig on sync changes and nightly; soak weekly and at milestones | two-client coexistence against the local server (U13, U117, U248) |
+| Sync verification | `tools/mg sync-rig`, plus U248 cloud jobs to be defined before acceptance | transfer compatibility locally; cloud convergence at milestones | Separate local-Anki-server migration results from deterministic CloudKit tests and signed development-container multi-device evidence (U13, U117, U248) |
 | Safety | `tools/mg fault`, `tools/mg safety-app` | nightly; milestones | fault injection and disk-full (R2003, R2015) |
 | Private collection | `tools/mg private-suite` | milestones (local only) | R1938–R1943 on the user's collection, which never leaves the Mac |
 | Nightly | `tools/mg nightly` | scheduled (once the user approves the scheduler entry) | differential fuzzing, JPlag similarity, 365-day DST runs, Anki timing ratio |
