@@ -35,7 +35,7 @@ A backup that is not forced is made only when the collection changed since the l
 - A periodic backup is not made when the backups folder holds an entry whose creation time `c` satisfies `c <= now` and `(now - c)`, in whole seconds rounded down, `< interval × 60`.
 - Every directory entry counts, whatever its name or type: backups and server copies, any file the user put there (`notes.txt`), a file whose name dates it months ago (its creation time counts, never the date in its name), unpublished work (`.meguri-tmp-…`), a directory, a symbolic link (the link itself, not its target).
 - Use OS creation timestamps. Ignore timestamp read errors.
-- An interval of 0 never blocks. A folder that does not exist has no entries.
+- An interval of 0 never blocks. A folder that does not exist has no entries (Meguri's choice: Anki fails a backup that is not forced when it cannot list the folder, and its desktop always creates the folder first).
 - Anki computes `interval × 60` in 32-bit unsigned arithmetic that wraps: from 71,582,789 minutes on, its limit is the product modulo 2^32 seconds, and 1,073,741,824 minutes gives 0 (nothing blocks). Meguri computes the product exactly. The settings offer at most 9999 minutes (`package/backups#B6.2`); no scenario uses such values.
 
 ### T2.3 Meguri's rule
@@ -100,7 +100,7 @@ Notes on the deadline:
 
 ### T4.1 What Anki forces (Anki 26.9.3)
 
-Anki's desktop makes a forced backup (interval ignored, T2.1 still applied, the operation waiting for it) before a one-way download (full download), before a `.colpkg` import (after the user confirms the replacement) and before Check Database, and for "Create Backup" (menu). It makes none before a one-way upload, before restoring a backup, or before deleting decks, note types, empty cards or unused media. Its restore imports the chosen backup without a backup first, makes no backup when the profile closes during the restore, and keeps automatic sync off until the profile is closed.
+Anki's desktop makes a forced backup (interval ignored, T2.1 still applied, the operation waiting for it) before a one-way download (full download), before a `.colpkg` import (after the user confirms the replacement) and before Check Database, and for "Create Backup" (menu). It makes none before a one-way upload, before restoring a backup, or before deleting decks, note types, empty cards or unused media. Restoring a backup from the main window first closes the collection as any close does (the closing sync when automatic sync is on, then the close backup, which is not forced, so T2.1 and T2.2 decide), then imports the chosen backup with no forced backup. Until the restored profile is closed again, Anki syncs nothing automatically and makes no close backup; its 5-minute periodic checks go on.
 
 ### T4.2 Meguri
 
@@ -177,7 +177,7 @@ A safety backup becomes a byte copy when the lifecycle is `Failed` (`Corrupt`, o
 - **Cancel or failure before the rename**: the lifecycle returns to the state it had (Ready, or `Failed`) with the same generation; the pause is as `engine/collection-replace#R6.2` says; the safety backup stays.
 - **States**: allowed from Ready, from `Failed{Corrupt}` (`engine/lifecycle#L4`) and from NoCollection (no safety backup then).
 - After it, the restored collection's `col.mod` (the restore instant) differs from the reference, so the scheduler arms a deadline (T3.3) from the safety backup's creation time.
-- Anki, for comparison: its restore is its `.colpkg` import (the same stamps, `engine/collection-replace#R7`), with no backup first and automatic sync off until the profile closes (T4.1).
+- Anki, for comparison: its restore is its `.colpkg` import (the same stamps, `engine/collection-replace#R7`), with no forced backup first and automatic sync off until the restored profile closes (T4.1).
 
 ## T9. Errors
 
@@ -209,4 +209,4 @@ The errors of `package/backups#B4`, `package/container#P13`, `engine/collection-
 | T8: a backup with a corrupted page refused, the collection hash unchanged (R1638); refused while a session is open; once in ExclusiveBusy an answer is refused and every answer committed before is in the pre-restore backup; cancel before the rename keeps lifecycle and generation; restore of a server copy | same file |
 | T8 end to end (R2010): back up, answer 5 cards, restore: the 5 reviews absent, `scm` changed, `CollectionReplaced` emitted, `oneWayChoicePending` true, a pre-restore backup holding the 5 reviews; in the U13 harness the next automatic sync does not run and a manual sync asks for the one-way choice | same file, in Docker and in the iOS simulator through U133a |
 
-Goldens: the six `package/backup-triggers` scenarios need the oracle op `backup` (`specs/conformance/backup-trigger-ops.md` H1), which the oracle maintainer adds before recording them with `tools/mg oracle record package/backup-triggers`. Their expected values were checked against black-box runs of Anki 26.9.3 in the oracle image (`oracle/provenance/backup-triggers.md`).
+Goldens: every `package/backup-triggers` scenario has one, recorded by the oracle with the op `backup` (`specs/conformance/backup-trigger-ops.md` H1), and their outcomes follow T2 and T4. Two goldens hold Anki's side of a deviation, and the deviation gives Meguri's: `forced-unchanged` (T4.2) and `reopen` (T2.3). The scenarios fail goldens-check and the T0 run until U127's adapter declares `backup` and the testkit's scenario model reads it (`backup-trigger-ops` H4), besides U126's `add_backup_files`, `force_backup` and `backup_files` (`backup-ops` F8).
