@@ -1,0 +1,142 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c1", "#c2"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n2"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c4", "#c5"],
+          "note": "#n3"
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c6"],
+          "note": "#n4"
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c7"],
+          "note": "#n5"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c8"],
+          "note": "#n6"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c9"],
+          "note": "#n7"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c10"],
+          "note": "#n8"
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c11"],
+          "note": "#n9"
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c12"],
+          "note": "#n10"
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c13"],
+          "note": "#n11"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c14"],
+          "note": "#n12"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c15"],
+          "note": "#n13"
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["p1", 0, "Mixed", 0, 825],
+            ["p1", 1, "Mixed", 0, 825],
+            ["p2", 0, "Mixed", 0, 82],
+            ["p2", 1, "Mixed", 0, 82],
+            ["p3-split", 0, "Mixed", 0, 647],
+            ["p3-split", 1, "Ordered", 0, 3],
+            ["p0", 0, "Mixed", 0, 801],
+            ["p998", 0, "Mixed", 0, 779],
+            ["p999", 0, "Mixed", 0, 574],
+            ["p1000", 0, "Mixed", 0, 998],
+            ["p1001", 0, "Mixed", 0, 661],
+            ["p5000", 0, "Mixed", 0, 4542],
+            ["p123456789", 0, "Mixed", 0, 33597438],
+            ["p4294967295", 0, "Mixed", 0, -1963237748],
+            ["ordered-p0", 0, "Ordered", 0, 0],
+            ["p1-reviewed", 0, "Mixed", 1, 1894705895],
+            ["p1-reviewed", 1, "Mixed", 0, 82]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["3"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "cardgen/position/random",
+  "scenario_sha256": "4d2513481ebd41d32055dd20c8c4db27e355b78c0b2ab537f012f14e53c07fa9",
+  "tz": "UTC"
+}
