@@ -136,6 +136,20 @@ case "$name $*" in
   "vm-ssh xcodebuild -version")
     [ "${STUB_VM_SSH:-1}" = 1 ] || exit 255
     printf 'Xcode %s\nBuild version %s\n' "${STUB_VM_XCODE:-27.0}" 27A266a ;;
+  "vm-ssh stat -f %Su /dev/console")
+    [ "${STUB_VM_SSH:-1}" = 1 ] || exit 255
+    echo "${STUB_VM_CONSOLE:-meguri}" ;;
+  "vm-ssh printf \"uid %s\\nsysctl\\n\" \"\$UID\"; "*)
+    # The VM's process check (U19c): STUB_VM_PROCS processes of its user
+    # (501) of 2900, 300 of others; STUB_VM_FORK=1: its shell cannot fork.
+    [ "${STUB_VM_SSH:-1}" = 1 ] || exit 255
+    if [ "${STUB_VM_FORK:-0}" = 1 ]; then
+      echo "zsh:1: fork failed: resource temporarily unavailable" >&2
+      exit 1
+    fi
+    printf 'uid 501\nsysctl\n2900\n4000\nps\n'
+    awk -v n="${STUB_VM_PROCS:-1600}" 'BEGIN { for (i = 0; i < n; i++) print "  501"; for (i = 0; i < 300; i++) print "    0" }'
+    printf 'end\n' ;;
   "vm-ssh sw_vers -buildVersion")
     [ "${STUB_VM_SSH:-1}" = 1 ] || exit 255
     echo "${STUB_VM_MACOS_BUILD:-26A434}" ;;
@@ -192,6 +206,8 @@ assert_read_only_calls() {
     -e '^vm-ssh xcodebuild -version$' \
     -e '^vm-ssh sw_vers -buildVersion$' \
     -e '^vm-ssh xcrun simctl list runtimes --json$' \
+    -e '^vm-ssh stat -f %Su /dev/console$' \
+    -e '^vm-ssh printf "uid %s\\nsysctl\\n" "\$UID"; sysctl -n kern\.maxprocperuid kern\.maxproc; printf "ps\\n"; ps -A -o uid=; printf "end\\n"$' \
     "$STUB_LOG" || true)"
   if [ -n "$bad" ]; then
     echo "doctor issued commands outside the read-only allowlist:"
@@ -537,6 +553,39 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   [ "$(field .status)" = warn ]
   jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac" and .status == "warn" and (.message | contains("connect the drive that holds the VM")))' "$result"
   [ "$(field '.details.mac_vm.vms[0].drive_connected')" = false ]
+  [ "$(field '.user_steps[] | select(.id == "mac-vm") | .state')" = missing ]
+  assert_read_only_calls
+  validate "$result"
+}
+
+# bats test_tags=gate
+@test "doctor lists mac-vm while the running VM does not answer in a logged-in session or is near its process limit, so catch-up waits (U19c)" {
+  make_stubs
+  mg doctor
+  [ "$(field .status)" = pass ]
+  [ "$(field '[.user_steps[] | select(.id == "mac-vm")] | length')" = 0 ]
+  [ "$(field -c '.details.mac_vm.vms[0] | [.console, .procs.user, .procs.max_per_user, .procs.free]')" = '["meguri",1600,2900,1300]' ]
+
+  # SSH does not answer: queued jobs wait for it.
+  STUB_VM_SSH=0 mg doctor
+  [ "$(field .status)" = warn ]
+  [ "$(field '.user_steps[] | select(.id == "mac-vm") | "\(.state) \(.required) \(.title)"')" = "missing true Let the macOS test VM answer again" ]
+  [[ "$(field '.user_steps[] | select(.id == "mac-vm") | .how')" == *"meguri-mac does not answer over SSH"* ]]
+
+  # The login window has the console.
+  STUB_VM_CONSOLE=root mg doctor
+  jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac" and .status == "warn" and (.message | contains("no user is logged in there")))' "$result"
+  [ "$(field '.user_steps[] | select(.id == "mac-vm") | .state')" = missing ]
+
+  # Near the process limit: 2700 of 2900, 200 free where a job needs 400.
+  STUB_VM_PROCS=2700 mg doctor
+  jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac" and .status == "warn" and (.message | contains("near its process limit (2700 of 2900 processes of its user, 3000 of 4000 in all): 200 free, a job needs 400")))' "$result"
+  [ "$(field '.user_steps[] | select(.id == "mac-vm") | .state')" = missing ]
+  [ "$(field '.details.mac_vm.vms[0].procs.free')" = 200 ]
+
+  # Its shell cannot fork the check.
+  STUB_VM_FORK=1 mg doctor
+  jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac" and .status == "warn" and (.message | contains("fork failed")))' "$result"
   [ "$(field '.user_steps[] | select(.id == "mac-vm") | .state')" = missing ]
   assert_read_only_calls
   validate "$result"

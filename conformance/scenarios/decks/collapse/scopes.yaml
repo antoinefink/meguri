@@ -1,0 +1,20 @@
+# Collapsing and expanding (specs/decks/decks.md D10; R36, R37, R69): the
+# browser scope changes browser_collapsed only and the study scope
+# study_collapsed only; each written deck is stamped; a deck already in the
+# requested state is not written. A deck expanded in both scopes stores an
+# empty deck common blob, still with the BLOB storage class.
+id: decks/collapse/scopes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["P::C"]
+steps:
+  - advance: 1m
+  - set_deck_collapsed: {decks: [P], scope: browser, collapsed: false}
+  - observe: [decks]
+  - advance: 1m
+  - set_deck_collapsed: {decks: [P, "P::C"], scope: study, collapsed: false}
+  - advance: 1m
+  - set_deck_collapsed: {decks: [P], scope: study, collapsed: false}
+  - set_deck_collapsed: {decks: ["P::C"], scope: browser, collapsed: true}
+  - observe: [decks]
+  - db_exec: {sql: "SELECT replace(name, char(31), '::'), hex(common), typeof(common) FROM decks ORDER BY id"}

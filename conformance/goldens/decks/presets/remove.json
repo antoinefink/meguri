@@ -1,0 +1,111 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, 1894701600000, 1894701600000]
+          ]
+        }
+      },
+      {},
+      {
+        "remove_preset": {
+          "error": "default_preset"
+        }
+      },
+      {},
+      {
+        "decks": {
+          "A": {
+            "browser_collapsed": true,
+            "config_id": 1894701600001,
+            "filtered": false,
+            "id": 1894701600000,
+            "mtime_secs": 1894701660,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "B": {
+            "browser_collapsed": true,
+            "config_id": 1894701600001,
+            "filtered": false,
+            "id": 1894701600001,
+            "mtime_secs": 1894701660,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "C": {
+            "browser_collapsed": true,
+            "config_id": 1894701600001,
+            "filtered": false,
+            "id": 1894701600002,
+            "mtime_secs": 1894701600,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "D": {
+            "browser_collapsed": true,
+            "config_id": 1894701600001,
+            "filtered": false,
+            "id": 1894701600003,
+            "mtime_secs": 1894701660,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "Default": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1,
+            "mtime_secs": 0,
+            "study_collapsed": true,
+            "usn": 0
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1, "Default", 0, 0],
+            [1894701600001, "Keep", 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701660000, 1894701600000, 1894701660000, 0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d3d41dad6e7541f21252ed38d15adc18f36fa9187cb31cb56d67cd76a545e867",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "decks/presets/remove",
+  "scenario_sha256": "56c016cdf0e1f70f44fe4e32a0929c6ec300cdb408c1f4b84b69f6f3a949e50d",
+  "tz": "UTC"
+}

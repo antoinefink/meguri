@@ -284,9 +284,9 @@ final class AgentDriver {
         case let .launch(options):
             try launch(options)
         case let .tap(id):
-            try coordinate(at: try hitPoint(id)).tap()
+            try coordinate(at: try hitPoint(id)).clickOrTap()
         case let .type(id, text):
-            try coordinate(at: try hitPoint(id)).tap()
+            try coordinate(at: try hitPoint(id)).clickOrTap()
             try running().typeText(text)
         case let .swipe(id, direction):
             try drag(id, direction, scroll: false)
@@ -424,7 +424,7 @@ final class AgentDriver {
         if scroll { vector = CGVector(dx: -vector.dx, dy: -vector.dy) }
         let end = start.withOffset(vector)
         #if os(macOS)
-        start.press(forDuration: 0.05, thenDragTo: end)
+        start.click(forDuration: 0.05, thenDragTo: end)
         #else
         start.press(forDuration: 0.05, thenDragTo: end, withVelocity: scroll ? .default : .fast, thenHoldForDuration: 0)
         #endif

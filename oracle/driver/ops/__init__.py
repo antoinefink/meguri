@@ -12,6 +12,7 @@ from . import (  # noqa: F401
     notes,
     notetypes,
     package,
+    presets,
     sched,
     storage,
     storage_open,

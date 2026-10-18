@@ -115,7 +115,7 @@ impl Writer {
 }
 
 impl<'c> WriteScope<'c> {
-    fn begin(
+    pub(crate) fn begin(
         conn: &'c Connection,
         mode: StampMode,
         clock: &'c dyn Clock,
@@ -309,6 +309,15 @@ impl<'c> WriteScope<'c> {
     /// Writes a typed record: inserted, updated, or skipped when unchanged.
     pub fn put<R: Record>(&mut self, record: &R) -> Result<Written, StorageError> {
         self.put_cells(R::TABLE, record.to_cells(), false)
+    }
+
+    /// Stamp even an unchanged row (decks/decks D8, D9).
+    pub fn put_deck_forced(&mut self, deck: &Deck) -> Result<Written, StorageError> {
+        self.put_cells(Table::Decks, deck.to_cells(), true)
+    }
+
+    pub fn put_card_forced(&mut self, card: &Card) -> Result<Written, StorageError> {
+        self.put_cells(Table::Cards, card.to_cells(), true)
     }
 
     fn add<R: Record>(&mut self, record: &R) -> Result<i64, StorageError> {
@@ -613,19 +622,19 @@ const SIDECARS: [&str; 3] = ["-wal", "-shm", "-journal"];
 /// created, while that file is still the one it created, and the sidecars,
 /// none of which was there when it claimed the path. It never removes a
 /// file another caller made.
-struct Claim<'p> {
-    path: &'p Path,
+pub(crate) struct Claim {
+    path: PathBuf,
     /// Device and inode of the file the claim created.
     file: (u64, u64),
     settled: bool,
 }
 
-impl<'p> Claim<'p> {
+impl Claim {
     /// Creates the empty file at `path` with `O_CREAT | O_EXCL`, so of
     /// callers racing for one path exactly one gets it. Refused when the
     /// file exists or a sidecar is next to it (SQLite would read a stale
     /// `-wal` into the new file).
-    fn take(path: &'p Path) -> Result<Claim<'p>, StorageError> {
+    pub(crate) fn take(path: &Path) -> Result<Claim, StorageError> {
         let exists = StorageError::BuilderRefused {
             reason: BuilderRefusal::Exists,
         };
@@ -638,7 +647,7 @@ impl<'p> Claim<'p> {
             Err(e) => return Err(io(e)),
         };
         let mut claim = Claim {
-            path,
+            path: path.to_path_buf(),
             file: (0, 0),
             settled: false,
         };
@@ -678,15 +687,15 @@ impl<'p> Claim<'p> {
     }
 }
 
-impl Drop for Claim<'_> {
+impl Drop for Claim {
     fn drop(&mut self) {
         if self.settled || !self.still_ours() {
             return;
         }
         for suffix in SIDECARS {
-            let _ = std::fs::remove_file(sibling(self.path, suffix));
+            let _ = std::fs::remove_file(sibling(&self.path, suffix));
         }
-        let _ = std::fs::remove_file(self.path);
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 

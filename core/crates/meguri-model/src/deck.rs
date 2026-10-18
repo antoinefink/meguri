@@ -52,3 +52,23 @@ pub fn native_name(human: &str) -> String {
         .collect();
     components.join(&FIELD_SEPARATOR.to_string())
 }
+
+/// decks/decks D1: normalization on every stored-name write.
+pub fn normalize_native_name(native: &str) -> String {
+    native
+        .split(FIELD_SEPARATOR)
+        .map(normalize_component)
+        .collect::<Vec<_>>()
+        .join("\u{1f}")
+}
+
+fn normalize_component(component: &str) -> String {
+    let clean: String = component.chars().filter(|c| !c.is_ascii_control()).collect();
+    let composed: String = clean.nfc().collect();
+    let trimmed = composed.trim_matches(|c: char| c.is_whitespace() || c == ':');
+    if trimmed.is_empty() {
+        "blank".to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}

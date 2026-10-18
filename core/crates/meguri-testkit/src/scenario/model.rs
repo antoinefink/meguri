@@ -933,11 +933,44 @@ pub enum Step {
     Converge(NoArgs),
     /// Live scenarios only (D9): the collection moves to this side.
     Handoff(Side),
+    /// deck-ops.md K2.
+    #[serde(deserialize_with = "op_mapping")]
+    AddDeck(NameArgs),
+    /// deck-ops.md K3.
+    #[serde(deserialize_with = "op_mapping")]
+    RenameDeck(RenameDeckArgs),
+    /// deck-ops.md K4.
+    #[serde(deserialize_with = "op_mapping")]
+    ReparentDecks(ReparentDecksArgs),
+    /// deck-ops.md K5.
+    #[serde(deserialize_with = "op_mapping")]
+    DeleteDecks(DecksArgs),
+    /// deck-ops.md K6.
+    #[serde(deserialize_with = "op_mapping")]
+    SetDeckCollapsed(SetDeckCollapsedArgs),
+    /// deck-ops.md K7.
+    #[serde(deserialize_with = "op_mapping")]
+    SetCurrentDeck(DeckArgs),
+    /// deck-ops.md K8.
+    #[serde(deserialize_with = "op_mapping")]
+    AddPreset(NameArgs),
+    /// deck-ops.md K8.
+    #[serde(deserialize_with = "op_mapping")]
+    ClonePreset(PresetNameArgs),
+    /// deck-ops.md K8.
+    #[serde(deserialize_with = "op_mapping")]
+    RenamePreset(PresetNameArgs),
+    /// deck-ops.md K9.
+    #[serde(deserialize_with = "op_mapping")]
+    RemovePreset(RemovePresetArgs),
+    /// deck-ops.md K10.
+    #[serde(deserialize_with = "op_mapping")]
+    SetDeckPreset(SetDeckPresetArgs),
 }
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 44] = [
+    pub const NAMES: [&'static str; 55] = [
         "advance",
         "set_clock",
         "add_note",
@@ -982,6 +1015,17 @@ impl Step {
         "net_fault",
         "converge",
         "handoff",
+        "add_deck",
+        "rename_deck",
+        "reparent_decks",
+        "delete_decks",
+        "set_deck_collapsed",
+        "set_current_deck",
+        "add_preset",
+        "clone_preset",
+        "rename_preset",
+        "remove_preset",
+        "set_deck_preset",
     ];
 
     /// The ops only actor scenarios have (sync-ops.md S1).
@@ -1034,6 +1078,17 @@ impl Step {
             Step::NetFault(_) => "net_fault",
             Step::Converge(_) => "converge",
             Step::Handoff(_) => "handoff",
+            Step::AddDeck(_) => "add_deck",
+            Step::RenameDeck(_) => "rename_deck",
+            Step::ReparentDecks(_) => "reparent_decks",
+            Step::DeleteDecks(_) => "delete_decks",
+            Step::SetDeckCollapsed(_) => "set_deck_collapsed",
+            Step::SetCurrentDeck(_) => "set_current_deck",
+            Step::AddPreset(_) => "add_preset",
+            Step::ClonePreset(_) => "clone_preset",
+            Step::RenamePreset(_) => "rename_preset",
+            Step::RemovePreset(_) => "remove_preset",
+            Step::SetDeckPreset(_) => "set_deck_preset",
         }
     }
 
@@ -1278,6 +1333,97 @@ pub struct BrowserConfigSetArgs {
     pub value: Value,
 }
 
+/// `add_deck: {name}` (deck-ops.md K2) and `add_preset: {name}` (K8): the
+/// name as typed, passed to the operation as given (K1).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NameArgs {
+    pub name: String,
+}
+
+/// `rename_deck: {deck, name}` (deck-ops.md K3): the deck by its stored human
+/// name (K1, not empty: checked on load) and the typed new full name.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenameDeckArgs {
+    pub deck: String,
+    pub name: String,
+}
+
+/// `reparent_decks: {decks, parent}` (deck-ops.md K4): at least one deck, in
+/// order (checked on load); `parent` the target deck, empty for the top
+/// level.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReparentDecksArgs {
+    pub decks: Vec<String>,
+    pub parent: String,
+}
+
+/// `delete_decks: {decks}` (deck-ops.md K5): at least one deck, in order
+/// (checked on load).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecksArgs {
+    pub decks: Vec<String>,
+}
+
+/// `set_deck_collapsed: {decks, scope, collapsed}` (deck-ops.md K6): at
+/// least one deck (checked on load).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetDeckCollapsedArgs {
+    pub decks: Vec<String>,
+    pub scope: CollapseScope,
+    pub collapsed: bool,
+}
+
+/// Which collapse flag `set_deck_collapsed` sets (deck-ops.md K6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CollapseScope {
+    /// The deck list's (`study_collapsed`).
+    Study,
+    /// The browser sidebar's (`browser_collapsed`).
+    Browser,
+}
+
+/// `set_current_deck: {deck}` (deck-ops.md K7); not empty (checked on load).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeckArgs {
+    pub deck: String,
+}
+
+/// `clone_preset` and `rename_preset: {preset, name}` (deck-ops.md K8): the
+/// preset by its stored name and the new preset's name.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PresetNameArgs {
+    pub preset: String,
+    pub name: String,
+}
+
+/// `remove_preset: {preset, fallback}` (deck-ops.md K9): two different
+/// presets (checked on load).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemovePresetArgs {
+    pub preset: String,
+    pub fallback: String,
+}
+
+/// `set_deck_preset: {deck, preset, subtree?}` (deck-ops.md K10): the deck
+/// not empty (checked on load); `subtree` false when missing, never null.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetDeckPresetArgs {
+    pub deck: String,
+    pub preset: String,
+    #[serde(default)]
+    pub subtree: bool,
+}
+
 /// Arguments of a draft op: an object whose shape the owning area fixes
 /// (D7.2). `Scenario::from_value` checks the keys the schema requires.
 #[derive(Debug, Clone)]
@@ -1510,7 +1656,10 @@ pub enum ObservationKind {
     FuzzTable,
     NetProbe,
     Queue,
+    /// deck-ops.md K12.
     DeckTree,
+    /// deck-ops.md K11.
+    Decks,
     Render,
     /// render-ops.md Q4.
     RenderStatus,
@@ -1563,7 +1712,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 29] = [
+    pub const ALL: [ObservationKind; 30] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1573,6 +1722,7 @@ impl ObservationKind {
         ObservationKind::NetProbe,
         ObservationKind::Queue,
         ObservationKind::DeckTree,
+        ObservationKind::Decks,
         ObservationKind::Render,
         ObservationKind::RenderStatus,
         ObservationKind::Template,
@@ -1606,6 +1756,7 @@ impl ObservationKind {
             ObservationKind::NetProbe => "net_probe",
             ObservationKind::Queue => "queue",
             ObservationKind::DeckTree => "deck_tree",
+            ObservationKind::Decks => "decks",
             ObservationKind::Render => "render",
             ObservationKind::RenderStatus => "render_status",
             ObservationKind::Template => "template",
@@ -1638,6 +1789,7 @@ impl ObservationKind {
             ObservationKind::Ids => ArgShape::AnyRefs,
             ObservationKind::Timing
             | ObservationKind::DeckTree
+            | ObservationKind::Decks
             | ObservationKind::Digest
             | ObservationKind::SchemaObjects
             | ObservationKind::UndoStatus

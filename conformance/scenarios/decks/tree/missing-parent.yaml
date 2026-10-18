@@ -1,0 +1,12 @@
+# A deck whose parent deck is missing (specs/decks/decks.md D12): with 2 and
+# 2::3 removed by a raw write, as a damaged collection can hold them, 2::3::4
+# is left out of the tree until Check Database adds the missing parents. The
+# top-level deck before it has no subdecks, the case where Anki also leaves
+# it out (D15.5).
+id: decks/tree/missing-parent
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["1", "2::3::4"]
+steps:
+  - db_exec: {sql: "DELETE FROM decks WHERE name IN ('2', '2' || char(31) || '3')"}
+  - observe: [deck_tree, decks]

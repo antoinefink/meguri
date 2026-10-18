@@ -1,0 +1,39 @@
+# A rename keeps every field it does not edit (specs/decks/decks.md D13;
+# R322, R1464): the browser flag, the legacy custom-study extensions, the day
+# counters, the description, a shared deck's sharedFrom key and an unknown
+# key (both kept in the deck's other bytes) survive; the deck common and kind
+# bytes are unchanged, and only name, mtime_secs and usn move. The keys are
+# set through the legacy JSON form (specs/conformance/model-ops.md L2).
+#
+# Anki writes the top-level members of other in no set order, so the deck
+# holds only sharedFrom while steps 1 and 4 read its bytes; the unknown key
+# joins it after that, and the second rename keeps both (conformance/AGENTS.md,
+# deck-ops.md K14).
+id: decks/rename/preserve
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Shared]
+steps:
+  - legacy_update:
+      deck: Shared
+      patch:
+        browserCollapsed: false
+        extendNew: 5
+        extendRev: 7
+        newToday: [3, 4]
+        revToday: [3, 9]
+        timeToday: [3, 60000]
+        desc: "From the <b>shared</b> deck"
+        sharedFrom: 1894000000
+  - db_exec: {sql: "SELECT hex(common), hex(kind), mtime_secs, usn FROM decks WHERE name = 'Shared'"}
+  - advance: 1m
+  - rename_deck: {deck: Shared, name: "Library::Shared"}
+  - db_exec: {sql: "SELECT hex(common), hex(kind), mtime_secs, usn FROM decks WHERE name = 'Library' || char(31) || 'Shared'"}
+  - legacy_update:
+      deck: "Library::Shared"
+      patch:
+        zzAddonKey: {"a": [1, 2.5], "b": "x"}
+  - advance: 1m
+  - rename_deck: {deck: "Library::Shared", name: "Archive::Shared"}
+  - observe:
+      - legacy_json: {decks: ["Archive::Shared"]}

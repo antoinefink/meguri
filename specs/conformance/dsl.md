@@ -99,7 +99,7 @@ A list of deck option presets: `{name, <option>: <value>, ...}`. A preset named 
 
 ### D6.3 decks
 
-A list of deck names (`::` nests) or `{name, preset}`. A deck without a preset uses `Default`. The preset must be `Default` or defined in `presets`.
+A list of deck names (`::` nests) or `{name, preset}`. A deck without a preset uses `Default`. The preset must be `Default` or defined in `presets`. Each entry is created, in list order, as `add_deck` creates a deck (`deck-ops.md` K15; `specs/decks/decks.md` D5).
 
 ### D6.4 notetypes
 
@@ -154,6 +154,15 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `set_tag_collapsed` | `{tags: [<name>, ...], collapsed: <boolean>}` | none | stable (`tag-ops.md` G7) |
 | `set_flag` | `{cards: [#cN, ...], flag: <integer>}` | `{count}`; rejection `invalid_flag` | stable (`tag-ops.md` G8) |
 | `browser_config_set` | `{key, value}`: one of the 22 browser config keys and a value of its shape, written whole | none | stable (`browser-config-ops.md` B1) |
+| `add_deck` | `{name}`: a typed deck name | `{name}`: the stored name of the deck returned; rejections `filtered_parent`, `too_deep` | stable (`deck-ops.md` K2) |
+| `rename_deck` | `{deck, name}` | `{name}`; rejections `filtered_parent`, `too_deep`, `under_descendant` (Meguri's only) | stable (`deck-ops.md` K3) |
+| `reparent_decks` | `{decks: [...], parent}`: `parent` empty for the top level | `{count}`; rejection `filtered_parent` | stable (`deck-ops.md` K4) |
+| `delete_decks` | `{decks: [...]}` | `{count}`: cards removed | stable (`deck-ops.md` K5) |
+| `set_deck_collapsed` | `{decks: [...], scope: study \| browser, collapsed}` | none | stable (`deck-ops.md` K6) |
+| `set_current_deck` | `{deck}` | none | stable (`deck-ops.md` K7) |
+| `add_preset`, `clone_preset`, `rename_preset` | `{name}`, `{preset, name}`, `{preset, name}` | none | stable (`deck-ops.md` K8) |
+| `remove_preset` | `{preset, fallback}` | none; rejection `default_preset` | stable (`deck-ops.md` K9) |
+| `set_deck_preset` | `{deck, preset, subtree?}` | none; rejection `filtered_deck` | stable (`deck-ops.md` K10) |
 | `bury`, `suspend` | `{cards: [#cN, ...]}` | none | draft (sched) |
 | `forget` | `{cards, restore_position?: bool, reset_counts?: bool}` | none | draft (sched) |
 | `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |

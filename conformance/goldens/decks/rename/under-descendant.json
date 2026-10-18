@@ -1,0 +1,35 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "rename_deck": {
+          "name": "A::B::A"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Default", 0],
+            ["A::B::A", 1894701660],
+            ["A::B::A::B", 1894701660],
+            ["A::B", 1894701660],
+            ["A", 1894701660]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d3d41dad6e7541f21252ed38d15adc18f36fa9187cb31cb56d67cd76a545e867",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "decks/rename/under-descendant",
+  "scenario_sha256": "87567fe06f45a6c9f0e99ab791c567a5b2c814b7bfb24306907cb45d844b32c6",
+  "tz": "UTC"
+}

@@ -16,6 +16,11 @@ pub enum EngineError {
     SuspendDeadline {
         phase: String,
     },
+    NotFound {
+        table: Table,
+        key: String,
+    },
+    DeckRefused(crate::decks::Refusal),
     /// An editor attempted to save a note deleted since it was opened.
     NoteNotFound {
         id: meguri_model::ids::NoteId,
@@ -129,6 +134,8 @@ impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EngineError::SuspendDeadline { phase } => write!(f, "suspend deadline exceeded: {phase}"),
+            EngineError::NotFound { table, key } => write!(f, "not found: {table} {key}"),
+            EngineError::DeckRefused(reason) => f.write_str(reason.kind()),
             EngineError::NoteNotFound { id } => write!(f, "note {} no longer exists", id.0),
             EngineError::Stale { table, key } => write!(f, "stale: row {key} of {table} changed since it was read"),
             EngineError::StaleGeneration { planned, current } => write!(

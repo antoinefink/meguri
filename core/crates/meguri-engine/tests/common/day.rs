@@ -1,7 +1,6 @@
 //! The day clock's test collections (`specs/sched/day-clock.md` D11, D14):
-//! the new collection a day scenario starts from, made from a copy of the
-//! schema-18 fixture through the storage open gate before the engine opens
-//! it, so the engine's first day query is the one at open.
+//! real U28 bootstrap before the engine opens it, so the engine's first
+//! day query is the one at open.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -9,12 +8,9 @@ use std::sync::Arc;
 use meguri_engine::{Collection, Engine, EngineConfig, OpenConfig};
 use meguri_model::clock::Clock;
 use meguri_model::rng::SeededRandom;
-use meguri_sched::timing::new_collection_timing;
 use meguri_storage::raw::SqlValue;
 use meguri_storage::{OpenOptions, open_collection};
 use tempfile::TempDir;
-
-use super::copy_fixture;
 
 /// What the new collection holds of the day clock's state.
 #[derive(Clone, Copy, Debug)]
@@ -38,39 +34,19 @@ pub fn raw(path: &Path, clock: &dyn Clock, statements: &[(&str, Vec<SqlValue>)])
     opened.close().unwrap();
 }
 
-/// A copy of the fixture made into a new collection created at the clock's
-/// instant, as the day goldens show one: no notes, cards, review log, graves
-/// or tags; `crt` and `creationOffset` (`usn` 0, `mtime_secs` 0) from D11;
-/// no `rollover`, `localOffset` or `lastUnburied` key; `col.mod` 0.
+/// The real bootstrap at the scenario clock; legacy tests deliberately
+/// remove only the creation offset before the normal engine open.
 pub fn new_collection(clock: &dyn Clock, timing: Timing) -> (TempDir, PathBuf) {
-    let (dir, path) = copy_fixture("schema-18.anki2");
-    let now = clock.now_ms().div_euclid(1000);
-    let created = new_collection_timing(now, clock);
-    let mut statements: Vec<(&str, Vec<SqlValue>)> = [
-        "DELETE FROM notes",
-        "DELETE FROM cards",
-        "DELETE FROM revlog",
-        "DELETE FROM graves",
-        "DELETE FROM tags",
-    ]
-    .into_iter()
-    .map(|sql| (sql, Vec::new()))
-    .collect();
-    statements.push((
-        "UPDATE col SET crt = ?1, mod = 0, scm = ?2",
-        vec![SqlValue::Integer(created.crt), SqlValue::Integer(now * 1000)],
-    ));
-    statements.push((
-        "DELETE FROM config WHERE KEY IN ('rollover', 'localOffset', 'lastUnburied', 'creationOffset')",
-        Vec::new(),
-    ));
-    if let Timing::New = timing {
-        statements.push((
-            "INSERT INTO config (KEY, usn, mtime_secs, val) VALUES ('creationOffset', 0, 0, CAST(?1 AS BLOB))",
-            vec![SqlValue::Text(created.creation_offset.to_string())],
-        ));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("collection.anki2");
+    meguri_engine::bootstrap::create(&path, clock, &SeededRandom::new(7)).unwrap();
+    if let Timing::Legacy = timing {
+        raw(
+            &path,
+            clock,
+            &[("DELETE FROM config WHERE KEY = 'creationOffset'", Vec::new())],
+        );
     }
-    raw(&path, clock, &statements);
     (dir, path)
 }
 

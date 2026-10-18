@@ -48,9 +48,12 @@
 #
 # Exit codes: 0 ok, 1 failed, 2 usage, 3 every device stayed leased until
 # the wait ran out, 4 the kind's device type is unavailable in this toolchain,
-# 5 no test VM can run the pool (queued; MEGURI_SIM_ALLOW_HOST=1 runs it
-# here), 6 the test VM could not run it (the config is not valid, the VM did
-# not start or answer, the SSH session failed).
+# 5 no test VM can run the pool now (queued): none is there
+# (MEGURI_SIM_ALLOW_HOST=1 runs it here), or it cannot be reached (U19c: no
+# logged-in session over SSH in time, ssh failed with 255, or the command
+# could not start or fork there: mvl_unreachable; the last "sim-pool:
+# queued: " line on stderr says why), 6 the test VM could not run it (the
+# config is not valid, tart could not start the VM, the VM's lease).
 # Output other than results goes to stderr.
 #
 # Overrides (self-tests): MEGURI_SIM_POOL_DIR, MEGURI_SIM_POOL_MAX,
@@ -744,8 +747,8 @@ EOF
 
 # sp_route <command> [args]: the pool is the test VM's (U8c). Runs this
 # script there over SSH and exits with its code, or returns to run it here
-# (no VM and MEGURI_SIM_ALLOW_HOST=1); exits 5 when no VM can run it and 6
-# when the VM could not.
+# (no VM and MEGURI_SIM_ALLOW_HOST=1); exits 5 when no VM can run it now (none,
+# or it does not answer) and 6 when the VM could not.
 sp_route() {
   local rc vm logs
   # shellcheck source=mac-vm-lib.sh
@@ -773,6 +776,10 @@ sp_route() {
   logs="${TMPDIR:-/tmp}/meguri-sim-pool-vm"
   mkdir -p "$logs" || { sp_log "cannot create $logs"; exit 6; }
   if ! mvl_ensure_ready "$vm" "$logs"; then
+    if [ "$MVL_FAIL" = ssh ]; then
+      sp_log "queued: $MVL_REASON"
+      exit 5
+    fi
     sp_log "the test VM could not run the pool: $MVL_REASON"
     exit 6
   fi
@@ -808,7 +815,10 @@ sp_via_mg() {
   result="$(MEGURI_SIM_POOL_VIA_MG=1 "$SP_ROOT/tools/mg" sim "$@" </dev/null | tail -n 1)"
   rc="$(jq -r '.details.pool.exit // empty' "$result" 2>/dev/null)"
   if [ -z "$rc" ]; then
-    [ "$(jq -r '.details.queued // false' "$result" 2>/dev/null)" != true ] || exit 5
+    if [ "$(jq -r '.details.queued // false' "$result" 2>/dev/null)" = true ]; then
+      sp_log "queued: $(jq -r '.details.queued_parts[0].reason // .message' "$result" 2>/dev/null)"
+      exit 5
+    fi
     sp_log "the test VM could not run the pool under its lease: $(jq -r '.message // "no result"' "$result" 2>/dev/null || echo "tools/mg sim $1 left no result")"
     exit 6
   fi
@@ -820,7 +830,9 @@ sp_via_mg() {
 # caller's description go to a temporary directory in the VM (one per call:
 # a script being replaced while bash reads it breaks), and the script runs
 # there for the caller (the lease names this Mac's checkout, not a directory
-# of the VM). Exits with the VM's exit code; 6 when SSH failed.
+# of the VM). Exits with the VM's exit code; 5 when the VM could not be
+# reached or could not start what the script runs there (mvl_unreachable on
+# its stderr, which still reaches this one's).
 sp_forward() {
   local vm="$1" ssh name envs=(MEGURI_SIM_POOL_IN_VM=1) v json tmp rc
   shift
@@ -834,20 +846,24 @@ sp_forward() {
   jq -n --arg vm "$name" --arg wt "$(sp_checkout)" --arg cwd "$(pwd -P)" --argjson pid "$PPID" \
     '{vm: $vm, worktree: $wt, cwd: $cwd, pid: $pid}' >"$tmp/caller.json" || { rm -rf "$tmp"; sp_log "cannot describe the caller"; exit 1; }
   json="$(basename "$SP_DEVICES_JSON")"
-  COPYFILE_DISABLE=1 tar -cf - -C "$SP_SCRIPTS" sim-pool.sh -C "$tmp" caller.json -C "$(dirname "$SP_DEVICES_JSON")" "$json" |
-    "$ssh" "d=\$(mktemp -d /tmp/meguri-sim-pool.XXXXXX) || exit 1
+  # Its stderr also goes to a file, read when it fails.
+  {
+    COPYFILE_DISABLE=1 tar -cf - -C "$SP_SCRIPTS" sim-pool.sh -C "$tmp" caller.json -C "$(dirname "$SP_DEVICES_JSON")" "$json" |
+      "$ssh" "d=\$(mktemp -d /tmp/meguri-sim-pool.XXXXXX) || exit 1
 tar -C \"\$d\" -xf - || { rm -rf \"\$d\"; exit 1; }
 env $(mvl_q "${envs[@]}") MEGURI_SIM_POOL_CALLER=\"\$d/caller.json\" MEGURI_SIM_DEVICES_JSON=\"\$d\"/$(mvl_q "$json") \\
   /bin/bash \"\$d/sim-pool.sh\" $(mvl_q "$@")
 rc=\$?
 rm -rf \"\$d\"
-exit \$rc"
-  rc="${PIPESTATUS[1]}"
-  rm -rf "$tmp"
-  if [ "$rc" -eq 255 ]; then
-    sp_log "the SSH session to the test VM $name failed"
-    exit 6
+exit \$rc" 2>&1 1>&3 3>&- | tee "$tmp/stderr" >&2 3>&-
+    rc="${PIPESTATUS[1]}"
+  } 3>&1
+  if [ "$rc" -ne 0 ] && mvl_unreachable "$rc" "$(cat "$tmp/stderr" 2>/dev/null)"; then
+    sp_log "queued: the test VM $name could not be reached or could not start the pool's commands (exit $rc$(mvl_last "$tmp/stderr"))"
+    rm -rf "$tmp"
+    exit 5
   fi
+  rm -rf "$tmp"
   exit "$rc"
 }
 

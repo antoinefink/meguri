@@ -1,0 +1,23 @@
+# The deck tree (specs/decks/decks.md D12; R36, R39): children in unicase
+# order of the stored names; the default deck hidden while it is top-level,
+# has no subdeck and no card, and another top-level deck exists; shown when it
+# is the only deck, has a subdeck, or holds a card.
+id: decks/tree/structure
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [b, "B2::x", "a::z", "a::Y", "Ä", _u]
+steps:
+  - observe: [deck_tree]
+  - delete_decks: {decks: [b, B2, a, "Ä", _u]}
+  - observe: [deck_tree]
+  - add_deck: {name: "Default::Kid"}
+  - add_deck: {name: Z}
+  - observe: [deck_tree]
+  - delete_decks: {decks: ["Default::Kid"]}
+  - observe: [deck_tree]
+  - add_note: {notetype: Pair, fields: [x, y]}
+  - observe: [deck_tree]

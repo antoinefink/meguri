@@ -100,6 +100,15 @@ impl Harness {
     }
 }
 
+/// A real bootstrapped collection, without fixture rows.
+pub fn fresh() -> Harness {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("collection.anki2");
+    let clock = StepClock::new(NOW_MS, UtcOffset::UTC, "UTC");
+    meguri_engine::bootstrap::create(&path, &clock, &SeededRandom::new(7)).unwrap();
+    Harness::open_path(dir, path)
+}
+
 pub fn open_config(clock: &Arc<StepClock>) -> OpenConfig {
     OpenConfig::new(clock.clone(), Arc::new(SeededRandom::new(7)))
 }

@@ -273,7 +273,7 @@
       "anyOf": [
         {
           "type": "string",
-          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|render_status|db_dump|schema_objects|stats|digest|undo_status|tag_tree|browser_config|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
+          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|decks|render|render_status|db_dump|schema_objects|stats|digest|undo_status|tag_tree|browser_config|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
         },
         {
           "type": "object",
@@ -317,7 +317,8 @@
               "type": ["object", "null"],
               "properties": { "deck": { "type": "string" } }
             },
-            "deck_tree": { "type": "null" },
+            "deck_tree": { "description": "deck-ops.md K12: the deck tree's structure (decks/decks.md D12); the queue area adds counts.", "type": "null" },
+            "decks": { "description": "deck-ops.md K11: every deck by its stored human name.", "type": "null" },
             "tag_tree": { "description": "tag-ops.md G9.", "type": "null" },
             "browser_config": { "description": "browser-config-ops.md B2.", "type": "null" },
             "search": {
@@ -907,6 +908,87 @@
           "description": "sync-ops.md S7.",
           "type": "object",
           "maxProperties": 0
+        },
+        "add_deck": {
+          "description": "deck-ops.md K2: create a deck from a typed name (decks/decks.md D5); rejections filtered_parent, too_deep.",
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": { "name": { "type": "string" } }
+        },
+        "rename_deck": {
+          "description": "deck-ops.md K3: rename a deck, named by its stored human name, to a typed full name (decks/decks.md D6); rejections filtered_parent, too_deep, under_descendant (Meguri only).",
+          "type": "object",
+          "required": ["deck", "name"],
+          "additionalProperties": false,
+          "properties": { "deck": { "type": "string", "minLength": 1 }, "name": { "type": "string" } }
+        },
+        "reparent_decks": {
+          "description": "deck-ops.md K4: move decks under parent, or to the top level when parent is empty (decks/decks.md D7); rejection filtered_parent.",
+          "type": "object",
+          "required": ["decks", "parent"],
+          "additionalProperties": false,
+          "properties": { "decks": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 }, "parent": { "type": "string" } }
+        },
+        "delete_decks": {
+          "description": "deck-ops.md K5: delete decks with their subdecks and cards (decks/decks.md D8).",
+          "type": "object",
+          "required": ["decks"],
+          "additionalProperties": false,
+          "properties": { "decks": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 } }
+        },
+        "set_deck_collapsed": {
+          "description": "deck-ops.md K6: set study_collapsed or browser_collapsed of the decks (decks/decks.md D10).",
+          "type": "object",
+          "required": ["decks", "scope", "collapsed"],
+          "additionalProperties": false,
+          "properties": {
+            "decks": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+            "scope": { "enum": ["study", "browser"] },
+            "collapsed": { "type": "boolean" }
+          }
+        },
+        "set_current_deck": {
+          "description": "deck-ops.md K7: write curDeck (decks/decks.md D11).",
+          "type": "object",
+          "required": ["deck"],
+          "additionalProperties": false,
+          "properties": { "deck": { "type": "string", "minLength": 1 } }
+        },
+        "add_preset": {
+          "description": "deck-ops.md K8: add a preset from the defaults (decks/deck-presets.md P4).",
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": { "name": { "type": "string" } }
+        },
+        "clone_preset": {
+          "description": "deck-ops.md K8: clone a preset (decks/deck-presets.md P5).",
+          "type": "object",
+          "required": ["preset", "name"],
+          "additionalProperties": false,
+          "properties": { "preset": { "type": "string" }, "name": { "type": "string" } }
+        },
+        "rename_preset": {
+          "description": "deck-ops.md K8: rename a preset (decks/deck-presets.md P6).",
+          "type": "object",
+          "required": ["preset", "name"],
+          "additionalProperties": false,
+          "properties": { "preset": { "type": "string" }, "name": { "type": "string" } }
+        },
+        "remove_preset": {
+          "description": "deck-ops.md K9: remove a preset, confirmed, moving its decks to fallback (decks/deck-presets.md P8); rejection default_preset. preset and fallback differ (checked when the scenario loads).",
+          "type": "object",
+          "required": ["preset", "fallback"],
+          "additionalProperties": false,
+          "properties": { "preset": { "type": "string" }, "fallback": { "type": "string" } }
+        },
+        "set_deck_preset": {
+          "description": "deck-ops.md K10: assign a preset to a deck, or to it and its subtree (decks/deck-presets.md P9); rejection filtered_deck.",
+          "type": "object",
+          "required": ["deck", "preset"],
+          "additionalProperties": false,
+          "properties": { "deck": { "type": "string", "minLength": 1 }, "preset": { "type": "string" }, "subtree": { "type": "boolean" } }
         },
         "handoff": {
           "description": "Live scenarios (dsl.md D9.2): the side that runs the next steps; handoffs alternate.",

@@ -1,57 +1,57 @@
 harvest_id,language,source,area,classification,reason,scenarios,status
 hf7c80804a0ae,rust,tag,browser,unclassified,,,open
-h05c549f3f6aa,rust,supplementary,deckconfig,unclassified,,,open
-h06c17c5eb2f4,rust,supplementary,deckconfig,unclassified,,,open
-h07c1d1d6c593,rust,supplementary,deckconfig,unclassified,,,open
-h0f4f7e722f1e,rust,supplementary,deckconfig,unclassified,,,open
-h0fa4ffa48585,rust,supplementary,deckconfig,unclassified,,,open
-h17ecc898d745,rust,supplementary,deckconfig,unclassified,,,open
+h05c549f3f6aa,rust,supplementary,deckconfig,in-scope,updating a preset,decks/presets/add-clone-rename,done
+h06c17c5eb2f4,rust,supplementary,deckconfig,not-applicable,an API error for an unknown preset id,,done
+h07c1d1d6c593,rust,supplementary,deckconfig,in-scope,the default preset cannot be removed,decks/presets/remove,done
+h0f4f7e722f1e,rust,supplementary,deckconfig,in-scope,presets arriving by sync or import are added only when their id is free,,deferred
+h0fa4ffa48585,rust,supplementary,deckconfig,in-scope,a new preset gets a free id,decks/presets/add-clone-rename storage/ids/all-tables,done
+h17ecc898d745,rust,supplementary,deckconfig,in-scope,saving a preset from its legacy JSON,model/schema11/preset-values,done
 h1c1a2a378925,rust,tag,deckconfig,unclassified,,,open
-h1df457b7a669,rust,supplementary,deckconfig,unclassified,,,open
+h1df457b7a669,rust,supplementary,deckconfig,in-scope,the built-in defaults stand in when even the default preset is missing; seen through scheduling,,deferred
 h27c58d269610,rust,tag,deckconfig,unclassified,,,open
-h29179d9ceae2,rust,supplementary,deckconfig,unclassified,,,open
-h2e6e22823ea4,rust,supplementary,deckconfig,unclassified,,,open
+h29179d9ceae2,rust,supplementary,deckconfig,in-scope,a created preset is read back,decks/presets/add-clone-rename,done
+h2e6e22823ea4,rust,supplementary,deckconfig,in-scope,removing a preset,decks/presets/remove,done
 h2e8ed638f17b,rust,supplementary,deckconfig,unclassified,,,open
 h3219d2cb2ba0,rust,tag,deckconfig,unclassified,,,open
-h351975c45911,rust,supplementary,deckconfig,unclassified,,,open
+h351975c45911,rust,supplementary,deckconfig,not-applicable,an API getter for one preset,,done
 h385f4aeda2a6,rust,supplementary,deckconfig,unclassified,,,open
-h3d8240dabf39,rust,supplementary,deckconfig,unclassified,,,open
-h3dc2e6c7647a,rust,supplementary,deckconfig,unclassified,,,open
-h402aaecf9a85,rust,supplementary,deckconfig,unclassified,,,open
+h3d8240dabf39,rust,supplementary,deckconfig,in-scope,presets arriving as legacy JSON by sync or import are added,,deferred
+h3dc2e6c7647a,rust,supplementary,deckconfig,in-scope,a deck whose preset is missing uses the default preset; seen through scheduling,,deferred
+h402aaecf9a85,rust,supplementary,deckconfig,in-scope,updating a preset as an undoable change,decks/presets/add-clone-rename,done
 h4939abe921e2,rust,supplementary,deckconfig,unclassified,,,open
 h4f44f64a9d78,rust,tag,deckconfig,unclassified,,,open
-h54bd0b969d29,rust,supplementary,deckconfig,unclassified,,,open
+h54bd0b969d29,rust,supplementary,deckconfig,in-scope,the legacy JSON of a preset,model/schema11/preset-values,done
 h5e274df557cf,rust,tag,deckconfig,unclassified,,,open
-h65b62d476674,rust,supplementary,deckconfig,unclassified,,,open
-h69f9ba4c6483,rust,supplementary,deckconfig,unclassified,,,open
-h6a74f5728f8c,rust,supplementary,deckconfig,unclassified,,,open
-h6c0d5ffc0db0,rust,supplementary,deckconfig,unclassified,,,open
+h65b62d476674,rust,supplementary,deckconfig,in-scope,a changed preset is stamped,decks/presets/add-clone-rename,done
+h69f9ba4c6483,rust,supplementary,deckconfig,in-scope,presets arriving as legacy JSON by sync or import are added,,deferred
+h6a74f5728f8c,rust,supplementary,deckconfig,in-scope,the default preset stands in for a missing one; seen through scheduling,,deferred
+h6c0d5ffc0db0,rust,supplementary,deckconfig,in-scope,adding a preset,decks/presets/add-clone-rename,done
 h70e1bda7fbd5,rust,supplementary,deckconfig,unclassified,,,open
-h74f60c8aa789,rust,supplementary,deckconfig,unclassified,,,open
-h774fd17fd8ea,rust,supplementary,deckconfig,unclassified,,,open
+h74f60c8aa789,rust,supplementary,deckconfig,in-scope,assigning a preset to a deck and its subdecks,decks/presets/assign,done
+h774fd17fd8ea,rust,supplementary,deckconfig,in-scope,presets arriving by sync or import are added only when their id is free,,deferred
 h78189711cf81,rust,tag,deckconfig,in-scope,"reserved keys in a preset's other bytes, top level and sub-objects, never reach the legacy JSON object",model/schema11/preset-other,done
 h788f98b55f1d,rust,tag,deckconfig,unclassified,,,open
 h7f7645f98775,rust,tag,deckconfig,unclassified,,,open
 h81d3f640e8fd,rust,tag,deckconfig,unclassified,,,open
-h87ef468beabc,rust,supplementary,deckconfig,unclassified,,,open
-habc378b0ea2b,rust,supplementary,deckconfig,unclassified,,,open
+h87ef468beabc,rust,supplementary,deckconfig,in-scope,the built-in default preset values,storage/new-collection/rows,done
+habc378b0ea2b,rust,supplementary,deckconfig,in-scope,removing a preset,decks/presets/remove,done
 hac8e0ee77853,rust,supplementary,deckconfig,unclassified,,,open
 hae800fcda356,rust,tag,deckconfig,unclassified,,,open
 hb50a0cec5249,rust,supplementary,deckconfig,unclassified,,,open
 hba00bf856693,rust,supplementary,deckconfig,unclassified,,,open
-hbfa3b0173663,rust,supplementary,deckconfig,unclassified,,,open
-hc06112477870,rust,supplementary,deckconfig,unclassified,,,open
-hc77e5ddeebb7,rust,supplementary,deckconfig,unclassified,,,open
-hc9c179bfb2ef,rust,supplementary,deckconfig,unclassified,,,open
+hbfa3b0173663,rust,supplementary,deckconfig,in-scope,an unchanged preset is not written,decks/presets/add-clone-rename,done
+hc06112477870,rust,supplementary,deckconfig,in-scope,removing a preset as an undoable change,decks/presets/remove,done
+hc77e5ddeebb7,rust,supplementary,deckconfig,in-scope,saving a preset from its legacy JSON,model/schema11/preset-values,done
+hc9c179bfb2ef,rust,supplementary,deckconfig,in-scope,adding a preset as an undoable change,decks/presets/add-clone-rename,done
 hd2c8c7020dc2,rust,tag,deckconfig,in-scope,"legacy graduating and easy intervals: two or more elements accepted, anything else gives the defaults",model/schema11/preset-values,done
-hd3586154cc8d,rust,supplementary,deckconfig,unclassified,,,open
-hd68f57dc3fd2,rust,supplementary,deckconfig,unclassified,,,open
-hd709478326d6,rust,supplementary,deckconfig,unclassified,,,open
+hd3586154cc8d,rust,supplementary,deckconfig,in-scope,undoing a preset removal restores it; asserted by the core tests until deck undo scenarios exist,,deferred
+hd68f57dc3fd2,rust,supplementary,deckconfig,in-scope,a new preset is stamped,decks/presets/add-clone-rename,done
+hd709478326d6,rust,supplementary,deckconfig,in-scope,a missing preset id falls back to the default preset; seen through scheduling,,deferred
 he12744628934,rust,tag,deckconfig,unclassified,,,open
-he9efe2bce55c,rust,supplementary,deckconfig,unclassified,,,open
+he9efe2bce55c,rust,supplementary,deckconfig,not-applicable,an API option that returns nothing for a missing preset,,done
 heaf6b0314ef9,rust,supplementary,deckconfig,unclassified,,,open
-hf1fc2f580d06,rust,supplementary,deckconfig,unclassified,,,open
-hfa91e7718197,rust,supplementary,deckconfig,unclassified,,,open
+hf1fc2f580d06,rust,supplementary,deckconfig,in-scope,presets arriving by sync or import keep their ids,,deferred
+hfa91e7718197,rust,supplementary,deckconfig,not-applicable,a legacy call that lists every preset as JSON,,done
 h0de8cd79d6ba,typescript,tag,deckconfig,unclassified,,,open
 h1dc1c50d96e2,typescript,tag,deckconfig,unclassified,,,open
 h1e72f458212b,typescript,tag,deckconfig,unclassified,,,open
@@ -59,56 +59,56 @@ h35f01eb07a7f,typescript,tag,deckconfig,unclassified,,,open
 h413f1956a499,typescript,tag,deckconfig,unclassified,,,open
 h83f55b823be2,typescript,tag,deckconfig,unclassified,,,open
 h90b32cd0020c,typescript,tag,deckconfig,unclassified,,,open
-haa85eb491ea1,typescript,tag,deckconfig,unclassified,,,open
+haa85eb491ea1,typescript,tag,deckconfig,in-scope,the preset menu appends the current time to a duplicate name; the menu is the deck options screen,,deferred
 hfb585bb34348,typescript,tag,deckconfig,unclassified,,,open
-h544ca5b02509,python,tag,decks,unclassified,,,open
-h69fa4a82068d,python,tag,decks,unclassified,,,open
-h95fdd3f84c24,python,tag,decks,unclassified,,,open
-h10068b492e55,rust,tag,decks,unclassified,,,open
-h13a4966f8014,rust,tag,decks,unclassified,,,open
-h19c49175661d,rust,tag,decks,unclassified,,,open
-h25a2a4a1f100,rust,tag,decks,unclassified,,,open
-h26a096646ed7,rust,tag,decks,unclassified,,,open
-h2c1eea8afaea,rust,tag,decks,unclassified,,,open
-h34d675666d1c,rust,tag,decks,unclassified,,,open
+h544ca5b02509,python,tag,decks,in-scope,removing a deck removes its subdecks and their cards,decks/delete/subtree,done
+h69fa4a82068d,python,tag,decks,in-scope,"renaming a deck moves its subtree, creates missing parents and keeps names unique",decks/rename/subtree,done
+h95fdd3f84c24,python,tag,decks,in-scope,"creating decks, finding them by name and parents created for nested names",decks/create/parents decks/create/names,done
+h10068b492e55,rust,tag,decks,not-applicable,a call that returns a blank legacy deck object; Meguri has no such API and creates no filtered decks,,done
+h13a4966f8014,rust,tag,decks,in-scope,saving a deck from its legacy JSON keeps the given usn and modification time,decks/rename/preserve model/schema11/deck-names,done
+h19c49175661d,rust,tag,decks,out-of-scope,building filtered decks (Meguri keeps filtered decks but never creates them),,done
+h25a2a4a1f100,rust,tag,decks,in-scope,deck tree counts belong to the queue area,,deferred
+h26a096646ed7,rust,tag,decks,in-scope,deck pickers leave out the default deck while it holds no cards; specified with the pickers,,deferred
+h2c1eea8afaea,rust,tag,decks,in-scope,"deleting the default deck keeps it under its default name, with a suffix when the name is taken",decks/delete/default,done
+h34d675666d1c,rust,tag,decks,in-scope,deck pickers leave out the default deck while it holds no cards; specified with the pickers,,deferred
 h3bb5ab9d9cbc,rust,tag,decks,in-scope,"deck name components normalized (NFC, control characters, trimming, blank)",model/schema11/deck-names,done
-h3c7a515847bc,rust,tag,decks,unclassified,,,open
-h5159c422dac6,rust,tag,decks,unclassified,,,open
-h59d86b0d0618,rust,tag,decks,unclassified,,,open
-h5e505e6b3fb6,rust,tag,decks,unclassified,,,open
-h5f4acc7e4835,rust,tag,decks,unclassified,,,open
-h65b482fdf0c5,rust,tag,decks,unclassified,,,open
-h663150e1b1b7,rust,tag,decks,unclassified,,,open
-h6995204cee00,rust,tag,decks,unclassified,,,open
-h713c4ca59486,rust,tag,decks,unclassified,,,open
-h7374a304aaa2,rust,tag,decks,unclassified,,,open
-h7687dc7854d2,rust,tag,decks,unclassified,,,open
-h79589a39cd9f,rust,tag,decks,unclassified,,,open
-h8673919e1db4,rust,tag,decks,unclassified,,,open
-h8b7b9e2cc85a,rust,tag,decks,unclassified,,,open
-h97653de82f30,rust,tag,decks,unclassified,,,open
+h3c7a515847bc,rust,tag,decks,not-applicable,mapping between the backend message and the internal deck record; Meguri has no such service layer,,done
+h5159c422dac6,rust,tag,decks,out-of-scope,labels of filtered deck search orders,,done
+h59d86b0d0618,rust,tag,decks,in-scope,renaming a deck renames its descendants,decks/rename/subtree,done
+h5e505e6b3fb6,rust,tag,decks,in-scope,deck pickers can leave out filtered decks; specified with the pickers,,deferred
+h5f4acc7e4835,rust,tag,decks,not-applicable,a legacy call that lists every deck as JSON; the default deck of a new collection is covered by storage/new-collection,,done
+h65b482fdf0c5,rust,tag,decks,out-of-scope,building filtered decks,,done
+h663150e1b1b7,rust,tag,decks,in-scope,collapsing changes only the flag of the requested scope,decks/collapse/scopes,done
+h6995204cee00,rust,tag,decks,in-scope,deleting a deck removes its cards,decks/delete/subtree,done
+h713c4ca59486,rust,tag,decks,in-scope,an existing name ignoring case returns that deck; new subdecks take the parent spelling and missing parents are created,decks/create/parents,done
+h7374a304aaa2,rust,tag,decks,in-scope,a deck and its descendants by name,decks/presets/assign decks/delete/subtree,done
+h7687dc7854d2,rust,tag,decks,not-applicable,default values when a backend message lacks a part; Meguri has no such service layer,,done
+h79589a39cd9f,rust,tag,decks,in-scope,a deck whose parent is missing is left out of the tree,decks/tree/missing-parent,done
+h8673919e1db4,rust,tag,decks,in-scope,deck tree counts with limits belong to the queue area,,deferred
+h8b7b9e2cc85a,rust,tag,decks,in-scope,a deck update writes the fields it changes and keeps the others,decks/rename/preserve decks/collapse/scopes,done
+h97653de82f30,rust,tag,decks,out-of-scope,editing filtered deck settings,,done
 h9929404ade51,rust,tag,decks,in-scope,reserved keys in a deck's other bytes never reach the legacy JSON object,model/schema11/deck-other-flatten model/schema11/deck-other-roundtrip,done
-h999720c226d7,rust,tag,decks,unclassified,,,open
-h99b83b4a6481,rust,tag,decks,unclassified,,,open
-ha07b5be6909c,rust,tag,decks,unclassified,,,open
-ha321fffdb44c,rust,tag,decks,unclassified,,,open
-ha7724cf9a502,rust,tag,decks,unclassified,,,open
-ha978090ce7aa,rust,tag,decks,unclassified,,,open
+h999720c226d7,rust,tag,decks,out-of-scope,editing filtered deck settings,,done
+h99b83b4a6481,rust,tag,decks,not-applicable,an API error for an unknown deck name,,done
+ha07b5be6909c,rust,tag,decks,in-scope,saving a deck from its legacy JSON stores the changes,decks/rename/preserve,done
+ha321fffdb44c,rust,tag,decks,in-scope,selecting the current deck and reading it back,decks/current/select,done
+ha7724cf9a502,rust,tag,decks,in-scope,"the name a dragged deck gets, and drops that change nothing",decks/move/rules decks/move/prefix-sibling,done
+ha978090ce7aa,rust,tag,decks,not-applicable,legacy add and get calls; Meguri has no such API,,done
 hbf8f9be771c0,rust,tag,decks,in-scope,human deck names converted to the stored native form,model/schema11/deck-names,done
-hc42b58794e0c,rust,tag,decks,unclassified,,,open
-hcc9150d28b7e,rust,tag,decks,unclassified,,,open
-hcd825469184c,rust,tag,decks,unclassified,,,open
-hd11fe668ff13,rust,tag,decks,unclassified,,,open
-hdd45edf23247,rust,tag,decks,unclassified,,,open
-hdddcc971bba4,rust,tag,decks,unclassified,,,open
-he05ec989069b,rust,tag,decks,unclassified,,,open
-he09f009e572d,rust,tag,decks,unclassified,,,open
-he0cc1b3282f3,rust,tag,decks,unclassified,,,open
-he67086c6cae1,rust,tag,decks,unclassified,,,open
-he911ddd760e5,rust,tag,decks,unclassified,,,open
-hea29130bf547,rust,tag,decks,unclassified,,,open
-hefe2b9c355ec,rust,tag,decks,unclassified,,,open
-hf72c1d5ce28e,rust,tag,decks,unclassified,,,open
+hc42b58794e0c,rust,tag,decks,in-scope,an added deck is found by its name,decks/create/parents,done
+hcc9150d28b7e,rust,tag,decks,not-applicable,a backend message without a deck kind; the stored record case is the model area,,done
+hcd825469184c,rust,tag,decks,in-scope,the tree shows the default deck when it is the only deck,decks/tree/structure,done
+hd11fe668ff13,rust,tag,decks,not-applicable,a legacy call that adds a deck when its id is zero; Meguri has no such API,,done
+hdd45edf23247,rust,tag,decks,out-of-scope,editing filtered deck settings,,done
+hdddcc971bba4,rust,tag,decks,in-scope,deck tree counts belong to the queue area,,deferred
+he05ec989069b,rust,tag,decks,in-scope,dropping a deck onto another makes it a subdeck,decks/move/rules,done
+he09f009e572d,rust,tag,decks,in-scope,malformed legacy deck JSON is refused,model/schema11/deck-rejections,done
+he0cc1b3282f3,rust,tag,decks,in-scope,the tree nests decks by name in name order,decks/tree/structure,done
+he67086c6cae1,rust,tag,decks,not-applicable,an API error for an unknown deck id,,done
+he911ddd760e5,rust,tag,decks,in-scope,dropping a deck on the top level,decks/move/rules,done
+hea29130bf547,rust,tag,decks,in-scope,the parent of a nested deck name,decks/create/parents,done
+hefe2b9c355ec,rust,tag,decks,in-scope,the tree without counts,decks/tree/structure,done
+hf72c1d5ce28e,rust,tag,decks,in-scope,"renames in the middle of the tree, a parent renamed under its own old name, and the plus suffix",decks/rename/subtree,done
 h00001e1c4f09,python,tag,desktop,not-applicable,"Anki's desktop Qt user interface, installer and add-on manager; Meguri has its own app",,done
 h03ae9b68e83f,python,tag,desktop,not-applicable,"Anki's desktop Qt user interface, installer and add-on manager; Meguri has its own app",,done
 h07a67403400d,python,tag,desktop,not-applicable,"Anki's desktop Qt user interface, installer and add-on manager; Meguri has its own app",,done

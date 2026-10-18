@@ -629,6 +629,14 @@ runs:
     placement: host
     class: perf
     budget_s: 7200
+  # M0 and M1R evaluate their UI results without M1's core benchmarks.
+  - id: perf-gate-ui
+    job: perf-gate
+    args: [--require, perf-ui]
+    tier: T3
+    placement: [host, docker:dev]
+    class: perf
+    budget_s: 300
   # The milestone evaluation (U240's perf-gate suites): after bench-mac, so the
   # Mac benches and the simulator smoke are judged on one commit.
   - id: perf-gate-milestone

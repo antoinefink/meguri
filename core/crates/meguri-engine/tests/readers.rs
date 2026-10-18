@@ -107,10 +107,22 @@ fn a_sync_snapshot_never_delays_search_stats_or_backups_and_interactive_reads_st
             let reader = collection.search_reader(0).unwrap();
             let started = monotonic::now();
             let mut scans = 0;
+            let mut after = i64::MIN;
             while monotonic::now() - started < Duration::from_millis(300) {
-                reader
-                    .execute_raw("SELECT count(*) FROM notes WHERE flds LIKE '%zq%'", &[])
+                // Bound each chunk: a final full-table scan could overshoot
+                // the 300 ms workload by seconds while VACUUM competes for
+                // I/O. Keep the existing latency limits below unchanged.
+                let rows = reader
+                    .execute_raw(
+                        "SELECT max(id), sum(flds LIKE '%zq%') FROM \
+                     (SELECT id, flds FROM notes WHERE id > ?1 ORDER BY id LIMIT 1000)",
+                        &[SqlValue::Integer(after)],
+                    )
                     .unwrap();
+                after = match rows.rows[0][0] {
+                    SqlValue::Integer(id) => id,
+                    _ => i64::MIN, // wrap after the collection's last page
+                };
                 scans += 1;
             }
             assert!(scans > 0);

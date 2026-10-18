@@ -1,0 +1,23 @@
+# Adding, cloning and renaming presets (specs/decks/deck-presets.md P4, P5,
+# P6; R732): a preset added from the defaults holds the built-in defaults and
+# the FSRS-6 default parameters; a clone's config bytes equal its source's,
+# legacy keys in other included; each gets an id from the clock and is
+# stamped; a rename stamps only when the name changes; no deck changes. The
+# source's options and legacy key are set through the legacy JSON form
+# (specs/conformance/model-ops.md L2).
+id: decks/presets/add-clone-rename
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_preset: {name: Custom}
+  - legacy_update: {preset: Custom, patch: {new: {perDay: 35}, zzAddonKey: {"k": 1}}}
+  - advance: 1m
+  - clone_preset: {preset: Custom, name: "Custom copy"}
+  - add_preset: {name: Fresh}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn, hex(config) FROM deck_config ORDER BY id"}
+  - advance: 1m
+  - rename_preset: {preset: "Custom copy", name: "Copy B"}
+  - rename_preset: {preset: Fresh, name: Fresh}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn FROM deck_config ORDER BY id"}
+  - observe:
+      - legacy_json: {presets: [Custom, "Copy B", Fresh]}
+  - observe: [decks]

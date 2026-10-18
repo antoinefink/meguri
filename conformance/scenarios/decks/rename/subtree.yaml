@@ -1,0 +1,22 @@
+# Renaming decks (specs/decks/decks.md D2, D3, D6; R60, R61): renaming a
+# parent moves its subtree, every renamed deck stamped; a name another deck
+# holds gets "+"; a deck renamed under an existing deck takes its spelling; a
+# change of case alone is a rename; a deck renamed under its own old name
+# leaves a new empty deck there; a name that converts to the stored one
+# changes nothing. No grave and no schema change.
+id: decks/rename/subtree
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["A::B::C", a2, Spanish, X]
+steps:
+  - advance: 1m
+  - rename_deck: {deck: A, name: "X::A"}
+  - observe: [decks]
+  - advance: 1m
+  - rename_deck: {deck: "X::A::B", name: spanish}
+  - rename_deck: {deck: a2, name: "x::Sub"}
+  - rename_deck: {deck: "X::Sub", name: "x::sub"}
+  - rename_deck: {deck: Spanish, name: "Spanish::Deep"}
+  - rename_deck: {deck: X, name: " X "}
+  - observe: [decks, deck_tree]
+  - db_exec: {sql: "SELECT (SELECT mod FROM col), (SELECT scm FROM col), (SELECT count() FROM graves)"}

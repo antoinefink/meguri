@@ -1,0 +1,13 @@
+# Dropping a deck onto a sibling whose name starts with its own (specs/decks/
+# decks.md D7, D15.2; R62, R63). Anki compares the stored names as byte
+# strings and skips a::b dropped onto a::bc (count 0); Meguri moves it to
+# a::bc::b, since a::bc is not one of its descendants. The golden is Anki's;
+# deviations decks-move-prefix-sibling-* give Meguri's values.
+id: decks/move/prefix-sibling
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [a, "a::b", "a::bc"]
+steps:
+  - advance: 1m
+  - reparent_decks: {decks: ["a::b"], parent: "a::bc"}
+  - db_exec: {sql: "SELECT replace(name, char(31), '::'), mtime_secs FROM decks ORDER BY id"}

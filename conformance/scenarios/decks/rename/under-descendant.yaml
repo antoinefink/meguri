@@ -1,0 +1,13 @@
+# Renaming a deck under one of its own descendants (specs/decks/decks.md D6
+# step 4, D15.1; R62). Anki renames A to A::B::A, moves A::B under it and
+# creates new empty A::B and A; Meguri refuses with under_descendant and
+# writes nothing. The golden is Anki's; deviations
+# decks-rename-under-descendant-* give Meguri's values.
+id: decks/rename/under-descendant
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["A::B"]
+steps:
+  - advance: 1m
+  - rename_deck: {deck: A, name: "A::B::A"}
+  - db_exec: {sql: "SELECT replace(name, char(31), '::'), mtime_secs FROM decks ORDER BY id"}

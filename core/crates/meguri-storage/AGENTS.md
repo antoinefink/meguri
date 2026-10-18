@@ -25,3 +25,5 @@
 - A valid sidecar requires all known fields. Track its presence separately: `last_mod == last_scm == 0` is a valid external-change baseline.
 
 - `counting_vfs` (test-hooks) selects a registered observer through `vfs=` for one test path before open, recording filename, open/sync flags and independent monotonic times for every xSync. Keep `sync_wal` identical under observation. Its copied method tables live until xClose; every forwarded callback receives the original file/VFS pointer.
+
+- `bootstrap::create` stages the entire new collection and publishes with a same-directory hard link: never replace that with an overwriting rename. The engine freezes the creation clock and supplies the rows; the storage callback runs only on the unpublished file.

@@ -1,0 +1,127 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "deck_tree": [
+          {
+            "children": [],
+            "name": "_u"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "name": "Y"
+              },
+              {
+                "children": [],
+                "name": "z"
+              }
+            ],
+            "name": "a"
+          },
+          {
+            "children": [],
+            "name": "b"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "name": "x"
+              }
+            ],
+            "name": "B2"
+          },
+          {
+            "children": [],
+            "name": "Ä"
+          }
+        ]
+      },
+      {
+        "delete_decks": {
+          "count": 0
+        }
+      },
+      {
+        "deck_tree": [
+          {
+            "children": [],
+            "name": "Default"
+          }
+        ]
+      },
+      {
+        "add_deck": {
+          "name": "Default::Kid"
+        }
+      },
+      {
+        "add_deck": {
+          "name": "Z"
+        }
+      },
+      {
+        "deck_tree": [
+          {
+            "children": [
+              {
+                "children": [],
+                "name": "Kid"
+              }
+            ],
+            "name": "Default"
+          },
+          {
+            "children": [],
+            "name": "Z"
+          }
+        ]
+      },
+      {
+        "delete_decks": {
+          "count": 0
+        }
+      },
+      {
+        "deck_tree": [
+          {
+            "children": [],
+            "name": "Z"
+          }
+        ]
+      },
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "deck_tree": [
+          {
+            "children": [],
+            "name": "Default"
+          },
+          {
+            "children": [],
+            "name": "Z"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d3d41dad6e7541f21252ed38d15adc18f36fa9187cb31cb56d67cd76a545e867",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "decks/tree/structure",
+  "scenario_sha256": "b43ac76be560707436e8cdda8afad15f2c75847819963f19ce444e5da7e9d6ce",
+  "tz": "UTC"
+}

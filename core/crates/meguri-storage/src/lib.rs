@@ -7,6 +7,7 @@
 //! and `derived-store.md`.
 
 pub mod atomic_file;
+pub mod bootstrap;
 pub mod bulk;
 pub mod checkpoint;
 pub mod collation;

@@ -1,0 +1,19 @@
+# Selecting the current deck (specs/decks/decks.md D11; R1474): curDeck gets
+# the deck's id with usn -1 and mtime_secs now, and col.mod moves to now, so
+# the collection counts as changed for sync; selecting the deck that is
+# already current writes nothing. The undo status is not observed here
+# (specs/conformance/deck-ops.md K7).
+id: decks/current/select
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Inbox, Other]
+steps:
+  - db_exec: {sql: "SELECT usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY = 'curDeck'"}
+  - advance: 1h
+  - set_current_deck: {deck: Other}
+  - db_exec: {sql: "SELECT usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY = 'curDeck'"}
+  - advance: 1m
+  - set_current_deck: {deck: Other}
+  - db_exec: {sql: "SELECT usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY = 'curDeck'"}
+  - set_current_deck: {deck: Default}
+  - db_exec: {sql: "SELECT usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY = 'curDeck'"}

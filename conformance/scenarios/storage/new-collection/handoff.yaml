@@ -1,0 +1,27 @@
+# Live (T1): Anki opens a collection Meguri created and works in it
+# (specs/storage/new-collection.md B10; plan U28). The first segment runs on
+# Meguri: its own bootstrap, then the setup's note type. The oracle then reads
+# the col row, the config keys, the default deck and preset, adds a note to
+# the default deck, and runs Check Database. The golden is the oracle running
+# both segments, so the chain passes only when Anki finds in Meguri's new
+# collection what it finds in its own. Notes of the stock kinds in a Meguri
+# collection are U29's notetypes/records/stock-handoff.
+id: storage/new-collection/handoff
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+steps:
+  - observe: [timing]
+  - handoff: oracle
+  - observe: [timing]
+  - db_exec: {sql: "SELECT id, crt, mod, scm, ver, dty, usn, ls FROM col"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config ORDER BY KEY"}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn, hex(common), hex(kind) FROM decks ORDER BY id"}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn, hex(config) FROM deck_config ORDER BY id"}
+  - advance: 1m
+  - add_note: {notetype: Pair, fields: [sun, sol]}
+  - db_exec: {sql: "SELECT c.did, c.ord, c.usn, n.usn FROM cards c JOIN notes n ON n.id = c.nid"}
+  - check_db: {}

@@ -4,31 +4,8 @@
 //! compared with the oracle's golden, the deviations of
 //! `conformance/deviations.yaml` applied (dsl.md D13).
 //!
-//! The scenarios start from a new collection, which Meguri's executor makes
-//! only once U28's bootstrap exists; until then T0 lists them pending, U28
-//! activates them (plan, U40 Verification as amended, review-log U40 A1),
-//! and this file plays them as Meguri's adapters would, with the engine's
-//! real day clock:
-//!
-//! - **The new collection**: `tests/common/day.rs`, a copy of the schema-18
-//!   fixture with no notes or cards, `crt` and `creationOffset` from D11
-//!   (meguri-sched's `new_collection_timing`, which the `creation-*`
-//!   scenarios check) and none of the keys the first day query writes. The
-//!   engine opens it at `clock.start`, so its first day query is the one at
-//!   open (D8), as D14.2 has the scenarios expect.
-//! - **`timing`**: `check_rollover` (D14.2), with the scenario clock's
-//!   instant and offset.
-//! - **`set_config`** (and `setup.config`): a skip-undo op through the config
-//!   API; the check a change of `rollover` or `creationOffset` starts (D8) has
-//!   run before the next step.
-//! - **`db_exec`**: one statement on the writer connection; one that writes
-//!   drops the cached day (D6).
-//! - **`reopen`**: the engine closes the collection and opens it again, which
-//!   runs the first check (D8).
-//!
-//! `sched/day/legacy-timing-after-answer` needs notes and answers (U27, U44;
-//! D14.3) and waits for them: U44 runs it through the real answer path
-//! (review-log U40 A2).
+//! Scenarios use U28's actual bootstrap before the normal engine open.
+//! U44 owns the answer scenario; it is not run here.
 
 mod common;
 

@@ -1,0 +1,18 @@
+# Deck names (specs/decks/decks.md D1, D2; R1465, R56, R57): emoji and mixed
+# scripts are stored byte for byte; each component loses ASCII control
+# characters and surrounding whitespace and ":", is NFC, and an empty one is
+# "blank"; removing a control character can let a combining mark compose.
+# Names that are equal under unicase are one deck (Straße and STRASSE).
+id: decks/create/names
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_deck: {name: "Café::日本語::😀 Emoji"}
+  - add_deck: {name: "Ελληνικά::Русский::עברית"}
+  - add_deck: {name: "  Tail ::  :B: \u0007x ::  "}
+  - add_deck: {name: "e\u0001́"}
+  - add_deck: {name: "Café::日本語"}
+  - add_deck: {name: STRASSE}
+  - add_deck: {name: Straße}
+  - add_deck: {name: "::"}
+  - db_exec: {sql: "SELECT id, hex(name) FROM decks ORDER BY id"}
+  - observe: [decks]

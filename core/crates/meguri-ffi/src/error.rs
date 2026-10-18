@@ -57,7 +57,10 @@ impl From<EngineError> for CoreError {
             | EngineError::NeedsSchemaConfirmation { .. } => CoreError::Unavailable {
                 reason: error.to_string(),
             },
-            EngineError::NotetypeRefused(_) | EngineError::NoteNotFound { .. } => CoreError::InvalidArgument {
+            EngineError::NotFound { .. }
+            | EngineError::DeckRefused(_)
+            | EngineError::NotetypeRefused(_)
+            | EngineError::NoteNotFound { .. } => CoreError::InvalidArgument {
                 message: error.to_string(),
             },
             EngineError::Unsupported { feature } => CoreError::Unsupported { feature },

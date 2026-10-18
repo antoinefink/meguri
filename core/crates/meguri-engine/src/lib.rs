@@ -13,12 +13,15 @@
 //! `change-stream.md`, `lifecycle.md`, `jobs.md`, `undo.md`,
 //! `specs/sched/day-clock.md`, `specs/notetypes/`.
 
+pub mod bootstrap;
 pub mod browser_config;
 pub mod cancel;
 pub mod cardgen;
 pub mod cards;
 pub mod changes;
 pub mod collection;
+pub mod deck_config;
+pub mod decks;
 pub mod derived_host;
 pub mod error;
 pub mod executor;

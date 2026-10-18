@@ -495,6 +495,149 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+# Fakes for the Mac's hidden launches (run, screenshot; U8d): the drive
+# fakes' build; `open` logs its arguments and starts a stand-in whose command
+# line is the app's executable, as LaunchServices would (argv[0] set with
+# exec -a); lsappinfo reports any process as FX_APP_TYPE (UIElement), in
+# front with FX_APP_FRONT=1; Screen Recording is allowed, the window list
+# has one window and screencapture writes the PNG.
+add_mac_launch_fakes() {
+  add_drive_fakes
+  stub open 'echo "open $*" >>"$STUB_LOG"
+while [ "$#" -gt 0 ] && [ "$1" != --args ]; do app="$1"; shift; done
+(exec -a "$app/Contents/MacOS/Meguri" sleep 60) >/dev/null 2>&1 3>&- &
+echo "$!" >>"$(dirname "$STUB_LOG")/bg.pids"'
+  stub lsappinfo 'echo "lsappinfo $*" >>"$STUB_LOG"
+[ "${FX_APP_INFO:-}" != empty ] || exit 0
+[ "${FX_APP_INFO:-}" != malformed ] || { echo "ApplicationType unavailable"; exit 0; }
+printf "[ NULL ]  ASN:0x0-0x1a01a:%s\n    bundleID=[ NULL ]\n !cgsConnection !signalled type=\"%s\" flavor=[ NULL ]  Arch=!!none\n" "${FX_APP_FRONT:+ (in front)}" "${FX_APP_TYPE:-UIElement}"
+[ "${FX_APP_INFO:-}" != failed ]'
+  stub osascript 'case "$*" in *CGPreflightScreenCaptureAccess*) echo true ;; *CGWindowListCopyWindowInfo*) echo 4242 ;; esac'
+  stub screencapture 'echo "screencapture $*" >>"$STUB_LOG"; printf png >"${!#}"'
+}
+
+# mac_app_running: whether a stand-in Mac app of this test still runs.
+mac_app_running() { pgrep -f "^$SB/build/app/DerivedData/Build/Products/Debug/Meguri.app/Contents/MacOS/Meguri" >/dev/null; }
+
+assert_mac_presence_missing() {
+  mg run --platform mac --seconds 1
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '.failures[0].id')" = no-evidence ]
+  ! mac_app_running
+
+  mg screenshot --platform mac --route sample/screen
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '.failures[0].id')" = no-evidence ]
+  not_called '^screencapture '
+  ! mac_app_running
+}
+
+@test "failed lsappinfo fails run and screenshot even when it prints a safe type" {
+  add_mac_launch_fakes
+  FX_APP_INFO=failed assert_mac_presence_missing
+}
+
+@test "empty lsappinfo fails run and screenshot" {
+  add_mac_launch_fakes
+  FX_APP_INFO=empty assert_mac_presence_missing
+}
+
+@test "unrecognized lsappinfo type fails run and screenshot" {
+  add_mac_launch_fakes
+  FX_APP_TYPE=Unknown assert_mac_presence_missing
+}
+
+@test "malformed lsappinfo output fails run and screenshot" {
+  add_mac_launch_fakes
+  FX_APP_INFO=malformed assert_mac_presence_missing
+}
+
+@test "Mac presence queries reject missing or invalid pids and propagate lsappinfo failure" {
+  add_mac_launch_fakes
+  local pid
+  for pid in '' 0 -1 invalid; do
+    run bash -c 'mg_job() { :; }; . "$1"; mg_app_mac_presence "$2"' _ "$SB/tools/mg.d/app.sh" "$pid"
+    [ "$status" -ne 0 ]
+  done
+  not_called '^lsappinfo '
+  FX_APP_INFO=failed run bash -c 'mg_job() { :; }; . "$1"; mg_app_mac_presence "$2"' _ "$SB/tools/mg.d/app.sh" "$$"
+  [ "$status" -ne 0 ]
+  called '^lsappinfo info -only ApplicationType [0-9]+$'
+}
+
+@test "BackgroundOnly lsappinfo passes run and screenshot" {
+  add_mac_launch_fakes
+  FX_APP_TYPE=BackgroundOnly mg run --platform mac --seconds 1
+  [ "$status" -eq 0 ]
+  [ "$(field .details.application_type)" = BackgroundOnly ]
+  ! mac_app_running
+  FX_APP_TYPE=BackgroundOnly mg screenshot --platform mac --route sample/screen
+  [ "$status" -eq 0 ]
+  called '^screencapture '
+  ! mac_app_running
+}
+
+@test "run on the Mac launches hidden with -MeguriBackgroundLaunch YES and checks every second that the app stays out of the Dock" {
+  add_mac_launch_fakes
+  mg run --platform mac --route sample/screen --seconds 2
+  [ "$status" -eq 0 ]
+  local app="$SB/build/app/DerivedData/Build/Products/Debug/Meguri.app"
+  called "^open -g -j -n $app --args -MeguriBackgroundLaunch YES -ApplePersistenceIgnoreState YES -MeguriRoute sample/screen\$"
+  [ "$(grep -c '^lsappinfo info -only ApplicationType [0-9]' "$STUB_LOG")" -eq 2 ]
+  [ "$(field .details.application_type)" = UIElement ]
+  ! mac_app_running
+}
+
+@test "a hidden Mac launch with a Dock tile, or made the active app, fails run and screenshot, and the app is quit" {
+  add_mac_launch_fakes
+  FX_APP_TYPE=Foreground mg run --platform mac --seconds 3
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = in-sight ]
+  [[ "$(field '.failures[0].message')" == *"lsappinfo: Foreground"* ]]
+  [ "$(grep -c '^lsappinfo ' "$STUB_LOG")" -eq 1 ]
+  ! mac_app_running
+
+  FX_APP_FRONT=1 mg run --platform mac --seconds 3
+  [ "$status" -eq 1 ]
+  [[ "$(field '.failures[0].message')" == *"lsappinfo: UIElement front"* ]]
+  ! mac_app_running
+
+  : >"$STUB_LOG"
+  FX_APP_TYPE=Foreground mg screenshot --platform mac --route sample/screen
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = in-sight ]
+  not_called '^screencapture '
+  ! mac_app_running
+}
+
+@test "run and screenshot launch only Debug on the Mac: Profile has no background launch and is refused before any build" {
+  add_mac_launch_fakes
+  mg run --platform mac --config Profile --seconds 1
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = usage ]
+  [[ "$(field '.failures[0].message')" == *"Debug only: Profile has no background launch"* ]]
+  mg screenshot --platform mac --config Profile --route sample/screen
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = usage ]
+  not_called '^fake build '
+  not_called '^open '
+  ! mac_app_running
+}
+
+@test "screenshot on the Mac launches hidden with -MeguriBackgroundLaunch YES and captures the window out of the Dock" {
+  add_mac_launch_fakes
+  mg screenshot --platform mac --route sample/screen
+  [ "$status" -eq 0 ]
+  local app="$SB/build/app/DerivedData/Build/Products/Debug/Meguri.app"
+  called "^open -g -j -n $app --args -MeguriBackgroundLaunch YES -ApplePersistenceIgnoreState YES -MeguriAnimations off -MeguriRoute sample/screen\$"
+  called '^lsappinfo info -only ApplicationType [0-9]+$'
+  called '^screencapture -x -o -l 4242 '
+  [ -s "$(field '.artifacts[] | select(.kind == "png") | .path')" ]
+  ! mac_app_running
+}
+
 @test "xcode-check builds without the host lease, then queues for it before launches, simulators and tests" {
   add_fixture_jobs
   cat >>"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'

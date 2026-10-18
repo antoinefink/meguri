@@ -252,7 +252,7 @@ milestones:
       - {id: a11y-mac, run: a11y-mac, why: "the accessibility harness on the Mac (U10)"}
       - {id: image-tools-selftest, run: image-tools-selftest, why: "image diff, critic, gallery and perf-compare tests (U10, U12)"}
       - {id: perf-smoke, run: perf-smoke, plan: [A stub screen emits a named interval, (U12)], why: "a stub screen emits a named interval (U12)"}
-      - {id: perf-gate, run: perf-gate-milestone, plan: [that U241 evaluates], why: "U241 evaluates the stub screen's interval (U12, U241)"}
+      - {id: perf-ui-gate, run: perf-gate-ui, plan: [that U241 evaluates], why: "U241 evaluates the stub screen's interval (U12, U241)"}
       - {id: selftest, run: selftest, why: "tools/mg self-tests (U1, U19, U240)"}
       - {id: selftest-host, run: selftest-host, why: "tools/mg host self-tests (U1)"}
       - {id: selftest-xcframework, run: selftest-xcframework, why: "the XCFramework build script (U6)"}
@@ -304,8 +304,8 @@ milestones:
       - {id: private-selftest, run: private-selftest, why: "the private vault's mount and scan (U15)"}
       - {id: anonymize-check, run: anonymize-check, why: "the anonymized clone (U15)"}
       - {id: u243-review-loop, run: u243-review-loop, pending: U243, plan: ["U243 on the Mac host and simulators"], why: "review-loop frame budgets on the Mac host and simulators (R1807-R1817)"}
-      - id: perf-gate
-        run: perf-gate-milestone
+      - id: perf-ui-gate
+        run: perf-gate-ui
         scope: {detail: groups, items: [review]}
         plan:
           - {text: "gated by U241 against the review-loop budgets (R1807–R1817)", items: [review]}

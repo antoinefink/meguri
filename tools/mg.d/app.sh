@@ -7,13 +7,15 @@
 # mg_sim_take after (the VM's lease, the products copied in), and reach the
 # simulators through mg_simctl. A --device must be a pool device this
 # checkout leased. Mac launches take the host lease (host.sh). The Mac app is
-# launched hidden (open -g -j) and never in Release or AppStore, whose ids
-# are the daily driver's (app/AGENTS.md).
+# launched hidden (open -g -j) with -MeguriBackgroundLaunch YES, so it stays
+# out of the Dock and never becomes active (U8d; mg_app_open_mac), and only in
+# Debug: Profile has no background launch, and Release and AppStore have the
+# daily driver's ids (app/AGENTS.md).
 
 mg_job build-app host mg_build_app \
   "Build the app and its UI tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] (lint-ui first, core XCFramework, xcodebuild build-for-testing into build/app/DerivedData; Mac: Debug and Profile only)"
 mg_job run host mg_run \
-  "Install and launch with test-hook options: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid>] [--config Debug|Profile] [--route r] [--window-size s] [--seconds N] [-- launch args]; a simulator keeps running the app (and its lease), the Mac app runs hidden for N s (5) and quits"
+  "Install and launch with test-hook options: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid>] [--config Debug|Profile] [--route r] [--window-size s] [--seconds N] [-- launch args]; a simulator keeps running the app (and its lease), the Mac app (Debug only) runs hidden for N s (5), out of the Dock and never active (checked with lsappinfo every second), and quits"
 
 MG_APP_DD=build/app/DerivedData
 MG_APP_DEV_ID=com.antoinefink.meguri.dev
@@ -97,7 +99,9 @@ mg_app_input_digest() {
 # Mac runs go where mg_mac_ui_begin sent them (MG_MAC_RUNNER), simulator runs
 # where mg_sim_begin did (MG_SIM_RUNNER): to the test VM (mac-vm.sh) or this
 # Mac. Returns 0 pass, 1 test failures, 2 could not run (records a user step
-# when macOS has not allowed UI automation).
+# when macOS has not allowed UI automation), 4 queued: the test VM could not
+# be reached (mg_vm_xcodebuild_test recorded the queued part, user step
+# mac-vm).
 mg_app_xcodebuild_test() {
   local prefix="$1" platform="$2" dest="$3" config="$4" rc summary sdk=""
   shift 4
@@ -112,6 +116,7 @@ mg_app_xcodebuild_test() {
     mg_vm_xcodebuild_test "$prefix" "${MG_APP_TEST_PLAN:-UI}" "$sdk" "$dest" "$config" "$@"
     rc=$?
     mg_artifact log "$prefix.log" "xcodebuild test ($platform, in the test VM)"
+    [ -z "$MG_MAC_VM_RUN_QUEUED" ] || return 4
     [ -z "$MG_MAC_VM_RUN_ERROR" ] || return 2
   else
     # No diagnostics on failure: they take up to 10 minutes (simctl diagnose)
@@ -263,10 +268,11 @@ mg_app_mac_input_record() {
 # mg_sim_lease <kind> <release|keep>: leases a pool device for this job (in
 # the test VM, sim-pool.sh); sets MG_SIM_UDID. With release, the device goes
 # back to the pool (reset) when the job ends. On failure records it and
-# returns 1.
+# returns 1; when the test VM could not be reached (sim-pool.sh exit 5) the
+# simulator runs are queued (mg__mac_vm_unreachable, user step mac-vm).
 mg_sim_lease() {
-  local rc
-  MG_SIM_UDID="$("$MG_TOOLS/scripts/sim-pool.sh" acquire "$1" --holder "$(basename "$MG_ROOT") $MG_JOB")"
+  local rc err="$MG_RUN_DIR/sim-pool-acquire-$1.err"
+  MG_SIM_UDID="$(mg_sim_pool_run "$err" acquire "$1" --holder "$(basename "$MG_ROOT") $MG_JOB")"
   rc=$?
   case "$rc" in
     0) ;;
@@ -281,7 +287,11 @@ mg_sim_lease() {
       mg_status error
       return 1
       ;;
-    5 | 6)
+    5)
+      mg__mac_vm_unreachable "sim-pool.sh acquire $1: $(mg_sim_pool_queued_reason "$err")"
+      return 1
+      ;;
+    6)
       mg_failure sim-vm "sim-pool.sh acquire $1: the test VM could not lease a simulator (exit $rc); see log.txt" "tools/mg doctor"
       mg_status error
       return 1
@@ -295,6 +305,24 @@ mg_sim_lease() {
   [ "$2" = keep ] || mg_on_exit "'$MG_TOOLS/scripts/sim-pool.sh' release '$MG_SIM_UDID' >&2"
   mg_detail device "$("$MG_TOOLS/scripts/sim-pool.sh" status 2>/dev/null | jq -c --arg u "$MG_SIM_UDID" 'first(.devices[] | select(.udid == $u) | {udid, name, kind}) // {udid: $u}')"
   return 0
+}
+
+# mg_sim_pool_run <stderr copy> <sim-pool.sh args>: sim-pool.sh, its stdout
+# printed, its stderr on this job's stderr and in <stderr copy> (for the
+# reason of an exit 5); returns its exit code.
+mg_sim_pool_run() {
+  local copy="$1" rc
+  shift
+  { "$MG_TOOLS/scripts/sim-pool.sh" "$@" 2>&1 1>&3 3>&- | tee "$copy" >&2 3>&-; rc="${PIPESTATUS[0]}"; } 3>&1
+  return "$rc"
+}
+
+# mg_sim_pool_queued_reason <stderr copy>: why sim-pool.sh exited 5 (its
+# last "sim-pool: queued: " line).
+mg_sim_pool_queued_reason() {
+  local r
+  r="$(sed -n 's/^sim-pool: queued: //p' "$1" 2>/dev/null | tail -n 1)"
+  printf '%s\n' "${r:-the test VM could not run the pool; see log.txt}"
 }
 
 # mg_sim_check_owned <udid>: a pool device leased from this checkout. Another
@@ -407,6 +435,59 @@ mg_app_mac_guard() {
   return 1
 }
 
+# mg_app_mac_launchable <config>: only a Debug build stays out of sight on
+# this Mac (U8d); Profile keeps Release's launch for performance runs (R1866)
+# and would get a Dock tile. Otherwise records a usage error and returns 1,
+# before anything is built or launched.
+mg_app_mac_launchable() {
+  [ "$1" != Debug ] || return 0
+  mg_failure usage "$MG_JOB: the Mac app is launched on this Mac in Debug only: $1 has no background launch (U8d; Profile keeps Release's launch for performance runs, R1866) and would show in the Dock" "tools/mg --list"
+  mg_message "$MG_JOB: the Mac app is launched on this Mac in Debug only, not $1 (U8d)"
+  mg_status error
+  return 1
+}
+
+# mg_app_open_mac <app> [launch args...]: launches the Mac app the only way
+# tools/mg launches it on this Mac (root AGENTS.md): a new instance, hidden
+# and in the background (open -g -j), with -MeguriBackgroundLaunch YES, which
+# keeps the Debug build out of the Dock and never active (U8d,
+# app/Meguri/TestHooks/BackgroundLaunch.swift; mg_app_mac_launchable first).
+mg_app_open_mac() {
+  local app="$1"
+  shift
+  open -g -j -n "$app" --args -MeguriBackgroundLaunch YES "$@" >&2
+}
+
+# mg_app_mac_presence <pid>: how LaunchServices shows the process (lsappinfo):
+# its application type (Foreground: a Dock tile; UIElement; BackgroundOnly),
+# followed by "front" while it is the active app. A failed query returns 1;
+# empty or unknown types are not evidence of an out-of-sight launch.
+mg_app_mac_presence() {
+  local info type
+  case "$1" in "" | 0 | *[!0-9]*) return 1 ;; esac
+  info="$(lsappinfo info -only ApplicationType "$1" 2>/dev/null)" || return 1
+  type="$(printf '%s\n' "$info" | sed -nE 's/.*type="([A-Za-z]+)".*/\1/p' | head -n 1)"
+  case "$info" in *"(in front)"*) type="${type:+$type }front" ;; esac
+  printf '%s\n' "$type"
+}
+
+# mg_app_mac_out_of_sight <pid> <when>: a hidden launch gets no Dock tile and
+# never becomes the active app (U8d). Sets MG_APP_MAC_PRESENCE; otherwise
+# records the failure and returns 1.
+mg_app_mac_out_of_sight() {
+  if MG_APP_MAC_PRESENCE="$(mg_app_mac_presence "$1")"; then
+    case "$MG_APP_MAC_PRESENCE" in
+      UIElement | BackgroundOnly) return 0 ;;
+      Foreground | *" front" | front)
+        mg_failure in-sight "the Mac app (pid $1) showed on this Mac $2 (lsappinfo: $MG_APP_MAC_PRESENCE): a hidden tools/mg launch must get no Dock tile and never be the active app (U8d, -MeguriBackgroundLaunch YES)"
+        return 1
+        ;;
+    esac
+  fi
+  mg_failure no-evidence "cannot verify the Mac app stays out of sight (pid ${1:-unknown}) $2 (lsappinfo: ${MG_APP_MAC_PRESENCE:-empty or failed}): expected UIElement or BackgroundOnly for a known pid (U8d)"
+  return 1
+}
+
 # mg_app_quit_mac <app>: terminates the app (SIGKILL after 10 s).
 mg_app_quit_mac() {
   local pids i
@@ -489,11 +570,17 @@ mg_run() {
   mg_sim_take || return 0
   # A fixture the launch names must be in the VM, where the app reads it.
   if [ "$MG_SIM_RUNNER" = vm ]; then
-    if ! mg_vm_launch_args "${launch[@]}"; then
-      mg_message "run: a launch fixture could not be put in the test VM; nothing was launched"
-      mg_status error
-      return 0
-    fi
+    mg_vm_launch_args "${launch[@]}"
+    case $? in
+      0) ;;
+      # The VM could not be reached: queued (mg__mac_vm_unreachable).
+      2) return 0 ;;
+      *)
+        mg_message "run: a launch fixture could not be put in the test VM; nothing was launched"
+        mg_status error
+        return 0
+        ;;
+    esac
     launch=("${MG_VM_ARGS[@]}")
   fi
   if [ -n "$udid" ]; then
@@ -528,16 +615,18 @@ mg_run() {
   mg_status pass
 }
 
-# The Mac: a hidden background launch that must stay up for <seconds>, then
-# quits (it holds the host lease meanwhile, so no other job launches the app).
+# The Mac: a hidden background launch that must stay up, out of the Dock and
+# never active, for <seconds>, then quits (it holds the host lease meanwhile,
+# so no other job launches the app).
 mg_run__mac() {
   local config="$1" seconds="$2" app pid="" i
   shift 2
+  mg_app_mac_launchable "$config" || return 0
   mg_app_build mac "$config" || return 0
   mg_host_lease || return 0
   mg_app_mac_guard || return 0
   app="$(mg_app_products mac "$config")/Meguri.app"
-  open -g -j -n "$app" --args "$@" >&2
+  mg_app_open_mac "$app" "$@"
   mg_on_exit "mg_app_quit_mac '$app'"
   for i in 1 2 3 4 5 6 7 8 9 10; do
     pid="$(mg_app_mac_pids "$app" | head -n 1)"
@@ -557,8 +646,14 @@ mg_run__mac() {
       mg_status fail
       return 0
     fi
+    if ! mg_app_mac_out_of_sight "$pid" "$i s after a hidden launch"; then
+      mg_message "run: could not verify the Mac app stays out of sight after $i s (lsappinfo: ${MG_APP_MAC_PRESENCE:-empty or failed})"
+      mg_status fail
+      return 0
+    fi
     mg_sleep 1
   done
-  mg_message "run: the Mac app ($config) ran hidden for $seconds s (pid $pid) and was quit"
+  mg_detail application_type "$(jq -n --arg t "$MG_APP_MAC_PRESENCE" '$t')"
+  mg_message "run: the Mac app ($config) ran hidden for $seconds s (pid $pid, lsappinfo: ${MG_APP_MAC_PRESENCE:-unknown}) and was quit"
   mg_status pass
 }

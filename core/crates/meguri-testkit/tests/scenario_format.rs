@@ -416,6 +416,175 @@ fn the_model_requires_what_the_schema_requires_of_draft_ops() {
     }
 }
 
+/// The ops of deck-ops.md K2-K10.
+const DECK_OPS: [&str; 11] = [
+    "add_deck",
+    "rename_deck",
+    "reparent_decks",
+    "delete_decks",
+    "set_deck_collapsed",
+    "set_current_deck",
+    "add_preset",
+    "clone_preset",
+    "rename_preset",
+    "remove_preset",
+    "set_deck_preset",
+];
+
+/// A valid argument mapping for each deck op, every typed argument given.
+fn valid_deck_args(op: &str) -> Value {
+    match op {
+        "add_deck" => json!({"name": "A::B"}),
+        "rename_deck" => json!({"deck": "A", "name": "B"}),
+        "reparent_decks" => json!({"decks": ["A", "B"], "parent": ""}),
+        "delete_decks" => json!({"decks": ["A"]}),
+        "set_deck_collapsed" => json!({"decks": ["A"], "scope": "browser", "collapsed": true}),
+        "set_current_deck" => json!({"deck": "A"}),
+        "add_preset" => json!({"name": "P"}),
+        "clone_preset" | "rename_preset" => json!({"preset": "P", "name": "Q"}),
+        "remove_preset" => json!({"preset": "P", "fallback": "Default"}),
+        "set_deck_preset" => json!({"deck": "A", "preset": "P", "subtree": true}),
+        other => panic!("no valid example for deck op {other}"),
+    }
+}
+
+#[test]
+fn the_model_reads_the_deck_ops_as_the_schema_types_them() {
+    let schema: Value =
+        serde_json::from_str(&fs::read_to_string(conformance_dir().join("schema/scenario.schema.json")).unwrap())
+            .unwrap();
+    let steps = schema["$defs"]["step"]["properties"].as_object().unwrap();
+    // Every op the schema cites deck-ops.md for, and no other.
+    let mut cited: Vec<&str> = steps
+        .iter()
+        .filter(|(_, def)| {
+            def["description"]
+                .as_str()
+                .is_some_and(|d| d.starts_with("deck-ops.md"))
+        })
+        .map(|(op, _)| op.as_str())
+        .collect();
+    cited.sort_unstable();
+    let mut ours = DECK_OPS.to_vec();
+    ours.sort_unstable();
+    assert_eq!(cited, ours);
+    for op in DECK_OPS {
+        assert!(Step::NAMES.contains(&op), "{op} is not in Step::NAMES");
+        let def = &steps[op];
+        let valid = valid_deck_args(op);
+        assert_eq!(model_accepts(json!({op: valid.clone()})), Ok(()), "{op}");
+        // A mapping, never the list of its values that serde's derive reads.
+        let as_list: Vec<Value> = valid.as_object().unwrap().values().cloned().collect();
+        assert!(model_accepts(json!({op: as_list})).is_err(), "{op} as a list");
+        assert!(model_accepts(json!({op: null})).is_err(), "{op}: null");
+        let mut extra = valid.clone();
+        extra["colour"] = json!("red");
+        assert!(model_accepts(json!({op: extra})).is_err(), "{op} with an unknown key");
+        for key in def["required"].as_array().unwrap() {
+            let mut without = valid.clone();
+            without.as_object_mut().unwrap().remove(key.as_str().unwrap());
+            assert!(model_accepts(json!({op: without})).is_err(), "{op} without {key}");
+        }
+        // No deck-op argument is nullable or a mapping.
+        for key in def["properties"].as_object().unwrap().keys() {
+            for wrong_value in [Value::Null, json!({"a": 1})] {
+                let mut wrong = valid.clone();
+                wrong[key.as_str()] = wrong_value.clone();
+                assert!(model_accepts(json!({op: wrong})).is_err(), "{op}.{key}: {wrong_value}");
+            }
+        }
+    }
+}
+
+#[test]
+fn deck_ops_read_their_arguments_and_load_time_rules() {
+    use meguri_testkit::scenario::CollapseScope;
+
+    let text = r##"
+id: decks/all-ops
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup: {decks: [A, "A::B"], presets: [{name: P}]}
+steps:
+  - add_deck: {name: " C :: D "}
+  - rename_deck: {deck: "A::B", name: B}
+  - reparent_decks: {decks: [B, C], parent: ""}
+  - delete_decks: {decks: ["C::D"]}
+  - set_deck_collapsed: {decks: [A, B], scope: study, collapsed: false}
+  - set_current_deck: {deck: A}
+  - add_preset: {name: Q}
+  - clone_preset: {preset: Q, name: R}
+  - rename_preset: {preset: R, name: S}
+  - remove_preset: {preset: S, fallback: Default}
+  - set_deck_preset: {deck: A, preset: P}
+  - set_deck_preset: {deck: A, preset: P, subtree: true}
+  - observe: [decks, deck_tree, {decks: null}]
+"##;
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    // K1: typed names are passed as given.
+    assert!(matches!(&parsed.steps[0], Step::AddDeck(a) if a.name == " C :: D "));
+    assert!(matches!(&parsed.steps[1], Step::RenameDeck(a) if a.deck == "A::B" && a.name == "B"));
+    assert!(matches!(&parsed.steps[2], Step::ReparentDecks(a) if a.decks == ["B", "C"] && a.parent.is_empty()));
+    assert!(matches!(&parsed.steps[3], Step::DeleteDecks(a) if a.decks == ["C::D"]));
+    assert!(matches!(
+        &parsed.steps[4],
+        Step::SetDeckCollapsed(a) if a.decks == ["A", "B"] && a.scope == CollapseScope::Study && !a.collapsed
+    ));
+    assert!(matches!(&parsed.steps[5], Step::SetCurrentDeck(a) if a.deck == "A"));
+    assert!(matches!(&parsed.steps[6], Step::AddPreset(a) if a.name == "Q"));
+    assert!(matches!(&parsed.steps[7], Step::ClonePreset(a) if a.preset == "Q" && a.name == "R"));
+    assert!(matches!(&parsed.steps[8], Step::RenamePreset(a) if a.preset == "R" && a.name == "S"));
+    assert!(matches!(&parsed.steps[9], Step::RemovePreset(a) if a.preset == "S" && a.fallback == "Default"));
+    // K10: subtree is false when missing.
+    assert!(matches!(&parsed.steps[10], Step::SetDeckPreset(a) if a.deck == "A" && a.preset == "P" && !a.subtree));
+    assert!(matches!(&parsed.steps[11], Step::SetDeckPreset(a) if a.subtree));
+    let needs = parsed.needs();
+    let mut ops = DECK_OPS.to_vec();
+    ops.sort_unstable();
+    assert_eq!(needs.ops.iter().map(String::as_str).collect::<Vec<_>>(), ops);
+    assert_eq!(
+        needs.observations.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["deck_tree", "decks"]
+    );
+
+    for (bad, why) in [
+        // The schema's minLength and minItems.
+        ("rename_deck: {deck: \"\", name: B}", "deck name"),
+        ("set_current_deck: {deck: \"\"}", "deck name"),
+        ("set_deck_preset: {deck: \"\", preset: P}", "deck name"),
+        ("delete_decks: {decks: []}", "at least one deck"),
+        ("reparent_decks: {decks: [], parent: A}", "at least one deck"),
+        (
+            "set_deck_collapsed: {decks: [], scope: study, collapsed: true}",
+            "at least one deck",
+        ),
+        ("delete_decks: {decks: [A, \"\"]}", "deck name"),
+        ("reparent_decks: {decks: [\"\"], parent: A}", "deck name"),
+        (
+            "set_deck_collapsed: {decks: [\"\"], scope: browser, collapsed: true}",
+            "deck name",
+        ),
+        (
+            "set_deck_collapsed: {decks: [A], scope: both, collapsed: true}",
+            "unknown variant",
+        ),
+        (
+            "set_deck_collapsed: {decks: [A], scope: study, collapsed: \"yes\"}",
+            "invalid type",
+        ),
+        // K9: the fallback is another preset.
+        ("remove_preset: {preset: P, fallback: P}", "differ"),
+        ("observe: [\"decks(#c1)\"]", "does not take"),
+        ("observe: [{decks: {}}]", "does not take"),
+        ("observe: [{deck_tree: {}}]", "does not take"),
+    ] {
+        let text = format!("id: decks/bad\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{{{bad}}}]\n");
+        let err = scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+            .expect_err(bad)
+            .to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
 #[test]
 fn the_model_enforces_the_schema_rules_beyond_types() {
     for (bad, why) in [

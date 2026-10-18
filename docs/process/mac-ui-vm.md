@@ -76,6 +76,20 @@ All runs went through the VM with `details.sim_runner: "vm"` and no host lease. 
   - `ui-tree --route sample/sheet -- -MeguriFixture <scratch file>` (20261015T151732Z-21266) passed through a copy of its script that names the VM's path. A direct `sim-pool.sh acquire ipad`, started while it ran, went through `tools/mg sim` (20261015T151749Z-22288), waited 31 s for the VM's lease and then leased the iPad.
   - `sim-setup` (20261015T151841Z-25447) waited 81 s for the VM's lease, which another job held, and passed.
 
+## The Mac app on the host (U8d)
+
+Two things still start the Mac app on this Mac: the app-hosted tests (Mac snapshots and in-process tests; the app is their test host) and the hidden launches of `tools/mg run` and `screenshot`. On 2026-10-16 Antoine saw the app in his Dock while tests ran, and chose this fix:
+
+- The Debug app declares `LSUIElement`. LaunchServices registers a launch from the Info.plist before any app code runs, so a regular app is reported `Foreground`, with a Dock tile, from its first moment; a policy set at run time alone would come too late.
+- `MeguriApp.init` decides once, before the app finishes launching (`app/Meguri/TestHooks/BackgroundLaunch.swift`). A test host (`XCTestConfigurationFilePath` set) or a launch with `-MeguriBackgroundLaunch YES` stays accessory: no Dock tile, never active, and its windows still render off-screen and exist for `screencapture -l`. Any other launch, by hand or by XCUIApplication in the VM's Mac UI suites, takes the regular policy.
+- `tools/mg run` and `screenshot` pass the argument and fail if `lsappinfo` reports the app `Foreground` or in front. They launch only Debug on this Mac. Profile, Release and AppStore have no switch and start as regular apps (`LSUIElement` false); Profile keeps Release's launch for performance runs (R1866).
+
+Verified on 2026-10-17 from the U8d worktree, with a watcher that polled `lsappinfo list` about three times a second for apps built there:
+
+- `snapshots --platform mac` (20261017T174219Z-60935): 60 pass against the committed references, none new or changed. The test host was `UIElement` and never in front for its whole run. Before the fix, the hosted test that checks this failed: the host had the regular policy.
+- `run --platform mac --route sample/screen --seconds 8` (20261017T174331Z-63793): passed, `UIElement` and never in front. During a second run (20261017T174422Z-66727) the hidden app's window (1180×780, layer 0, off screen) was in the window list, which is what `screencapture -l` captures.
+- `screenshot --platform mac` (20261017T174357Z-64876) was blocked before launching: the session that ran it has no Screen Recording permission (user step `screen-recording`).
+
 ## Limits
 
 - The T9 drive must be connected and mounted. Without it, there is no VM.
@@ -84,3 +98,7 @@ All runs went through the VM with `details.sim_runner: "vm"` and no host lease. 
 - The VM has 6 CPUs and 12 GB of memory. Pool devices stay booted (five on 2026-10-15), and a device's first boots load the VM for several minutes: a suite that runs meanwhile can time out. More CPUs and memory (`tart set meguri-mac --cpu … --memory …`, with the VM stopped) would give simulators more room.
 - The host cannot record the VM's screen: Mac `drive --record` in the VM makes its contact sheets from screenshots the test runner samples.
 - Input-driving Mac tests fail in the VM until Apple fixes the macOS 27.0.1 bug, exactly as on the host.
+
+### Mac input repair (2026-10-18)
+
+The earlier mac-input diagnosis applied to touch events: `.tap()` and coordinate `.press()` took Recap's touch path. The VM's `/usr/libexec/testmanagerd` has `com.apple.private.hid.client.event-dispatch.internal`, which WindowServer rejects on a non-internal build. Automation Mode does enable during XCTest, and no OS update was available. Native mouse events work on the same VM and OS/Xcode pair. Shared UI tests and the agent driver now use `clickOrTap()` (mouse on macOS, touch on iOS), and Mac drags use `click(forDuration:thenDragTo:)`. The alert-dismiss test passed with a real click (ui-test 20261018T065638Z-65888); the six-step sheet driver passed with screenshots and hierarchy checks (drive 20261018T065901Z-70138). No host input was driven and no security setting was weakened.

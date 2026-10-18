@@ -1,13 +1,26 @@
-# specs/conformance/dsl.md D9.1. None active yet. Every day and unbury
-# scenario starts from the new collection (dsl.md D8), which Meguri's
-# executor gets from U28's bootstrap; U28 depends on U40 for its crt and
-# creationOffset. The testkit's timing, reopen and setup.config adapters are
-# in place (exec/sched.rs, exec/storage.rs). U28 activates "day/*" (all but
-# day/legacy-timing-after-answer) and "unbury-on-rollover/*" here; U44
-# activates day/legacy-timing-after-answer, which also needs notes and answer
-# (plan, U40 Verification as amended 2026-10-16, docs/process/review-log/U40.md
-# A1, A2). Meanwhile core/crates/meguri-engine/tests/day_conformance.rs plays
-# them on the engine's day clock against their goldens. The answer scenarios
-# belong to U44.
+# U28 bootstrap completes the day and unbury adapters. U44 owns
+# day/legacy-timing-after-answer. Matrix cases are generated; list the family.
 area: sched
-active: []
+active:
+  - "day/ae84-kathmandu"
+  - "day/clock-back"
+  - "day/config-values"
+  - "day/created-los-angeles-studied-tokyo"
+  - "day/created-tokyo-studied-los-angeles"
+  - "day/creation-after-rollover-tokyo"
+  - "day/creation-at-rollover-utc"
+  - "day/creation-before-rollover"
+  - "day/creation-dst-fall"
+  - "day/creation-dst-spring"
+  - "day/dst-america-los-angeles"
+  - "day/dst-america-new-york"
+  - "day/dst-australia-lord-howe"
+  - "day/dst-europe-paris"
+  - "day/dst-gap-rollover-2-europe-paris"
+  - "day/dst-overlap-rollover-1-america-new-york"
+  - "day/legacy-timing-kept-on-reopen"
+  - "day/legacy-timing"
+  - "day/offset-change-recompute"
+  - "day/rollover-change-recompute"
+  - "day/matrix/*"
+  - "unbury-on-rollover/*"

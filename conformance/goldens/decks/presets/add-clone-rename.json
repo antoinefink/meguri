@@ -1,0 +1,236 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1, "Default", 0, 0, "0A080000803F00002041120400002041221C0000803F0000803F0000803F0000803F0000803F0000803F0000803F481450C8015D00002040656666A63F6D9A99993F7D0000803F8001949D02880101900101980104A80101B00108C0013CAD026666663FC5026666663FE00201"],
+            [1894701600000, "Custom", 1894701600, -1, "0A080000803F00002041120400002041221C0000803F0000803F0000803F0000803F0000803F0000803F0000803F32548716593E4D84A53FB29D1340C7BA0441C139CD40B459553FD93D41406F12833A40A4EF3F31992A3EA8C64B3F54E3BD3F917E7B3DD49A863E7FFBD23F5AF5193F30BBEF3F48E10A3F11C7BA3D27C2863D9BE61D3E482350C8015D00002040656666A63F6D9A99993F7D0000803F8001949D02880101900101980104A80101B00108C0013CAD026666663FC5026666663FE00201FA0F167B227A7A4164646F6E4B6579223A7B226B223A317D7D"],
+            [1894701660000, "Custom copy", 1894701660, -1, "0A080000803F00002041120400002041221C0000803F0000803F0000803F0000803F0000803F0000803F0000803F32548716593E4D84A53FB29D1340C7BA0441C139CD40B459553FD93D41406F12833A40A4EF3F31992A3EA8C64B3F54E3BD3F917E7B3DD49A863E7FFBD23F5AF5193F30BBEF3F48E10A3F11C7BA3D27C2863D9BE61D3E482350C8015D00002040656666A63F6D9A99993F7D0000803F8001949D02880101900101980104A80101B00108C0013CAD026666663FC5026666663FE00201FA0F167B227A7A4164646F6E4B6579223A7B226B223A317D7D"],
+            [1894701660001, "Fresh", 1894701660, -1, "0A080000803F00002041120400002041221C0000803F0000803F0000803F0000803F0000803F0000803F0000803F32548716593E4D84A53FB29D1340C7BA0441C139CD40B459553FD93D41406F12833A40A4EF3F31992A3EA8C64B3F54E3BD3F917E7B3DD49A863E7FFBD23F5AF5193F30BBEF3F48E10A3F11C7BA3D27C2863D9BE61D3E481450C8015D00002040656666A63F6D9A99993F7D0000803F8001949D02880101900101980104A80101B00108C0013CAD026666663FC5026666663FE00201"]
+          ]
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1, "Default", 0, 0],
+            [1894701600000, "Custom", 1894701600, -1],
+            [1894701660000, "Copy B", 1894701720, -1],
+            [1894701660001, "Fresh", 1894701660, -1]
+          ]
+        }
+      },
+      {
+        "legacy_json": {
+          "presets": {
+            "Copy B": {
+              "answerAction": 0,
+              "autoplay": true,
+              "buryInterdayLearning": false,
+              "desiredRetention": 0.9,
+              "dyn": false,
+              "easyDaysPercentages": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+              "fsrsParams5": [],
+              "fsrsParams6": [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542],
+              "fsrsWeights": [],
+              "id": 1894701660000,
+              "ignoreRevlogsBeforeDate": "",
+              "interdayLearningMix": 0,
+              "lapse": {
+                "delays": [10.0],
+                "leechAction": 1,
+                "leechFails": 8,
+                "minInt": 1,
+                "mult": 0.0
+              },
+              "maxTaken": 60,
+              "mod": 1894701720,
+              "name": "Copy B",
+              "new": {
+                "bury": false,
+                "delays": [1.0, 10.0],
+                "initialFactor": 2500,
+                "ints": [1, 4, 0],
+                "order": 1,
+                "perDay": 35
+              },
+              "newGatherPriority": 0,
+              "newMix": 0,
+              "newPerDayMinimum": 0,
+              "newSortOrder": 0,
+              "questionAction": 0,
+              "replayq": true,
+              "rev": {
+                "bury": false,
+                "ease4": 1.3,
+                "hardFactor": 1.2,
+                "ivlFct": 1.0,
+                "maxIvl": 36500,
+                "perDay": 200
+              },
+              "reviewOrder": 0,
+              "secondsToShowAnswer": 0.0,
+              "secondsToShowQuestion": 0.0,
+              "sm2Retention": 0.9,
+              "stopTimerOnAnswer": false,
+              "timer": 0,
+              "usn": -1,
+              "waitForAudio": true,
+              "weightSearch": "",
+              "zzAddonKey": {
+                "k": 1
+              }
+            },
+            "Custom": {
+              "answerAction": 0,
+              "autoplay": true,
+              "buryInterdayLearning": false,
+              "desiredRetention": 0.9,
+              "dyn": false,
+              "easyDaysPercentages": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+              "fsrsParams5": [],
+              "fsrsParams6": [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542],
+              "fsrsWeights": [],
+              "id": 1894701600000,
+              "ignoreRevlogsBeforeDate": "",
+              "interdayLearningMix": 0,
+              "lapse": {
+                "delays": [10.0],
+                "leechAction": 1,
+                "leechFails": 8,
+                "minInt": 1,
+                "mult": 0.0
+              },
+              "maxTaken": 60,
+              "mod": 1894701600,
+              "name": "Custom",
+              "new": {
+                "bury": false,
+                "delays": [1.0, 10.0],
+                "initialFactor": 2500,
+                "ints": [1, 4, 0],
+                "order": 1,
+                "perDay": 35
+              },
+              "newGatherPriority": 0,
+              "newMix": 0,
+              "newPerDayMinimum": 0,
+              "newSortOrder": 0,
+              "questionAction": 0,
+              "replayq": true,
+              "rev": {
+                "bury": false,
+                "ease4": 1.3,
+                "hardFactor": 1.2,
+                "ivlFct": 1.0,
+                "maxIvl": 36500,
+                "perDay": 200
+              },
+              "reviewOrder": 0,
+              "secondsToShowAnswer": 0.0,
+              "secondsToShowQuestion": 0.0,
+              "sm2Retention": 0.9,
+              "stopTimerOnAnswer": false,
+              "timer": 0,
+              "usn": -1,
+              "waitForAudio": true,
+              "weightSearch": "",
+              "zzAddonKey": {
+                "k": 1
+              }
+            },
+            "Fresh": {
+              "answerAction": 0,
+              "autoplay": true,
+              "buryInterdayLearning": false,
+              "desiredRetention": 0.9,
+              "dyn": false,
+              "easyDaysPercentages": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+              "fsrsParams5": [],
+              "fsrsParams6": [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542],
+              "fsrsWeights": [],
+              "id": 1894701660001,
+              "ignoreRevlogsBeforeDate": "",
+              "interdayLearningMix": 0,
+              "lapse": {
+                "delays": [10.0],
+                "leechAction": 1,
+                "leechFails": 8,
+                "minInt": 1,
+                "mult": 0.0
+              },
+              "maxTaken": 60,
+              "mod": 1894701660,
+              "name": "Fresh",
+              "new": {
+                "bury": false,
+                "delays": [1.0, 10.0],
+                "initialFactor": 2500,
+                "ints": [1, 4, 0],
+                "order": 1,
+                "perDay": 20
+              },
+              "newGatherPriority": 0,
+              "newMix": 0,
+              "newPerDayMinimum": 0,
+              "newSortOrder": 0,
+              "questionAction": 0,
+              "replayq": true,
+              "rev": {
+                "bury": false,
+                "ease4": 1.3,
+                "hardFactor": 1.2,
+                "ivlFct": 1.0,
+                "maxIvl": 36500,
+                "perDay": 200
+              },
+              "reviewOrder": 0,
+              "secondsToShowAnswer": 0.0,
+              "secondsToShowQuestion": 0.0,
+              "sm2Retention": 0.9,
+              "stopTimerOnAnswer": false,
+              "timer": 0,
+              "usn": -1,
+              "waitForAudio": true,
+              "weightSearch": ""
+            }
+          }
+        }
+      },
+      {
+        "decks": {
+          "Default": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1,
+            "mtime_secs": 0,
+            "study_collapsed": true,
+            "usn": 0
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d3d41dad6e7541f21252ed38d15adc18f36fa9187cb31cb56d67cd76a545e867",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "decks/presets/add-clone-rename",
+  "scenario_sha256": "b8c7437f160e75f1fbc3ef32981ca7903f6cf7ae4989bdc215db6392bf696f72",
+  "tz": "UTC"
+}

@@ -158,3 +158,9 @@ impl Ports {
 
 /// Swift supplies important-usage capacity; Linux uses statvfs (U32).
 pub use meguri_storage::space::SpaceProvider as DiskSpaceProvider;
+
+/// U127's pre-operation backup hook. The caller waits off the writer;
+/// failure prevents the deletion. meguri-host supplies the package service.
+pub trait BackupService: Send + Sync {
+    fn before_deck_delete(&self) -> Result<(), EngineError>;
+}

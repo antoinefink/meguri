@@ -1,0 +1,94 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "delete_decks": {
+          "count": 3
+        }
+      },
+      {
+        "card": {
+          "#c1": null,
+          "#c2": null,
+          "#c3": null
+        },
+        "decks": {
+          "Default": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1,
+            "mtime_secs": 1894701660,
+            "study_collapsed": true,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "rename_deck": {
+          "name": "Outer::Inner"
+        }
+      },
+      {
+        "add_deck": {
+          "name": "default"
+        }
+      },
+      {},
+      {
+        "delete_decks": {
+          "count": 0
+        }
+      },
+      {
+        "deck_tree": [
+          {
+            "children": [],
+            "name": "default"
+          }
+        ],
+        "decks": {
+          "Default+": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1,
+            "mtime_secs": 1894701720,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "default": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701660001,
+            "mtime_secs": 1894701660,
+            "study_collapsed": true,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, 2, -1],
+            [1894701660000, 2, -1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d3d41dad6e7541f21252ed38d15adc18f36fa9187cb31cb56d67cd76a545e867",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "decks/delete/default",
+  "scenario_sha256": "7ba8c8ec7a1cdbb07fe63c3b0a02bc9a4880620a493449f18e44cdf50a95c817",
+  "tz": "UTC"
+}

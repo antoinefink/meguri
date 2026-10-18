@@ -18,22 +18,27 @@ setup() {
   export STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
   : >"$STUB_LOG"
   # The pool leases POOL-<kind>; with STUB_POOL_BUSY=<kind>, every device of
-  # that kind stays leased (exit 3, as sim-pool.sh does).
+  # that kind stays leased (exit 3, as sim-pool.sh does); with
+  # STUB_POOL_UNREACHABLE=<kind>, the test VM cannot be reached when it
+  # leases one (exit 5, queued).
   cat >"$SB/tools/scripts/sim-pool.sh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "sim-pool.sh $*" >>"$STUB_LOG"
 if [ "$1" = acquire ]; then
   [ "$2" != "${STUB_POOL_BUSY:-}" ] || { echo "sim-pool: every $2 device stayed leased" >&2 && exit 3; }
+  [ "$2" != "${STUB_POOL_UNREACHABLE:-}" ] ||
+    { echo "sim-pool: queued: meguri-mac did not answer over SSH in a logged-in session within 240 s (last: exec request failed on channel 0)" >&2 && exit 5; }
   echo "POOL-$2"
 fi
 exit 0
 EOF
   chmod +x "$SB/tools/scripts/sim-pool.sh"
-  unset STUB_POOL_BUSY
+  unset STUB_POOL_BUSY STUB_POOL_UNREACHABLE
   # Every call is logged. Builds fail (pass with STUB_BUILD_OK=1), so no
   # product check runs; builds for testing write the plan's simulator
-  # xctestrun; test runs pass. A launched app stays up, except on the route
-  # stub/quits.
+  # xctestrun; test runs pass. A launched app stays up (`open -W` becomes a
+  # process whose command line is the app's executable), except on the route
+  # stub/quits; lsappinfo reports it as STUB_APP_TYPE (UIElement).
   cat >"$STUBS/_stub" <<'EOF'
 #!/usr/bin/env bash
 name="$(basename "$0")"
@@ -53,17 +58,27 @@ case "$name $*" in
   "xcrun xcresulttool get "*) echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' ;;
   "xcodebuild build "*) [ "${STUB_BUILD_OK:-}" = 1 ] || exit 65 ;;
   "open "*"-MeguriRoute stub/quits"*) ;;
-  "open "*) exec sleep 30 ;;
+  "open "*)
+    while [ "$#" -gt 0 ] && [ "$1" != --args ]; do app="$1"; shift; done
+    [ "${STUB_APP_INFO:-}" != no-pid ] || exec sleep 30
+    exec -a "$app/Contents/MacOS/Meguri" sleep 30
+    ;;
+  "lsappinfo "*)
+    [ "${STUB_APP_INFO:-}" != empty ] || exit 0
+    [ "${STUB_APP_INFO:-}" != malformed ] || { echo "ApplicationType unavailable"; exit 0; }
+    printf '[ NULL ]  ASN:0x0-0x1a01a:%s\n !cgsConnection !signalled type="%s" flavor=[ NULL ]\n' "${STUB_APP_FRONT:+ (in front)}" "${STUB_APP_TYPE:-UIElement}"
+    [ "${STUB_APP_INFO:-}" != failed ] || exit 1
+    ;;
 esac
 exit 0
 EOF
   chmod +x "$STUBS/_stub"
   local c
-  for c in xcrun xcodebuild codesign lipo segedit pluginkit plutil xmllint open; do
+  for c in xcrun xcodebuild codesign lipo segedit pluginkit plutil xmllint open lsappinfo; do
     ln -s _stub "$STUBS/$c"
   done
   export PATH="$STUBS:$PATH"
-  unset MEGURI_ALLOW_MAC_UI
+  unset MEGURI_ALLOW_MAC_UI STUB_APP_TYPE
 }
 
 teardown() {
@@ -169,6 +184,8 @@ check_project() {
 called() { grep -qE "$1" "$STUB_LOG" || { echo "no call matches: $1" && cat "$STUB_LOG" && return 1; }; }
 not_called() { ! grep -E "$1" "$STUB_LOG"; }
 tap_line() { grep -qxE "$1" <<<"$output" || { echo "no TAP line matches: $1" && echo "$output" && return 1; }; }
+# no_vm_failure: no lease or test run failed (the stubbed builds do).
+no_vm_failure() { ! grep -E '^not ok [0-9]+ (lease|.*-app-hosted|.*TestHooksTests|.*DriveScriptTests)' <<<"$output" || { echo "$output" && return 1; }; }
 
 @test "xcode-check leases its simulators from the pool and releases them at exit" {
   check_project
@@ -255,14 +272,63 @@ SWIFT
   STUB_BUILD_OK=1 check_project --no-ui --iphone PHONE-1 --ipad PAD-1
   local app
   app="$(cd "$BATS_TEST_TMPDIR/work" && pwd -P)/DerivedData/Build/Products/Debug/Meguri.app"
-  called "^open -g -j -n -W $app --args -ApplePersistenceIgnoreState YES\$"
-  called "^open -g -j -n -W $app --args -ApplePersistenceIgnoreState YES -MeguriRoute stub/stays\$"
-  called "^open -g -j -n -W $app --args -ApplePersistenceIgnoreState YES -MeguriRoute stub/quits\$"
+  called "^open -g -j -n -W $app --args -MeguriBackgroundLaunch YES -ApplePersistenceIgnoreState YES\$"
+  called "^open -g -j -n -W $app --args -MeguriBackgroundLaunch YES -ApplePersistenceIgnoreState YES -MeguriRoute stub/stays\$"
+  called "^open -g -j -n -W $app --args -MeguriBackgroundLaunch YES -ApplePersistenceIgnoreState YES -MeguriRoute stub/quits\$"
   [ "$(grep -c '^open ' "$STUB_LOG")" -eq 3 ]
   tap_line 'ok [0-9]+ mac-Debug launched hidden stays up: Home'
   tap_line 'ok [0-9]+ mac-Debug launched hidden stays up: route stub/stays'
   tap_line 'not ok [0-9]+ mac-Debug launched hidden stays up: route stub/quits'
   tap_line '# the app quit within 3 s of a hidden launch \(open -W exit 0\)'
+  [ "$(grep -c '^lsappinfo info -only ApplicationType [0-9]' "$STUB_LOG")" -eq 2 ]
+}
+
+@test "a hidden Mac launch that shows in the Dock fails xcode-check (U8d)" {
+  mkdir -p "$SB/app/Meguri/TestHooks"
+  STUB_BUILD_OK=1 STUB_APP_TYPE=Foreground check_project --no-ui --iphone PHONE-1 --ipad PAD-1
+  tap_line 'not ok [0-9]+ mac-Debug launched hidden stays up: Home'
+  tap_line '# the app showed on this Mac \(pid [0-9]+; a Dock tile or the active app\): lsappinfo:.*type="Foreground".*'
+}
+
+assert_project_presence_missing() {
+  mkdir -p "$SB/app/Meguri/TestHooks"
+  STUB_BUILD_OK=1 check_project --no-ui --iphone PHONE-1 --ipad PAD-1
+  tap_line 'not ok [0-9]+ mac-Debug launched hidden stays up: Home'
+  tap_line '# cannot verify the Mac app stays out of sight.*'
+}
+
+@test "failed lsappinfo fails xcode-check even when it prints a safe type" {
+  STUB_APP_INFO=failed assert_project_presence_missing
+}
+
+@test "empty lsappinfo fails xcode-check" {
+  STUB_APP_INFO=empty assert_project_presence_missing
+}
+
+@test "unrecognized lsappinfo type fails xcode-check" {
+  STUB_APP_TYPE=Unknown assert_project_presence_missing
+}
+
+@test "malformed lsappinfo output fails xcode-check" {
+  STUB_APP_INFO=malformed assert_project_presence_missing
+}
+
+@test "no known Mac app pid fails xcode-check" {
+  STUB_APP_INFO=no-pid assert_project_presence_missing
+  not_called '^lsappinfo '
+}
+
+@test "BackgroundOnly lsappinfo passes xcode-check" {
+  mkdir -p "$SB/app/Meguri/TestHooks"
+  STUB_BUILD_OK=1 STUB_APP_TYPE=BackgroundOnly check_project --no-ui --iphone PHONE-1 --ipad PAD-1
+  tap_line 'ok [0-9]+ mac-Debug launched hidden stays up: Home'
+}
+
+@test "a UIElement in front fails xcode-check" {
+  mkdir -p "$SB/app/Meguri/TestHooks"
+  STUB_BUILD_OK=1 STUB_APP_FRONT=1 check_project --no-ui --iphone PHONE-1 --ipad PAD-1
+  tap_line 'not ok [0-9]+ mac-Debug launched hidden stays up: Home'
+  tap_line '# the app showed on this Mac .*'
 }
 
 @test "the builds phase builds and checks, but launches, leases and tests nothing, and prints no plan" {
@@ -288,7 +354,7 @@ SWIFT
   check_project --phase devices --continue-from "$n"
   app="$(cd "$BATS_TEST_TMPDIR/work" && pwd -P)/DerivedData/Build/Products/Debug/Meguri.app"
   [ "$(head -n 1 <<<"$output")" = "ok $((n + 1)) mac-Debug launched hidden stays up: Home" ]
-  called "^open -g -j -n -W $app --args -ApplePersistenceIgnoreState YES -MeguriRoute stub/stays\$"
+  called "^open -g -j -n -W $app --args -MeguriBackgroundLaunch YES -ApplePersistenceIgnoreState YES -MeguriRoute stub/stays\$"
   called '^sim-pool\.sh acquire iphone --holder xcode-check$'
   called '^xcodebuild test .* -destination id=POOL-iphone .*'
   not_called '^xcodebuild (-list|build .* -destination platform=macOS)'
@@ -370,17 +436,44 @@ SWIFT
   called '^vm-pkill -9 -f '
 
   # SSH stops answering as well: the run cannot be stopped, and no other run
-  # starts in the VM.
+  # starts in the VM. The VM cannot be reached: those runs are queued (U19c).
   rm -f "$FAKE_VM_DIR/meguri-mac/ssh-dropped"
   : >"$STUB_LOG"
   FAKE_VM_SSH_DROP=down check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
-  [ "$status" -ne 0 ]
+  no_vm_failure
   [ "$(grep -c '^vm-xcodebuild ' "$STUB_LOG")" = 1 ]
-  tap_line 'not ok [0-9]+ iphone-Debug-TestHooksTests: not run'
-  tap_line '# the run iphone-app-hosted lost its SSH session and may still be running in meguri-mac \(the VM did not answer .*'
-  tap_line 'not ok [0-9]+ ipad-Debug-TestHooksTests: not run'
+  tap_line 'ok [0-9]+ iphone-app-hosted # SKIP queued: the SSH session to meguri-mac ended before xcodebuild did, and meguri-mac did not answer after it \(the VM did not answer .*\) \(user step mac-vm\)'
+  tap_line 'ok [0-9]+ iphone-Debug-TestHooksTests # SKIP queued: not run: the run iphone-app-hosted lost its SSH session and may still be running in meguri-mac \(the VM did not answer .*'
+  tap_line 'ok [0-9]+ ipad-Debug-TestHooksTests # SKIP queued: not run: .*'
+  [ "$(cut -f1 "$BATS_TEST_TMPDIR/work/vm-queued.tsv" | head -n 3 | tr '\n' ' ')" = "iphone-app-hosted iphone-Debug-TestHooksTests iphone-Release-TestHooksTests " ]
   not_called '^xcodebuild build-for-testing .* -scheme Meguri-Profile '
   vm_tests_running
+}
+
+# bats test_tags=gate
+@test "a VM that cannot be reached during the devices phase queues the leases and runs it keeps from happening, never a failure (U19c)" {
+  fake_vm
+  add_test_inputs
+  # The iPad's lease: the pool's VM did not answer.
+  STUB_POOL_UNREACHABLE=ipad check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  no_vm_failure
+  tap_line 'ok [0-9]+ lease an iPad simulator from the pool # SKIP queued: meguri-mac did not answer over SSH in a logged-in session within 240 s \(last: exec request failed on channel 0\) \(user step mac-vm\)'
+  tap_line 'ok [0-9]+ iphone-Debug-TestHooksTests: Passed .*'
+  [ "$(cat "$BATS_TEST_TMPDIR/work/vm-queued.tsv")" = "lease an iPad simulator from the pool$(printf '\t')meguri-mac did not answer over SSH in a logged-in session within 240 s (last: exec request failed on channel 0)" ]
+
+  # The VM refuses one run's session: that run is queued, the others run.
+  FAKE_VM_SSH_REFUSE='xcodebuild test-without-building .*Meguri-Profile_Performance' check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  no_vm_failure
+  tap_line 'ok [0-9]+ iphone-Profile-TestHooksTests # SKIP queued: meguri-mac refused the run.s SSH session \(ssh exit 255: exec request failed on channel 0\) \(user step mac-vm\)'
+  tap_line 'ok [0-9]+ iphone-Debug-DriveScriptTests: Passed .*'
+  [ "$(cut -f1 "$BATS_TEST_TMPDIR/work/vm-queued.tsv")" = iphone-Profile-TestHooksTests ]
+
+  # Its shell cannot fork the copy of the products: queued too.
+  : >"$STUB_LOG"
+  FAKE_VM_FORK_FAIL="DerivedData-tests/Build/Products' && mkdir -p" check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  no_vm_failure
+  tap_line 'ok [0-9]+ iphone-app-hosted # SKIP queued: copying .*/DerivedData-tests/Build/Products into the VM meguri-mac failed \(tar and ssh exit codes: [0-9]+ 1: zsh:2: fork failed: resource temporarily unavailable\); see log.txt \(user step mac-vm\)'
+  not_called '^vm-xcodebuild '
 }
 
 @test "without the test VM, xcode-check builds for the simulator but leases and tests none" {

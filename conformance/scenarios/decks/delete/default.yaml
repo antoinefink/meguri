@@ -1,0 +1,27 @@
+# Deleting the default deck (specs/decks/decks.md D8, D12; R68): its cards and
+# subdecks go, but the deck (id 1) stays, named Default and stamped. Nested
+# under another deck that is deleted, it comes back at the top level as
+# Default, or Default+ when another deck already has that name; the tree then
+# hides it, since it is empty and another top-level deck exists.
+id: decks/delete/default
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: ["Default::Kid"]
+  notes:
+    - {notetype: Pair, fields: [d1, a]}
+    - {notetype: Pair, fields: [d2, a]}
+    - {notetype: Pair, deck: "Default::Kid", fields: [k1, a]}
+steps:
+  - advance: 1m
+  - delete_decks: {decks: [Default]}
+  - observe: [decks, card]
+  - rename_deck: {deck: Default, name: "Outer::Inner"}
+  - add_deck: {name: default}
+  - advance: 1m
+  - delete_decks: {decks: [Outer]}
+  - observe: [decks, deck_tree]
+  - db_exec: {sql: "SELECT oid, type, usn FROM graves WHERE type = 2 ORDER BY oid"}
