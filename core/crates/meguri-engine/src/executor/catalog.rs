@@ -122,6 +122,8 @@ pub const SYNC_INCOMING_MERGE: OpDef = OpDef::long_write("sync_incoming_merge", 
 pub const NOTETYPE_STRUCTURE_CHANGE: OpDef = OpDef::long_write("notetype_structure_change", UndoClass::Undoable, false);
 /// A bulk op over a large selection (U86): one undo step named after it.
 pub const BULK_OP: OpDef = OpDef::long_write("bulk_op", UndoClass::Undoable, false);
+/// Memory-only recompute (U46), with transaction rollback on cancellation.
+pub const MEMORY_RECOMPUTE: OpDef = OpDef::long_write("memory_recompute", UndoClass::Undoable, true);
 /// Undo of a step (`engine/undo` M4).
 pub const UNDO: OpDef = OpDef::short("undo", UndoClass::Undoable);
 /// Redo of a step (`engine/undo` M5).
@@ -141,12 +143,13 @@ pub const ANALYZE: OpDef = OpDef::maintenance("analyze");
 pub const WAL_CHECKPOINT: OpDef = OpDef::maintenance("wal_checkpoint");
 
 /// Every catalog entry, in the spec's order.
-pub const CATALOG: [OpDef; 13] = [
+pub const CATALOG: [OpDef; 14] = [
     CHECK_DATABASE,
     APKG_APPLY,
     SYNC_INCOMING_MERGE,
     NOTETYPE_STRUCTURE_CHANGE,
     BULK_OP,
+    MEMORY_RECOMPUTE,
     UNDO,
     REDO,
     UNDO_LONG_WRITE,

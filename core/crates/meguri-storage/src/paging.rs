@@ -69,6 +69,27 @@ pub struct StoredConfig {
 /// Typed reads (`model/row-records`): a row that cannot be read is
 /// [`StorageError::Row`]; a missing row is `None`.
 pub trait ReadRows: sealed::Connected {
+    /// M3's indexed fallback; Reset does not truncate this lookup.
+    fn fsrs_last_review_time(&self, card: CardId) -> Result<Option<i64>, StorageError> {
+        crate::queries::revlog_fsrs::last_review_time(self.connection(), card)
+    }
+
+    fn fsrs_included_count(
+        &self,
+        selection: &crate::queries::revlog_fsrs::HistorySelection,
+        cutoff: i64,
+        exclude_suspended: bool,
+    ) -> Result<crate::queries::revlog_fsrs::IncludedCount, StorageError> {
+        crate::queries::revlog_fsrs::count(self.connection(), selection, cutoff, exclude_suspended)
+    }
+
+    fn visit_fsrs_histories<E: From<StorageError>>(
+        &self,
+        selection: &crate::queries::revlog_fsrs::HistorySelection,
+        each: impl FnMut(Card, &[RevlogEntry]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        crate::queries::revlog_fsrs::visit(self.connection(), selection, each)
+    }
     fn col(&self) -> Result<Col, StorageError> {
         rows::get::<Col>(self.connection(), &COL_KEY)?.ok_or_else(|| StorageError::Mode {
             detail: "the collection has no col row".to_owned(),

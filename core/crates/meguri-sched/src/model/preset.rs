@@ -84,16 +84,18 @@ impl PresetView {
         let DeckKind::Normal(normal) = &home.kind.kind else {
             return Ok(None);
         };
-        let source = rows
-            .deck_config(DeckConfigId(normal.config_id))?
-            .unwrap_or_else(|| DeckConfig {
-                id: DeckConfigId(normal.config_id),
-                name: String::new(),
-                mtime: Default::default(),
-                usn: Default::default(),
-                config: ProtoBlob::new(DeckConfigMessage::builtin_defaults()),
-            });
-        Ok(Some(Self::new(&source)))
+        Ok(Some(Self::for_config(rows, DeckConfigId(normal.config_id))?))
+    }
+
+    pub fn for_config(rows: &impl ReadRows, id: DeckConfigId) -> Result<Self, StorageError> {
+        let source = rows.deck_config(id)?.unwrap_or_else(|| DeckConfig {
+            id,
+            name: String::new(),
+            mtime: Default::default(),
+            usn: Default::default(),
+            config: ProtoBlob::new(DeckConfigMessage::builtin_defaults()),
+        });
+        Ok(Self::new(&source))
     }
     pub fn new(source: &DeckConfig) -> Self {
         Self {

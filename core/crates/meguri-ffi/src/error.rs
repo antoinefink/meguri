@@ -69,7 +69,8 @@ impl From<EngineError> for CoreError {
             | EngineError::NeedsSchemaConfirmation { .. } => CoreError::Unavailable {
                 reason: error.to_string(),
             },
-            EngineError::NotFound { .. }
+            EngineError::InvalidIgnoreBeforeDate { .. }
+            | EngineError::NotFound { .. }
             | EngineError::DeckRefused(_)
             | EngineError::NotetypeRefused(_)
             | EngineError::NoteNotFound { .. } => CoreError::InvalidArgument {

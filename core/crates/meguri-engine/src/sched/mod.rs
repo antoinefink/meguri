@@ -6,6 +6,7 @@
 //! math itself is meguri-sched's `timing`.
 
 pub mod day_clock;
+pub mod memory;
 pub mod rollover_op;
 
 pub use day_clock::{DayClock, DayReport};

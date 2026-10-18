@@ -133,6 +133,18 @@ impl CardData {
         self.unknown.iter().map(|(key, text)| (key.as_str(), text.as_str()))
     }
 
+    /// Memory recomputes compare the values the codec would store, including
+    /// absent keys, without rewriting other data (`sched/memory-state#M4.2`).
+    pub fn same_memory_values(&self, other: &Self) -> bool {
+        let memory = |data: &Self| {
+            data.memory_state
+                .map(|state| (round(state.stability, 10_000.0), round(state.difficulty, 1_000.0)))
+        };
+        memory(self) == memory(other)
+            && self.desired_retention.map(|v| round(v, 100.0)) == other.desired_retention.map(|v| round(v, 100.0))
+            && self.decay.map(|v| round(v, 1_000.0)) == other.decay.map(|v| round(v, 1_000.0))
+    }
+
     /// C4: the known members present, rounded, in order, then the unknown
     /// ones; `{}` when there is none.
     pub fn to_text(&self) -> String {

@@ -323,6 +323,21 @@ impl<'c> WriteScope<'c> {
         self.put_cells(Table::Cards, card.to_cells(), true)
     }
 
+    /// Replace data while preserving every other stored scheduling column,
+    /// including imported values that a typed whole-card write would normalize.
+    /// The ordinary scope stamps and journals only a changed row.
+    pub fn put_card_data(
+        &mut self,
+        id: meguri_model::ids::CardId,
+        data: &meguri_model::card_data::CardData,
+    ) -> Result<Written, StorageError> {
+        let Some(mut image) = rows::select_image(self.conn, Table::Cards, &RowKey::Id(id.0))? else {
+            return Ok(Written::Unchanged);
+        };
+        image[17] = Cell::text(data.to_text());
+        self.put_cells(Table::Cards, image, false)
+    }
+
     fn add<R: Record>(&mut self, record: &R) -> Result<i64, StorageError> {
         let id = ids::allocate(self.conn, R::TABLE, self.now().0)?;
         let mut cells = record.to_cells();

@@ -29,6 +29,7 @@ pub mod open;
 pub mod paging;
 pub mod paths;
 mod pragmas;
+pub mod queries;
 #[cfg(feature = "test-hooks")]
 pub mod raw;
 pub mod rows;

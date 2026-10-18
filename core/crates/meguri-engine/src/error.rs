@@ -13,6 +13,9 @@ use crate::undo::reasons::DisabledReason;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineError {
+    InvalidIgnoreBeforeDate {
+        preset: meguri_model::ids::DeckConfigId,
+    },
     SuspendDeadline {
         phase: String,
     },
@@ -144,6 +147,9 @@ impl From<OpenError> for EngineError {
 impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            EngineError::InvalidIgnoreBeforeDate { preset } => {
+                write!(f, "invalid ignore-before date for preset {}", preset.0)
+            }
             EngineError::SuspendDeadline { phase } => write!(f, "suspend deadline exceeded: {phase}"),
             EngineError::NotFound { table, key } => write!(f, "not found: {table} {key}"),
             EngineError::DeckRefused(reason) => f.write_str(reason.kind()),
