@@ -36,6 +36,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "add_notetype",
             "add_preset",
             "add_stock_notetype",
+            "adopt",
             "advance",
             "browser_config_set",
             "clear_unused_tags",
@@ -93,6 +94,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert_eq!(
         json["supports"]["observations"],
         serde_json::json!([
+            "blob_decode",
             "browser_config",
             "canonical_search",
             "card",
@@ -115,12 +117,12 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "timing",
         ])
     );
-    // dsl.md D7.2: 59 ops besides observe, the actor ops of sync-ops.md, the
+    // dsl.md D7.2: 60 ops besides observe, the actor ops of sync-ops.md, the
     // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
     // set_config, undo-ops.md's undo, redo and remove_config, the eight ops
     // of tag-ops.md, browser-config-ops.md's browser_config_set, the note
     // type ops of notetype-ops.md and the deck ops of deck-ops.md among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 59);
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 60);
     for op in [
         "actor",
         "sync",
@@ -128,6 +130,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         "converge",
         "reopen",
         "open",
+        "adopt",
         "set_config",
         "add_deck",
         "set_deck_preset",
@@ -181,8 +184,8 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             .iter()
             .any(|k| k == "undo_status")
     );
-    // observations.md O4: blob_decode and package_col (model-ops.md L5),
-    // remain kinds of the language that Meguri's executor does not run yet.
+    // observations.md O4: both kinds belong to the language; U36 runs
+    // blob_decode, while package_col remains owned by package export.
     for kind in ["blob_decode", "package_col"] {
         assert!(
             json["language"]["observations"]
