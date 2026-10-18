@@ -30,11 +30,15 @@ The home deck's own desired retention when the deck sets one, otherwise the home
 
 `days_elapsed = floor(max(0, next_day_at − lrt) / 86400)` in whole seconds, where `next_day_at` is the next day boundary of the day clock and `lrt` the last review time in the card data (`model/card-data-json` C2). A card reviewed earlier the same day gets 0. When `lrt` is missing, the time of the card's last review in the review log stands in for it (U46); with neither, 0.
 
+The timestamp inputs are signed 64-bit seconds. For extreme imported values, their subtraction retains its low 64 bits, interpreted as signed; clamp a negative result to 0 before dividing by 86,400. The resulting whole-day count is converted to the FSRS `u32` argument by retaining its low 32 bits, not by saturation. A representable difference of `(2^32 + 3) × 86,400` seconds therefore passes 3 days. A subtraction that wraps across the signed maximum into a negative result passes 0. Meguri defines the subtraction as wrapping even in checked builds, so an imported timestamp cannot panic. These boundary conversions have direct tests; no overflowing-timestamp oracle fixture is required.
+
 The boundary counts: with the next day starting at 2030-01-16 04:00 UTC, a review at 2030-01-15 04:00:00 (exactly one day before) gives 1, at 04:00:01 gives 0, at 03:59:59 gives 1; a review time at or after the boundary gives 0; exactly three days before it gives 3 and one second more still 3 (golden `sched/fsrs/elapsed-days`).
 
 ### T2.4 Memory state
 
-The card data's `s` and `d` (`model/card-data-json` C3). A card that is not new and has none gets one from its review history first (U46, R650). A new card has none.
+The card data's `s` and `d` (`model/card-data-json` C3). A caller resolves a non-new card's missing state through U46's history or existing-card fallback (R650). With no usable history and interval 0, the pinned behavior can still leave that state absent. A new card has none.
+
+The pure engine uses the injected snapshot exactly: `None` is a valid resolved absence for any card type and goes to `FSRS::next_states` as `None`. It does not return a missing-memory error or read the collection to supply a fallback. The current state then has no `memory_state` member; the answer states use the initial memory values returned by FSRS. This boundary does not replace U46's responsibility to resolve a positive-interval card before calling the engine.
 
 ### T2.5 Preset values
 
@@ -43,6 +47,8 @@ From the home preset, read with the bounds of `sched/presets#V3`: the maximum in
 ## T3. A review card's current state
 
 The current state of a review card in a normal deck is `review` with `scheduled_days` = `cards.ivl`, `elapsed_days` = `max(0, ivl − (due' − today))` where `due' = min(cards.due, today)`, `ease_factor` = `cards.factor` / 1000 (`f32`), `lapses` = `cards.lapses`, `leeched` = false and `memory_state` = T2.4. Only `scheduled_days` and `ease_factor` feed the states below; the FSRS call takes T2.3's elapsed days.
+
+For imported values, this elapsed-state expression uses signed 32-bit arithmetic. Interpret the low 32 bits of `ivl` and `today` as signed before the comparison and differences. Each subtraction retains its low 32 bits; interpret the final result as signed, replace a negative result with 0, then expose it as `u32`. Do not saturate an unsigned interval-plus-overdue sum. With `ivl` 4,294,967,295 and ordinary `today`, due today gives elapsed 0 and due two days ago gives 1. These values describe the current state only, not the elapsed-days input passed to FSRS.
 
 ## T4. Again on a review card (R654, R671, R587)
 
@@ -206,6 +212,8 @@ A pure function of its inputs: it reads nothing else and writes nothing.
 
 Again on a review card carries the leech flag (T12).
 
+Review-log day intervals retain their low 32 bits as a signed integer. This applies to both `ivl` and `lastIvl`: a current review interval 2,147,483,648 produces `lastIvl` −2,147,483,648, and 4,294,967,295 produces −1. It is not a positive clamp or an input refusal. Normal computed review intervals are within the preset bounds; the distinction matters for imported current intervals. Seconds retain the negative, saturating rule above.
+
 **Errors:** `UnsupportedParams` (T1, T13), `InFilteredDeck` (T7), and the crate's other errors (T1). None of them changes anything.
 
 **FSRS instances:** the engine may keep `FSRS` instances made from a parameter list for reuse, keyed by the exact `f32` values of the list; a reused instance gives the same results as a new one. U46, U47 and U50 use the same instances and the same T13 check.
@@ -220,6 +228,7 @@ Again on a review card carries the leech flag (T12).
 | `sched/fsrs/short-term` | T10 with and without `fsrsShortTermWithStepsEnabled`, parameter forms of 17, 19 and 21 values |
 | `sched/fsrs/elapsed-days` | T2.3 at the day boundary |
 | `sched/fsrs/max-interval` | T5, T8 and T9 under a maximum of 1, 5 and 30 days, an interval above the maximum |
+| `sched/fsrs/input-boundaries` | T2.4's resolved absent memory, T3's signed current-state arithmetic, T14's wrapped imported `lastIvl`, and `sched/steps` L4's saturation order; the final answer needs U44 |
 | `sched/steps/*` | T7, T8, T9 with `sched/steps` |
 | `fp-probe/*` | T1 to T5 on many inputs (`conformance/float-determinism`) |
 

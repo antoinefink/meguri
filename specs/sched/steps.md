@@ -51,7 +51,7 @@ With steps, Hard stays on the current step and keeps `remaining_steps` = `r` exa
 
 - on a step other than the first (index above 0): that step's seconds, as they are, even above one day;
 - on the first step (index 0), with at least two steps: `floor((s0 + s1) / 2)`, the sum of the first two steps' seconds in unsigned 32-bit arithmetic that stops at 4,294,967,295;
-- on the first step of a single-step list: the smaller of `floor(3 × s0 / 2)` and `s0 + 86,400` (both stopping at 4,294,967,295);
+- on the first step of a single-step list: multiply `s0` by 3 with saturation at 4,294,967,295, then divide that result by 2, discarding the remainder; take the smaller of this value and `s0 + 86,400` with saturation at the same maximum. Saturation precedes division, as for the two-step sum; widened multiplication followed by final saturation gives a different result and is not this rule;
 - then, for the two first-step forms only: a delay above 86,400 s (exactly 86,400 is not above) becomes whole days: `round(delay / 86,400)` with the division in `f32` and halves away from zero, times 86,400.
 
 Without steps, Hard leaves the steps (T8 to T10).
@@ -74,6 +74,8 @@ Without steps, Hard leaves the steps (T8 to T10).
 | 1m 10m 1h | 2 | 3600 | the current step |
 
 (Goldens `sched/steps/hard-delays` and `sched/labels/units`, through the `scheduled_secs` of the Hard states.)
+
+At the imported-data boundary, one step whose seconds saturate to 4,294,967,295 gives 2,147,483,647 seconds before day rounding, then 2,147,472,000 seconds (24,855 days). This multiplication boundary is separate from Z7's explicit safe rule for an unrepresentable fuzz range.
 
 ## L5. Good (R641)
 

@@ -1,0 +1,32 @@
+# Pure snapshot boundaries: a resolved absent memory state on a non-new
+# zero-interval card; imported u32 intervals in current state and revlog;
+# and saturation before division for a single enormous learning step.
+# These cases avoid arithmetic that would require an invalid fuzz range.
+id: sched/fsrs/input-boundaries
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Plain}
+    - {name: HugeStep, learn_steps: [1m]}
+  decks:
+    - {name: Plain, preset: Plain}
+    - {name: HugeStep, preset: HugeStep}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Plain, fields: [zero-interval, back]}
+    - {notetype: Pair, deck: Plain, fields: [maximum-due-today, back]}
+    - {notetype: Pair, deck: Plain, fields: [maximum-two-days-overdue, back]}
+    - {notetype: Pair, deck: HugeStep, fields: [large-single-step, back]}
+steps:
+  - legacy_update: {preset: HugeStep, patch: {new: {delays: [100000000.0]}}}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 0, factor = 2500, reps = 1, data = '{}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 4294967295, factor = 2500, reps = 1, data = '{\"s\":10,\"d\":5,\"lrt\":1894442400}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = -2, ivl = 4294967295, factor = 2500, reps = 1, data = '{\"s\":10,\"d\":5,\"lrt\":1894442400}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}
+  - observe: ["next_states(#c1, #c2, #c3, #c4)"]
+  - answer: {card: "#c2", rating: good}
+  - db_exec: {sql: "SELECT lastIvl, ivl FROM revlog ORDER BY id"}

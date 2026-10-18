@@ -37,3 +37,17 @@ and split the English text as O10 says.
 Test links for the classified harvest rows are in `oracle/harvest/links.csv`
 (rows of `scheduler/states/*`, `steps.rs`, `timespan.rs answer_buttons` and
 `answering/mod.rs elapsed_secs`).
+
+## Boundary clarifications at U45 intake, 2026-10-18
+
+Rechecked tag 26.09.3 for `fsrs-transitions` T2.4, T3 and T14 and `steps` L4:
+
+- `rslib/src/scheduler/answering/mod.rs` and `rslib/src/scheduler/fsrs/memory_state.rs`: the non-new-card inference step can leave memory absent with no usable history and interval 0; that absence reaches the FSRS call. U46 still owns the caller's history and existing-card fallback.
+- `rslib/src/scheduler/answering/current.rs`: current review elapsed days use signed 32-bit interpretation and differences, with a final nonnegative result; this differs from unsigned saturation for imported intervals.
+- `rslib/src/scheduler/states/interval_kind.rs`: a review-log interval in days keeps its low bits as signed 32-bit; seconds use the distinct negative saturating form.
+- `rslib/src/scheduler/states/steps.rs`: single-step Hard saturates multiplication before division; the two-step average likewise saturates its sum before division.
+- `rslib/src/timestamp.rs` and `rslib/src/scheduler/answering/mod.rs`: elapsed seconds are a signed timestamp difference, clamped nonnegative before whole-day division; the FSRS argument keeps the low 32 bits of those days. Meguri makes signed overflow explicitly wrapping for deterministic checked builds; this extreme subtraction case is a direct test, not an oracle fixture.
+
+`sched/fsrs/input-boundaries` observes safe representable cases for these rules through the existing oracle adapters. It does not induce an invalid learning-fuzz range or change the overflow-only Meguri policy in `sched/fuzz` Z7.
+
+Recorded with `tools/mg oracle record sched/fsrs/input-boundaries`; subsequent Linux and Apple `oracle compare` each passed the case, with no Apple overlay.
