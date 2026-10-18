@@ -64,12 +64,11 @@ fn timing(session: &mut Session<'_>, _request: &ObservationRequest) -> Result<Va
 }
 
 /// sync-ops.md S6: closes the collection and opens it again from its file.
-/// An engine open drops the cached day and runs the day clock's first check
-/// (D8, D14.2).
+/// This raw fixture adapter invalidates its cached day; an explicit timing
+/// observation performs the query (D14.2). CoreHost owns real lifecycle steps.
 fn reopen(session: &mut Session<'_>, _step: &Step) -> Result<OpResult, ExecError> {
     super::storage::reopen_collection(session)?;
     session.day.clear();
-    day_query_now(session)?;
     Ok(OpResult::Done)
 }
 

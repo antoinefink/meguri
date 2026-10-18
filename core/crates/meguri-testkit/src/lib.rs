@@ -9,6 +9,7 @@ pub mod anonymize;
 pub mod bench;
 pub mod catalog;
 pub mod diff;
+pub mod dump;
 pub mod exec;
 pub mod generate;
 pub mod observe;

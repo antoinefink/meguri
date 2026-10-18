@@ -38,7 +38,7 @@ pub use meguri::{
     Session, SetupFn, SyncAccount, actor_seed,
 };
 pub use oracle::{Hello, OracleExecutor};
-pub use storage::{Storage, db_dump_table, db_exec_rows, normalize_sql};
+pub use storage::{Storage, db_dump_table, db_dump_table_raw, db_exec_rows, normalize_sql};
 pub use tags::tag_tree_value;
 
 /// A failed run: a protocol error kind (`unknown_ref`, `invalid_scenario`,

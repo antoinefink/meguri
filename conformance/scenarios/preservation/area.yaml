@@ -7,4 +7,7 @@
 # notetype/* with U34's update_notetype edits (N11.7). The recipe is the
 # oracle's: Meguri runs it only once every op it uses exists.
 area: preservation
-active: []
+active:
+  - fixture/open
+  - churn/*
+  - edit/*

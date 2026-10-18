@@ -11,7 +11,7 @@
 //! engine and `CoreHost::open` do not exist (U24, U38), the gate is the
 //! collection open.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,6 +29,7 @@ pub(super) fn register(registry: &mut Registry) {
     registry.new_collection(new_collection);
     registry.op_rejecting("open", &["file_too_old", "file_too_new", "v1_scheduler"], open);
     registry.op("db_exec", db_exec);
+    registry.op("adopt", adopt);
     registry.op("set_config", set_config);
     registry.setup("config", setup_config);
     registry.observation("schema_objects", schema_objects);
@@ -511,17 +512,54 @@ fn key_text(value: &SqlValue) -> String {
     }
 }
 
-fn dump_table(collection: &OpenedCollection, table: &str) -> Result<Value, ExecError> {
+/// N5: append only unbound row identities, in stored-ID order.
+fn adopt(session: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
+    let ids = |table: &str| -> Result<Vec<i64>, ExecError> {
+        let rows = collection(session)?
+            .writer()
+            .execute_raw(&format!("SELECT id FROM {table} ORDER BY id"), &[])
+            .map_err(core)?;
+        rows.rows
+            .into_iter()
+            .map(|row| match row.as_slice() {
+                [SqlValue::Integer(id)] => Ok(*id),
+                _ => Err(core("a stored identity is not an integer")),
+            })
+            .collect()
+    };
+    let notes = ids("notes")?;
+    let cards = ids("cards")?;
+    let append = |bound: &mut Vec<i64>, ids: Vec<i64>| {
+        let mut known: BTreeSet<i64> = bound.iter().copied().collect();
+        let before = bound.len();
+        bound.extend(ids.into_iter().filter(|id| known.insert(*id)));
+        bound.len() - before
+    };
+    Ok(OpResult::Output(
+        json!({"notes": append(&mut session.notes, notes), "cards": append(&mut session.cards, cards)}),
+    ))
+}
+
+fn dump_table(collection: &OpenedCollection, table: &str, raw: bool) -> Result<Value, ExecError> {
     let rows = collection
         .writer()
         .execute_raw(&format!("SELECT * FROM {table}"), &[])
         .map_err(core)?;
-    db_dump_table(table, &rows)
+    db_dump_table_inner(table, &rows, raw)
 }
 
 /// O8: one table's rows, as `SELECT * FROM <table>` returns them, keyed by
 /// their primary key and with the random values hidden.
 pub fn db_dump_table(table: &str, rows: &RawRows) -> Result<Value, ExecError> {
+    db_dump_table_inner(table, rows, false)
+}
+
+/// N4: one stored table, with every GUID and blob byte preserved.
+pub fn db_dump_table_raw(table: &str, rows: &RawRows) -> Result<Value, ExecError> {
+    db_dump_table_inner(table, rows, true)
+}
+
+fn db_dump_table_inner(table: &str, rows: &RawRows, raw: bool) -> Result<Value, ExecError> {
     // A key column is found in any letter case: releases at schemas 14 to
     // 16 created config's as `key`.
     let keys: Vec<usize> = key_columns(table)
@@ -539,9 +577,9 @@ pub fn db_dump_table(table: &str, rows: &RawRows) -> Result<Value, ExecError> {
         let mut object = Map::new();
         for (column, value) in rows.columns.iter().zip(row) {
             let value = match (table, column.to_ascii_lowercase().as_str(), value) {
-                ("notes", "guid", _) => Value::String("#random".to_owned()),
-                ("fields", "config", SqlValue::Blob(bytes)) => digest_without_field(bytes, 9),
-                ("templates", "config", SqlValue::Blob(bytes)) => digest_without_field(bytes, 8),
+                ("notes", "guid", _) if !raw => Value::String("#random".to_owned()),
+                ("fields", "config", SqlValue::Blob(bytes)) if !raw => digest_without_field(bytes, 9),
+                ("templates", "config", SqlValue::Blob(bytes)) if !raw => digest_without_field(bytes, 8),
                 _ => sql_value(value),
             };
             object.insert(column.clone(), value);
@@ -554,6 +592,7 @@ pub fn db_dump_table(table: &str, rows: &RawRows) -> Result<Value, ExecError> {
 /// O8: the stored rows of the twelve tables, or of the listed ones.
 fn db_dump(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
     let collection = collection(session)?;
+    let raw = matches!(&request.args, ObservationArgs::Mapping(map) if map.get("raw") == Some(&Value::Bool(true)));
     let tables: Vec<&str> = match &request.args {
         ObservationArgs::Mapping(map) => match map.get("tables") {
             Some(Value::Array(tables)) => tables.iter().filter_map(Value::as_str).collect(),
@@ -566,7 +605,7 @@ fn db_dump(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Va
         if !DUMP_TABLES.contains(&table) {
             return Err(invalid(format!("db_dump has no table {table}")));
         }
-        out.insert(table.to_owned(), dump_table(collection, table)?);
+        out.insert(table.to_owned(), dump_table(collection, table, raw)?);
     }
     Ok(Value::Object(out))
 }

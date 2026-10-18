@@ -215,6 +215,7 @@ fn actors(s: &Scenario) -> Result<(), FormatError> {
         let at = |why: String| Err(FormatError::new(format!("step {index} ({}): {why}", step.name())));
         match step {
             Step::Handoff(_) => return at("an actor scenario has no handoff step (sync-ops.md S1)".to_owned()),
+            Step::Adopt(_) => return at("an actor scenario has no adopt step (normalized-dump.md N5)".to_owned()),
             Step::Actor(name) if !actors.contains(name) => {
                 return at(format!("actor {name} is not declared in actors (sync-ops.md S2.3)"));
             }
@@ -634,8 +635,11 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
             FieldsCheckRequest::from_mapping(map)?;
         }
         ObservationKind::DbDump => {
-            if let Some(key) = map.keys().find(|k| k.as_str() != "tables") {
-                return bad(&format!("takes {{tables}}, not {key:?}"));
+            if let Some(key) = map.keys().find(|k| !matches!(k.as_str(), "tables" | "raw")) {
+                return bad(&format!("takes {{tables, raw}}, not {key:?}"));
+            }
+            if map.get("raw").is_some_and(|raw| !raw.is_boolean()) {
+                return bad("raw is a boolean");
             }
             if let Some(tables) = map.get("tables") {
                 let Some(tables) = tables.as_array().filter(|t| !t.is_empty()) else {

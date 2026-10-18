@@ -1358,7 +1358,7 @@ fn actor_scenarios_are_checked_when_they_load() {
             "sqlite_master",
         ),
         (
-            base("[client_a]", "[{observe: [{db_dump: {tables: [cards], raw: true}}]}]"),
+            base("[client_a]", "[{observe: [{db_dump: {tables: [cards], raw: 1}}]}]"),
             "raw",
         ),
     ] {

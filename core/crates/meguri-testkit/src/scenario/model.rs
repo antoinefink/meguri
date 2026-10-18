@@ -955,6 +955,8 @@ pub enum Step {
     CheckDb(NoArgs),
     /// record-ops.md W1.
     DbExec(DbExecArgs),
+    /// normalized-dump.md N5: bind unnumbered fixture rows, without writing.
+    Adopt(NoArgs),
     /// Closes the collection and opens it again (sync-ops.md S6).
     Reopen(NoArgs),
     /// storage-ops.md P1: replaces the collection with a copy of a fixture
@@ -1007,7 +1009,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 60] = [
+    pub const NAMES: [&'static str; 61] = [
         "advance",
         "set_clock",
         "add_note",
@@ -1050,6 +1052,7 @@ impl Step {
         "export",
         "check_db",
         "db_exec",
+        "adopt",
         "reopen",
         "open",
         "actor",
@@ -1118,6 +1121,7 @@ impl Step {
             Step::Export(_) => "export",
             Step::CheckDb(_) => "check_db",
             Step::DbExec(_) => "db_exec",
+            Step::Adopt(_) => "adopt",
             Step::Reopen(_) => "reopen",
             Step::Open(_) => "open",
             Step::Actor(_) => "actor",
@@ -3022,6 +3026,17 @@ fn add_step_needs(needs: &mut Needs, steps: &[Step]) {
                 needs
                     .observations
                     .extend(requests.iter().map(|r| r.kind.name().to_owned()));
+                for request in requests {
+                    if request.kind == ObservationKind::Template {
+                        if let ObservationArgs::Mapping(map) = &request.args {
+                            if TemplateRequest::from_mapping(map)
+                                .is_ok_and(|r| r.cases.iter().any(|c| matches!(c, TemplateCase::Card { .. })))
+                            {
+                                needs.observations.insert("template.card".to_owned());
+                            }
+                        }
+                    }
+                }
             }
             // notetype-ops.md T10.1: the op and a capability per kind of edit.
             Step::UpdateNotetype(args) => {

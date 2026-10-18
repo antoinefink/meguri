@@ -69,6 +69,7 @@ pub struct Registry {
     /// `update_notetype.<edit>`, notetype-ops.md T10.1).
     op_parts: BTreeSet<&'static str>,
     observations: BTreeMap<&'static str, ObserveFn>,
+    observation_parts: BTreeSet<&'static str>,
     handoff: Option<(HandoffFn, HandoffFn)>,
     actor: Option<RawDumpFn>,
     finish: Vec<FinishFn>,
@@ -134,6 +135,19 @@ impl Registry {
         );
     }
 
+    /// A part of an observation that later units may attach (for example template.card).
+    pub fn observation_part(&mut self, name: &'static str) {
+        let kind = name.split_once('.').map(|(kind, _)| kind);
+        assert!(
+            kind.is_some_and(|kind| self.observations.contains_key(kind)),
+            "observation part {name} has no registered observation"
+        );
+        assert!(
+            self.observation_parts.insert(name),
+            "observation part {name} registered twice"
+        );
+    }
+
     /// The handoff adapters: what makes Meguri a side of live chains.
     pub fn handoff(&mut self, out: HandoffFn, into: HandoffFn) {
         assert!(self.handoff.is_none(), "handoff registered twice");
@@ -172,7 +186,12 @@ impl Registry {
         Needs {
             setup,
             ops,
-            observations: self.observations.keys().map(|s| (*s).to_owned()).collect(),
+            observations: self
+                .observations
+                .keys()
+                .chain(&self.observation_parts)
+                .map(|s| (*s).to_owned())
+                .collect(),
         }
     }
 }

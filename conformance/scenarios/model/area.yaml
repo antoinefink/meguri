@@ -1,0 +1,9 @@
+# U36: model-ops.md L1, L2, L4 on the real row store and codecs.
+# apkg-notetypes remains pending for U120/U123's package adapters.
+area: model
+active:
+  - proto/*
+  - schema11/deck-*
+  - schema11/notetype-*
+  - schema11/other-out-of-range
+  - schema11/preset-*
