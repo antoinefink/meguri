@@ -1,5 +1,5 @@
 //! U46/R1849: full recompute and commit, every card processed. The shared
-//! generated fixture is copied, then new/no-history cards receive a graded
+//! generated fixture is copied into one normal home deck, then no-history cards receive a graded
 //! SM-2 row so the 100k budget measures 100k processed cards. Undo restores
 //! the exact starting workload outside each timed operation.
 use criterion::Criterion;
@@ -35,11 +35,32 @@ fn main() -> ExitCode {
     let fixture = fixtures::profile_collection("100k").expect("100k fixture");
     let copy = fixture.working_copy().expect("private working copy");
     let opened = fixtures::open(&copy.path).expect("storage open");
+    {
+        use meguri_storage::{ReadRows, StampMode, Table};
+        let count = opened.writer().ids_after(Table::Cards, None, 100_001).unwrap().len();
+        assert!(count <= 100_000, "the profile exceeds the benchmark size");
+        // Profile generation respects complete note/card groups, so its
+        // requested size can be slightly short. Add complete valid pairs
+        // only to this private copy; never relabel the smaller workload.
+        let sample = opened.writer().cards_after(None, 1).unwrap().remove(0);
+        let note = opened.writer().note(sample.note_id).unwrap().unwrap();
+        let clock = FixedClock::new(DEFAULT_NOW_MS, UtcOffset::UTC);
+        let mut scope = opened.writer().begin_write(StampMode::Raw, &clock, None).unwrap();
+        for index in count..100_000 {
+            let mut note = note.clone();
+            note.guid = format!("mb{index}");
+            let note_id = scope.add_note(&note).unwrap();
+            let mut card = sample.clone();
+            card.note_id = note_id;
+            scope.add_card(&card).unwrap();
+        }
+        scope.commit().unwrap();
+    }
     // Preparation only. The measured operation uses product typed reads,
     // the ordinary writer journal, change stream and undo machinery.
     opened
         .writer()
-        .execute_raw("UPDATE cards SET type=2,queue=2,data='{}'", &[])
+        .execute_raw("UPDATE cards SET type=2,queue=2,data='{}',did=1,odid=0", &[])
         .unwrap();
     opened.writer().execute_raw("INSERT INTO revlog(id,cid,usn,ease,ivl,lastIvl,factor,time,type) SELECT ?1+row_number() OVER(ORDER BY c.id),c.id,-1,3,20,10,2500,1000,1 FROM cards c WHERE NOT EXISTS(SELECT 1 FROM revlog r WHERE r.cid=c.id)",
         &[meguri_storage::raw::SqlValue::Integer(DEFAULT_NOW_MS)]).unwrap();
