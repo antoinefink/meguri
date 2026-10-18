@@ -139,7 +139,15 @@ fn commit_faults_leave_exactly_the_atomic_before_or_after_state() {
             .unwrap();
         scope.put(&changed).unwrap();
         faultpoint::arm(point, Fault::IoError(std::io::ErrorKind::Other));
-        assert!(scope.commit().is_err());
+        let result = scope.commit();
+        if committed {
+            assert!(
+                result.unwrap().post_commit_error.is_some(),
+                "post-commit failure must retain committed state"
+            );
+        } else {
+            assert!(result.is_err(), "pre-commit failure must roll back");
+        }
         faultpoint::disarm_all();
         assert!(opened.writer().is_autocommit());
         assert_eq!(

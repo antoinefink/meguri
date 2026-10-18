@@ -585,20 +585,41 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// F1: handoffs share collection media, not Meguri's journal or recovery state.
+fn copy_handoff(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        if matches!(
+            entry.file_name().to_str(),
+            Some("meguri-media.db" | "meguri-media.db-wal" | "meguri-media.db-shm" | "media.trash" | "media.staging")
+        ) {
+            continue;
+        }
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
 /// D9.2, handing over: the guard, the collection closed (C10), and the
 /// session directory copied into `dir`.
 fn hand_out(session: &mut Session<'_>, dir: &Path) -> Result<(), ExecError> {
     session.storage.guard()?;
     session.storage.close()?;
     let from = session.storage.dir()?;
-    copy_tree(&from, dir).map_err(|e| ExecError::new("handoff_error", format!("{}: {e}", dir.display())))
+    copy_handoff(&from, dir).map_err(|e| ExecError::new("handoff_error", format!("{}: {e}", dir.display())))
 }
 
 /// D9.2, taking over: the handed directory copied into a new session
 /// directory and its collection opened through the gate.
 fn hand_in(session: &mut Session<'_>, dir: &Path) -> Result<(), ExecError> {
     let to = session.storage.dir()?;
-    copy_tree(dir, &to).map_err(|e| ExecError::new("handoff_error", format!("{}: {e}", dir.display())))?;
+    copy_handoff(dir, &to).map_err(|e| ExecError::new("handoff_error", format!("{}: {e}", dir.display())))?;
     let collection = open_collection(
         &to.join(COLLECTION),
         &OpenOptions::new(&*session.clock, &*session.random),
@@ -616,6 +637,33 @@ fn finish(session: &mut Session<'_>) -> Result<(), ExecError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_handoff_copies_files_without_journal_or_recovery_state() {
+        let from = tempfile::tempdir().unwrap();
+        let to = tempfile::tempdir().unwrap();
+        fs::write(from.path().join("collection.anki2"), b"collection").unwrap();
+        fs::create_dir(from.path().join("collection.media")).unwrap();
+        fs::write(
+            from.path().join("collection.media/meguri-media.db"),
+            b"ordinary attachment",
+        )
+        .unwrap();
+        for name in ["meguri-media.db", "meguri-media.db-wal", "meguri-media.db-shm"] {
+            fs::write(from.path().join(name), b"private sync state").unwrap();
+        }
+        for name in ["media.trash", "media.staging"] {
+            fs::create_dir(from.path().join(name)).unwrap();
+            fs::write(from.path().join(name).join("held.png"), b"recovery").unwrap();
+        }
+        copy_handoff(from.path(), to.path()).unwrap();
+        assert_eq!(fs::read(to.path().join("collection.anki2")).unwrap(), b"collection");
+        assert_eq!(
+            fs::read(to.path().join("collection.media/meguri-media.db")).unwrap(),
+            b"ordinary attachment"
+        );
+        assert_eq!(fs::read_dir(to.path()).unwrap().count(), 2);
+    }
 
     /// dsl.md D6.1 written as W4 writes: each key a local change at the
     /// clock's instant that moves `col.mod`, and a `rollover` change computes

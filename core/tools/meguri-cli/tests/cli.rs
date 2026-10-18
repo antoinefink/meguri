@@ -30,6 +30,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         json["supports"]["ops"],
         serde_json::json!([
             "add_deck",
+            "add_media",
             "add_note",
             "add_note_tags",
             "add_notetype",
@@ -45,9 +46,11 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "delete_notes",
             "delete_tags",
             "edit_note",
+            "empty_media_trash",
             "ensure_io_notetype",
             "handoff",
             "legacy_update",
+            "media_outside",
             "open",
             "remove_note_tags",
             "remove_preset",
@@ -57,6 +60,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "reopen",
             "reparent_decks",
             "reparent_tags",
+            "restore_media_trash",
             "set_clock",
             "set_config",
             "set_current_deck",
@@ -64,6 +68,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "set_deck_preset",
             "set_flag",
             "set_tag_collapsed",
+            "trash_media",
             "update_notetype",
             "update_notetype.css",
             "update_notetype.field_options",
@@ -75,7 +80,15 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     // dsl.md D8: U28 bootstrap declares the new_collection capability.
     assert_eq!(
         json["supports"]["setup"],
-        serde_json::json!(["config", "decks", "new_collection", "notes", "notetypes", "presets",])
+        serde_json::json!([
+            "config",
+            "decks",
+            "media_files",
+            "new_collection",
+            "notes",
+            "notetypes",
+            "presets",
+        ])
     );
     assert_eq!(
         json["supports"]["observations"],
@@ -90,6 +103,9 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "fields_check",
             "fsrs_next",
             "legacy_json",
+            "media_dir",
+            "media_pending",
+            "media_trash",
             "notetype_structure",
             "schema_objects",
             "search",
@@ -99,12 +115,12 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "timing",
         ])
     );
-    // dsl.md D7.2: 54 ops besides observe, the actor ops of sync-ops.md, the
+    // dsl.md D7.2: 59 ops besides observe, the actor ops of sync-ops.md, the
     // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
     // set_config, undo-ops.md's undo, redo and remove_config, the eight ops
     // of tag-ops.md, browser-config-ops.md's browser_config_set, the note
     // type ops of notetype-ops.md and the deck ops of deck-ops.md among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 54);
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 59);
     for op in [
         "actor",
         "sync",

@@ -1127,7 +1127,12 @@ fn the_text_functions_are_the_schemas() {
     let schema: Value =
         serde_json::from_str(&fs::read_to_string(conformance_dir().join("schema/scenario.schema.json")).unwrap())
             .unwrap();
-    let request = &schema["$defs"]["observation_request"]["anyOf"][1]["properties"];
+    let request = schema["$defs"]["observation_request"]["anyOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|branch| branch.get("properties"))
+        .expect("observation request has an object alternative");
     let from_schema: Vec<&str> = request["text"]["properties"]["fns"]["items"]["enum"]
         .as_array()
         .unwrap_or_else(|| panic!("no text fns enum in {request}"))
