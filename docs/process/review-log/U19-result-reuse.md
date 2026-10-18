@@ -1,4 +1,4 @@
-# U19 catch-up result reuse — in progress
+# U19 catch-up result reuse
 
 Start: `1a2466a56096d31155f9c6afde5259b1e5ec9b01`.
 Session: `s-20261018T131028Z-b9f766d3` (Codex, infra).
@@ -45,4 +45,9 @@ without running or settling the queue if it changed. A clean concurrent
 commit remains eligible for a fresh run. All 14 catch-up tests pass,
 including commit, tracked-edit and untracked-file races.
 
-Round 3 and the required full gate remain pending.
+Round 3 (Codex, frozen `e98d9a8b`): clean; no remaining P0–P1 or material
+additional P2. All three earlier findings are fixed. Reviewer session:
+`s-20261018T114529Z-a13f699d`. The final completion commit is subject to the
+required full `tools/mg gate --base
+1a2466a56096d31155f9c6afde5259b1e5ec9b01` before acceptance. Gate evidence
+is retained under `build/mg/gate/`, with the exact result in orchestration state.
