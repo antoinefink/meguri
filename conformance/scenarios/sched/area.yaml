@@ -3,8 +3,12 @@
 # and steps/rollover-answer. Matrix cases are generated; list the family.
 # U46 adds complete memory resolver/count cases. Mixed memory cases remain
 # pending: on-the-fly (U44), lrt-repair (U128), recompute (U49).
+# U50 adds enable-fsrs and the scheduler-switch family. Answer-dependent
+# compatibility cases and actor sync remain pending their real adapters.
 area: sched
 active:
+  - "compat/enable-fsrs"
+  - "compat/v3-switch/*"
   - "day/ae84-kathmandu"
   - "day/clock-back"
   - "day/config-values"
