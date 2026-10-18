@@ -1,5 +1,5 @@
+use fuzz_rand::{Rng, SeedableRng, rngs::StdRng};
 use meguri_sched::model::card_data::{CardData, MemoryState};
-use rand::{Rng, SeedableRng, rngs::StdRng};
 
 fn raw_value(rng: &mut StdRng, depth: u8) -> String {
     match rng.random_range(0..if depth == 0 { 5 } else { 7 }) {

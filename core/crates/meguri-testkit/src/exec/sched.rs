@@ -15,18 +15,98 @@ use meguri_engine::{DayQuery, day_query};
 use meguri_model::clock::Clock;
 use meguri_sched::states::fuzz;
 use meguri_sched::states::review::{self, ReviewAnswers, ReviewCard};
-use meguri_storage::{StampMode, StorageError};
+use meguri_storage::{ReadRows, StampMode, StorageError};
 use serde_json::{Value, json};
 
 use super::{ExecError, OpResult, Registry, Session};
 use crate::observe;
-use crate::scenario::{FsrsNextInput, FsrsNextRequest, ObservationArgs, ObservationRequest, Step};
+use crate::scenario::{FsrsNextInput, FsrsNextRequest, LogicalRef, ObservationArgs, ObservationRequest, RefKind, Step};
 
 /// Registers the `fsrs_next` and `timing` kinds and the `reopen` op.
 pub(super) fn register(registry: &mut Registry) {
     registry.observation("fsrs_next", observe);
     registry.observation("timing", timing);
+    registry.observation("fuzz_table", fuzz_table);
     registry.op("reopen", reopen);
+}
+
+/// O4/Z6: synthetic ids/counts are pure inputs, never temporary card edits.
+fn fuzz_table(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
+    let ObservationArgs::Mapping(map) = &request.args else {
+        return Err(invalid("fuzz_table takes {card, pairs, intervals}"));
+    };
+    let reference: LogicalRef = map
+        .get("card")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("fuzz_table needs a card reference"))?
+        .parse()
+        .map_err(|e| invalid(format!("fuzz_table card: {e}")))?;
+    if reference.kind != RefKind::Card {
+        return Err(invalid("fuzz_table needs a card reference"));
+    }
+    let id = *session
+        .cards
+        .get(reference.index())
+        .ok_or_else(|| ExecError::new("unknown_ref", reference.to_string()))?;
+    let core = |e: StorageError| ExecError::new("core_error", e.to_string());
+    let rows = session
+        .storage
+        .collection()
+        .ok_or_else(|| invalid("no collection is open"))?
+        .reader()?;
+    let card = rows
+        .card(meguri_model::ids::CardId(id))
+        .map_err(core)?
+        .ok_or_else(|| ExecError::new("unknown_ref", reference.to_string()))?;
+    let preset = meguri_sched::model::preset::PresetView::for_card(&*rows, &card)
+        .map_err(core)?
+        .ok_or_else(|| invalid("fuzz_table card has no normal home deck"))?;
+    let maximum = preset.fields().maximum_review_interval;
+    let pairs = map
+        .get("pairs")
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid("fuzz_table needs pairs"))?
+        .iter()
+        .map(|value| {
+            let pair = value
+                .as_array()
+                .filter(|p| p.len() == 2)
+                .ok_or_else(|| invalid("fuzz_table pair must have two integers"))?;
+            let id = pair[0]
+                .as_u64()
+                .ok_or_else(|| invalid("fuzz_table id must be an unsigned integer"))?;
+            let reps = pair[1]
+                .as_u64()
+                .filter(|v| *v < u64::from(u32::MAX))
+                .ok_or_else(|| invalid("fuzz_table count exceeds 4294967294"))?;
+            Ok((id, reps))
+        })
+        .collect::<Result<Vec<_>, ExecError>>()?;
+    // The oracle lends this one card's identity. Reject collisions even
+    // though Meguri's pure computation has no reason to rewrite that row.
+    let occupied: std::collections::BTreeSet<u64> = rows
+        .ids_after(meguri_storage::Table::Cards, None, usize::MAX)
+        .map_err(core)?
+        .into_iter()
+        .filter(|other| *other != id)
+        .map(|v| v as u64)
+        .collect();
+    if pairs.iter().any(|(id, _)| occupied.contains(id)) {
+        return Err(invalid("fuzz_table id belongs to another card"));
+    }
+    let intervals = map
+        .get("intervals")
+        .and_then(Value::as_array)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| invalid("fuzz_table needs intervals"))?
+        .iter()
+        .map(|v| {
+            v.as_u64()
+                .and_then(|v| u32::try_from(v).ok())
+                .ok_or_else(|| invalid("fuzz_table intervals must fit u32"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(json!({"intervals":intervals,"rows":fuzz_table_rows(&pairs,&intervals,maximum)}))
 }
 
 /// One day query now (`sched/day-clock` D5 to D7) on the session's

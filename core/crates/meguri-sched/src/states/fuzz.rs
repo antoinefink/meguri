@@ -4,8 +4,8 @@
 //! arithmetic or single 32-bit float operations in a fixed order, with no
 //! math-library call, so it gives the same result on every platform.
 
-use rand::rngs::StdRng;
-use rand::{Rng as _, SeedableRng};
+use fuzz_rand::rngs::StdRng;
+use fuzz_rand::{Rng as _, SeedableRng};
 
 /// Z1: the seed of an answer, the card id plus the review count before the
 /// answer, added with wrap-around.
@@ -17,6 +17,27 @@ pub fn seed(card_id: u64, reps: u64) -> u64 {
 /// seeded with `seed`; in [0, 1).
 pub fn factor(seed: u64) -> f32 {
     StdRng::seed_from_u64(seed).random_range(0.0f32..1.0f32)
+}
+
+/// Z7: a fresh integer draw; independent of the review factor's generator.
+pub fn learning_delay(seconds: u32, seed: u64) -> u32 {
+    let width = ((seconds as f32 * 0.25).min(300.0)) as u32;
+    if width == 0 {
+        return seconds;
+    }
+    let mut rng = StdRng::seed_from_u64(seed);
+    if let Some(end) = seconds.checked_add(width) {
+        rng.random_range(seconds..end)
+    } else {
+        // Imported steps can saturate to u32::MAX. Z7's explicit boundary
+        // rule clips candidates inclusively; normal draws remain unchanged.
+        let count = u64::from(width).min(u64::from(u32::MAX) - u64::from(seconds) + 1) as u32;
+        if count == 1 {
+            seconds
+        } else {
+            seconds + rng.random_range(0..count)
+        }
+    }
 }
 
 /// Z3: the fuzz on each side of an interval of `x` days, every operation

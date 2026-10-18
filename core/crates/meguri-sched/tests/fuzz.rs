@@ -4,6 +4,38 @@
 use meguri_sched::states::fuzz;
 
 #[test]
+fn learning_step_integer_fuzz_matches_recorded_answers_and_previous_answer_seeds() {
+    for (id, reps, seconds, expected) in [
+        (1894701600000u64, 0, 600, 739),
+        (1894698000000, 0, 600, 696),
+        (1894698000000, 2, 600, 715),
+        (1894701600002, 0, 30, 33),
+        (1894701600003, 4294967295, 30, 31),
+        (1894701600004, 1, 30, 34),
+        (1894701600007, 2, 7200, 7360),
+        (1894701600008, 3, 72000, 72267),
+    ] {
+        assert_eq!(fuzz::learning_delay(seconds, fuzz::seed(id, reps)), expected);
+    }
+    for seconds in 0..=4 {
+        assert_eq!(fuzz::learning_delay(seconds, 42), seconds);
+    }
+    for seed in 0..1000 {
+        assert!((600..750).contains(&fuzz::learning_delay(600, seed)));
+        assert_eq!(fuzz::learning_delay(u32::MAX, seed), u32::MAX);
+        assert!((u32::MAX - 3..=u32::MAX).contains(&fuzz::learning_delay(u32::MAX - 3, seed)));
+    }
+}
+
+#[test]
+fn fractional_threshold_and_collapsed_range_widening_remain_exact() {
+    assert_eq!(fuzz::range(2.5f32.next_down(), 1, 100), (2, 2));
+    assert_eq!(fuzz::range(2.5, 1, 100), (2, 4));
+    assert_eq!(fuzz::range(3.0, 3, 100), (3, 4));
+    assert_eq!(fuzz::range(3.0, 3, 3), (3, 3));
+}
+
+#[test]
 fn the_seed_is_the_card_id_plus_the_review_count_with_wrap_around() {
     assert_eq!(fuzz::seed(1_894_698_000_000, 2), 1_894_698_000_002);
     assert_eq!(fuzz::seed(u64::MAX, 2), 1);
