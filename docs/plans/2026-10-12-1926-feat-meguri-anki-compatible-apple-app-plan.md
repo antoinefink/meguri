@@ -284,7 +284,7 @@ flowchart TB
 - R158. Connecting an empty local installation to an existing iCloud collection downloads a coherent collection before activating it; media can continue afterward. Two non-empty collections are never silently merged or overwritten (R2055).
 - R159. After the first download or import, Meguri confirms what arrived in one line (e.g. "12,533 notes · 22 decks · 115,764 reviews") and opens Home.
 - R160. Studying, browsing and editing work while the first media download continues in the background; cards whose media has not arrived yet show a placeholder instead of an error.
-- R161. "Start Empty" creates a new collection containing only the Default deck and Anki's stock note types, and Home shows an empty state with Add Note, Create Deck, Import File and Log In.
+- R161. Start Empty creates a collection containing only the Default deck and Anki's stock note types. Empty Home offers Add Note, Create Deck, Import File and Connect to iCloud as their units become available; Anki server credentials are confined to Settings Anki Transfers.
 - R162. One-time tips (each shown at most once, dismissible, never during the first card of a review) explain: `::` for subdecks when creating a deck, double-click/Return to study in the sidebar layout, and the review tap zones on the first answer side on iPhone/iPad.
 - R163. There are no other onboarding pop-ups, tutorials or sample decks.
 
@@ -2216,9 +2216,9 @@ R1498–R1502 and R1504–R1546 describe the retained Anki protocol used only in
 **Coexistence and migration**
 - R1589. Anki desktop and AnkiMobile can read every supported manual transfer result. Meguri-to-Meguri routine synchronization uses CloudKit, and continued use of an Anki client requires another explicit manual import/export rather than automatic coexistence.
 - R1590. Meguri never causes a one-way sync for an operation that Anki performs incrementally, and never edits notetypes, presets or config on its own except FSRS parameter updates that the scheduler requires.
-- R1591. On first launch, Meguri offers three paths: log in and download the server collection (then media), import a `.colpkg` file, or start with an empty collection.
-- R1592. The first-launch download lets the user study as soon as the collection is downloaded, while media continues in the background.
-- R1593. If the user starts empty and then logs in to an account with data, Meguri offers a download without asking about upload, since the local side has no cards.
+- R1591. First launch offers Connect to iCloud, Import a File and Start Empty (R157). M1R includes U166's minimal collection-only .colpkg import. Manual Anki server migration is started explicitly from Settings Anki Transfers after local creation, with its source/direction preview and confirmation.
+- R1592. Connecting to an existing iCloud collection stages and validates collection records before activation. The user can then study while media continues in the background. A manual Anki server import stages and validates its collection separately, then follows the explicit iCloud publication choice (R1548).
+- R1593. Connecting an empty local collection to an Apple account with cloud data offers that cloud collection without an Anki upload/download prompt. A non-empty local collection requires the connection/replacement preview and explicit choice (R158, R2055, R2056); no login alone starts an Anki transfer.
 - R1594. Meguri keeps a local deleted-notes log in Anki's `deleted.txt` format (with `#guid column` and `#notetype column` headers) next to the collection.
 
 **`.apkg` import**
@@ -2924,7 +2924,7 @@ R1498–R1502 and R1504–R1546 describe the retained Anki protocol used only in
 - R2051. Committed local changes and deletions cannot be lost between a SQLite commit, event notification, outbox persistence and CKSyncEngine scheduling. Persist or reconstruct pending work after every crash window. Never advance a fetch cursor beyond durably applied data; replay is idempotent. Disposable derived data is not the sole source of synchronization progress.
 - R2052. Give records stable, collection-scoped identities and retain deletion knowledge so an offline device cannot resurrect deleted objects. Do not use wall-clock last-write-wins as the sole conflict rule. Concurrent reviews retain both history events; conflicting card scheduling is reconciled from the resulting history under a deterministic, tested policy.
 - R2053. Notetype/field/template changes, imports and whole-collection replacements become visible only as a validated coherent generation. Incomplete cloud batches never expose cards referencing missing notes, notetypes or decks. CloudKit's per-batch atomicity is not assumed to cover a large import or every record zone.
-- R2054. Conflicting edits preserve a recoverable copy when automatic reconciliation cannot preserve both intents. Quota, throttling, token expiry, deleted zones and partial failures do not silently clear pending changes or recreate deleted content. Recovery is explicit when intent is ambiguous.
+- R2054. Conflicting edits preserve a recoverable copy when automatic reconciliation cannot preserve both intents. A Review Conflicts action in the iCloud needs-attention state and Settings lets the user inspect saved versions and recover chosen content through a normal validated edit, without replacing the whole collection. Copies remain accessible after relaunch until explicitly resolved. Quota, throttling, token expiry, deleted zones and partial failures do not silently clear pending changes or recreate deleted content. Recovery is explicit when intent is ambiguous.
 - R2055. Bind local tracking to the CloudKit environment, Apple account and collection identity. On sign-out or account change stop the old engine and isolate its pending work; preserve local data and never upload it into the new account automatically. Reconnection requires an explicit collection choice.
 - R2056. Before replacing an existing local or cloud collection, show direction, counts and pending work, retain recoverable backups of each side being replaced, and require confirmation. Restore/import creates a new publication generation; it never blindly replays stale queued records from the replaced generation.
 - R2057. Media uses CKAsset and durable content identity, with filename mapping, deduplication, deletion handling and resumable progress. Transfer collection records before bulk media, prioritize missing assets needed by visible cards, and bound staging disk space/memory. Interrupted asset installation leaves the existing valid file intact.
@@ -3227,7 +3227,7 @@ R1498–R1502 and R1504–R1546 describe the retained Anki protocol used only in
 #### Outside this product's identity
 
 - An add-on or plugin system; Meguri builds the few add-on behaviors Antoine relies on (heatmap, Migaku and AnkiConnect servers, batch editing) as native features instead.
-- A Meguri-specific data format or cloud service; the Anki collection and Anki sync protocol remain the only storage and sync contract.
+- A Meguri-operated signup, account or sync-storage service, or a replacement collection format. The local collection remains Anki-compatible; private CloudKit records/assets implement routine sync, and the Anki protocol serves explicit manual transfers only (R2043, R2044, R2060).
 - Gamification beyond the heatmap and streak stats (no XP, leagues, guilt messages, or Activity-ring look-alikes).
 - Logging into AnkiWeb from any public Meguri surface (app or future website) without Ankitects' permission; the compliant migration path is export from Anki, import into Meguri.
 - Uploading or browsing AnkiWeb shared decks inside the app (Antoine's "Deck sharer" workflow stays in Anki/AnkiWeb).
@@ -3317,7 +3317,7 @@ Earlier Product Contract corrections: The edits:
 Readings of Product Contract conflicts settled during review, with the Product Contract text unchanged:
 - R239 and R387: ⌘⌫ deletes the note at once with the Undo toast, as the ⋯ menu does (U181).
 - R2041 with R1624, R1770 and R1772: the Mac entitlement set adds user-selected file access and app-scope bookmarks (KTD22).
-- R1553 with "background refresh: off": no app-refresh task; R1553's scheduled sync runs as a processing task (KTD15, U154).
+- R1553 with background refresh off: no custom app-refresh polling or scheduled Anki transfers. CKSyncEngine owns automatic cloud scheduling and remote notifications; U154 owns maintenance/optimizer processing registrations and bounded flush assertions (KTD15).
 - R52 with R325 and R458: a `.colpkg` import or restore is refused while a review session is open; `.apkg` imports keep the review underneath (KTD17).
 - R42 with R366 and R725: selecting a deck neither records nor clears undo; other non-undoable ops clear it (U25).
 - R1468 with R692: R1468's device-only "last optimize time" is the optimizer's run diagnostics (U47, device-local). `lastFsrsOptimize` is Anki's own synced config key, so it carries no `meguri` prefix (KTD12).
@@ -3334,7 +3334,7 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - optimization cadence of 30 days with a 64-item minimum;
   - editor Return markup taken from the oracle;
   - `rid:` search not supported;
-  - background refresh off: no `BGAppRefreshTask`, and no widget-only refresh. R1553's scheduled normal sync and media continuation run as a `BGProcessingTask` (KTD15, U154);
+  - no custom BGAppRefreshTask polling or widget-only refresh; CKSyncEngine schedules automatic cloud work, while U154 registers maintenance and optimizer processing tasks and bounded lifecycle flushes (KTD15);
   - server backup before upload only for self-hosted servers;
   - media download in USN order;
   - Migaku `created:false` treated as success only once verified, else HTTP 400;
@@ -8816,7 +8816,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `core/crates/meguri-host/src/wiring/sync.rs`
 
 **Approach:**
-- Specify the record, revision, conflict, tombstone, structural-generation and durable tracking contract first (R2066). The contract includes every crash boundary across separate collection/tracking files, incoming apply/cursor persistence, account changes, whole-collection replacement and acknowledged deletions. Do not reinterpret existing Anki specs as CloudKit specs.
+- Specify the record, revision, conflict, tombstone, structural-generation and durable tracking contract first (R2066). Include durable conflict-copy listing, inspection, recovery and explicit-resolution operations for U161's per-object recovery flow. The contract includes every crash boundary across separate collection/tracking files, incoming apply/cursor persistence, account changes, whole-collection replacement and acknowledged deletions. Do not reinterpret existing Anki specs as CloudKit specs.
 - Core policy owns the eligible revision frontier, session hold-back and pause-after-import decision. Session events arrive directly from U43; Swift cannot supply fabricated session state. Outputs request cloud work, expose pending/held-back records and carry generation/revision guards.
 - App lifecycle and the automatic toggle request best-effort cloud work; CKSyncEngine manages Apple scheduling/backoff. No Rust policy pretends it can enforce a delivery interval or CloudKit retry timer. A single app flush deadline covers the foreground target only.
 - Core policy never emits an Anki transfer action on launch, timer, foreground/background, review completion, optimizer adoption, AnkiConnect sync or network recovery. Transfer starts require the explicit Settings operation identifier and confirmation.
@@ -9107,8 +9107,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Approach:**
 - **Matching:** fields and templates match by their stable ids, falling back to names for packages without ids. The result is an ordinal remap for note fields and card templates.
 - **Moving notes:** notes of the incoming notetype, and of earlier sibling copies with the same original id, move through U35's change-notetype machinery, so card ordinals and graves follow the U35 rules. Merged copies left empty are deleted.
-- **Preview:** U120's inspect reports `requiresOneWaySync` when merging would change a schema. The UI warns before confirm (R1605).
-- **Apply:** apply goes through U29's schema-change gate. That gate enforces R1476 (no change if the user declines) and sets `scm` (R1475). The U127 safety backup runs first (R2008).
+- **Preview:** U120 inspect reports structural changes and destructive field/template mappings for confirmation (R1605). Retain requiresOneWaySync as Anki transfer-compatibility metadata; ordinary package import does not show an Anki full-upload warning.
+- **Apply:** after the destructive-mapping preview is confirmed, U127 completes the structural safety backup before the import's first collection write. U29 validates the structural operation and sets scm (R1475); publish the validated coherent CloudKit generation. Cancellation before confirmation changes nothing; backup failure refuses the operation (R2008).
 - **Cloze vs standard (R1606):** reported as an error. Whether this aborts the whole import or only that notetype follows the oracle; the spec writer records it.
 - Undo behavior of a merge import follows the oracle, as recorded in the spec.
 
@@ -9122,7 +9122,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Package from a client without field/template ids → merged by name (golden).
 - Cloze incoming vs local standard notetype with the same original id → error reported, matching the oracle's abort scope.
 - Earlier duplicate copy (from a previous non-merge import) → its notes move into the merged notetype, and the empty copy is deleted.
-- Preview shows `requiresOneWaySync`. A declined R1476 confirmation → collection unchanged and no backup written.
+- Declining the destructive-mapping preview → collection unchanged and no backup written. Accepting a structural merge makes its safety backup before the first write even though no Anki full-upload dialog appears; injected backup failure leaves the collection unchanged.
 - Accepted merge → a backup file exists, and its write precedes the import op's commit in the op log.
 
 **Verification:** all `conformance/scenarios/package/notetype-merge/` goldens match. A two-client run in the U13 harness shows that the next sync requires a one-way choice.
@@ -9295,7 +9295,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - A disk-full failpoint during the package write → no destination file, the temp file is removed, and a typed error is returned.
 - Injected low free space → `InsufficientSpace{needed, available}` before any write.
 - After a `Restore` replace → `CollectionReplaced(gen+1)` is emitted once, previous-generation reader connections are closed, the derived store is marked stale, and the sidecar has `cloudPublicationPending = true`.
-- Failpoint kill before the rename → the relaunch opens the old collection unchanged and clears `cloudPublicationPending`, so automatic sync resumes. A cancel before the rename clears the flag at once.
+- Kill/cancel before the rename → reopen the old collection and reconcile the replacement journal to restore that generation's prior publication decision. Test both prior-clear and prior-pending states: only prior-clear resumes automatic publication; prior-pending remains paused. Ambiguous recovery stays paused.
 - Kill after the rename → the relaunch opens the new collection, which passes the integrity check. This is the R2003/R2004 subset and the restore analogue of AE86.
 - `ReplaceReason::FullDownload` with a truncated staging file → refused by the integrity gate; the old collection is unchanged (R2005; U109 reuses this fixture).
 - A schema-11 staging file under `FullDownload` → upgraded on the staging copy. A kill right after the rename → the reopened collection is schema 18.
@@ -9347,7 +9347,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Package whose collection fails `integrity_check` (corrupted page) → `Corrupt` at inspect; nothing changed (R1628).
 - After a successful import → `CollectionReplaced(gen+1)` emitted once; previous-generation reader connections closed; derived store marked stale; sidecar `cloudPublicationPending = true`; a pre-import backup exists.
 - Cancel during media merge → collection, generation and lifecycle restored to Ready; no backup cleanup needed.
-- Failpoint kill before the rename → relaunch opens the old collection unchanged, and `cloudPublicationPending` is cleared there, so automatic sync resumes; a cancel before the rename clears it at once. Kill after the rename → relaunch opens the new collection, which passes integrity check (R2003/R2004 subset, the colpkg analogue of AE86).
+- Kill/cancel before the rename → reopen the old collection and restore its prior publication decision after journal reconciliation; test both prior-clear and prior-pending, and keep ambiguous recovery paused. Kill after the rename → open the valid new generation with its explicit cloud publication choice still pending (R2003/R2004 subset, the colpkg analogue of AE86).
 - A schema-11 `.colpkg` is upgraded and its `scm` set, then the process is killed right after the rename → the reopened collection is schema 18 with the new `scm`.
 - `.colpkg` export with Include media during an active review session on the interactive lane → answers keep committing; the exported file passes integrity check and contains every review committed before the snapshot.
 - T1: Meguri `.colpkg` export → oracle import → dumps equal (R1922).
@@ -9434,7 +9434,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   - Delete Unused media (U130);
   - deleting a deck that contains cards (U28);
   - deleting a notetype (U34);
-  - the first schema-changing op at its R1476 confirmation point (U29, U121).
+  - every qualifying structural operation in R1475, once per logical operation before its first collection write, after any destructive-mapping preview is confirmed (U29, U121; R2008). Anki full-transfer confirmation is not a prerequisite for this backup.
   If the backup fails, the op is refused with `SafetyBackupFailed` and never proceeds silently (see coverage note).
 - **Safety backup of a damaged collection:** when the source collection is in `Failed(Corrupt)`, failed to open, or fails `quick_check`, the forced backup is a byte copy of the collection file and its `-wal`, verified by size and SHA-1, not a `VACUUM INTO` package. It is kept as a recovery artifact under a `corrupt-…` name that retention never deletes, and U132's "most recent backup that passes an integrity check" remedy never picks it. Only a failed copy (for example disk full) returns `SafetyBackupFailed`.
 - **Back Up Now (R1632):** forced; returns the file name and size.
@@ -10916,7 +10916,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Goal:** Present iCloud as routine sync, with a separate Settings-only manual Anki migration workflow.
 
-**Requirements:** R89, R102–R107, R117–R127, R1496–R1504, R1536–R1548, R1558–R1562, R2046, R2048–R2050, R2055–R2063; AE89, AE91, AE94, AE95.
+**Requirements:** R89, R102–R107, R117–R127, R1496–R1504, R1536–R1548, R1558–R1562, R2046, R2048–R2050, R2054–R2063; AE89, AE91, AE94, AE95.
 
 **Dependencies:** U151, U153, U160, U105, U107, U109, U111, U20.
 
@@ -10932,6 +10932,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Anki Transfers contains file import/export plus explicit server Import from Anki / Export to Anki. Configure endpoint and credentials there. Existing build-gated AnkiWeb rows appear here only; the home toolbar and onboarding have none.
 - Direction preview identifies every affected side, counts, pending edits/reviews, media scope and safety backup. No ambiguous merge/replacement starts without confirmation. A completed import enters the separate iCloud publication choice; cancelling it keeps the imported data local and remote data intact.
 - Show last manual transfer, active/resumable operation, cooldown and next eligible time. Both directions share the persisted local endpoint/account cooldown. Failed/cancelled operations can retry without consuming it. File export remains accessible even when CloudKit or server transfers cannot run.
+- Review Conflicts is reachable from iCloud needs attention and Account & Sync. List preserved edits with object identity and available version context; open a read-only comparison, then let the user restore selected content through a normal validated edit with a preview. Preserve the current version and saved copies until the user explicitly resolves them. Whole-collection replacement is not required to recover one edit. U113's reviewed recovery contract owns durable storage and semantics.
 - Recovery download/replace actions use the correct source (iCloud vs manually selected Anki server), preview/back up affected data and respect review/exclusive gates. Mac quit offers bounded flush progress and Quit Without Syncing.
 
 **Test scenarios:**
@@ -10939,6 +10940,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Toolbar Sync Now, Y and integration sync never open Anki login or make Anki-server calls.
 - A completed API call with pending selected records never displays complete. Another device offline does not change this device's truthful completion wording.
 - Settings import/export confirmation, direction, backups, post-import publication choice, resume and cooldown survive relaunch; keyboard/VoiceOver paths match touch.
+- A conflicting note edit remains listed and inspectable after relaunch; recovery applies chosen content as a normal edit without replacing the collection or losing the prior/current versions. Cancel leaves both versions intact, and keyboard/VoiceOver users can reach the same action.
 - AppStore and personal configurations obey AE89; transfer availability never changes CloudKit controls.
 
 **Verification:** tools/mg Swift tests, off-screen snapshots and VM UI suites; signed CloudKit status/error scenarios are recorded separately.
@@ -14551,11 +14553,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Test scenarios:**
 - Kill the app 200 ms after tapping Good on the 10th card, then relaunch: Home counts reflect at least the 9 earlier answers, and the integrity report is OK.
-- Kill the app while a manual sync started from the Sync button applies incoming changes (test-hook signal), then relaunch against the U13 server: the integrity report is OK, the next sync completes, and the local and server dumps converge.
+- Kill while Sync Now applies incoming CloudKit changes (test-hook signal), then relaunch against the deterministic cloud fake: integrity passes, durable cursor/pending work recovers and the next exchange converges. Record the signed CloudKit integration leg separately. The U13 transfer lane starts only through a confirmed Settings Anki transfer.
 - Kill during a UI-started .colpkg import, then relaunch: the previous collection opens unchanged, and no half-imported decks appear (wires in with U162).
-- Covers AE86 (app path). Kill during the first full download from the onboarding flow: relaunch shows the previous state (or onboarding when there was none), never a partial collection.
+- Covers AE86 (app paths). Kill while onboarding stages its initial iCloud collection: relaunch shows the previous valid generation, or onboarding when there was none, never partial content. Independently kill a full Anki download started through Settings Anki Transfers and assert the same local replacement safety against U13; these are separate backend results.
 - Background mid-session: the test-hook lock report shows no lock held, and the last answer is in the database (R2007).
-- Restore yesterday's backup: deck counts equal the backup's, the auto-sync toggle is effectively paused with the "choose a sync direction" banner, and no sync request is sent until the user chooses (R2010).
+- Restore yesterday's backup: deck counts match the backup and iCloud publication remains paused with a Choose where to keep the restored collection action. Sync Now, restart and an Anki transfer cannot clear that choice (R2010).
 - An injected corruption flag on launch: the app shows Restore from Backup and, with an account, Download from Server (Check Database joins once U163 and U128 land), and the review entry points are disabled; restoring the newest good backup from there lands on Home with generation +1 (R2012).
 - Low disk space: a full download, and an import once U162 lands, show the insufficient-space message and leave the collection unchanged (R2015).
 - Delete unused media → trash → restore: the files return. Empty trash: a confirmation appears, and the files are gone only after it (R2018). Wires in with U130 and U163.
