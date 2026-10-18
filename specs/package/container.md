@@ -193,7 +193,7 @@ Checks a collection package before a restore (U127), and later before a `.colpkg
   4. Run `PRAGMA integrity_check` on it, with `unicase` registered: anything but the single row `ok` is `Corrupt`.
   5. Read the media map (P5).
 - Result: a staged-collection handle and the facts `ver_found` (the `col.ver` read before any upgrade), the counts of `notes`, `cards` and `revlog` rows, `scm` and `mod` as the staged file holds them after the gate, and the number of media entries. The handle owns the staging directory: dropping it removes the directory; handing it to the replace primitive (`engine/collection-replace#R2`) passes the file on.
-- Anki checks the same things in a different order (the media map after the collection). Only the error kind is observable, and every fault but an unknown version gives the same kind (P13), so the order cannot be told apart.
+- Anki 26.9.3 also reads the media map after the collection, but it sets `scm` and `mod` on its copy before its integrity check; Meguri sets them in the replace (`engine/collection-replace#R3`, `#R7`), after its own checks. Only the error kind is observable, and every fault but an unknown version gives the same kind (P13), so neither difference can be told apart.
 - Any failure removes the staging directory. Inspect writes nothing outside it: the live collection, its `-wal`, the backups and the media folder keep their bytes (R1638, data side). Inspect needs no exclusive phase and runs while the collection is open and used.
 
 ## P13. Errors
