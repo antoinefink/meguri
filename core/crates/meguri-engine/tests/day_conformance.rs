@@ -1,7 +1,8 @@
 //! Every day clock scenario (`conformance/scenarios/sched/day/`, its
 //! generated `matrix/`, and `sched/unbury-on-rollover/`;
 //! `specs/sched/day-clock.md` D14) played on the engine's day clock and
-//! compared with the oracle's golden, the deviations of
+//! with explicit compatibility queries through the writer, and compared
+//! with the oracle's golden. Automatic clock reports must agree; the deviations of
 //! `conformance/deviations.yaml` applied (dsl.md D13).
 //!
 //! Scenarios use U28's actual bootstrap before the normal engine open.
@@ -10,16 +11,16 @@
 mod common;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::day::{self, Timing};
 use meguri_engine::executor::catalog;
-use meguri_engine::{Collection, Engine, OpSpec, Ports};
+use meguri_engine::{Collection, DayCache, DayQuery, Engine, OpSpec, Ports, day_query};
 use meguri_model::changes::OpSource;
 use meguri_model::clock::Clock;
-use meguri_storage::ConfigValue;
 use meguri_storage::raw::SqlValue;
+use meguri_storage::{ConfigValue, StampMode};
 use meguri_testkit::diff::{self, CompareOptions};
 use meguri_testkit::exec::clock::ScenarioClock;
 use meguri_testkit::exec::db_exec_rows;
@@ -43,6 +44,7 @@ struct Player {
     path: PathBuf,
     engine: Engine,
     collection: Collection,
+    compatibility_day: Arc<Mutex<DayCache>>,
 }
 
 impl Player {
@@ -58,6 +60,7 @@ impl Player {
             path,
             engine,
             collection,
+            compatibility_day: Arc::new(Mutex::new(DayCache::default())),
         }
     }
 
@@ -88,6 +91,7 @@ impl Player {
     /// W4: one config key through the config API, an op of its own that
     /// keeps no undo entry.
     fn set_config(&self, key: &str, value: &Value) {
+        let timing = matches!(key, "rollover" | "creationOffset");
         let key = key.to_owned();
         let value = ConfigValue::parse(value.to_string().as_bytes()).expect("a JSON value");
         self.c()
@@ -100,6 +104,10 @@ impl Player {
             )
             .unwrap();
         self.settle();
+        if timing {
+            self.compatibility_day.lock().unwrap().clear();
+            self.compatibility_query();
+        }
     }
 
     /// W1: one statement on the writer connection, committed at once; one
@@ -115,6 +123,7 @@ impl Player {
             .unwrap();
         if !sql.trim_start().to_ascii_lowercase().starts_with("select") {
             self.c().drop_cached_day().unwrap();
+            self.compatibility_day.lock().unwrap().clear();
         }
         json!({ "rows": db_exec_rows(&rows) })
     }
@@ -122,6 +131,7 @@ impl Player {
     /// sync-ops.md S6: close, then open from the file; the open runs the
     /// day clock's first check.
     fn reopen(&mut self) {
+        self.compatibility_day.lock().unwrap().clear();
         self.engine.close().unwrap();
         let (engine, collection) = day::open(&self.path, self.clock.clone(), Ports::default());
         self.engine = engine;
@@ -129,8 +139,35 @@ impl Player {
     }
 
     /// observations.md O4 `timing`: one `checkRollover()`.
+    // The protocol timing observation explicitly asks for D5/D7 compatibility
+    // writes. Native automatic checks have the no-churn policy of D8.
+    fn compatibility_query(&self) -> DayQuery {
+        let clock = self.clock.clone();
+        let cache = self.compatibility_day.clone();
+        self.c()
+            .run(
+                OpSpec::named("compatibility_day_query", OpSource::Rollover).stamp(StampMode::Raw),
+                move |ctx| {
+                    let now = clock.now_ms();
+                    Ok(day_query(
+                        ctx.scope(),
+                        &mut cache.lock().unwrap(),
+                        now.div_euclid(1000),
+                        clock.utc_offset_at(now),
+                    )?)
+                },
+            )
+            .unwrap()
+            .value
+    }
+
     fn timing(&self) -> Value {
+        let query = self.compatibility_query();
         let report = self.c().check_rollover().unwrap();
+        assert_eq!(
+            (report.today, report.next_day_at),
+            (query.day.today, query.day.next_day_at)
+        );
         let now_ms = self.clock.now_ms();
         json!({
             "days_elapsed": report.today,

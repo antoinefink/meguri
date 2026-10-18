@@ -317,7 +317,7 @@ milestones:
         plan:
           - {text: "U248 coexistence soak (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210)", items: [coexistence]}
         why: U248 coexistence soak, run by tools/mg milestone; its optimizer race comes with U47 (M1)
-      - {id: u36-preservation, run: u36-preservation, pending: U36, plan: ["U36 preservation suite (R2017)"], why: "the preservation suite (R2017)"}
+      - {id: u36-preservation, run: conformance, plan: ["U36 preservation suite (R2017)"], why: "active preservation scenarios in both T0 lanes; core-test also runs the engine churn guards (R2017)"}
       - id: u250-fault
         run: u250-fault
         pending: U250
@@ -422,7 +422,7 @@ milestones:
         scope: {detail: scenarios, items: [coexistence, two-device-optimizer]}
         plan: [{text: "U248 coexistence soak, with its two-device optimizer race", items: [coexistence, two-device-optimizer]}]
         why: U248 coexistence soak with its two-device optimizer race (U47)
-      - {id: u36-preservation, run: u36-preservation, pending: U36, plan: [U36 preservation suite (R2017)], why: "the preservation suite (R2017)"}
+      - {id: u36-preservation, run: conformance, plan: [U36 preservation suite (R2017)], why: "active preservation scenarios in both T0 lanes; core-test also runs the engine churn guards (R2017)"}
       - id: u250-fault
         run: u250-fault
         pending: U250

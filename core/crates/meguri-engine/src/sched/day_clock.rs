@@ -30,7 +30,7 @@ use crate::executor::op::{CommitNotice, OpContext, OpSpec};
 use crate::executor::writer;
 use crate::undo::reasons::ClearCause;
 
-use super::rollover_op::{DayCache, day_query};
+use super::rollover_op::{DayCache, automatic_day_query};
 
 /// The op every day query runs in (D10).
 const OP_NAME: &str = "rollover";
@@ -167,7 +167,7 @@ impl DayClock {
             state.parked = false;
             (state.cache.clone(), state.changes, state.reported.clone())
         };
-        let query = day_query(ctx.scope(), &mut cache, now.secs, now.offset)?;
+        let query = automatic_day_query(ctx.scope(), &mut cache, now.secs, now.offset)?;
         let rolled_over_from = before
             .as_ref()
             .filter(|reported| reported.day != query.day.today)

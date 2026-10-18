@@ -146,6 +146,9 @@ fn shown(events: &[EventKind]) -> Vec<String> {
 /// by a skip-undo op: a review card buried by the scheduler and an
 /// interday learning card buried by the user (D7's table).
 fn buried_cards(c: &Collection) -> (NoteId, CardId, CardId) {
+    buried_cards_with_day(c, None)
+}
+fn buried_cards_with_day(c: &Collection, day: Option<u32>) -> (NoteId, CardId, CardId) {
     let card = |nid, card_type, queue, due, mtime| Card {
         id: CardId(0),
         note_id: nid,
@@ -171,6 +174,10 @@ fn buried_cards(c: &Collection) -> (NoteId, CardId, CardId) {
             .skip_undo()
             .stamp(StampMode::CallerSupplied),
         move |ctx| {
+            if let Some(day) = day {
+                ctx.scope()
+                    .set_config("lastUnburied", &ConfigValue::from(u64::from(day)))?;
+            }
             let mut note = common::note(&["river", "rio"]);
             note.usn = Usn(3);
             let nid = ctx.scope().add_note(&note)?;
@@ -308,7 +315,7 @@ fn a_second_check_on_the_same_day_reports_nothing_and_skips_the_writer() {
 }
 
 #[test]
-fn the_first_check_at_open_writes_and_reports_nothing() {
+fn the_first_check_at_open_keeps_defaults_and_reports_no_events() {
     let clock = Arc::new(StepClock::new(T0 * 1000, offset(CET), "Europe/Paris"));
     let (_dir, path) = day::new_collection(clock.as_ref(), Timing::New);
     let engine = Engine::new(meguri_engine::EngineConfig::default()).unwrap();
@@ -341,11 +348,7 @@ fn the_first_check_at_open_writes_and_reports_nothing() {
     };
     assert_eq!(
         rows,
-        [
-            row("creationOffset", 0, 0, "-60"),
-            row("localOffset", -1, T0, "-60"),
-            row("rollover", -1, T0, "4"),
-        ]
+        [row("creationOffset", 0, 0, "-60"), row("localOffset", -1, T0, "-60"),]
     );
     assert_eq!(c.reader(ReaderRole::Query).unwrap().col().unwrap().created.0, CRT);
     assert_eq!(c.check_rollover().unwrap(), report(0, CRT + DAY, None));
@@ -918,4 +921,93 @@ fn a_raw_write_drops_the_cached_day() {
     assert_eq!(d.check().today, 5, "cached");
     d.c.drop_cached_day().unwrap();
     assert_eq!(d.check(), report(4, BOUNDARY, Some(5)));
+}
+
+#[test]
+fn empty_automatic_checks_emit_rollover_events_without_synced_bookkeeping() {
+    let d = Day::paris(Timing::New);
+    d.at(DAY5_MORNING);
+    d.check();
+    let before = preservation_dump(&d.c);
+    let sub = d.subscribe();
+    d.at(BOUNDARY);
+    assert_eq!(d.check(), report(6, BOUNDARY + DAY, Some(5)));
+    assert_eq!(preservation_dump(&d.c), before);
+    assert_eq!(d.config("lastUnburied"), None);
+    assert_eq!(d.config("rollover"), None);
+    assert_eq!(
+        shown(&day_events(&drain(&sub, Duration::from_millis(100)))),
+        shown(&[rolled(5, 6), next_at(BOUNDARY + DAY)])
+    );
+}
+
+#[test]
+fn empty_check_remembers_today_without_unburying_new_same_day_cards() {
+    let d = Day::paris(Timing::New);
+    d.at(DAY5_MORNING);
+    d.check();
+    let (_, review, interday) = buried_cards(&d.c);
+    d.check();
+    assert_eq!(d.card(review).queue, CardQueue::BuriedByScheduler);
+    assert_eq!(d.card(interday).queue, CardQueue::BuriedByUser);
+    d.at(BOUNDARY);
+    d.check();
+    assert_eq!(d.card(review).queue, CardQueue::Review);
+    assert_eq!(d.card(interday).queue, CardQueue::InterdayLearning);
+}
+
+#[test]
+fn atomic_bury_marker_survives_same_day_reopen_and_next_day_open_restores_cards() {
+    let d = Day::paris(Timing::New);
+    d.at(DAY5_MORNING);
+    d.check();
+    let (_, review, interday) = buried_cards_with_day(&d.c, Some(5));
+    d.engine.close().unwrap();
+    let (engine, c) = day::open(&d.path, d.clock.clone(), Ports::default());
+    let read = |c: &Collection, id| c.reader(ReaderRole::Query).unwrap().card(id).unwrap().unwrap();
+    assert_eq!(read(&c, review).queue, CardQueue::BuriedByScheduler);
+    assert_eq!(read(&c, interday).queue, CardQueue::BuriedByUser);
+    engine.close().unwrap();
+    d.at(BOUNDARY);
+    let (_engine, c) = day::open(&d.path, d.clock.clone(), Ports::default());
+    let review = read(&c, review);
+    let interday = read(&c, interday);
+    assert_eq!(review.queue, CardQueue::Review);
+    assert_eq!(interday.queue, CardQueue::InterdayLearning);
+    assert_eq!((review.mtime, review.usn), (EpochSecs(1_700_000_001), Usn(3)));
+    assert_eq!((interday.mtime, interday.usn), (EpochSecs(1_700_000_002), Usn(3)));
+    assert_eq!(
+        c.reader(ReaderRole::Query)
+            .unwrap()
+            .config_value("lastUnburied")
+            .unwrap(),
+        Some(ConfigValue::from(6_i64))
+    );
+}
+
+#[test]
+fn a_real_offset_change_writes_only_local_offset_when_no_cards_need_restoration() {
+    let d = Day::paris(Timing::New);
+    let before = preservation_dump(&d.c);
+    d.clock.set_utc_offset(offset(2 * CET));
+    d.check();
+    meguri_testkit::dump::preservation::assert_changes_allowed(
+        &before,
+        &preservation_dump(&d.c),
+        &[
+            "/config/localOffset/val",
+            "/config/localOffset/usn",
+            "/config/localOffset/mtime_secs",
+        ],
+    )
+    .unwrap();
+    assert_eq!(d.config("localOffset").unwrap().2, "-120");
+    assert_eq!(d.config("lastUnburied"), None);
+    assert_eq!(d.config("rollover"), None);
+}
+
+fn preservation_dump(c: &Collection) -> serde_json::Value {
+    let reader = c.reader(ReaderRole::Query).unwrap();
+    let snapshot = reader.snapshot().unwrap();
+    meguri_testkit::dump::preservation::raw_dump(|sql| snapshot.execute_raw(sql, &[])).unwrap()
 }

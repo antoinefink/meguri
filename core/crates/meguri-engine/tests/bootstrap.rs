@@ -25,7 +25,7 @@ fn defaults_open_without_undo_or_bootstrap_changes() {
         (col.created.0, col.modified.0, col.schema_modified.0),
         (1_894_680_000, 0, 1_894_701_600_000)
     );
-    assert_eq!(r.config_keys().unwrap().len(), 17); // B4's 16 plus opening's rollover
+    assert_eq!(r.config_keys().unwrap().len(), 16); // B4; automatic open uses the effective default.
     assert_eq!(
         r.config_value("activeDecks").unwrap(),
         Some(ConfigValue::Array(vec![ConfigValue::from(1_i64)]))

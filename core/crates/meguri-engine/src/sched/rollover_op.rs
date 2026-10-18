@@ -24,6 +24,9 @@ struct DayKey {
 #[derive(Clone, Debug, Default)]
 pub struct DayCache {
     cached: Option<(DayKey, SchedDay)>,
+    // Automatic empty checks do not stamp synced config. Remember the input
+    // marker as well as the day, so a real imported marker change is rechecked.
+    automatic_unbury: Option<(u32, u32)>,
 }
 
 impl DayCache {
@@ -31,6 +34,7 @@ impl DayCache {
     /// a raw write, a change of the timing keys).
     pub fn clear(&mut self) {
         self.cached = None;
+        self.automatic_unbury = None;
     }
 
     /// The cached day, when it was computed under `offset` and `now` is
@@ -70,6 +74,26 @@ pub fn day_query(
     now: i64,
     offset: UtcOffset,
 ) -> Result<DayQuery, StorageError> {
+    query(scope, cache, now, offset, false)
+}
+
+/// Native lifecycle checks avoid synced bookkeeping when no card needs restoration.
+pub(super) fn automatic_day_query(
+    scope: &mut WriteScope<'_>,
+    cache: &mut DayCache,
+    now: i64,
+    offset: UtcOffset,
+) -> Result<DayQuery, StorageError> {
+    query(scope, cache, now, offset, true)
+}
+
+fn query(
+    scope: &mut WriteScope<'_>,
+    cache: &mut DayCache,
+    now: i64,
+    offset: UtcOffset,
+    automatic: bool,
+) -> Result<DayQuery, StorageError> {
     let crt = scope.col()?.created.0;
     let rollover = timing::rollover_hour(stored(scope, "rollover")?);
     let key = DayKey {
@@ -85,7 +109,8 @@ pub fn day_query(
     let (day, computed) = match cached {
         Some(day) => (day, false),
         None => {
-            if rollover.is_none() {
+            cache.automatic_unbury = None;
+            if rollover.is_none() && !automatic {
                 scope.set_config_keeping_col_mod(
                     "rollover",
                     &ConfigValue::from(i64::from(timing::DEFAULT_ROLLOVER_HOUR)),
@@ -107,7 +132,10 @@ pub fn day_query(
         }
     };
     let mut unburied = 0;
-    if timing::needs_unbury(timing::last_unburied(stored(scope, "lastUnburied")?), day.today) {
+    let last_unburied = timing::last_unburied(stored(scope, "lastUnburied")?);
+    if timing::needs_unbury(last_unburied, day.today)
+        && (!automatic || cache.automatic_unbury != Some((day.today, last_unburied)))
+    {
         for card in scope.cards_in_queues(&BURIED)? {
             if let Some(queue) = timing::unburied_queue(card.card_type, card.due)
                 && scope.set_card_queue(card.id, queue)?.changed()
@@ -115,7 +143,12 @@ pub fn day_query(
                 unburied += 1;
             }
         }
-        scope.set_config_keeping_col_mod("lastUnburied", &ConfigValue::from(u64::from(day.today)))?;
+        if !automatic || unburied > 0 {
+            scope.set_config_keeping_col_mod("lastUnburied", &ConfigValue::from(u64::from(day.today)))?;
+        }
+        if automatic {
+            cache.automatic_unbury = Some((day.today, if unburied > 0 { day.today } else { last_unburied }));
+        }
     }
     Ok(DayQuery {
         day,

@@ -48,16 +48,16 @@ pub fn differences(before: &Value, after: &Value) -> Vec<Difference> {
         if before == after {
             return;
         }
-        if path.len() < 3 {
-            if let (Some(Value::Object(b)), Some(Value::Object(a))) = (before, after) {
-                let keys: BTreeSet<_> = b.keys().chain(a.keys()).collect();
-                for key in keys {
-                    path.push(key.clone());
-                    walk(b.get(key), a.get(key), path, out);
-                    path.pop();
-                }
-                return;
+        if path.len() < 3
+            && let (Some(Value::Object(b)), Some(Value::Object(a))) = (before, after)
+        {
+            let keys: BTreeSet<_> = b.keys().chain(a.keys()).collect();
+            for key in keys {
+                path.push(key.clone());
+                walk(b.get(key), a.get(key), path, out);
+                path.pop();
             }
+            return;
         }
         out.push(Difference {
             pointer: pointer::render(path),

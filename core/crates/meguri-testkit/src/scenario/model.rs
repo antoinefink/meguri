@@ -3027,14 +3027,12 @@ fn add_step_needs(needs: &mut Needs, steps: &[Step]) {
                     .observations
                     .extend(requests.iter().map(|r| r.kind.name().to_owned()));
                 for request in requests {
-                    if request.kind == ObservationKind::Template {
-                        if let ObservationArgs::Mapping(map) = &request.args {
-                            if TemplateRequest::from_mapping(map)
-                                .is_ok_and(|r| r.cases.iter().any(|c| matches!(c, TemplateCase::Card { .. })))
-                            {
-                                needs.observations.insert("template.card".to_owned());
-                            }
-                        }
+                    if request.kind == ObservationKind::Template
+                        && let ObservationArgs::Mapping(map) = &request.args
+                        && TemplateRequest::from_mapping(map)
+                            .is_ok_and(|r| r.cases.iter().any(|c| matches!(c, TemplateCase::Card { .. })))
+                    {
+                        needs.observations.insert("template.card".to_owned());
                     }
                 }
             }

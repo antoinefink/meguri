@@ -123,25 +123,43 @@ fn preservation_arguments_are_strict_and_adopt_is_forbidden_in_actor_scenarios()
 #[test]
 fn blob_decode_isolates_invalid_notetype_children_without_rewriting_anything() {
     let dir = tempfile::tempdir().unwrap();
-    let loaded = load(dir.path(), concat!(
-        "  - db_exec: {sql: \"UPDATE fields SET config = X'00' WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Vocab') AND ord = 0\"}\n",
-        "  - observe: [{db_dump: {raw: true}}]\n",
-        "  - observe: [{blob_decode: {notetypes: [Vocab, Formula], decks: [Cram], presets: [Steady]}}]\n",
-        "  - observe: [{db_dump: {raw: true}}]\n"));
+    let loaded = load(
+        dir.path(),
+        concat!(
+            "  - db_exec: {sql: \"UPDATE fields SET config = X'00' WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Vocab') AND ord = 0\"}\n",
+            "  - observe: [{db_dump: {raw: true}}]\n",
+            "  - observe: [{blob_decode: {notetypes: [Vocab, Formula], decks: [Cram], presets: [Steady]}}]\n",
+            "  - observe: [{db_dump: {raw: true}}]\n"
+        ),
+    );
     let out = MeguriExecutor::new().run(&loaded).unwrap();
-    assert_eq!(out["steps"][3]["blob_decode"], json!({"notetypes": {"Vocab": "invalid_blob", "Formula": "ok"}, "decks": {"Cram": "ok"}, "presets": {"Steady": "ok"}}));
+    assert_eq!(
+        out["steps"][3]["blob_decode"],
+        json!({"notetypes": {"Vocab": "invalid_blob", "Formula": "ok"}, "decks": {"Cram": "ok"}, "presets": {"Steady": "ok"}})
+    );
     assert_eq!(out["steps"][2]["db_dump"], out["steps"][4]["db_dump"]);
 }
 
 #[test]
 fn blob_decode_does_not_misclassify_non_blob_columns_missing_names_or_missing_deck_kind() {
     for (sql, observation, kind) in [
-        ("UPDATE deck_config SET config = 'text' WHERE name = 'Steady'", "{blob_decode: {presets: [Steady]}}", "core_error"),
-        ("UPDATE decks SET kind = X'' WHERE name = 'Cram'", "{blob_decode: {decks: [Cram]}}", "core_error"),
+        (
+            "UPDATE deck_config SET config = 'text' WHERE name = 'Steady'",
+            "{blob_decode: {presets: [Steady]}}",
+            "core_error",
+        ),
+        (
+            "UPDATE decks SET kind = X'' WHERE name = 'Cram'",
+            "{blob_decode: {decks: [Cram]}}",
+            "core_error",
+        ),
         ("SELECT 1", "{blob_decode: {notetypes: [Absent]}}", "unknown_ref"),
     ] {
         let dir = tempfile::tempdir().unwrap();
-        let loaded = load(dir.path(), &format!("  - db_exec: {{sql: \"{sql}\"}}\n  - observe: [{observation}]\n"));
+        let loaded = load(
+            dir.path(),
+            &format!("  - db_exec: {{sql: \"{sql}\"}}\n  - observe: [{observation}]\n"),
+        );
         assert_eq!(MeguriExecutor::new().run(&loaded).unwrap_err().kind, kind);
     }
 }
@@ -153,7 +171,12 @@ fn stored_card_template_cases_wait_for_their_own_capability() {
     assert!(stored.scenario.needs().observations.contains("template.card"));
     let new_note = scenario::load(&root.join("render/template/blank.yaml")).unwrap();
     assert!(!new_note.scenario.needs().observations.contains("template.card"));
-    assert!(!MeguriExecutor::core_registry().capabilities().observations.contains("template.card"));
+    assert!(
+        !MeguriExecutor::core_registry()
+            .capabilities()
+            .observations
+            .contains("template.card")
+    );
     let mut registry = MeguriExecutor::core_registry();
     registry.observation_part("template.card");
     assert!(registry.capabilities().observations.contains("template.card"));
