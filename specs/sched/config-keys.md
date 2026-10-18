@@ -25,9 +25,9 @@ Writing a key stores its value in the compact JSON form, as a local change, and 
 | Key | Reader | Default | Meaning | Written by (Meguri) |
 |---|---|---|---|---|
 | `collapseTime` | u32 | 1200 | learn-ahead limit in seconds ("Learn ahead limit", minutes in the UI, R760) | Settings (U49): minutes × 60 |
-| `rollover` | `sched/day-clock#D2` | 4 | next day starts at this hour (R760) | the day clock; Settings |
+| `rollover` | `sched/day-clock#D2` | 4 | next day starts at this hour (R760) | explicit compatibility day query; Settings; automatic checks use the effective default without repairing it (D8) |
 | `creationOffset`, `localOffset` | `sched/day-clock#D2` | none, 0 | day-count offsets | the day clock (`localOffset` only) |
-| `lastUnburied` | u32 | 0 | last day buried cards were restored | the day clock (`sched/day-clock#D7`) |
+| `lastUnburied` | u32 | 0 | last day buried cards were restored | explicit compatibility query (D7); automatic check only after actual restoration, and real bury actions atomically before burying (D8) |
 | `nextPos` | u32 | 0 (a new collection holds 1) | next new-card position (R590, `sched/card-data#K7`) | card generation: the read value + 1, wrapping from 4294967295 to 0 |
 | `timeLim` | u32 | 0 | timebox limit in seconds, 0 = off (R759; minutes in the UI) | Settings: minutes × 60 |
 | `newCardsIgnoreReviewLimit` | bool | false | "New cards ignore review limit" (R608, R741) | deck options save (U49) |
