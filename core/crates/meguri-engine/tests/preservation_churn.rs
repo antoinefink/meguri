@@ -127,6 +127,10 @@ fn a_hundred_idle_relaunches_across_days_and_static_font_ensures_create_no_churn
     assert_eq!(pending_counts(&h.collection), [0; 12]);
     for i in 0..100 {
         h.clock.set_now_ms(NOW_MS + (i / 13) * 86_400_000 + i * 60_000);
+        h.collection.check_rollover().unwrap();
+        assert_eq!(pending_counts(&h.collection), [0; 12]);
+        assert_changes_allowed(&before, &dump(&h.collection), &[]).unwrap();
+        assert_eq!(schema(&h.collection), original_schema);
         relaunch(&mut h);
         let media = MediaService::open(&h.collection, h.clock.clone()).unwrap();
         assert_eq!(media.store().ensure_static_media(name, font).unwrap(), name);

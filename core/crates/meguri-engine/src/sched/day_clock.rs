@@ -245,6 +245,8 @@ impl DayClock {
         state.changes += 1;
         if timing {
             state.cache.clear();
+        } else if touches("lastUnburied") {
+            state.cache.forget_unbury_check();
         }
         timing || changes.collection_row
     }

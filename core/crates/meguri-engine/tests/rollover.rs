@@ -957,6 +957,22 @@ fn empty_check_remembers_today_without_unburying_new_same_day_cards() {
 }
 
 #[test]
+fn an_incoming_marker_change_invalidates_an_earlier_empty_unbury_check() {
+    let d = Day::paris(Timing::New);
+    d.at(DAY5_MORNING);
+    d.check();
+    let (_, review, interday) = buried_cards_with_day(&d.c, Some(5));
+    d.check();
+    assert_eq!(d.card(review).queue, CardQueue::BuriedByScheduler);
+    assert_eq!(d.card(interday).queue, CardQueue::BuriedByUser);
+    sync_config(&d.c, &[("lastUnburied", ConfigValue::String("not-a-day".into()))]);
+    d.check();
+    assert_eq!(d.card(review).queue, CardQueue::Review);
+    assert_eq!(d.card(interday).queue, CardQueue::InterdayLearning);
+    assert_eq!(d.config("lastUnburied"), Some((-1, DAY5_MORNING, "5".to_owned())));
+}
+
+#[test]
 fn atomic_bury_marker_survives_same_day_reopen_and_next_day_open_restores_cards() {
     let d = Day::paris(Timing::New);
     d.at(DAY5_MORNING);

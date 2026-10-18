@@ -37,6 +37,12 @@ impl DayCache {
         self.automatic_unbury = None;
     }
 
+    /// A committed marker change invalidates the empty-check basis even when
+    /// the replacement reads as the same effective day under D2.
+    pub(super) fn forget_unbury_check(&mut self) {
+        self.automatic_unbury = None;
+    }
+
     /// The cached day, when it was computed under `offset` and `now` is
     /// before its boundary. The rest of its key (`crt`, the creation offset,
     /// the rollover hour) is the caller's to know unchanged.
