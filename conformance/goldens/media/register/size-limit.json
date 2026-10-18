@@ -1,0 +1,23 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "media_pending": {
+          "limit.bin": "27f215202a9c8074a6c65a6fdf82deecb25ec69f"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "252219e0b6ce03b4f55b5a7450dcf4dcf2fec9e81df560681b569e45046102cd",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "media/register/size-limit",
+  "scenario_sha256": "41cc840e12f1432fcb74b3724613f01f66cab5246603604447e18da89c742ca6",
+  "tz": "UTC"
+}

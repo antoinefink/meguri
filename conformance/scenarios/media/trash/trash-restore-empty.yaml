@@ -1,0 +1,17 @@
+# Trash, restore and empty (specs/media/media-files.md M10, M11): a trashed
+# file leaves the folder, sits in the trash and is pending as a deletion; a
+# restore brings it back under its name and pending again; emptying the trash
+# deletes the bytes for good and leaves the deletions pending.
+id: media/trash/trash-restore-empty
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_media: {name: a.jpg, text: "aaa"}
+  - add_media: {name: b.jpg, text: "bbb"}
+  - trash_media: {names: [a.jpg]}
+  - observe: [media_dir, media_trash, media_pending]
+  - restore_media_trash: {}
+  - observe: [media_dir, media_trash, media_pending]
+  - trash_media: {names: [a.jpg, b.jpg]}
+  - observe: [media_dir, media_trash]
+  - empty_media_trash: {}
+  - observe: [media_dir, media_trash, media_pending]

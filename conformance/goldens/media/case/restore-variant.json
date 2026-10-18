@@ -1,0 +1,47 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "media_pending": {
+          "Pic.png": "c278a732fd3e5d6b7d0cafa6b3a97fa45849ff20"
+        }
+      },
+      {},
+      {
+        "add_media": {
+          "name": "pic.png"
+        }
+      },
+      {},
+      {
+        "media_dir": {
+          "Pic.png": {
+            "sha1": "c278a732fd3e5d6b7d0cafa6b3a97fa45849ff20",
+            "size": 9
+          },
+          "pic.png": {
+            "sha1": "55272cbcd7edc90cfa9a192aaba646deb9b7c438",
+            "size": 10
+          }
+        },
+        "media_pending": {
+          "Pic.png": "c278a732fd3e5d6b7d0cafa6b3a97fa45849ff20",
+          "pic.png": "55272cbcd7edc90cfa9a192aaba646deb9b7c438"
+        },
+        "media_trash": []
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "252219e0b6ce03b4f55b5a7450dcf4dcf2fec9e81df560681b569e45046102cd",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "media/case/restore-variant",
+  "scenario_sha256": "a8199eea59e0870c3963fe636d3fd1aa39e3f5bcd30caa7d6f12cd468fb4954e",
+  "tz": "UTC"
+}

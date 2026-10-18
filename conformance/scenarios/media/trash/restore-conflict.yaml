@@ -1,0 +1,14 @@
+# Restoring never overwrites (specs/media/media-files.md M10.2, R1649): a
+# trashed a.jpg whose name now holds other bytes comes back under the hash
+# name; a trashed c.jpg whose bytes are already back under c.jpg is dropped.
+id: media/trash/restore-conflict
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_media: {name: a.jpg, text: "first a"}
+  - trash_media: {names: [a.jpg]}
+  - add_media: {name: a.jpg, text: "second a"}
+  - add_media: {name: c.jpg, text: "same c"}
+  - trash_media: {names: [c.jpg]}
+  - add_media: {name: c.jpg, text: "same c"}
+  - restore_media_trash: {}
+  - observe: [media_dir, media_trash, media_pending]

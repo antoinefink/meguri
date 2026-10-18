@@ -1,0 +1,30 @@
+# Which files in the folder are media (specs/media/media-files.md M7.1, M8):
+# thumbs.db-like and .ds_store-like names are ignored (any one character in
+# the middle or in front, case ignored, long s matching s), names the
+# transform would change are skipped until Check Media renames them, empty
+# files and subdirectories never count, and everything else, mixed case and
+# _-prefixed names included, is registered and pending.
+id: media/register/ignored
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: "Thumbs.DB", text: "ignored"}
+    - {name: ".DS_Store", text: "ignored"}
+    - {name: "thumbs_db", text: "ignored"}
+    - {name: "thumb\u017F-db", text: "ignored"}
+    - {name: "xds_store", text: "ignored"}
+    - {name: "\u017FDS_STORE", text: "ignored"}
+    - {name: "thumbs.db.png", text: "kept"}
+    - {name: "my.ds_store", text: "kept"}
+    - {name: "_font.ttf", text: "kept"}
+    - {name: "ok.png", text: "kept"}
+    - {name: "Upper.PNG", text: "kept"}
+    - {name: "a b.png", text: "kept"}
+    - {name: "a:b.png", text: "not normalized"}
+    - {name: "con.jpg", text: "not normalized"}
+    - {name: "trail.", text: "not normalized"}
+    - {name: "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn", text: "not normalized"}
+    - {name: "empty.png", text: ""}
+    - {name: "sub", dir: true}
+steps:
+  - observe: [media_pending, media_dir]

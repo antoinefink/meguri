@@ -1,0 +1,14 @@
+# The trash keeps every version (specs/media/media-files.md M10.1, R2018):
+# a.jpg trashed twice with different bytes gives two trash entries, and the
+# restore puts the newer one back as a.jpg and the older one under its hash
+# name. Anki keeps only the newer version: deviation media-trash-keeps-versions.
+id: media/trash/twice
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_media: {name: a.jpg, text: "first a"}
+  - trash_media: {names: [a.jpg]}
+  - add_media: {name: a.jpg, text: "second a"}
+  - trash_media: {names: [a.jpg]}
+  - observe: [media_trash]
+  - restore_media_trash: {}
+  - observe: [media_dir, media_trash, media_pending]

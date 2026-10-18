@@ -1,0 +1,7 @@
+# Interface names the media specs use: the media folder and trash folder
+# names Anki uses next to a collection, and the file names it never treats
+# as media.
+collection.media
+media.trash
+thumbs.db
+ds_store

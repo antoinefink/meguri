@@ -311,29 +311,29 @@ h5b5bc3629af2,rust,tag,maintenance,unclassified,,,open
 h8bba9c90dc5d,rust,tag,maintenance,unclassified,,,open
 h984772533897,rust,tag,maintenance,unclassified,,,open
 hec5bf5d4f824,rust,tag,maintenance,unclassified,,,open
-h563f74ccee41,python,tag,media,unclassified,,,open
-h83e771fdcf55,python,tag,media,unclassified,,,open
-h8a1d70115eae,python,tag,media,unclassified,,,open
-h026e05052d5b,rust,tag,media,unclassified,,,open
-h02ee289c8351,rust,tag,media,unclassified,,,open
-h0688e35c67d3,rust,tag,media,unclassified,,,open
+h563f74ccee41,python,tag,media,in-scope,"media names found in field text, the text with media tags removed, and the display encoding of local names (text area)",text/refs/extract text/refs/iri text/strip/text-line,done
+h83e771fdcf55,python,tag,media,in-scope,"adding a file: the same name and bytes are reused, other bytes get the hash name",media/add/ae36 media/add/hash-names,done
+h8a1d70115eae,python,tag,media,in-scope,Check Media's missing and unused lists (U130),,deferred
+h026e05052d5b,rust,tag,media,in-scope,Check Media (U130),,deferred
+h02ee289c8351,rust,tag,media,in-scope,Check Media's unused and missing lists (U130); the naming of its added files is U31's,media/add/ae36,deferred
+h0688e35c67d3,rust,tag,media,in-scope,Check Media (U130),,deferred
 h2751253863a4,rust,tag,media,in-scope,the 120-byte media file name limit,text/filenames/normalize text/corpus/filenames-01,done
 h2df882b13f13,rust,tag,media,in-scope,the media file name transform,text/filenames/normalize text/corpus/filenames-01,done
-h448a4c3e64ba,rust,tag,media,unclassified,,,open
-h487c9a31bd1f,rust,tag,media,unclassified,,,open
-h4b933596f69b,rust,tag,media,unclassified,,,open
-h5ba43605f707,rust,tag,media,unclassified,,,open
-h60490d4bf757,rust,tag,media,unclassified,,,open
-h77a1ba508ad3,rust,tag,media,unclassified,,,open
-h7937b5639094,rust,tag,media,unclassified,,,open
-h7bc4c354c48f,rust,tag,media,unclassified,,,open
-h86faf5420724,rust,tag,media,unclassified,,,open
-h9cb0084d6163,rust,tag,media,unclassified,,,open
-hd18d3fee8949,rust,tag,media,unclassified,,,open
-hd6632486d7a9,rust,tag,media,unclassified,,,open
-hec37a4cc2d38,rust,tag,media,unclassified,,,open
-hfc5d2785b867,rust,tag,media,unclassified,,,open
-hfe84eb8e5a8e,rust,tag,media,unclassified,,,open
+h448a4c3e64ba,rust,tag,media,in-scope,Check Media (U130),,deferred
+h487c9a31bd1f,rust,tag,media,in-scope,restoring the trash (U31); the Check Media report around it waits for U130,media/trash/trash-restore-empty,deferred
+h4b933596f69b,rust,tag,media,in-scope,Check Media (U130),,deferred
+h5ba43605f707,rust,tag,media,in-scope,emptying the trash (U31); the Check Media report around it waits for U130,media/trash/trash-restore-empty,deferred
+h60490d4bf757,rust,tag,media,in-scope,"restoring the trash: back under the name, identical bytes dropped, other bytes under the hash name",media/trash/restore-conflict media/trash/trash-restore-empty,done
+h77a1ba508ad3,rust,tag,media,not-applicable,a desktop helper that joins the media folder path; Meguri resolves names through its own lookup,,done
+h7937b5639094,rust,tag,media,in-scope,Check Media (U130),,deferred
+h7bc4c354c48f,rust,tag,media,in-scope,"media references of note type templates, CSS and fields, used by Check Media (U130, U60)",,deferred
+h86faf5420724,rust,tag,media,in-scope,"adding with dedupe across letter case and the hash name, then moving the files to the trash",media/add/ae36 media/add/lowercase media/trash/trash-restore-empty,done
+h9cb0084d6163,rust,tag,media,in-scope,Check Media (U130),,deferred
+hd18d3fee8949,rust,tag,media,in-scope,Check Media (U130),,deferred
+hd6632486d7a9,rust,tag,media,in-scope,Check Media (U130),,deferred
+hec37a4cc2d38,rust,tag,media,in-scope,the hash name format,media/add/hash-names,done
+hfc5d2785b867,rust,tag,media,in-scope,Check Media (U130),,deferred
+hfe84eb8e5a8e,rust,tag,media,in-scope,Check Media (U130),,deferred
 h1617b31103f7,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
 h259a80791fb5,python,tag,model,in-scope,A missing config key reads as the reader's default; each key's reader and default are specified and tested with the area that reads it,browser/config/absent-defaults,done
 h32c56ad2dd75,python,tag,model,in-scope,"Config values keep their JSON kind through a write: integers, floats, booleans, null, strings, lists and objects",storage/config/rewrite-same-value,done
@@ -1025,12 +1025,12 @@ h46c1ebf32143,rust,supplementary,sync,unclassified,,,open
 h54c23550e27f,rust,tag,sync,in-scope,"a sync the server cannot apply (a note whose note type it lacks) fails with the database-check kind and leaves both sides able to sync again; the scenario needs a driver kind that tells this failure from a failed sanity check (U107), meguri-sync stub tests cover the status mapping meanwhile",,deferred
 h55c7436ac179,rust,tag,sync,unclassified,,,open
 h59143f82a4f9,rust,tag,sync,in-scope,"a transfer that stops moving fails after the stall timeout while a steady one never times out; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
-h5c5b47431921,rust,tag,sync,unclassified,,,open
+h5c5b47431921,rust,tag,sync,in-scope,"registering outside additions, rewrites and removals in the media folder",media/register/outside-changes,done
 h62b3f29862b5,rust,tag,sync,unclassified,,,open
 h65243b54e871,rust,tag,sync,unclassified,,,open
 h6b1ce6691f8e,rust,tag,sync,in-scope,"a never-synced new collection against a new account finds no changes online, and a sync then writes nothing",sync/meta/status,done
 h7298208250f2,rust,supplementary,sync,in-scope,the login body carries the user name and password under their short member names,sync/transport/login,done
-h7709a37ac92a,rust,tag,sync,unclassified,,,open
+h7709a37ac92a,rust,tag,sync,not-applicable,Anki's private media database API; Meguri keeps its own media journal and never opens that file,,done
 h7ffe4ba74f1f,rust,tag,sync,not-applicable,"the sync server ends an older sync session when another starts; Meguri is a client with one session key per job, and the resulting conflict answer is a sync error kind",,done
 h850281d2190d,rust,supplementary,sync,unclassified,,,open
 h862454dde0dd,rust,tag,sync,in-scope,"a request to an address that never answers fails within the timeouts; scenarios need U118's faults, meguri-sync's stub tests cover it meanwhile",,deferred

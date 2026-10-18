@@ -1,0 +1,274 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_media": {
+          "name": "straße.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "straße-352f7829a2384b001cc12b0c2613c756454a1f6a.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "ß.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "ǆ.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "ǆ.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "ǆ-352f7829a2384b001cc12b0c2613c756454a1f6a.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "k.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "k-352f7829a2384b001cc12b0c2613c756454a1f6a.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "i̇x.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "abσ.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "aς"
+        }
+      },
+      {
+        "add_media": {
+          "name": "aς-352f7829a2384b001cc12b0c2613c756454a1f6a."
+        }
+      },
+      {
+        "add_media": {
+          "name": "𐐨.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "ꭰ.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "ꭰ-352f7829a2384b001cc12b0c2613c756454a1f6a.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i"
+        }
+      },
+      {
+        "add_media": {
+          "name": "i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i-352f7829a2384b001cc12b0c2613c756454a1f6a.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-352f7829a2384b001cc12b0c2613c756454a1f6a.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "café.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "café.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "café-352f7829a2384b001cc12b0c2613c756454a1f6a.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "μάθημα.mp3"
+        }
+      },
+      {
+        "add_media": {
+          "name": "привет.ogg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "աբ.png"
+        }
+      },
+      {
+        "media_dir": {
+          "abσ.png": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "aς": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "aς-352f7829a2384b001cc12b0c2613c756454a1f6a.": {
+            "sha1": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+            "size": 6
+          },
+          "café-352f7829a2384b001cc12b0c2613c756454a1f6a.jpg": {
+            "sha1": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+            "size": 6
+          },
+          "café.jpg": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i-352f7829a2384b001cc12b0c2613c756454a1f6a.png": {
+            "sha1": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+            "size": 6
+          },
+          "i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i.png": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "i̇x.png": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "k-352f7829a2384b001cc12b0c2613c756454a1f6a.png": {
+            "sha1": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+            "size": 6
+          },
+          "k.png": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "straße-352f7829a2384b001cc12b0c2613c756454a1f6a.png": {
+            "sha1": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+            "size": 6
+          },
+          "straße.png": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-352f7829a2384b001cc12b0c2613c756454a1f6a.jpg": {
+            "sha1": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+            "size": 6
+          },
+          "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz.jpg": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "ß.png": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "ǆ-352f7829a2384b001cc12b0c2613c756454a1f6a.png": {
+            "sha1": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+            "size": 6
+          },
+          "ǆ.png": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "μάθημα.mp3": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "привет.ogg": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "աբ.png": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "ꭰ-352f7829a2384b001cc12b0c2613c756454a1f6a.png": {
+            "sha1": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+            "size": 6
+          },
+          "ꭰ.png": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          },
+          "𐐨.png": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          }
+        },
+        "media_pending": {
+          "abσ.png": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "aς": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "aς-352f7829a2384b001cc12b0c2613c756454a1f6a.": null,
+          "café-352f7829a2384b001cc12b0c2613c756454a1f6a.jpg": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+          "café.jpg": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i-352f7829a2384b001cc12b0c2613c756454a1f6a.png": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+          "i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i.png": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i̇i": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "i̇x.png": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "k-352f7829a2384b001cc12b0c2613c756454a1f6a.png": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+          "k.png": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "straße-352f7829a2384b001cc12b0c2613c756454a1f6a.png": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+          "straße.png": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-352f7829a2384b001cc12b0c2613c756454a1f6a.jpg": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+          "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz.jpg": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "ß.png": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "ǆ-352f7829a2384b001cc12b0c2613c756454a1f6a.png": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+          "ǆ.png": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "μάθημα.mp3": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "привет.ogg": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "աբ.png": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "ꭰ-352f7829a2384b001cc12b0c2613c756454a1f6a.png": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+          "ꭰ.png": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+          "𐐨.png": "e0996a37c13d44c3b06074939d43fa3759bd32c1"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "252219e0b6ce03b4f55b5a7450dcf4dcf2fec9e81df560681b569e45046102cd",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "media/add/lowercase",
+  "scenario_sha256": "83746638f6447ae1a010c65b637b1d567104d07a8e8adf14a6d80863bf342302",
+  "tz": "UTC"
+}

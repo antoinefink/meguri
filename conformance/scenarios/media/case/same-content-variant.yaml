@@ -1,0 +1,14 @@
+# A mixed-case file from outside keeps its name, and adding a case variant of
+# it with the same bytes reuses it (specs/media/media-files.md M3 row a, R984,
+# R1570). Anki on the oracle's case-sensitive volume writes a second file
+# mixedcase.png instead: deviation media-case-variant-same-content.
+id: media/case/same-content-variant
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: MixedCase.png, text: "mixed"}
+steps:
+  - add_media: {name: MixedCase.png, text: "mixed"}
+  - add_media: {name: mixedcase.png, text: "mixed"}
+  - add_media: {name: MIXEDCASE.PNG, text: "mixed"}
+  - observe: [media_dir, media_pending]

@@ -128,6 +128,18 @@ fsrsWeights
 desiredRetention
 loadBalancerEnabled
 fsrsShortTermWithStepsEnabled
+# Media setup, ops, observations and rejections (media-ops.md, U31).
+media_files
+media_outside
+add_media
+trash_media
+restore_media_trash
+empty_media_trash
+media_dir
+media_trash
+media_pending
+invalid_name
+ignored_name
 # timed-operations.md: package entries and kinds, sync protocol headers, the
 # browser's sort-column config values and the search keywords of its queries.
 colpkg

@@ -1,0 +1,13 @@
+# Other bytes under the name of a mixed-case file get the hash name of the
+# lowercase candidate, since that candidate is a case variant of the file
+# (specs/media/media-files.md M3 row c, R1570). Anki on the oracle's
+# case-sensitive volume writes mixedcase.png beside MixedCase.png instead:
+# deviation media-case-variant-other-content.
+id: media/case/other-content-variant
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: MixedCase.png, text: "mixed"}
+steps:
+  - add_media: {name: MixedCase.png, text: "changed"}
+  - observe: [media_dir, media_pending]

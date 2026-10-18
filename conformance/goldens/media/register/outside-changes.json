@@ -1,0 +1,48 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "media_pending": {
+          "f.jpg": "3096162fbd55879be22401d1d65d5904893354f3",
+          "g.jpg": "4788e8da4ac944791115f4f4bd6112765eb340a6"
+        }
+      },
+      {},
+      {},
+      {
+        "add_media": {
+          "name": "h.jpg"
+        }
+      },
+      {
+        "media_dir": {
+          "f.jpg": {
+            "sha1": "a8d71aa69a7f36014978b4d918ddbbdaae16de6c",
+            "size": 5
+          },
+          "h.jpg": {
+            "sha1": "8aa490f1987efe2b40cbbe295c15b16a64289005",
+            "size": 5
+          }
+        },
+        "media_pending": {
+          "f.jpg": "a8d71aa69a7f36014978b4d918ddbbdaae16de6c",
+          "g.jpg": null,
+          "h.jpg": "8aa490f1987efe2b40cbbe295c15b16a64289005"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "252219e0b6ce03b4f55b5a7450dcf4dcf2fec9e81df560681b569e45046102cd",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "media/register/outside-changes",
+  "scenario_sha256": "f6750034e052c576a2f1d3faf5063a8019b9d42dc069a7f0e0fb7efefba53ec4",
+  "tz": "UTC"
+}
