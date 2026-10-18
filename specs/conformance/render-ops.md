@@ -47,6 +47,7 @@ Two observation kinds (`observations.md` O4). `template` (Q1) evaluates the temp
 - The note, its note type (name, fields, kind), the card's ordinal and the card itself (`did`, `odid`, `flags`, `id`) come from the collection at this step, so every special has its real value (P3).
 - `Card` is the stored template's name: for a standard note type the template at the card's ordinal, for a cloze note type the first template.
 - `ord`, `name`, `fields` and `tags` are not allowed in a card case.
+- Any request containing a card case needs the `template.card` observation capability in addition to `template` (`dsl.md` D8). An executor declares it only when it implements these collection-backed cases; support for new-note cases alone is insufficient.
 
 ### Q1.4 Evaluation
 
@@ -85,7 +86,7 @@ Nothing in the scenario's collection changes. New-note cases never read it.
 
 - The oracle driver implements the kind: every scenario under `conformance/scenarios/render/` has its golden, recorded with `tools/mg oracle record render`.
 - Meguri's executor (the testkit's `template` adapter, U60) runs new-note cases with meguri-template and a field map built as Q1.2 says. New-note cases of a cloze note type (the blank check of T10, `render/cloze#C15`) and templates that use the `cloze` or `cloze-only` filter run with U61's cloze module (`render/cloze/blank-check`, `render/cloze/templates`).
-- Card cases also need notes, cards, decks and note types in the collection (the `notes`, `decks` and `notetypes` setup sections and the `ids` observation: U27, U28, U29) and, for a cloze card, the cloze blank check (U61). U62 adds card cases to the adapter and activates `special-fields/cards`. `template/legacy-req` needs the `legacy_update` and `legacy_json` adapters and a note type save that recomputes each template's requirement (`template-syntax.md` T11.3); U36 activates it. Until then T0 reports both `pending`, and meguri-template's golden-pair tests check the engine's part of both against their goldens (`conformance/scenarios/render/area.yaml`).
+- Card cases also need notes, cards, decks and note types in the collection (the `notes`, `decks` and `notetypes` setup sections and the `ids` observation: U27, U28, U29) and, for a cloze card, the cloze blank check (U61). U62 adds card cases to the adapter, declares `template.card` and activates `special-fields/cards` and the template-card leg of `preservation/render/every-card`. Until then these card-case scenarios are `pending`, even when their other capabilities exist. `template/legacy-req` needs the `legacy_update` and `legacy_json` adapters and a note type save that recomputes each template's requirement (`template-syntax.md` T11.3); U36 activates it independently. meguri-template's golden-pair tests check the engine's part against the goldens (`conformance/scenarios/render/area.yaml`).
 
 ## Q4. `render_status`
 
