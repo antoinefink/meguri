@@ -1,0 +1,329 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T23:40:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "answer_labels": {
+          "#c1": {
+            "again": {
+              "amount": "10",
+              "less_than": true,
+              "unit": "minutes"
+            },
+            "easy": {
+              "amount": "7",
+              "less_than": false,
+              "unit": "days"
+            },
+            "good": {
+              "amount": "1",
+              "less_than": false,
+              "unit": "days"
+            },
+            "hard": {
+              "amount": "1",
+              "less_than": false,
+              "unit": "days"
+            }
+          },
+          "#c2": {
+            "again": {
+              "amount": "10",
+              "less_than": true,
+              "unit": "minutes"
+            },
+            "easy": {
+              "amount": "2",
+              "less_than": false,
+              "unit": "days"
+            },
+            "good": {
+              "amount": "1",
+              "less_than": false,
+              "unit": "days"
+            },
+            "hard": {
+              "amount": "1",
+              "less_than": false,
+              "unit": "days"
+            }
+          }
+        },
+        "next_states": {
+          "#c1": {
+            "again": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.4133,
+                "stability": 0.212
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 600
+            },
+            "current": {
+              "kind": "new",
+              "position": 1
+            },
+            "easy": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 1.0,
+                "stability": 8.2956
+              },
+              "scheduled_days": 7
+            },
+            "good": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 2.118104,
+                "stability": 2.3065
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 86400
+            },
+            "hard": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 5.1121707,
+                "stability": 1.2931
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 43500
+            }
+          },
+          "#c2": {
+            "again": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 8.806304,
+                "stability": 0.08335672
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 600
+            },
+            "current": {
+              "elapsed_secs": 994,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.4133,
+                "stability": 0.212
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 600
+            },
+            "easy": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 5.2000203,
+                "stability": 0.42438
+              },
+              "scheduled_days": 2
+            },
+            "good": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.402115,
+                "stability": 0.24668919
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 86400
+            },
+            "hard": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 7.60421,
+                "stability": 0.212
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 43500
+            }
+          }
+        }
+      },
+      {},
+      {
+        "answer_labels": {
+          "#c1": {
+            "again": {
+              "amount": "1",
+              "less_than": false,
+              "unit": "days"
+            },
+            "easy": {
+              "amount": "7",
+              "less_than": false,
+              "unit": "days"
+            },
+            "good": {
+              "amount": "1",
+              "less_than": false,
+              "unit": "days"
+            },
+            "hard": {
+              "amount": "1",
+              "less_than": false,
+              "unit": "days"
+            }
+          },
+          "#c2": {
+            "again": {
+              "amount": "1",
+              "less_than": false,
+              "unit": "days"
+            },
+            "easy": {
+              "amount": "2",
+              "less_than": false,
+              "unit": "days"
+            },
+            "good": {
+              "amount": "1",
+              "less_than": false,
+              "unit": "days"
+            },
+            "hard": {
+              "amount": "1",
+              "less_than": false,
+              "unit": "days"
+            }
+          }
+        },
+        "next_states": {
+          "#c1": {
+            "again": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.4133,
+                "stability": 0.212
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 600
+            },
+            "current": {
+              "kind": "new",
+              "position": 1
+            },
+            "easy": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 1.0,
+                "stability": 8.2956
+              },
+              "scheduled_days": 7
+            },
+            "good": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 2.118104,
+                "stability": 2.3065
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 86400
+            },
+            "hard": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 5.1121707,
+                "stability": 1.2931
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 43500
+            }
+          },
+          "#c2": {
+            "again": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 8.806304,
+                "stability": 0.08335672
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 600
+            },
+            "current": {
+              "elapsed_secs": 15394,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.4133,
+                "stability": 0.212
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 600
+            },
+            "easy": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 5.2000203,
+                "stability": 0.42438
+              },
+              "scheduled_days": 2
+            },
+            "good": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.402115,
+                "stability": 0.24668919
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 86400
+            },
+            "hard": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 7.60421,
+                "stability": 0.212
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 43500
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "b490ad0efe12a5980bf3bfb23472baed186edbe49fdc039cea5745cbe11ec2e8",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/labels/rollover",
+  "scenario_sha256": "ec70d8f3450b38d2da1841b44ff0e2cefc386d278d6df8a9ec837261bbe54479",
+  "tz": "Europe/Paris"
+}

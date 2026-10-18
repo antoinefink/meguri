@@ -1,0 +1,49 @@
+# Maximum interval (R670; specs/sched/fsrs-transitions.md T5, T8, T9). It caps
+# every fuzzed review interval: graduation, Hard, Good and Easy on review cards,
+# and leaving relearning.
+#   Max1 (maximum 1 day): c1 new, every graduation is 1 day; c6 relearning card
+#     on its last step.
+#   Max5: c2 learning card on its last step; c3 review card with stability 100.
+#   Max30: c4 review card whose current interval (100) is above the maximum;
+#     c5 review card with stability 10, Good about 32 days.
+id: sched/fsrs/max-interval
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Max1, learn_steps: [1m, 10m], relearn_steps: [10m], max_interval_days: 1}
+    - {name: Max5, learn_steps: [1m, 10m], relearn_steps: [10m], max_interval_days: 5}
+    - {name: Max30, learn_steps: [1m, 10m], relearn_steps: [10m], max_interval_days: 30}
+  decks:
+    - {name: Max1, preset: Max1}
+    - {name: Max5, preset: Max5}
+    - {name: Max30, preset: Max30}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Max1, fields: [c1, back]}
+    - {notetype: Pair, deck: Max5, fields: [c2, back]}
+    - {notetype: Pair, deck: Max5, fields: [c3, back]}
+    - {notetype: Pair, deck: Max30, fields: [c4, back]}
+    - {notetype: Pair, deck: Max30, fields: [c5, back]}
+    - {notetype: Pair, deck: Max1, fields: [c6, back]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, reps = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1, 1894701600, 2, 1, '{"s":2.3065,"d":2.118,"lrt":1894701000}', 1]
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [2, 2, 0, 5, 2500, 9, 0, '{"s":100.0,"d":5.0,"lrt":1886061600}', 2]
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [2, 2, 0, 100, 2500, 10, 0, '{"s":50.0,"d":5.0,"lrt":1886061600}', 3]
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [2, 2, 0, 10, 2500, 11, 0, '{"s":10.0,"d":5.0,"lrt":1893837600}', 4]
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [3, 1, 1894701600, 1, 2300, 12, 1, 1, '{"s":5.0,"d":5.0,"lrt":1894701000}', 5]
+  - observe: [next_states]

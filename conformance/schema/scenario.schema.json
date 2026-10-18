@@ -283,7 +283,7 @@
       "anyOf": [
         {
           "type": "string",
-          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|decks|render|render_status|db_dump|schema_objects|stats|digest|undo_status|tag_tree|browser_config|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
+          "pattern": "^\\s*(ids|timing|card|revlog|next_states|answer_labels|queue|deck_tree|decks|render|render_status|db_dump|schema_objects|stats|digest|undo_status|tag_tree|browser_config|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
         },
         {
           "description": "media-ops.md F9-F11: media kinds take no references.",
@@ -302,6 +302,7 @@
             "card": { "$ref": "#/$defs/card_refs" },
             "revlog": { "$ref": "#/$defs/card_refs" },
             "next_states": { "$ref": "#/$defs/card_refs" },
+            "answer_labels": { "description": "observations.md O10.", "$ref": "#/$defs/card_refs" },
             "render": { "$ref": "#/$defs/card_refs" },
             "render_status": { "description": "render-ops.md Q4: review render status of these cards.", "$ref": "#/$defs/card_refs" },
             "fuzz_table": {

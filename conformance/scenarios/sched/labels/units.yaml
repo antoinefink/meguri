@@ -1,0 +1,70 @@
+# Answer button labels by unit (R656; specs/sched/answer-labels.md A2-A4). The
+# learn-ahead limit is 0, so no label has the < prefix. Each card is a new card
+# whose preset has one learning step; Again shows that step and Hard 1.5 times
+# it (at most a day more, rounded to days above one day), converted to days
+# when it reaches the next day (2030-01-16 04:00 UTC, 64,800 s away); Good and
+# Easy graduate to review days. Steps: 45s, 59s, 90s, 150s, 10m, 90m, 119m30s,
+# 1d, 1d23h, 30d, 31d, 70d, 364d, 365d, 400d and 0s (a delay of 0 shows the end
+# label).
+id: sched/labels/units
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false, collapseTime: 0}
+  presets:
+    - {name: S45s, learn_steps: [45s], relearn_steps: [10m]}
+    - {name: S59s, learn_steps: [59s], relearn_steps: [10m]}
+    - {name: S90s, learn_steps: [90s], relearn_steps: [10m]}
+    - {name: S150s, learn_steps: [150s], relearn_steps: [10m]}
+    - {name: S10m, learn_steps: [10m], relearn_steps: [10m]}
+    - {name: S90m, learn_steps: [90m], relearn_steps: [10m]}
+    - {name: S119m30s, learn_steps: [119m30s], relearn_steps: [10m]}
+    - {name: S1d, learn_steps: [1d], relearn_steps: [10m]}
+    - {name: S1d23h, learn_steps: [1d23h], relearn_steps: [10m]}
+    - {name: S30d, learn_steps: [30d], relearn_steps: [10m]}
+    - {name: S31d, learn_steps: [31d], relearn_steps: [10m]}
+    - {name: S70d, learn_steps: [70d], relearn_steps: [10m]}
+    - {name: S364d, learn_steps: [364d], relearn_steps: [10m]}
+    - {name: S365d, learn_steps: [365d], relearn_steps: [10m]}
+    - {name: S400d, learn_steps: [400d], relearn_steps: [10m]}
+    - {name: S0s, learn_steps: [0s], relearn_steps: [10m]}
+  decks:
+    - {name: S45s, preset: S45s}
+    - {name: S59s, preset: S59s}
+    - {name: S90s, preset: S90s}
+    - {name: S150s, preset: S150s}
+    - {name: S10m, preset: S10m}
+    - {name: S90m, preset: S90m}
+    - {name: S119m30s, preset: S119m30s}
+    - {name: S1d, preset: S1d}
+    - {name: S1d23h, preset: S1d23h}
+    - {name: S30d, preset: S30d}
+    - {name: S31d, preset: S31d}
+    - {name: S70d, preset: S70d}
+    - {name: S364d, preset: S364d}
+    - {name: S365d, preset: S365d}
+    - {name: S400d, preset: S400d}
+    - {name: S0s, preset: S0s}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: S45s, fields: [c1, back]}
+    - {notetype: Pair, deck: S59s, fields: [c2, back]}
+    - {notetype: Pair, deck: S90s, fields: [c3, back]}
+    - {notetype: Pair, deck: S150s, fields: [c4, back]}
+    - {notetype: Pair, deck: S10m, fields: [c5, back]}
+    - {notetype: Pair, deck: S90m, fields: [c6, back]}
+    - {notetype: Pair, deck: S119m30s, fields: [c7, back]}
+    - {notetype: Pair, deck: S1d, fields: [c8, back]}
+    - {notetype: Pair, deck: S1d23h, fields: [c9, back]}
+    - {notetype: Pair, deck: S30d, fields: [c10, back]}
+    - {notetype: Pair, deck: S31d, fields: [c11, back]}
+    - {notetype: Pair, deck: S70d, fields: [c12, back]}
+    - {notetype: Pair, deck: S364d, fields: [c13, back]}
+    - {notetype: Pair, deck: S365d, fields: [c14, back]}
+    - {notetype: Pair, deck: S400d, fields: [c15, back]}
+    - {notetype: Pair, deck: S0s, fields: [c16, back]}
+steps:
+  - observe: [answer_labels, next_states]

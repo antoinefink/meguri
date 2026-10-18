@@ -1,7 +1,7 @@
 # Conformance observations and comparison
 
 Spec: conformance/observations
-Requirements: R1884, R1886, R1887, R1888, R1889, R1927
+Requirements: R656, R1884, R1886, R1887, R1888, R1889, R1927
 Anki: 26.09.3
 Scenarios: conformance/scenarios/smoke/
 
@@ -41,7 +41,8 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `card` | card references or none | `{"#cN": <row> \| null}`: the stored card row with columns `id` (as `#cN`), `nid` (as `#nN`), `did` and `odid` (deck names; `null` for 0), `ord`, `mod`, `usn`, `type`, `queue`, `due`, `ivl`, `factor`, `reps`, `lapses`, `left`, `odue`, `flags` and `data` (parsed JSON object; `{}` when empty; the text when it is not JSON) |
 | `revlog` | card references or none | `{"#cN": [<row>, ...]}`: the card's review-log rows in id order, columns `id`, `cid` (as `#cN`), `usn`, `ease`, `ivl`, `lastIvl`, `factor`, `time`, `type` |
 | `next_states` | card references or none | `{"#cN": {current, again, hard, good, easy}}`: the scheduling state now and after each rating (O5) |
-| `fuzz_table` | `{card: #cN, pairs: [[card_id, reps], ...], intervals: [days, ...]}` | `{intervals, rows: [[card_id, reps, delta, ...], ...]}`: the interval fuzz applied when answering a card with that id and review count (reviews before the answer), one delta in days per interval, bounded by the card's preset |
+| `fuzz_table` | `{card: #cN, pairs: [[card_id, reps], ...], intervals: [days, ...]}` | `{intervals, rows: [[card_id, reps, delta, ...], ...]}`: the interval fuzz applied when answering a card with that id and review count (reviews before the answer), one delta in days per interval, bounded by the card's preset (`sched/fuzz#Z6`). A pair's card id must not be the id of another card of the collection and its review count must be at most 4,294,967,294: the oracle computes the table by giving the card that id and count + 1 |
+| `answer_labels` | card references or none | `{"#cN": {again, hard, good, easy}}`: the answer button labels now, each as its parts (O10) |
 | `net_probe` | `{host, port, timeout_ms?}` | `{connected, error}` (diagnostic, oracle only: proves the worker has no route out) |
 | `schema_objects` | none | `[{type, name, tbl_name, sql}]`, every object of the collection file's `sqlite_master` with its SQL text normalized (`storage-ops.md` P3) |
 | `queue` | none or `{deck}` | draft (sched): the cards in the order the scheduler would show them, as `#cN`, and the new, learning and review counts |
@@ -77,7 +78,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 - a state is `{kind, ...fields}` with `kind` one of `new`, `learning`, `review`, `relearning`, `preview`, `rescheduling`;
 - `new`: `position`; `learning`: `remaining_steps`, `scheduled_secs`, `elapsed_secs`, `memory_state?`; `review`: `scheduled_days`, `elapsed_days`, `ease_factor`, `lapses`, `leeched`, `memory_state?`; `relearning`: `learning` and `review`, each the matching state without `kind`;
 - `memory_state` is `{stability, difficulty}`, present only with FSRS on;
-- interval labels are never observed.
+- labels are not part of `next_states`; the `answer_labels` kind reports them (O10).
 
 ## O6. Numbers
 
@@ -166,3 +167,18 @@ The `text` kind evaluates pure text functions of the text area on a list of inpu
 
 - An input to `media_filename` that lowercasing (the Unicode default lowercase mapping) would change is `invalid_scenario`: the oracle observes the name transform through the media store, which also lowercases new names (`text/media-filenames#F4`). An input whose transformed name is empty is a run error on the oracle; use the spec's examples for that case.
 - Errors: a malformed request is `invalid_scenario`. No function refuses a valid input.
+
+## O10. Answer labels
+
+`answer_labels` reports the labels the answer buttons show for a card now (`specs/sched/answer-labels.md`), computed from the same states as `next_states` at the same instant. Its value is `{"#cN": {"again": <label>, "hard": <label>, "good": <label>, "easy": <label>}}`, every card in logical-id order when no reference is given. A label is an object with exactly these members:
+
+| Member | Value |
+|---|---|
+| `less_than` | `true` when the label starts with `<` (`sched/answer-labels#A5`) |
+| `amount` | the number as the label writes it (`sched/answer-labels#A3`): digits, and a full stop and one digit when it has a fraction (`"10"`, `"2.3"`); `""` for the end label |
+| `unit` | `seconds`, `minutes`, `hours`, `days`, `months` or `years` (`sched/answer-labels#A2`), or `end` for a delay of 0 |
+
+- Example: `<10m` is `{"amount": "10", "less_than": true, "unit": "minutes"}`; `2.3mo` is `{"amount": "2.3", "less_than": false, "unit": "months"}`; `(end)` is `{"amount": "", "less_than": false, "unit": "end"}`.
+- The parts, not the text, are compared: no localized text and no Unicode isolation mark is ever an observation (R1887).
+- The oracle reads Anki's English labels and splits them: it drops the isolation marks U+2068 and U+2069, maps `(end)` to the end label, and otherwise reads an optional `<`, the amount (digits with an optional full stop and digits) and the suffix `s`, `m`, `h`, `d`, `mo` or `y`. A label it cannot split is a run error (`anki_error`), never a value.
+- A card in a filtered deck has labels in Anki (preview delays); filtered decks are out of scope for Meguri, and scenarios request labels only for cards of normal decks.

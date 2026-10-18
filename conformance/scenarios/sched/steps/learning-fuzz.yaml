@@ -1,0 +1,91 @@
+# Learning-step fuzz as the current state shows it (R663, specs/sched/steps.md
+# L8, specs/sched/fuzz.md Z7). A card in the intraday learning queue reports
+# as elapsed time now minus the instant it was answered, which is its due time
+# minus the fuzzed delay of its current step, the fuzz seeded with its id and
+# its review count minus one. Every card here is due now, so its elapsed
+# seconds equal that fuzzed delay: an extra of 0 up to a quarter of the step,
+# at most 300 s, in whole seconds.
+#   c1 [3s] no room for fuzz; c2 [4s] a range of one second; c3 [30s];
+#   c4 [30s] with 0 reviews (the seed's review count wraps to 4294967295);
+#   c5 [30s] 2 reviews; c6 [10m]; c7 [10m] 1000 reviews; c8 [2h] (cap 300 s);
+#   c9 [20h]; c10 [30s] due in 100 s, so the elapsed time is negative and
+#   wraps; c11 [10m] buried and c12 [10m] suspended (elapsed 0 outside the
+#   learning queues); c13 a relearning card on its relearning step [10m].
+id: sched/steps/learning-fuzz
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: S3, learn_steps: [3s]}
+    - {name: S4, learn_steps: [4s]}
+    - {name: S30, learn_steps: [30s]}
+    - {name: S10m, learn_steps: [10m], relearn_steps: [10m]}
+    - {name: S2h, learn_steps: [2h]}
+    - {name: S20h, learn_steps: [20h]}
+  decks:
+    - {name: S3, preset: S3}
+    - {name: S4, preset: S4}
+    - {name: S30, preset: S30}
+    - {name: S10m, preset: S10m}
+    - {name: S2h, preset: S2h}
+    - {name: S20h, preset: S20h}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: S3, fields: [c01, back]}
+    - {notetype: Pair, deck: S4, fields: [c02, back]}
+    - {notetype: Pair, deck: S30, fields: [c03, back]}
+    - {notetype: Pair, deck: S30, fields: [c04, back]}
+    - {notetype: Pair, deck: S30, fields: [c05, back]}
+    - {notetype: Pair, deck: S10m, fields: [c06, back]}
+    - {notetype: Pair, deck: S10m, fields: [c07, back]}
+    - {notetype: Pair, deck: S2h, fields: [c08, back]}
+    - {notetype: Pair, deck: S20h, fields: [c09, back]}
+    - {notetype: Pair, deck: S30, fields: [c10, back]}
+    - {notetype: Pair, deck: S10m, fields: [c11, back]}
+    - {notetype: Pair, deck: S10m, fields: [c12, back]}
+    - {notetype: Pair, deck: S10m, fields: [c13, back]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = ?, due = ?, left = 1, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701600, 1, '{"s":1.0,"d":5.0,"lrt":1894701000}', 0]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = ?, due = ?, left = 1, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701600, 1, '{"s":1.0,"d":5.0,"lrt":1894701000}', 1]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = ?, due = ?, left = 1, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701600, 1, '{"s":1.0,"d":5.0,"lrt":1894701000}', 2]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = ?, due = ?, left = 1, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701600, 0, '{"s":1.0,"d":5.0,"lrt":1894701000}', 3]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = ?, due = ?, left = 1, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701600, 2, '{"s":1.0,"d":5.0,"lrt":1894701000}', 4]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = ?, due = ?, left = 1, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701600, 1, '{"s":1.0,"d":5.0,"lrt":1894701000}', 5]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = ?, due = ?, left = 1, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701600, 1000, '{"s":1.0,"d":5.0,"lrt":1894701000}', 6]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = ?, due = ?, left = 1, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701600, 3, '{"s":1.0,"d":5.0,"lrt":1894694400}', 7]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = ?, due = ?, left = 1, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701600, 4, '{"s":1.0,"d":5.0,"lrt":1894629600}', 8]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = ?, due = ?, left = 1, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701700, 1, '{"s":1.0,"d":5.0,"lrt":1894701600}', 9]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = ?, due = ?, left = 1, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [-2, 1894701600, 1, '{"s":1.0,"d":5.0,"lrt":1894701000}', 10]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = ?, due = ?, left = 1, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [-1, 1894701600, 1, '{"s":1.0,"d":5.0,"lrt":1894701000}', 11]
+  - db_exec:
+      sql: "UPDATE cards SET type = 3, queue = 1, due = ?, left = 1, ivl = 3, factor = 2300, reps = 6, lapses = 1, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 12)"
+      params: [1894701600, '{"s":1.2,"d":7.0,"lrt":1894701000}']
+  - observe: [next_states]

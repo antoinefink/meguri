@@ -1,0 +1,54 @@
+# Moving through learning steps (R638, R639, R641, specs/sched/steps.md L2-L5).
+# Every card is an intraday learning card of the preset Three (1m 10m 1h), due
+# now, last answered ten minutes ago. The current step is the step count minus
+# the remaining count, clamped to the last step, and only left modulo 1000
+# counts:
+#   c1 left 3 (first step), c2 left 2 (second), c3 left 1 (last),
+#   c4 left 1002 (as 2), c5 left 0 (clamped to the last step),
+#   c6 left 5 (more than the step count: the first step), c7 left 2003 (as 3).
+# Again returns to the first step with the full count; Hard repeats the current
+# step (the average of the first two on the first step) and keeps the count as
+# stored modulo 1000; Good moves to the next step or graduates; Easy graduates.
+id: sched/steps/learning-progress
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Three, learn_steps: [1m, 10m, 1h], relearn_steps: [10m], desired_retention: 0.9}
+  decks: [{name: Words, preset: Three}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Words, fields: [c1, back]}
+    - {notetype: Pair, deck: Words, fields: [c2, back]}
+    - {notetype: Pair, deck: Words, fields: [c3, back]}
+    - {notetype: Pair, deck: Words, fields: [c4, back]}
+    - {notetype: Pair, deck: Words, fields: [c5, back]}
+    - {notetype: Pair, deck: Words, fields: [c6, back]}
+    - {notetype: Pair, deck: Words, fields: [c7, back]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 1, due = ?, left = ?, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1894701600, 3, 1, '{"s":1.0,"d":5.0,"lrt":1894701000}', 0]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 1, due = ?, left = ?, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1894701600, 2, 2, '{"s":1.0,"d":5.0,"lrt":1894701000}', 1]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 1, due = ?, left = ?, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1894701600, 1, 3, '{"s":1.0,"d":5.0,"lrt":1894701000}', 2]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 1, due = ?, left = ?, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1894701600, 1002, 4, '{"s":1.0,"d":5.0,"lrt":1894701000}', 3]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 1, due = ?, left = ?, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1894701600, 0, 5, '{"s":1.0,"d":5.0,"lrt":1894701000}', 4]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 1, due = ?, left = ?, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1894701600, 5, 6, '{"s":1.0,"d":5.0,"lrt":1894701000}', 5]
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 1, due = ?, left = ?, reps = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1894701600, 2003, 7, '{"s":1.0,"d":5.0,"lrt":1894701000}', 6]
+  - observe: [next_states]

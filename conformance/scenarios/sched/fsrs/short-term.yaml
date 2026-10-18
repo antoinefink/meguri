@@ -1,0 +1,77 @@
+# Short-term scheduling (R657, R658; specs/sched/fsrs-transitions.md T10). A
+# preset with no steps lets FSRS keep a card in (re)learning for an interval
+# under half a day, in seconds, when its parameters allow short-term scheduling
+# (no parameters, or 19 or more with the 18th and 19th above 0). The global
+# fsrsShortTermWithStepsEnabled extends this to presets with steps; it is off
+# for the first observation and on for the second.
+#   EmptyDefault (no steps, no parameters, retention 0.9): c1 new; c7 review
+#     card with stability 0.4 (Again under half a day); c8 relearning card with
+#     no step left.
+#   Empty99 (no steps, retention 0.99, so every interval is short): c2 new; c3
+#     intraday learning card with no step left.
+#   Steps99 (steps 10m, relearning 10m, retention 0.99): c4 new; c5 learning
+#     card on its last step; c6 relearning card on its last step; c12 review
+#     card.
+#   NoShort21 (21 parameters, the 18th 0): c9 new. Five19 (19 parameters,
+#     fsrsParams5): c10 new. Four17 (17 parameters, fsrsWeights): c11 new; a
+#     17-value list never allows short-term scheduling.
+id: sched/fsrs/short-term
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: EmptyDefault, learn_steps: [], relearn_steps: [], desired_retention: 0.9}
+    - {name: Empty99, learn_steps: [], relearn_steps: [], desired_retention: 0.99}
+    - {name: Steps99, learn_steps: [10m], relearn_steps: [10m], desired_retention: 0.99}
+    - {name: NoShort21, learn_steps: [], relearn_steps: [], desired_retention: 0.99, fsrs_params: [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.0, 0.0912, 0.0658, 0.1542]}
+    - {name: Five19, learn_steps: [], relearn_steps: [], desired_retention: 0.99}
+    - {name: Four17, learn_steps: [], relearn_steps: [], desired_retention: 0.99}
+  decks:
+    - {name: EmptyDefault, preset: EmptyDefault}
+    - {name: Empty99, preset: Empty99}
+    - {name: Steps99, preset: Steps99}
+    - {name: NoShort21, preset: NoShort21}
+    - {name: Five19, preset: Five19}
+    - {name: Four17, preset: Four17}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: EmptyDefault, fields: [c1, back]}
+    - {notetype: Pair, deck: Empty99, fields: [c2, back]}
+    - {notetype: Pair, deck: Empty99, fields: [c3, back]}
+    - {notetype: Pair, deck: Steps99, fields: [c4, back]}
+    - {notetype: Pair, deck: Steps99, fields: [c5, back]}
+    - {notetype: Pair, deck: Steps99, fields: [c6, back]}
+    - {notetype: Pair, deck: EmptyDefault, fields: [c7, back]}
+    - {notetype: Pair, deck: EmptyDefault, fields: [c8, back]}
+    - {notetype: Pair, deck: NoShort21, fields: [c9, back]}
+    - {notetype: Pair, deck: Five19, fields: [c10, back]}
+    - {notetype: Pair, deck: Four17, fields: [c11, back]}
+    - {notetype: Pair, deck: Steps99, fields: [c12, back]}
+steps:
+  - legacy_update: {preset: Five19, patch: {fsrsParams5: [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621]}}
+  - legacy_update: {preset: Four17, patch: {fsrsWeights: [0.4872, 1.4003, 3.7145, 13.8206, 5.1618, 1.2298, 0.8975, 0.031, 1.6474, 0.1367, 1.0461, 2.1072, 0.0793, 0.3246, 1.587, 0.2272, 2.8755]}}
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, reps = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1, 1894701600, 1, 0, '{"s":0.212,"d":6.4133,"lrt":1894700400}', 2]
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, reps = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1, 1894701600, 1, 1, '{"s":2.3065,"d":2.118,"lrt":1894701000}', 4]
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [3, 1, 1894701600, 1, 2300, 6, 1, 1, '{"s":0.3,"d":9.0,"lrt":1894701000}', 5]
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [2, 2, 0, 1, 2500, 5, 0, '{"s":0.4,"d":8.0,"lrt":1894615200}', 6]
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [3, 1, 1894701600, 1, 2300, 6, 1, 0, '{"s":0.3,"d":9.0,"lrt":1894701000}', 7]
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [2, 2, 0, 10, 2500, 7, 0, '{"s":10.0,"d":5.0,"lrt":1893837600}', 11]
+  - observe: [next_states]
+  - set_config: {key: fsrsShortTermWithStepsEnabled, value: true}
+  - observe: [next_states]

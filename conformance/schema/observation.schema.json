@@ -15,6 +15,21 @@
     "note_key": { "type": "string", "pattern": "^#n[1-9][0-9]*$" },
     "deck_name": { "type": ["string", "null"] },
     "f32": { "type": "number", "description": "Shortest round-trip f32 decimal (O6)." },
+    "answer_label": {
+      "description": "observations.md O10, specs/sched/answer-labels.md: a label's prefix, amount and unit; the end label has amount \"\" and unit end, never less_than.",
+      "type": "object",
+      "required": ["amount", "less_than", "unit"],
+      "additionalProperties": false,
+      "properties": {
+        "amount": { "type": "string", "pattern": "^(|(0|[1-9][0-9]*)(\\.[1-9])?)$" },
+        "less_than": { "type": "boolean" },
+        "unit": { "enum": ["seconds", "minutes", "hours", "days", "months", "years", "end"] }
+      },
+      "oneOf": [
+        { "properties": { "unit": { "const": "end" }, "amount": { "const": "" }, "less_than": { "const": false } } },
+        { "properties": { "unit": { "enum": ["seconds", "minutes", "hours", "days", "months", "years"] }, "amount": { "minLength": 1 } } }
+      ]
+    },
     "step_output": {
       "type": "object",
       "properties": {
@@ -173,6 +188,22 @@
               "hard": { "$ref": "#/$defs/state" },
               "good": { "$ref": "#/$defs/state" },
               "easy": { "$ref": "#/$defs/state" }
+            }
+          }
+        },
+        "answer_labels": {
+          "description": "observations.md O10: the four answer button labels of each card, as parts.",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/card_key" },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["again", "hard", "good", "easy"],
+            "additionalProperties": false,
+            "properties": {
+              "again": { "$ref": "#/$defs/answer_label" },
+              "hard": { "$ref": "#/$defs/answer_label" },
+              "good": { "$ref": "#/$defs/answer_label" },
+              "easy": { "$ref": "#/$defs/answer_label" }
             }
           }
         },

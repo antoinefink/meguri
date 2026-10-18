@@ -1,0 +1,46 @@
+# AE30 and R601 through answers (needs the answer op, U44). Europe/Paris, the
+# next day starts at 04:00, steps 10m 1d. The collection is created at 23:40;
+# c2 is put on its first step as if answered Again then. At 23:55 the next day
+# starts in 14,700 s:
+#   c1 (new) and c2 (first step) answered Hard: 12 h 5 min (43,500 s) passes
+#   04:00, so both become interday learning cards due tomorrow (queue 3, due 1),
+#   not due at 11:55;
+#   c4 (new) answered Good: the 1-day step is due tomorrow as well;
+#   c5 (new) answered Again: 10 min stays intraday, due now + 600 s plus the
+#   learning-step fuzz.
+# At 03:55 the next day starts in 300 s: c3 (new) answered Again also becomes
+# interday learning due tomorrow, which starts five minutes later.
+# The review-log rows give ivl in days (positive) or seconds (negative).
+id: sched/steps/rollover-answer
+clock: {tz: Europe/Paris, start: "2030-01-15T23:40:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Day, learn_steps: [10m, 1d], relearn_steps: [10m], desired_retention: 0.9}
+  decks: [{name: Words, preset: Day}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Words, fields: [c1, back]}
+    - {notetype: Pair, deck: Words, fields: [c2, back]}
+    - {notetype: Pair, deck: Words, fields: [c3, back]}
+    - {notetype: Pair, deck: Words, fields: [c4, back]}
+    - {notetype: Pair, deck: Words, fields: [c5, back]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 1, due = ?, left = 2, reps = 1, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
+      params: [1894747800, '{"s":0.212,"d":6.4133,"lrt":1894747200}']
+  - set_clock: "2030-01-15T23:55:00"
+  - observe: [ids, timing, "next_states(#c1, #c2, #c4, #c5)"]
+  - answer: {card: "#c1", rating: hard}
+  - answer: {card: "#c2", rating: hard}
+  - answer: {card: "#c4", rating: good}
+  - answer: {card: "#c5", rating: again}
+  - observe: ["card(#c1, #c2, #c4, #c5)", "revlog(#c1, #c2, #c4, #c5)"]
+  - set_clock: "2030-01-16T03:55:00"
+  - observe: [timing, "next_states(#c3)"]
+  - answer: {card: "#c3", rating: again}
+  - observe: ["card(#c3)", "revlog(#c3)"]

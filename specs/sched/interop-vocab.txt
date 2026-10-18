@@ -99,3 +99,18 @@ mod
 type
 nid
 utc_offset_secs
+# U45 (steps, fsrs-transitions, fuzz, answer-labels): card columns, state
+# message fields, preset and config keys, and the fsrs and rand crate API.
+leeched
+position
+learn_steps
+relearn_steps
+initialFactor
+minInt
+cardStateCustomizer
+fsrsParams7
+FSRSError
+InvalidParameters
+InvalidInput
+SeedableRng
+answer_labels

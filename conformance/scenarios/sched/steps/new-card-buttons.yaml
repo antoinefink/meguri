@@ -1,0 +1,31 @@
+# A new card answers like a learning card at its first step (R642,
+# specs/sched/steps.md L6). c1 and c2 are new cards of the preset Learn (steps
+# 1m 10m, starting ease 2.3); c3 is a learning card of the same preset at its
+# first step, answered Again a minute ago: its Again, Hard and Good delays and
+# step counts equal the new cards', and only the memory states differ. Easy
+# graduates a new card to the larger of FSRS's Easy interval and the fuzzed
+# Good interval + 1, with the starting ease (R651, R587). c4 is a new card of a
+# preset with three steps.
+id: sched/steps/new-card-buttons
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Learn, learn_steps: [1m, 10m], relearn_steps: [10m], starting_ease: 2.3, desired_retention: 0.9}
+    - {name: Three, learn_steps: [1m, 10m, 1h], relearn_steps: [10m], desired_retention: 0.9}
+  decks: [{name: Words, preset: Learn}, {name: Verbs, preset: Three}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Words, fields: [one, back]}
+    - {notetype: Pair, deck: Words, fields: [two, back]}
+    - {notetype: Pair, deck: Words, fields: [three, back]}
+    - {notetype: Pair, deck: Verbs, fields: [four, back]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 1, due = ?, left = 2, reps = 1, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"
+      params: [1894701600, '{"s":0.212,"d":6.4133,"lrt":1894701540}']
+  - observe: [ids, next_states]

@@ -1,0 +1,30 @@
+# AE30 and R601 on the labels (specs/sched/answer-labels.md A1,
+# specs/sched/steps.md L7). Europe/Paris, the next day starts at 04:00, steps
+# 10m 1d. c1 is new; c2 is on its first step, answered Again at 23:40. At 23:55
+# the next day starts in 14,700 s: Hard (43,500 s) and Good (one day) both
+# reach it and show 1d; Again (600 s) shows <10m. At 03:55 the next day starts
+# in 300 s, so even Again's 10 minutes shows 1d.
+id: sched/labels/rollover
+clock: {tz: Europe/Paris, start: "2030-01-15T23:40:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Day, learn_steps: [10m, 1d], relearn_steps: [10m], desired_retention: 0.9}
+  decks:
+    - {name: Words, preset: Day}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Words, fields: [c1, back]}
+    - {notetype: Pair, deck: Words, fields: [c2, back]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, reps = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1, 1894747800, 1, 2, '{"s":0.212,"d":6.4133,"lrt":1894747200}', 1]
+  - set_clock: "2030-01-15T23:55:00"
+  - observe: [answer_labels, next_states]
+  - set_clock: "2030-01-16T03:55:00"
+  - observe: [answer_labels, next_states]
