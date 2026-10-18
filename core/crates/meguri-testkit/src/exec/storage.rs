@@ -63,7 +63,7 @@ pub struct Storage {
 /// A protocol storage open stays raw. Engine-owned operations promote it once,
 /// closing that writer before the hosted writer starts (engine/host H4).
 pub enum SessionCollection {
-    Raw(OpenedCollection),
+    Raw(Box<OpenedCollection>),
     Hosted {
         host: Box<CoreHost>,
         collection: Collection,
@@ -274,7 +274,7 @@ impl Storage {
     }
 
     fn opened(&mut self, collection: OpenedCollection) -> Result<(), ExecError> {
-        let collection = SessionCollection::Raw(collection);
+        let collection = SessionCollection::Raw(Box::new(collection));
         self.baseline = object_set(&collection)?;
         self.collection = Some(collection);
         Ok(())
@@ -972,26 +972,23 @@ mod tests {
         .unwrap();
         let opened = open_collection(&file, &OpenOptions::new(&*session.clock, &*session.random)).unwrap();
         session.storage.opened(opened).unwrap();
-        let sql = |session: &Session<'_>, sql: &str| {
-            db_exec_rows(
-                &collection(session)
-                    .unwrap()
-                    .reader()
-                    .unwrap()
-                    .execute_raw(sql, &[])
-                    .unwrap(),
-            )
+        let sql = |session: &mut Session<'_>, sql: &str| {
+            let step: Step = serde_json::from_value(json!({"db_exec": {"sql": sql}})).unwrap();
+            let OpResult::Output(value) = db_exec(session, &step).unwrap() else {
+                panic!("expected query rows");
+            };
+            value["rows"].clone()
         };
-        sql(&session, "UPDATE col SET crt = 1894676400");
+        sql(&mut session, "UPDATE col SET crt = 1894676400");
         sql(
-            &session,
+            &mut session,
             "UPDATE config SET val = CAST('-60' AS BLOB) WHERE KEY = 'creationOffset'",
         );
 
         setup_config(&mut session, &loaded.scenario.setup).unwrap();
         assert_eq!(
             sql(
-                &session,
+                &mut session,
                 "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('collapseTime', \
                  'rollover') ORDER BY KEY"
             ),
@@ -1000,7 +997,10 @@ mod tests {
                 ["rollover", -1, 1_895_130_000, "12"]
             ])
         );
-        assert_eq!(sql(&session, "SELECT mod FROM col"), json!([[1_895_130_000_000_i64]]));
+        assert_eq!(
+            sql(&mut session, "SELECT mod FROM col"),
+            json!([[1_895_130_000_000_i64]])
+        );
         let day = session
             .day
             .valid_at(1_895_130_000, UtcOffset::from_seconds(3600).unwrap())

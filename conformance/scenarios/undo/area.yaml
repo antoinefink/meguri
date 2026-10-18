@@ -1,6 +1,13 @@
-# U28 supplies the real bootstrap/deck setup; all ten goldens pass in the
-# engine suite. Production undo/redo/status still require U38's CoreHost
-# session adapter (undo-ops V6), and revlog-taken-id also needs U44's answer.
-# Activate each scenario when its last adapter lands (plan U28 Verification).
+# U38 supplies hosted undo/config/note operations. The answer-dependent
+# revlog-taken-id remains pending until U44 supplies its real adapter.
 area: undo
-active: []
+active:
+  - col-mod
+  - config-writes
+  - delete-notes
+  - delete-note-existing-grave
+  - edit-note
+  - edit-note-merge
+  - edit-note-new-card
+  - redo-cleared
+  - thirty-steps

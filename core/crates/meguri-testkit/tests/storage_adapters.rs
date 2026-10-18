@@ -149,11 +149,9 @@ fn set_config_writes_only_changed_values_in_compact_form() {
 }
 
 /// undo-ops.md V3.1: a write with `undoable: true` records an "Update
-/// Config" step, which needs the engine's undo history. Until the session
-/// runs ops through the engine (U38), Meguri refuses it rather than write
-/// it as W4 does and record nothing.
+/// Config" step after promoting the raw session to the hosted engine.
 #[test]
-fn set_config_with_an_undo_step_is_refused_until_the_session_runs_through_the_engine() {
+fn set_config_with_an_undo_step_promotes_the_raw_session_and_replays_the_real_history() {
     let dir = tempfile::tempdir().unwrap();
     let loaded = load(
         dir.path(),
@@ -161,11 +159,21 @@ fn set_config_with_an_undo_step_is_refused_until_the_session_runs_through_the_en
         concat!(
             "steps:\n  - open: {fixture: storage/schema-18.anki2}\n",
             "  - set_config: {key: probe, value: 1, undoable: true}\n",
+            "  - observe: [undo_status]\n",
+            "  - undo: {}\n",
+            "  - db_exec: {sql: \"SELECT count(*) FROM config WHERE KEY = 'probe'\"}\n",
+            "  - redo: {}\n",
+            "  - db_exec: {sql: \"SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'probe'\"}\n",
         ),
         &["schema-18.anki2"],
     );
-    let error = MeguriExecutor::new().run(&loaded).unwrap_err();
-    assert_eq!((error.kind.as_str(), error.step), ("unsupported_op", Some(1)));
+    let value = MeguriExecutor::new().run(&loaded).unwrap();
+    assert_eq!(
+        value["steps"][2]["undo_status"],
+        json!({"undo":"update_config", "redo":null})
+    );
+    assert_eq!(value["steps"][4]["db_exec"]["rows"], json!([[0]]));
+    assert_eq!(value["steps"][6]["db_exec"]["rows"], json!([["1"]]));
 }
 
 #[test]
@@ -204,12 +212,7 @@ fn record_ops_take_exactly_their_arguments() {
 
 /// An op of a later area that creates a table: the guard must stop the run.
 fn add_table(session: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
-    let collection = session.storage.collection().unwrap();
-    collection
-        .writer()
-        .execute_raw("CREATE TABLE sneaked_in (x)", &[])
-        .map_err(|e| ExecError::new("core_error", e.to_string()))?;
-    Ok(OpResult::Done)
+    raw(session, &["CREATE TABLE sneaked_in (x)"])
 }
 
 #[test]
@@ -251,12 +254,21 @@ fn redefine_index(session: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecE
 }
 
 fn raw(session: &mut Session<'_>, statements: &[&str]) -> Result<OpResult, ExecError> {
-    let writer = session.storage.collection().unwrap().writer();
-    for sql in statements {
-        writer
-            .execute_raw(sql, &[])
-            .map_err(|e| ExecError::new("core_error", e.to_string()))?;
-    }
+    let collection = session.engine_collection()?;
+    let statements: Vec<_> = statements.iter().map(|s| (*s).to_owned()).collect();
+    collection
+        .submit_maintenance(
+            meguri_engine::executor::catalog::ANALYZE,
+            std::time::Duration::from_millis(10),
+            move |writer| {
+                for sql in statements {
+                    writer.execute_raw(&sql, &[])?;
+                }
+                Ok(())
+            },
+        )
+        .wait()
+        .map_err(|e| ExecError::new("core_error", e.to_string()))?;
     Ok(OpResult::Done)
 }
 

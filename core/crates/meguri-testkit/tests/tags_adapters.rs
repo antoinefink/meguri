@@ -17,7 +17,6 @@ use meguri_model::ids::{CardId, DeckId, NotetypeId};
 use meguri_model::note::Note;
 use meguri_model::time::EpochSecs;
 use meguri_model::usn::Usn;
-use meguri_storage::StampMode;
 use meguri_testkit::exec::{ExecError, Executor, MeguriExecutor, OpResult, Session};
 use meguri_testkit::scenario::{self, Fields, LoadedScenario, Step};
 use serde_json::{Value, json};
@@ -53,45 +52,51 @@ fn add_note(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecErro
     let Fields::List(fields) = &spec.fields else {
         return Err(ExecError::new("internal_error", "the stand-in takes a field list"));
     };
-    let clock = session.clock.clone();
+    let fields = fields.clone();
+    let tags = spec.tags.clone();
     let position = i32::try_from(session.notes.len() + 1).unwrap();
-    let collection = session.storage.collection().expect("an open collection");
-    let mut scope = collection
-        .writer()
-        .begin_write(StampMode::Local, &*clock, None)
-        .unwrap();
-    let note = Note {
-        guid: format!("stand-in-{position}"),
-        notetype_id: NotetypeId(1),
-        fields: fields.join("\u{1f}"),
-        sort_field: fields[0].clone(),
-        tags: note_tags_for_save(&mut scope, &spec.tags).unwrap(),
-        ..Note::default()
-    };
-    let nid = scope.add_note(&note).unwrap();
-    let cid = scope
-        .add_card(&Card {
-            id: CardId(0),
-            note_id: nid,
-            deck_id: DeckId(1),
-            ord: 0,
-            mtime: EpochSecs(0),
-            usn: Usn::PENDING,
-            card_type: CardType::New,
-            queue: CardQueue::New,
-            due: position,
-            interval: 0,
-            ease_factor: 0,
-            reps: 0,
-            lapses: 0,
-            remaining_steps: 0,
-            original_due: 0,
-            original_deck_id: DeckId(0),
-            flags: 0,
-            data: CardData::default(),
-        })
-        .unwrap();
-    scope.commit().unwrap();
+    let collection = session.engine_collection()?;
+    let (nid, cid) = collection
+        .run(
+            meguri_engine::OpSpec::named("test_note", meguri_engine::OpSource::UserNonUndoable).skip_undo(),
+            move |ctx| {
+                let scope = ctx.scope();
+                let note = Note {
+                    guid: format!("stand-in-{position}"),
+                    notetype_id: NotetypeId(1),
+                    fields: fields.join("\u{1f}"),
+                    sort_field: fields[0].clone(),
+                    tags: note_tags_for_save(scope, &tags).unwrap(),
+                    ..Note::default()
+                };
+                let nid = scope.add_note(&note).unwrap();
+                let cid = scope
+                    .add_card(&Card {
+                        id: CardId(0),
+                        note_id: nid,
+                        deck_id: DeckId(1),
+                        ord: 0,
+                        mtime: EpochSecs(0),
+                        usn: Usn::PENDING,
+                        card_type: CardType::New,
+                        queue: CardQueue::New,
+                        due: position,
+                        interval: 0,
+                        ease_factor: 0,
+                        reps: 0,
+                        lapses: 0,
+                        remaining_steps: 0,
+                        original_due: 0,
+                        original_deck_id: DeckId(0),
+                        flags: 0,
+                        data: CardData::default(),
+                    })
+                    .unwrap();
+                Ok((nid, cid))
+            },
+        )
+        .map_err(|e| ExecError::new("test_standin", e.to_string()))?
+        .value;
     session.notes.push(nid.0);
     session.cards.push(cid.0);
     Ok(OpResult::Output(json!({
