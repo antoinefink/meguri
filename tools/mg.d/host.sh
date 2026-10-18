@@ -459,12 +459,20 @@ mg_mac_ui() {
       drive:*) name="drive-$(basename "${s#drive:}" .json)" ;;
       *) name="$s" ;;
     esac
-    # A lost run the VM could not stop: no run starts beside it.
+    # A lost run the VM could not stop: no run starts beside it. When the VM
+    # did not answer, the suites left are queued (mac-vm), not errors.
     if [ -n "$MG_MAC_VM_LOST" ]; then
+      if [ -n "$MG_MAC_VM_LOST_UNREACHABLE" ]; then
+        queued=$((queued + 1))
+        mg_queued_part mac-vm "$name" "not run: $MG_MAC_VM_LOST" "tools/mg mac-ui --suite $s"
+        continue
+      fi
       errors=$((errors + 1))
       mg_failure "suite/$name" "Mac UI suite $name was not run: $MG_MAC_VM_LOST" "tools/mg mac-ui --suite $s"
       continue
     fi
+    # A suite the VM cannot take is queued under its own name.
+    MG_VM_PART="$name"
     case "$s" in
       test-hooks | agent-driver | a11y)
         since="$(mg_app_log_now)"
@@ -480,7 +488,7 @@ mg_mac_ui() {
         # A suite whose input macOS dropped tested nothing it acted on: it is
         # queued (mac-input), unless it could not run at all or a test failed
         # where the drop does not explain it (mg_app_mac_input_result).
-        if [ "$result" -ne 2 ] && mg_app_mac_input_refused "$since" "$name"; then
+        if [ "$result" -le 1 ] && mg_app_mac_input_refused "$since" "$name"; then
           mg_app_mac_input_result "$MG_RUN_DIR/$name.xcresult" "$result" "$name"
           result=$?
         fi
@@ -496,23 +504,30 @@ mg_mac_ui() {
     case "$result" in
       0) passed=$((passed + 1)) ;;
       1) failed=$((failed + 1)) && mg_failure "suite/$name" "Mac UI suite $name failed; see log.txt" "tools/mg mac-ui --suite $s" ;;
-      3) queued=$((queued + 1)) ;;
+      3 | 4) queued=$((queued + 1)) ;;
       *) errors=$((errors + 1)) && mg_failure "suite/$name" "Mac UI suite $name could not run; see log.txt" "tools/mg mac-ui --suite $s" ;;
     esac
   done
+  MG_VM_PART=""
   mg_count total "${#suites[@]}"
   mg_count passed "$passed"
   mg_count failed "$failed"
   mg_count errors "$errors"
   mg_count queued "$queued"
+  local steps
+  steps="$(jq -r 'map(.user_step) | unique | join(", ")' <<<"$MG_QUEUED_PARTS")"
   if [ "$failed" -gt 0 ]; then
-    mg_message "mac-ui: $failed of ${#suites[@]} suite(s) failed$([ "$queued" -eq 0 ] || echo "; $queued queued (user step mac-input)")"
+    mg_message "mac-ui: $failed of ${#suites[@]} suite(s) failed$([ "$queued" -eq 0 ] || echo "; $queued queued (user step $steps)")"
     mg_status fail
   elif [ "$errors" -gt 0 ]; then
-    mg_message "mac-ui: $errors of ${#suites[@]} suite(s) could not run$([ "$queued" -eq 0 ] || echo "; $queued queued (user step mac-input)")"
+    mg_message "mac-ui: $errors of ${#suites[@]} suite(s) could not run$([ "$queued" -eq 0 ] || echo "; $queued queued (user step $steps)")"
     mg_status error
   elif [ "$queued" -gt 0 ]; then
-    mg_message "mac-ui: $passed passed; $queued of ${#suites[@]} suite(s) queued: macOS dropped the input XCUITest synthesized in $(jq -r 'map(.part) | join(", ")' <<<"$MG_QUEUED_PARTS") (user step mac-input)"
+    mg_message "mac-ui: $passed passed; $queued of ${#suites[@]} suite(s) queued: $(jq -r '
+      [(map(select(.user_step == "mac-input") | .part) | select(length > 0)
+        | "macOS dropped the input XCUITest synthesized in \(join(", ")) (user step mac-input)"),
+       (map(select(.user_step == "mac-vm")) | select(length > 0)
+        | "the test VM could not run \(map(.part) | join(", ")): \(.[0].reason) (user step mac-vm)")] | join("; ")' <<<"$MG_QUEUED_PARTS")"
     mg_status pass
   else
     mg_message "mac-ui: ${#suites[@]} suite(s) passed"

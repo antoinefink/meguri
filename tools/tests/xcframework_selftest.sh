@@ -171,7 +171,7 @@ t_xcode_device_preaction_adds_the_device_slice_and_links() {
   # The device link: the package's test bundle links the device slice and the
   # bindings generated from the Mac slice.
   local log="$SB/device-link.log"
-  if ! (cd "$PKG" && xcodebuild build-for-testing -scheme MeguriCore -destination 'generic/platform=iOS' \
+  if ! (cd "$PKG" && xcodebuild build-for-testing -scheme MeguriCore-Package -destination 'generic/platform=iOS' \
     -derivedDataPath "$SB/DerivedData" CODE_SIGNING_ALLOWED=NO) >"$log" 2>&1; then
     echo "iOS device build-for-testing failed:"
     grep -E 'error:|Undefined symbol|ld:' "$log" | head -n 20

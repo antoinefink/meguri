@@ -136,6 +136,9 @@ esac'
 # them (without the fake file system's prefix).
 vm_stubs() {
   stub "$FAKE_VM_BIN/sudo" 'exec "$@"'
+  # The process check jobs make before they start work there (U19c).
+  ln -s "$REPO_ROOT/tools/tests/mac_vm_fake_procs.sh" "$FAKE_VM_BIN/sysctl"
+  ln -s "$REPO_ROOT/tools/tests/mac_vm_fake_procs.sh" "$FAKE_VM_BIN/ps"
   # pgrep -f and pkill [-9] -f, among this VM's test runs only: never the
   # host's processes.
   stub "$FAKE_VM_BIN/pgrep" '
@@ -288,6 +291,7 @@ mg() {
 }
 
 field() { jq -r "$@" "$result"; }
+validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
 called() { grep -Eq -- "$1" "$STUB_LOG" || { echo "no call matching: $1"; cat "$STUB_LOG"; return 1; }; }
 not_called() { ! grep -Eq -- "$1" "$STUB_LOG" || { echo "unexpected call: $(grep -E -- "$1" "$STUB_LOG")"; return 1; }; }
 
@@ -723,19 +727,95 @@ test_results() {
   not_called "^host-xcodebuild"
 }
 
-# --- the VM cannot run: error, never the host screen ------------------------------------
+# --- the VM cannot be reached: queued; it cannot run: error; never the host screen ---------
 
-@test "SSH that does not answer is an error with the reason; the host screen is not used" {
+# bats test_tags=gate
+@test "SSH that does not answer queues the suites with the mac-vm step and the reason, never an error; the host screen is not used (U19c)" {
   touch "$FAKE_VM_DIR/ssh-down"
   MEGURI_MAC_VM_BOOT_SECONDS=2 mg mac-ui --suite a11y
-  [ "$status" -eq 2 ]
-  [ "$(field .status)" = error ]
-  [ "$(field '.failures[0].id')" = mac-vm-ssh ]
-  [[ "$(field '.failures[0].message')" == *"meguri-mac did not answer over SSH in a logged-in session within 2 s"*"Connection refused"* ]]
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part)"')" = "mac-vm the Mac UI suites" ]
+  [[ "$(field '.details.queued_parts[0].reason')" == *"meguri-mac did not answer over SSH in a logged-in session within 2 s"*"Connection refused"* ]]
+  [[ "$(field .details.mac_vm.reason)" == *"did not answer over SSH"* ]]
+  [ "$(field '.user_steps[] | select(.id == "mac-vm") | "\(.state) \(.required)"')" = "missing true" ]
+  [[ "$(field .message)" == *"queued: meguri-mac did not answer over SSH"*"(user step mac-vm)"* ]]
   not_called "^host-xcodebuild"
   not_called "^vm-xcodebuild"
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  validate "$result"
+}
+
+# bats test_tags=gate
+@test "a VM whose shell cannot fork when the job looks for a run left there queues the job, not an error (U19c: U28's merge)" {
+  FAKE_VM_FORK_FAIL='mg-mac-vm: stopping' mg a11y --platform mac
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+  [[ "$(field '.details.queued_parts[0].reason')" == *"meguri-mac did not answer when this job looked for a UI test run an earlier job left there"*"fork failed: resource temporarily unavailable"* ]]
+  not_called "^vm-xcodebuild"
+  # The lease went back when the job queued.
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+}
+
+# bats test_tags=gate
+@test "a test run whose SSH session the VM refuses is queued under its suite; the next suite still runs (U19c)" {
+  FAKE_VM_SSH_REFUSE='xcodebuild test-without-building .*TestHooksTests' mg mac-ui --suite test-hooks --suite a11y
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.queued) \(.errors)"')" = "2 1 0 1 0" ]
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part)"')" = "mac-vm test-hooks" ]
+  [[ "$(field '.details.queued_parts[0].reason')" == *"meguri-mac refused the test run's SSH session (ssh exit 255: exec request failed on channel 0)"* ]]
+  [[ "$(field .message)" == *"1 passed; 1 of 2 suite(s) queued: the test VM could not run test-hooks: "*"(user step mac-vm)"* ]]
+  called "^vm-xcodebuild .*-only-testing:MeguriUITests/AccessibilityHelperTests"
+}
+
+# bats test_tags=gate
+@test "a VM near its process limit: the job waits, checking again with a growing delay, and runs once processes free up (U19c)" {
+  FAKE_VM_PROCS=2700,2700,2000 MEGURI_MAC_VM_PROCS_POLL_SECONDS=1 mg a11y --platform mac
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field -c '.details.mac_vm.procs | [.user, .max_per_user, .all, .max, .free, .needed]')" = '[2000,2900,2050,4000,900,400]' ]
+  [ "$(field '.details.mac_vm.procs.waited_s >= 3')" = true ]
+  [[ "$stderr" == *"waiting for free processes: meguri-mac is near its process limit (2700 of 2900 processes of its user, 2750 of 4000 in all): 200 free, a job needs 400"* ]]
+  # Checked three times, the second delay twice the first, all before any copy or run.
+  local times="$FAKE_VM_DIR/meguri-mac/procs.times"
+  [ "$(wc -l <"$times" | tr -d ' ')" = 3 ]
+  awk 'NR > 1 { d[NR - 1] = $1 - p } { p = $1 } END { exit !(d[1] >= 0.9 && d[2] >= 1.8 && d[2] >= 1.5 * d[1]) }' "$times"
+  called "^vm-xcodebuild"
+}
+
+# bats test_tags=gate
+@test "a VM that stays near its process limit is queued after the bounded wait, before anything is copied or run there (U19c)" {
+  FAKE_VM_PROCS=2800 MEGURI_MAC_VM_PROCS_POLL_SECONDS=1 MEGURI_MAC_VM_PROCS_WAIT_SECONDS=3 mg a11y --platform mac
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+  [ "$(field '.details.queued_parts[0].user_step')" = mac-vm ]
+  [[ "$(field '.details.queued_parts[0].reason')" == "meguri-mac is near its process limit (2800 of 2900 processes of its user, 2850 of 4000 in all): 100 free, a job needs 400, still after "[34]" s" ]]
+  [ "$(field '.details.mac_vm.procs.free')" = 100 ]
+  not_called "^vm-xcodebuild"
+  [ ! -e "$(vm_fs meguri-mac "$SB/build/app/DerivedData/Build/Products")" ]
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+
+  # A check that gets no answer within the wait queues the job too.
+  : >"$FAKE_VM_DIR/meguri-mac/procs.times"
+  FAKE_VM_SSH_REFUSE='^printf "uid' MEGURI_MAC_VM_PROCS_POLL_SECONDS=1 MEGURI_MAC_VM_PROCS_WAIT_SECONDS=2 mg a11y --platform mac
+  [ "$(field .status)" = warn ]
+  [[ "$(field '.details.queued_parts[0].reason')" == "meguri-mac did not answer: the check of its processes did not run through (ssh exit 255: exec request failed on channel 0), still after "* ]]
+  not_called "^vm-xcodebuild"
+
+  # A VM that gives no process limit is not waited for.
+  FAKE_VM_MAXPROCPERUID=unknown mg a11y --platform mac
+  [ "$(field .status)" = pass ]
+  [[ "$stderr" == *"it gave no process limit"*"going on without the process check"* ]]
 }
 
 @test "a VM that fails to start is an error with tart's reason; the host screen is not used" {
@@ -770,13 +850,17 @@ test_results() {
   not_called "^vm-pkill"
 }
 
-@test "a lost run that cannot be stopped aborts the remaining suites, and the VM gets no new run until it is stopped" {
-  # The session drops and SSH stops answering: the run cannot be stopped.
+@test "a lost run that cannot be stopped ends the remaining suites, and the VM gets no new run until it is stopped" {
+  # The session drops and SSH stops answering: the run cannot be stopped,
+  # and the VM cannot be reached: the suites are queued (U19c).
   FAKE_VM_SSH_DROP=down mg mac-ui --suite a11y --suite test-hooks --suite agent-driver
-  [ "$status" -eq 2 ]
-  [ "$(field '[.failures[].id] | join(" ")')" = "mac-vm-ssh mac-vm-stop suite/a11y suite/test-hooks suite/agent-driver" ]
-  [[ "$(field '.failures[] | select(.id == "suite/test-hooks") | .message')" == *"was not run"* ]]
-  [ "$(field .summary.errors)" = 3 ]
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+  [ "$(field '[.details.queued_parts[] | "\(.user_step) \(.part)"] | join(", ")')" = "mac-vm a11y, mac-vm test-hooks, mac-vm agent-driver" ]
+  [[ "$(field '.details.queued_parts[1].reason')" == "not run: the test run that lost its SSH session may still be running in the VM meguri-mac, which did not answer"* ]]
+  [ "$(field '.summary | "\(.queued) \(.errors)"')" = "3 0" ]
   [ "$(grep -c '^vm-xcodebuild ' "$STUB_LOG")" = 1 ]
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
   vm_tests_running meguri-mac
@@ -803,12 +887,14 @@ test_results() {
 }
 
 @test "a passing run whose result bundle does not come back from the VM is an error, never a pass" {
-  # The SSH call that looks for the bundle fails.
+  # The SSH call that looks for the bundle fails as ssh: the VM could not be
+  # reached, so the suite is queued (U19c), never a pass.
   FAKE_VM_SSH_FAIL='^test -d ' mg mac-ui --suite a11y
-  [ "$status" -eq 2 ]
-  [ "$(field .status)" = error ]
-  [ "$(field '[.failures[].id] | join(" ")')" = "mac-vm-copy suite/a11y" ]
-  [[ "$(field '.failures[0].message')" == *"could not check for "*"/a11y.xcresult in the VM meguri-mac (ssh exit 255"*"closed by remote host"* ]]
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part)"')" = "mac-vm a11y" ]
+  [[ "$(field '.details.queued_parts[0].reason')" == *"could not check for "*"/a11y.xcresult in the VM meguri-mac (ssh exit 255"*"closed by remote host"* ]]
 
   # xcodebuild exits 0 but leaves no result bundle.
   FAKE_VM_NO_BUNDLE=1 mg a11y --platform mac
@@ -842,4 +928,33 @@ test_results() {
   called "^vm-pkill -9 -f "
   ! vm_tests_running meguri-mac
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+}
+
+# bats test_tags=gate
+@test "ui-test on the Mac queues only failures explained by dropped input and preserves independent failures" {
+  local r="$BATS_TEST_TMPDIR/results"
+  export FAKE_VM_INPUT_DROPPED=1 FAKE_VM_FAIL_RE=NavigationLayoutTests FAKE_VM_RESULTS="$r"
+
+  test_results "$r" NavigationLayoutTests tap
+  mg ui-test --platform mac --suite NavigationLayoutTests
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+
+  test_results "$r" NavigationLayoutTests free tap
+  mg ui-test --platform mac --suite NavigationLayoutTests
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field .details.queued)" = false ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test/NavigationLayoutTests/testChecksWithoutInput()" ]
+
+  test_results "$r" NavigationLayoutTests early
+  mg ui-test --platform mac --suite NavigationLayoutTests
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test/NavigationLayoutTests/testTapsCancel()" ]
+
+  FAKE_VM_RESULTS="" mg ui-test --platform mac --suite NavigationLayoutTests
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test/xcresult" ]
 }

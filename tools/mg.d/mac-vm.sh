@@ -27,14 +27,21 @@
 # drive or the VM, the job is queued (warn, user step mac-vm); with
 # MEGURI_MAC_UI_ALLOW_HOST=1 Mac suites take the host path (host lease and
 # hourly gate, host.sh), with MEGURI_SIM_ALLOW_HOST=1 simulator jobs use this
-# Mac's pool. A VM that does not start or answer is an error, never a reason
-# to use the host's screen or simulators. The config, state, start and copy
-# helpers are tools/scripts/mac-vm-lib.sh, shared with scripts that run
-# outside tools/mg.
+# Mac's pool. A VM that cannot be reached is queued too (U19c, mac-vm, with
+# the reason): no logged-in session over SSH in time, an SSH call that
+# fails as ssh (255) or whose command could not start there (exec request
+# refused, no fork: mvl_unreachable), or too few free processes there after a
+# bounded wait (mvl_wait_procs, checked once the job holds the VM's lease and
+# before it copies or runs anything). A VM that tart cannot start, a run that
+# cannot be stopped, a copy or a result the VM answered wrongly stay errors.
+# None is ever a reason to use the host's screen or simulators. The config,
+# state, start, copy, reachability and process helpers are
+# tools/scripts/mac-vm-lib.sh, shared with scripts that run outside tools/mg.
 #
 # Overrides (self-tests): MEGURI_MAC_VM_CONFIG, MEGURI_MAC_VM_POLL_SECONDS (3),
 # MEGURI_MAC_VM_BOOT_SECONDS (240), MEGURI_MAC_VM_LEASE_WAIT_SECONDS (3600),
-# MEGURI_MAC_VM_STOP_SECONDS (20).
+# MEGURI_MAC_VM_STOP_SECONDS (20), MEGURI_MAC_VM_MIN_FREE_PROCS (400),
+# MEGURI_MAC_VM_PROCS_WAIT_SECONDS (600), MEGURI_MAC_VM_PROCS_POLL_SECONDS (10).
 
 # shellcheck source=tools/scripts/mac-vm-lib.sh
 . "$MG_TOOLS/scripts/mac-vm-lib.sh"
@@ -45,8 +52,16 @@ MG_MAC_VM_DETAIL='{}'
 MG_MAC_VM_RUN_ERROR=""
 MG_MAC_VM_TESTING=""
 # Set (to the reason) when a test run that lost its SSH session could not be
-# stopped in the VM: this job starts no further run there.
+# stopped in the VM: this job starts no further run there. _UNREACHABLE: it
+# could not be stopped because the VM did not answer (the runs left are
+# queued, not errors).
 MG_MAC_VM_LOST=""
+MG_MAC_VM_LOST_UNREACHABLE=""
+# Set (to the reason) once the VM could not be reached for this job
+# (mg__mac_vm_unreachable); MG_MAC_VM_RUN_QUEUED: the last remote test run.
+MG_MAC_VM_QUEUED=""
+MG_MAC_VM_RUN_QUEUED=""
+MG_MAC_VM_STEP=""
 MG_MAC_VM_MARK="mg-mac-vm: remote exit"
 
 mg_mac_vm_config_path() { mvl_config_path; }
@@ -86,6 +101,41 @@ mg_mac_vm_probe() {
 mg_mac_vm_user_step() {
   mg_user_step mac-vm missing true "Connect the drive with the macOS test VM" \
     "Simulators and Mac UI suites run only in the macOS test VM, never on this Mac: connect the T9 drive, or set the VM up and name it in $(mg_mac_vm_config_path) (docs/process/mac-ui-vm.md). Until then they are queued."
+}
+
+# mg__mac_vm_unavailable_step <reason>: the step behind a VM that is there
+# but cannot be reached (U19c).
+mg__mac_vm_unavailable_step() {
+  mg_user_step mac-vm missing true "Let the macOS test VM answer again" \
+    "The test VM is there but cannot take jobs now: $1. Simulator jobs and Mac UI suites are queued until it answers over SSH in a logged-in session with enough free processes; tools/mg catch-up runs them again once tools/mg doctor sees that. It usually recovers once its load drops; if it does not, look at it (docs/process/mac-ui-vm.md). Jobs never stop or restart it."
+}
+
+# mg__mac_vm_unreachable <reason> [part]: the VM cannot take this job's work
+# now (U19c): no logged-in session over SSH in time, an SSH call that did not
+# reach it or could not start its command (mvl_unreachable), or too few free
+# processes after the wait (mvl_wait_procs). <part> (default: the job's
+# simulator runs or Mac UI suites) is queued with the mac-vm step and the
+# reason, never an error; the run is queued unless a part that ran failed or
+# erred (mg_queued_settle). Sets MG_MAC_VM_QUEUED and MG_MAC_VM_REASON.
+mg__mac_vm_unreachable() {
+  local part="${2:-}"
+  if [ -z "$part" ]; then
+    if [ "$MG_SIM_RUNNER" = vm ]; then part="the simulator runs"; else part="the Mac UI suites"; fi
+  fi
+  MG_MAC_VM_QUEUED="$1"
+  MG_MAC_VM_REASON="$1"
+  echo "$MG_JOB: the test VM cannot be reached: $1; $part queued (user step mac-vm)" >&2
+  mg__mac_vm_detail "$(jq -nc --arg r "$1" '{reason: $r}')"
+  if [ -z "$MG_MAC_VM_STEP" ]; then
+    mg__mac_vm_unavailable_step "$1"
+    MG_MAC_VM_STEP=1
+  fi
+  mg_queued_part mac-vm "$part" "$1"
+  case "$(cat "$MG_STATE/status" 2>/dev/null)" in
+    fail | error) ;;
+    *) mg_message "$MG_JOB: queued: $1; $part did not run (user step mac-vm); tools/mg catch-up runs them again once the VM answers" ;;
+  esac
+  mg_queued_settle
 }
 
 # mg__mac_vm_detail <JSON object>: merged into details.mac_vm. `started`
@@ -168,7 +218,7 @@ mg__mac_vm_queued() {
 # mg_mac_ui_take: after the build, what the runner needs: the VM's lease,
 # start and copy (mg_mac_vm_take), or on the host its lease, the .dev app
 # guard and the hourly gate. Records the result and returns 1 when the job
-# cannot go on.
+# cannot go on (2: the VM could not be reached, the suites are queued).
 mg_mac_ui_take() {
   if [ "$MG_MAC_RUNNER" = vm ]; then
     mg_mac_vm_take
@@ -178,18 +228,29 @@ mg_mac_ui_take() {
 }
 
 # mg_mac_vm_take [--no-copy]: a VM lease, the VM running with a logged-in
-# session and no test run left in it, and (unless --no-copy) this checkout's
-# test products and fixtures in it. Sets MG_MAC_VM.
+# session, no test run left in it and enough free processes (mvl_wait_procs:
+# it waits for them), and (unless --no-copy) this checkout's test products
+# and fixtures in it. Sets MG_MAC_VM. Returns 1 when the job cannot go on
+# (recorded), 2 when the VM could not be reached (queued,
+# mg__mac_vm_unreachable): the lease is then released at once, since the job
+# runs nothing more there.
 mg_mac_vm_take() {
-  local name
+  local name rc
   mg__mac_vm_lease || return 1
   mg_on_exit mg__mac_vm_stop_orphans
-  mg__mac_vm_boot || return 1
+  mg__mac_vm_boot
+  rc=$?
+  [ "$rc" -eq 0 ] || { mg__mac_vm_release_queued "$rc"; return "$rc"; }
   # A run that an earlier job could not stop (its SSH session was lost, or the
   # job was killed) ends before this job's run starts: until then the VM gets
   # no new run.
   name="$(jq -r .name <<<"$MG_MAC_VM")"
   if ! mg__mac_vm_stop_tests; then
+    if [ -n "$MG_MAC_VM_STOP_UNREACHABLE" ]; then
+      mg__mac_vm_unreachable "$name did not answer when this job looked for a UI test run an earlier job left there: $MG_MAC_VM_STOP_REASON"
+      mg__mac_vm_release_queued 2
+      return 2
+    fi
     mg__mac_vm_fail mac-vm-stop "a UI test run that an earlier job left in $name could not be stopped: $MG_MAC_VM_STOP_REASON; no new run starts there until it is"
     return 1
   fi
@@ -197,13 +258,45 @@ mg_mac_vm_take() {
     echo "mac-vm: stopped a UI test run that an earlier job left in $name" >&2
     mg__mac_vm_detail '{"stopped_left_run": true}'
   fi
-  [ "${1:-}" != --no-copy ] || return 0
-  if ! mg_mac_vm_copy_in "$MG_ROOT/$MG_APP_DD/Build/Products" "$MG_ROOT/app/Fixtures"; then
-    mg_message "$MG_JOB: the test VM could not run the $([ "$MG_SIM_RUNNER" = vm ] && echo simulators || echo suites): the test products could not be copied into it"
-    mg_status error
-    return 1
+  if ! mg__mac_vm_procs; then
+    mg__mac_vm_release_queued 2
+    return 2
   fi
-  return 0
+  [ "${1:-}" != --no-copy ] || return 0
+  mg_mac_vm_copy_in "$MG_ROOT/$MG_APP_DD/Build/Products" "$MG_ROOT/app/Fixtures"
+  rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    2)
+      mg__mac_vm_release_queued 2
+      return 2
+      ;;
+  esac
+  mg_message "$MG_JOB: the test VM could not run the $([ "$MG_SIM_RUNNER" = vm ] && echo simulators || echo suites): the test products could not be copied into it"
+  mg_status error
+  return 1
+}
+
+# mg__mac_vm_release_queued <code>: for code 2 (the VM could not be reached,
+# the job's VM part is queued), gives the VM's lease back at once: the job
+# runs nothing more there, and others need not wait for its other parts.
+mg__mac_vm_release_queued() {
+  [ "$1" -eq 2 ] && [ -n "${MG_LEASE_DIR:-}" ] || return 0
+  mg__host_lease_release "$MG_LEASE_DIR" $$
+}
+
+# mg__mac_vm_procs: waits while the leased VM has too few free processes for
+# a job, or does not answer the check (mvl_wait_procs, bounded), and records
+# the last check in details.mac_vm.procs. Returns 1 when it stayed so: queued
+# (mg__mac_vm_unreachable).
+mg__mac_vm_procs() {
+  local rc=0
+  mvl_wait_procs "$(jq -r .ssh <<<"$MG_MAC_VM")" "$(jq -r .name <<<"$MG_MAC_VM")" || rc=1
+  mg__mac_vm_detail "$(jq -nc --argjson p "${MVL_PROCS:-null}" --argjson w "${MVL_PROCS_WAITED:-0}" \
+    --argjson m "${MEGURI_MAC_VM_MIN_FREE_PROCS:-400}" '{procs: (($p // {}) + {needed: $m, waited_s: $w})}')"
+  [ "$rc" -eq 0 ] && return 0
+  mg__mac_vm_unreachable "$MVL_REASON"
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -221,9 +314,10 @@ MG_SIM_RUNNER=""
 # the pool VM (MG_SIM_RUNNER=vm; MG_MAC_VM names it, started headless when
 # it was not running, and the job's VM lease will be that VM's); without one,
 # this Mac's simulators with MEGURI_SIM_ALLOW_HOST=1 (host); otherwise the job
-# is recorded as queued (warn) and this returns 2. A config that is not
-# valid, or a VM that does not start or answer, is an error (returns 1),
-# never a reason to boot a simulator on this Mac.
+# is recorded as queued (warn) and this returns 2, as when the VM does not
+# answer (mg__mac_vm_unreachable; MG_SIM_RUNNER is then empty: nothing more
+# goes to the VM). A config that is not valid, or a VM that does not start,
+# is an error (returns 1), never a reason to boot a simulator on this Mac.
 mg_sim_begin() {
   local rc
   MG_SIM_RUNNER=""
@@ -236,8 +330,10 @@ mg_sim_begin() {
       MG_MAC_VM="$(jq -c '.[0]' <<<"$MG_MAC_VMS")"
       mg_detail sim_runner '"vm"'
       mg__mac_vm_detail "$(jq -c '{name}' <<<"$MG_MAC_VM")"
-      mg__mac_vm_boot || return 1
-      return 0
+      mg__mac_vm_boot
+      rc=$?
+      [ "$rc" -ne 2 ] || MG_SIM_RUNNER=""
+      return "$rc"
       ;;
     2)
       mg__mac_vm_config_error
@@ -256,7 +352,8 @@ mg_sim_begin() {
 
 # mg_sim_take [--no-copy]: after the build, the lease a simulator job holds
 # while it uses its device: the pool VM's lease (mg_mac_vm_take, which also
-# copies the products in unless --no-copy), or this Mac's host lease.
+# copies the products in unless --no-copy; 2: the VM could not be reached,
+# the job's simulator runs are queued), or this Mac's host lease.
 mg_sim_take() {
   if [ "$MG_SIM_RUNNER" = vm ]; then
     mg_mac_vm_take "$@"
@@ -293,10 +390,10 @@ mg_sim_mkdir() {
 # mg_sim_fetch <absolute path>...: in the VM, copies captures the simulators
 # wrote there back to the same paths here and removes them from the VM;
 # nothing to do on this Mac. Records a failure (mac-vm-copy) and returns 1
-# when one does not come back.
+# when one does not come back; 2 when the VM could not be reached (queued).
 mg_sim_fetch() {
   [ "$MG_SIM_RUNNER" = vm ] || return 0
-  mg_mac_vm_copy_out "$@" || return 1
+  mg_mac_vm_copy_out "$@" || return
   mg_mac_vm_ssh "rm -rf $(mvl_q "$@")" >/dev/null 2>&1
   return 0
 }
@@ -324,7 +421,8 @@ mg_sim_pool_take() {
 # it after the job ends), because the VM's paths outside a checkout are not
 # this Mac's. A value that is not absolute stays as it is (the app
 # refuses it, as on this Mac). Records a failure and returns 1 when the
-# fixture is not here or cannot be copied.
+# fixture is not here or cannot be copied; 2 when the VM could not be reached
+# (queued).
 mg_vm_fixture() {
   local dir
   MG_VM_FIXTURE="$1"
@@ -342,6 +440,10 @@ mg_vm_fixture() {
   MG_VM_FIXTURES=$((${MG_VM_FIXTURES:-0} + 1))
   dir="$MG_RUN_DIR/vm-fixtures/$MG_VM_FIXTURES"
   if ! mvl_copy_to "$(jq -r .ssh <<<"$MG_MAC_VM")" "$(jq -r .name <<<"$MG_MAC_VM")" "$1" "$dir"; then
+    if [ -n "$MVL_UNREACHABLE" ]; then
+      mg__mac_vm_unreachable "$MVL_REASON"
+      return 2
+    fi
     mg_failure mac-vm-copy "$MVL_REASON"
     return 1
   fi
@@ -353,7 +455,8 @@ mg_vm_fixture() {
 # leased VM, in MG_VM_ARGS: each -MeguriFixture value put there and named by
 # its path there (mg_vm_fixture). Read in pairs as the app reads them
 # (LaunchOptions.swift): a -Meguri<Name> argument takes the next one as its
-# value. Returns 1 when a fixture could not be put there (recorded).
+# value. Returns 1 when a fixture could not be put there (recorded), 2 when
+# the VM could not be reached (queued).
 mg_vm_launch_args() {
   MG_VM_ARGS=()
   while [ "$#" -gt 0 ]; do
@@ -362,7 +465,7 @@ mg_vm_launch_args() {
       -Meguri?*)
         [ "$#" -ge 2 ] || break
         if [ "$1" = -MeguriFixture ]; then
-          mg_vm_fixture "$2" || return 1
+          mg_vm_fixture "$2" || return
           MG_VM_ARGS[${#MG_VM_ARGS[@]}]="$MG_VM_FIXTURE"
         else
           MG_VM_ARGS[${#MG_VM_ARGS[@]}]="$2"
@@ -434,8 +537,9 @@ mg__mac_vm_lease() {
 
 # mg__mac_vm_boot: starts the VM MG_MAC_VM names headless when it is not
 # running (mvl_start: in a session of its own, so it outlives this job; jobs
-# never stop it), then waits until SSH answers in a logged-in session. On
-# failure records an error and returns 1.
+# never stop it), then waits until SSH answers in a logged-in session.
+# Returns 2 when it gave none in time (queued, mg__mac_vm_unreachable);
+# when tart could not start it records an error and returns 1.
 mg__mac_vm_boot() {
   local name rc=0
   name="$(jq -r .name <<<"$MG_MAC_VM")"
@@ -443,6 +547,10 @@ mg__mac_vm_boot() {
   [ -z "$MVL_TART_LOG" ] || mg_artifact log "$MVL_TART_LOG" "tart run $name"
   mg__mac_vm_detail "$(jq -nc --argjson s "$MVL_STARTED" '{started: $s}')"
   [ "$rc" -eq 0 ] && return 0
+  if [ "$MVL_FAIL" = ssh ]; then
+    mg__mac_vm_unreachable "$MVL_REASON"
+    return 2
+  fi
   mg__mac_vm_fail "mac-vm-$MVL_FAIL" "$MVL_REASON"
   return 1
 }
@@ -464,18 +572,27 @@ mg_mac_vm_q() { mvl_q "$@"; }
 # there; paths that do not exist here are skipped. The UI tests read the app
 # bundle and fixtures at their build paths. Only this checkout's directories
 # are replaced. Records a failure (mac-vm-copy) and returns 1 when a copy
-# fails.
+# fails; 2 when the VM could not be reached (queued, mg__mac_vm_unreachable).
 mg_mac_vm_copy_in() {
   mvl_copy_in "$(jq -r .ssh <<<"$MG_MAC_VM")" "$(jq -r .name <<<"$MG_MAC_VM")" "$MG_ROOT" "$@" && return 0
+  if [ -n "$MVL_UNREACHABLE" ]; then
+    mg__mac_vm_unreachable "$MVL_REASON"
+    return 2
+  fi
   mg_failure mac-vm-copy "$MVL_REASON"
   return 1
 }
 
 # mg_mac_vm_copy_out <absolute path>...: copies files and directories back
 # from the same absolute paths in the leased VM, replacing what is here.
-# Records a failure (mac-vm-copy) and returns 1 when one does not come back.
+# Records a failure (mac-vm-copy) and returns 1 when one does not come back;
+# 2 when the VM could not be reached (queued, mg__mac_vm_unreachable).
 mg_mac_vm_copy_out() {
   mvl_copy_out "$(jq -r .ssh <<<"$MG_MAC_VM")" "$(jq -r .name <<<"$MG_MAC_VM")" "$@" && return 0
+  if [ -n "$MVL_UNREACHABLE" ]; then
+    mg__mac_vm_unreachable "$MVL_REASON"
+    return 2
+  fi
   mg_failure mac-vm-copy "$MVL_REASON"
   return 1
 }
@@ -516,10 +633,17 @@ mg_mac_vm_xcodebuild_test() {
 # did not come back) records the failure, sets MG_MAC_VM_RUN_ERROR and
 # returns 1. A run whose SSH session was lost may go on in the VM: it is
 # stopped before this returns, or when it cannot be, MG_MAC_VM_LOST is set.
+# When the VM could not be reached (U19c: the session refused, a fork that
+# failed there before the run made a result bundle, a lost session after
+# which the VM does not answer, a result bundle that could not be fetched
+# because SSH failed) the run is queued instead: MG_VM_PART (default: the
+# job's runs) is a queued part (mg__mac_vm_unreachable), MG_MAC_VM_RUN_QUEUED
+# is set and this returns 1.
 mg_vm_xcodebuild_test() {
-  local prefix="$1" plan="$2" sdk="$3" dest="$4" config="$5" xctestrun n envs=() rc code dir base vm rcs probe out copy_error=""
+  local prefix="$1" plan="$2" sdk="$3" dest="$4" config="$5" xctestrun n envs=() rc code dir base vm rcs probe out copy_error="" queued="" err
   shift 5
   MG_MAC_VM_RUN_ERROR=""
+  MG_MAC_VM_RUN_QUEUED=""
   vm="$(jq -r .name <<<"$MG_MAC_VM")"
   dir="$(dirname "$prefix")"
   base="$(basename "$prefix")"
@@ -543,14 +667,24 @@ mg_vm_xcodebuild_test() {
   rc=$?
   code="$(sed -n "s/^$MG_MAC_VM_MARK \([0-9][0-9]*\)\$/\1/p" "$prefix.log" | tail -n 1)"
   if [ -z "$code" ]; then
-    mg_failure mac-vm-ssh "the SSH session to the VM $vm ended before xcodebuild did (exit $rc); see $prefix.log"
-    MG_MAC_VM_RUN_ERROR=1
     # xcodebuild may still be running there: it must end before any other run
     # starts in the VM's one login session.
     echo "mac-vm: stopping the test run that lost its SSH session" >&2
     if mg__mac_vm_stop_tests; then
       echo "mac-vm: $([ -n "$MG_MAC_VM_STOPPED" ] && echo "stopped it" || echo "it had already ended")" >&2
+      if mvl_unreachable "$rc" "$(cat "$prefix.log")" && mvl_refused "$(cat "$prefix.log")"; then
+        queued="$vm refused the test run's SSH session (ssh exit $rc$(mvl_last "$prefix.log"))"
+      else
+        mg_failure mac-vm-ssh "the SSH session to the VM $vm ended before xcodebuild did (exit $rc); see $prefix.log"
+        MG_MAC_VM_RUN_ERROR=1
+      fi
+    elif [ -n "$MG_MAC_VM_STOP_UNREACHABLE" ]; then
+      MG_MAC_VM_LOST="the test run that lost its SSH session may still be running in the VM $vm, which did not answer ($MG_MAC_VM_STOP_REASON)"
+      MG_MAC_VM_LOST_UNREACHABLE=1
+      queued="the SSH session to $vm ended before xcodebuild did (exit $rc), and $vm did not answer after it ($MG_MAC_VM_STOP_REASON)"
     else
+      mg_failure mac-vm-ssh "the SSH session to the VM $vm ended before xcodebuild did (exit $rc); see $prefix.log"
+      MG_MAC_VM_RUN_ERROR=1
       MG_MAC_VM_LOST="the test run that lost its SSH session may still be running in the VM $vm ($MG_MAC_VM_STOP_REASON)"
       mg_failure mac-vm-stop "$MG_MAC_VM_LOST; this job runs nothing more there, and the next job that takes $vm stops it first"
     fi
@@ -560,26 +694,51 @@ mg_vm_xcodebuild_test() {
   # A run that reported its exit code needs it: without it the result is
   # unknown. After a lost session the copy is only for the record.
   rm -rf "$prefix.xcresult"
-  out="$(mg_mac_vm_ssh "test -d $(mg_mac_vm_q "$prefix.xcresult")" 2>&1)"
-  probe=$?
-  case "$probe" in
-    0)
-      mg_mac_vm_ssh "tar -C $(mg_mac_vm_q "$dir") -cf - $(mg_mac_vm_q "$base.xcresult")" | tar -C "$dir" -xf -
-      rcs="${PIPESTATUS[*]}"
-      if [ "$rcs" != "0 0" ]; then
-        copy_error="copying $prefix.xcresult back from the VM $vm failed (ssh and tar exit codes: $rcs)"
-      elif [ ! -d "$prefix.xcresult" ]; then
-        copy_error="copying $prefix.xcresult back from the VM $vm brought no result bundle back"
-      fi
-      mg_mac_vm_ssh "rm -rf $(mg_mac_vm_q "$prefix.xcresult")" >/dev/null 2>&1
-      ;;
-    1)
-      # xcodebuild that failed before testing writes no bundle: the caller
-      # reports it as a run that could not start.
-      [ "$code" != 0 ] || copy_error="xcodebuild passed in the VM $vm but left no result bundle at $prefix.xcresult"
-      ;;
-    *) copy_error="could not check for $prefix.xcresult in the VM $vm (ssh exit $probe: $(tail -n 1 <<<"$out"))" ;;
-  esac
+  if [ -z "$queued" ]; then
+    out="$(mg_mac_vm_ssh "test -d $(mg_mac_vm_q "$prefix.xcresult")" 2>&1)"
+    probe=$?
+    [ "$probe" -ne 1 ] || ! mvl_refused "$out" || probe=255
+    case "$probe" in
+      0)
+        err="$(mvl_tmp)" || err=/dev/null
+        mg_mac_vm_ssh "tar -C $(mg_mac_vm_q "$dir") -cf - $(mg_mac_vm_q "$base.xcresult")" 2>"$err" | tar -C "$dir" -xf -
+        rcs="${PIPESTATUS[*]}"
+        [ "$err" = /dev/null ] || cat "$err" >&2
+        if [ "$rcs" != "0 0" ]; then
+          if [ -n "$code" ] && [ "$err" != /dev/null ] && mvl_unreachable "${rcs%% *}" "$(cat "$err")"; then
+            queued="copying $prefix.xcresult back from the VM $vm failed (ssh and tar exit codes: $rcs$(mvl_last "$err"))"
+          else
+            copy_error="copying $prefix.xcresult back from the VM $vm failed (ssh and tar exit codes: $rcs)"
+          fi
+        elif [ ! -d "$prefix.xcresult" ]; then
+          copy_error="copying $prefix.xcresult back from the VM $vm brought no result bundle back"
+        fi
+        [ "$err" = /dev/null ] || rm -f "$err"
+        mg_mac_vm_ssh "rm -rf $(mg_mac_vm_q "$prefix.xcresult")" >/dev/null 2>&1
+        ;;
+      1)
+        # xcodebuild that failed before testing writes no bundle: the caller
+        # reports it as a run that could not start, unless what failed was a
+        # fork in the VM (its process limit).
+        if [ -n "$code" ] && [ "$code" != 0 ] && mvl_refused "$(cat "$prefix.log")"; then
+          queued="the test run could not start processes in the VM $vm (exit $code$(grep -Ei 'fork|exec request' "$prefix.log" | tail -n 1 | sed 's/^/: /' | tr -d '\r'))"
+        fi
+        [ "$code" != 0 ] || copy_error="xcodebuild passed in the VM $vm but left no result bundle at $prefix.xcresult"
+        ;;
+      *)
+        if [ -n "$code" ] && mvl_unreachable "$probe" "$out"; then
+          queued="could not check for $prefix.xcresult in the VM $vm (ssh exit $probe: $(tail -n 1 <<<"$out" | tr -d '\r'))"
+        else
+          copy_error="could not check for $prefix.xcresult in the VM $vm (ssh exit $probe: $(tail -n 1 <<<"$out"))"
+        fi
+        ;;
+    esac
+  fi
+  if [ -n "$queued" ]; then
+    mg__mac_vm_unreachable "$queued" "${MG_VM_PART:-}"
+    MG_MAC_VM_RUN_QUEUED=1
+    return 1
+  fi
   if [ -n "$copy_error" ] && [ -n "$code" ]; then
     mg_failure mac-vm-copy "$copy_error"
     MG_MAC_VM_RUN_ERROR=1
@@ -591,12 +750,14 @@ mg_vm_xcodebuild_test() {
 # mg__mac_vm_stop_tests: stops every UI test run in the leased VM and
 # confirms none is left (mvl_stop_tests). Returns 0 when none is left
 # (MG_MAC_VM_STOPPED=1 when it stopped one); 1 when one still runs or the VM
-# did not answer, with MG_MAC_VM_STOP_REASON.
+# did not answer, with MG_MAC_VM_STOP_REASON (MG_MAC_VM_STOP_UNREACHABLE=1
+# when the VM could not be reached: mvl_unreachable).
 mg__mac_vm_stop_tests() {
   local rc=0
   mvl_stop_tests "$(jq -r .ssh <<<"$MG_MAC_VM")" || rc=1
   MG_MAC_VM_STOPPED="$MVL_STOPPED"
   MG_MAC_VM_STOP_REASON="$MVL_REASON"
+  MG_MAC_VM_STOP_UNREACHABLE="$MVL_UNREACHABLE"
   return "$rc"
 }
 
