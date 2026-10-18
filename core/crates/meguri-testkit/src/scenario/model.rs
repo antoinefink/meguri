@@ -932,6 +932,9 @@ pub enum Step {
     SetDue(DraftArgs),
     Reposition(DraftArgs),
     UpdatePreset(DraftArgs),
+    /// deck-options-ops.md E1: the deck options screen's Save (boxed: the
+    /// largest arguments by far).
+    SaveDeckOptions(Box<SaveDeckOptionsArgs>),
     /// model-ops.md L2.
     LegacyUpdate(LegacyUpdate),
     /// notetype-ops.md T2: shaped as a `setup.notetypes` entry.
@@ -1009,7 +1012,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 61] = [
+    pub const NAMES: [&'static str; 62] = [
         "advance",
         "set_clock",
         "add_note",
@@ -1041,6 +1044,7 @@ impl Step {
         "set_due",
         "reposition",
         "update_preset",
+        "save_deck_options",
         "legacy_update",
         "add_notetype",
         "add_stock_notetype",
@@ -1110,6 +1114,7 @@ impl Step {
             Step::SetDue(_) => "set_due",
             Step::Reposition(_) => "reposition",
             Step::UpdatePreset(_) => "update_preset",
+            Step::SaveDeckOptions(_) => "save_deck_options",
             Step::LegacyUpdate(_) => "legacy_update",
             Step::AddNotetype(_) => "add_notetype",
             Step::AddStockNotetype(_) => "add_stock_notetype",
@@ -1475,6 +1480,82 @@ pub struct SetDeckPresetArgs {
     pub subtree: bool,
 }
 
+/// `save_deck_options: {deck, preset?, options?, deck_desired_retention?}`
+/// (deck-options-ops.md E1): `deck` and `preset` not empty (checked on
+/// load).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SaveDeckOptionsArgs {
+    /// The deck whose options screen is open: a deck of `setup.decks`, or
+    /// `Default` for the default deck.
+    pub deck: String,
+    /// The preset the deck is switched to (`Default` or one of
+    /// `setup.presets`); `None` keeps the deck's current preset.
+    #[serde(default, deserialize_with = "present")]
+    pub preset: Option<String>,
+    /// New values for that preset's options; the others keep theirs.
+    #[serde(default, deserialize_with = "present")]
+    pub options: Option<DeckOptionsChange>,
+    /// The deck's own desired retention: `None` (missing) keeps it,
+    /// `Some(None)` (null) removes it, `Some(Some(r))` sets it.
+    #[serde(default, deserialize_with = "present")]
+    pub deck_desired_retention: Option<Option<f64>>,
+}
+
+/// The options a `save_deck_options` step changes (deck-options-ops.md E1):
+/// those of `setup.presets` (dsl.md D6.2) with the same values, plus
+/// `historical_retention` (sched/fsrs-items I1.4) and `ignore_reviews_before`
+/// (the date text as stored, sched/fsrs-items I1.3). A missing option keeps
+/// its value.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeckOptionsChange {
+    #[serde(default, deserialize_with = "present")]
+    pub learn_steps: Option<Vec<Duration>>,
+    #[serde(default, deserialize_with = "present")]
+    pub relearn_steps: Option<Vec<Duration>>,
+    #[serde(default, deserialize_with = "present")]
+    pub graduating_interval_days: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
+    pub easy_interval_days: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
+    pub new_per_day: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
+    pub reviews_per_day: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
+    pub max_interval_days: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
+    pub min_lapse_interval_days: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
+    pub starting_ease: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
+    pub easy_bonus: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
+    pub hard_interval: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
+    pub interval_modifier: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
+    pub lapse_new_interval: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
+    pub leech_threshold: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
+    pub leech_action: Option<LeechAction>,
+    #[serde(default, deserialize_with = "present")]
+    pub bury_new: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub bury_reviews: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub bury_interday_learning: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub desired_retention: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
+    pub fsrs_params: Option<Vec<f64>>,
+    #[serde(default, deserialize_with = "present")]
+    pub historical_retention: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
+    pub ignore_reviews_before: Option<String>,
+}
+
 /// Arguments of a draft op: an object whose shape the owning area fixes
 /// (D7.2). `Scenario::from_value` checks the keys the schema requires.
 #[derive(Debug, Clone)]
@@ -1741,6 +1822,8 @@ pub enum ObservationKind {
     Cloze,
     /// float-determinism.md F5.
     FsrsNext,
+    /// deck-options-ops.md E2.
+    IgnoredBeforeCount,
     /// tag-ops.md G9.
     TagTree,
     /// browser-config-ops.md B2.
@@ -1767,7 +1850,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 34] = [
+    pub const ALL: [ObservationKind; 35] = [
         ObservationKind::MediaDir,
         ObservationKind::MediaTrash,
         ObservationKind::MediaPending,
@@ -1799,6 +1882,7 @@ impl ObservationKind {
         ObservationKind::UndoStatus,
         ObservationKind::Cloze,
         ObservationKind::FsrsNext,
+        ObservationKind::IgnoredBeforeCount,
         ObservationKind::TagTree,
         ObservationKind::BrowserConfig,
         ObservationKind::NotetypeStructure,
@@ -1837,6 +1921,7 @@ impl ObservationKind {
             ObservationKind::UndoStatus => "undo_status",
             ObservationKind::Cloze => "cloze",
             ObservationKind::FsrsNext => "fsrs_next",
+            ObservationKind::IgnoredBeforeCount => "ignored_before_count",
             ObservationKind::TagTree => "tag_tree",
             ObservationKind::BrowserConfig => "browser_config",
             ObservationKind::NotetypeStructure => "notetype_structure",
@@ -1876,7 +1961,8 @@ impl ObservationKind {
             | ObservationKind::FieldsCheck
             | ObservationKind::Text
             | ObservationKind::Cloze
-            | ObservationKind::FsrsNext => ArgShape::Mapping,
+            | ObservationKind::FsrsNext
+            | ObservationKind::IgnoredBeforeCount => ArgShape::Mapping,
             ObservationKind::Queue
             | ObservationKind::DbDump
             | ObservationKind::Stats
@@ -2327,6 +2413,43 @@ pub struct FsrsNextInput {
     /// A member of the request's `param_sets`.
     pub params: String,
     pub max_ivl: u32,
+}
+
+/// An `ignored_before_count` observation request (deck-options-ops.md E2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IgnoredBeforeCountRequest {
+    /// `Default` or a preset of `setup.presets`.
+    pub preset: String,
+    /// The date texts, in order, as the screen would hold them; at least one.
+    pub dates: Vec<String>,
+}
+
+impl IgnoredBeforeCountRequest {
+    /// Reads the request with scenario.schema.json's rules: exactly `preset`
+    /// (a non-empty string) and `dates` (a non-empty list of strings).
+    pub fn from_mapping(map: &Map<String, Value>) -> Result<IgnoredBeforeCountRequest, FormatError> {
+        let bad = |why: &str| FormatError::new(format!("observation ignored_before_count: {why}"));
+        if map.len() != 2 || !map.contains_key("preset") || !map.contains_key("dates") {
+            return Err(bad("takes {preset, dates}"));
+        }
+        let preset = map["preset"]
+            .as_str()
+            .filter(|p| !p.is_empty())
+            .ok_or_else(|| bad("preset is a non-empty preset name"))?;
+        let dates = map["dates"]
+            .as_array()
+            .filter(|d| !d.is_empty())
+            .and_then(|d| {
+                d.iter()
+                    .map(|v| v.as_str().map(str::to_owned))
+                    .collect::<Option<Vec<_>>>()
+            })
+            .ok_or_else(|| bad("dates is a non-empty list of strings"))?;
+        Ok(IgnoredBeforeCountRequest {
+            preset: preset.to_owned(),
+            dates,
+        })
+    }
 }
 
 /// An `fsrs_next` observation request (float-determinism.md F5.1).

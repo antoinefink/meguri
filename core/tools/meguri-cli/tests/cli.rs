@@ -125,12 +125,12 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "undo_status",
         ])
     );
-    // dsl.md D7.2: 60 ops besides observe, the actor ops of sync-ops.md, the
+    // dsl.md D7.2: 61 ops besides observe, the actor ops of sync-ops.md, the
     // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
     // set_config, undo-ops.md's undo, redo and remove_config, the eight ops
     // of tag-ops.md, browser-config-ops.md's browser_config_set, the note
-    // type ops of notetype-ops.md and the deck ops of deck-ops.md among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 60);
+    // type ops of notetype-ops.md and the deck ops of deck-ops.md, plus save_deck_options.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 61);
     for op in [
         "actor",
         "sync",
@@ -142,6 +142,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         "set_config",
         "add_deck",
         "set_deck_preset",
+        "save_deck_options",
         "add_notetype",
         "update_notetype",
         "undo",
@@ -192,9 +193,9 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             .iter()
             .any(|k| k == "undo_status")
     );
-    // observations.md O4: both kinds belong to the language; U36 runs
+    // observations.md O4: these kinds belong to the language; U36 runs
     // blob_decode, while package_col remains owned by package export.
-    for kind in ["blob_decode", "package_col"] {
+    for kind in ["blob_decode", "package_col", "ignored_before_count"] {
         assert!(
             json["language"]["observations"]
                 .as_array()

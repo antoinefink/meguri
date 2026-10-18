@@ -1,0 +1,520 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-03-02T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "next_states": {
+          "#c1": {
+            "again": {
+              "kind": "relearning",
+              "learning": {
+                "elapsed_secs": 0,
+                "memory_state": {
+                  "difficulty": 9.207148,
+                  "stability": 3.0917656
+                },
+                "remaining_steps": 1,
+                "scheduled_secs": 600
+              },
+              "review": {
+                "ease_factor": 2.1,
+                "elapsed_days": 0,
+                "lapses": 2,
+                "leeched": false,
+                "memory_state": {
+                  "difficulty": 9.207148,
+                  "stability": 3.0917656
+                },
+                "scheduled_days": 3
+              }
+            },
+            "current": {
+              "ease_factor": 2.3,
+              "elapsed_days": 111,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 7.6328034,
+                "stability": 49.215424
+              },
+              "scheduled_days": 25
+            },
+            "easy": {
+              "ease_factor": 2.45,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 6.8270254,
+                "stability": 196.88057
+              },
+              "scheduled_days": 201
+            },
+            "good": {
+              "ease_factor": 2.3,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 7.620399,
+                "stability": 128.05846
+              },
+              "scheduled_days": 131
+            },
+            "hard": {
+              "ease_factor": 2.1499999,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 8.413773,
+                "stability": 96.63163
+              },
+              "scheduled_days": 99
+            }
+          },
+          "#c2": {
+            "again": {
+              "kind": "relearning",
+              "learning": {
+                "elapsed_secs": 0,
+                "memory_state": {
+                  "difficulty": 9.207148,
+                  "stability": 3.0917656
+                },
+                "remaining_steps": 1,
+                "scheduled_secs": 600
+              },
+              "review": {
+                "ease_factor": 2.1,
+                "elapsed_days": 0,
+                "lapses": 2,
+                "leeched": false,
+                "memory_state": {
+                  "difficulty": 9.207148,
+                  "stability": 3.0917656
+                },
+                "scheduled_days": 3
+              }
+            },
+            "current": {
+              "ease_factor": 2.3,
+              "elapsed_days": 111,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 7.6328034,
+                "stability": 49.215424
+              },
+              "scheduled_days": 25
+            },
+            "easy": {
+              "ease_factor": 2.45,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 6.8270254,
+                "stability": 196.88057
+              },
+              "scheduled_days": 199
+            },
+            "good": {
+              "ease_factor": 2.3,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 7.620399,
+                "stability": 128.05846
+              },
+              "scheduled_days": 129
+            },
+            "hard": {
+              "ease_factor": 2.1499999,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 8.413773,
+                "stability": 96.63163
+              },
+              "scheduled_days": 98
+            }
+          },
+          "#c3": {
+            "again": {
+              "kind": "relearning",
+              "learning": {
+                "elapsed_secs": 0,
+                "memory_state": {
+                  "difficulty": 9.2095995,
+                  "stability": 2.9206686
+                },
+                "remaining_steps": 1,
+                "scheduled_secs": 600
+              },
+              "review": {
+                "ease_factor": 2.1,
+                "elapsed_days": 0,
+                "lapses": 2,
+                "leeched": false,
+                "memory_state": {
+                  "difficulty": 9.2095995,
+                  "stability": 2.9206686
+                },
+                "scheduled_days": 3
+              }
+            },
+            "current": {
+              "ease_factor": 2.3,
+              "elapsed_days": 111,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 7.6402645,
+                "stability": 39.451553
+              },
+              "scheduled_days": 25
+            },
+            "easy": {
+              "ease_factor": 2.45,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 6.8369794,
+                "stability": 178.02197
+              },
+              "scheduled_days": 171
+            },
+            "good": {
+              "ease_factor": 2.3,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 7.6278524,
+                "stability": 113.438644
+              },
+              "scheduled_days": 109
+            },
+            "hard": {
+              "ease_factor": 2.1499999,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 8.418726,
+                "stability": 83.947395
+              },
+              "scheduled_days": 80
+            }
+          },
+          "#c4": {
+            "again": {
+              "kind": "relearning",
+              "learning": {
+                "elapsed_secs": 0,
+                "memory_state": {
+                  "difficulty": 9.2095995,
+                  "stability": 2.9206686
+                },
+                "remaining_steps": 1,
+                "scheduled_secs": 600
+              },
+              "review": {
+                "ease_factor": 2.1,
+                "elapsed_days": 0,
+                "lapses": 2,
+                "leeched": false,
+                "memory_state": {
+                  "difficulty": 9.2095995,
+                  "stability": 2.9206686
+                },
+                "scheduled_days": 3
+              }
+            },
+            "current": {
+              "ease_factor": 2.3,
+              "elapsed_days": 111,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 7.6402645,
+                "stability": 39.451553
+              },
+              "scheduled_days": 25
+            },
+            "easy": {
+              "ease_factor": 2.45,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 6.8369794,
+                "stability": 178.02197
+              },
+              "scheduled_days": 184
+            },
+            "good": {
+              "ease_factor": 2.3,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 7.6278524,
+                "stability": 113.438644
+              },
+              "scheduled_days": 118
+            },
+            "hard": {
+              "ease_factor": 2.1499999,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 8.418726,
+                "stability": 83.947395
+              },
+              "scheduled_days": 87
+            }
+          },
+          "#c5": {
+            "again": {
+              "kind": "relearning",
+              "learning": {
+                "elapsed_secs": 0,
+                "memory_state": {
+                  "difficulty": 9.210256,
+                  "stability": 2.9200883
+                },
+                "remaining_steps": 1,
+                "scheduled_secs": 600
+              },
+              "review": {
+                "ease_factor": 2.1,
+                "elapsed_days": 0,
+                "lapses": 2,
+                "leeched": false,
+                "memory_state": {
+                  "difficulty": 9.210256,
+                  "stability": 2.9200883
+                },
+                "scheduled_days": 3
+              }
+            },
+            "current": {
+              "ease_factor": 2.3,
+              "elapsed_days": 111,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 7.642262,
+                "stability": 39.423847
+              },
+              "scheduled_days": 25
+            },
+            "easy": {
+              "ease_factor": 2.45,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 6.839644,
+                "stability": 177.88315
+              },
+              "scheduled_days": 173
+            },
+            "good": {
+              "ease_factor": 2.3,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 7.629848,
+                "stability": 113.35161
+              },
+              "scheduled_days": 110
+            },
+            "hard": {
+              "ease_factor": 2.1499999,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 8.420053,
+                "stability": 83.884
+              },
+              "scheduled_days": 81
+            }
+          },
+          "#c6": {
+            "again": {
+              "kind": "relearning",
+              "learning": {
+                "elapsed_secs": 0,
+                "memory_state": {
+                  "difficulty": 9.210256,
+                  "stability": 2.9200883
+                },
+                "remaining_steps": 1,
+                "scheduled_secs": 600
+              },
+              "review": {
+                "ease_factor": 2.1,
+                "elapsed_days": 0,
+                "lapses": 2,
+                "leeched": false,
+                "memory_state": {
+                  "difficulty": 9.210256,
+                  "stability": 2.9200883
+                },
+                "scheduled_days": 3
+              }
+            },
+            "current": {
+              "ease_factor": 2.3,
+              "elapsed_days": 111,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 7.642262,
+                "stability": 39.423847
+              },
+              "scheduled_days": 25
+            },
+            "easy": {
+              "ease_factor": 2.45,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 6.839644,
+                "stability": 177.88315
+              },
+              "scheduled_days": 183
+            },
+            "good": {
+              "ease_factor": 2.3,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 7.629848,
+                "stability": 113.35161
+              },
+              "scheduled_days": 117
+            },
+            "hard": {
+              "ease_factor": 2.1499999,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 1,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 8.420053,
+                "stability": 83.884
+              },
+              "scheduled_days": 87
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d242c316ccc15adbecf1514c8b7cc469057e11fb38054dc00fb496b302f2b634",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/memory/skipped-rows",
+  "scenario_sha256": "5a5f322aa9ebb00c8965302a9293226e0f34c995afe6621aecd218a03261943f",
+  "tz": "UTC"
+}

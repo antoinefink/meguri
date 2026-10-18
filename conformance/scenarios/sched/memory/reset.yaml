@@ -1,0 +1,96 @@
+# Reset markers (type 4 with factor 0, written by Forget) end the history that
+# counts (specs/sched/fsrs-items.md I3; R685). Only rows after the last marker
+# are used, and when nothing graded follows it, the card has no item.
+# H as in sched/memory/on-the-fly; the Reset row is 2025-12-01 08:00 (type 4,
+# ease 0, ivl 0, lastIvl 25, factor 0). L, a new start after it:
+#   2025-12-01T09:00:00     type 0 ease 3 ivl   -600 lastIvl    -60 factor    0
+#   2025-12-01T09:10:00     type 0 ease 3 ivl      1 lastIvl   -600 factor 2500
+#   2025-12-02T10:00:00     type 1 ease 3 ivl      4 lastIvl      1 factor 2500
+#   2025-12-06T10:00:00     type 1 ease 3 ivl     14 lastIvl      4 factor 2500
+# c1: H, Reset, L: only L counts, so c1 has the memory states of c2.
+# c2: L alone.
+# c3: H, Reset, then L's two review rows (no learning row): they start from
+#     the SM-2 conversion of the first, so c3 has the memory states of c4.
+# c4: the two review rows alone.
+# c5: H, then Reset as the last row, the card still a review card (an old
+#     client's data): no item, so the card's own values count, as for c6.
+#     Its elapsed days still come from H's last graded row (M3 ignores
+#     Reset markers), while c6 has 0.
+# c6: no review log, the same card values as c5.
+# c7: H, Reset, then a set-due-date row: no item, so the card's own values
+#     count, as for c8.
+# c8: no review log, the same card values as c7.
+# c9: H then L with no Reset row between (older clients wrote none): the last
+#     run of learning rows starts the history, so c9 has the memory states
+#     of c2.
+id: sched/memory/reset
+clock: {tz: UTC, start: "2026-03-02T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, fields: [one, back]}
+    - {notetype: Pair, fields: [two, back]}
+    - {notetype: Pair, fields: [three, back]}
+    - {notetype: Pair, fields: [four, back]}
+    - {notetype: Pair, fields: [five, back]}
+    - {notetype: Pair, fields: [six, back]}
+    - {notetype: Pair, fields: [seven, back]}
+    - {notetype: Pair, fields: [eight, back]}
+    - {notetype: Pair, fields: [nine, back]}
+steps:
+  # c1: H, Reset, then L
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"
+      params: [2, 2, -74, 14, 2500, 4, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200001, 3, -600, -60, 0, 0), (1759309800001, 3, 1, -600, 2500, 0), (1759399200001, 3, 3, 1, 2500, 1), (1759658400001, 3, 9, 3, 2500, 1), (1760436000001, 1, -600, 9, 2300, 1), (1760436600001, 3, 2, -600, 2300, 2), (1760608800001, 3, 6, 2, 2300, 1), (1761127200001, 4, 20, 6, 2450, 1), (1762855200001, 2, 25, 20, 2300, 1), (1764576000001, 0, 0, 25, 0, 4), (1764579600001, 3, -600, -60, 0, 0), (1764580200001, 3, 1, -600, 2500, 0), (1764669600001, 3, 4, 1, 2500, 1), (1765015200001, 3, 14, 4, 2500, 1)) AS v"
+  # c2: L alone
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
+      params: [2, 2, -74, 14, 2500, 4, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1764579600002, 3, -600, -60, 0, 0), (1764580200002, 3, 1, -600, 2500, 0), (1764669600002, 3, 4, 1, 2500, 1), (1765015200002, 3, 14, 4, 2500, 1)) AS v"
+  # c3: H, Reset, then two review rows
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"
+      params: [2, 2, -74, 14, 2500, 4, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200003, 3, -600, -60, 0, 0), (1759309800003, 3, 1, -600, 2500, 0), (1759399200003, 3, 3, 1, 2500, 1), (1759658400003, 3, 9, 3, 2500, 1), (1760436000003, 1, -600, 9, 2300, 1), (1760436600003, 3, 2, -600, 2300, 2), (1760608800003, 3, 6, 2, 2300, 1), (1761127200003, 4, 20, 6, 2450, 1), (1762855200003, 2, 25, 20, 2300, 1), (1764576000003, 0, 0, 25, 0, 4), (1764669600003, 3, 4, 1, 2500, 1), (1765015200003, 3, 14, 4, 2500, 1)) AS v"
+  # c4: the two review rows alone
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"
+      params: [2, 2, -74, 14, 2500, 4, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1764669600004, 3, 4, 1, 2500, 1), (1765015200004, 3, 14, 4, 2500, 1)) AS v"
+  # c5: H, then Reset as the last row; still a review card
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"
+      params: [2, 2, -86, 25, 2300, 9, 1, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200005, 3, -600, -60, 0, 0), (1759309800005, 3, 1, -600, 2500, 0), (1759399200005, 3, 3, 1, 2500, 1), (1759658400005, 3, 9, 3, 2500, 1), (1760436000005, 1, -600, 9, 2300, 1), (1760436600005, 3, 2, -600, 2300, 2), (1760608800005, 3, 6, 2, 2300, 1), (1761127200005, 4, 20, 6, 2450, 1), (1762855200005, 2, 25, 20, 2300, 1), (1764576000005, 0, 0, 25, 0, 4)) AS v"
+  # c6: no review log, the same card values
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"
+      params: [2, 2, -86, 25, 2300, 9, 1, 0, "{}"]
+  # c7: H, Reset, then a set-due-date row
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"
+      params: [2, 2, -84, 7, 2500, 9, 1, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200007, 3, -600, -60, 0, 0), (1759309800007, 3, 1, -600, 2500, 0), (1759399200007, 3, 3, 1, 2500, 1), (1759658400007, 3, 9, 3, 2500, 1), (1760436000007, 1, -600, 9, 2300, 1), (1760436600007, 3, 2, -600, 2300, 2), (1760608800007, 3, 6, 2, 2300, 1), (1761127200007, 4, 20, 6, 2450, 1), (1762855200007, 2, 25, 20, 2300, 1), (1764576000007, 0, 0, 25, 0, 4), (1764577800007, 0, 7, 0, 2500, 4)) AS v"
+  # c8: no review log, the same card values as c7
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7)"
+      params: [2, 2, -84, 7, 2500, 9, 1, 0, "{}"]
+  # c9: H, then L without a Reset row
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 8)"
+      params: [2, 2, -74, 14, 2500, 4, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 8), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200009, 3, -600, -60, 0, 0), (1759309800009, 3, 1, -600, 2500, 0), (1759399200009, 3, 3, 1, 2500, 1), (1759658400009, 3, 9, 3, 2500, 1), (1760436000009, 1, -600, 9, 2300, 1), (1760436600009, 3, 2, -600, 2300, 2), (1760608800009, 3, 6, 2, 2300, 1), (1761127200009, 4, 20, 6, 2450, 1), (1762855200009, 2, 25, 20, 2300, 1), (1764579600009, 3, -600, -60, 0, 0), (1764580200009, 3, 1, -600, 2500, 0), (1764669600009, 3, 4, 1, 2500, 1), (1765015200009, 3, 14, 4, 2500, 1)) AS v"
+  - observe: ["next_states(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8, #c9)"]

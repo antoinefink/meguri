@@ -216,6 +216,26 @@
             "rows": { "type": "array", "items": { "type": "array", "items": { "type": "integer" }, "minItems": 2 } }
           }
         },
+        "ignored_before_count": {
+          "description": "deck-options-ops.md E2: one entry per date text, the counts or invalid_date.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["included", "total"],
+                "additionalProperties": false,
+                "properties": { "included": { "type": "integer", "minimum": 0 }, "total": { "type": "integer", "minimum": 0 } }
+              },
+              {
+                "type": "object",
+                "required": ["error"],
+                "additionalProperties": false,
+                "properties": { "error": { "enum": ["invalid_date"] } }
+              }
+            ]
+          }
+        },
         "net_probe": {
           "type": "object",
           "required": ["connected", "error"],

@@ -1,0 +1,125 @@
+# Recomputing memory states in bulk, as the deck options screen's save does
+# it (specs/sched/memory-state.md M4, M7; R686, R687, R697): for each card of
+# a recomputed deck that is not new and has review-log rows, s and d come from
+# its history (removed when it gives no item), dr is the deck's desired
+# retention in force and decay the preset's. Nothing else on the card
+# changes, and no review-log row is added or changed (the digest rows).
+# Needs save_deck_options (specs/conformance/deck-options-ops.md E1).
+# H as in sched/memory/on-the-fly. Presets Lang (desired retention 0.9, no
+# parameters) and Other (defaults); decks Words and Phrases use Lang, Misc
+# uses Other.
+# c1 (Words): H, no memory state.
+# c2 (Words): H without its learning rows, stale s 1, d 5, dr 0.7, decay 0.5.
+# c3 (Words): no review log, the same stale values and an lrt: never touched.
+# c4 (Words): only a set-due-date row, stale values: s and d removed, dr and
+#     decay set.
+# c5 (Words): a new card with a stale dr and decay: never touched.
+# c6 (Phrases): H, no memory state.
+# c7 (Misc): H, no memory state.
+# c8 (Words): suspended review card with H: recomputed like c1.
+# The deviations memory-recompute-unchanged-mod and -usn point at step 25:
+# renumber them when steps are added or removed before it.
+id: sched/memory/recompute
+clock: {tz: UTC, start: "2026-03-02T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets: [{name: Lang, desired_retention: 0.9}, {name: Other}]
+  decks: [{name: Words, preset: Lang}, {name: Phrases, preset: Lang}, {name: Misc, preset: Other}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Words, fields: [one, back]}
+    - {notetype: Pair, deck: Words, fields: [two, back]}
+    - {notetype: Pair, deck: Words, fields: [three, back]}
+    - {notetype: Pair, deck: Words, fields: [four, back]}
+    - {notetype: Pair, deck: Words, fields: [five, back]}
+    - {notetype: Pair, deck: Phrases, fields: [six, back]}
+    - {notetype: Pair, deck: Misc, fields: [seven, back]}
+    - {notetype: Pair, deck: Words, fields: [eight, back]}
+steps:
+  # Phrases has its own desired retention, 0.8 ("This deck").
+  - legacy_update: {deck: Phrases, patch: {desiredRetention: 80}}
+  # c1: Words: H, no memory state
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"
+      params: [2, 2, -86, 25, 2300, 9, 1, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200001, 3, -600, -60, 0, 0), (1759309800001, 3, 1, -600, 2500, 0), (1759399200001, 3, 3, 1, 2500, 1), (1759658400001, 3, 9, 3, 2500, 1), (1760436000001, 1, -600, 9, 2300, 1), (1760436600001, 3, 2, -600, 2300, 2), (1760608800001, 3, 6, 2, 2300, 1), (1761127200001, 4, 20, 6, 2450, 1), (1762855200001, 2, 25, 20, 2300, 1)) AS v"
+  # c2: Words: H without its learning rows, a stale state
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
+      params: [2, 2, -86, 25, 2300, 9, 1, 0, "{\"s\":1.0,\"d\":5.0,\"dr\":0.7,\"decay\":0.5}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759399200002, 3, 3, 1, 2500, 1), (1759658400002, 3, 9, 3, 2500, 1), (1760436000002, 1, -600, 9, 2300, 1), (1760436600002, 3, 2, -600, 2300, 2), (1760608800002, 3, 6, 2, 2300, 1), (1761127200002, 4, 20, 6, 2450, 1), (1762855200002, 2, 25, 20, 2300, 1)) AS v"
+  # c3: Words: no review log, a stale state and lrt
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"
+      params: [2, 2, -86, 25, 2300, 9, 1, 0, "{\"s\":1.0,\"d\":5.0,\"dr\":0.7,\"decay\":0.5,\"lrt\":1762855200}"]
+  # c4: Words: a set-due-date row only, a stale state
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"
+      params: [2, 2, -5, 20, 2500, 9, 1, 0, "{\"s\":1.0,\"d\":5.0,\"dr\":0.7,\"decay\":0.5}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1770717600004, 0, 20, 25, 2500, 4)) AS v"
+  # c5: Words: a new card with a stale dr and decay
+  - db_exec:
+      sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"
+      params: ["{\"dr\":0.7,\"decay\":0.5}"]
+  # c6: Phrases: H, no memory state
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"
+      params: [2, 2, -86, 25, 2300, 9, 1, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200006, 3, -600, -60, 0, 0), (1759309800006, 3, 1, -600, 2500, 0), (1759399200006, 3, 3, 1, 2500, 1), (1759658400006, 3, 9, 3, 2500, 1), (1760436000006, 1, -600, 9, 2300, 1), (1760436600006, 3, 2, -600, 2300, 2), (1760608800006, 3, 6, 2, 2300, 1), (1761127200006, 4, 20, 6, 2450, 1), (1762855200006, 2, 25, 20, 2300, 1)) AS v"
+  # c7: Misc: H, no memory state
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"
+      params: [2, 2, -86, 25, 2300, 9, 1, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200007, 3, -600, -60, 0, 0), (1759309800007, 3, 1, -600, 2500, 0), (1759399200007, 3, 3, 1, 2500, 1), (1759658400007, 3, 9, 3, 2500, 1), (1760436000007, 1, -600, 9, 2300, 1), (1760436600007, 3, 2, -600, 2300, 2), (1760608800007, 3, 6, 2, 2300, 1), (1761127200007, 4, 20, 6, 2450, 1), (1762855200007, 2, 25, 20, 2300, 1)) AS v"
+  # c8: Words: a suspended review card, H
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7)"
+      params: [2, -1, -86, 25, 2300, 9, 1, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200008, 3, -600, -60, 0, 0), (1759309800008, 3, 1, -600, 2500, 0), (1759399200008, 3, 3, 1, 2500, 1), (1759658400008, 3, 9, 3, 2500, 1), (1760436000008, 1, -600, 9, 2300, 1), (1760436600008, 3, 2, -600, 2300, 2), (1760608800008, 3, 6, 2, 2300, 1), (1761127200008, 4, 20, 6, 2450, 1), (1762855200008, 2, 25, 20, 2300, 1)) AS v"
+  # Every save below starts from cards stamped long ago (mod 1700000000) with
+  # a server usn, so that a card a save stamps shows mod = now, usn -1.
+  - db_exec: {sql: "UPDATE cards SET usn = 5, mod = 1700000000"}
+  - advance: 1h
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8)"]
+  - db_exec: {sql: "SELECT count(*), total(id), total(cid), total(usn), total(ease), total(ivl), total(lastIvl), total(factor), total(time), total(type) FROM revlog"}
+  # 1. Lang's desired retention 0.9 -> 0.85 from the Words screen: Words is
+  # recomputed; Phrases keeps its own 0.8 and Misc uses Other: untouched.
+  - save_deck_options: {deck: Words, options: {desired_retention: 0.85}}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8)"]
+  - db_exec: {sql: "SELECT count(*), total(id), total(cid), total(usn), total(ease), total(ivl), total(lastIvl), total(factor), total(time), total(type) FROM revlog"}
+  - db_exec: {sql: "UPDATE cards SET usn = 6, mod = 1700000000"}
+  - advance: 1h
+  # 2. Lang's parameters: the empty list -> the same values written out.
+  # Words and Phrases are recomputed. Words' cards come out with the values
+  # they hold: Meguri leaves them as they are (mod, usn); Anki stamps them
+  # (deviations memory-recompute-unchanged-mod and -usn).
+  - save_deck_options: {deck: Words, options: {fsrs_params: [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542]}}
+  - observe: ["card(#c1, #c2, #c4, #c8)"]
+  - observe: ["card(#c3, #c5, #c6, #c7)"]
+  - db_exec: {sql: "SELECT count(*), total(id), total(cid), total(usn), total(ease), total(ivl), total(lastIvl), total(factor), total(time), total(type) FROM revlog"}
+  - db_exec: {sql: "UPDATE cards SET usn = 7, mod = 1700000000"}
+  - advance: 1h
+  # 3. Phrases' own desired retention 0.8 -> 0.75: only Phrases.
+  - save_deck_options: {deck: Phrases, deck_desired_retention: 0.75}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8)"]
+  - db_exec: {sql: "UPDATE cards SET usn = 8, mod = 1700000000"}
+  - advance: 1h
+  # 4. Historical retention and the ignore date alone: no deck is recomputed.
+  - save_deck_options: {deck: Words, options: {historical_retention: 0.8, ignore_reviews_before: "2025-10-03"}}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8)"]
+  - db_exec: {sql: "UPDATE cards SET usn = 9, mod = 1700000000"}
+  - advance: 1h
+  # 5. Misc moves from Other to Lang: Misc is recomputed with Lang's values.
+  - save_deck_options: {deck: Misc, preset: Lang}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8)"]
+  - db_exec: {sql: "SELECT count(*), total(id), total(cid), total(usn), total(ease), total(ivl), total(lastIvl), total(factor), total(time), total(type) FROM revlog"}

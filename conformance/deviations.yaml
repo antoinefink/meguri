@@ -534,6 +534,26 @@ deviations:
       replace:
         a.jpg: "fa048a40dc97077f6ac1356629394ff2e566207c"
         "a-6d6efa518bdaba281c68518bd20ab7d447555bbd.jpg": "6d6efa518bdaba281c68518bd20ab7d447555bbd"
+  # specs/sched/memory-state.md M4.2 (R687): a recompute writes only cards
+  # whose s, d, dr or decay change as stored. Anki rewrites and stamps every
+  # card it processes. In sched/memory/recompute, step 24 sets Lang's
+  # parameter list to the values it already used, so the four Words cards
+  # observed at step 25 come out unchanged and keep the mod and usn that
+  # step 22 gave them.
+  - id: memory-recompute-unchanged-mod
+    requirement: R687
+    summary: A memory-state recompute that leaves a card's s, d, dr and decay as stored does not write the card, so its mod stays; Anki stamps it with now.
+    test: sched/memory/recompute
+    scenarios: [sched/memory/recompute]
+    pointer: /steps/25/card/*/mod
+    transform: {replace: 1700000000}
+  - id: memory-recompute-unchanged-usn
+    requirement: R687
+    summary: A memory-state recompute that leaves a card's s, d, dr and decay as stored does not write the card, so its server usn stays and it does not sync; Anki sets usn -1.
+    test: sched/memory/recompute
+    scenarios: [sched/memory/recompute]
+    pointer: /steps/25/card/*/usn
+    transform: {replace: 6}
   # specs/sched/day-clock.md D6, D12: Meguri computes the day afresh when the
   # UTC offset, rollover, creationOffset or crt changed since it computed it;
   # Anki keeps the computed day until its boundary passes.

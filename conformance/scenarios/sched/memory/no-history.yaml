@@ -1,0 +1,74 @@
+# Cards without a usable review history (specs/sched/memory-state.md M2.2;
+# R650, R689). A card whose history gives no item gets its memory state from
+# its own interval and ease through the SM-2 conversion, unless its interval
+# is 0: then it has none, and FSRS treats it as a new card.
+# c1: review card, 20 days, factor 2500, no review log.
+# c2: c1 with factor 0 (an ease of 0, read as is).
+# c3: relearning card, interval 5, factor 2100, no review log.
+# c4: learning card (interval 0), no review log: no memory state.
+# c5: c1 with a set-due-date row only (type 4, factor 2500): same as c1.
+# c6: c1 with a rescheduled row only (type 5): same as c1.
+# c7: a review card whose interval is 0: no memory state.
+# c8: a review card with factor 820 and no review log: the factor is an ease
+#     of 0.82 here, unlike a review-log row's factor (sched/memory/
+#     sm2-history c5).
+# Without lrt and review log, FSRS's elapsed days are 0 (M3), so Good keeps
+# the stability. Then historical retention 0.8 changes c1 and c5.
+id: sched/memory/no-history
+clock: {tz: UTC, start: "2026-03-02T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, fields: [one, back]}
+    - {notetype: Pair, fields: [two, back]}
+    - {notetype: Pair, fields: [three, back]}
+    - {notetype: Pair, fields: [four, back]}
+    - {notetype: Pair, fields: [five, back]}
+    - {notetype: Pair, fields: [six, back]}
+    - {notetype: Pair, fields: [seven, back]}
+    - {notetype: Pair, fields: [eight, back]}
+steps:
+  # c1: review card, 20 days, factor 2500, no review log
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"
+      params: [2, 2, -5, 20, 2500, 9, 1, 0, "{}"]
+  # c2: review card, factor 0, no review log
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
+      params: [2, 2, -5, 20, 0, 9, 1, 0, "{}"]
+  # c3: relearning card, 5 days, factor 2100, no review log
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"
+      params: [3, 1, 1772445000, 5, 2100, 6, 2, 1, "{}"]
+  # c4: learning card, no review log
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"
+      params: [1, 1, 1772445000, 0, 0, 1, 0, 1, "{}"]
+  # c5: as c1, with one set-due-date row
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"
+      params: [2, 2, -5, 20, 2500, 9, 1, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1770717600005, 0, 20, 30, 2500, 4)) AS v"
+  # c6: as c1, with one rescheduled row
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"
+      params: [2, 2, -5, 20, 2500, 9, 1, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1770717600006, 0, 20, 30, 2500, 5)) AS v"
+  # c7: review card with interval 0, no review log
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"
+      params: [2, 2, 0, 0, 2500, 9, 1, 0, "{}"]
+  # c8: review card, 100 days, factor 820, no review log
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7)"
+      params: [2, 2, 14, 100, 820, 9, 1, 0, "{}"]
+  - observe: ["next_states(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8)"]
+  - legacy_update: {preset: Default, patch: {sm2Retention: 0.8}}
+  - observe: ["next_states(#c1, #c5)"]

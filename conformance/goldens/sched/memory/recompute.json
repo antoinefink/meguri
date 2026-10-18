@@ -1,0 +1,1319 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-03-02T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 5
+          },
+          "#c2": {
+            "data": {
+              "d": 5.0,
+              "decay": 0.5,
+              "dr": 0.7,
+              "s": 1.0
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 5
+          },
+          "#c3": {
+            "data": {
+              "d": 5.0,
+              "decay": 0.5,
+              "dr": 0.7,
+              "lrt": 1762855200,
+              "s": 1.0
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 5
+          },
+          "#c4": {
+            "data": {
+              "d": 5.0,
+              "decay": 0.5,
+              "dr": 0.7,
+              "s": 1.0
+            },
+            "did": "Words",
+            "due": -5,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 20,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 5
+          },
+          "#c5": {
+            "data": {
+              "decay": 0.5,
+              "dr": 0.7
+            },
+            "did": "Words",
+            "due": 5,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 5
+          },
+          "#c6": {
+            "data": {},
+            "did": "Phrases",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n6",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 5
+          },
+          "#c7": {
+            "data": {},
+            "did": "Misc",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n7",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 5
+          },
+          "#c8": {
+            "data": {},
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c8",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n8",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": -1,
+            "reps": 9,
+            "type": 2,
+            "usn": 5
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [44, 77467800600216.0, 77987606400172.0, -44.0, 119.0, -5051.0, -5410.0, 95750.0, 220000.0, 44.0]
+          ]
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 39.4516
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1772449200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {
+              "d": 9.252,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 17.2756
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1772449200,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": -1
+          },
+          "#c3": {
+            "data": {
+              "d": 5.0,
+              "decay": 0.5,
+              "dr": 0.7,
+              "lrt": 1762855200,
+              "s": 1.0
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 5
+          },
+          "#c4": {
+            "data": {
+              "decay": 0.154,
+              "dr": 0.85
+            },
+            "did": "Words",
+            "due": -5,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 20,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1772449200,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": -1
+          },
+          "#c5": {
+            "data": {
+              "decay": 0.5,
+              "dr": 0.7
+            },
+            "did": "Words",
+            "due": 5,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 5
+          },
+          "#c6": {
+            "data": {},
+            "did": "Phrases",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n6",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 5
+          },
+          "#c7": {
+            "data": {},
+            "did": "Misc",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n7",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 5
+          },
+          "#c8": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 39.4516
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c8",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1772449200,
+            "nid": "#n8",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": -1,
+            "reps": 9,
+            "type": 2,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [44, 77467800600216.0, 77987606400172.0, -44.0, 119.0, -5051.0, -5410.0, 95750.0, 220000.0, 44.0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 39.4516
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1772452800,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {
+              "d": 9.252,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 17.2756
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1772452800,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {
+              "decay": 0.154,
+              "dr": 0.85
+            },
+            "did": "Words",
+            "due": -5,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 20,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1772452800,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": -1
+          },
+          "#c8": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 39.4516
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c8",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1772452800,
+            "nid": "#n8",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": -1,
+            "reps": 9,
+            "type": 2,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "card": {
+          "#c3": {
+            "data": {
+              "d": 5.0,
+              "decay": 0.5,
+              "dr": 0.7,
+              "lrt": 1762855200,
+              "s": 1.0
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 6
+          },
+          "#c5": {
+            "data": {
+              "decay": 0.5,
+              "dr": 0.7
+            },
+            "did": "Words",
+            "due": 5,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 6
+          },
+          "#c6": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.8,
+              "s": 39.4516
+            },
+            "did": "Phrases",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1772452800,
+            "nid": "#n6",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": -1
+          },
+          "#c7": {
+            "data": {},
+            "did": "Misc",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n7",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 6
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [44, 77467800600216.0, 77987606400172.0, -44.0, 119.0, -5051.0, -5410.0, 95750.0, 220000.0, 44.0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 39.4516
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 7
+          },
+          "#c2": {
+            "data": {
+              "d": 9.252,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 17.2756
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 7
+          },
+          "#c3": {
+            "data": {
+              "d": 5.0,
+              "decay": 0.5,
+              "dr": 0.7,
+              "lrt": 1762855200,
+              "s": 1.0
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 7
+          },
+          "#c4": {
+            "data": {
+              "decay": 0.154,
+              "dr": 0.85
+            },
+            "did": "Words",
+            "due": -5,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 20,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 7
+          },
+          "#c5": {
+            "data": {
+              "decay": 0.5,
+              "dr": 0.7
+            },
+            "did": "Words",
+            "due": 5,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 7
+          },
+          "#c6": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.75,
+              "s": 39.4516
+            },
+            "did": "Phrases",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1772456400,
+            "nid": "#n6",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": -1
+          },
+          "#c7": {
+            "data": {},
+            "did": "Misc",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n7",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 7
+          },
+          "#c8": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 39.4516
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c8",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n8",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": -1,
+            "reps": 9,
+            "type": 2,
+            "usn": 7
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 39.4516
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 8
+          },
+          "#c2": {
+            "data": {
+              "d": 9.252,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 17.2756
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 8
+          },
+          "#c3": {
+            "data": {
+              "d": 5.0,
+              "decay": 0.5,
+              "dr": 0.7,
+              "lrt": 1762855200,
+              "s": 1.0
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 8
+          },
+          "#c4": {
+            "data": {
+              "decay": 0.154,
+              "dr": 0.85
+            },
+            "did": "Words",
+            "due": -5,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 20,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 8
+          },
+          "#c5": {
+            "data": {
+              "decay": 0.5,
+              "dr": 0.7
+            },
+            "did": "Words",
+            "due": 5,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 8
+          },
+          "#c6": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.75,
+              "s": 39.4516
+            },
+            "did": "Phrases",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n6",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 8
+          },
+          "#c7": {
+            "data": {},
+            "did": "Misc",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n7",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 8
+          },
+          "#c8": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 39.4516
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c8",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n8",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": -1,
+            "reps": 9,
+            "type": 2,
+            "usn": 8
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 39.4516
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 9
+          },
+          "#c2": {
+            "data": {
+              "d": 9.252,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 17.2756
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 9
+          },
+          "#c3": {
+            "data": {
+              "d": 5.0,
+              "decay": 0.5,
+              "dr": 0.7,
+              "lrt": 1762855200,
+              "s": 1.0
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 9
+          },
+          "#c4": {
+            "data": {
+              "decay": 0.154,
+              "dr": 0.85
+            },
+            "did": "Words",
+            "due": -5,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 20,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 9
+          },
+          "#c5": {
+            "data": {
+              "decay": 0.5,
+              "dr": 0.7
+            },
+            "did": "Words",
+            "due": 5,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 9
+          },
+          "#c6": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.75,
+              "s": 39.4516
+            },
+            "did": "Phrases",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n6",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": 9
+          },
+          "#c7": {
+            "data": {
+              "d": 9.768,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 9.9838
+            },
+            "did": "Misc",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1772463600,
+            "nid": "#n7",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 9,
+            "type": 2,
+            "usn": -1
+          },
+          "#c8": {
+            "data": {
+              "d": 7.64,
+              "decay": 0.154,
+              "dr": 0.85,
+              "s": 39.4516
+            },
+            "did": "Words",
+            "due": -86,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c8",
+            "ivl": 25,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n8",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": -1,
+            "reps": 9,
+            "type": 2,
+            "usn": 9
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [44, 77467800600216.0, 77987606400172.0, -44.0, 119.0, -5051.0, -5410.0, 95750.0, 220000.0, 44.0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "89673ccd68bc9c0f745e08ffc73f3619373c05c2ab672b6b26df410536031cb4",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/memory/recompute",
+  "scenario_sha256": "a5033914bdedf5737dea7f7d5cfa28643b4f2b50ab0fc5b4939ba3af00e2db1f",
+  "tz": "UTC"
+}
