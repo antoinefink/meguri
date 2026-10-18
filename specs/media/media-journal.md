@@ -69,6 +69,8 @@ Unknown staged files are preserved in the trash. Recovery is idempotent and neve
 Recovery skips stages still owned by a live operation in this process. A missing
 manifest is an error when reading names, binding references or publishing; it
 cannot turn an attachment-bearing operation into an empty successful stage.
+The engine pins its collection snapshot after the store captures inactive
+recovery candidates, so every selected operation's commit is visible.
 
 ## J5. Engine coordination
 

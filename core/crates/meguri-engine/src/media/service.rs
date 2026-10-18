@@ -60,10 +60,16 @@ impl MediaService {
     }
     pub fn recover(&self) -> Result<RecoveryReport, EngineError> {
         let reader = self.collection.reader(ReaderRole::Query)?;
-        let snapshot = reader.snapshot()?;
+        let mut snapshot = None;
         self.state
             .store
             .recover(|reference| {
+                // Candidate capture excludes live stages. Pin the collection
+                // only afterward, so every selected commit is visible.
+                let snapshot = snapshot
+                    .get_or_insert_with(|| reader.snapshot())
+                    .as_ref()
+                    .map_err(|e| meguri_storage::media::MediaError::Database(e.to_string()))?;
                 snapshot
                     .note(NoteId(reference.note_id))
                     .map(|note| note.is_some_and(|note| reference.matches(&note)))

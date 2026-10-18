@@ -5,6 +5,48 @@ use meguri_engine::media::{MediaJobKind, MediaService};
 use meguri_engine::{EngineError, EventKind, OpSource, OpSpec};
 use std::{fs, sync::Arc};
 
+type RecoveryHook = Box<dyn FnOnce() + Send>;
+static RECOVERY_HOOK: std::sync::Mutex<Option<RecoveryHook>> = std::sync::Mutex::new(None);
+fn commit_before_recovery_candidates() {
+    let hook = RECOVERY_HOOK.lock().unwrap().take().unwrap();
+    hook();
+}
+
+#[test]
+fn media_recovery_snapshot_includes_every_selected_manifest_commit() {
+    let h = Harness::open();
+    let media = MediaService::open(&h.collection, h.clock.clone()).unwrap();
+    let mut stage = media.begin_staging().unwrap();
+    stage.add("racing.png", b"committed attachment").unwrap();
+    let collection = h.collection.clone();
+    *RECOVERY_HOOK.lock().unwrap() = Some(Box::new(move || {
+        meguri_model::faultpoint::arm(
+            "media.stage.before_publish",
+            meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other),
+        );
+        let committed = collection.run(OpSpec::named("racing_media", OpSource::UserNonUndoable), move |ctx| {
+            let id = ctx.scope().add_note(&note(&["<img src='racing.png'>"]))?;
+            ctx.commit_media(stage, &[id])
+        });
+        meguri_model::faultpoint::disarm("media.stage.before_publish");
+        assert!(matches!(committed, Err(EngineError::MediaCommitPending { .. })));
+    }));
+    meguri_model::faultpoint::arm(
+        "media.recover.before_candidates",
+        meguri_model::faultpoint::Fault::Callback(commit_before_recovery_candidates),
+    );
+    let recovered = media.recover();
+    meguri_model::faultpoint::disarm_all();
+    let report = recovered.unwrap();
+    assert_eq!(report.published, 1);
+    assert_eq!(report.trashed, 0);
+    assert_eq!(
+        fs::read(media.store().media_dir().join("racing.png")).unwrap(),
+        b"committed attachment"
+    );
+    assert_eq!(media.store().trash_summary().unwrap().entries, 0);
+}
+
 #[derive(Default)]
 struct FileObserver {
     root: std::sync::Mutex<std::path::PathBuf>,

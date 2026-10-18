@@ -312,6 +312,7 @@ impl MediaStore {
     }
     /// The caller checks each witness against rows in the open collection.
     pub fn recover(&self, mut matches: impl FnMut(&NoteReference) -> Result<bool>) -> Result<RecoveryReport> {
+        meguri_model::faultpoint!("media.recover.before_candidates")?;
         let operations = {
             let db = self.db()?;
             let mut active = self
