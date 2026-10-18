@@ -24,6 +24,7 @@ pub mod integrity;
 pub mod journal;
 pub mod leftovers;
 pub mod lockfile;
+pub mod media;
 pub mod open;
 pub mod paging;
 pub mod paths;

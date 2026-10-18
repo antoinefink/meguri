@@ -9,11 +9,11 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 ## Roles (clean room)
 
-- Every agent session has one role; read `docs/process/roles/<role>.md` first. Implementers and fixers work only in worktrees from `tools/mg worktree new` and never read `oracle/`, `refs/`, `local-data/` or any Anki source (R1955). Trailers and the similarity gate: `docs/process/provenance.md`.
+- Every agent session has one role; read `docs/process/roles/<role>.md` first. Implementers and fixers never read `oracle/`, `refs/`, `local-data/` or any Anki source (R1955). Trailers and the similarity gate: `docs/process/provenance.md`.
 
 ## Tooling
 
-- Integrate into `master` with `tools/mg merge`. Keep temporary role worktrees for units; push only `master` to origin, never force. `feat/meguri-v1` was retired on 2026-10-18.
+- Work directly on `master` in the main checkout; do not create branches or worktrees. Resume prepared work from existing worktrees without redoing it. Record each unit's starting commit, keep its review/fix log, and run `tools/mg gate --base <unit-start-commit>` before accepting it. Commit WIP with co-author attribution; push only `master`, never force. `tools/mg merge` is not required (Antoine, 2026-10-18).
 
 - Build, test and verify only through `tools/mg <job>` (`tools/mg --list`; contract in `tools/AGENTS.md`). Rust, oracle and sync-server work runs in Docker; Apple builds run on the host; simulators and Mac UI suites run in the macOS test VM.
 - Never perform the one-time user steps (`docs/process/one-time-setup.md`); `tools/mg doctor` lists the missing ones.

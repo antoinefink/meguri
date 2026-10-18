@@ -345,3 +345,21 @@ mg_core_deny() {
     mg_status fail
   fi
 }
+
+
+mg_job core-format docker:dev mg_core_format \
+  "Rewrite Rust source formatting with cargo fmt --all; core-lint verifies it"
+mg_core_format() {
+  if [ "$#" -ne 0 ]; then
+    mg_failure usage "core-format takes no arguments"
+    mg_status error
+    return 0
+  fi
+  if (cd core && cargo fmt --all); then
+    mg_message "core-format: Rust sources formatted"
+    mg_status pass
+  else
+    mg_failure rustfmt "cargo fmt failed; see log.txt"
+    mg_status fail
+  fi
+}

@@ -21,6 +21,7 @@ ryu.workspace = true
 serde.workspace = true
 # The write journal keeps a note's after-image as its SHA-256.
 sha2.workspace = true
+sha1.workspace = true
 # raw_value: the upgrade reads the legacy JSON columns member by member, as
 # exact text (specs/model/json-numbers.md N7).
 serde_json = { workspace = true, features = ["raw_value"] }

@@ -1,0 +1,467 @@
+use super::{MediaEntry, MediaError, MediaStore, Result, case_fold::*, journal_db};
+use crate::atomic_file::{AtomicFile, Purpose};
+use rusqlite::Connection;
+use sha1::{Digest, Sha1};
+use std::{
+    collections::BTreeSet,
+    fs::{self, Metadata, OpenOptions},
+    io::{Read, Write},
+    os::unix::{fs::MetadataExt, fs::OpenOptionsExt},
+    path::Path,
+    sync::atomic::Ordering,
+};
+
+pub(super) fn ensure_directory(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(m) if m.is_dir() && !m.file_type().is_symlink() => Ok(()),
+        Ok(_) => Err(MediaError::InvalidName),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(fs::create_dir(path)?),
+        Err(e) => Err(e.into()),
+    }
+}
+pub(super) fn probe_case_sensitivity(path: &Path) -> Result<bool> {
+    let probe = tempfile::Builder::new()
+        .prefix(".meguri-tmp-media-case-")
+        .tempfile_in(path)?;
+    let name = probe
+        .path()
+        .file_name()
+        .ok_or(MediaError::InvalidName)?
+        .to_string_lossy();
+    Ok(!path.join(name.to_uppercase()).exists())
+}
+pub(super) fn stamp(m: &Metadata) -> String {
+    format!("{}:{}", m.mtime(), m.mtime_nsec())
+}
+pub(super) fn regular(path: &Path) -> Result<Option<Metadata>> {
+    match fs::symlink_metadata(path) {
+        Ok(m) => Ok(m.is_file().then_some(m)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+pub(super) fn hash_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha1::digest(bytes))
+}
+pub(super) fn hash_file(path: &Path) -> Result<String> {
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?;
+    let mut hash = Sha1::new();
+    let mut bytes = [0_u8; 65_536];
+    loop {
+        let n = file.read(&mut bytes)?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&bytes[..n]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+fn same_stat(entry: &MediaEntry, m: &Metadata) -> bool {
+    entry.live
+        && entry.size == m.len()
+        && entry.mtime_secs == m.mtime()
+        && i64::from(entry.mtime_nanos) == m.mtime_nsec()
+}
+pub(super) fn live(db: &mut Connection, name: &str, hash: String, m: &Metadata, force_dirty: bool) -> Result<()> {
+    let old = journal_db::entry(db, name)?;
+    let syncable = (1..=104_857_600).contains(&m.len());
+    let changed = old
+        .as_ref()
+        .is_none_or(|o| o.sha1.as_ref() != Some(&hash) || o.syncable() != syncable || !o.live);
+    let dirty = old.as_ref().is_some_and(|o| o.dirty)
+        || (changed && (syncable || old.as_ref().is_some_and(MediaEntry::syncable)))
+        || (force_dirty && syncable);
+    let entry = MediaEntry {
+        name: name.into(),
+        sha1: Some(hash),
+        size: m.len(),
+        mtime_secs: m.mtime(),
+        mtime_nanos: m.mtime_nsec() as u32,
+        live: true,
+        dirty,
+        change_counter: 0,
+        pending_download: false,
+    };
+    if old
+        .as_ref()
+        .is_some_and(|o| same_stat(o, m) && o.sha1 == entry.sha1 && o.dirty == entry.dirty && !o.pending_download)
+    {
+        return Ok(());
+    }
+    journal_db::save(db, &entry)
+}
+pub(super) fn deleted(db: &mut Connection, name: &str) -> Result<()> {
+    let Some(mut entry) = journal_db::entry(db, name)? else {
+        return Ok(());
+    };
+    if !entry.live {
+        return Ok(());
+    }
+    entry.dirty |= entry.syncable();
+    entry.live = false;
+    entry.sha1 = None;
+    entry.size = 0;
+    entry.pending_download = false;
+    journal_db::save(db, &entry)
+}
+
+enum Publication {
+    Temporary(AtomicFile),
+    Existing(std::path::PathBuf),
+}
+impl Publication {
+    fn publish(self, destination: &Path) -> std::result::Result<(), crate::StorageError> {
+        match self {
+            Self::Temporary(file) => file.publish_new(|_| Ok(())),
+            Self::Existing(source) => crate::atomic_file::move_new(&source, destination),
+        }
+    }
+}
+
+impl MediaStore {
+    /// A matching folder marker performs no enumeration or hashing.
+    pub fn check_changes(&self) -> Result<()> {
+        let current = stamp(&fs::metadata(self.media_dir())?);
+        if journal_db::marker(&*self.db()?)?.as_deref() == Some(&current) {
+            return Ok(());
+        }
+        self.register_full(|_, _| true)
+    }
+    /// The callback cancels by returning false; completed records remain valid.
+    pub fn register_full(&self, mut progress: impl FnMut(usize, usize) -> bool) -> Result<()> {
+        let before = stamp(&fs::metadata(self.media_dir())?);
+        let cutoff = {
+            let db = self.db()?;
+            journal_db::set_marker(&db, None)?;
+            journal_db::counter(&db)?
+        };
+        self.inner.scans.fetch_add(1, Ordering::Relaxed);
+        let files = fs::read_dir(self.media_dir())?.collect::<std::io::Result<Vec<_>>>()?;
+        let total = files.len();
+        let mut found = BTreeSet::new();
+        let mut stable = true;
+        for (index, file) in files.into_iter().enumerate() {
+            if !progress(index, total) {
+                return Err(MediaError::Cancelled);
+            }
+            let Some(name) = file.file_name().to_str().and_then(disk_name) else {
+                continue;
+            };
+            if !normalized(&name) || ignored(&name) {
+                continue;
+            }
+            // The mutex yields between files, so adds can proceed during a long scan.
+            let mut db = self.db()?;
+            let Some(m) = regular(&file.path())? else {
+                continue;
+            };
+            found.insert(name.clone());
+            let old = journal_db::entry(&db, &name)?;
+            if old.as_ref().is_some_and(|o| same_stat(o, &m)) {
+                continue;
+            }
+            self.inner.hashes.fetch_add(1, Ordering::Relaxed);
+            let hash = hash_file(&file.path())?;
+            let Some(after) = regular(&file.path())? else {
+                stable = false;
+                continue;
+            };
+            if stamp(&after) != stamp(&m) || after.len() != m.len() {
+                stable = false;
+                continue;
+            }
+            live(&mut db, &name, hash, &after, false)?;
+        }
+        if !progress(total, total) {
+            return Err(MediaError::Cancelled);
+        }
+        let mut db = self.db()?;
+        for entry in journal_db::entries(&db)? {
+            if entry.live && entry.change_counter <= cutoff && !found.contains(&entry.name) {
+                deleted(&mut db, &entry.name)?;
+            }
+        }
+        let after = stamp(&fs::metadata(self.media_dir())?);
+        if stable && before == after {
+            journal_db::set_marker(&db, Some(&after))?;
+        }
+        Ok(())
+    }
+    pub fn lookup(&self, name: &str) -> Result<Option<String>> {
+        let name = meguri_text::normalize::nfc(name);
+        if !safe_component(&name) || ignored(&name) {
+            return Ok(None);
+        }
+        if regular(&self.media_dir().join(name.as_ref()))?.is_some() {
+            return Ok(Some(name.into_owned()));
+        }
+        let db = self.db()?;
+        let variants = journal_db::variants(&db, &name)?;
+        let key = case_key(&name);
+        Ok(variants
+            .iter()
+            .find(|e| e.name == key)
+            .or_else(|| variants.first())
+            .map(|e| e.name.clone()))
+    }
+    pub(super) fn candidates(&self, db: &mut Connection, name: &str) -> Result<Vec<(String, String)>> {
+        let mut files = journal_db::variants(db, name)?;
+        files.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut result = Vec::new();
+        for entry in files {
+            let path = self.media_dir().join(&entry.name);
+            let Some(m) = regular(&path)? else {
+                deleted(db, &entry.name)?;
+                continue;
+            };
+            let hash = if same_stat(&entry, &m) {
+                entry.sha1.unwrap_or_default()
+            } else {
+                self.inner.hashes.fetch_add(1, Ordering::Relaxed);
+                let hash = hash_file(&path)?;
+                live(db, &entry.name, hash.clone(), &m, false)?;
+                hash
+            };
+            result.push((entry.name, hash));
+        }
+        let mut q = db.prepare("SELECT name,sha1 FROM staged_files ORDER BY name")?;
+        for value in q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+            let (other, hash) = value?;
+            if case_key(&other) == case_key(name) {
+                result.push((other, hash));
+            }
+        }
+        Ok(result)
+    }
+    pub(super) fn choose(&self, db: &mut Connection, desired: &str, hash: &str) -> Result<(String, bool)> {
+        let name = meguri_text::media_name::safe_media_name(desired);
+        if name.is_empty() {
+            return Err(MediaError::InvalidName);
+        }
+        if ignored(&name) {
+            return Err(MediaError::IgnoredName);
+        }
+        let lower = lowercase_candidate(&name);
+        let mut variants = self.candidates(db, &name)?;
+        for value in self.candidates(db, &lower)? {
+            if !variants.contains(&value) {
+                variants.push(value);
+            }
+        }
+        let same = variants
+            .iter()
+            .filter(|(_, h)| h == hash)
+            .map(|(n, _)| n)
+            .min_by_key(|n| {
+                (
+                    if **n == name {
+                        0
+                    } else if **n == lower {
+                        1
+                    } else {
+                        2
+                    },
+                    n.as_bytes(),
+                )
+            });
+        if let Some(same) = same {
+            return Ok((same.clone(), false));
+        }
+        if !variants.iter().any(|(n, _)| case_key(n) == case_key(&lower)) {
+            return Ok((lower, true));
+        }
+        Ok((hash_name(&lower, hash), true))
+    }
+    pub(super) fn write_bytes(&self, destination: &Path, bytes: &[u8]) -> Result<()> {
+        let mut file = AtomicFile::new(destination, Purpose::Media)?;
+        file.file_mut().write_all(bytes)?;
+        file.publish_new(|_| Ok(())).map_err(MediaError::from)
+    }
+    fn install_locked(
+        &self,
+        db: &mut Connection,
+        name: &str,
+        bytes: &[u8],
+        replacements: &[(String, String)],
+    ) -> Result<()> {
+        let target = self.media_dir().join(name);
+        let marker = stamp(&fs::metadata(self.media_dir())?);
+        let mut file = AtomicFile::new(&target, Purpose::Media)?;
+        file.file_mut().write_all(bytes)?;
+        self.install_publication_locked(
+            db,
+            name,
+            hash_bytes(bytes),
+            Publication::Temporary(file),
+            replacements,
+            &marker,
+        )
+    }
+    pub(super) fn install_existing_locked(
+        &self,
+        db: &mut Connection,
+        name: &str,
+        source: &Path,
+        hash: &str,
+        replacements: &[(String, String)],
+    ) -> Result<()> {
+        let marker = stamp(&fs::metadata(self.media_dir())?);
+        self.install_publication_locked(
+            db,
+            name,
+            hash.to_owned(),
+            Publication::Existing(source.to_owned()),
+            replacements,
+            &marker,
+        )
+    }
+    fn install_publication_locked(
+        &self,
+        db: &mut Connection,
+        name: &str,
+        hash: String,
+        publication: Publication,
+        replacements: &[(String, String)],
+        marker: &str,
+    ) -> Result<()> {
+        let target = self.media_dir().join(name);
+        db.execute_batch("SAVEPOINT media_install")?;
+        let outcome = (|| {
+            let mut moved = Vec::new();
+            let result = (|| {
+                for (old, old_hash) in replacements {
+                    let Some(m) = regular(&self.media_dir().join(old))? else {
+                        continue;
+                    };
+                    let entry = self.trash_one_locked(db, old, old_hash, &m)?;
+                    moved.push((old.clone(), entry));
+                }
+                publication.publish(&target)?;
+                live(db, name, hash.clone(), &fs::symlink_metadata(&target)?, true)?;
+                self.advance_marker(db, &marker)?;
+                Ok(())
+            })();
+            match result {
+                Ok(()) => {
+                    db.execute_batch("RELEASE media_install")?;
+                    Ok(())
+                }
+                Err(error) => {
+                    let published = !matches!(error, MediaError::NameTaken)
+                        && regular(&target)?.is_some()
+                        && hash_file(&target)? == hash;
+                    if published {
+                        // A rename can succeed before directory sync fails. Keep
+                        // both new bytes and the old version's trash metadata.
+                        let recorded = live(db, name, hash, &fs::symlink_metadata(&target)?, true);
+                        db.execute_batch("RELEASE media_install")?;
+                        journal_db::set_marker(db, None)?;
+                        recorded?;
+                    } else {
+                        let mut restored = true;
+                        for (old, entry) in moved.into_iter().rev() {
+                            if self.restore_original_locked(db, &entry, &old).is_err() {
+                                restored = false;
+                            }
+                        }
+                        if restored {
+                            db.execute_batch("ROLLBACK TO media_install; RELEASE media_install")?;
+                        } else {
+                            db.execute_batch("RELEASE media_install")?;
+                            journal_db::set_marker(db, None)?;
+                            return Err(MediaError::Io(
+                                "media publication failed; prior bytes remain in the trash".into(),
+                            ));
+                        }
+                    }
+                    Err(error)
+                }
+            }
+        })();
+        // No error path may leave a journal transaction open for later ops.
+        if !db.is_autocommit() {
+            db.execute_batch("ROLLBACK")?;
+        }
+        outcome
+    }
+    pub fn add(&self, desired: &str, bytes: &[u8]) -> Result<String> {
+        self.check_changes()?;
+        let hash = hash_bytes(bytes);
+        let hashed = hash_name(
+            &lowercase_candidate(&meguri_text::media_name::safe_media_name(desired)),
+            &hash,
+        );
+        // M9: decide again after registration, then use the hash name.
+        for attempt in 0..3 {
+            let result = {
+                let mut db = self.db()?;
+                let (name, write) = if attempt == 2 {
+                    (hashed.clone(), true)
+                } else {
+                    self.choose(&mut db, desired, &hash)?
+                };
+                if !write && regular(&self.media_dir().join(&name))?.is_some() {
+                    return Ok(name);
+                }
+                let mut replacements = Vec::new();
+                if name == hashed {
+                    let mut variants = self.candidates(&mut db, &name)?;
+                    if regular(&self.media_dir().join(&name))?.is_some() && !variants.iter().any(|(n, _)| n == &name) {
+                        variants.push((name.clone(), hash_file(&self.media_dir().join(&name))?));
+                    }
+                    if let Some((found, _)) = variants
+                        .iter()
+                        .filter(|(_, h)| h == &hash)
+                        .min_by_key(|(n, _)| (n != &name, n.as_bytes()))
+                    {
+                        if regular(&self.media_dir().join(found))?.is_some() {
+                            return Ok(found.clone());
+                        }
+                    }
+                    replacements = variants.into_iter().filter(|(_, h)| h != &hash).collect();
+                }
+                self.install_locked(&mut db, &name, bytes, &replacements).map(|_| name)
+            };
+            match result {
+                Err(MediaError::NameTaken) if attempt < 2 => self.register_full(|_, _| true)?,
+                other => return other,
+            }
+        }
+        Err(MediaError::NameTaken)
+    }
+    pub fn ensure_static_media(&self, name: &str, bytes: &[u8]) -> Result<String> {
+        if !normalized(name) {
+            return Err(MediaError::InvalidName);
+        }
+        if ignored(name) {
+            return Err(MediaError::IgnoredName);
+        }
+        self.check_changes()?;
+        let mut db = self.db()?;
+        let hash = hash_bytes(bytes);
+        let candidates = self.candidates(&mut db, name)?;
+        if let Some((found, _)) = candidates.iter().find(|(_, h)| h == &hash) {
+            if regular(&self.media_dir().join(found))?.is_some() {
+                return Ok(found.clone());
+            }
+        }
+        if candidates
+            .iter()
+            .any(|(n, h)| h != &hash && !self.media_dir().join(n).exists())
+        {
+            return Err(MediaError::NameTaken);
+        }
+        let replacements = candidates.into_iter().filter(|(_, h)| h != &hash).collect::<Vec<_>>();
+        self.install_locked(&mut db, name, bytes, &replacements)?;
+        Ok(name.into())
+    }
+    pub(super) fn advance_marker(&self, db: &Connection, before: &str) -> Result<()> {
+        if journal_db::marker(db)?.as_deref() == Some(before) {
+            journal_db::set_marker(db, Some(&stamp(&fs::metadata(self.media_dir())?)))?;
+        }
+        Ok(())
+    }
+}

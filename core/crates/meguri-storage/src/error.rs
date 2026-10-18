@@ -111,6 +111,8 @@ impl std::error::Error for OpenError {}
 /// Errors of an open collection's connections and of writes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StorageError {
+    /// A no-replace file publication found an existing destination.
+    DestinationExists,
     InsufficientSpace {
         required: u64,
         available: u64,
@@ -214,6 +216,7 @@ impl fmt::Display for StorageError {
             StorageError::Sqlite {
                 extended_code, message, ..
             } => write!(f, "SQLite error {extended_code}: {message}"),
+            StorageError::DestinationExists => f.write_str("destination already exists"),
             StorageError::Io { detail } => write!(f, "I/O error: {detail}"),
             StorageError::Derived { detail } => write!(f, "derived store: {detail}"),
         }

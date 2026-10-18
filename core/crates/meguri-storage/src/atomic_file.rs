@@ -75,7 +75,13 @@ impl AtomicFile {
         } else {
             self.temp.persist_noclobber(&self.destination)
         }
-        .map_err(|e| StorageError::from(e.error))?;
+        .map_err(|e| {
+            if e.error.kind() == std::io::ErrorKind::AlreadyExists {
+                StorageError::DestinationExists
+            } else {
+                StorageError::from(e.error)
+            }
+        })?;
         meguri_model::faultpoint!("storage.atomic.after_rename")?;
         sync_directory(parent(&self.destination))
     }
@@ -100,4 +106,47 @@ pub(crate) fn full_sync(file: &File) -> Result<(), StorageError> {
 }
 pub fn sync_directory(path: &Path) -> Result<(), StorageError> {
     fs::File::open(path)?.sync_all().map_err(Into::into)
+}
+
+/// Move an already synchronized file without replacing another directory entry.
+pub fn move_new(source: &Path, destination: &Path) -> Result<(), StorageError> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let from = CString::new(source.as_os_str().as_bytes()).map_err(|e| StorageError::Io { detail: e.to_string() })?;
+    let to =
+        CString::new(destination.as_os_str().as_bytes()).map_err(|e| StorageError::Io { detail: e.to_string() })?;
+    // SAFETY: both paths are NUL-terminated and live throughout the call.
+    #[cfg(target_os = "linux")]
+    let result = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    #[cfg(target_vendor = "apple")]
+    let result = unsafe {
+        libc::renameatx_np(
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_EXCL,
+        )
+    };
+    if result != 0 {
+        let error = std::io::Error::last_os_error();
+        return Err(if error.kind() == std::io::ErrorKind::AlreadyExists {
+            StorageError::DestinationExists
+        } else {
+            error.into()
+        });
+    }
+    sync_directory(parent(destination))?;
+    if parent(source) != parent(destination) {
+        sync_directory(parent(source))?;
+    }
+    Ok(())
 }

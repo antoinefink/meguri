@@ -1,6 +1,16 @@
 # Merging a unit
 
-`tools/mg merge <branch>` is the only path to the integration branch: the branch checked out in the main checkout (`master`). The origin remote uses `master` as its default branch. This job, rather than a push hook, enforces the receipt (R1951). The orchestrator runs it in the main checkout. A green receipt merges without human review (R1991).
+## Current workflow: direct commits on master
+
+Antoine changed the workflow on 2026-10-18. Work directly on `master` in the main checkout; create no branches or worktrees. Inspect an existing unit's status and log before bringing its prepared work onto `master`. Preserve its spec and implementation history and any uncommitted work.
+
+Record the unit's starting commit before bringing in its work. Keep the spec, implementation, review and fix steps, the clean-room restrictions, and the review log. Commit WIP freely with co-author attribution. Before accepting a completed unit, commit it with its `Unit:` trailer and run `tools/mg gate --base <unit-start-commit>`. Fix failures before starting the next unit. Only push `master`, without force. `tools/mg merge` is not required.
+
+The branch-merge procedure below remains available for historical receipts and existing tooling. Queued runs remain incomplete verification: run `tools/mg catch-up` between units and require passing results at milestone gates.
+
+## Earlier workflow: role branches
+
+`tools/mg merge <branch>` checks and fast-forwards the integration branch in the main checkout (`master`). The origin remote uses `master` as its default branch. The orchestrator runs it in the main checkout. A green receipt merges without human review (R1991).
 
 ## What it does
 
