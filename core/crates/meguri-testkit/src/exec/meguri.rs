@@ -635,43 +635,6 @@ impl Default for MeguriExecutor {
     }
 }
 
-#[cfg(test)]
-mod host_tests {
-    use super::*;
-    use meguri_engine::UndoScope;
-
-    #[test]
-    fn default_executor_refuses_unavailable_backup_without_mutation_or_history_events() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("refusal.yaml");
-        std::fs::write(&path, "id: host/refusal\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsetup:\n  decks: [Protected]\n  notes: [{notetype: Basic, deck: Protected, fields: [front, back]}]\nsteps:\n  - delete_decks: {decks: [Protected]}\n").unwrap();
-        let loaded = crate::scenario::load(&path).unwrap();
-        let mut executor = MeguriExecutor::new();
-        executor.registry.record_changes();
-        let mut session = executor.session(&loaded, None).unwrap();
-        executor.new_collection(&mut session).unwrap();
-        executor.run_setup(&mut session).unwrap();
-        let collection = session.engine_collection().unwrap();
-        let data = |session: &Session<'_>| {
-            let reader = session.storage.collection().unwrap().reader().unwrap();
-            ["col", "decks", "notes", "cards", "graves"].map(|table| {
-                reader
-                    .execute_raw(&format!("SELECT * FROM {table} ORDER BY 1"), &[])
-                    .unwrap()
-            })
-        };
-        let before = data(&session);
-        let undo = collection.peek_undo(UndoScope::Global).unwrap();
-        session.storage.take_changes();
-        let error = executor.step(&mut session, &loaded.scenario.steps[0]).unwrap_err();
-        assert_eq!(error.kind, "core_error");
-        assert_eq!(data(&session), before);
-        assert_eq!(collection.peek_undo(UndoScope::Global).unwrap(), undo);
-        assert!(session.storage.take_changes().is_empty());
-        assert_eq!(session.storage.backup_calls(), 0);
-    }
-}
-
 impl Executor for MeguriExecutor {
     fn name(&self) -> &str {
         "meguri"
@@ -768,5 +731,42 @@ fn merge(out: &mut Map<String, Value>, kind: &str, value: Value) -> Result<(), E
             Ok(())
         }
         _ => Err(twice()),
+    }
+}
+
+#[cfg(test)]
+mod host_tests {
+    use super::*;
+    use meguri_engine::UndoScope;
+
+    #[test]
+    fn default_executor_refuses_unavailable_backup_without_mutation_or_history_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("refusal.yaml");
+        std::fs::write(&path, "id: host/refusal\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsetup:\n  decks: [Protected]\n  notes: [{notetype: Basic, deck: Protected, fields: [front, back]}]\nsteps:\n  - delete_decks: {decks: [Protected]}\n").unwrap();
+        let loaded = crate::scenario::load(&path).unwrap();
+        let mut executor = MeguriExecutor::new();
+        executor.registry.record_changes();
+        let mut session = executor.session(&loaded, None).unwrap();
+        executor.new_collection(&mut session).unwrap();
+        executor.run_setup(&mut session).unwrap();
+        let collection = session.engine_collection().unwrap();
+        let data = |session: &Session<'_>| {
+            let reader = session.storage.collection().unwrap().reader().unwrap();
+            ["col", "decks", "notes", "cards", "graves"].map(|table| {
+                reader
+                    .execute_raw(&format!("SELECT * FROM {table} ORDER BY 1"), &[])
+                    .unwrap()
+            })
+        };
+        let before = data(&session);
+        let undo = collection.peek_undo(UndoScope::Global).unwrap();
+        session.storage.take_changes();
+        let error = executor.step(&mut session, &loaded.scenario.steps[0]).unwrap_err();
+        assert_eq!(error.kind, "core_error");
+        assert_eq!(data(&session), before);
+        assert_eq!(collection.peek_undo(UndoScope::Global).unwrap(), undo);
+        assert!(session.storage.take_changes().is_empty());
+        assert_eq!(session.storage.backup_calls(), 0);
     }
 }
