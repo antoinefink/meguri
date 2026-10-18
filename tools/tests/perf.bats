@@ -178,6 +178,9 @@ vm_stub() { printf '#!/bin/bash\n%s\n' "$2" >"$FAKE_VM_BIN/$1" && chmod +x "$FAK
 # system's prefix).
 vm_stubs() {
   vm_stub sudo 'exec "$@"'
+  # The process check jobs make before they start work there (U19c).
+  ln -s "$REPO_ROOT/tools/tests/mac_vm_fake_procs.sh" "$FAKE_VM_BIN/sysctl"
+  ln -s "$REPO_ROOT/tools/tests/mac_vm_fake_procs.sh" "$FAKE_VM_BIN/ps"
   vm_stub stat "if [ \"\$*\" = '-f %Su /dev/console' ]; then echo meguri; exit 0; fi
 exec $(command -v stat) \"\$@\""
   cat >"$FAKE_VM_BIN/pgrep" <<'EOF'
@@ -422,6 +425,36 @@ assert_host_untouched() {
   [ "$(jq -r '"\(.runner.kind) \(.runner.model) \(.runner.os_build)"' "$out")" = "simulator iPhone 17 Pro 24A434" ]
   # The device went back to the pool, and the VM's lease is free.
   [ ! -e "$(vm_lease "$u")" ]
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  assert_host_untouched
+}
+
+# bats test_tags=gate
+@test "perf-ui on a simulator is queued, not an error, while the test VM does not answer or stays near its process limit (U19c: the merges of U28, U32 and U63)" {
+  use_vm
+  touch "$FAKE_VM_DIR/ssh-down"
+  MEGURI_MAC_VM_BOOT_SECONDS=2 mg perf-ui --platform iphone
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part)"')" = "mac-vm the simulator runs" ]
+  [[ "$(field '.details.queued_parts[0].reason')" == *"meguri-mac did not answer over SSH in a logged-in session within 2 s"* ]]
+  [ "$(field '.user_steps[] | select(.id == "mac-vm") | .state')" = missing ]
+  not_called '^fake build'
+  [ -z "$(field '.artifacts[] | select(.kind == "perf-result") | .path')" ]
+
+  # Up, but its user near the process limit: built, waited, then queued
+  # before anything runs there.
+  rm "$FAKE_VM_DIR/ssh-down"
+  : >"$STUB_LOG"
+  FAKE_VM_PROCS=2850 MEGURI_MAC_VM_PROCS_POLL_SECONDS=1 MEGURI_MAC_VM_PROCS_WAIT_SECONDS=2 mg perf-ui --platform iphone
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [[ "$(field '.details.queued_parts[0].reason')" == "meguri-mac is near its process limit (2850 of 2900 processes of its user, 2900 of 4000 in all): 50 free, a job needs 400, still after "* ]]
+  called '^fake build ios-sim Profile Performance Meguri-Profile$'
+  not_called '^vm-xcodebuild '
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
   assert_host_untouched
 }

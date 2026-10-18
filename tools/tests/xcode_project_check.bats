@@ -18,18 +18,22 @@ setup() {
   export STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
   : >"$STUB_LOG"
   # The pool leases POOL-<kind>; with STUB_POOL_BUSY=<kind>, every device of
-  # that kind stays leased (exit 3, as sim-pool.sh does).
+  # that kind stays leased (exit 3, as sim-pool.sh does); with
+  # STUB_POOL_UNREACHABLE=<kind>, the test VM cannot be reached when it
+  # leases one (exit 5, queued).
   cat >"$SB/tools/scripts/sim-pool.sh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "sim-pool.sh $*" >>"$STUB_LOG"
 if [ "$1" = acquire ]; then
   [ "$2" != "${STUB_POOL_BUSY:-}" ] || { echo "sim-pool: every $2 device stayed leased" >&2 && exit 3; }
+  [ "$2" != "${STUB_POOL_UNREACHABLE:-}" ] ||
+    { echo "sim-pool: queued: meguri-mac did not answer over SSH in a logged-in session within 240 s (last: exec request failed on channel 0)" >&2 && exit 5; }
   echo "POOL-$2"
 fi
 exit 0
 EOF
   chmod +x "$SB/tools/scripts/sim-pool.sh"
-  unset STUB_POOL_BUSY
+  unset STUB_POOL_BUSY STUB_POOL_UNREACHABLE
   # Every call is logged. Builds fail (pass with STUB_BUILD_OK=1), so no
   # product check runs; builds for testing write the plan's simulator
   # xctestrun; test runs pass. A launched app stays up, except on the route
@@ -169,6 +173,8 @@ check_project() {
 called() { grep -qE "$1" "$STUB_LOG" || { echo "no call matches: $1" && cat "$STUB_LOG" && return 1; }; }
 not_called() { ! grep -E "$1" "$STUB_LOG"; }
 tap_line() { grep -qxE "$1" <<<"$output" || { echo "no TAP line matches: $1" && echo "$output" && return 1; }; }
+# no_vm_failure: no lease or test run failed (the stubbed builds do).
+no_vm_failure() { ! grep -E '^not ok [0-9]+ (lease|.*-app-hosted|.*TestHooksTests|.*DriveScriptTests)' <<<"$output" || { echo "$output" && return 1; }; }
 
 @test "xcode-check leases its simulators from the pool and releases them at exit" {
   check_project
@@ -370,17 +376,44 @@ SWIFT
   called '^vm-pkill -9 -f '
 
   # SSH stops answering as well: the run cannot be stopped, and no other run
-  # starts in the VM.
+  # starts in the VM. The VM cannot be reached: those runs are queued (U19c).
   rm -f "$FAKE_VM_DIR/meguri-mac/ssh-dropped"
   : >"$STUB_LOG"
   FAKE_VM_SSH_DROP=down check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
-  [ "$status" -ne 0 ]
+  no_vm_failure
   [ "$(grep -c '^vm-xcodebuild ' "$STUB_LOG")" = 1 ]
-  tap_line 'not ok [0-9]+ iphone-Debug-TestHooksTests: not run'
-  tap_line '# the run iphone-app-hosted lost its SSH session and may still be running in meguri-mac \(the VM did not answer .*'
-  tap_line 'not ok [0-9]+ ipad-Debug-TestHooksTests: not run'
+  tap_line 'ok [0-9]+ iphone-app-hosted # SKIP queued: the SSH session to meguri-mac ended before xcodebuild did, and meguri-mac did not answer after it \(the VM did not answer .*\) \(user step mac-vm\)'
+  tap_line 'ok [0-9]+ iphone-Debug-TestHooksTests # SKIP queued: not run: the run iphone-app-hosted lost its SSH session and may still be running in meguri-mac \(the VM did not answer .*'
+  tap_line 'ok [0-9]+ ipad-Debug-TestHooksTests # SKIP queued: not run: .*'
+  [ "$(cut -f1 "$BATS_TEST_TMPDIR/work/vm-queued.tsv" | head -n 3 | tr '\n' ' ')" = "iphone-app-hosted iphone-Debug-TestHooksTests iphone-Release-TestHooksTests " ]
   not_called '^xcodebuild build-for-testing .* -scheme Meguri-Profile '
   vm_tests_running
+}
+
+# bats test_tags=gate
+@test "a VM that cannot be reached during the devices phase queues the leases and runs it keeps from happening, never a failure (U19c)" {
+  fake_vm
+  add_test_inputs
+  # The iPad's lease: the pool's VM did not answer.
+  STUB_POOL_UNREACHABLE=ipad check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  no_vm_failure
+  tap_line 'ok [0-9]+ lease an iPad simulator from the pool # SKIP queued: meguri-mac did not answer over SSH in a logged-in session within 240 s \(last: exec request failed on channel 0\) \(user step mac-vm\)'
+  tap_line 'ok [0-9]+ iphone-Debug-TestHooksTests: Passed .*'
+  [ "$(cat "$BATS_TEST_TMPDIR/work/vm-queued.tsv")" = "lease an iPad simulator from the pool$(printf '\t')meguri-mac did not answer over SSH in a logged-in session within 240 s (last: exec request failed on channel 0)" ]
+
+  # The VM refuses one run's session: that run is queued, the others run.
+  FAKE_VM_SSH_REFUSE='xcodebuild test-without-building .*Meguri-Profile_Performance' check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  no_vm_failure
+  tap_line 'ok [0-9]+ iphone-Profile-TestHooksTests # SKIP queued: meguri-mac refused the run.s SSH session \(ssh exit 255: exec request failed on channel 0\) \(user step mac-vm\)'
+  tap_line 'ok [0-9]+ iphone-Debug-DriveScriptTests: Passed .*'
+  [ "$(cut -f1 "$BATS_TEST_TMPDIR/work/vm-queued.tsv")" = iphone-Profile-TestHooksTests ]
+
+  # Its shell cannot fork the copy of the products: queued too.
+  : >"$STUB_LOG"
+  FAKE_VM_FORK_FAIL="DerivedData-tests/Build/Products' && mkdir -p" check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  no_vm_failure
+  tap_line 'ok [0-9]+ iphone-app-hosted # SKIP queued: copying .*/DerivedData-tests/Build/Products into the VM meguri-mac failed \(tar and ssh exit codes: [0-9]+ 1: zsh:2: fork failed: resource temporarily unavailable\); see log.txt \(user step mac-vm\)'
+  not_called '^vm-xcodebuild '
 }
 
 @test "without the test VM, xcode-check builds for the simulator but leases and tests none" {

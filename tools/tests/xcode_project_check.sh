@@ -38,7 +38,13 @@
 # it is stopped there before the next run (mvl_stop_tests), and when it
 # cannot be, no further run starts there. --no-sims (no VM: queued) builds
 # the same and leases and tests no simulator. Without either, simulators are
-# this Mac's (MEGURI_SIM_ALLOW_HOST=1).
+# this Mac's (MEGURI_SIM_ALLOW_HOST=1). A VM that cannot be reached during
+# the devices phase (U19c: sim-pool.sh exit 5, an SSH call that fails as ssh
+# or whose command cannot start or fork there, mvl_unreachable) is no
+# failure: each lease or run it kept from happening is a skipped test
+# "queued: <reason> (user step mac-vm)" and a line "<name>\t<reason>" in
+# <work dir>/vm-queued.tsv, which tools/mg xcode-check records as queued
+# parts.
 
 set -u
 
@@ -154,6 +160,15 @@ quit_running() {
   kill -9 $(running "$1") 2>/dev/null
 }
 
+# The leases and runs a VM that could not be reached kept from happening.
+VM_QUEUED="$WORK/vm-queued.tsv"
+[ "$PHASE" = builds ] || rm -f "$VM_QUEUED"
+# vm_queued <name> <reason>: a skipped test, listed for tools/mg xcode-check.
+vm_queued() {
+  printf '%s\t%s\n' "$1" "$2" >>"$VM_QUEUED"
+  skip "$1" "queued: $2 (user step mac-vm)"
+}
+
 LEASED=()
 cleanup() {
   local udid
@@ -178,6 +193,12 @@ lease() {
   if [ "$rc" -eq 0 ] && [ -n "$LEASE" ]; then
     LEASED+=("$LEASE")
     return 0
+  fi
+  if [ "$rc" -eq 5 ]; then
+    vm_queued "lease an $2 simulator from the pool" \
+      "$(sed -n 's/^sim-pool: queued: //p' "$log" | tail -n 1 | grep . || echo "the test VM could not run the pool; log: $log")"
+    LEASE=""
+    return 1
   fi
   not_ok "lease an $2 simulator from the pool" "$(tail -n 1 "$log")" "sim-pool.sh acquire $1 exit $rc; log: $log"
   LEASE=""
@@ -515,8 +536,12 @@ VM_MARK="mg-xcode-check: remote exit"
 VM_INPUTS="app/Snapshots app/Fixtures tools/drive-scripts"
 VM_INPUTS_COPIED=""
 # Set (to the reason) when a run whose SSH session was lost could not be
-# stopped in the VM: no further run starts there.
+# stopped in the VM: no further run starts there. VM_LOST_UNREACHABLE: it
+# could not be stopped because the VM did not answer (the runs left are
+# queued). VM_QUEUE_REASON: why test_in_vm returned 72.
 VM_LOST=""
+VM_LOST_UNREACHABLE=""
+VM_QUEUE_REASON=""
 
 # xctestrun_for <scheme> <plan> <config>: the newest simulator xctestrun of
 # the scheme's plan whose test root is the configuration's.
@@ -535,13 +560,19 @@ xctestrun_for() {
 # run in the test VM: built for testing here, the products copied to the
 # same path in the VM, test-without-building there, the result bundle copied
 # back. Returns xcodebuild's exit code, 70 when the run could not happen (the
-# reason is in <log>), or 71 when it did not start because a lost run may
-# still be going on in the VM (VM_LOST).
+# reason is in <log>), 71 when it did not start because a lost run may
+# still be going on in the VM (VM_LOST), or 72 when the VM could not be
+# reached (VM_QUEUE_REASON; U19c).
 test_in_vm() {
-  local name="$1" scheme="$2" plan="$3" config="$4" dest="$5" result="$WORK/$1.xcresult" log="$LOGS/$1.log" xctestrun code p inputs=()
+  local name="$1" scheme="$2" plan="$3" config="$4" dest="$5" result="$WORK/$1.xcresult" log="$LOGS/$1.log" xctestrun code p inputs=() rc
   shift 5
+  VM_QUEUE_REASON=""
   if [ -n "$VM_LOST" ]; then
     echo "xcode_project_check: not run: $VM_LOST" >"$log"
+    if [ -n "$VM_LOST_UNREACHABLE" ]; then
+      VM_QUEUE_REASON="not run: $VM_LOST"
+      return 72
+    fi
     return 71
   fi
   if ! xcodebuild build-for-testing -project "$PROJECT" -scheme "$scheme" -testPlan "$plan" -configuration "$config" \
@@ -551,17 +582,24 @@ test_in_vm() {
   fi
   xctestrun="$(xctestrun_for "$scheme" "$plan" "$config")"
   [ -n "$xctestrun" ] || { echo "xcode_project_check: no $scheme $plan xctestrun for $config in $DD_TESTS/Build/Products" >>"$log" && return 70; }
-  mvl_copy_in "$VM_SSH" "$VM_NAME" "$WORK" "$DD_TESTS/Build/Products" 2>>"$log" ||
-    { echo "xcode_project_check: $MVL_REASON" >>"$log" && return 70; }
+  if ! mvl_copy_in "$VM_SSH" "$VM_NAME" "$WORK" "$DD_TESTS/Build/Products" 2>>"$log"; then
+    echo "xcode_project_check: $MVL_REASON" >>"$log"
+    [ -z "$MVL_UNREACHABLE" ] || { VM_QUEUE_REASON="$MVL_REASON" && return 72; }
+    return 70
+  fi
   if [ -z "$VM_INPUTS_COPIED" ]; then
     for p in $VM_INPUTS; do inputs[${#inputs[@]}]="$REPO/$p"; done
-    mvl_copy_in "$VM_SSH" "$VM_NAME" "$REPO" "${inputs[@]}" 2>>"$log" ||
-      { echo "xcode_project_check: $MVL_REASON" >>"$log" && return 70; }
+    if ! mvl_copy_in "$VM_SSH" "$VM_NAME" "$REPO" "${inputs[@]}" 2>>"$log"; then
+      echo "xcode_project_check: $MVL_REASON" >>"$log"
+      [ -z "$MVL_UNREACHABLE" ] || { VM_QUEUE_REASON="$MVL_REASON" && return 72; }
+      return 70
+    fi
     VM_INPUTS_COPIED=1
   fi
   "$VM_SSH" "{ mkdir -p $(mvl_q "$WORK") && rm -rf $(mvl_q "$result") && xcodebuild test-without-building -xctestrun $(mvl_q "$xctestrun") \
     -destination $(mvl_q "$dest") -resultBundlePath $(mvl_q "$result") -collect-test-diagnostics never ${1+$(mvl_q "$@")}; };
     rc=\$?; echo \"$VM_MARK \$rc\"; exit \$rc" </dev/null >>"$log" 2>&1
+  rc=$?
   code="$(sed -n "s/^$VM_MARK \([0-9][0-9]*\)\$/\1/p" "$log" | tail -n 1)"
   if [ -z "$code" ]; then
     echo "xcode_project_check: the SSH session to $VM_NAME ended before xcodebuild did" >>"$log"
@@ -570,13 +608,33 @@ test_in_vm() {
     # it uses.
     if mvl_stop_tests "$VM_SSH"; then
       echo "xcode_project_check: $([ -n "$MVL_STOPPED" ] && echo "stopped that run in $VM_NAME" || echo "that run had already ended in $VM_NAME")" >>"$log"
+      # A session the VM refused ran nothing: queued, not an error.
+      if mvl_unreachable "$rc" "$(cat "$log")" && mvl_refused "$(cat "$log")"; then
+        VM_QUEUE_REASON="$VM_NAME refused the run's SSH session (ssh exit $rc$(mvl_last "$log"))"
+        return 72
+      fi
     else
       VM_LOST="the run $name lost its SSH session and may still be running in $VM_NAME ($MVL_REASON); the next job that takes the VM stops it first"
       echo "xcode_project_check: $VM_LOST" >>"$log"
+      if [ -n "$MVL_UNREACHABLE" ]; then
+        VM_LOST_UNREACHABLE=1
+        VM_QUEUE_REASON="the SSH session to $VM_NAME ended before xcodebuild did, and $VM_NAME did not answer after it ($MVL_REASON)"
+        return 72
+      fi
     fi
     return 70
   fi
   if ! mvl_copy_out "$VM_SSH" "$VM_NAME" "$result"; then
+    if [ -n "$MVL_UNREACHABLE" ]; then
+      echo "xcode_project_check: $MVL_REASON" >>"$log"
+      VM_QUEUE_REASON="$MVL_REASON"
+      return 72
+    fi
+    # A run that failed before testing because nothing could fork there.
+    if [ "$code" != 0 ] && mvl_refused "$(cat "$log")"; then
+      VM_QUEUE_REASON="the run could not start processes in $VM_NAME (exit $code$(mvl_last "$log"))"
+      return 72
+    fi
     [ "$code" != 0 ] || { echo "xcode_project_check: $MVL_REASON" >>"$log" && return 70; }
   fi
   "$VM_SSH" "rm -rf $(mvl_q "$result")" </dev/null >/dev/null 2>&1
@@ -603,6 +661,10 @@ run_tests() {
       ;;
   esac
   local rc=$? summary
+  if [ "$rc" -eq 72 ] && [ -n "$VM_QUEUE_REASON" ]; then
+    vm_queued "$name" "$VM_QUEUE_REASON"
+    return 0
+  fi
   if [ "$rc" -eq 71 ] && [ -n "$VM_LOST" ]; then
     not_ok "$name: not run" "$VM_LOST"
     return 0

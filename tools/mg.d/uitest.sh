@@ -43,7 +43,7 @@ mg_ui_test() {
     since="$(mg_app_log_now)"
     mg_app_xcodebuild_test "$MG_RUN_DIR/mac" mac "platform=macOS,arch=arm64" Debug "${only[@]}"
     result=$?
-    ! mg_app_mac_input_refused "$since" || result=2
+    [ "$result" -gt 1 ] || ! mg_app_mac_input_refused "$since" || result=2
     mg_ui_test__report "$MG_RUN_DIR/mac" "$result"
     return 0
   fi
@@ -67,10 +67,16 @@ mg_ui_test() {
   mg_ui_test__report "$MG_RUN_DIR/$platform" "$result"
 }
 
-# mg_ui_test__report <prefix> <test result 0|1|2>: counts and failing tests
-# from the result bundle, then the status.
+# mg_ui_test__report <prefix> <test result 0|1|2|4>: counts and failing tests
+# from the result bundle, then the status. 4: the test VM could not be
+# reached (queued, mac-vm).
 mg_ui_test__report() {
   local prefix="$1" result="$2" summary f
+  if [ "$result" -eq 4 ]; then
+    mg_status pass
+    mg_queued_settle
+    return 0
+  fi
   summary="$(xcrun xcresulttool get test-results summary --path "$prefix.xcresult" 2>/dev/null |
     jq -c '{passed: .passedTests, failed: .failedTests, skipped: .skippedTests}')" || summary=""
   if [ -n "$summary" ]; then

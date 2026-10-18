@@ -97,7 +97,9 @@ mg_app_input_digest() {
 # Mac runs go where mg_mac_ui_begin sent them (MG_MAC_RUNNER), simulator runs
 # where mg_sim_begin did (MG_SIM_RUNNER): to the test VM (mac-vm.sh) or this
 # Mac. Returns 0 pass, 1 test failures, 2 could not run (records a user step
-# when macOS has not allowed UI automation).
+# when macOS has not allowed UI automation), 4 queued: the test VM could not
+# be reached (mg_vm_xcodebuild_test recorded the queued part, user step
+# mac-vm).
 mg_app_xcodebuild_test() {
   local prefix="$1" platform="$2" dest="$3" config="$4" rc summary sdk=""
   shift 4
@@ -112,6 +114,7 @@ mg_app_xcodebuild_test() {
     mg_vm_xcodebuild_test "$prefix" "${MG_APP_TEST_PLAN:-UI}" "$sdk" "$dest" "$config" "$@"
     rc=$?
     mg_artifact log "$prefix.log" "xcodebuild test ($platform, in the test VM)"
+    [ -z "$MG_MAC_VM_RUN_QUEUED" ] || return 4
     [ -z "$MG_MAC_VM_RUN_ERROR" ] || return 2
   else
     # No diagnostics on failure: they take up to 10 minutes (simctl diagnose)
@@ -263,10 +266,11 @@ mg_app_mac_input_record() {
 # mg_sim_lease <kind> <release|keep>: leases a pool device for this job (in
 # the test VM, sim-pool.sh); sets MG_SIM_UDID. With release, the device goes
 # back to the pool (reset) when the job ends. On failure records it and
-# returns 1.
+# returns 1; when the test VM could not be reached (sim-pool.sh exit 5) the
+# simulator runs are queued (mg__mac_vm_unreachable, user step mac-vm).
 mg_sim_lease() {
-  local rc
-  MG_SIM_UDID="$("$MG_TOOLS/scripts/sim-pool.sh" acquire "$1" --holder "$(basename "$MG_ROOT") $MG_JOB")"
+  local rc err="$MG_RUN_DIR/sim-pool-acquire-$1.err"
+  MG_SIM_UDID="$(mg_sim_pool_run "$err" acquire "$1" --holder "$(basename "$MG_ROOT") $MG_JOB")"
   rc=$?
   case "$rc" in
     0) ;;
@@ -281,7 +285,11 @@ mg_sim_lease() {
       mg_status error
       return 1
       ;;
-    5 | 6)
+    5)
+      mg__mac_vm_unreachable "sim-pool.sh acquire $1: $(mg_sim_pool_queued_reason "$err")"
+      return 1
+      ;;
+    6)
       mg_failure sim-vm "sim-pool.sh acquire $1: the test VM could not lease a simulator (exit $rc); see log.txt" "tools/mg doctor"
       mg_status error
       return 1
@@ -295,6 +303,24 @@ mg_sim_lease() {
   [ "$2" = keep ] || mg_on_exit "'$MG_TOOLS/scripts/sim-pool.sh' release '$MG_SIM_UDID' >&2"
   mg_detail device "$("$MG_TOOLS/scripts/sim-pool.sh" status 2>/dev/null | jq -c --arg u "$MG_SIM_UDID" 'first(.devices[] | select(.udid == $u) | {udid, name, kind}) // {udid: $u}')"
   return 0
+}
+
+# mg_sim_pool_run <stderr copy> <sim-pool.sh args>: sim-pool.sh, its stdout
+# printed, its stderr on this job's stderr and in <stderr copy> (for the
+# reason of an exit 5); returns its exit code.
+mg_sim_pool_run() {
+  local copy="$1" rc
+  shift
+  { "$MG_TOOLS/scripts/sim-pool.sh" "$@" 2>&1 1>&3 3>&- | tee "$copy" >&2 3>&-; rc="${PIPESTATUS[0]}"; } 3>&1
+  return "$rc"
+}
+
+# mg_sim_pool_queued_reason <stderr copy>: why sim-pool.sh exited 5 (its
+# last "sim-pool: queued: " line).
+mg_sim_pool_queued_reason() {
+  local r
+  r="$(sed -n 's/^sim-pool: queued: //p' "$1" 2>/dev/null | tail -n 1)"
+  printf '%s\n' "${r:-the test VM could not run the pool; see log.txt}"
 }
 
 # mg_sim_check_owned <udid>: a pool device leased from this checkout. Another
@@ -489,11 +515,17 @@ mg_run() {
   mg_sim_take || return 0
   # A fixture the launch names must be in the VM, where the app reads it.
   if [ "$MG_SIM_RUNNER" = vm ]; then
-    if ! mg_vm_launch_args "${launch[@]}"; then
-      mg_message "run: a launch fixture could not be put in the test VM; nothing was launched"
-      mg_status error
-      return 0
-    fi
+    mg_vm_launch_args "${launch[@]}"
+    case $? in
+      0) ;;
+      # The VM could not be reached: queued (mg__mac_vm_unreachable).
+      2) return 0 ;;
+      *)
+        mg_message "run: a launch fixture could not be put in the test VM; nothing was launched"
+        mg_status error
+        return 0
+        ;;
+    esac
     launch=("${MG_VM_ARGS[@]}")
   fi
   if [ -n "$udid" ]; then

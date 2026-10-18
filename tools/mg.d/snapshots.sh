@@ -114,8 +114,17 @@ mg_snapshots() {
   MG_SNAP_MODE="$mode" MG_SNAP_FILTER="$filter" MG_SNAP_BROKEN=0
   # The simulators' lease (the test VM's) comes before the Mac's host lease,
   # whatever the platform order: every job that takes both takes them so.
-  case " $platforms " in *" iphone "* | *" ipad "*) mg_snapshots__sim_lease || return 0 ;; esac
-  local ran="" rc
+  # A test VM that cannot be reached queues the simulators
+  # (mg__mac_vm_unreachable); the Mac part still runs.
+  local ran="" rc sims_queued=""
+  case " $platforms " in
+    *" iphone "* | *" ipad "*)
+      mg_snapshots__sim_lease
+      rc=$?
+      [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ] || return 0
+      [ "$rc" -ne 2 ] || sims_queued=1
+      ;;
+  esac
   for p in $platforms; do
     if [ "$p" = mac ]; then
       mg_snapshots__mac
@@ -126,11 +135,15 @@ mg_snapshots() {
       ran="$ran mac"
       continue
     fi
+    [ -z "$sims_queued" ] || continue
     for kind in $(mg_snapshots__kinds "$p"); do
       d="$(printf '%s\n' $MG_SNAP_DEVICES | sed -n "s/^$kind=//p")"
-      mg_snapshots__simulator "$kind" "$d" || return 0
+      mg_snapshots__simulator "$kind" "$d"
+      rc=$?
+      [ "$rc" -ne 2 ] || { sims_queued=1 && break; }
+      [ "$rc" -eq 0 ] || return 0
     done
-    ran="$ran $p"
+    [ -n "$sims_queued" ] || ran="$ran $p"
   done
   # Only the Mac was asked for, and it is queued.
   [ -n "$ran" ] || return 0
@@ -151,12 +164,19 @@ mg_snapshots__lease() {
 
 # The simulators' lease, taken once: the test VM's (with the products,
 # app/Snapshots and the inventory copied in), or the host lease with
-# MEGURI_SIM_ALLOW_HOST=1.
+# MEGURI_SIM_ALLOW_HOST=1. Returns 2 when the test VM could not be reached
+# (queued; its lease is given back).
 mg_snapshots__sim_lease() {
+  local rc
   [ -z "${MG_SNAP_SIM_LEASED:-}" ] || return 0
   if [ "$MG_SIM_RUNNER" = vm ]; then
-    mg_sim_take || return 1
-    if ! mg_mac_vm_copy_in "$MG_ROOT/app/Snapshots" "$MG_RUN_DIR/inventory.json"; then
+    mg_sim_take || return
+    mg_mac_vm_copy_in "$MG_ROOT/app/Snapshots" "$MG_RUN_DIR/inventory.json"
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+      mg__mac_vm_release_queued 2
+      return 2
+    elif [ "$rc" -ne 0 ]; then
       mg_message "snapshots: the test VM could not run the simulators: the baselines could not be copied into it"
       mg_status error
       return 1
@@ -172,7 +192,8 @@ mg_snapshots__sim_lease() {
 # writes <out>.log and <out>.xcresult. A simulator run in the test VM writes
 # its output directory there (TEST_RUNNER_MEGURI_SNAPSHOT_OUT, the same path)
 # and it comes back here. Records tests that failed outside the snapshot
-# suites (their snapshot failures come from results.jsonl).
+# suites (their snapshot failures come from results.jsonl). Returns 2 when
+# the test VM could not be reached (queued, mg__mac_vm_unreachable).
 mg_snapshots__xcodebuild() {
   local out="$1" dest="$2" suites="$3" only=() s rc summary e
   shift 3
@@ -188,6 +209,7 @@ mg_snapshots__xcodebuild() {
     mg_vm_xcodebuild_test "$out" Snapshot iphonesimulator "$dest" Debug ${only[0]+"${only[@]}"}
     rc=$?
     for e in "$@"; do unset "${e%%=*}"; done
+    [ -z "$MG_MAC_VM_RUN_QUEUED" ] || return 2
     if [ -n "$MG_MAC_VM_RUN_ERROR" ]; then
       mg_artifact log "$out.log" "xcodebuild test $(basename "$(dirname "$out")")/$(basename "$out") (in the test VM)"
       MG_SNAP_BROKEN=1
@@ -195,7 +217,8 @@ mg_snapshots__xcodebuild() {
     fi
     # The run's output directory comes back (a run that wrote none has none).
     if mg_mac_vm_ssh "test -d $(mvl_q "$out")" >/dev/null 2>&1; then
-      mg_sim_fetch "$out" || { MG_SNAP_BROKEN=1; return 1; }
+      mg_sim_fetch "$out"
+      case $? in 0) ;; 2) return 2 ;; *) MG_SNAP_BROKEN=1 && return 1 ;; esac
     fi
   else
     env "$@" xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme Meguri -testPlan Snapshot -configuration Debug \
@@ -239,12 +262,13 @@ mg_snapshots__settings() {
 
 # mg_snapshots__simulator <pool kind> [udid]: plan, then one run per group.
 # The test process renders only the device classes of its kind
-# (TEST_RUNNER_MEGURI_SNAPSHOT_TARGET).
+# (TEST_RUNNER_MEGURI_SNAPSHOT_TARGET). Returns 2 when the test VM could not
+# be reached (queued).
 mg_snapshots__simulator() {
-  local kind="$1" udid="$2" dir="$MG_RUN_DIR/$1" groups g dest
-  mg_snapshots__sim_lease || return 1
+  local kind="$1" udid="$2" dir="$MG_RUN_DIR/$1" groups g dest rc
+  mg_snapshots__sim_lease || return
   if [ -z "$udid" ]; then
-    mg_sim_lease "$kind" release || return 1
+    mg_sim_lease "$kind" release || { [ -z "$MG_MAC_VM_QUEUED" ] || return 2; return 1; }
     udid="$MG_SIM_UDID"
     mg_sim_check_runtime "$udid" || return 1
   fi
@@ -258,7 +282,12 @@ mg_snapshots__simulator() {
   fi
   mg_snapshots__xcodebuild "$dir/plan" "$dest" "$MG_SNAP_SUITES" TEST_RUNNER_MEGURI_SNAPSHOT_MODE=plan \
     TEST_RUNNER_MEGURI_SNAPSHOT_FILTER="$MG_SNAP_FILTER" TEST_RUNNER_MEGURI_SNAPSHOT_GROUP="$MG_SNAP_DEFAULT_GROUP" \
-    TEST_RUNNER_MEGURI_SNAPSHOT_TARGET="$kind" TEST_RUNNER_MEGURI_SNAPSHOT_OUT="$dir/plan" || { mg_status error; return 1; }
+    TEST_RUNNER_MEGURI_SNAPSHOT_TARGET="$kind" TEST_RUNNER_MEGURI_SNAPSHOT_OUT="$dir/plan" || {
+    rc=$?
+    [ "$rc" -ne 2 ] || return 2
+    mg_status error
+    return 1
+  }
   groups="$( (echo "$MG_SNAP_DEFAULT_GROUP"; [ ! -f "$dir/plan/plan.jsonl" ] || jq -r 'select(.deferred == null) | .group' "$dir/plan/plan.jsonl" | sort -u) |
     awk '!seen[$0]++')"
   mg_detail "groups_$(printf '%s' "$kind" | tr '-' '_')" "$(printf '%s\n' $groups | jq -R . | jq -sc .)"
@@ -274,7 +303,12 @@ mg_snapshots__simulator() {
     [ "$g" != "$MG_SNAP_DEFAULT_GROUP" ] || suites=all
     mg_snapshots__xcodebuild "$dir/$g" "$dest" "$suites" TEST_RUNNER_MEGURI_SNAPSHOT_MODE="$MG_SNAP_MODE" \
       TEST_RUNNER_MEGURI_SNAPSHOT_FILTER="$MG_SNAP_FILTER" TEST_RUNNER_MEGURI_SNAPSHOT_GROUP="$g" TEST_RUNNER_MEGURI_SNAPSHOT_TARGET="$kind" \
-      TEST_RUNNER_MEGURI_SNAPSHOT_OUT="$dir/$g" TEST_RUNNER_MEGURI_INVENTORY_JSON="$MG_RUN_DIR/inventory.json" || { mg_status error; return 1; }
+      TEST_RUNNER_MEGURI_SNAPSHOT_OUT="$dir/$g" TEST_RUNNER_MEGURI_INVENTORY_JSON="$MG_RUN_DIR/inventory.json" || {
+      rc=$?
+      [ "$rc" -ne 2 ] || return 2
+      mg_status error
+      return 1
+    }
   done
   mg_snapshots__settings "$udid" "$MG_SNAP_DEFAULT_GROUP" >/dev/null 2>&1
   return 0

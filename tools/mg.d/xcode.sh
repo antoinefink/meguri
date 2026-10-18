@@ -10,14 +10,18 @@ mg_job xcode-check host mg_xcode_check \
 # host lease (U8, tools/mg.d/host.sh), and with no other .dev Mac app running,
 # the hidden Mac launches, the simulators and the test runs. Other worktrees'
 # app jobs are not held up by the builds. The VM's lease is taken before the
-# host's, as every job that takes both does. Without the VM the simulator
-# runs are queued (--no-sims): the run is warn at best. On a locked Mac (or
-# a sleeping display) the devices phase is queued (host-session, U19b): the
+# host's, as every job that takes both does. Without the VM, or with one
+# that cannot be reached when the job begins or takes it (U19c), the
+# simulator runs are queued (--no-sims): the run is warn at best. A VM that
+# stops answering during the devices phase queues the leases and runs it
+# kept from happening (the script's vm-queued.tsv). On a locked Mac (or a
+# sleeping display) the devices phase is queued (host-session, U19b): the
 # builds' results stand, so a failing build fails the run, and passing
 # builds leave it queued.
 mg_xcode_check() {
   [ "${1:-}" = "--" ] && shift
-  local tap="$MG_RUN_DIR/xcode-check.tap" rc devices_rc sims=() queued="" begin lease=0
+  local tap="$MG_RUN_DIR/xcode-check.tap" rc devices_rc sims=() queued="" begin lease=0 take part reason
+  local vmq=build/xcode-check/vm-queued.tsv
   mg_lint_ui_first || return 0
   if ! mg__xcframework "$MG_RUN_DIR/xcframework.json"; then
     mg_failure xcframework "building the core XCFramework failed; see log.txt" "tools/mg core-xcframework"
@@ -35,9 +39,18 @@ mg_xcode_check() {
   rc=${PIPESTATUS[0]}
   mg_artifact tap "$tap"
   mg_artifact logs build/xcode-check/logs "xcodebuild logs"
-  if [ "$MG_SIM_RUNNER" = vm ] && ! mg_sim_take --no-copy; then
-    lease=1
-  else
+  if [ "$MG_SIM_RUNNER" = vm ]; then
+    mg_sim_take --no-copy
+    take=$?
+    case "$take" in
+      0) ;;
+      # The test VM could not be reached (queued, its lease given back): the
+      # devices phase runs without simulators.
+      2) queued=1 sims=(--no-sims) MG_SIM_RUNNER="" ;;
+      *) lease=1 ;;
+    esac
+  fi
+  if [ "$lease" -eq 0 ]; then
     mg_host_lease --part "the devices phase (hidden Mac launches, simulators, test runs)"
     lease=$?
     [ "$lease" -ne 0 ] || mg_app_mac_guard || lease=1
@@ -69,8 +82,21 @@ mg_xcode_check() {
   MG_MAC_VM_TESTING=""
   [ "$devices_rc" -eq 0 ] || rc="$devices_rc"
   mg_tap_report "$tap" "$rc" ""
-  if [ -n "$queued" ] && [ "$(cat "$MG_STATE/status")" = pass ]; then
-    mg_message "xcode-check: passed without the simulator runs, which are queued: $MG_MAC_VM_REASON (user step mac-vm)"
+  # Leases and runs a VM that stopped answering kept from happening.
+  if [ -s "$vmq" ]; then
+    mg_artifact tsv "$vmq" "leases and runs the test VM could not take"
+    while IFS="$(printf '\t')" read -r part reason; do
+      [ -z "$part" ] || mg__mac_vm_unreachable "$reason" "$part"
+    done <"$vmq"
   fi
+  case "$(cat "$MG_STATE/status")" in
+    pass | warn)
+      if [ -n "$queued" ]; then
+        mg_message "xcode-check: passed without the simulator runs, which are queued: $MG_MAC_VM_REASON (user step mac-vm)"
+      elif [ "$MG_QUEUED_PARTS" != '[]' ]; then
+        mg_message "xcode-check: what ran passed; queued: $(mg_queued_parts_text): $MG_MAC_VM_REASON"
+      fi
+      ;;
+  esac
   mg_queued_settle
 }

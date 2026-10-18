@@ -35,11 +35,16 @@ mg__doctor_toolchain_values() {
 # mg__doctor_mac_vm <host Xcode version> <host Xcode build>: the macOS test
 # VM (mac-vm.sh, docs/process/mac-ui-vm.md): configured, its drive
 # connected, present, running, answering over SSH, with the host's Xcode and
-# the pinned iOS simulator runtime (tools/sim-devices.json; U8c). It reads
+# the pinned iOS simulator runtime (tools/sim-devices.json; U8c), a
+# logged-in session and enough free processes (U19c, mvl_procs). It reads
 # only: a stopped VM is not started (jobs start it). Problems warn; Mac UI
-# suites and simulator jobs queue without the VM.
+# suites and simulator jobs queue without the VM, and while a running VM
+# does not answer over SSH in a logged-in session or has too few free
+# processes for a job (the mac-vm step is then missing: tools/mg catch-up
+# waits).
 mg__doctor_mac_vm() {
   local host_xcode="$1 ($2)" rc n i=0 vm name tart ssh state out vxv vxb vmb status msg vms='[]' missing=0 pin rt
+  local console procs unavailable="" min="${MEGURI_MAC_VM_MIN_FREE_PROCS:-400}"
   mg__mac_vm_read_config
   rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -56,7 +61,7 @@ mg__doctor_mac_vm() {
     name="$(jq -r .name <<<"$vm")"
     tart="$(jq -r .tart <<<"$vm")"
     ssh="$(jq -r .ssh <<<"$vm")"
-    state="" vxv="" vxb="" vmb="" rt=""
+    state="" vxv="" vxb="" vmb="" rt="" console="" procs=null
     if [ ! -x "$tart" ] || [ ! -x "$ssh" ]; then
       status=warn missing=1
       msg="$name: $([ -x "$tart" ] && echo "its SSH wrapper $ssh" || echo "the tart wrapper $tart") is not there; connect the drive that holds the VM"
@@ -69,8 +74,22 @@ mg__doctor_mac_vm() {
           out="$("$ssh" "xcodebuild -version" </dev/null 2>/dev/null)"
           vxv="$(printf '%s\n' "$out" | sed -n 's/^Xcode \([0-9.]*\).*/\1/p' | head -n 1)"
           vxb="$(printf '%s\n' "$out" | sed -n 's/^Build version \(.*\)/\1/p' | head -n 1)"
+          if [ -n "$vxv" ]; then
+            console="$("$ssh" "stat -f %Su /dev/console" </dev/null 2>/dev/null | head -n 1)"
+            mvl_procs "$ssh" && procs="$MVL_PROCS"
+          fi
           if [ -z "$vxv" ]; then
-            status=warn msg="$name: running, but SSH does not answer ($ssh)"
+            status=warn msg="$name: running, but SSH does not answer ($ssh); simulator and Mac UI jobs queue until it does"
+            unavailable="$name does not answer over SSH"
+          elif [ -z "$console" ] || [ "$console" = root ]; then
+            status=warn msg="$name: running, but no user is logged in there (the console is ${console:-unknown}); simulator and Mac UI jobs queue until one is"
+            unavailable="no user is logged in to $name"
+          elif [ "$procs" = null ] && [ -n "$MVL_UNREACHABLE" ]; then
+            status=warn msg="$name: running, but it could not start its process check ($MVL_REASON); simulator and Mac UI jobs wait, then queue"
+            unavailable="$name could not start its process check ($MVL_REASON)"
+          elif [ -n "$MVL_PROC_FREE" ] && [ "$MVL_PROC_FREE" -lt "$min" ]; then
+            unavailable="$name is near its process limit ($(mvl_procs_text)): $MVL_PROC_FREE free, a job needs $min"
+            status=warn msg="$name: running, but near its process limit ($(mvl_procs_text)): $MVL_PROC_FREE free, a job needs $min; simulator and Mac UI jobs wait, then queue"
           elif [ "$vxv ($vxb)" != "$host_xcode" ]; then
             status=warn msg="$name: Xcode $vxv ($vxb) in the VM, $host_xcode on this Mac; Mac UI results may differ"
           else
@@ -95,14 +114,20 @@ mg__doctor_mac_vm() {
     fi
     mg__doctor_check "mac-vm/$name" "$status" "$msg"
     vms="$(jq -c --arg n "$name" --argjson d "$([ -x "$tart" ] && [ -x "$ssh" ] && echo true || echo false)" --arg s "$state" \
-      --arg x "$vxv" --arg b "$vxb" --arg hx "$host_xcode" --arg rt "$rt" --arg mb "$vmb" '. + [{name: $n, drive_connected: $d,
+      --arg x "$vxv" --arg b "$vxb" --arg hx "$host_xcode" --arg rt "$rt" --arg mb "$vmb" --arg con "$console" --argjson procs "$procs" \
+      '. + [{name: $n, drive_connected: $d,
         present: (if $s == "" then null else $s != "missing" end), state: (if $s == "" or $s == "missing" then null else $s end),
         ssh: (if $s != "running" then null else $x != "" end),
         xcode: (if $x == "" then null else "\($x) (\($b))" end), xcode_matches_host: (if $x == "" then null else "\($x) (\($b))" == $hx end),
         macos_build: (if $mb == "" then null else $mb end),
-        sim_runtime: (if $rt == "" then null else $rt == "yes" end)}]' <<<"$vms")"
+        sim_runtime: (if $rt == "" then null else $rt == "yes" end),
+        console: (if $con == "" then null else $con end), procs: $procs}]' <<<"$vms")"
   done
-  [ "$missing" -eq 0 ] || mg_mac_vm_user_step
+  if [ "$missing" -ne 0 ]; then
+    mg_mac_vm_user_step
+  elif [ -n "$unavailable" ]; then
+    mg__mac_vm_unavailable_step "$unavailable"
+  fi
   MG_DOCTOR_VMS="$vms"
   mg_detail mac_vm "$(jq -nc --arg c "$(mg_mac_vm_config_path)" --argjson v "$vms" '{config: $c, configured: true, vms: $v}')"
 }

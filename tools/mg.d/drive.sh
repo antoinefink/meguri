@@ -190,8 +190,9 @@ mg_drive__motion_inputs() {
 # queued (macOS dropped the input the drive synthesized, and nothing the drop
 # cannot explain went wrong: its captures and manifest are kept, and its
 # failed step from the first input step on is not the app's and is not
-# recorded). A pass needs every listed capture exported and non-empty, and
-# the hierarchy check run over them.
+# recorded), 4 queued (the test VM could not be reached: mac-vm, recorded
+# by mg__mac_vm_unreachable). A pass needs every listed capture exported and
+# non-empty, and the hierarchy check run over them.
 mg_drive_run() {
   local script="$1" platform="$2" udid="$3" config="$4" record="$5" out="$6"
   local dest name abs_script rc capture="" video="" rec_start="" rec_log recorder="" capture_error=0
@@ -255,7 +256,8 @@ mg_drive_run() {
       if [ "$form" = fixture ]; then
         case "$fixture" in /*) ;; *) fixture="$MG_ROOT/$fixture" ;; esac
       fi
-      mg_vm_fixture "$fixture" || return 2
+      mg_vm_fixture "$fixture"
+      case $? in 0) ;; 2) return 4 ;; *) return 2 ;; esac
       [ "$MG_VM_FIXTURE" = "$fixture" ] || moved="$(jq -c --arg h "$fixture" --arg v "$MG_VM_FIXTURE" '. + {($h): $v}' <<<"$moved")"
     done < <(jq -r '.steps[] | objects | .launch? | objects | (.fixture? | strings | "fixture\t\(.)"),
       (.arguments? | arrays | . as $a | range(1; length) as $i | select($a[$i - 1] == "-MeguriFixture") | $a[$i] | strings | "argument\t\(.)")' "$abs_script")
@@ -267,7 +269,8 @@ mg_drive_run() {
               | if $i > 0 and $a[$i - 1] == "-MeguriFixture" and ($a[$i] | type) == "string" and $m[$a[$i]] != null
                 then $m[$a[$i]] else $a[$i] end]) else . end)) else . end)' "$abs_script" >"$run_script" || return 2
     fi
-    mg_mac_vm_copy_in "$run_script" || return 2
+    mg_mac_vm_copy_in "$run_script"
+    case $? in 0) ;; 2) return 4 ;; *) return 2 ;; esac
   fi
 
   echo "drive: running $script on $([ "$platform" = mac ] && echo "the Mac${MG_MAC_RUNNER:+ ($MG_MAC_RUNNER)}" || echo "$udid${MG_SIM_RUNNER:+ ($MG_SIM_RUNNER)}") ($config)${capture:+, capturing motion: $capture}" >&2
@@ -280,7 +283,7 @@ mg_drive_run() {
   # app: its captures are kept, and it ends queued (mac-input), not fail.
   local part="$name"
   [ "$out" != "$MG_RUN_DIR" ] || part="$(basename "$script")"
-  if [ "$platform" = mac ] && [ "$rc" -ne 2 ] && mg_app_mac_input_refused "$since" "$part"; then
+  if [ "$platform" = mac ] && [ "$rc" -le 1 ] && mg_app_mac_input_refused "$since" "$part"; then
     refused=1
   fi
   case "$capture" in
@@ -303,6 +306,7 @@ mg_drive_run() {
     capture_error=1
   fi
   [ "$rc" -ne 2 ] || return 2
+  [ "$rc" -ne 4 ] || return 4
 
   # Attachments: XCTest names each export <name>_<n>_<UUID>.<ext>.
   local raw="$out/attachments" log
@@ -546,6 +550,9 @@ mg_drive__job() {
       mg_message "$MG_JOB: queued: macOS dropped the input the drive synthesized (user step mac-input); its steps did not test the app; manifest: $manifest"
       mg_status pass
       ;;
+    # The test VM could not be reached: queued (mg__mac_vm_unreachable wrote
+    # the message).
+    4) mg_status pass ;;
     *)
       if [ -f "$manifest" ]; then
         mg_message "$MG_JOB: the drive ran, but a capture or check it asked for could not be made; see the failures and log.txt"
