@@ -8,7 +8,7 @@
 # which the container cannot see, so they are host jobs too.
 
 mg_job conformance host mg_conformance \
-  "T0 conformance on the committed goldens, macOS native and Linux dev container: [--live] [--lane native|docker|all] [--jobs N] [filter...]"
+  "Conformance: T0 by default, T0+T1 with --live, T1 with --live-only; [--lane native|docker|all] [--jobs N] [filter...]"
 mg_job goldens-check host mg_goldens_check \
   "Golden freshness, schemas and changed values since a revision: [--base <rev>] (default HEAD)"
 mg_job harvest-report host mg_harvest_report \
@@ -95,17 +95,18 @@ mg_conf__lane_report() {
   MG_CONF_LANES="$MG_CONF_LANES$(jq -c --arg lane "$lane" '{($lane): {totals, failed, wall_ms}}' "$report")"$'\n'
 }
 
-# tools/mg conformance [--live] [--lane native|docker|all] [--jobs N] [filter...]
+# tools/mg conformance [--live|--live-only] [--lane native|docker|all] [--jobs N] [filter...]
 mg_conformance() {
-  local live=false lane=all jobs=12
+  local live=false t0=true lane=all jobs=12
   local filters=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --live) live=true; shift ;;
-      --lane) lane="${2:-}"; shift 2 || { mg_conf__usage "tools/mg conformance [--live] [--lane native|docker|all] [--jobs N] [filter...]" "--lane needs a value"; return 0; } ;;
+      --live-only) live=true; t0=false; shift ;;
+      --lane) lane="${2:-}"; shift 2 || { mg_conf__usage "tools/mg conformance [--live|--live-only] [--lane native|docker|all] [--jobs N] [filter...]" "--lane needs a value"; return 0; } ;;
       --jobs) jobs="${2:-}"; shift 2 || { mg_conf__usage "tools/mg conformance --jobs N" "--jobs needs a number"; return 0; } ;;
-      --help) mg_conf__usage "tools/mg conformance [--live] [--lane native|docker|all] [--jobs N] [filter...]" "help"; return 0 ;;
-      --*) mg_conf__usage "tools/mg conformance [--live] [--lane native|docker|all] [--jobs N] [filter...]" "unknown option '$1'"; return 0 ;;
+      --help) mg_conf__usage "tools/mg conformance [--live|--live-only] [--lane native|docker|all] [--jobs N] [filter...]" "help"; return 0 ;;
+      --*) mg_conf__usage "tools/mg conformance [--live|--live-only] [--lane native|docker|all] [--jobs N] [filter...]" "unknown option '$1'"; return 0 ;;
       *) filters[${#filters[@]}]="$1"; shift ;;
     esac
   done
@@ -128,13 +129,15 @@ mg_conformance() {
     if [ -n "$actors" ]; then
       mg_oracle__sync_faults || return 0
     fi
-    mg_conf__record_stale ${filters[0]+"${filters[@]}"} || failed=true
+    if [ "$t0" = true ]; then
+      mg_conf__record_stale ${filters[0]+"${filters[@]}"} || failed=true
+    fi
   fi
 
   # T0 on each lane: the testkit tests (one test per scenario, the runner's
   # own tests and the 2,000-scenario budget) when no filter is given, then the
   # JSON report of the selected scenarios.
-  if [ "$lane" != docker ]; then
+  if [ "$t0" = true ] && [ "$lane" != docker ]; then
     local native="$MG_RUN_DIR/t0-native.json"
     if [ "${#filters[@]}" -eq 0 ]; then
       echo "conformance: testkit tests (macOS native)" >&2
@@ -150,7 +153,7 @@ mg_conformance() {
     mg_conf__lane_report native "$native" "$rc" || failed=true
     [ "$rc" -eq 0 ] || failed=true
   fi
-  if [ "$lane" != native ]; then
+  if [ "$t0" = true ] && [ "$lane" != native ]; then
     local docker_report="$MG_RUN_DIR/t0-docker.json" script
     script="cd core"
     if [ "${#filters[@]}" -eq 0 ]; then
@@ -176,8 +179,12 @@ mg_conformance() {
 
   mg_detail lanes "$(printf '%s' "$MG_CONF_LANES" | jq -sc 'add // {}')"
   local first
-  first="$(ls "$MG_RUN_DIR"/t0-*.json 2>/dev/null | head -n 1)"
-  if [ -n "$first" ]; then
+  if [ "$t0" = true ]; then
+    first="$(ls "$MG_RUN_DIR"/t0-*.json 2>/dev/null | head -n 1)"
+  else
+    first="$MG_RUN_DIR/t1-live.json"
+  fi
+  if [ -n "$first" ] && [ -s "$first" ]; then
     mg_count total "$(jq '.scenarios | length' "$first")"
     mg_count passed "$(jq '[.scenarios[] | select(.status == "pass")] | length' "$first")"
     mg_count failed "$(jq '[.scenarios[] | select(.fails)] | length' "$first")"
@@ -189,7 +196,11 @@ mg_conformance() {
     | map("\(.key): " + (.value.totals | to_entries | map(select(.value > 0) | "\(.value) \(.key)") | join(", ")))
     | join("; ")')"
   local tiers=T0
-  [ "$live" = true ] && tiers="T0 and T1"
+  if [ "$t0" = false ]; then
+    tiers=T1
+  elif [ "$live" = true ]; then
+    tiers="T0 and T1"
+  fi
   if [ "$failed" = true ] || [ -s "$MG_STATE/failures.jsonl" ]; then
     mg_message "conformance: $tiers failed ($summary)"
     mg_status fail

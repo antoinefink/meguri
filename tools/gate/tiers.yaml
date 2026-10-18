@@ -145,7 +145,7 @@ runs:
     tier: T0
     placement: [host, docker:dev]
     class: conformance
-    triggers: [core/, conformance/, tools/mg.d/conformance.sh]
+    triggers: [core/, conformance/, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh]
     budget_s: 1200
   - id: goldens-check
     job: goldens-check
@@ -413,7 +413,8 @@ runs:
   # --- T1: live oracle ----------------------------------------------------------
   - id: live-oracle
     job: conformance
-    args: [--live, --lane, native]
+    # T0 already ran on both lanes; this job executes fresh T1 workers only.
+    args: [--live-only, --lane, native]
     tier: T1
     placement: [host, docker:oracle]
     needs: [oracle, sync-server]

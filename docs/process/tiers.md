@@ -41,6 +41,12 @@ For direct work on `master`, a full `tools/mg gate --base <unit-start-commit>`
 also appends queued checks to catch-up when its receipt is complete and clean
 and the tip commit carries `Unit:`. Local, partial and dirty runs do not.
 
+The gate's live-oracle job uses `conformance --live-only`: it runs fresh T1
+workers after the separate dual-lane T0 job. Its result counts only T1.
+Stale or missing goldens fail T1; this mode does not re-record them.
+Standalone `conformance --live` still runs both T0 and T1. T0's triggers cover
+every live-oracle filter path, including changes to the oracle tooling.
+
 ## Quarantine
 
 A flaky test fails the gate until it is fixed or quarantined (R1953). `tools/gate/quarantine.yaml` lists quarantined tests: the tiers run and the failure id its job reports, a class, an owner, a reason, a deadline, `approved_by: antoine` and evidence. A quarantined test still runs and is reported; its failure does not block until the deadline. After the deadline the gate fails, whether the test failed or not.
