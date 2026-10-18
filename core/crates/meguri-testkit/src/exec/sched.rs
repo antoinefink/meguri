@@ -29,7 +29,64 @@ pub(super) fn register(registry: &mut Registry) {
     registry.observation("fuzz_table", fuzz_table);
     registry.observation("next_states", scheduling_states);
     registry.observation("answer_labels", scheduling_states);
+    registry.observation("ignored_before_count", ignored_before_count);
     registry.op("reopen", reopen);
+}
+
+fn ignored_before_count(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
+    let ObservationArgs::Mapping(map) = &request.args else {
+        return Err(invalid("ignored_before_count takes {preset, dates}"));
+    };
+    let request =
+        crate::scenario::IgnoredBeforeCountRequest::from_mapping(map).map_err(|error| invalid(error.to_string()))?;
+    let day = day_query_now(session)?.day;
+    let collection = session.engine_collection()?;
+    let core = |error: StorageError| ExecError::new("core_error", error.to_string());
+    let rows = collection
+        .reader(meguri_storage::ReaderRole::Interactive)
+        .map_err(|error| ExecError::new("core_error", error.to_string()))?;
+    let preset = rows
+        .deck_config_rows()
+        .map_err(core)?
+        .into_iter()
+        .find(|preset| preset.name == request.preset)
+        .ok_or_else(|| invalid("unknown preset"))?;
+    let preset = meguri_sched::model::preset::PresetView::new(&preset);
+    let config = meguri_sched::model::sched_config::SchedConfig::new(&*rows);
+    let bool_config = |key: &str, default: bool| -> Result<bool, ExecError> {
+        Ok(rows
+            .config_value(key)
+            .map_err(core)?
+            .and_then(|value| value.as_bool())
+            .unwrap_or(default))
+    };
+    let search = meguri_search::SearchContext {
+        now: session.clock.now_secs(),
+        today: day.today,
+        next_day_at: day.next_day_at,
+        learn_ahead_secs: config.collapse_time().map_err(core)?,
+        current_deck: meguri_model::ids::DeckId(
+            rows.config_value("curDeck")
+                .map_err(core)?
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0),
+        ),
+        normalize_note_text: bool_config("normalize_note_text", true)?,
+        ignore_accents: bool_config("ignoreAccentsInSearch", false)?,
+        fold: meguri_search::FoldMode::Unicode,
+    };
+    request
+        .dates
+        .iter()
+        .map(
+            |date| match meguri_engine::sched::memory::ignored_before_count(&*rows, &preset, date, &search) {
+                Ok(count) => Ok(json!({"included":count.included,"total":count.total})),
+                Err(meguri_engine::EngineError::InvalidIgnoreBeforeDate { .. }) => Ok(json!({"error":"invalid_date"})),
+                Err(error) => Err(ExecError::new("core_error", error.to_string())),
+            },
+        )
+        .collect::<Result<Vec<_>, _>>()
+        .map(Value::Array)
 }
 
 /// O4/Z6: synthetic ids/counts are pure inputs, never temporary card edits.
@@ -318,11 +375,29 @@ fn scheduling_states(session: &mut Session<'_>, request: &ObservationRequest) ->
             _ => None,
         };
         let desired_retention = DeckSched::new(normal, &deck.common).retention(preset.fields().desired_retention);
+        let mut history = Vec::new();
+        if card.card_type != meguri_model::card::CardType::New && card.data.memory_state.is_none() {
+            rows.visit_fsrs_histories(
+                &meguri_storage::queries::revlog_fsrs::HistorySelection::Cards(vec![card.id]),
+                |_, found| -> Result<(), StorageError> {
+                    history.extend_from_slice(found);
+                    Ok(())
+                },
+            )
+            .map_err(core)?;
+        }
+        let memory_state =
+            meguri_sched::memory::resolve::on_the_fly(&mut cache, &preset, &card, &history, day.next_day_at)
+                .map_err(|error| ExecError::new("core_error", error.to_string()))?;
+        let last_review_time = match card.data.last_review_secs {
+            Some(time) => Some(time),
+            None => rows.fsrs_last_review_time(card.id).map_err(core)?,
+        };
         let input = StateInput {
             card: &card,
             preset: &preset,
-            memory_state: card.data.memory_state,
-            last_review_time: card.data.last_review_secs,
+            memory_state,
+            last_review_time,
             desired_retention,
             today: day.today,
             next_day_at: day.next_day_at,

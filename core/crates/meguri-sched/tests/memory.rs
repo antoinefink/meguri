@@ -165,6 +165,60 @@ fn fallback_and_repair_have_distinct_reset_and_button_rules() {
 }
 
 #[test]
+fn on_the_fly_preserves_stored_memory_and_refuses_only_used_cutoffs() {
+    use meguri_model::{
+        deck_config::DeckConfig,
+        ids::DeckConfigId,
+        proto::{ProtoBlob, deck_config::DeckConfigMessage},
+    };
+    use meguri_sched::{
+        memory::resolve::{MemoryError, on_the_fly},
+        model::preset::PresetView,
+        states::fsrs_glue::FsrsCache,
+    };
+    let preset = |date: &str| {
+        let mut fields = DeckConfigMessage::builtin_defaults();
+        fields.ignore_revlogs_before_date = date.into();
+        PresetView::new(&DeckConfig {
+            id: DeckConfigId(42),
+            name: "test".into(),
+            mtime: Default::default(),
+            usn: Default::default(),
+            config: ProtoBlob::new(fields),
+        })
+    };
+    let bad = preset("bad");
+    let mut cache = FsrsCache::default();
+    let mut card = common::card();
+    assert_eq!(on_the_fly(&mut cache, &bad, &card, &[], 86400).unwrap(), None);
+    card.card_type = CardType::Review;
+    card.data.memory_state = Some(meguri_model::card_data::MemoryState {
+        stability: 30.,
+        difficulty: 6.,
+    });
+    assert_eq!(
+        on_the_fly(&mut cache, &bad, &card, &[], 86400).unwrap(),
+        card.data.memory_state
+    );
+    card.data.memory_state = None;
+    assert!(matches!(
+        on_the_fly(&mut cache, &bad, &card, &[], 86400),
+        Err(MemoryError::InvalidDate {
+            preset: DeckConfigId(42)
+        })
+    ));
+    let valid = preset("");
+    assert_eq!(on_the_fly(&mut cache, &valid, &card, &[], 86400).unwrap(), None);
+    card.interval = 20;
+    for factor in [0, 820] {
+        card.ease_factor = factor;
+        let memory = on_the_fly(&mut cache, &valid, &card, &[], 86400).unwrap().unwrap();
+        assert_eq!(memory.stability, 20.);
+        assert_eq!(memory.difficulty, 10.);
+    }
+}
+
+#[test]
 fn cutoff_accepts_the_pinned_date_language_and_uses_utc_midnight() {
     for (text, expected) in [
         ("", 0),

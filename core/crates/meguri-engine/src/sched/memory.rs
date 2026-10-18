@@ -13,6 +13,93 @@ use crate::{
     tags::RunOptions,
     undo::entry::StepKind,
 };
+
+/// Resolve the preset's card set once. A nonempty custom search is used
+/// verbatim, including whitespace; the default matches home ids directly
+/// so quotes and backslashes in preset names remain valid (M10).
+pub fn preset_selection(
+    rows: &impl ReadRows,
+    preset: &PresetView,
+    search: &meguri_search::SearchContext,
+) -> Result<(HistorySelection, bool), EngineError> {
+    let text = &preset.fields().param_search;
+    if text.is_empty() {
+        let decks = rows
+            .deck_rows()?
+            .into_iter()
+            .filter_map(|deck| match &deck.kind.kind {
+                DeckKind::Normal(normal) if normal.config_id == preset.source().id.0 => Some(deck.id),
+                _ => None,
+            })
+            .collect();
+        return Ok((HistorySelection::HomeDecks(decks), true));
+    }
+    let query = meguri_search::parse(text).map_err(|error| EngineError::InvalidArgument {
+        message: error.to_string(),
+    })?;
+    let compiled = meguri_search::Plan::build(&query, meguri_search::SearchMode::Cards, search).map_err(|error| {
+        EngineError::Unsupported {
+            feature: format!("preset search: {error:?}"),
+        }
+    })?;
+    let params = compiled
+        .params()
+        .iter()
+        .map(|param| match param {
+            meguri_search::Param::Integer(value) => meguri_storage::Cell::Integer(*value),
+            meguri_search::Param::Real(value) => meguri_storage::Cell::Real(*value),
+            meguri_search::Param::Text(value) => meguri_storage::Cell::text(value.clone()),
+        })
+        .collect::<Vec<_>>();
+    Ok((
+        HistorySelection::Cards(rows.search_card_ids(compiled.sql(), &params)?),
+        false,
+    ))
+}
+
+pub fn ignored_before_count(
+    rows: &impl ReadRows,
+    preset: &PresetView,
+    date: &str,
+    search: &meguri_search::SearchContext,
+) -> Result<meguri_storage::queries::revlog_fsrs::IncludedCount, EngineError> {
+    let cutoff =
+        meguri_sched::memory::ignore_before::cutoff_millis(date).map_err(|_| EngineError::InvalidIgnoreBeforeDate {
+            preset: preset.source().id,
+        })?;
+    let (selection, exclude_suspended) = preset_selection(rows, preset, search)?;
+    Ok(rows.fsrs_included_count(&selection, cutoff, exclude_suspended)?)
+}
+
+/// Build only this preset's training buffers. The optimizer consumes and
+/// drops the returned owner before requesting another preset (I7/R1852).
+pub fn training_items(
+    rows: &impl ReadRows,
+    preset: &PresetView,
+    next_day_at: i64,
+    search: &meguri_search::SearchContext,
+    check: &dyn Fn() -> Result<(), EngineError>,
+    progress: Option<&ProgressSink>,
+) -> Result<meguri_sched::memory::items::PresetTraining, EngineError> {
+    let cutoff = preset_cutoff(preset).map_err(error)?;
+    let (selection, exclude_suspended) = preset_selection(rows, preset, search)?;
+    let mut training = meguri_sched::memory::items::PresetTraining::default();
+    let mut scanned = 0u64;
+    rows.visit_fsrs_histories(&selection, |card, history| -> Result<(), EngineError> {
+        check()?;
+        if !exclude_suspended || card.queue != meguri_model::card::CardQueue::Suspended {
+            training.add_card(history, cutoff, next_day_at);
+        }
+        scanned += 1;
+        if let Some(progress) = progress {
+            progress.report(scanned, None);
+        }
+        Ok(())
+    })?;
+    training.sort();
+    check()?;
+    Ok(training)
+}
 use meguri_model::{
     card::CardType,
     card_data::MemoryState,

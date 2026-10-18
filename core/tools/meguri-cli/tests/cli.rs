@@ -110,6 +110,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "fsrs_next",
             "fuzz_table",
             "ids",
+            "ignored_before_count",
             "legacy_json",
             "media_dir",
             "media_pending",

@@ -44,6 +44,10 @@ meguri-testkit.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 
+[[bench]]
+name = "memory_recompute"
+harness = false
+
 # Criterion wall-clock suite (U12 harness, R1864): empty-op overhead and the
 # answer-sized write phase (`specs/engine/op-model.md` O10).
 [[bench]]

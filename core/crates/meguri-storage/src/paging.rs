@@ -69,6 +69,19 @@ pub struct StoredConfig {
 /// Typed reads (`model/row-records`): a row that cannot be read is
 /// [`StorageError::Row`]; a missing row is `None`.
 pub trait ReadRows: sealed::Connected {
+    /// Execute the read-only one-column card-id statement compiled by the
+    /// search crate. SQL remains inside storage; callers bind typed cells.
+    fn search_card_ids(&self, sql: &str, params: &[Cell]) -> Result<Vec<CardId>, StorageError> {
+        let mut statement = self.connection().prepare_cached(sql)?;
+        if !statement.readonly() || statement.column_count() != 1 {
+            return Err(StorageError::Mode {
+                detail: "card search must be a read-only id query".into(),
+            });
+        }
+        Ok(statement
+            .query_map(params_from_iter(params), |row| row.get::<_, i64>(0).map(CardId))?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
     /// M3's indexed fallback; Reset does not truncate this lookup.
     fn fsrs_last_review_time(&self, card: CardId) -> Result<Option<i64>, StorageError> {
         crate::queries::revlog_fsrs::last_review_time(self.connection(), card)
