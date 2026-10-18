@@ -35,7 +35,14 @@ injects both a commit and a tracked edit during proof validation. All three
 focused cases pass, including 22 invalid-evidence variants.
 
 Before those fixes, all 442 Bats tests and all 27 macOS host tests passed
-(`selftest/20261018T131551Z-28855` and
+(`selftest/20261018T131550Z-28657` and
 `selftest-host/20261018T131551Z-28856`; exact paths in orchestration output).
-The full gate will verify the final corrected source. Round 2 and that gate
-remain pending.
+Round 2 (Codex, frozen `7f17f4dc`): one P2 follow-through finding. A
+checkout that became dirty while validating evidence still fell through to
+a fresh run. The revised regression failed before the fix. Catch-up now
+rechecks the checkout before fallback, including untracked files, and stops
+without running or settling the queue if it changed. A clean concurrent
+commit remains eligible for a fresh run. All 14 catch-up tests pass,
+including commit, tracked-edit and untracked-file races.
+
+Round 3 and the required full gate remain pending.

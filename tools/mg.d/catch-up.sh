@@ -240,7 +240,7 @@ mg_catch_up() {
 
 # mg_catch_up__checked: escalations an earlier run appended but could not
 # commit are committed first (mg_catch_up__settle); then the main checkout
-# must have no other uncommitted change to tracked files. Returns 1 after
+# must have no other uncommitted or untracked change. Returns 1 after
 # recording the error.
 mg_catch_up__checked() {
   if ! mg_catch_up__settle; then
@@ -248,8 +248,9 @@ mg_catch_up__checked() {
       "git -C $MG_ROOT diff HEAD -- $MG_ESCALATIONS_FILE"
     return 1
   fi
-  if ! git -C "$MG_ROOT" diff --quiet || ! git -C "$MG_ROOT" diff --cached --quiet; then
-    mg_catch_up__error main-dirty "the main checkout has uncommitted changes to tracked files: a run would not test the integration head" "git status"
+  local dirty
+  if ! dirty="$(git -C "$MG_ROOT" status --porcelain --untracked-files=all)" || [ -n "$dirty" ]; then
+    mg_catch_up__error main-dirty "the main checkout has uncommitted or untracked changes: a run would not test the integration head" "git status"
     return 1
   fi
 }
@@ -324,6 +325,9 @@ mg_catch_up__work() {
     else
       group="$(jq -c --argjson m "$missing" 'map(select(any(.user_steps[]?; . as $s | $m | index($s) != null) | not))' <<<"$group")"
       [ "$(jq length <<<"$group")" -gt 0 ] || continue
+      # Reuse may have been refused because a concurrent edit appeared.
+      # Never fall through to a fresh run on that dirty checkout.
+      mg_catch_up__checked || return 0
     fi
     args=()
     while IFS= read -r -d '' a; do args[${#args[@]}]="$a"; done < <(jq -j '.[0].args[] | . + "\u0000"' <<<"$group")

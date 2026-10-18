@@ -1032,6 +1032,7 @@ jq() {
     case "$(cat "$FX/race-mode")" in
       commit) git -C "$MG_ROOT" -c core.hooksPath=/dev/null commit -q --allow-empty -m 'Concurrent commit' ;;
       dirty) printf 'concurrent change\n' >>"$MG_ROOT/docs/notes.md" ;;
+      untracked) printf 'concurrent file\n' >"$MG_ROOT/concurrent.txt" ;;
     esac
   fi
   return "$rc"
@@ -1044,7 +1045,7 @@ EOF
   queue_merge "$BATS_TEST_TMPDIR/U150" U150
   cp "$SB/$QUEUE" "$FX/queued.original"
   local mode
-  for mode in commit dirty; do
+  for mode in commit dirty untracked; do
     cp "$FX/queued.original" "$SB/$QUEUE"
     fx ui pass
     mg t-job ui
@@ -1053,11 +1054,19 @@ EOF
     printf '%s\n' "$mode" >"$FX/race-mode"
     : >"$STUB_LOG"
     mg catch-up
-    [ "$status" -eq 0 ]
     [ ! -f "$FX/race-proof" ]
-    [ "$(called '^t-job ui')" = 1 ]
-    [ "$(field '.details.runs[0].reused')" = false ]
+    if [ "$mode" = commit ]; then
+      [ "$status" -eq 0 ]
+      [ "$(called '^t-job ui')" = 1 ]
+      [ "$(field '.details.runs[0].reused')" = false ]
+    else
+      [ "$status" -eq 2 ]
+      [ "$(called '^t-job ui')" = 0 ]
+      [ "$(field '.failures[0].id')" = main-dirty ]
+      [ "$(queue_states)" = queued ]
+    fi
     git -C "$SB" checkout -q -- docs/notes.md
+    rm -f "$SB/concurrent.txt"
   done
 }
 
