@@ -1,7 +1,7 @@
 # tools/mg self-tests. Sourced by tools/mg.
 
 mg_job selftest docker:dev mg_selftest \
-  "tools/mg self-tests (bats, tools/tests/*.bats) in the dev container; args go to bats, e.g. --filter doctor"
+  "tools/mg self-tests (bats, four files at once, sequential within each file) in the dev container; args go to bats, e.g. --filter doctor or --jobs 1"
 mg_job selftest-host host mg_selftest_host \
   "tools/mg host self-tests: macOS bash, real doctor, Docker placement, image rebuild (tools/tests/mg_host_selftest.sh)"
 mg_job selftest-xcframework host mg_selftest_xcframework \
@@ -53,8 +53,14 @@ mg_tap_report() {
 }
 
 mg_selftest() {
-  local tap="$MG_RUN_DIR/selftest.tap" rc
-  bats --formatter tap ${1+"$@"} tools/tests/*.bats | tee "$tap"
+  local tap="$MG_RUN_DIR/selftest.tap" rc arg
+  local defaults=(--jobs 4 --no-parallelize-within-files)
+  # Bats rejects its file-only flag with one job. An explicit job count
+  # therefore replaces both defaults and retains Bats' own CLI semantics.
+  for arg in ${1+"$@"}; do
+    case "$arg" in --jobs|-j|--jobs=*|-j[0-9]*) defaults=(); break ;; esac
+  done
+  bats --formatter tap ${defaults[0]+"${defaults[@]}"} ${1+"$@"} tools/tests/*.bats | tee "$tap"
   rc=${PIPESTATUS[0]}
   mg_artifact tap "$tap"
   mg_tap_report "$tap" "$rc" "tools/mg selftest --filter"

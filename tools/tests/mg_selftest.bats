@@ -2335,3 +2335,55 @@ STUB
   [ "$(grep -c -- ' rm ' "$BATS_TEST_TMPDIR/docker-calls")" -eq 0 ]
   validate "$result"
 }
+
+# These exercise the real nested runner with isolated fixture files.
+@test "selftest overlaps files but keeps each file sequential by default" {
+  rm "$SB/tools/tests/"*.bats
+  export SELFTEST_OVERLAP="$BATS_TEST_TMPDIR/overlap"
+  mkdir "$SELFTEST_OVERLAP"
+  local name
+  for name in a b; do
+    cat >"$SB/tools/tests/$name.bats" <<'EOF'
+#!/usr/bin/env bats
+setup() {
+  export SELFTEST_FILE="$(basename "$BATS_TEST_FILENAME" .bats)"
+  mkdir "$SELFTEST_OVERLAP/active-$SELFTEST_FILE"
+}
+teardown() { rmdir "$SELFTEST_OVERLAP/active-$SELFTEST_FILE"; }
+@test "independent file overlaps its peer" {
+  local name="$SELFTEST_FILE" other=a i
+  [ "$name" = a ] && other=b
+  touch "$SELFTEST_OVERLAP/$name"
+  for i in {1..100}; do
+    [ -f "$SELFTEST_OVERLAP/$other" ] && return 0
+    sleep 0.05
+  done
+  return 1
+}
+@test "same file stays sequential" { sleep 0.2; }
+EOF
+  done
+  mg selftest
+  [ "$status" -eq 0 ]
+  [ "$(field '.summary.passed')" -eq 4 ]
+}
+
+@test "selftest jobs one overrides the parallel default" {
+  rm "$SB/tools/tests/"*.bats
+  export SELFTEST_SERIAL="$BATS_TEST_TMPDIR/active"
+  local name
+  for name in a b; do
+    cat >"$SB/tools/tests/$name.bats" <<'EOF'
+#!/usr/bin/env bats
+@test "serial override never overlaps" {
+  mkdir "$SELFTEST_SERIAL"
+  sleep 0.2
+  rmdir "$SELFTEST_SERIAL"
+}
+EOF
+  done
+  mg selftest --jobs 1
+  if [ "$status" -ne 0 ]; then printf "%s\n" "$stderr" >&2; fi
+  [ "$status" -eq 0 ]
+  [ "$(field '.summary.passed')" -eq 2 ]
+}

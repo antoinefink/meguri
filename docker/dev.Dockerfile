@@ -42,6 +42,11 @@ RUN --mount=type=cache,id=meguri-dev-cargo-registry,target=/usr/local/cargo/regi
     cargo install --locked --version "${GUNGRAUN_RUNNER_VERSION}" gungraun-runner \
  && gungraun-runner --version
 
+# File-level Bats parallelism; keep the expensive Rust install layers cached.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends parallel \
+ && rm -rf /var/lib/apt/lists/*
+
 ENV MG_CONTAINER=dev
 
 FROM dev AS fuzz
