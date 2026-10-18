@@ -1,0 +1,50 @@
+# R704 (specs/sched/fsrs-policy.md U1-U4): two presets Meguri cannot schedule
+# with, next to a normal one.
+#   Future  34 values in fsrsParams6, a list fsrs 6.6.2 cannot construct
+#   Newer   a valid fsrsParams6 list plus a non-empty fsrsParams7 list, kept in
+#           the preset's `other` JSON (a later FSRS list)
+#   Other   the built-in defaults
+# Answering a card of Other, saving Other and turning nothing else leaves both
+# presets and their cards byte for byte as they were, and both still read and
+# decode. (Whether Meguri refuses to study them is Meguri-only, U4.)
+id: sched/compat/unsupported-preset-kept
+description: Presets with a parameter list Meguri cannot use, or a later FSRS list, keep their bytes and their cards' bytes while another preset is answered and saved.
+clock: {tz: UTC, start: "2030-05-01T09:00:00"}
+setup:
+  config:
+    fsrs: true
+  presets:
+    - name: Future
+      fsrs_params: [0.21, 1.29, 2.31, 8.3, 6.41, 0.83, 3.02, 0.01, 1.87, 0.17, 0.8, 1.48, 0.06, 0.26, 1.65, 0.6, 1.87, 0.54, 0.09, 0.07, 0.15, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+    - name: Newer
+      fsrs_params: [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542]
+    - name: Other
+  decks:
+    - {name: F, preset: Future}
+    - {name: N, preset: Newer}
+    - {name: O, preset: Other}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { font-family: serif; }"
+  notes:
+    - {notetype: Pair, deck: F, fields: [oak, roble]}
+    - {notetype: Pair, deck: N, fields: [pine, pino]}
+    - {notetype: Pair, deck: O, fields: [elm, olmo]}
+steps:
+  - observe: [timing]
+  - legacy_update: {preset: Newer, patch: {fsrsParams7: [0.2, 1.3, 2.3, 8.3, 6.4, 0.8, 3.0, 0.01, 1.9, 0.2, 0.8, 1.5, 0.06, 0.26, 1.6, 0.6, 1.9, 0.5, 0.09, 0.07, 0.15, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]}}
+  - advance: 1m
+  - db_exec: {sql: "SELECT name, mtime_secs, usn, hex(config) FROM deck_config ORDER BY id"}
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn, data FROM cards ORDER BY id"}
+  - answer: {card: "#c3", rating: good, time_ms: 5000}
+  - advance: 10m
+  - answer: {card: "#c3", rating: good, time_ms: 4000}
+  - advance: 1m
+  - legacy_update: {preset: Other, patch: {}}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn, hex(config) FROM deck_config ORDER BY id"}
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn, data FROM cards ORDER BY id"}
+  - observe:
+      - legacy_json: {presets: [Future, Newer]}
+      - blob_decode: {presets: [Future, Newer]}

@@ -7,6 +7,7 @@ from . import (  # noqa: F401
     collection,
     deck_options,
     decks,
+    fsrs_policy,
     handoff,
     maintenance,
     media,

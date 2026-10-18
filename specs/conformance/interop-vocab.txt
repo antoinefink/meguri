@@ -37,6 +37,8 @@ tbl_name
 file_too_old
 file_too_new
 v1_scheduler
+# fsrs-policy-ops.md F2: the deck options save request field.
+fsrs_reschedule
 # Collection config keys.
 fsrs
 loadBalancerEnabled

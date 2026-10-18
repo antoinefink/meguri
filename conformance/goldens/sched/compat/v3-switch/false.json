@@ -1,0 +1,56 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-06-01T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1906603200,
+          "now": 1906538400,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["sched2021", 0, 0, "false"]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["sched2021", -1, 1906538460, "true"],
+            ["schedVer", 0, 0, "2"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1906538460000]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "7aa5be68cd3f6ec92b60d18d7848e5789ec977b61294deb57de649edda2c6243",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/compat/v3-switch/false",
+  "scenario_sha256": "38362d9b3bb64b0d41330d599569c2474fcbc44169b60ab0d22450e1f4c39938",
+  "tz": "UTC"
+}

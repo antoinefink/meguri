@@ -1,0 +1,65 @@
+# R703 (specs/sched/fsrs-policy.md E1-E4, S2): cards studied with FSRS on, then
+# another client turns FSRS off. Anki's switch-off writes fsrs false and removes
+# s, d, dr and decay from every card it computed (pos and lrt stay); steps 18
+# and 19 leave that state as it arrives by sync. The collection reopens with
+# FSRS off without writing anything, and turning FSRS on again recomputes the
+# FSRS values from the review history without changing any due date or
+# interval. A second enable_fsrs, with FSRS already on, changes nothing at all
+# (col.mod included).
+id: sched/compat/re-enable
+description: FSRS turned off by another client and on again gets its memory states back from the review history, with due dates unchanged; enabling while on changes nothing.
+clock: {tz: America/New_York, start: "2030-02-10T09:00:00"}
+setup:
+  config:
+    fsrs: true
+    cardStateCustomizer: ""
+    newCardsIgnoreReviewLimit: false
+    applyAllParentLimits: false
+    fsrsHealthCheck: true
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { font-family: serif; }"
+  notes:
+    - {notetype: Pair, deck: Words, fields: [lake, lago]}
+    - {notetype: Pair, deck: Words, fields: [hill, colina]}
+    - {notetype: Pair, deck: Words, fields: [wind, viento]}
+    - {notetype: Pair, deck: Words, fields: [snow, nieve]}
+steps:
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good, time_ms: 4000}
+  - answer: {card: "#c2", rating: again, time_ms: 9000}
+  - answer: {card: "#c3", rating: easy, time_ms: 3000}
+  - advance: 10m
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - answer: {card: "#c2", rating: good, time_ms: 6000}
+  - advance: 2d
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good, time_ms: 4000}
+  - answer: {card: "#c2", rating: good, time_ms: 5000}
+  - answer: {card: "#c3", rating: hard, time_ms: 7000}
+  - advance: 5d
+  - observe: [timing]
+  - answer: {card: "#c1", rating: again, time_ms: 12000}
+  - answer: {card: "#c3", rating: good, time_ms: 4000}
+  - advance: 1m
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn, data FROM cards ORDER BY id"}
+  - set_config: {key: fsrs, value: false}
+  - db_exec: {sql: "UPDATE cards SET data = json_remove(data, '$.s', '$.d', '$.dr', '$.decay') WHERE type != 0"}
+  - reopen: {}
+  - observe: [timing]
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn, data FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1m
+  - enable_fsrs: {}
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn, data FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT id, cid, usn, ease, ivl, lastIvl, factor, time, type FROM revlog ORDER BY id"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'fsrs'"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1m
+  - enable_fsrs: {}
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn, data FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'fsrs'"}
+  - db_exec: {sql: "SELECT mod FROM col"}
