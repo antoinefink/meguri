@@ -14,13 +14,12 @@
 # probe is missing or a setting left it unchanged. Simulators run in the
 # macOS test VM (U8c, mac-vm.sh): the products, app/Snapshots (the baselines
 # the tests read at their source path) and the inventory go there, and each
-# run's output directory comes back. The Mac renders in-process on this Mac,
-# off-screen; its test host is sandboxed, so its results are written in its
-# container and copied here. On a locked Mac (or a sleeping display) the Mac
-# part is queued (host-session, U19b): the simulators' results still decide,
-# so their failures fail the run. `--record <filter>` then copies the images of
-# failing or missing snapshots that match the filter into app/Snapshots/,
-# leaving the others byte for byte; `--rebaseline` records everything for
+# run's output directory comes back. The Mac renders in-process in the same
+# leased VM; its sandbox container output is staged under the run directory
+# there before being fetched. No host login session or host lease is needed.
+# `--record <filter>` then copies the images of failing or missing snapshots
+# that match the filter into app/Snapshots/, leaving the others byte for
+# byte; `--rebaseline` records everything for
 # the current OS build and drops the baselines of other builds of the same
 # model (R1974).
 # Approved signature baselines (docs/design/approved-baselines.json) that
@@ -51,6 +50,10 @@ mg_snapshots__usage() {
 }
 
 mg_snapshots() {
+  # Jobs have their own shell. Keep the pool's host override suppressed for
+  # child scripts and exit cleanup even if the VM later becomes unavailable.
+  MEGURI_SIM_ALLOW_HOST=0
+  export MEGURI_SIM_ALLOW_HOST
   local platforms="" devices=() filter="" mode=verify rebaseline=false p d kind kinds
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -80,13 +83,19 @@ mg_snapshots() {
   done
   [ -n "$platforms" ] || platforms="iphone ipad mac"
   platforms="${platforms# }"
-  # Simulators: where they run is decided before anything else touches them.
-  [ "$platforms" = mac ] || mg_sim_begin || return 0
+  # Use the pool VM for every platform, including Mac-only runs. Explicit
+  # host-pool overrides do not apply to snapshot verification.
+  local begin
+  MG_VM_PART="the snapshot runs ($platforms)"
+  mg_sim_begin
+  begin=$?
+  [ "$begin" -eq 0 ] || [ "$begin" -eq 2 ] || return 0
   # Each --device stands in for the pool kind it is; the job leases the others.
   kinds=""
   for p in $platforms; do [ "$p" = mac ] || kinds="$kinds $(mg_snapshots__kinds "$p")"; done
   MG_SNAP_DEVICES=""
   for d in ${devices[0]+"${devices[@]}"}; do
+    [ "$begin" -eq 0 ] || continue
     kind="$("$MG_TOOLS/scripts/sim-pool.sh" status 2>/dev/null | jq -r --arg u "$d" 'first(.devices[] | select(.udid == $u) | .kind) // empty')"
     if [ -z "$kind" ] || ! mg_word_in "$kind" "$kinds"; then
       mg_snapshots__usage "--device $d is ${kind:+a $kind simulator, }not one of the kinds --platform $(printf '%s' "$platforms" | tr ' ' ',') renders on (${kinds# })"
@@ -108,83 +117,68 @@ mg_snapshots() {
     mg_status error
     return 0
   fi
-  case " $platforms " in *" iphone "* | *" ipad "*) mg_app_build ios-sim Debug Snapshot || return 0 ;; esac
-  case " $platforms " in *" mac "*) mg_app_build mac Debug Snapshot || return 0 ;; esac
+  case " $platforms " in *" iphone "* | *" ipad "*) mg_app_build ios-sim Debug Snapshot || { mg_queued_settle; return 0; } ;; esac
+  case " $platforms " in *" mac "*) mg_app_build mac Debug Snapshot || { mg_queued_settle; return 0; } ;; esac
 
   MG_SNAP_MODE="$mode" MG_SNAP_FILTER="$filter" MG_SNAP_BROKEN=0
-  # The simulators' lease (the test VM's) comes before the Mac's host lease,
-  # whatever the platform order: every job that takes both takes them so.
-  # A test VM that cannot be reached queues the simulators
-  # (mg__mac_vm_unreachable); the Mac part still runs.
-  local ran="" rc sims_queued=""
-  case " $platforms " in
-    *" iphone "* | *" ipad "*)
-      mg_snapshots__sim_lease
-      rc=$?
-      [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ] || return 0
-      [ "$rc" -ne 2 ] || sims_queued=1
-      ;;
-  esac
+  # Copy both platforms' products and runtime inputs under one VM lease,
+  # after all host builds, regardless of the requested platform order.
+  local ran="" rc f returned=""
+  [ "$begin" -eq 0 ] || { mg_queued_settle; return 0; }
+  mg_snapshots__sim_lease
+  rc=$?
+  [ "$rc" -eq 0 ] || { mg_queued_settle; return 0; }
   for p in $platforms; do
     if [ "$p" = mac ]; then
       mg_snapshots__mac
       rc=$?
-      # A locked Mac queues the Mac part (mg_host_lease); the rest goes on.
-      [ "$rc" -eq 2 ] && continue
-      [ "$rc" -eq 0 ] || return 0
-      ran="$ran mac"
+      if [ "$rc" -eq 0 ]; then ran="$ran mac"; else [ "$rc" -eq 2 ] || MG_SNAP_BROKEN=1; fi
       continue
     fi
-    [ -z "$sims_queued" ] || continue
     for kind in $(mg_snapshots__kinds "$p"); do
       d="$(printf '%s\n' $MG_SNAP_DEVICES | sed -n "s/^$kind=//p")"
       mg_snapshots__simulator "$kind" "$d"
       rc=$?
-      [ "$rc" -ne 2 ] || { sims_queued=1 && break; }
-      [ "$rc" -eq 0 ] || return 0
+      [ "$rc" -eq 0 ] || break
     done
-    [ -n "$sims_queued" ] || ran="$ran $p"
+    if [ "$rc" -eq 0 ]; then ran="$ran $p"; else [ "$rc" -eq 2 ] || MG_SNAP_BROKEN=1; fi
   done
-  # Only the Mac was asked for, and it is queued.
-  [ -n "$ran" ] || return 0
+  # Include outputs already returned even if a later platform was queued
+  # or failed. Never let queuing hide an independent snapshot failure.
+  for f in "$MG_RUN_DIR"/*/*/results.jsonl; do [ ! -f "$f" ] || returned=1; done
+  if [ -z "$ran$returned" ]; then
+    [ "$MG_SNAP_BROKEN" = 0 ] || mg_status error
+    mg_queued_settle
+    return 0
+  fi
   mg_snapshots__finish "${ran# }" "$rebaseline"
 }
 
-# The host lease, taken once for the whole job (mg_host_lease is not
-# re-entrant: a second call would wait for this job itself). Returns
-# mg_host_lease's code: 2 when the locked Mac queued <part>.
-mg_snapshots__lease() {
-  local rc
-  [ -z "${MG_SNAP_LEASED:-}" ] || return 0
-  mg_host_lease --part "${1:-$MG_JOB}"
-  rc=$?
-  [ "$rc" -eq 0 ] || return "$rc"
-  MG_SNAP_LEASED=1
-}
-
-# The simulators' lease, taken once: the test VM's (with the products,
-# app/Snapshots and the inventory copied in), or the host lease with
-# MEGURI_SIM_ALLOW_HOST=1. Returns 2 when the test VM could not be reached
-# (queued; its lease is given back).
+# One VM lease and one source copy for Mac-only and mixed runs.
 mg_snapshots__sim_lease() {
   local rc
   [ -z "${MG_SNAP_SIM_LEASED:-}" ] || return 0
-  if [ "$MG_SIM_RUNNER" = vm ]; then
-    mg_sim_take || return
-    mg_mac_vm_copy_in "$MG_ROOT/app/Snapshots" "$MG_RUN_DIR/inventory.json"
-    rc=$?
-    if [ "$rc" -eq 2 ]; then
-      mg__mac_vm_release_queued 2
-      return 2
-    elif [ "$rc" -ne 0 ]; then
-      mg_message "snapshots: the test VM could not run the simulators: the baselines could not be copied into it"
-      mg_status error
-      return 1
-    fi
-  else
-    mg_snapshots__lease || return 1
+  mg_sim_take || return
+  mg_mac_vm_copy_in "$MG_ROOT/app/Snapshots" "$MG_RUN_DIR/inventory.json"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    mg__mac_vm_release_queued "$rc"
+    [ "$rc" -eq 2 ] || mg_status error
+    return "$rc"
   fi
   MG_SNAP_SIM_LEASED=1
+}
+
+# A lost run that could not be stopped bars all later execution in this VM.
+mg_snapshots__session() {
+  [ -n "$MG_MAC_VM_LOST" ] || return 0
+  if [ -n "$MG_MAC_VM_LOST_UNREACHABLE" ]; then
+    mg__mac_vm_unreachable "$MG_MAC_VM_LOST"
+    return 2
+  fi
+  mg_failure mac-vm-stop "$MG_MAC_VM_LOST"
+  mg_status error
+  return 1
 }
 
 # mg_snapshots__xcodebuild <out dir> <destination> <only-testing suites|all> <env...>:
@@ -195,36 +189,31 @@ mg_snapshots__sim_lease() {
 # suites (their snapshot failures come from results.jsonl). Returns 2 when
 # the test VM could not be reached (queued, mg__mac_vm_unreachable).
 mg_snapshots__xcodebuild() {
-  local out="$1" dest="$2" suites="$3" only=() s rc summary e
+  local out="$1" dest="$2" suites="$3" only=() s rc summary e sdk=iphonesimulator
   shift 3
+  mg_snapshots__session || return
   if [ "$suites" != all ]; then
     for s in $suites; do only[${#only[@]}]="-only-testing:MeguriSnapshotTests/$s"; done
   fi
   rm -rf "$out.xcresult"
   mkdir -p "$(dirname "$out")"
-  if [ "$dest" != "platform=macOS,arch=arm64" ] && [ "$MG_SIM_RUNNER" = vm ]; then
-    # mg_vm_xcodebuild_test passes the exported TEST_RUNNER_ variables.
-    for e in "$@"; do export "${e?}"; done
-    rm -rf "$out"
-    mg_vm_xcodebuild_test "$out" Snapshot iphonesimulator "$dest" Debug ${only[0]+"${only[@]}"}
-    rc=$?
-    for e in "$@"; do unset "${e%%=*}"; done
-    [ -z "$MG_MAC_VM_RUN_QUEUED" ] || return 2
-    if [ -n "$MG_MAC_VM_RUN_ERROR" ]; then
-      mg_artifact log "$out.log" "xcodebuild test $(basename "$(dirname "$out")")/$(basename "$out") (in the test VM)"
-      MG_SNAP_BROKEN=1
-      return 1
-    fi
-    # The run's output directory comes back (a run that wrote none has none).
-    if mg_mac_vm_ssh "test -d $(mvl_q "$out")" >/dev/null 2>&1; then
-      mg_sim_fetch "$out"
-      case $? in 0) ;; 2) return 2 ;; *) MG_SNAP_BROKEN=1 && return 1 ;; esac
-    fi
-  else
-    env "$@" xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme Meguri -testPlan Snapshot -configuration Debug \
-      -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$out.xcresult" -collect-test-diagnostics never \
-      ${only[0]+"${only[@]}"} >"$out.log" 2>&1
-    rc=$?
+  [ "$dest" != "platform=macOS,arch=arm64" ] || sdk=macosx
+  # mg_vm_xcodebuild_test passes the exported TEST_RUNNER_ variables.
+  for e in "$@"; do export "${e?}"; done
+  rm -rf "$out"
+  mg_vm_xcodebuild_test "$out" Snapshot "$sdk" "$dest" Debug ${only[0]+"${only[@]}"}
+  rc=$?
+  for e in "$@"; do unset "${e%%=*}"; done
+  [ -z "$MG_MAC_VM_RUN_QUEUED" ] || return 2
+  if [ -n "$MG_MAC_VM_RUN_ERROR" ]; then
+    mg_artifact log "$out.log" "xcodebuild test (in the test VM)"
+    MG_SNAP_BROKEN=1
+    return 1
+  fi
+  # Mac output lives in its guest sandbox until mg_snapshots__mac stages it.
+  if [ "$sdk" != macosx ]; then
+    mg_sim_fetch "$out"
+    case $? in 0) ;; 2) return 2 ;; *) MG_SNAP_BROKEN=1 && return 1 ;; esac
   fi
   mg_artifact log "$out.log" "xcodebuild test $(basename "$(dirname "$out")")/$(basename "$out")"
   summary="$(xcrun xcresulttool get test-results summary --path "$out.xcresult" 2>/dev/null |
@@ -249,15 +238,22 @@ mg_snapshots__xcodebuild() {
 # Reduce Motion and Liquid Glass opacity for a settings group (rt1-rm0-t50),
 # everything else at its default.
 mg_snapshots__settings() {
-  local udid="$1" group="$2" rt rm t onoff
+  local udid="$1" group="$2" rt rm t onoff out rc
   onoff() { [ "$1" = 1 ] && echo on || echo off; }
   rt="$(printf '%s' "$group" | sed -E 's/^rt([01])-rm([01])-t([0-9]+)$/\1/')"
   rm="$(printf '%s' "$group" | sed -E 's/^rt([01])-rm([01])-t([0-9]+)$/\2/')"
   t="$(printf '%s' "$group" | sed -E 's/^rt([01])-rm([01])-t([0-9]+)$/\3/')"
   printf '%s' "$group" | grep -Eq '^rt[01]-rm[01]-t[0-9]+$' || { echo "snapshots: bad settings group '$group'" >&2; return 1; }
-  mg_devicectl device settings appearance --device "$udid" --mode light --text-size large --larger-accessibility-sizes off \
+  out="$(mg_devicectl device settings appearance --device "$udid" --mode light --text-size large --larger-accessibility-sizes off \
     --increase-contrast off --reduce-transparency "$(onoff "$rt")" --reduce-motion "$(onoff "$rm")" \
-    --liquid-glass-opacity "$(awk -v t="$t" 'BEGIN { printf "%.2f", t / 100 }')" >&2
+    --liquid-glass-opacity "$(awk -v t="$t" 'BEGIN { printf "%.2f", t / 100 }')" 2>&1)"
+  rc=$?
+  [ -z "$out" ] || printf '%s\n' "$out" >&2
+  if [ "$rc" -ne 0 ] && mvl_unreachable "$rc" "$out"; then
+    mg__mac_vm_unreachable "could not set $udid's appearance: $out"
+    return 2
+  fi
+  return "$rc"
 }
 
 # mg_snapshots__simulator <pool kind> [udid]: plan, then one run per group.
@@ -266,6 +262,7 @@ mg_snapshots__settings() {
 # be reached (queued).
 mg_snapshots__simulator() {
   local kind="$1" udid="$2" dir="$MG_RUN_DIR/$1" groups g dest rc
+  mg_snapshots__session || return
   mg_snapshots__sim_lease || return
   if [ -z "$udid" ]; then
     mg_sim_lease "$kind" release || { [ -z "$MG_MAC_VM_QUEUED" ] || return 2; return 1; }
@@ -275,7 +272,10 @@ mg_snapshots__simulator() {
   [ -z "$2" ] || mg_sim_check_given "$udid" || return 1
   dest="id=$udid"
   mg_on_exit "mg_snapshots__settings '$udid' '$MG_SNAP_DEFAULT_GROUP' >/dev/null 2>&1"
-  if ! mg_snapshots__settings "$udid" "$MG_SNAP_DEFAULT_GROUP"; then
+  mg_snapshots__settings "$udid" "$MG_SNAP_DEFAULT_GROUP"
+  rc=$?
+  [ "$rc" -ne 2 ] || return 2
+  if [ "$rc" -ne 0 ]; then
     mg_failure settings "devicectl could not set $udid's appearance settings (spike S5)"
     mg_status error
     return 1
@@ -292,7 +292,10 @@ mg_snapshots__simulator() {
     awk '!seen[$0]++')"
   mg_detail "groups_$(printf '%s' "$kind" | tr '-' '_')" "$(printf '%s\n' $groups | jq -R . | jq -sc .)"
   for g in $groups; do
-    if ! mg_snapshots__settings "$udid" "$g"; then
+    mg_snapshots__settings "$udid" "$g"
+    rc=$?
+    [ "$rc" -ne 2 ] || return 2
+    if [ "$rc" -ne 0 ]; then
       mg_failure settings "devicectl could not set settings group $g on $udid (spike S5)"
       mg_status error
       return 1
@@ -314,27 +317,54 @@ mg_snapshots__simulator() {
   return 0
 }
 
-# The Mac: one in-process run, off-screen windows only. The sandboxed test
-# host writes in its own container; the results are moved here. Returns 2
-# when the locked Mac queued it.
+# The sandbox container belongs to the guest account, which need not have
+# this host's HOME. Stage its output at the checkout path before fetching.
 mg_snapshots__mac() {
-  local dir="$MG_RUN_DIR/mac/mac" box rc
-  box="$HOME/Library/Containers/$MG_APP_DEV_ID/Data/tmp/meguri-snapshots/$MG_RUN_ID"
-  mg_snapshots__lease mac
+  local dir="$MG_RUN_DIR/mac/mac" box rc err="$MG_RUN_DIR/mac-home.log"
+  mg_snapshots__session || return
+  box="$(mg_mac_vm_ssh 'printf "%s" "$HOME"' 2>"$err")"
   rc=$?
-  [ "$rc" -eq 0 ] || return "$rc"
-  mg_app_mac_guard || return 1
-  rm -rf "$box"
+  if [ "$rc" -ne 0 ]; then
+    if mvl_unreachable "$rc" "$(cat "$err")"; then
+      mg__mac_vm_unreachable "could not read the guest HOME$(mvl_last "$err")" mac
+      return 2
+    fi
+    mg_failure mac-vm-home "could not read the guest HOME; see $err"
+    mg_status error
+    return 1
+  fi
+  case "$box" in /*) ;; *) box="" ;; esac
+  if [ -z "$box" ] || [ "$box" = / ] || [[ "$box" = *$'\n'* ]]; then
+    mg_failure mac-vm-home "the test VM returned an invalid HOME"
+    mg_status error
+    return 1
+  fi
+  box="$box/Library/Containers/$MG_APP_DEV_ID/Data/tmp/meguri-snapshots/$MG_RUN_ID"
+  # The run id is unique; staging replaces only this run's directory.
   mg_snapshots__xcodebuild "$dir" "platform=macOS,arch=arm64" all TEST_RUNNER_MEGURI_SNAPSHOT_MODE="$MG_SNAP_MODE" \
     TEST_RUNNER_MEGURI_SNAPSHOT_FILTER="$MG_SNAP_FILTER" TEST_RUNNER_MEGURI_SNAPSHOT_OUT="$box" \
-    TEST_RUNNER_MEGURI_INVENTORY_JSON="$MG_RUN_DIR/inventory.json" || { mg_status error; return 1; }
-  mkdir -p "$dir"
-  if [ -d "$box" ]; then
-    cp -R "$box/." "$dir/"
-    rm -rf "$box"
-    [ ! -f "$dir/results.jsonl" ] ||
-      jq -c --arg from "$box" --arg to "$dir" 'with_entries(if (.value | type) == "string" and (.value | startswith($from)) then .value |= ($to + .[($from | length):]) else . end)' \
-        "$dir/results.jsonl" >"$dir/results.jsonl.tmp" && mv "$dir/results.jsonl.tmp" "$dir/results.jsonl"
+    TEST_RUNNER_MEGURI_INVENTORY_JSON="$MG_RUN_DIR/inventory.json"
+  rc=$?
+  [ "$rc" -eq 0 ] || { [ "$rc" -eq 2 ] || mg_status error; return "$rc"; }
+  mg_mac_vm_ssh "mkdir -p $(mvl_q "$dir") && cp -R $(mvl_q "$box/.") $(mvl_q "$dir/") && rm -rf $(mvl_q "$box")" >"$err" 2>&1
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    if mvl_unreachable "$rc" "$(cat "$err")"; then
+      mg__mac_vm_unreachable "could not stage the Mac snapshot output$(mvl_last "$err")" mac
+      return 2
+    fi
+    mg_failure mac-vm-copy "could not stage the Mac snapshot output; see $err"
+    mg_status error
+    return 1
+  fi
+  mg_sim_fetch "$dir" || return
+  if [ -f "$dir/results.jsonl" ]; then
+    jq -c --arg from "$box" --arg to "$dir" 'with_entries(if (.value | type) == "string" and (.value | startswith($from)) then .value |= ($to + .[($from | length):]) else . end)' \
+      "$dir/results.jsonl" >"$dir/results.jsonl.tmp" && mv "$dir/results.jsonl.tmp" "$dir/results.jsonl" || {
+      mg_failure snapshot-results "invalid Mac snapshot results.jsonl"
+      mg_status error
+      return 1
+    }
   fi
   return 0
 }

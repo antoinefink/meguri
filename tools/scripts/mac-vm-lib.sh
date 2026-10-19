@@ -323,7 +323,8 @@ mvl_copy_to() {
 }
 
 # mvl_stop_tests <ssh>: stops every UI test run in the VM (xcodebuild
-# test-without-building and its Mac or iOS test runner: SIGTERM, then SIGKILL
+# test-without-building, Mac or iOS test hosts, and hidden Debug launches:
+# SIGTERM, then SIGKILL
 # halfway through MEGURI_MAC_VM_STOP_SECONDS, 20) and confirms none is left.
 # Only the lease holder runs tests in a VM, so for the holder any such
 # process is a run left behind (a lost SSH session, a killed job), and two
@@ -337,7 +338,7 @@ mvl_stop_tests() {
   MVL_REASON=""
   MVL_UNREACHABLE=""
   # The brackets keep the shell that runs this command from matching itself.
-  out="$("$1" "p=$(mvl_q 'xcodebuild[ ]test-without-building|UITests-Runner[.]app/Contents/MacOS/|UITests-Runner[.]app/[^/]*UITests-Runner')
+  out="$("$1" "p=$(mvl_q 'xcodebuild[ ]test-without-building|UITests-Runner[.]app/Contents/MacOS/|UITests-Runner[.]app/[^/]*UITests-Runner|/[x]ctest( |$)|[m]ac-hidden-launch[.]sh|/Build/Products/Debug/Meguri[.]app/Contents/MacOS/[M]eguri')
 if pgrep -f \"\$p\" >/dev/null; then
   echo 'mg-mac-vm: stopping'
   pkill -f \"\$p\"

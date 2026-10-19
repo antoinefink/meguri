@@ -85,7 +85,7 @@ stub() { printf '#!/bin/bash\n%s\n' "$2" >"$1" && chmod +x "$1"; }
 add_vm() {
   mkdir -p "$FAKE_VM_DIR/$1/fs"
   echo "$2" >"$FAKE_VM_DIR/$1/state"
-  stub "$DRIVE/vm-ssh-$1" "FAKE_VM_NAME=$1 exec '$REPO_ROOT/tools/tests/mac_vm_fake_ssh.sh' \"\$@\""
+  stub "$DRIVE/vm-ssh-$1" "HOME='$BATS_TEST_TMPDIR/guest-home' FAKE_VM_NAME=$1 exec '$REPO_ROOT/tools/tests/mac_vm_fake_ssh.sh' \"\$@\""
 }
 
 write_config() {
@@ -205,13 +205,19 @@ while [ $# -gt 0 ]; do
   esac
 done
 products="$(dirname "$run")"
-app="$products/Debug-iphonesimulator/Meguri.app/Info.plist"
+case "$dest" in
+  platform=macOS*) app="$products/Debug/Meguri.app/Info.plist" ;;
+  *) app="$products/Debug-iphonesimulator/Meguri.app/Info.plist" ;;
+esac
 [ -f "$run" ] && [ -f "$app" ] || { echo "xcodebuild: error: no test products at $(unmap "$products")"; exit 70; }
 echo "vm-products $(unmap "$products") $(cat "$app")" >>"$STUB_LOG"
-udid="${dest#id=}"
-state="$(xcrun simctl __state "$udid" 2>/dev/null)"
-[ "$state" = Booted ] || { echo "xcodebuild: error: Unable to find a destination matching $dest"; exit 70; }
-[ "${FAKE_VM_TEST_VOICEOVER:-}" != 1 ] || xcrun simctl __voiceover "$udid" enabled >/dev/null || exit 70
+case "$dest" in
+  id=*)
+    udid="${dest#id=}"
+    state="$(xcrun simctl __state "$udid" 2>/dev/null)"
+    [ "$state" = Booted ] || { echo "xcodebuild: error: Unable to find a destination matching $dest"; exit 70; }
+    [ "${FAKE_VM_TEST_VOICEOVER:-}" != 1 ] || xcrun simctl __voiceover "$udid" enabled >/dev/null || exit 70 ;;
+esac
 # The driver launches the app with the fixtures its script names: they must
 # be in the VM (launch.fixture relative to the checkout).
 if [ -n "${TEST_RUNNER_MEGURI_DRIVE_SCRIPT:-}" ] && [ -f "$TEST_RUNNER_MEGURI_DRIVE_SCRIPT" ]; then
@@ -235,9 +241,11 @@ if [ -n "${TEST_RUNNER_MEGURI_SNAPSHOT_OUT:-}" ]; then
   if [ "${TEST_RUNNER_MEGURI_SNAPSHOT_MODE:-}" = plan ]; then
     : >"$out/plan.jsonl"
   else
-    printf "probe %s\n" "$TEST_RUNNER_MEGURI_SNAPSHOT_GROUP" >"$out/probe.png"
-    jq -nc --arg a "$(unmap "$out")/probe.png" --arg g "$TEST_RUNNER_MEGURI_SNAPSHOT_GROUP" --arg t "$TEST_RUNNER_MEGURI_SNAPSHOT_TARGET" \
-      "{name: \"matrix.probe/default/\(\$t)\", subject: \"matrix.probe\", status: \"pass\", platform: \$t, group: \$g, key: \"iPhone18,1-24A434\", actual: \$a}" >"$out/results.jsonl"
+    printf "probe %s\n" "${TEST_RUNNER_MEGURI_SNAPSHOT_GROUP:-mac}" >"$out/probe.png"
+    status=pass
+    [ "${TEST_RUNNER_MEGURI_SNAPSHOT_TARGET:-mac}" != "${FAKE_VM_SNAPSHOT_FAIL:-}" ] || status=fail
+    jq -nc --arg a "$(unmap "$out")/probe.png" --arg g "${TEST_RUNNER_MEGURI_SNAPSHOT_GROUP:-mac}" --arg t "${TEST_RUNNER_MEGURI_SNAPSHOT_TARGET:-mac}" --arg s "$status" \
+      "{name: \"matrix.probe/default/\(\$t)\", subject: \"matrix.probe\", status: \$s, platform: \$t, group: \$g, key: \"iPhone18,1-24A434\", actual: \$a}" >"$out/results.jsonl"
     echo "{\"screens\": [], \"problems\": []}" >"$out/state-coverage.json"
     [ -f "$TEST_RUNNER_MEGURI_INVENTORY_JSON" ] && echo "vm-inventory present" >>"$STUB_LOG"
   fi
@@ -278,11 +286,12 @@ mg_lint_ui_first() { return 0; }
 mg__xcframework() { return 0; }
 mg_app_build() {
   echo "fake build $*" >>"$STUB_LOG"
-  local p="$MG_ROOT/build/app/DerivedData/Build/Products" plan="${3:-UI}"
-  mkdir -p "$p/$2-iphonesimulator/Meguri.app" "$p/$2-iphonesimulator/MeguriUITests-Runner.app"
-  printf 'built from %s\n' "$MG_ROOT" >"$p/$2-iphonesimulator/Meguri.app/Info.plist"
-  printf '<plist><string>__TESTROOT__/%s-iphonesimulator/MeguriUITests-Runner.app</string></plist>\n' "$2" \
-    >"$p/Meguri_${plan}_iphonesimulator27.0-arm64.xctestrun"
+  local p="$MG_ROOT/build/app/DerivedData/Build/Products" plan="${3:-UI}" sdk=iphonesimulator root="$2-iphonesimulator"
+  [ "$1" != mac ] || { sdk=macosx; root="$2"; }
+  mkdir -p "$p/$root/Meguri.app" "$p/$root/MeguriUITests-Runner.app"
+  printf 'built from %s\n' "$MG_ROOT" >"$p/$root/Meguri.app/Info.plist"
+  printf '<plist><string>__TESTROOT__/%s/MeguriUITests-Runner.app</string></plist>\n' "$root" \
+    >"$p/Meguri_${plan}_${sdk}27.0-arm64.xctestrun"
 }
 fx_host() { case "$1" in /work/*) printf '%s\n' "$MG_ROOT/${1#/work/}" ;; *) printf '%s\n' "$1" ;; esac; }
 mg_image_tools() {
@@ -685,6 +694,112 @@ assert_host_untouched() {
   assert_host_untouched
 }
 
+# bats test_tags=gate
+@test "locked-host Mac-only snapshots use the VM, guest container HOME, baselines and inventory, and return output without a host lease" {
+  STUB_LOCKED=1 mg snapshots --platform mac --filter 'matrix.probe/*'
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.host_lease)" = null ]
+  [ "$(field .details.snapshots.mode)" = verify ]
+  [ "$(field .details.recorded)" = 0 ]
+  called "^vm-xcodebuild .*Meguri_Snapshot_macosx27.0-arm64.xctestrun -destination platform=macOS,arch=arm64 "
+  called '^vm-env TEST_RUNNER_MEGURI_SNAPSHOT_FILTER=matrix.probe/\*$'
+  called '^vm-env TEST_RUNNER_MEGURI_SNAPSHOT_OUT=.*/guest-home/Library/Containers/'
+  called '^vm-inventory present$'
+  local dir
+  dir="$(dirname "$result")/mac/mac"
+  [ "$(jq -r .actual "$dir/results.jsonl")" = "$dir/probe.png" ]
+  [ -f "$dir/probe.png" ]
+  [ -f "$dir/state-coverage.json" ]
+  [ ! -e "$(vm_fs meguri-mac "$dir")" ]
+  [ -z "$(find "$(vm_fs meguri-mac "$BATS_TEST_TMPDIR/guest-home")" -name probe.png)" ]
+  cmp "$SB/app/Snapshots/iPhone18,1-24A434/baseline.png" "$(vm_fs meguri-mac "$SB/app/Snapshots/iPhone18,1-24A434/baseline.png")"
+  not_called '^vm-devicectl '
+  not_called '^simctl '
+  assert_host_untouched
+}
+
+# bats test_tags=gate
+@test "locked-host mixed snapshots respect either platform order under one VM lease and one product copy" {
+  local order first
+  for order in mac,ipad ipad,mac; do
+    : >"$STUB_LOG"
+    STUB_LOCKED=1 mg snapshots --platform "$order"
+    [ "$(field .status)" = pass ]
+    [ "$(field .summary.passed)" = 2 ]
+    [ "$(field .details.host_lease)" = null ]
+    [ "$(grep -c "^ssh .* rm -rf '$SB/build/app/DerivedData/Build/Products' && mkdir -p " "$STUB_LOG")" = 1 ]
+    first="$(grep '^vm-xcodebuild ' "$STUB_LOG" | head -n 1)"
+    case "$order" in mac,*) [[ "$first" == *Meguri_Snapshot_macosx* ]] ;; *) [[ "$first" == *Meguri_Snapshot_iphonesimulator* ]] ;; esac
+    not_called '^vm-overlap'
+    not_called '^vm-host-lease held$'
+    [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+    assert_host_untouched
+  done
+}
+
+@test "a refused Mac snapshot run queues its part while an independent simulator snapshot failure still fails in either platform order" {
+  local order
+  for order in ipad,mac mac,ipad; do
+    FAKE_VM_SNAPSHOT_FAIL=ipad FAKE_VM_SSH_REFUSE='env .*xcodebuild test-without-building .*Meguri_Snapshot_macosx' \
+      mg snapshots --platform "$order"
+    [ "$(field .status)" = fail ]
+    [ "$(field .details.queued)" = false ]
+    [ "$(field '[.details.queued_parts[].user_step] | unique | join(" ")')" = mac-vm ]
+    [ "$(field '[.failures[].id] | unique | join(" ")')" = snapshot/matrix.probe/default/ipad ]
+    assert_host_untouched
+  done
+}
+
+@test "missing and unreachable VM queue Mac snapshots with no host fallback, but an independent host build failure persists" {
+  rm "$MEGURI_MAC_VM_CONFIG"
+  STUB_LOCKED=1 MEGURI_SIM_ALLOW_HOST=1 mg snapshots --platform mac
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  called '^fake build mac Debug Snapshot$'
+  not_called '^vm-xcodebuild '
+  assert_host_untouched
+  write_config meguri-mac
+  FAKE_VM_SSH_REFUSE='stat -f' MEGURI_MAC_VM_BOOT_SECONDS=1 mg snapshots --platform mac
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  rm "$MEGURI_MAC_VM_CONFIG"
+  cat >>"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'
+mg_app_build() { mg_failure build "independent host build failure"; mg_status fail; return 1; }
+EOF
+  mg snapshots --platform mac
+  [ "$(field .status)" = fail ]
+  [ "$(field '.failures[0].id')" = build ]
+  assert_host_untouched
+}
+
+@test "Mac snapshots report malformed guest HOME and actual baseline copy failures as errors" {
+  # The fake wrapper answers the HOME probe incorrectly, but all other VM
+  # commands still use the established fake filesystem and SSH controls.
+  local ssh="$DRIVE/vm-ssh-meguri-mac"
+  cp "$ssh" "$ssh-real"
+  cat >"$ssh" <<'EOF'
+#!/bin/bash
+case "$*" in *'printf "%s" "$HOME"'*) echo relative/home; exit 0 ;; esac
+exec "${0}-real" "$@"
+EOF
+  chmod +x "$ssh"
+  mg snapshots --platform mac
+  [ "$(field .status)" = error ]
+  [ "$(field '[.failures[].id] | index("mac-vm-home") != null')" = true ]
+  not_called '^vm-xcodebuild '
+  mv "$ssh-real" "$ssh"
+  cat >"$BIN/tar" <<'EOF'
+#!/bin/bash
+case "$*" in *app*'-cf - Snapshots'*) exit 1 ;; esac
+exec /usr/bin/tar "$@"
+EOF
+  chmod +x "$BIN/tar"
+  mg snapshots --platform mac
+  [ "$(field .status)" = error ]
+  [ "$(field '[.failures[].id] | index("mac-vm-copy") != null')" = true ]
+  assert_host_untouched
+}
+
 @test "two checkouts start simulator jobs at once: the second waits for the VM lease" {
   local sb2 first second
   sb2="$(new_checkout repo2)"
@@ -838,6 +953,69 @@ assert_host_untouched() {
   assert_host_untouched
 }
 
+@test "a cancelled xcode-check stops its hidden guest app before releasing the lease; the next job stops an older hidden product too" {
+  # Keep the real devices phase and its extracted helper; only build output
+  # is supplied by the phase shim. Cancellation happens during open -W.
+  cp "$SB/tools/tests/xcode_project_check.sh" "$SB/tools/tests/xcode_project_check.real.sh"
+  cat >"$SB/tools/tests/xcode_project_check.sh" <<'EOF'
+#!/bin/bash
+work="$1"
+case " $* " in
+  *" --phase builds "*)
+    mkdir -p "$work/DerivedData/Build/Products/Debug/Meguri.app/Contents/MacOS"
+    echo checked-debug >"$work/DerivedData/Build/Products/Debug/Meguri.app/Contents/MacOS/Meguri"
+    : >"$work/mac-debug-built"
+    echo "ok 1 builds"
+    exit 0 ;;
+esac
+exec /bin/bash "$(dirname "$0")/xcode_project_check.real.sh" "$@"
+EOF
+  cat >"$FAKE_VM_BIN/open" <<'EOF'
+#!/bin/bash
+while [ "$#" -gt 0 ] && [ "$1" != --args ]; do app="$1"; shift; done
+[ "$(cat "$app/Contents/MacOS/Meguri")" = checked-debug ] || exit 1
+printf '%s\n' "$$" "$PPID" >>"$FAKE_VM/tests.pids"
+bash -c 'trap "" TERM; exec -a "$1/Contents/MacOS/Meguri" sleep 600' _ "$app" &
+child=$!
+echo "$child" >>"$FAKE_VM/tests.pids"
+until pgrep -f '/Build/Products/Debug/Meguri[.]app/Contents/MacOS/[M]eguri' >/dev/null; do sleep 0.01; done
+echo "vm-hidden-open $*" >>"$STUB_LOG"
+wait "$child"
+EOF
+  chmod +x "$FAKE_VM_BIN/open"
+  local job old app
+  STUB_LOCKED=1 "$SB/tools/mg" xcode-check >"$BATS_TEST_TMPDIR/hidden.out" 2>"$BATS_TEST_TMPDIR/hidden.err" 3>&- &
+  job=$!
+  bg_track "$job"
+  wait_log "$STUB_LOG" '^vm-hidden-open '
+  kill -TERM "$job"
+  wait "$job" || true
+  result="$(tail -n 1 "$BATS_TEST_TMPDIR/hidden.out")"
+  [ "$(field '[.failures[].id] | index("cancelled") != null')" = true ]
+  called '^vm-test-stop-lease held$'
+  not_called '^vm-test-stop-lease free$'
+  ! FAKE_VM="$FAKE_VM_DIR/meguri-mac" "$FAKE_VM_BIN/pgrep" -f '/Build/Products/Debug/Meguri[.]app/Contents/MacOS/[M]eguri'
+  [ "$(field .details.host_lease)" = null ]
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+
+  # An earlier job killed beyond cleanup may still own a product. The next
+  # lease holder must stop that process before copying any new products.
+  app="$(vm_fs meguri-mac "$SB/build/old/DerivedData/Build/Products/Debug/Meguri.app")"
+  bash -c 'trap "" TERM; exec -a "$1/Contents/MacOS/Meguri" sleep 600' _ "$app" 3>&- &
+  old=$!
+  bg_track "$old"
+  echo "$old" >>"$FAKE_VM_DIR/meguri-mac/tests.pids"
+  : >"$STUB_LOG"
+  mg snapshots --platform mac
+  [ "$(field .status)" = pass ]
+  ! kill -0 "$old" 2>/dev/null
+  local stopped copied
+  stopped="$(grep -n '^vm-pkill -9 -f ' "$STUB_LOG" | head -n 1 | cut -d: -f1)"
+  copied="$(grep -n "^ssh .* rm -rf '$SB/build/app/DerivedData/Build/Products'" "$STUB_LOG" | head -n 1 | cut -d: -f1)"
+  [ -n "$stopped" ] && [ "$stopped" -lt "$copied" ]
+  assert_host_untouched
+}
+
 @test "a cancelled xcode-check stops its simulator run in the VM before releasing the VM's lease" {
   # The checks script is a fake whose devices phase, as the real one does,
   # leases an iPhone from the pool under the job's lease, copies its test
@@ -941,7 +1119,7 @@ EOF
 }
 
 # bats test_tags=gate
-@test "xcode-check with the VM near its process limit keeps its builds and Mac launches and queues its simulator runs; runs the VM drops mid-phase are queued by name (U19c)" {
+@test "xcode-check with the VM near its process limit keeps its builds and queues all app execution; runs the VM drops mid-phase are queued by name (U19c)" {
   # The checks script is a fake: it logs its phases and arguments, and in its
   # devices phase lists what $FAKE_XCODE_CHECK_QUEUED names as a run the VM
   # could not take, as the real one does.
@@ -968,11 +1146,11 @@ FAKE
   [ "$(field .status)" = warn ]
   [ "$(field .details.queued)" = true ]
   [ "$(field '.failures | length')" = 0 ]
-  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part)"')" = "mac-vm the simulator runs" ]
-  [[ "$(field .message)" == "xcode-check: passed without the simulator runs, which are queued: meguri-mac is near its process limit"*"(user step mac-vm)" ]]
-  # The devices phase ran without simulators, under the host lease alone.
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part)"')" = "mac-vm the devices phase (hidden Mac launches, simulators, test runs)" ]
+  [[ "$(field .message)" == "xcode-check: builds checked; VM execution queued: meguri-mac is near its process limit"*"(user step mac-vm)" ]]
+  # The devices phase still builds but queues execution, with no host lease.
   called '^fake xcode_project_check --phase devices --continue-from 1 --no-sims$'
-  [ "$(field .details.host_lease.job)" = xcode-check ]
+  [ "$(field .details.host_lease)" = null ]
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
 
   : >"$STUB_LOG"
@@ -988,7 +1166,7 @@ FAKE
   rm -f "$MEGURI_MAC_VM_CONFIG"
   local args
   for args in "sim acquire iphone" "sim status" "sim-setup" "a11y --platform iphone" "run --platform iphone" \
-    "drive $SB/tools/drive-scripts/examples/open-sample-sheet.json --platform iphone" "snapshots --platform iphone"; do
+    "drive $SB/tools/drive-scripts/examples/open-sample-sheet.json --platform iphone"; do
     # shellcheck disable=SC2086
     mg $args
     [ "$status" -eq 0 ] || { echo "tools/mg $args exited $status"; return 1; }
@@ -1001,6 +1179,14 @@ FAKE
   [ "$status" -eq 5 ]
   [[ "$stderr" == *"queued"* ]]
   not_called '^fake build'
+  not_called '^(tart|ssh) '
+  assert_host_untouched
+
+  # Snapshot builds remain independent host checks even without a VM.
+  mg snapshots --platform iphone
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  called '^fake build ios-sim Debug Snapshot$'
   not_called '^(tart|ssh) '
   assert_host_untouched
 

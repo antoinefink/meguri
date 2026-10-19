@@ -118,7 +118,7 @@ mg__mac_vm_unavailable_step() {
 # reason, never an error; the run is queued unless a part that ran failed or
 # erred (mg_queued_settle). Sets MG_MAC_VM_QUEUED and MG_MAC_VM_REASON.
 mg__mac_vm_unreachable() {
-  local part="${2:-}"
+  local part="${2:-${MG_VM_PART:-}}"
   if [ -z "$part" ]; then
     if [ "$MG_SIM_RUNNER" = vm ]; then part="the simulator runs"; else part="the Mac UI suites"; fi
   fi
@@ -346,7 +346,7 @@ mg_sim_begin() {
     mg_detail sim_runner '"host"'
     return 0
   fi
-  mg__mac_vm_queued "simulators run only in the test VM (docs/process/mac-ui-vm.md), never on this Mac" "the simulator runs"
+  mg__mac_vm_queued "simulators run only in the test VM (docs/process/mac-ui-vm.md), never on this Mac" "${MG_VM_PART:-the simulator runs}"
   return 2
 }
 

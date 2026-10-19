@@ -950,6 +950,51 @@ EOF
     expect "queue done" "$(tail -n 1 "$dir/build/mg/catch-up/queue.jsonl" | jq -r .state)" done
 }
 
+# Exercise the Mac wrapper's empty -only-testing array and TEST_RUNNER_
+# forwarding under the host Bash, with the existing VM runner boundary
+# stubbed. Full SSH/lease/result transport is covered by sim_vm.bats.
+t_snapshot_vm_dispatch_on_macos_bash() {
+  local dir="$SB/snapshot-vm-bash"
+  mkdir -p "$dir/bin"
+  cat >"$dir/bin/xcrun" <<'EOF'
+#!/bin/bash
+case "$*" in
+  'xcresulttool get test-results summary '*) echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' ;;
+  'xcresulttool get test-results tests '*) echo '{"testNodes":[]}' ;;
+  *) exit 97 ;;
+esac
+EOF
+  cat >"$dir/bin/xcodebuild" <<'EOF'
+#!/bin/bash
+exit 97
+EOF
+  chmod +x "$dir/bin/xcrun" "$dir/bin/xcodebuild"
+  cat >"$dir/dispatch.sh" <<'EOF'
+#!/bin/bash
+set -u
+MG_TOOLS="$1/tools" MG_RUN_DIR="$2" MG_MAC_VM_LOST="" MG_MAC_VM_LOST_UNREACHABLE=""
+MG_MAC_VM_RUN_ERROR="" MG_MAC_VM_RUN_QUEUED="" MG_SNAP_BROKEN=0 MG_SIM_RUNNER=vm
+mg_job() { :; }
+mg_artifact() { :; }
+mg_failure() { echo "unexpected failure: $*" >&2; exit 1; }
+mg_vm_xcodebuild_test() {
+  printf '%s\n' "$* env=${TEST_RUNNER_MEGURI_SNAPSHOT_OUT:-missing}" >>"$MG_RUN_DIR/calls"
+  mkdir -p "$1.xcresult"
+  : >"$1.log"
+}
+mg_sim_fetch() { echo "fetch $*" >>"$MG_RUN_DIR/calls"; }
+. "$MG_TOOLS/mg.d/snapshots.sh"
+mg_snapshots__xcodebuild "$MG_RUN_DIR/mac" platform=macOS,arch=arm64 all TEST_RUNNER_MEGURI_SNAPSHOT_OUT=/guest/container || exit 1
+[ -z "${TEST_RUNNER_MEGURI_SNAPSHOT_OUT+x}" ] || exit 1
+mg_snapshots__xcodebuild "$MG_RUN_DIR/ipad" id=FAKE-IPAD "$MG_SNAP_SUITES" TEST_RUNNER_MEGURI_SNAPSHOT_OUT=/guest/ipad || exit 1
+[ -z "${TEST_RUNNER_MEGURI_SNAPSHOT_OUT+x}" ]
+EOF
+  PATH="$dir/bin:$PATH" /bin/bash "$dir/dispatch.sh" "$SB" "$dir" || return 1
+  expect "VM dispatch and fetch" "$(cat "$dir/calls")" "$dir/mac Snapshot macosx platform=macOS,arch=arm64 Debug env=/guest/container
+$dir/ipad Snapshot iphonesimulator id=FAKE-IPAD Debug -only-testing:MeguriSnapshotTests/GalleryComponentSnapshots -only-testing:MeguriSnapshotTests/ScreenSnapshots env=/guest/ipad
+fetch $dir/ipad"
+}
+
 t_results_validate_against_schema() {
   [ -n "$RESULTS" ] || { echo "no results collected"; return 1; }
   # shellcheck disable=SC2086 # RESULTS is a space-separated list of relative paths
@@ -966,7 +1011,7 @@ t_similarity_nightly_runs_jplag t_sync_rig_publishes_on_loopback_only_and_down_r
 t_sync_rig_probes_ignore_proxy_variables t_sync_rig_records_decoded_exchanges
 t_sync_rig_up_fails_when_the_recording_is_unwritable t_actor_scenario_proxies_are_internal_only
 t_recorder_attributes_exchanges_to_actors_and_steps t_sim_pool_on_macos_bash t_host_lease_gate_and_sim_setup_on_macos_bash
-t_fixtures_check_on_macos_bash t_bench_mac_on_macos_bash t_catch_up_reuses_passing_results_on_macos_bash t_results_validate_against_schema"
+t_fixtures_check_on_macos_bash t_bench_mac_on_macos_bash t_catch_up_reuses_passing_results_on_macos_bash t_snapshot_vm_dispatch_on_macos_bash t_results_validate_against_schema"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 if ! setup_sandbox >"$SB/setup.log" 2>&1; then

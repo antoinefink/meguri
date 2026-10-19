@@ -18,7 +18,7 @@
 # simulator, no test run, no TAP plan line); `devices` is the rest: the
 # hidden Mac launches of the Debug app `builds` left, the simulator builds
 # and every test run, numbered from N + 1. `tools/mg xcode-check` takes the
-# host lease between the two (tools/mg.d/host.sh). Without --phase, both.
+# VM lease between the two. Without --phase, both.
 # Without --iphone/--ipad it leases the simulators from the shared pool
 # (tools/scripts/sim-pool.sh) after the Mac configuration builds, and releases
 # them at exit; it never creates, shuts down or deletes a simulator (root
@@ -28,17 +28,16 @@
 # on the Mac only with MEGURI_ALLOW_MAC_UI=1 (`tools/mg mac-ui`) and are
 # reported as queued otherwise. --no-ui skips the test runs.
 #
-# Simulators live in the macOS test VM (U8c, docs/process/mac-ui-vm.md): with
-# --vm-ssh (the VM's SSH wrapper; the job holds its lease) the simulator
-# builds use the generic iOS Simulator destination here, and each simulator
-# test run is built for testing here, its products copied to the same path in
+# All app execution uses the macOS test VM: --vm-ssh names its SSH wrapper
+# (the job holds its lease). Builds use host destinations or the generic iOS
+# Simulator destination; each test run is built here, copied to the same path in
 # the VM (with the sources the tests read at their repository paths, once per
 # run: VM_INPUTS), run there with test-without-building, and its result
 # bundle copied back. A run whose SSH session was lost may go on in the VM:
 # it is stopped there before the next run (mvl_stop_tests), and when it
 # cannot be, no further run starts there. --no-sims (no VM: queued) builds
-# the same and leases and tests no simulator. Without either, simulators are
-# this Mac's (MEGURI_SIM_ALLOW_HOST=1). A VM that cannot be reached during
+# the same and queues app execution. Without a VM wrapper there is no host
+# fallback, including for Mac Unit and Snapshot plans. A VM unreachable during
 # the devices phase (U19c: sim-pool.sh exit 5, an SSH call that fails as ssh
 # or whose command cannot start or fork there, mvl_unreachable) is no
 # failure: each lease or run it kept from happening is a skipped test
@@ -79,6 +78,7 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+[ -n "$VM_SSH" ] || SIMS=false
 mkdir -p "$WORK"
 WORK="$(cd "$WORK" && pwd -P)"
 DD="$WORK/DerivedData"
@@ -98,9 +98,8 @@ CONFIGS="Debug Profile Release AppStore"
 POOL="$REPO/tools/scripts/sim-pool.sh"
 # shellcheck source=../scripts/mac-vm-lib.sh
 . "$REPO/tools/scripts/mac-vm-lib.sh"
-# A simulator build's destination: a device here, or any simulator when the
-# devices are the test VM's (or there are none).
-sim_dest() { if [ -z "$VM_SSH" ] && [ "$SIMS" = true ]; then echo "id=$1"; else echo "generic/platform=iOS Simulator"; fi; }
+# Host builds never resolve a simulator destination against a host device.
+sim_dest() { echo "generic/platform=iOS Simulator"; }
 
 N="$FIRST"
 FAILED=0
@@ -138,28 +137,6 @@ forget_mac_app() { # forget_mac_app <config>: unregisters and deletes a Release 
   rm -rf "$app"
 }
 
-# running <executable>: the PIDs of the processes running it.
-running() {
-  ps -Aww -o pid=,command= | awk -v e="$1" '
-    { pid = $1; sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "") }
-    $0 == e || index($0, e " ") == 1 { print pid }'
-}
-
-# quit_running <executable>: terminates the processes running it (SIGKILL after 10 s).
-quit_running() {
-  local pids
-  pids="$(running "$1")"
-  [ -n "$pids" ] || return 0
-  # shellcheck disable=SC2086
-  kill $pids 2>/dev/null
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    [ -n "$(running "$1")" ] || return 0
-    sleep 1
-  done
-  # shellcheck disable=SC2046
-  kill -9 $(running "$1") 2>/dev/null
-}
-
 # The leases and runs a VM that could not be reached kept from happening.
 VM_QUEUED="$WORK/vm-queued.tsv"
 [ "$PHASE" = builds ] || rm -f "$VM_QUEUED"
@@ -175,13 +152,12 @@ cleanup() {
   for udid in ${LEASED[@]+"${LEASED[@]}"}; do
     "$POOL" release "$udid" >&2
   done
-  quit_running "$DD/Build/Products/Debug/Meguri.app/Contents/MacOS/Meguri"
   forget_mac_app Release
   forget_mac_app AppStore
   rm -f "$REPO/app/Meguri/App/SyncedFolderProbe"*.swift
 }
 trap cleanup EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' INT TERM HUP
 
 # lease <kind> <name>: leases a pool device of <kind> (sim-pool.sh) and sets
 # LEASE to its UDID, or reports the failure and sets LEASE to "". Called
@@ -409,58 +385,6 @@ entitlements_are() { # entitlements_are <bundle> <expected keys...>
   [ "$actual" = "$expected" ] || { printf 'entitlements: %s\nexpected: %s\n' "$(echo $actual)" "$(echo $expected)" && return 1; }
 }
 
-# stays_up <app> [launch args...]: launches the app hidden and in the
-# background, as agents must (`open -g -j`, root AGENTS.md), with
-# -MeguriBackgroundLaunch YES (U8d), checks that it still runs 3 s later, out
-# of the Dock and not the active app (lsappinfo), then quits it. On the Mac an
-# alert presented while the app is hidden closes the window, and the app quits
-# (app/AGENTS.md).
-stays_up() {
-  local app="$1" opener rc=0 pids pid shown type
-  shift
-  open -g -j -n -W "$app" --args -MeguriBackgroundLaunch YES -ApplePersistenceIgnoreState YES "$@" >/dev/null 2>&1 &
-  opener=$!
-  sleep 3
-  if ! kill -0 "$opener" 2>/dev/null; then
-    wait "$opener"
-    echo "the app quit within 3 s of a hidden launch (open -W exit $?)"
-    rc=1
-  fi
-  pids="$(running "$app/Contents/MacOS/Meguri")"
-  if [ -z "$pids" ]; then
-    echo "cannot verify the Mac app stays out of sight: no known pid"
-    rc=1
-  fi
-  for pid in $pids; do
-    if ! shown="$(lsappinfo info -only ApplicationType "$pid" 2>/dev/null)"; then
-      echo "cannot verify the Mac app stays out of sight (pid $pid): lsappinfo failed"
-      rc=1
-      continue
-    fi
-    type="$(printf '%s\n' "$shown" | sed -nE 's/.*type="([A-Za-z]+)".*/\1/p' | head -n 1)"
-    shown="$(printf '%s\n' "$shown" | tr -s '\n ' '  ')"
-    case "$shown" in
-      *'type="Foreground"'* | *"(in front)"*)
-        echo "the app showed on this Mac (pid $pid; a Dock tile or the active app): lsappinfo:$shown"
-        rc=1
-        ;;
-      *)
-        case "$type" in
-          UIElement | BackgroundOnly) ;;
-          *)
-            echo "cannot verify the Mac app stays out of sight (pid $pid; expected UIElement or BackgroundOnly): lsappinfo:${shown:-empty}"
-            rc=1
-            ;;
-        esac
-        ;;
-    esac
-  done
-  quit_running "$app/Contents/MacOS/Meguri"
-  kill "$opener" 2>/dev/null
-  wait "$opener" 2>/dev/null
-  return "$rc"
-}
-
 KTD22="com.apple.security.app-sandbox com.apple.security.network.client com.apple.security.network.server com.apple.security.files.user-selected.read-write com.apple.security.files.bookmarks.app-scope"
 FIXTURES=com.apple.security.temporary-exception.files.absolute-path.read-only
 if builds_phase; then
@@ -541,43 +465,14 @@ if builds_phase; then
   rm -f "$REPO/app/Meguri/App/$probe.swift"
 fi
 
-# --- Launches and simulators (the devices phase) ----------------------------
-# Hidden launches of the Mac Debug app the builds left, on Home and on every
-# test-hook route.
-if devices_phase && [ -f "$MAC_DEBUG_BUILT" ]; then
-  app="$DD/Build/Products/Debug/Meguri.app"
-  check "mac-Debug launched hidden stays up: Home" stays_up "$app"
-  for route in $ROUTES; do
-    check "mac-Debug launched hidden stays up: route $route" stays_up "$app" -MeguriRoute "$route"
-  done
-fi
-
-if devices_phase; then
-  # Pool devices are leased only now, after the Mac configuration builds, so
-  # that other agents can use them meanwhile. Without a test VM (--no-sims)
-  # the simulator builds still run; no simulator is leased or tested.
-  if [ "$SIMS" = true ]; then
-    [ -n "$IPHONE" ] || { lease iphone iPhone && IPHONE="$LEASE"; }
-    [ -n "$IPAD" ] || { lease ipad iPad && IPAD="$LEASE"; }
-  else
-    skip "lease the iPhone and iPad simulators" "queued: no test VM (user step mac-vm)"
-  fi
-  if { [ -n "$IPHONE" ] || [ "$SIMS" = false ]; } && build "iphone-Debug" Debug "$(sim_dest "$IPHONE")"; then
-    check "iphone-Debug links the Debug core with the simulator slice" stamp_is Debug ankiweb,test-hooks sim
-    check "iphone-Debug entitlements: the .dev App Group" expect_sim_entitlement "$DD/Build/Products/Debug-iphonesimulator/Meguri.app/Meguri" \
-      com.apple.security.application-groups '["group.com.antoinefink.meguri.dev"]'
-
-  fi
-  [ -z "$IPAD" ] || build "ipad-Debug" Debug "$(sim_dest "$IPAD")"
-fi
-
-# --- Tests ------------------------------------------------------------------
+# --- VM execution (the devices phase) ---------------------------------------
 VM_MARK="mg-xcode-check: remote exit"
 # What the tests read in the repository, at their source paths, besides the
 # products: the snapshot baselines (HostedSnapshot.swift), the hook fixtures
 # (BuildUnderTest.hookFixture) and the example drive scripts
-# (DriveScriptTests). Copied into the VM before its first run.
-VM_INPUTS="app/Snapshots app/Fixtures tools/drive-scripts"
+# (DriveScriptTests), plus the workspace version and source color catalog
+# read by the Mac Unit plan. Copied before its first run.
+VM_INPUTS="app/Snapshots app/Fixtures tools/drive-scripts core/Cargo.toml app/Packages/MeguriKit/Sources/DesignSystem/Resources/Colors.xcassets"
 VM_INPUTS_COPIED=""
 # Set (to the reason) when a run whose SSH session was lost could not be
 # stopped in the VM: no further run starts there. VM_LOST_UNREACHABLE: it
@@ -586,67 +481,28 @@ VM_INPUTS_COPIED=""
 VM_LOST=""
 VM_LOST_UNREACHABLE=""
 VM_QUEUE_REASON=""
+VM_HIDDEN_COPIED=""
 
-# xctestrun_for <scheme> <plan> <config>: the newest simulator xctestrun of
-# the scheme's plan whose test root is the configuration's.
+# xctestrun_for <scheme> <plan> <config> <sdk>: newest matching test root.
 xctestrun_for() {
-  local f
+  local f root="$3"
+  [ "$4" = macosx ] || root="$3-$4"
   # shellcheck disable=SC2012 # newest first; the names are Xcode's
-  ls -t "$DD_TESTS/Build/Products/$1_$2_iphonesimulator"*.xctestrun 2>/dev/null | while IFS= read -r f; do
-    if grep -q "__TESTROOT__/$3-iphonesimulator/" "$f"; then
+  ls -t "$DD_TESTS/Build/Products/$1_$2_$4"*.xctestrun 2>/dev/null | while IFS= read -r f; do
+    if grep -q "__TESTROOT__/$root/" "$f"; then
       printf '%s\n' "$f"
       break
     fi
   done
 }
 
-# test_in_vm <name> <scheme> <plan> <config> <destination> [args]: a simulator
-# run in the test VM: built for testing here, the products copied to the
-# same path in the VM, test-without-building there, the result bundle copied
-# back. Returns xcodebuild's exit code, 70 when the run could not happen (the
-# reason is in <log>), 71 when it did not start because a lost run may
-# still be going on in the VM (VM_LOST), or 72 when the VM could not be
-# reached (VM_QUEUE_REASON; U19c).
-test_in_vm() {
-  local name="$1" scheme="$2" plan="$3" config="$4" dest="$5" result="$WORK/$1.xcresult" log="$LOGS/$1.log" xctestrun code p inputs=() rc
-  shift 5
-  VM_QUEUE_REASON=""
-  if [ -n "$VM_LOST" ]; then
-    echo "xcode_project_check: not run: $VM_LOST" >"$log"
-    if [ -n "$VM_LOST_UNREACHABLE" ]; then
-      VM_QUEUE_REASON="not run: $VM_LOST"
-      return 72
-    fi
-    return 71
-  fi
-  if ! xcodebuild build-for-testing -project "$PROJECT" -scheme "$scheme" -testPlan "$plan" -configuration "$config" \
-    -destination "generic/platform=iOS Simulator" -derivedDataPath "$DD_TESTS" >"$log" 2>&1; then
-    echo "xcode_project_check: the build for testing failed" >>"$log"
-    return 70
-  fi
-  xctestrun="$(xctestrun_for "$scheme" "$plan" "$config")"
-  [ -n "$xctestrun" ] || { echo "xcode_project_check: no $scheme $plan xctestrun for $config in $DD_TESTS/Build/Products" >>"$log" && return 70; }
-  if ! mvl_copy_in "$VM_SSH" "$VM_NAME" "$WORK" "$DD_TESTS/Build/Products" 2>>"$log"; then
-    echo "xcode_project_check: $MVL_REASON" >>"$log"
-    [ -z "$MVL_UNREACHABLE" ] || { VM_QUEUE_REASON="$MVL_REASON" && return 72; }
-    return 70
-  fi
-  if [ -z "$VM_INPUTS_COPIED" ]; then
-    for p in $VM_INPUTS; do inputs[${#inputs[@]}]="$REPO/$p"; done
-    if ! mvl_copy_in "$VM_SSH" "$VM_NAME" "$REPO" "${inputs[@]}" 2>>"$log"; then
-      echo "xcode_project_check: $MVL_REASON" >>"$log"
-      [ -z "$MVL_UNREACHABLE" ] || { VM_QUEUE_REASON="$MVL_REASON" && return 72; }
-      return 70
-    fi
-    VM_INPUTS_COPIED=1
-  fi
-  "$VM_SSH" "{ mkdir -p $(mvl_q "$WORK") && rm -rf $(mvl_q "$result") && xcodebuild test-without-building -xctestrun $(mvl_q "$xctestrun") \
-    -destination $(mvl_q "$dest") -resultBundlePath $(mvl_q "$result") -collect-test-diagnostics never ${1+$(mvl_q "$@")}; };
-    rc=\$?; echo \"$VM_MARK \$rc\"; exit \$rc" </dev/null >>"$log" 2>&1
-  rc=$?
-  code="$(sed -n "s/^$VM_MARK \([0-9][0-9]*\)\$/\1/p" "$log" | tail -n 1)"
-  if [ -z "$code" ]; then
-    echo "xcode_project_check: the SSH session to $VM_NAME ended before xcodebuild did" >>"$log"
+# Check completion of a remote app/test session and stop survivors before
+# allowing any subsequent product copy or run. Returns 70/71/72 as below.
+vm_session_result() {
+  local name="$1" log="$2" rc="$3"
+  VM_REMOTE_CODE="$(sed -n "s/^$VM_MARK \([0-9][0-9]*\)\$/\1/p" "$log" | tail -n 1)"
+  if [ -z "$VM_REMOTE_CODE" ]; then
+    echo "xcode_project_check: the SSH session to $VM_NAME ended before the remote command did" >>"$log"
     # xcodebuild may go on there: it must end before another run starts in
     # the VM's one login session, or that run's product copy replaces files
     # it uses.
@@ -662,12 +518,68 @@ test_in_vm() {
       echo "xcode_project_check: $VM_LOST" >>"$log"
       if [ -n "$MVL_UNREACHABLE" ]; then
         VM_LOST_UNREACHABLE=1
-        VM_QUEUE_REASON="the SSH session to $VM_NAME ended before xcodebuild did, and $VM_NAME did not answer after it ($MVL_REASON)"
+        VM_QUEUE_REASON="the SSH session to $VM_NAME ended before the remote command did, and $VM_NAME did not answer after it ($MVL_REASON)"
         return 72
       fi
     fi
     return 70
   fi
+  return 0
+}
+
+# test_in_vm <name> <scheme> <plan> <config> <destination> [args]: a Mac or simulator
+# run in the test VM: built for testing here, the products copied to the
+# same path in the VM, test-without-building there, the result bundle copied
+# back. Returns xcodebuild's exit code, 70 when the run could not happen (the
+# reason is in <log>), 71 when it did not start because a lost run may
+# still be going on in the VM (VM_LOST), or 72 when the VM could not be
+# reached (VM_QUEUE_REASON; U19c).
+test_in_vm() {
+  local name="$1" scheme="$2" plan="$3" config="$4" dest="$5" result="$WORK/$1.xcresult" log="$LOGS/$1.log" xctestrun code p inputs=() rc sdk=iphonesimulator build_dest="generic/platform=iOS Simulator"
+  shift 5
+  VM_QUEUE_REASON=""
+  if [ -n "$VM_LOST" ]; then
+    echo "xcode_project_check: not run: $VM_LOST" >"$log"
+    if [ -n "$VM_LOST_UNREACHABLE" ]; then
+      VM_QUEUE_REASON="not run: $VM_LOST"
+      return 72
+    fi
+    return 71
+  fi
+  case "$dest" in platform=macOS*) sdk=macosx build_dest="$dest" ;; esac
+  if ! xcodebuild build-for-testing -project "$PROJECT" -scheme "$scheme" -testPlan "$plan" -configuration "$config" \
+    -destination "$build_dest" -derivedDataPath "$DD_TESTS" >"$log" 2>&1; then
+    echo "xcode_project_check: the build for testing failed" >>"$log"
+    return 70
+  fi
+  xctestrun="$(xctestrun_for "$scheme" "$plan" "$config" "$sdk")"
+  [ -n "$xctestrun" ] || { echo "xcode_project_check: no $scheme $plan xctestrun for $config in $DD_TESTS/Build/Products" >>"$log" && return 70; }
+  if ! mvl_copy_in "$VM_SSH" "$VM_NAME" "$WORK" "$DD_TESTS/Build/Products" 2>>"$log"; then
+    echo "xcode_project_check: $MVL_REASON" >>"$log"
+    [ -z "$MVL_UNREACHABLE" ] || { VM_QUEUE_REASON="$MVL_REASON" && return 72; }
+    return 70
+  fi
+  if [ -z "$VM_INPUTS_COPIED" ]; then
+    for p in $VM_INPUTS; do
+      if [ ! -e "$REPO/$p" ]; then
+        echo "xcode_project_check: missing runtime input $REPO/$p" >>"$log"
+        return 70
+      fi
+      inputs[${#inputs[@]}]="$REPO/$p"
+    done
+    if ! mvl_copy_in "$VM_SSH" "$VM_NAME" "$REPO" "${inputs[@]}" 2>>"$log"; then
+      echo "xcode_project_check: $MVL_REASON" >>"$log"
+      [ -z "$MVL_UNREACHABLE" ] || { VM_QUEUE_REASON="$MVL_REASON" && return 72; }
+      return 70
+    fi
+    VM_INPUTS_COPIED=1
+  fi
+  "$VM_SSH" "{ mkdir -p $(mvl_q "$WORK") && rm -rf $(mvl_q "$result") && xcodebuild test-without-building -xctestrun $(mvl_q "$xctestrun") \
+    -destination $(mvl_q "$dest") -resultBundlePath $(mvl_q "$result") -collect-test-diagnostics never ${1+$(mvl_q "$@")}; };
+    rc=\$?; echo \"$VM_MARK \$rc\"; exit \$rc" </dev/null >>"$log" 2>&1
+  rc=$?
+  vm_session_result "$name" "$log" "$rc" || return
+  code="$VM_REMOTE_CODE"
   if ! mvl_copy_out "$VM_SSH" "$VM_NAME" "$result"; then
     if [ -n "$MVL_UNREACHABLE" ]; then
       echo "xcode_project_check: $MVL_REASON" >>"$log"
@@ -690,20 +602,11 @@ run_tests() {
   local name="$1" scheme="$2" plan="$3" config="$4" dest="$5" result="$WORK/$1.xcresult"
   shift 5
   rm -rf "$result"
-  case "$dest" in
-    id=*)
-      if [ -n "$VM_SSH" ]; then
-        test_in_vm "$name" "$scheme" "$plan" "$config" "$dest" "$@"
-      else
-        xcodebuild test -project "$PROJECT" -scheme "$scheme" -testPlan "$plan" -configuration "$config" -destination "$dest" \
-          -derivedDataPath "$DD_TESTS" -resultBundlePath "$result" "$@" >"$LOGS/$name.log" 2>&1
-      fi
-      ;;
-    *)
-      xcodebuild test -project "$PROJECT" -scheme "$scheme" -testPlan "$plan" -configuration "$config" -destination "$dest" \
-        -derivedDataPath "$DD_TESTS" -resultBundlePath "$result" "$@" >"$LOGS/$name.log" 2>&1
-      ;;
-  esac
+  if [ -z "$VM_SSH" ]; then
+    vm_queued "$name" "no test VM"
+    return 0
+  fi
+  test_in_vm "$name" "$scheme" "$plan" "$config" "$dest" "$@"
   local rc=$? summary
   if [ "$rc" -eq 72 ] && [ -n "$VM_QUEUE_REASON" ]; then
     vm_queued "$name" "$VM_QUEUE_REASON"
@@ -714,8 +617,12 @@ run_tests() {
     return 0
   fi
   summary="$(xcrun xcresulttool get test-results summary --path "$result" 2>/dev/null |
-    jq -r '"\(.result) passed=\(.passedTests) failed=\(.failedTests) skipped=\(.skippedTests)"')"
-  if [ "$rc" -eq 0 ]; then
+    jq -er 'select((.result | type) == "string" and (.passedTests | type) == "number"
+      and (.failedTests | type) == "number" and (.skippedTests | type) == "number")
+      | "\(.result) passed=\(.passedTests) failed=\(.failedTests) skipped=\(.skippedTests)"')"
+  if [ "$rc" -eq 0 ] && [ -z "$summary" ]; then
+    not_ok "$name: no result" "the VM run returned no readable test summary; log: $LOGS/$name.log"
+  elif [ "$rc" -eq 0 ]; then
     ok "$name: $summary"
   elif grep -q 'failed to initialize for UI testing' "$LOGS/$name.log"; then
     skip "$name" "user step uitest-automation: macOS has not allowed UI automation (docs/process/one-time-setup.md)"
@@ -724,6 +631,72 @@ run_tests() {
       "$(grep -E 'error:|failed \(|^xcode_project_check: ' "$LOGS/$name.log" | head -n 8)"
   fi
 }
+
+# Copy the checked Debug product once, before any hidden launch. The helper
+# retains exactly the liveness, Dock and foreground assertions used here.
+hidden_in_vm() {
+  local name="$1" log="$LOGS/hidden-$N.log" app="$DD/Build/Products/Debug/Meguri.app" rc
+  shift
+  if [ -z "$VM_SSH" ]; then vm_queued "$name" "no test VM"; return; fi
+  if [ -n "$VM_LOST" ]; then
+    if [ -n "$VM_LOST_UNREACHABLE" ]; then vm_queued "$name" "$VM_LOST"; else not_ok "$name" "$VM_LOST"; fi
+    return
+  fi
+  if [ -z "$VM_HIDDEN_COPIED" ]; then
+    if [ ! -f "$REPO/tools/scripts/mac-hidden-launch.sh" ]; then
+      not_ok "$name" "missing hidden-launch helper"
+      return
+    fi
+    if [ ! -d "$app" ]; then not_ok "$name" "no checked Debug product at $app"; return; fi
+    if ! mvl_copy_in "$VM_SSH" "$VM_NAME" "$REPO" "$REPO/tools/scripts/mac-hidden-launch.sh" "$REPO/app/Fixtures" >"$log" 2>&1 ||
+       ! mvl_copy_in "$VM_SSH" "$VM_NAME" "$WORK" "$app" >>"$log" 2>&1; then
+      if [ -n "$MVL_UNREACHABLE" ]; then vm_queued "$name" "$MVL_REASON"; else not_ok "$name" "$MVL_REASON"; fi
+      return
+    fi
+    VM_HIDDEN_COPIED=1
+  fi
+  "$VM_SSH" "bash $(mvl_q "$REPO/tools/scripts/mac-hidden-launch.sh") $(mvl_q "$app") ${1+$(mvl_q "$@")};
+    rc=\$?; echo \"$VM_MARK \$rc\"; exit \$rc" </dev/null >"$log" 2>&1
+  rc=$?
+  vm_session_result "$name" "$log" "$rc"
+  rc=$?
+  if [ "$rc" -eq 72 ]; then
+    vm_queued "$name" "$VM_QUEUE_REASON"
+  elif [ "$rc" -eq 0 ] && [ "$VM_REMOTE_CODE" != 0 ] && mvl_refused "$(cat "$log")"; then
+    vm_queued "$name" "the hidden launch could not start processes in $VM_NAME$(mvl_last "$log")"
+  elif [ "$rc" -ne 0 ] || [ "$VM_REMOTE_CODE" != 0 ]; then
+    not_ok "$name" "$(cat "$log")"
+  else
+    ok "$name"
+  fi
+}
+
+# Hidden launches of the Mac Debug product left by the host builds.
+if devices_phase && [ -f "$MAC_DEBUG_BUILT" ]; then
+  hidden_in_vm "mac-Debug launched hidden stays up: Home"
+  for route in $ROUTES; do
+    hidden_in_vm "mac-Debug launched hidden stays up: route $route" -MeguriRoute "$route"
+  done
+fi
+
+if devices_phase; then
+  # Pool devices are leased only now, after the Mac configuration builds, so
+  # that other agents can use them meanwhile. Without a test VM (--no-sims)
+  # the simulator builds still run; no simulator is leased or tested.
+  if [ "$SIMS" = true ]; then
+    [ -n "$IPHONE" ] || { lease iphone iPhone && IPHONE="$LEASE"; }
+    [ -n "$IPAD" ] || { lease ipad iPad && IPAD="$LEASE"; }
+  else
+    skip "lease the iPhone and iPad simulators" "queued: no test VM (user step mac-vm)"
+  fi
+  if { [ -n "$IPHONE" ] || [ "$SIMS" = false ]; } && build "iphone-Debug" Debug "$(sim_dest "$IPHONE")"; then
+    check "iphone-Debug links the Debug core with the simulator slice" stamp_is Debug ankiweb,test-hooks sim
+    check "iphone-Debug entitlements: the .dev App Group" expect_sim_entitlement "$DD/Build/Products/Debug-iphonesimulator/Meguri.app/Meguri" \
+      com.apple.security.application-groups '["group.com.antoinefink.meguri.dev"]'
+
+  fi
+  [ -z "$IPAD" ] || build "ipad-Debug" Debug "$(sim_dest "$IPAD")"
+fi
 
 if devices_phase && [ "$UI" = true ]; then
   run_tests mac-unit Meguri Unit Debug "platform=macOS,arch=arm64"
