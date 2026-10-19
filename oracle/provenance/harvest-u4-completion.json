@@ -1,0 +1,1303 @@
+{
+  "session": "s-20261019T101755Z-2e85db55",
+  "pin": "26.09.3",
+  "method": "Individual pinned test-body review; supplementary behavior checked in pinned implementation. Classifications are neutral obligations, not pass evidence. Original classified rows preserved.",
+  "rows": [
+    {
+      "harvest_id": "h012e392276c1",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "h025050fe6ac6",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/backend/ankiweb.rs",
+      "source_file_sha256": "3d20c75d0cc6c4f09a1c661cc99c12aab5e6740e74eb49ceb0f246f29ea0bac4"
+    },
+    {
+      "harvest_id": "h04ca4d75662a",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/context-switching.spec.ts",
+      "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
+    },
+    {
+      "harvest_id": "h054820efe6cf",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/sync/collection/upload.rs",
+      "source_file_sha256": "17d46e0382d227c8ccc12979d4147449988bff73fea7c54f939c3eecd3d10ce1"
+    },
+    {
+      "harvest_id": "h05cbe1cb9526",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/stats/today.rs",
+      "source_file_sha256": "95920618745619cdcbe3e727b6ba5887945dee60a54e3649435119955e9a2a3a"
+    },
+    {
+      "harvest_id": "h060fcc66d2c0",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/context-switching.spec.ts",
+      "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
+    },
+    {
+      "harvest_id": "h08dfde967274",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "h08e20ff5f483",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/sync/collection/upload.rs",
+      "source_file_sha256": "17d46e0382d227c8ccc12979d4147449988bff73fea7c54f939c3eecd3d10ce1"
+    },
+    {
+      "harvest_id": "h0af129b47980",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/media-buttons.spec.ts",
+      "source_file_sha256": "69473bd4d1ab666bbeeb4fa4dc700a8504deca4a9a32cb8fa137b19eb968d6e3"
+    },
+    {
+      "harvest_id": "h0b343b3380e0",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/reviewer/mathjax.test.ts",
+      "source_file_sha256": "55522715c7cc10887cf8e921da3709e1fedac4662b4e13b8363c3cc14be29c8c"
+    },
+    {
+      "harvest_id": "h0c55254c24f2",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "h0d325c734b77",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/context-switching.spec.ts",
+      "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
+    },
+    {
+      "harvest_id": "h0de8cd79d6ba",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/deck-options/lib.test.ts",
+      "source_file_sha256": "11b4732b580eaaa8303226fb1ed1602f5e26c1bc935beec8894f1d12dcbd8c20"
+    },
+    {
+      "harvest_id": "h0e52b45b7b7a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/card_rendering/service.rs",
+      "source_file_sha256": "5db5fcbb8478536442b3b0dc149a31682584298387a0591918632e67922d562f"
+    },
+    {
+      "harvest_id": "h0f55ed16e296",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/card-info/lib.test.ts",
+      "source_file_sha256": "baae1be9f022045f496f0d3e365fef7e329568eed5a462b10e7a680ceffcee91"
+    },
+    {
+      "harvest_id": "h0fbabf88d405",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/html-filter/index.test.ts",
+      "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
+    },
+    {
+      "harvest_id": "h1126a583e576",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/card_rendering/service.rs",
+      "source_file_sha256": "5db5fcbb8478536442b3b0dc149a31682584298387a0591918632e67922d562f"
+    },
+    {
+      "harvest_id": "h13b7128734ea",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "h14162d344ef9",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/reviewer/mathjax.test.ts",
+      "source_file_sha256": "55522715c7cc10887cf8e921da3709e1fedac4662b4e13b8363c3cc14be29c8c"
+    },
+    {
+      "harvest_id": "h145698acc12f",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/reviewer/lib.test.ts",
+      "source_file_sha256": "f1e59a8eb841833850070c00e589ce4083ddd007d0f616bad933de5982d37d5a"
+    },
+    {
+      "harvest_id": "h1586af627542",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/revlog/mod.rs",
+      "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
+    },
+    {
+      "harvest_id": "h176cf97aef7a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "h19a3e91fc826",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/dbcheck.rs",
+      "source_file_sha256": "636054c65b35a88344f5cc1e2af5c4edb5366c789919358a776bac714fb90f08"
+    },
+    {
+      "harvest_id": "h1b75a8055e30",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/editable/change-timer.test.ts",
+      "source_file_sha256": "0a3e8829fa20de00f03bc9b9895c22a68e823bfef7cee49cf757e4159f61fc7f"
+    },
+    {
+      "harvest_id": "h1c1a2a378925",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/deckconfig/update.rs",
+      "source_file_sha256": "4ac00e112c80a40f379ced04b3aa23fc541a0e7c896f3fd91ad5ea66b8c0d9fe"
+    },
+    {
+      "harvest_id": "h1ca43e6f5d18",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/html-filter/index.test.ts",
+      "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
+    },
+    {
+      "harvest_id": "h1d03e06c9c80",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/paste-filter.spec.ts",
+      "source_file_sha256": "413e03393654cd99c07ecbb3d7c8950242c65ae77155ca591acf03f95d727eaa"
+    },
+    {
+      "harvest_id": "h1dc1c50d96e2",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/deck-options/steps.test.ts",
+      "source_file_sha256": "808b2e72033331dff940521129ed757c375acdaf42718ff2525c9d5989fa0004"
+    },
+    {
+      "harvest_id": "h1dc4ce816f33",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/revlog/mod.rs",
+      "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
+    },
+    {
+      "harvest_id": "h1e72f458212b",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/deck-options/steps.test.ts",
+      "source_file_sha256": "808b2e72033331dff940521129ed757c375acdaf42718ff2525c9d5989fa0004"
+    },
+    {
+      "harvest_id": "h209248bdfb33",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/card/filtered.rs",
+      "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
+    },
+    {
+      "harvest_id": "h2129dd2678c2",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/sync/media/tests.rs",
+      "source_file_sha256": "5ea9878c438be103151d09757a5c64cd728a7f8e291fa25fa480bfcf9cd17629"
+    },
+    {
+      "harvest_id": "h21a1ea45b18d",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/card_rendering/mod.rs",
+      "source_file_sha256": "e42521c0a36dc06898cc6d1e472a05051a77a418910d1ef362a67f3d04f7246a"
+    },
+    {
+      "harvest_id": "h22e00b0f1c78",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "h24131047d2ce",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_hooks.py",
+      "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h241c4726e626",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/sync/collection/upload.rs",
+      "source_file_sha256": "17d46e0382d227c8ccc12979d4147449988bff73fea7c54f939c3eecd3d10ce1"
+    },
+    {
+      "harvest_id": "h27c58d269610",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/deckconfig/update.rs",
+      "source_file_sha256": "4ac00e112c80a40f379ced04b3aa23fc541a0e7c896f3fd91ad5ea66b8c0d9fe"
+    },
+    {
+      "harvest_id": "h2c5d0a1cf58b",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "h2dc788fb8e1b",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/revlog/mod.rs",
+      "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
+    },
+    {
+      "harvest_id": "h2e0dbc5abe92",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/paste-filter.spec.ts",
+      "source_file_sha256": "413e03393654cd99c07ecbb3d7c8950242c65ae77155ca591acf03f95d727eaa"
+    },
+    {
+      "harvest_id": "h2e7c980ee2f6",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_collection.py",
+      "source_file_sha256": "791543f3451ecf4faa0e5a7ddbad48c4b48e0259b2edbf1bad49dc03a4ebb171"
+    },
+    {
+      "harvest_id": "h2ecf4efee965",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_hooks.py",
+      "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h3219d2cb2ba0",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/deckconfig/update.rs",
+      "source_file_sha256": "4ac00e112c80a40f379ced04b3aa23fc541a0e7c896f3fd91ad5ea66b8c0d9fe"
+    },
+    {
+      "harvest_id": "h32d716cc068a",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/paste-filter.spec.ts",
+      "source_file_sha256": "413e03393654cd99c07ecbb3d7c8950242c65ae77155ca591acf03f95d727eaa"
+    },
+    {
+      "harvest_id": "h331c1e604272",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/sanity.test.ts",
+      "source_file_sha256": "dacaddc3b1182dc2ffb3e071dbe96d2bc738d6c71f3cb6c6b1114d3e0535c536"
+    },
+    {
+      "harvest_id": "h3338e90d7270",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/error/network.rs",
+      "source_file_sha256": "05a975e375e95389d9137c080259efabe67faf839147a88e8f5771ce534d4621"
+    },
+    {
+      "harvest_id": "h33a369b7b2d4",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/card-info/lib.test.ts",
+      "source_file_sha256": "baae1be9f022045f496f0d3e365fef7e329568eed5a462b10e7a680ceffcee91"
+    },
+    {
+      "harvest_id": "h35f01eb07a7f",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/deck-options/steps.test.ts",
+      "source_file_sha256": "808b2e72033331dff940521129ed757c375acdaf42718ff2525c9d5989fa0004"
+    },
+    {
+      "harvest_id": "h3632fc2d2bac",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/note-add-roundtrip.spec.ts",
+      "source_file_sha256": "daf96b531cbd5e3108e608dac0ee64da1922a0a15171f38ee68e806391d9c771"
+    },
+    {
+      "harvest_id": "h36e914747858",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_stats.py",
+      "source_file_sha256": "78fc945fcb6f23dbdea9803670462008b5b67b7139c6849ed6f1389d4be78367"
+    },
+    {
+      "harvest_id": "h37999c439a16",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/card/filtered.rs",
+      "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
+    },
+    {
+      "harvest_id": "h385f4aeda2a6",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/deckconfig/service.rs",
+      "source_file_sha256": "ceef9627741fe05e46ab2d926fb5d2a45884c65515d36b342622c57d9d8d734b"
+    },
+    {
+      "harvest_id": "h389b8fd94c14",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/sync/media/tests.rs",
+      "source_file_sha256": "5ea9878c438be103151d09757a5c64cd728a7f8e291fa25fa480bfcf9cd17629"
+    },
+    {
+      "harvest_id": "h3a731837bd25",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/html-filter/index.test.ts",
+      "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
+    },
+    {
+      "harvest_id": "h3ad6e171d247",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/reviewer/lib.test.ts",
+      "source_file_sha256": "f1e59a8eb841833850070c00e589ce4083ddd007d0f616bad933de5982d37d5a"
+    },
+    {
+      "harvest_id": "h400e0628f27d",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/sync/collection/upload.rs",
+      "source_file_sha256": "17d46e0382d227c8ccc12979d4147449988bff73fea7c54f939c3eecd3d10ce1"
+    },
+    {
+      "harvest_id": "h40284ca51ce0",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/card-info/lib.test.ts",
+      "source_file_sha256": "baae1be9f022045f496f0d3e365fef7e329568eed5a462b10e7a680ceffcee91"
+    },
+    {
+      "harvest_id": "h413f1956a499",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/deck-options/lib.test.ts",
+      "source_file_sha256": "11b4732b580eaaa8303226fb1ed1602f5e26c1bc935beec8894f1d12dcbd8c20"
+    },
+    {
+      "harvest_id": "h420d96663fe4",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/i18n/src/lib.rs",
+      "source_file_sha256": "701df6dfb1b5f0b5c9602e07eaeead8991bf23c4a51ac0ad2a756d50c22003bd"
+    },
+    {
+      "harvest_id": "h434af44650c7",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/io/src/lib.rs",
+      "source_file_sha256": "9c6bb07d9b300aed15171881c4ec0be1fc9db1371440f4d8ace2eb4d606d71b8"
+    },
+    {
+      "harvest_id": "h4442659ae131",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/card/filtered.rs",
+      "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
+    },
+    {
+      "harvest_id": "h45394f1a8123",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/dbcheck.rs",
+      "source_file_sha256": "636054c65b35a88344f5cc1e2af5c4edb5366c789919358a776bac714fb90f08"
+    },
+    {
+      "harvest_id": "h46a2e2a48929",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/io/src/lib.rs",
+      "source_file_sha256": "9c6bb07d9b300aed15171881c4ec0be1fc9db1371440f4d8ace2eb4d606d71b8"
+    },
+    {
+      "harvest_id": "h46c1ebf32143",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/sync/collection/upload.rs",
+      "source_file_sha256": "17d46e0382d227c8ccc12979d4147449988bff73fea7c54f939c3eecd3d10ce1"
+    },
+    {
+      "harvest_id": "h47050b494ed4",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/deck-options.test.ts",
+      "source_file_sha256": "5ea1d2889fcd08517f0235b2767acfaa2fd24ed98c884647355a59b7744e4a71"
+    },
+    {
+      "harvest_id": "h4779ed3690a3",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_hooks.py",
+      "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h47dca159695d",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "h4820dda6cd77",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/card_rendering/service.rs",
+      "source_file_sha256": "5db5fcbb8478536442b3b0dc149a31682584298387a0591918632e67922d562f"
+    },
+    {
+      "harvest_id": "h4829c29578ab",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/sanity.test.ts",
+      "source_file_sha256": "dacaddc3b1182dc2ffb3e071dbe96d2bc738d6c71f3cb6c6b1114d3e0535c536"
+    },
+    {
+      "harvest_id": "h4939abe921e2",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/deckconfig/service.rs",
+      "source_file_sha256": "ceef9627741fe05e46ab2d926fb5d2a45884c65515d36b342622c57d9d8d734b"
+    },
+    {
+      "harvest_id": "h493cbb0fdf6b",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/revlog/mod.rs",
+      "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
+    },
+    {
+      "harvest_id": "h4b173b76b6d5",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/card_rendering/service.rs",
+      "source_file_sha256": "5db5fcbb8478536442b3b0dc149a31682584298387a0591918632e67922d562f"
+    },
+    {
+      "harvest_id": "h4d2c40a0930e",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/editor/rich-text-input/data-transfer.test.ts",
+      "source_file_sha256": "b23a71d463cd5a3ba5df43c84e573c9af1389eb02f520dff8c6fb5e8b11065e6"
+    },
+    {
+      "harvest_id": "h4f44f64a9d78",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/deckconfig/update.rs",
+      "source_file_sha256": "4ac00e112c80a40f379ced04b3aa23fc541a0e7c896f3fd91ad5ea66b8c0d9fe"
+    },
+    {
+      "harvest_id": "h51930b326444",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/card/filtered.rs",
+      "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
+    },
+    {
+      "harvest_id": "h5304b7b612e0",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_hooks.py",
+      "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h5388bc1a2b81",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_collection.py",
+      "source_file_sha256": "791543f3451ecf4faa0e5a7ddbad48c4b48e0259b2edbf1bad49dc03a4ebb171"
+    },
+    {
+      "harvest_id": "h55b5f8508781",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/error/not_found.rs",
+      "source_file_sha256": "a525c0c4d9c9b7984591d15e485dc50a0f7a9a80676a696fb13f68666cb09d36"
+    },
+    {
+      "harvest_id": "h55c7436ac179",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/sync/media/tests.rs",
+      "source_file_sha256": "5ea9878c438be103151d09757a5c64cd728a7f8e291fa25fa480bfcf9cd17629"
+    },
+    {
+      "harvest_id": "h56ce4672d339",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/error/network.rs",
+      "source_file_sha256": "05a975e375e95389d9137c080259efabe67faf839147a88e8f5771ce534d4621"
+    },
+    {
+      "harvest_id": "h5714739d928e",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_hooks.py",
+      "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h5889068b7624",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "ts/routes/card-info/lib.test.ts",
+      "source_file_sha256": "baae1be9f022045f496f0d3e365fef7e329568eed5a462b10e7a680ceffcee91"
+    },
+    {
+      "harvest_id": "h5a31d6105048",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/revlog/mod.rs",
+      "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
+    },
+    {
+      "harvest_id": "h5b5bc3629af2",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/dbcheck.rs",
+      "source_file_sha256": "636054c65b35a88344f5cc1e2af5c4edb5366c789919358a776bac714fb90f08"
+    },
+    {
+      "harvest_id": "h5ba60fc7cbbf",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "ts/routes/card-info/lib.test.ts",
+      "source_file_sha256": "baae1be9f022045f496f0d3e365fef7e329568eed5a462b10e7a680ceffcee91"
+    },
+    {
+      "harvest_id": "h5d08ad2ebcf9",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_hooks.py",
+      "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h5e274df557cf",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/deckconfig/update.rs",
+      "source_file_sha256": "4ac00e112c80a40f379ced04b3aa23fc541a0e7c896f3fd91ad5ea66b8c0d9fe"
+    },
+    {
+      "harvest_id": "h5e551aa48cb4",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/context-switching.spec.ts",
+      "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
+    },
+    {
+      "harvest_id": "h5fce9ef76c1f",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/media-buttons.spec.ts",
+      "source_file_sha256": "69473bd4d1ab666bbeeb4fa4dc700a8504deca4a9a32cb8fa137b19eb968d6e3"
+    },
+    {
+      "harvest_id": "h601407f24351",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/io-mask-save-race.spec.ts",
+      "source_file_sha256": "d0a42a3bfa17e18d6fa4c5f2434124917d5e49f767f020811a8abf1c7995a04b"
+    },
+    {
+      "harvest_id": "h62b3f29862b5",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/sync/media/tests.rs",
+      "source_file_sha256": "5ea9878c438be103151d09757a5c64cd728a7f8e291fa25fa480bfcf9cd17629"
+    },
+    {
+      "harvest_id": "h65243b54e871",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/sync/media/tests.rs",
+      "source_file_sha256": "5ea9878c438be103151d09757a5c64cd728a7f8e291fa25fa480bfcf9cd17629"
+    },
+    {
+      "harvest_id": "h67bebd174839",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/stats/card.rs",
+      "source_file_sha256": "0a49c8bbae7090d7a9da517e1e9b806a0aa87d665ee761e0df167d7f3005a0cb"
+    },
+    {
+      "harvest_id": "h69f4adbd5970",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_collection.py",
+      "source_file_sha256": "791543f3451ecf4faa0e5a7ddbad48c4b48e0259b2edbf1bad49dc03a4ebb171"
+    },
+    {
+      "harvest_id": "h6a3197e57c5e",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/card_rendering/service.rs",
+      "source_file_sha256": "5db5fcbb8478536442b3b0dc149a31682584298387a0591918632e67922d562f"
+    },
+    {
+      "harvest_id": "h6b5987957b1c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "h6b9234c17a08",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_hooks.py",
+      "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h6cb0e154dd0f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/stats/card.rs",
+      "source_file_sha256": "0a49c8bbae7090d7a9da517e1e9b806a0aa87d665ee761e0df167d7f3005a0cb"
+    },
+    {
+      "harvest_id": "h6d11dd559ac4",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/reviewer/mathjax.test.ts",
+      "source_file_sha256": "55522715c7cc10887cf8e921da3709e1fedac4662b4e13b8363c3cc14be29c8c"
+    },
+    {
+      "harvest_id": "h6dcf8bd3ec8f",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_collection.py",
+      "source_file_sha256": "791543f3451ecf4faa0e5a7ddbad48c4b48e0259b2edbf1bad49dc03a4ebb171"
+    },
+    {
+      "harvest_id": "h6e8d74322421",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/context-switching.spec.ts",
+      "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
+    },
+    {
+      "harvest_id": "h6efeaad807ac",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/card/filtered.rs",
+      "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
+    },
+    {
+      "harvest_id": "h6f0c84dadbdb",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "h70e1bda7fbd5",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/deckconfig/service.rs",
+      "source_file_sha256": "ceef9627741fe05e46ab2d926fb5d2a45884c65515d36b342622c57d9d8d734b"
+    },
+    {
+      "harvest_id": "h7489852a175a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "h74b7d2e31f18",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/i18n/src/lib.rs",
+      "source_file_sha256": "701df6dfb1b5f0b5c9602e07eaeead8991bf23c4a51ac0ad2a756d50c22003bd"
+    },
+    {
+      "harvest_id": "h7508907b7b47",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/unsurround.test.ts",
+      "source_file_sha256": "a9ff5a499f26cc90648bb4eb107ad932fb0d6b41aaa08e99c901bba66b8b606a"
+    },
+    {
+      "harvest_id": "h788f98b55f1d",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/deckconfig/update.rs",
+      "source_file_sha256": "4ac00e112c80a40f379ced04b3aa23fc541a0e7c896f3fd91ad5ea66b8c0d9fe"
+    },
+    {
+      "harvest_id": "h795ae9753da0",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_hooks.py",
+      "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h7ab84f3f0f1b",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "h7b088f7049ca",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/collection/backup.rs",
+      "source_file_sha256": "a43edc8df3b3cd2466a93b6a668ed3d7f829b9bc0fe1507b1aa704ac552df9c6"
+    },
+    {
+      "harvest_id": "h7e4c18df6974",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_collection.py",
+      "source_file_sha256": "791543f3451ecf4faa0e5a7ddbad48c4b48e0259b2edbf1bad49dc03a4ebb171"
+    },
+    {
+      "harvest_id": "h7f342d9e2c48",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_latex.py",
+      "source_file_sha256": "6733492612bfd7ef25f1a82a98857533777cb1d23f05953b108eae9c62d8b4e8"
+    },
+    {
+      "harvest_id": "h7f7645f98775",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/deckconfig/update.rs",
+      "source_file_sha256": "4ac00e112c80a40f379ced04b3aa23fc541a0e7c896f3fd91ad5ea66b8c0d9fe"
+    },
+    {
+      "harvest_id": "h802f402a566b",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/card/filtered.rs",
+      "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
+    },
+    {
+      "harvest_id": "h81d3f640e8fd",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/deckconfig/update.rs",
+      "source_file_sha256": "4ac00e112c80a40f379ced04b3aa23fc541a0e7c896f3fd91ad5ea66b8c0d9fe"
+    },
+    {
+      "harvest_id": "h82c4a097602a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/card_rendering/service.rs",
+      "source_file_sha256": "5db5fcbb8478536442b3b0dc149a31682584298387a0591918632e67922d562f"
+    },
+    {
+      "harvest_id": "h83f55b823be2",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/deck-options/lib.test.ts",
+      "source_file_sha256": "11b4732b580eaaa8303226fb1ed1602f5e26c1bc935beec8894f1d12dcbd8c20"
+    },
+    {
+      "harvest_id": "h8459f3ce87b7",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/card_rendering/service.rs",
+      "source_file_sha256": "5db5fcbb8478536442b3b0dc149a31682584298387a0591918632e67922d562f"
+    },
+    {
+      "harvest_id": "h84ceecde6896",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "h850281d2190d",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/sync/collection/upload.rs",
+      "source_file_sha256": "17d46e0382d227c8ccc12979d4147449988bff73fea7c54f939c3eecd3d10ce1"
+    },
+    {
+      "harvest_id": "h859f07d44ca0",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "h85e031554808",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/ankidroid/db.rs",
+      "source_file_sha256": "ff28b67f686a05babec28b7d64a8eecaa250ccc4232c9852e8283b6385fab277"
+    },
+    {
+      "harvest_id": "h88ee1a8ec135",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/editor/rich-text-input/data-transfer.test.ts",
+      "source_file_sha256": "b23a71d463cd5a3ba5df43c84e573c9af1389eb02f520dff8c6fb5e8b11065e6"
+    },
+    {
+      "harvest_id": "h89de56ad40bd",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_hooks.py",
+      "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h8bba9c90dc5d",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/dbcheck.rs",
+      "source_file_sha256": "636054c65b35a88344f5cc1e2af5c4edb5366c789919358a776bac714fb90f08"
+    },
+    {
+      "harvest_id": "h8c899c6506a2",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/sticky-field.spec.ts",
+      "source_file_sha256": "36bfcdded55d3628d85eaa40f7202373efd2a47034c301957867b2df15f5255b"
+    },
+    {
+      "harvest_id": "h8d2949298ebc",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/reviewer/lib.test.ts",
+      "source_file_sha256": "f1e59a8eb841833850070c00e589ce4083ddd007d0f616bad933de5982d37d5a"
+    },
+    {
+      "harvest_id": "h8e35ff39a69f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/error/network.rs",
+      "source_file_sha256": "05a975e375e95389d9137c080259efabe67faf839147a88e8f5771ce534d4621"
+    },
+    {
+      "harvest_id": "h90b32cd0020c",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/deck-options/steps.test.ts",
+      "source_file_sha256": "808b2e72033331dff940521129ed757c375acdaf42718ff2525c9d5989fa0004"
+    },
+    {
+      "harvest_id": "h92ef3cd2c306",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/context-switching.spec.ts",
+      "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
+    },
+    {
+      "harvest_id": "h938b8896f278",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_hooks.py",
+      "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h94ade20fdbd8",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/reviewer/mathjax.test.ts",
+      "source_file_sha256": "55522715c7cc10887cf8e921da3709e1fedac4662b4e13b8363c3cc14be29c8c"
+    },
+    {
+      "harvest_id": "h94c7daf74c2e",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/card/filtered.rs",
+      "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
+    },
+    {
+      "harvest_id": "h984772533897",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/dbcheck.rs",
+      "source_file_sha256": "636054c65b35a88344f5cc1e2af5c4edb5366c789919358a776bac714fb90f08"
+    },
+    {
+      "harvest_id": "h9a09160808bf",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/ankidroid/db.rs",
+      "source_file_sha256": "ff28b67f686a05babec28b7d64a8eecaa250ccc4232c9852e8283b6385fab277"
+    },
+    {
+      "harvest_id": "h9de5cb7af907",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/media-buttons.spec.ts",
+      "source_file_sha256": "69473bd4d1ab666bbeeb4fa4dc700a8504deca4a9a32cb8fa137b19eb968d6e3"
+    },
+    {
+      "harvest_id": "h9e254f805a25",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/ankidroid/db.rs",
+      "source_file_sha256": "ff28b67f686a05babec28b7d64a8eecaa250ccc4232c9852e8283b6385fab277"
+    },
+    {
+      "harvest_id": "h9f50c1c0f487",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/context-switching.spec.ts",
+      "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
+    },
+    {
+      "harvest_id": "ha1793751ed20",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/html-filter/index.test.ts",
+      "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
+    },
+    {
+      "harvest_id": "ha29e26f021f6",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/sync/media/tests.rs",
+      "source_file_sha256": "5ea9878c438be103151d09757a5c64cd728a7f8e291fa25fa480bfcf9cd17629"
+    },
+    {
+      "harvest_id": "ha2f22cc588c8",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_stats.py",
+      "source_file_sha256": "78fc945fcb6f23dbdea9803670462008b5b67b7139c6849ed6f1389d4be78367"
+    },
+    {
+      "harvest_id": "ha59b9ffb5db2",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "ha75aa66eb13f",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "ts/routes/card-info/lib.test.ts",
+      "source_file_sha256": "baae1be9f022045f496f0d3e365fef7e329568eed5a462b10e7a680ceffcee91"
+    },
+    {
+      "harvest_id": "ha80fc2c2d74d",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "ha86f3657ab34",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/html-filter/index.test.ts",
+      "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
+    },
+    {
+      "harvest_id": "haccda9311c93",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "hacd6334f675a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/sync/collection/tests.rs",
+      "source_file_sha256": "4e9308ef827b4e20d29278a944e2e805380f4c13ad2897045613528045efc51d"
+    },
+    {
+      "harvest_id": "hacf8f68aa5db",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/context-switching.spec.ts",
+      "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
+    },
+    {
+      "harvest_id": "hacfb5a333b1c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/sync/collection/tests.rs",
+      "source_file_sha256": "4e9308ef827b4e20d29278a944e2e805380f4c13ad2897045613528045efc51d"
+    },
+    {
+      "harvest_id": "hae529870cada",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/sync/collection/upload.rs",
+      "source_file_sha256": "17d46e0382d227c8ccc12979d4147449988bff73fea7c54f939c3eecd3d10ce1"
+    },
+    {
+      "harvest_id": "hae800fcda356",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/deckconfig/update.rs",
+      "source_file_sha256": "4ac00e112c80a40f379ced04b3aa23fc541a0e7c896f3fd91ad5ea66b8c0d9fe"
+    },
+    {
+      "harvest_id": "haf31e8129655",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_stats.py",
+      "source_file_sha256": "78fc945fcb6f23dbdea9803670462008b5b67b7139c6849ed6f1389d4be78367"
+    },
+    {
+      "harvest_id": "hafc40dbe3447",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "hb014ea4e2147",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/html-filter/index.test.ts",
+      "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
+    },
+    {
+      "harvest_id": "hb30e802d8f2f",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/revlog/mod.rs",
+      "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
+    },
+    {
+      "harvest_id": "hb4f60ade2634",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/context-switching.spec.ts",
+      "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
+    },
+    {
+      "harvest_id": "hb50a0cec5249",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/deckconfig/service.rs",
+      "source_file_sha256": "ceef9627741fe05e46ab2d926fb5d2a45884c65515d36b342622c57d9d8d734b"
+    },
+    {
+      "harvest_id": "hb640064a2bb5",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "hb7dfd31a030e",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/context-switching.spec.ts",
+      "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
+    },
+    {
+      "harvest_id": "hb93c4bd5833b",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "hbcc38ba4659c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/i18n/src/lib.rs",
+      "source_file_sha256": "701df6dfb1b5f0b5c9602e07eaeead8991bf23c4a51ac0ad2a756d50c22003bd"
+    },
+    {
+      "harvest_id": "hbcd13325e1bf",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_collection.py",
+      "source_file_sha256": "791543f3451ecf4faa0e5a7ddbad48c4b48e0259b2edbf1bad49dc03a4ebb171"
+    },
+    {
+      "harvest_id": "hbed095c14b47",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/editor/rich-text-input/data-transfer.test.ts",
+      "source_file_sha256": "b23a71d463cd5a3ba5df43c84e573c9af1389eb02f520dff8c6fb5e8b11065e6"
+    },
+    {
+      "harvest_id": "hbf81ece4b03e",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "hc01768203874",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/sticky-field.spec.ts",
+      "source_file_sha256": "36bfcdded55d3628d85eaa40f7202373efd2a47034c301957867b2df15f5255b"
+    },
+    {
+      "harvest_id": "hc0e055822e0f",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/paste-filter.spec.ts",
+      "source_file_sha256": "413e03393654cd99c07ecbb3d7c8950242c65ae77155ca591acf03f95d727eaa"
+    },
+    {
+      "harvest_id": "hc0fc7c23426d",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/revlog/mod.rs",
+      "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
+    },
+    {
+      "harvest_id": "hc4e797f560a0",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/card/filtered.rs",
+      "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
+    },
+    {
+      "harvest_id": "hc53d1db14186",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/editor/rich-text-input/data-transfer.test.ts",
+      "source_file_sha256": "b23a71d463cd5a3ba5df43c84e573c9af1389eb02f520dff8c6fb5e8b11065e6"
+    },
+    {
+      "harvest_id": "hc6cc252a0cb5",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "hc76586f0804d",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "hcddb2db9708d",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/editor/rich-text-input/data-transfer.test.ts",
+      "source_file_sha256": "b23a71d463cd5a3ba5df43c84e573c9af1389eb02f520dff8c6fb5e8b11065e6"
+    },
+    {
+      "harvest_id": "hd03c2e9b5063",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/reviewer/mathjax.test.ts",
+      "source_file_sha256": "55522715c7cc10887cf8e921da3709e1fedac4662b4e13b8363c3cc14be29c8c"
+    },
+    {
+      "harvest_id": "hd319020c121d",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/editor/rich-text-input/data-transfer.test.ts",
+      "source_file_sha256": "b23a71d463cd5a3ba5df43c84e573c9af1389eb02f520dff8c6fb5e8b11065e6"
+    },
+    {
+      "harvest_id": "hd717744a70ee",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/media-buttons.spec.ts",
+      "source_file_sha256": "69473bd4d1ab666bbeeb4fa4dc700a8504deca4a9a32cb8fa137b19eb968d6e3"
+    },
+    {
+      "harvest_id": "hd739e449be5d",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "hd760eb8143a3",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/note-add-roundtrip.spec.ts",
+      "source_file_sha256": "daf96b531cbd5e3108e608dac0ee64da1922a0a15171f38ee68e806391d9c771"
+    },
+    {
+      "harvest_id": "hd79863d619d2",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/sync/collection/tests.rs",
+      "source_file_sha256": "4e9308ef827b4e20d29278a944e2e805380f4c13ad2897045613528045efc51d"
+    },
+    {
+      "harvest_id": "hd919a62a1c8a",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/unsurround.test.ts",
+      "source_file_sha256": "a9ff5a499f26cc90648bb4eb107ad932fb0d6b41aaa08e99c901bba66b8b606a"
+    },
+    {
+      "harvest_id": "hd9206f0a281f",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "hd962000e6d0c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/ankidroid/db.rs",
+      "source_file_sha256": "ff28b67f686a05babec28b7d64a8eecaa250ccc4232c9852e8283b6385fab277"
+    },
+    {
+      "harvest_id": "hd9775245329a",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/unsurround.test.ts",
+      "source_file_sha256": "a9ff5a499f26cc90648bb4eb107ad932fb0d6b41aaa08e99c901bba66b8b606a"
+    },
+    {
+      "harvest_id": "hd9a760a2f259",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/tests/e2e/note-add-roundtrip.spec.ts",
+      "source_file_sha256": "daf96b531cbd5e3108e608dac0ee64da1922a0a15171f38ee68e806391d9c771"
+    },
+    {
+      "harvest_id": "hdaef1892f535",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/sync/media/changes.rs",
+      "source_file_sha256": "b3417a1d15d89514dc123680d47692dec5cc43a0cffb4e46a1e7902e220d7823"
+    },
+    {
+      "harvest_id": "hdf1ad6d4cdf4",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/html-filter/index.test.ts",
+      "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
+    },
+    {
+      "harvest_id": "hdf20698825af",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/html-filter/index.test.ts",
+      "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
+    },
+    {
+      "harvest_id": "he0cb4f886c79",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/sync/collection/upload.rs",
+      "source_file_sha256": "17d46e0382d227c8ccc12979d4147449988bff73fea7c54f939c3eecd3d10ce1"
+    },
+    {
+      "harvest_id": "he12744628934",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/deckconfig/update.rs",
+      "source_file_sha256": "4ac00e112c80a40f379ced04b3aa23fc541a0e7c896f3fd91ad5ea66b8c0d9fe"
+    },
+    {
+      "harvest_id": "he1ecc4d09556",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "he1f7c4ce9bf3",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/reviewer/mathjax.test.ts",
+      "source_file_sha256": "55522715c7cc10887cf8e921da3709e1fedac4662b4e13b8363c3cc14be29c8c"
+    },
+    {
+      "harvest_id": "he5cb8d3fb44b",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/reviewer/lib.test.ts",
+      "source_file_sha256": "f1e59a8eb841833850070c00e589ce4083ddd007d0f616bad933de5982d37d5a"
+    },
+    {
+      "harvest_id": "he69093b72b82",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/revlog/mod.rs",
+      "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
+    },
+    {
+      "harvest_id": "he7473958b8cf",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/stats/graphs/eases.rs",
+      "source_file_sha256": "98ac5a144c146c3e9b8eea77bd4efb2e94a6535cf9093899f93e2f2ccd36b78f"
+    },
+    {
+      "harvest_id": "he79db754bc77",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "he7d1b49afb31",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/html-filter/index.test.ts",
+      "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
+    },
+    {
+      "harvest_id": "he8aa29c82e65",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/latex.rs",
+      "source_file_sha256": "3c4b8b1ee50d452c56c7cf850ceb2556a643a808933d84c530f2b48fa06fb3d1"
+    },
+    {
+      "harvest_id": "he9f3ecd2d21f",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/revlog/mod.rs",
+      "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
+    },
+    {
+      "harvest_id": "hea8cbd8d6720",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/error/network.rs",
+      "source_file_sha256": "05a975e375e95389d9137c080259efabe67faf839147a88e8f5771ce534d4621"
+    },
+    {
+      "harvest_id": "heaf6b0314ef9",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/deckconfig/service.rs",
+      "source_file_sha256": "ceef9627741fe05e46ab2d926fb5d2a45884c65515d36b342622c57d9d8d734b"
+    },
+    {
+      "harvest_id": "heb300a3dbe24",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "hebddab91941f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/card_rendering/service.rs",
+      "source_file_sha256": "5db5fcbb8478536442b3b0dc149a31682584298387a0591918632e67922d562f"
+    },
+    {
+      "harvest_id": "hec0725d1a35e",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_collection.py",
+      "source_file_sha256": "791543f3451ecf4faa0e5a7ddbad48c4b48e0259b2edbf1bad49dc03a4ebb171"
+    },
+    {
+      "harvest_id": "hec5bf5d4f824",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/dbcheck.rs",
+      "source_file_sha256": "636054c65b35a88344f5cc1e2af5c4edb5366c789919358a776bac714fb90f08"
+    },
+    {
+      "harvest_id": "hedaf87a0aa38",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/surround.test.ts",
+      "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "hee35c52dd8b3",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "hef00e615d756",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/lib/domlib/surround/unsurround.test.ts",
+      "source_file_sha256": "a9ff5a499f26cc90648bb4eb107ad932fb0d6b41aaa08e99c901bba66b8b606a"
+    },
+    {
+      "harvest_id": "hf27c621cefe8",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/card-info/lib.test.ts",
+      "source_file_sha256": "baae1be9f022045f496f0d3e365fef7e329568eed5a462b10e7a680ceffcee91"
+    },
+    {
+      "harvest_id": "hf613c9b636bd",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/revlog/mod.rs",
+      "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
+    },
+    {
+      "harvest_id": "hf6c2f3eacd8d",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_hooks.py",
+      "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "hf6db24b439e4",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/typeanswer.rs",
+      "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "hfa50e8665fce",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/collection/backup.rs",
+      "source_file_sha256": "a43edc8df3b3cd2466a93b6a668ed3d7f829b9bc0fe1507b1aa704ac552df9c6"
+    },
+    {
+      "harvest_id": "hfa9987445e9e",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/sync/collection/tests.rs",
+      "source_file_sha256": "4e9308ef827b4e20d29278a944e2e805380f4c13ad2897045613528045efc51d"
+    },
+    {
+      "harvest_id": "hfb0061ec0b9b",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/storage/card/filtered.rs",
+      "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
+    },
+    {
+      "harvest_id": "hfb585bb34348",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/routes/deck-options/lib.test.ts",
+      "source_file_sha256": "11b4732b580eaaa8303226fb1ed1602f5e26c1bc935beec8894f1d12dcbd8c20"
+    },
+    {
+      "harvest_id": "hfe671bb51af8",
+      "evidence_kind": "pinned-test",
+      "source_file": "ts/reviewer/lib.test.ts",
+      "source_file_sha256": "f1e59a8eb841833850070c00e589ce4083ddd007d0f616bad933de5982d37d5a"
+    }
+  ]
+}
