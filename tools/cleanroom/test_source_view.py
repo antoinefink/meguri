@@ -78,6 +78,24 @@ class SourceViewTests(unittest.TestCase):
             validate(self.target)
         (self.target / "core/link.rs").unlink()
         (self.target / "oracle").mkdir()
+        (self.target / "oracle/forbidden.txt").write_text("not permitted")
+        with self.assertRaises(ValueError):
+            validate(self.target)
+
+    def test_empty_sandbox_guards_have_no_patch_content(self):
+        self.target.mkdir()
+        for name in (".git", ".codex", ".agents", ".aws"):
+            (self.target / name).mkdir()
+        validate(self.target)
+        # Empty directories have no Git patch representation. Files inside any
+        # excluded directory must still fail, including nested empty parents.
+        (self.target / ".aws/nested").mkdir()
+        validate(self.target)
+        env = dict(os.environ, GIT_DIR=str(self.root.parent / "shadow-git"), GIT_WORK_TREE=str(self.target))
+        subprocess.run(["git", "init", "-q"], env=env, cwd=self.target, check=True)
+        subprocess.run(["git", "add", "-f", "-A"], env=env, cwd=self.target, check=True)
+        self.assertEqual(subprocess.check_output(["git", "ls-files", "-z"], env=env, cwd=self.target), b"")
+        (self.target / ".aws/nested/credentials").write_text("synthetic")
         with self.assertRaises(ValueError):
             validate(self.target)
 

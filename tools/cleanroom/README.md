@@ -23,8 +23,9 @@ holds temporary authentication; cleanup removes authentication on success,
 failure or cancellation. Every invocation first proves permitted writes, missing
 host/source paths, denied credential-directory reads and a denied connection to
 a listener proven reachable outside the command sandbox. Probe failure stops the
-run. Codex may create empty `.git` and `.codex` protection directories; the runner
-removes only empty guards after the sandbox exits. Nonempty guards fail the run.
+run. Codex may create empty protection directories. Empty directories have no
+Git patch representation; any file under an excluded path still fails the run.
+Directory links and unreadable output trees also fail.
 
 The container permits nested unprivileged namespaces for bubblewrap: its Docker
 seccomp and system-path masks are disabled, with a read-only

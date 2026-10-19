@@ -65,15 +65,18 @@ def prepare(root: Path, target: Path) -> dict:
 
 
 def validate(root: Path) -> None:
-    for directory, dirs, files in os.walk(root, followlinks=False):
+    def walk_error(error: OSError) -> None:
+        raise error
+
+    for directory, dirs, files in os.walk(root, followlinks=False, onerror=walk_error):
         for entry in dirs + files:
             path = Path(directory) / entry
             name = path.relative_to(root).as_posix()
-            if not permitted(name):
-                raise ValueError("runner produced a forbidden output path")
             if path.is_symlink():
                 raise ValueError("runner produced a symbolic link")
             if entry in files:
+                if not permitted(name):
+                    raise ValueError("runner produced a forbidden output path")
                 regular_file(root, name)
 
 
