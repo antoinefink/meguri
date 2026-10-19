@@ -146,6 +146,87 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
     "$(sed -n '/^### Unit Index/,/^### /p' "$REPO_ROOT/$(jq -r .plan "$d/manifest.json")" | grep -c '^| U[0-9]')" ]
 }
 
+@test "real milestone similarity scans the whole committed tree and requires exact result arguments" {
+  local d="$BATS_TEST_TMPDIR"
+  "$REPO_ROOT/tools/mg" --list >"$d/registry.tsv"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" load --tiers "$REPO_ROOT/tools/gate/tiers.yaml" \
+    --quarantine "$REPO_ROOT/tools/gate/quarantine.yaml" --registry "$d/registry.tsv" \
+    --conformance "$REPO_ROOT/conformance" --out "$d/config.json"
+  python3 -B -I "$REPO_ROOT/tools/scripts/gates/milestone_gate.py" load \
+    --manifest "$REPO_ROOT/docs/process/milestones.yaml" --out "$d/manifest.json"
+  run python3 -B - "$REPO_ROOT" "$d" <<'PY'
+import importlib.util
+import json
+from pathlib import Path
+import sys
+
+root, directory = map(Path, sys.argv[1:])
+
+def module(name, path):
+    spec = importlib.util.spec_from_file_location(name, root / path)
+    loaded = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(loaded)
+    return loaded
+
+gate = module("gate", "tools/gate/gate.py")
+milestone = module("milestone_gate", "tools/scripts/gates/milestone_gate.py")
+config = json.loads((directory / "config.json").read_text())
+manifest = json.loads((directory / "manifest.json").read_text())
+model, errors, _ = milestone.build_model(manifest, config)
+assert not errors, errors
+runs = {run["id"]: run for run in config["runs"]}
+suite = next(s for s in model["milestones"][0]["suites"] if s["id"] == "similarity")
+scan = runs[suite["run"]]
+assert scan["job"] == "similarity" and scan["tier"] == "T3", scan
+sha = "a" * 40
+
+# Scheduled runs set base == tip; bypassing triggers alone must not produce
+# the empty diff scan that used to satisfy M0 and every cumulative milestone.
+for mid in model["order"]:
+    selected = milestone.milestone_runs(model, config, mid)
+    assert scan["id"] in selected, (mid, selected)
+    values = {"base": sha, "tip": sha, "milestone": mid}
+    plan = gate.plan_runs(config, [], "milestone", True, values, only=selected)
+    planned = next(r for r in plan if r["id"] == scan["id"])
+    assert planned["action"] == "run", (mid, planned)
+    assert planned["args"] == ["--rev", sha], (mid, planned)
+    assert planned["args"].count("--base") == 0
+    assert planned["merge_args"] == ["--rev", sha], planned
+
+release = gate.plan_runs(config, [], "release", True, values)
+assert any(r["id"] == scan["id"] and r["action"] == "run"
+           and r["args"] == ["--rev", sha] for r in release)
+unit = gate.plan_runs(config, ["core/crates/meguri-sched/src/answer.rs"], "full", True,
+                      {"base": "b" * 40, "tip": sha})
+diff = next(r for r in unit if r["id"] == "similarity")
+assert diff["action"] == "run" and diff["args"] == ["--base", "b" * 40], diff
+assert diff["merge_args"] == ["--rev", sha, "--base", "b" * 40], diff
+assert all(r["id"] != scan["id"] for r in unit)
+
+# A newer passing diff scan cannot stand in for a failing whole-tree scan,
+# even when both use the same similarity job and clean commit.
+results = directory / "results"
+def result(name, args, status, time):
+    path = results / "similarity" / name / "result.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"job": "similarity", "run_id": name,
+                               "dry_run": False, "commit": {"sha": sha, "dirty": False},
+                               "args": args, "status": status, "started_at": time}))
+    return str(path)
+
+result("diff", ["--base", sha], "pass", "2026-11-20T12:02:00Z")
+result("rev-diff", ["--rev", sha, "--base", sha], "pass", "2026-11-20T12:03:00Z")
+for mid in model["order"]:
+    assert milestone.Results(str(results), runs, mid).for_run(scan["id"]) is None
+whole = result("whole", ["--rev", sha], "fail", "2026-11-20T12:01:00Z")
+for mid in model["order"]:
+    found = milestone.Results(str(results), runs, mid).for_run(scan["id"])
+    assert found is not None and found[0] == whole, (mid, found)
+    assert milestone.judge(found[1], [], None)[0] == "fail", (mid, found)
+PY
+  [ "$status" -eq 0 ] || { printf '%s\n' "$output"; return 1; }
+}
+
 @test "the real manifest fails the check when an entry the plan requires is removed or weakened" {
   local d="$BATS_TEST_TMPDIR" line edit expected m1='.milestones[] | select(.id == "M1")'
   local m1r='.milestones[] | select(.id == "M1R")'

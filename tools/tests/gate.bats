@@ -1718,6 +1718,48 @@ $TRAILERS"
   jq -e '.failures[] | select(.id == "t-job:ui-fail")' "$result"
 }
 
+@test "M0 blocks an unchanged source flag through the real whole-tree similarity run" {
+  # Reuse the existing fake scanner, but take the suite-to-run wiring and
+  # arguments from production so this regression fails with the old config.
+  python3 - "$REPO_ROOT" "$SB" <<'PY'
+from pathlib import Path
+import sys
+import yaml
+
+root, sandbox = map(Path, sys.argv[1:])
+manifest = yaml.safe_load((root / "docs/process/milestones.yaml").read_text())
+suite = next(s for m in manifest["milestones"] if m["id"] == "M0"
+             for s in m["suites"] if s["id"] == "similarity")
+tiers = yaml.safe_load((root / "tools/gate/tiers.yaml").read_text())
+scan = next(r for r in tiers["runs"] if r["id"] == suite["run"])
+path = sandbox / "tools/gate/tiers.yaml"
+config = yaml.safe_load(path.read_text())
+config["runs"].append(scan)
+path.write_text(yaml.safe_dump(config, sort_keys=False))
+path = sandbox / "docs/process/milestones.yaml"
+config = yaml.safe_load(path.read_text())
+config["milestones"][0]["suites"].append({"id": suite["id"], "run": suite["run"]})
+path.write_text(yaml.safe_dump(config, sort_keys=False))
+PY
+  git -C "$SB" add tools/gate/tiers.yaml docs/process/milestones.yaml
+  git -C "$SB" commit -qm "Use the real M0 similarity wiring"
+  commit_in "$SB" core/x.rs 'pub fn unchanged() {}' "Add source
+
+$TRAILERS"
+  local tip="$(git -C "$SB" rev-parse HEAD)"
+  : >"$FX/similarity.flag"
+  mg milestone M0
+  [ "$status" -eq 1 ]
+  [ "$(rq .base)" = "$tip" ]
+  [ "$(rq .commit)" = "$tip" ]
+  jq -e '.dirty == false and .changed_paths == 0' "$(receipt)"
+  [ "$(called "^similarity --rev $tip @main$")" = 1 ]
+  jq -e --arg tip "$tip" '.runs[] | select(.job == "similarity" and .outcome == "fail"
+    and .args == ["--rev", $tip] and ([.args[] | select(. == "--base")] | length) == 0)' "$(receipt)"
+  jq -e '.failures[] | select(.id == "similarity:similarity:core/x.rs:struct")' "$result"
+  validate "$result"
+}
+
 @test "a milestone run refuses an invalid manifest and runs nothing" {
   printf '  - {id: M6, name: Later, plan: {gate: "", user_steps: ""}, units: [], suites: [{id: gone, run: gone}]}\n' \
     >>"$SB/docs/process/milestones.yaml"
