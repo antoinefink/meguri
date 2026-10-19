@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 import WebKit
@@ -9,8 +10,9 @@ extension RenderingSpikes {
     /// tests: U67 re-runs them against its production handler. Results and
     /// the chosen configuration: docs/design/decisions/s2-custom-scheme-media.md.
     ///
-    /// These run on the macOS host in an off-screen window. Relaunch
-    /// persistence (S2(d)) and the iOS simulator's media checks are in
+    /// These run in the macOS test VM in an off-screen window; audio
+    /// playback requires confirmed real hardware and skips the VM. Relaunch
+    /// persistence (S2(d)) and the iOS media checks are in
     /// `app/MeguriUITests/CardSwapTimingSpikeTests.swift`.
     @Suite struct CustomSchemeMediaSpikeTests {
         /// A page that runs card scripts, at `/_anki/` with the media root as
@@ -82,7 +84,23 @@ extension RenderingSpikes {
             }
         }
 
-        @Test func anEightMegabyteMP3SeeksToNinetyPercentAndPlaysThroughRangeRequests() async throws {
+        /// Matches the UI audio gate: an unknown hypervisor state cannot
+        /// establish real hardware. A stuck VM audio element can stall the
+        /// next media navigation, so check before creating a page.
+        private nonisolated static func hypervisorPresent() -> Bool? {
+            var value: Int32 = 0
+            var size = MemoryLayout<Int32>.size
+            guard sysctlbyname("kern.hv_vmm_present", &value, &size, nil, 0) == 0,
+                size == MemoryLayout<Int32>.size
+            else { return nil }
+            return value != 0
+        }
+
+        @Test(.enabled(
+            if: CustomSchemeMediaSpikeTests.hypervisorPresent() == false,
+            "Audio playback requires confirmed real hardware (kern.hv_vmm_present); the test VM has no audio route."
+        ))
+        func anEightMegabyteMP3SeeksToNinetyPercentAndPlaysThroughRangeRequests() async throws {
             let handler = SpikeMediaHandler()
             let mp3 = SpikeAssets.silentMP3(minimumBytes: 8 * 1024 * 1024)
             handler.add("/_long.mp3", mp3.data, "audio/mpeg")
