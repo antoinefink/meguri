@@ -48,3 +48,5 @@
 - `tools/mg core-format` rewrites Rust formatting in the dev container. `core-lint` verifies the result without edits.
 
 - `u38-wiring --milestone <id>` runs the on-demand host provider-owner test against the normalized milestone manifest. Ordinary core tests skip that one check while providers are expected to be pending; M1R and M1 run it through their distinct T3 run IDs.
+
+- Private scans permit only the exact Unicode notice at `specs/render/unicode-data-LICENSE.txt` with the SHA pinned in `private_scan.py`. A notice edit is scanned again; never expand this rule to paths, prefixes or editable manifests.

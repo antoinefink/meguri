@@ -580,5 +580,60 @@ class Staged(unittest.TestCase):
         self.assertEqual((r.returncode, out["files"], out["files_scanned"]), (0, [], 1))
 
 
+class PublicNoticeTests(unittest.TestCase):
+    """A fixed public notice may pass only with its complete verified bytes."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = self.temp.name
+        git(self.repo, "init", "-q")
+        self.path = "specs/render/unicode-data-LICENSE.txt"
+        source = os.path.abspath(os.path.join(os.path.dirname(SCRIPT), "../../..", self.path))
+        with open(source, "rb") as f:
+            self.notice = f.read()
+        self.matcher = private_scan.Matcher({("unicode",), ("sentinelprivate",)})
+
+    def check_both(self, path, data, expected):
+        full = os.path.join(self.repo, path)
+        write(full, data, "wb")
+        git(self.repo, "add", "--", path)
+        staged, count = private_scan.scan_staged(self.matcher, self.repo)
+        self.assertEqual(bool(staged), expected)
+        self.assertEqual(count, 1)
+        files, count = private_scan.scan_paths(self.matcher, [full], repo=self.repo)
+        self.assertEqual(bool(files), expected)
+        self.assertEqual(count, 1)
+
+    def test_exact_official_notice(self):
+        self.assertEqual(hashlib.sha256(self.notice).hexdigest(),
+                         "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96")
+        self.check_both(self.path, self.notice, False)
+
+    def test_one_byte_change_is_scanned(self):
+        self.check_both(self.path, self.notice + b" ", True)
+
+    def test_appended_private_text_is_scanned(self):
+        self.check_both(self.path, self.notice + b"\nsentinelprivate\n", True)
+
+    def test_notice_at_another_path_is_scanned(self):
+        self.check_both("other-LICENSE.txt", self.notice, True)
+
+    def test_index_bytes_control_staged_scan(self):
+        full = os.path.join(self.repo, self.path)
+        write(full, self.notice + b"\nsentinelprivate\n", "wb")
+        git(self.repo, "add", "--", self.path)
+        write(full, self.notice, "wb")
+        found, _ = private_scan.scan_staged(self.matcher, self.repo)
+        self.assertTrue(found)
+
+    def test_known_notice_never_exempts_other_files(self):
+        write(os.path.join(self.repo, self.path), self.notice, "wb")
+        write(os.path.join(self.repo, "report.txt"), "sentinelprivate\n")
+        git(self.repo, "add", "-A")
+        found, _ = private_scan.scan_staged(self.matcher, self.repo)
+        self.assertEqual(found, [{"path": "report.txt", "lines": [1]}])
+
+
 if __name__ == "__main__":
     unittest.main()

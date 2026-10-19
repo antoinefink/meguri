@@ -33,6 +33,7 @@ the containers.
 """
 
 import argparse
+import hashlib
 import html
 import json
 import os
@@ -541,7 +542,18 @@ def load_tokens(paths):
 # ------------------------------------------------------------------- scan
 
 
-def scan_paths(matcher, paths):
+# Byte-exact public notice, fetched from https://www.unicode.org/license.txt.
+# No caller-controlled manifest or partial content can exempt added text.
+PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
+PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+
+
+def public_notice(path, data):
+    return path == PUBLIC_NOTICE_PATH and hashlib.sha256(data).hexdigest() == PUBLIC_NOTICE_SHA256
+
+
+def scan_paths(matcher, paths, repo=None):
     files = []
     for given in paths:
         if os.path.isdir(given):
@@ -556,6 +568,9 @@ def scan_paths(matcher, paths):
             continue
         with open(path, "rb") as f:
             data = f.read()
+        relative = os.path.relpath(os.path.abspath(path), repo or PROJECT_ROOT)
+        if public_notice(relative, data):
+            continue
         if is_binary(data):
             if binary_hit(matcher, data):
                 found.append({"path": path, "binary": True})
@@ -613,6 +628,11 @@ def scan_staged(matcher, repo):
         staged.append(os.fsdecode(path))
         if added == b"-":
             binary.append(os.fsdecode(path))
+    public = set()
+    if PUBLIC_NOTICE_PATH in staged:
+        data = git(repo, "cat-file", "blob", ":" + PUBLIC_NOTICE_PATH)
+        if public_notice(PUBLIC_NOTICE_PATH, data):
+            public.add(PUBLIC_NOTICE_PATH)
     found = {}
     if len(binary) < len(staged):
         diff = git(
@@ -643,13 +663,13 @@ def scan_staged(matcher, repo):
                 m = HUNK.match(line)
                 line_no = int(m.group(1)) if m else 0
             elif not header and line.startswith("+") and path is not None:
-                if any(matcher.hit(v) for v in variants(line[1:])):
+                if path not in public and any(matcher.hit(v) for v in variants(line[1:])):
                     found.setdefault(path, []).append(line_no)
                 line_no += 1
     out = [{"path": p, "lines": found[p]} for p in sorted(found)]
     for path in binary:
         data = git(repo, "cat-file", "blob", ":" + path)
-        if binary_hit(matcher, data):
+        if path not in public and binary_hit(matcher, data):
             out.append({"path": path, "binary": True})
     return out, len(staged)
 
@@ -677,7 +697,7 @@ def main(argv):
         if args.staged:
             found, scanned = scan_staged(matcher, args.repo)
         else:
-            found, scanned = scan_paths(matcher, args.paths)
+            found, scanned = scan_paths(matcher, args.paths, repo=args.repo)
         print(json.dumps({"files": found, "files_scanned": scanned, "tokens": matcher.count}, sort_keys=True))
         return 1 if found else 0
     except (OSError, ValueError, RuntimeError, KeyError) as e:
