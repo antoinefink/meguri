@@ -53,10 +53,12 @@ class TapResult(unittest.TestResult):
         self._line(True, test)
 
     def addFailure(self, test, err):
+        super().addFailure(test, err)
         self._line(False, test)
         self._diag(err)
 
     def addError(self, test, err):
+        super().addError(test, err)
         self._line(False, test)
         self._diag(err)
 
@@ -67,6 +69,7 @@ class TapResult(unittest.TestResult):
         self._line(True, test)
 
     def addUnexpectedSuccess(self, test):
+        super().addUnexpectedSuccess(test)
         self._line(False, test)
 
 
