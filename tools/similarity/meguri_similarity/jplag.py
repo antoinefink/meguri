@@ -26,7 +26,7 @@ def _tags(anki, cfg):
     release = sorted((t for t in out.split() if _RELEASE_TAG.match(t) and lo <= version_tuple(t) <= hi), key=version_tuple)
     chosen, missing = [], []
     for t in jcfg["tags"]:
-        name = release[-1] if t == "latest" and release else t
+        name = ccfg["tags"]["max"] if t == "latest" else t
         if name in release:
             if name not in chosen:
                 chosen.append(name)
