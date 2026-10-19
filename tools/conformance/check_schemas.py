@@ -12,6 +12,7 @@ Needs python3-jsonschema (the dev image has it).
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 import json
 import subprocess
 import sys
@@ -20,6 +21,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 SCHEMAS = ("scenario", "observation", "golden", "area", "deviations", "overlay")
+VALIDATORS: dict[str, Draft202012Validator] = {}
 
 
 def load_schemas(root: Path) -> dict[str, dict]:
@@ -62,12 +64,31 @@ def schema_for(rel: str) -> str | None:
     return None
 
 
+def init_validators(schemas: dict[str, dict]) -> None:
+    global VALIDATORS
+    VALIDATORS = {name: validator(schemas, name) for name in SCHEMAS}
+
+
+def check_item(task: tuple[str, dict]) -> list[dict]:
+    rel, item = task
+    if "error" in item:
+        return [{"file": rel, "message": item["error"]}]
+    errors = []
+    for error in sorted(VALIDATORS[schema_for(rel)].iter_errors(item["value"]), key=lambda e: list(e.path)):
+        where = "/" + "/".join(str(x) for x in error.path)
+        errors.append({"file": rel, "message": f"{where}: {error.message}"})
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--cli", required=True)
     p.add_argument("--conformance", required=True)
     p.add_argument("--report", required=True)
+    p.add_argument("--jobs", type=int, default=4, help="schema workers (default: 4; 1 runs serially)")
     args = p.parse_args(argv)
+    if args.jobs < 1:
+        p.error("--jobs must be positive")
     root = Path(args.conformance)
     errors: list[dict] = []
     try:
@@ -90,14 +111,17 @@ def main(argv: list[str] | None = None) -> int:
         parsed = [json.loads(line) for line in out.stdout.split("\n") if line.strip()]
         if len(parsed) != len(files):
             errors.append({"file": "to-json", "message": f"meguri-cli parsed {len(parsed)} of {len(files)} files: {out.stderr[-2000:]}"})
-        validators = {name: validator(schemas, name) for name in SCHEMAS}
-        for (rel, _), item in zip(files, parsed):
-            if "error" in item:
-                errors.append({"file": rel, "message": item["error"]})
-                continue
-            for e in sorted(validators[schema_for(rel)].iter_errors(item["value"]), key=lambda e: list(e.path)):
-                where = "/" + "/".join(str(x) for x in e.path)
-                errors.append({"file": rel, "message": f"{where}: {e.message}"})
+        tasks = [(rel, item) for (rel, _), item in zip(files, parsed)]
+        if args.jobs == 1 or len(tasks) < 2:
+            init_validators(schemas)
+            for task in tasks:
+                errors.extend(check_item(task))
+        else:
+            # map preserves sorted file order; failures propagate and fail the job.
+            with ProcessPoolExecutor(max_workers=min(args.jobs, len(tasks)),
+                                     initializer=init_validators, initargs=(schemas,)) as workers:
+                for item_errors in workers.map(check_item, tasks):
+                    errors.extend(item_errors)
     for e in errors:
         print(f"schema: {e['file']}: {e['message']}", file=sys.stderr)
     print(f"schema: {len(files)} files, {len(errors)} errors", file=sys.stderr)

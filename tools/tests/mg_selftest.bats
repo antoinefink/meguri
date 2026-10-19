@@ -2150,6 +2150,7 @@ harness_report() {
   export PATH="$stubs:$PATH"
   for args in "conformance --lane moon" "conformance --jobs 0" "conformance --frobnicate" \
     "conformance --live --lane docker" "goldens-check --base no-such-revision" "goldens-check extra" \
+    "goldens-check --schema-jobs" "goldens-check --schema-jobs 0" "goldens-check --schema-jobs bad" \
     "harvest-report extra" "harvest-report --live-report" "harvest-report --live-report /etc/hosts" \
     "harvest-inventory --bogus"; do
     # shellcheck disable=SC2086 # each case is a word list

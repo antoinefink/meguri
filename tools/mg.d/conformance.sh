@@ -306,13 +306,15 @@ mg_conf__sha256() {
 
 # tools/mg goldens-check [--base <rev>]
 mg_goldens_check() {
-  local rev=HEAD
+  local rev=HEAD schema_jobs=4
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --base) rev="${2:-}"; shift 2 || { mg_conf__usage "tools/mg goldens-check [--base <rev>]" "--base needs a revision"; return 0; } ;;
-      *) mg_conf__usage "tools/mg goldens-check [--base <rev>]" "unexpected argument '$1'"; return 0 ;;
+      --schema-jobs) schema_jobs="${2:-}"; shift 2 || { mg_conf__usage "tools/mg goldens-check [--schema-jobs N]" "--schema-jobs needs a positive number"; return 0; } ;;
+      *) mg_conf__usage "tools/mg goldens-check [--base <rev>] [--schema-jobs N]" "unexpected argument '$1'"; return 0 ;;
     esac
   done
+  case "$schema_jobs" in '' | *[!0-9]* | 0) mg_conf__usage "tools/mg goldens-check [--schema-jobs N]" "--schema-jobs needs a positive number"; return 0 ;; esac
   if ! git -C "$MG_ROOT" rev-parse --verify -q "$rev^{commit}" >/dev/null; then
     mg_conf__usage "tools/mg goldens-check [--base <rev>]" "'$rev' is not a revision"
     return 0
@@ -345,7 +347,7 @@ mg_goldens_check() {
     --base /work/$(mg_conf__rel "$base")/conformance/goldens $lock_args --report /work/$(mg_conf__rel "$report")"
   rc=$?
   mg_conf__dev -- "cd core && cargo build -q -p meguri-cli && cd .. && python3 -B -I tools/conformance/check_schemas.py \
-    --cli /cargo-target/debug/meguri-cli --conformance conformance --report /work/$(mg_conf__rel "$MG_RUN_DIR")/schemas.json"
+    --cli /cargo-target/debug/meguri-cli --conformance conformance --jobs $schema_jobs --report /work/$(mg_conf__rel "$MG_RUN_DIR")/schemas.json"
   schema_rc=$?
   if [ ! -s "$report" ]; then
     mg_failure no-report "goldens-check exited with code $rc without a report; see log.txt"
