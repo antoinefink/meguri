@@ -197,6 +197,16 @@ fn marker(out: &mut ExtractedSide, side: AvSide, tag: AvTag) {
 }
 
 pub fn extract(text: &str, side: AvSide) -> ExtractedSide {
+    transform(text, side, false)
+}
+
+/// Type-answer A6.1.1: same grammar, dropping sound and tts without
+/// decoding filenames or requiring a tts language.
+pub fn remove(text: &str) -> String {
+    transform(text, AvSide::Question, true).text
+}
+
+fn transform(text: &str, side: AvSide, remove: bool) -> ExtractedSide {
     let index = Index::new(text);
     let mut out = ExtractedSide {
         text: String::with_capacity(text.len()),
@@ -211,13 +221,15 @@ pub fn extract(text: &str, side: AvSide) -> ExtractedSide {
             if let Some(end) = Index::next(&index.brackets, name_start)
                 && end > name_start
             {
-                marker(
-                    &mut out,
-                    side,
-                    AvTag::Sound {
-                        name: meguri_text::entities::decode_text(&text[name_start..end]).into_owned(),
-                    },
-                );
+                if !remove {
+                    marker(
+                        &mut out,
+                        side,
+                        AvTag::Sound {
+                            name: meguri_text::entities::decode_text(&text[name_start..end]).into_owned(),
+                        },
+                    );
+                }
                 at = end + 1;
                 continue;
             }
@@ -225,7 +237,9 @@ pub fn extract(text: &str, side: AvSide) -> ExtractedSide {
         if text[start..].starts_with("[anki:")
             && let Some(tag) = directive(text, start, &index)
         {
-            if tag.name == "tts" {
+            if remove && tag.name == "tts" {
+                // Omit the entire directive, including its opaque content.
+            } else if tag.name == "tts" {
                 let language = tag
                     .options
                     .iter()

@@ -1,6 +1,7 @@
 //! One read-only, snapshot-consistent stored-card render (render/card-render-pipeline).
 mod cache;
 mod special_fields;
+mod type_answer;
 use crate::{Collection, EngineError};
 pub(crate) use cache::ParseCache;
 use meguri_model::ids::CardId;
@@ -26,8 +27,7 @@ pub struct RenderedCard {
     pub review_extra: String,
     pub flag: u8,
     pub marked: bool,
-    /// U64 supplies the descriptor when type-in substitution lands.
-    pub type_in: Option<String>,
+    pub type_in: Option<meguri_template::type_answer::Descriptor>,
 }
 fn missing(table: Table, key: impl ToString) -> EngineError {
     EngineError::NotFound {
@@ -41,6 +41,37 @@ pub fn render_card(
     id: CardId,
     mode: RenderMode,
     platform: Platform,
+) -> Result<RenderedCard, EngineError> {
+    render_card_inner(collection, id, mode, platform, None, false)
+}
+
+/// Raw K4/K5 output without display substitutions. In particular, malformed
+/// imported fonts cannot change the comparable render observation boundary.
+pub fn render_card_comparable(
+    collection: &Collection,
+    id: CardId,
+    mode: RenderMode,
+) -> Result<RenderedCard, EngineError> {
+    render_card_inner(collection, id, mode, Platform::Mac, None, true)
+}
+
+/// K2 observation form of the same product pipeline, with warning tokens,
+/// play markers and comparison C for the supplied text. No input attributes.
+pub fn review_html(collection: &Collection, id: CardId, typed: &str) -> Result<display::DisplaySides, EngineError> {
+    let result = render_card_inner(collection, id, RenderMode::Review, Platform::Mac, Some(typed), false)?;
+    Ok(display::DisplaySides {
+        question: result.question.unwrap_or_default(),
+        answer: result.answer.unwrap_or_default(),
+    })
+}
+
+fn render_card_inner(
+    collection: &Collection,
+    id: CardId,
+    mode: RenderMode,
+    platform: Platform,
+    observation: Option<&str>,
+    comparable_only: bool,
 ) -> Result<RenderedCard, EngineError> {
     let reader = collection.reader(ReaderRole::Interactive)?;
     let snapshot = reader.snapshot()?;
@@ -79,19 +110,36 @@ pub fn render_card(
         Some(ConfigValue::String(s)) => s,
         _ => String::new(),
     };
-    let (question, answer) = if mode == RenderMode::Browser {
-        (comparable.question.clone(), comparable.answer.clone())
+    let (question, answer, type_in) = if mode == RenderMode::Browser || comparable_only {
+        (comparable.question.clone(), comparable.answer.clone(), None)
     } else {
-        let html = display::compose(
-            &comparable,
-            &kind.config.css,
-            u32::from(card.ord),
-            RenderHost {
-                platform,
-                hide_play_buttons,
-            },
-        );
-        (Some(html.question), Some(html.answer))
+        let sides = if observation.is_some() {
+            display::DisplaySides {
+                question: format!(
+                    "<style>{}</style>{}",
+                    kind.config.css,
+                    comparable.question.as_deref().unwrap_or_default()
+                ),
+                answer: format!(
+                    "<style>{}</style>{}",
+                    kind.config.css,
+                    comparable.answer.as_deref().unwrap_or_default()
+                ),
+            }
+        } else {
+            display::compose(
+                &comparable,
+                &kind.config.css,
+                u32::from(card.ord),
+                RenderHost {
+                    platform,
+                    hide_play_buttons,
+                },
+            )
+        };
+        let (sides, descriptor) =
+            type_answer::apply(sides, &question, &note, &kind, u32::from(card.ord) + 1, observation)?;
+        (Some(sides.question), Some(sides.answer), descriptor)
     };
     Ok(RenderedCard {
         card_id: id,
@@ -105,7 +153,7 @@ pub fn render_card(
         review_extra,
         flag: card.flags & 7,
         marked: crate::tags::canonical::split_text(&note.tags).any(|t| t.to_lowercase() == "marked"),
-        type_in: None,
+        type_in,
     })
 }
 

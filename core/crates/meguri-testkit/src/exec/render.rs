@@ -1,6 +1,6 @@
 //! Render observations use the stored-card engine (Q4/Q5) and template preview (Q1).
 use crate::scenario::{LogicalRef, RefKind};
-use meguri_engine::rendering::{self, AvTag, CardRender, Outcome, Platform, RenderMode};
+use meguri_engine::rendering::{self, AvTag, CardRender, Outcome, RenderMode};
 use meguri_model::ids::CardId;
 use meguri_storage::{ReadRows, ReaderRole};
 use meguri_template::cloze;
@@ -15,6 +15,8 @@ use crate::scenario::{
 
 /// Registers template, cloze, stored-card and image-occlusion observations.
 pub(super) fn register(registry: &mut Registry) {
+    registry.observation("type_answer", observe_type_answer);
+    registry.observation("review_html", observe_review_html);
     registry.observation("template", observe);
     registry.observation("cloze", observe_cloze);
     registry.observation_part("template.card");
@@ -204,12 +206,11 @@ fn stored(s: &mut Session<'_>, request: &ObservationRequest, status: bool) -> Re
         let value = if !exists {
             Value::Null
         } else {
-            let review = rendering::render_card(&collection, id, RenderMode::Review, Platform::Mac).map_err(core)?;
+            let review = rendering::render_card_comparable(&collection, id, RenderMode::Review).map_err(core)?;
             if status {
                 json!({"ord": review.ordinal, "status": match review.comparable.outcome { Outcome::Rendered => "ok", Outcome::Blank(_) => "empty", Outcome::Error{..} => "template_error" }})
             } else {
-                let browser =
-                    rendering::render_card(&collection, id, RenderMode::Browser, Platform::Mac).map_err(core)?;
+                let browser = rendering::render_card_comparable(&collection, id, RenderMode::Browser).map_err(core)?;
                 json!({"review": comparable(&review.comparable, false), "browser": comparable(&browser.comparable, true)})
             }
         };
@@ -284,4 +285,60 @@ fn observe_image_occlusion(_session: &mut Session<'_>, request: &ObservationRequ
             Ok(json!({"fields":outputs}))
         }
     }
+}
+
+fn observe_type_answer(_session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
+    use crate::scenario::{TypeAnswerFunction, TypeAnswerRequest};
+    use meguri_template::type_answer::{Mode, compare};
+    let ObservationArgs::Mapping(map) = &request.args else {
+        return Err(invalid("type_answer takes {fns, inputs}"));
+    };
+    let request = TypeAnswerRequest::from_mapping(map).map_err(|e| invalid(e.to_string()))?;
+    let mut result = Map::new();
+    for function in request.fns {
+        let mode = match function {
+            TypeAnswerFunction::Compare => Mode::Plain,
+            TypeAnswerFunction::CompareNc => Mode::Nc,
+        };
+        result.insert(
+            function.name().into(),
+            Value::Array(
+                request
+                    .inputs
+                    .iter()
+                    .map(|(e, t)| json!(compare(e, t, mode, false)))
+                    .collect(),
+            ),
+        );
+    }
+    Ok(result.into())
+}
+fn observe_review_html(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
+    use crate::scenario::ReviewHtmlCase;
+    let ObservationArgs::List(items) = &request.args else {
+        return Err(invalid("review_html takes cases"));
+    };
+    let cases = ReviewHtmlCase::from_list(items).map_err(|e| invalid(e.to_string()))?;
+    let collection = session.engine_collection()?;
+    let mut values = Vec::new();
+    for case in cases {
+        let id = CardId(
+            *session
+                .cards
+                .get(case.card.index())
+                .ok_or_else(|| ExecError::new("unknown_ref", case.card.to_string()))?,
+        );
+        match rendering::review_html(&collection, id, &case.typed) {
+            Ok(sides) => values.push(json!({"question": sides.question, "answer": sides.answer})),
+            Err(meguri_engine::EngineError::InvalidTypeAnswerReplacement) => {
+                values.push(json!({"error":"invalid_type_answer_replacement"}))
+            }
+            Err(meguri_engine::EngineError::NotFound {
+                table: meguri_storage::Table::Cards,
+                ..
+            }) => return Err(ExecError::new("unknown_ref", case.card.to_string())),
+            Err(error) => return Err(core(error)),
+        }
+    }
+    Ok(Value::Array(values))
 }

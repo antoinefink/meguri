@@ -19,3 +19,16 @@ import Instrumentation
         #expect(BridgeCall.renderCard.name == "render_card")
     }
 }
+
+@Suite struct TypeAnswerTests {
+    @Test func pureComparisonUsesTheInteractiveLaneWithoutAnOpenCollection() async throws {
+        let d = TypeAnswerDescriptor(expected: "ka")
+        #expect(try await Core.compareTypedAnswer(d, typed: "ka") == "<code id=typeans><span class=typeGood>ka</span></code>")
+        #expect(try await Core.compareTypedAnswer(d, typed: "kq") == "<code id=typeans><span class=typeGood>k</span><span class=typeBad>q</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>k</span><span class=typeMissed>a</span></code>")
+        #expect(try await Core.compareTypedAnswer(d, typed: "") == "<code id=typeans>ka</code>")
+        let nc = TypeAnswerDescriptor(expected: "Qëvax", mode: .nc, caseInsensitive: true, font: "Qav Serif", size: 28)
+        #expect(try await Core.compareTypedAnswer(nc, typed: "QEVAX") == "<code id=typeans><span class=typeGood>Qëvax</span></code>")
+        #expect(BridgeCall.compareTypedAnswer.name == "compare_typed_answer")
+        #expect(TypeAnswerDescriptor.placeholderHTML == "<span data-meguri-type-answer></span>")
+    }
+}

@@ -23,6 +23,10 @@ regex = "=1.11.2"
 sha1 = "=0.10.6"
 unicase = "=2.6.0"
 unicode-normalization = "=0.1.24"
+# U64: Unicode 10 categories and Unicode 16 simple case folding, respectively.
+unic-ucd-category = "=0.9.0"
+icu_casemap = "=2.0.0"
+icu_casemap_data = "=2.0.0"
 
 # Meguri crates. The allowed edges between them are tools/layering-check/edges.toml.
 meguri-engine = { path = "crates/meguri-engine" }

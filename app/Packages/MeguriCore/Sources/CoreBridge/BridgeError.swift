@@ -4,6 +4,7 @@ internal import MeguriCoreBindings
 /// The errors a core call can throw, as Swift sees them (KTD9). Every
 /// CoreBridge call throws only this type.
 public enum BridgeError: Error, Sendable, Hashable {
+    case invalidTypeAnswerReplacement
     /// The call's `CancelToken` was cancelled.
     case cancelled
     /// Another long operation holds the slot this one needs (R171).
@@ -41,6 +42,7 @@ extension BridgeError {
 
     init(_ error: MeguriCoreBindings.CoreError) {
         switch error {
+        case .InvalidTypeAnswerReplacement: self = .invalidTypeAnswerReplacement
         case .Cancelled: self = .cancelled
         case .Busy(let runningOp): self = .busy(runningOperation: runningOp)
         case .Unavailable(let reason): self = .unavailable(reason: reason)

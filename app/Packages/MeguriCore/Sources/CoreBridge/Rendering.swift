@@ -31,8 +31,7 @@ public struct RenderedCard: Sendable, Hashable {
     public let reviewExtra: String
     public let flag: UInt8
     public let marked: Bool
-    /// Filled by U64's type-in substitution.
-    public let typeIn: String?
+    public let typeIn: TypeAnswerDescriptor?
 
     init(_ value: MeguriCoreBindings.RenderedCard) {
         cardID = value.cardId
@@ -58,7 +57,7 @@ public struct RenderedCard: Sendable, Hashable {
         reviewExtra = value.reviewExtra
         flag = value.flag
         marked = value.marked
-        typeIn = value.typeIn
+        typeIn = value.typeIn.map(TypeAnswerDescriptor.init)
     }
     private static func error(_ kind: MeguriCoreBindings.RenderErrorKind) -> CardTemplateError {
         switch kind {
@@ -83,6 +82,43 @@ extension Core {
         let rawPlatform: MeguriCoreBindings.RenderPlatform = platform == .mac ? .mac : .ios
         return try await InteractiveLane.shared.call(.renderCard) {
             RenderedCard(try MeguriCoreBindings.renderCard(cardId: id, mode: rawMode, platform: rawPlatform))
+        }
+    }
+}
+
+
+public enum TypeAnswerMode: Sendable, Hashable { case plain, nc }
+/// Raw expected text stays separate from the displayed answer. Comparison
+/// returns C for insertion in every answer placeholder at reveal.
+public struct TypeAnswerDescriptor: Sendable, Hashable {
+    public static let placeholderHTML = "<span data-meguri-type-answer></span>"
+    public let expected: String
+    public let mode: TypeAnswerMode
+    public let caseInsensitive: Bool
+    public let font: String
+    public let size: UInt32
+
+    public init(expected: String, mode: TypeAnswerMode = .plain, caseInsensitive: Bool = false, font: String = "Arial", size: UInt32 = 20) {
+        self.expected = expected
+        self.mode = mode
+        self.caseInsensitive = caseInsensitive
+        self.font = font
+        self.size = size
+    }
+    init(_ value: MeguriCoreBindings.TypeAnswerDescriptor) {
+        self.init(expected: value.expected, mode: value.mode == .plain ? .plain : .nc,
+                  caseInsensitive: value.caseInsensitive, font: value.font, size: value.size)
+    }
+    var raw: MeguriCoreBindings.TypeAnswerDescriptor {
+        .init(expected: expected, mode: mode == .plain ? .plain : .nc,
+              caseInsensitive: caseInsensitive, font: font, size: size)
+    }
+}
+
+extension Core {
+    public static func compareTypedAnswer(_ descriptor: TypeAnswerDescriptor, typed: String) async throws(BridgeError) -> String {
+        try await InteractiveLane.shared.call(.compareTypedAnswer) {
+            try MeguriCoreBindings.compareTypedAnswer(descriptor: descriptor.raw, typed: typed)
         }
     }
 }

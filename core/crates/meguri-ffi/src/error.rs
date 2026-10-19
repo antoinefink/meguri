@@ -8,6 +8,8 @@ use meguri_engine::EngineError;
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Error)]
 pub enum CoreError {
+    /// Invalid imported type-in replacement; no partial rendering is returned.
+    InvalidTypeAnswerReplacement,
     /// The operation's `CancelToken` was cancelled before it finished.
     Cancelled,
     /// Another long operation holds the slot this one needs (R171).
@@ -31,6 +33,7 @@ pub enum CoreError {
 impl fmt::Display for CoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            CoreError::InvalidTypeAnswerReplacement => f.write_str("invalid_type_answer_replacement"),
             CoreError::Cancelled => f.write_str("cancelled"),
             CoreError::Busy { running_op } => write!(f, "busy: {running_op} is running"),
             CoreError::Unavailable { reason } => write!(f, "unavailable: {reason}"),
@@ -56,6 +59,7 @@ impl std::error::Error for CoreError {}
 impl From<EngineError> for CoreError {
     fn from(error: EngineError) -> CoreError {
         match error {
+            EngineError::InvalidTypeAnswerReplacement => CoreError::InvalidTypeAnswerReplacement,
             EngineError::Cancelled => CoreError::Cancelled,
             EngineError::Busy { running_op } => CoreError::Busy { running_op },
             EngineError::SessionActive => CoreError::Unavailable {
@@ -99,6 +103,7 @@ impl From<EngineError> for CoreError {
 impl From<CoreError> for EngineError {
     fn from(error: CoreError) -> EngineError {
         match error {
+            CoreError::InvalidTypeAnswerReplacement => EngineError::InvalidTypeAnswerReplacement,
             CoreError::Cancelled => EngineError::Cancelled,
             CoreError::Busy { running_op } => EngineError::Busy { running_op },
             CoreError::Unavailable { reason } => EngineError::CollectionUnavailable { reason },

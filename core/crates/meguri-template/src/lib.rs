@@ -23,8 +23,10 @@ pub mod display;
 pub mod error;
 pub mod filters;
 pub mod image_occlusion;
+pub mod media_display;
 pub mod parser;
 pub mod render;
+pub mod type_answer;
 
 pub use analysis::{Form, LegacyRequirement, RequirementKind, legacy_requirement};
 pub use error::{ErrorKind, TemplateError};

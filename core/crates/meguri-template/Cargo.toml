@@ -10,6 +10,12 @@ publish.workspace = true
 # Hint ids (specs/render/filters.md F5): a parity pin.
 blake3.workspace = true
 difflib.workspace = true
+unicode-normalization.workspace = true
+unic-ucd-category.workspace = true
+icu_casemap.workspace = true
+# Constrain the compiled data too: a semver-compatible update must not
+# silently move A9 to a newer Unicode version.
+icu_casemap_data.workspace = true
 # data-cloze attribute encoding (specs/render/cloze.md C7): a parity pin.
 htmlescape.workspace = true
 # The text filter (strip-html H4), section emptiness (field-emptiness E1) and

@@ -126,12 +126,8 @@ fn image_occlusion_class(cloze: &Cloze<'_>, active: bool, side: Side) -> &'stati
     }
 }
 
-/// C11: the hook for an image-occlusion cloze's element,
-/// `<div class="…" data-ordinal="…" ` + the shape attributes + `></div>`.
-/// The shape attributes are U64's (`render/image-occlusion`); until U64
-/// fills this in, the element is the empty string.
-fn image_occlusion_element(_class: &str, _number_list: &str, _shape: &str) -> String {
-    String::new()
+fn image_occlusion_element(class: &str, number_list: &str, shape: &str) -> String {
+    crate::image_occlusion::render::element(class, number_list, shape)
 }
 
 #[cfg(test)]

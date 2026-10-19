@@ -5,6 +5,7 @@ import Testing
 
 @Suite struct ErrorTests {
     static let cases: [(CoreError, BridgeError)] = [
+        (.InvalidTypeAnswerReplacement, .invalidTypeAnswerReplacement),
         (.Cancelled, .cancelled),
         (.Busy(runningOp: "Check Database"), .busy(runningOperation: "Check Database")),
         (.Unavailable(reason: "exclusive phase"), .unavailable(reason: "exclusive phase")),

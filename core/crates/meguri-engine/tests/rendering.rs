@@ -255,3 +255,155 @@ fn page_config_types_and_stored_tag_boundaries_are_exact() {
         assert!(rendered.review_extra.is_empty());
     }
 }
+
+fn configure_type_answer(h: &common::Harness, id: CardId, font: &str) {
+    let font = font.to_owned();
+    h.collection
+        .run(
+            OpSpec::named("type_answer_fixture", OpSource::SyncIncoming),
+            move |ctx| {
+                let card = ctx.scope().card(id)?.unwrap();
+                let mut note = ctx.scope().note(card.note_id)?.unwrap();
+                let mut kind = ctx.scope().notetype(note.notetype_id)?.unwrap();
+                note.fields = "cat<img src=\"my file#1.jpg\">\u{1f}<b>Qáv</b>[sound:typed file.ogg]".into();
+                kind.fields[1].config.font_name = font;
+                kind.fields[1].config.font_size = 28;
+                kind.config.css = "[[type:Back]]<hr id=answer><img src=\"css logo.png\">".into();
+                kind.templates[0].config.q_format = "{{Front}}|{{type:Back}}|{{type:Front}}".into();
+                kind.templates[0].config.a_format = "{{FrontSide}}<hr id=answer>{{type:Front}}".into();
+                ctx.scope().put(&note)?;
+                ctx.scope().put_notetype(&kind)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+}
+#[test]
+fn type_answer_stored_descriptor_whole_css_repeated_markers_and_read_only_reveal() {
+    use meguri_template::type_answer::{self, ANSWER_SLOT, Mode};
+    let (h, id) = fixture();
+    configure_type_answer(&h, id, "Qav Serif");
+    let before = common::steps::dump(&h.collection);
+    let seq = h.collection.last_seq();
+    for _ in 0..3 {
+        let card = rendering::render_card(&h.collection, id, RenderMode::Review, Platform::Ios).unwrap();
+        let d = card.type_in.unwrap();
+        assert_eq!(d.expected, "<b>Qáv</b>[sound:typed file.ogg]");
+        assert_eq!(
+            (d.font.as_str(), d.size, d.mode, d.case_insensitive),
+            ("Qav Serif", 28, Mode::Plain, false)
+        );
+        let question = card.question.unwrap();
+        assert_eq!(
+            question
+                .matches("id=typeans autocapitalize=\"off\" autocorrect=\"off\" spellcheck=\"false\"")
+                .count(),
+            3
+        );
+        assert!(question.contains("my%20file%231.jpg"));
+        assert!(question.contains("css%20logo.png"));
+        assert_eq!(
+            card.comparable.question.as_deref(),
+            Some("cat<img src=\"my file#1.jpg\">|[[type:Back]]|[[type:Front]]")
+        );
+        assert!(card.comparable.question_av.is_empty());
+        let answer = card.answer.unwrap();
+        assert_eq!(answer.matches(ANSWER_SLOT).count(), 4);
+        assert_eq!(answer.matches("<hr id=answer>").count(), 4);
+        let observation = rendering::review_html(&h.collection, id, "Qáv").unwrap();
+        assert_eq!(observation.question.matches("id=typeans onkeypress").count(), 3);
+        assert!(!observation.question.contains("autocorrect="));
+        // Full reveal equals A5's independently rendered observation form.
+        assert_eq!(
+            answer.replace(ANSWER_SLOT, &type_answer::compare_typed_answer(&d, "Qáv")),
+            observation.answer
+        );
+    }
+    let browser = rendering::render_card(&h.collection, id, RenderMode::Browser, Platform::Mac).unwrap();
+    assert!(browser.type_in.is_none());
+    assert_eq!(browser.question.as_deref(), Some(" "));
+    assert_eq!(common::steps::dump(&h.collection), before);
+    assert_eq!(h.collection.last_seq(), seq);
+}
+#[test]
+fn invalid_imported_font_refuses_without_partial_html_or_churn_and_raw_render_stays_available() {
+    let (h, id) = fixture();
+    configure_type_answer(&h, id, r"Qav\q");
+    let before = common::steps::dump(&h.collection);
+    let seq = h.collection.last_seq();
+    assert_eq!(
+        rendering::review_html(&h.collection, id, "Qáv"),
+        Err(meguri_engine::EngineError::InvalidTypeAnswerReplacement)
+    );
+    assert_eq!(
+        rendering::render_card(&h.collection, id, RenderMode::Review, Platform::Mac),
+        Err(meguri_engine::EngineError::InvalidTypeAnswerReplacement)
+    );
+    let raw = rendering::render_card_comparable(&h.collection, id, RenderMode::Review).unwrap();
+    assert_eq!(raw.comparable.outcome, Outcome::Rendered);
+    assert!(raw.comparable.question.unwrap().contains("[[type:Back]]"));
+    assert_eq!(common::steps::dump(&h.collection), before);
+    assert_eq!(h.collection.last_seq(), seq);
+}
+#[test]
+fn io_cards_have_exact_active_mask_audio_and_encoded_image_on_each_card() {
+    use meguri_engine::rendering::AvTag;
+    let h = common::fresh();
+    let template =
+        "{{cloze:Occlusion}}{{Image}}<div style=\"display:none\">{{cloze:A01}}{{cloze:A02}}{{cloze:A03}}</div>";
+    let kind = notetypes::add(
+        &h.collection,
+        notetypes::NewNotetype {
+            name: "IO render".into(),
+            kind: notetypes::NotetypeKind::Cloze,
+            fields: ["Image", "Occlusion", "A01", "A02", "A03"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            templates: vec![notetypes::NewTemplate {
+                name: "Masks".into(),
+                front: template.into(),
+                back: template.into(),
+                browser_front: String::new(),
+                browser_back: String::new(),
+            }],
+            css: Some(String::new()),
+        },
+    )
+    .unwrap()
+    .value
+    .id;
+    let note = notes::add(&h.collection, notes::AddNote {
+        notetype_id: kind, fields: vec![
+            "<img src=\"mask image#1.png\">".into(),
+            "{{c1::image-occlusion:rect:left=.1:width=.2}}{{c2::image-occlusion:ellipse:rx=.3}}{{c3::image-occlusion:polygon:points=1,2 3,4}}{{c0::image-occlusion:text:text=label}}".into(),
+            "{{c1::[sound:one file.mp3]}}".into(), "{{c2::[sound:two.mp3]}}".into(), "{{c3::[sound:three.mp3]}}".into(),
+        ], tags: vec![], deck_id: DeckId(1), guid: None, update_add_defaults: false,
+    }, OpSource::UserUndoable).unwrap().value;
+    let cards = h
+        .collection
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .cards_of_note(note.id)
+        .unwrap();
+    assert_eq!(cards.len(), 3);
+    let before = common::steps::dump(&h.collection);
+    let seq = h.collection.last_seq();
+    for card in cards {
+        let rendered = rendering::render_card(&h.collection, card.id, RenderMode::Review, Platform::Mac).unwrap();
+        assert!(rendered.comparable.question_av.is_empty());
+        let name = ["one file.mp3", "two.mp3", "three.mp3"][usize::from(card.ord)];
+        assert_eq!(rendered.comparable.answer_av, vec![AvTag::Sound { name: name.into() }]);
+        let q = rendered.question.unwrap();
+        let a = rendered.answer.unwrap();
+        assert!(q.contains("mask%20image%231.png"));
+        assert_eq!(q.matches("<div class=\"cloze-inactive\"").count(), 2);
+        assert_eq!(a.matches("<div class=\"cloze-highlight\"").count(), 1);
+        assert!(a.contains("<div class=\"cloze\" data-ordinal=\"0\" data-shape=\"text\" data-text=\"label\" ></div>"));
+        assert!(!q.contains("replay-button"));
+        assert!(a.contains("<div style=\"display:none\"><span class=\"cloze\""));
+        assert!(a.contains("pycmd('play:a:0')"));
+    }
+    assert_eq!(common::steps::dump(&h.collection), before);
+    assert_eq!(h.collection.last_seq(), seq);
+}

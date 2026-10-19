@@ -1792,6 +1792,8 @@ pub const DUMP_TABLES: [&str; 12] = [
 /// Observation kinds (observations.md O4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ObservationKind {
+    TypeAnswer,
+    ReviewHtml,
     MediaDir,
     MediaTrash,
     MediaPending,
@@ -1864,7 +1866,9 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 36] = [
+    pub const ALL: [ObservationKind; 38] = [
+        ObservationKind::TypeAnswer,
+        ObservationKind::ReviewHtml,
         ObservationKind::MediaDir,
         ObservationKind::MediaTrash,
         ObservationKind::MediaPending,
@@ -1905,6 +1909,8 @@ impl ObservationKind {
 
     pub fn name(self) -> &'static str {
         match self {
+            ObservationKind::TypeAnswer => "type_answer",
+            ObservationKind::ReviewHtml => "review_html",
             ObservationKind::MediaDir => "media_dir",
             ObservationKind::MediaTrash => "media_trash",
             ObservationKind::MediaPending => "media_pending",
@@ -1968,7 +1974,8 @@ impl ObservationKind {
             | ObservationKind::AnswerLabels
             | ObservationKind::Render
             | ObservationKind::RenderStatus => ArgShape::CardRefs,
-            ObservationKind::FuzzTable
+            ObservationKind::TypeAnswer
+            | ObservationKind::FuzzTable
             | ObservationKind::NetProbe
             | ObservationKind::LegacyJson
             | ObservationKind::BlobDecode
@@ -1984,7 +1991,7 @@ impl ObservationKind {
             | ObservationKind::DbDump
             | ObservationKind::Stats
             | ObservationKind::NotetypeStructure => ArgShape::OptionalMapping,
-            ObservationKind::Search | ObservationKind::CanonicalSearch => ArgShape::List,
+            ObservationKind::ReviewHtml | ObservationKind::Search | ObservationKind::CanonicalSearch => ArgShape::List,
         }
     }
 }
@@ -2008,12 +2015,13 @@ pub struct ObservationRequest {
 }
 
 impl ObservationRequest {
-    /// D8: the kinds that never read a collection, `text`, `cloze`,
+    /// D8: the kinds that never read a collection, `type_answer`, `text`, `cloze`,
     /// `fsrs_next` and `canonical_search`, and `template` when every case is
     /// a new-note case.
     pub fn reads_no_collection(&self) -> bool {
         match self.kind {
-            ObservationKind::Text
+            ObservationKind::TypeAnswer
+            | ObservationKind::Text
             | ObservationKind::Cloze
             | ObservationKind::ImageOcclusion
             | ObservationKind::FsrsNext

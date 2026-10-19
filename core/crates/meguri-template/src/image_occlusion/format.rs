@@ -22,7 +22,7 @@ pub struct RawField {
 }
 
 /// F4, also returning the number of bytes successfully consumed.
-fn raw_shape(text: &str) -> Option<(RawShape, usize)> {
+pub(super) fn raw_shape(text: &str) -> Option<(RawShape, usize)> {
     let colon = text.find(':')?;
     let mut shape = RawShape {
         shape: text[..colon].to_owned(),

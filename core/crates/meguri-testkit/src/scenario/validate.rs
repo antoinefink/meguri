@@ -525,6 +525,7 @@ const PACKAGE_COLUMNS: [&str; 6] = ["ver", "conf", "models", "decks", "dconf", "
 /// (search-ops.md S1, S2).
 pub(super) fn observation_list(kind: ObservationKind, items: &[Value]) -> Result<(), FormatError> {
     match kind {
+        ObservationKind::ReviewHtml => super::ReviewHtmlCase::from_list(items).map(drop),
         ObservationKind::Search => SearchRequest::from_list(items).map(drop),
         ObservationKind::CanonicalSearch => canonical_search_texts(items).map(drop),
         other => Err(FormatError::new(format!(
@@ -539,6 +540,7 @@ pub(super) fn observation_list(kind: ObservationKind, items: &[Value]) -> Result
 /// requested at most once per step; two lists do not merge.
 fn once_per_step(requests: &[super::model::ObservationRequest]) -> Result<(), FormatError> {
     for kind in [
+        ObservationKind::ReviewHtml,
         ObservationKind::Template,
         ObservationKind::FieldsCheck,
         ObservationKind::Search,
@@ -630,6 +632,9 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
                     return bad(&format!("column {column} is listed twice"));
                 }
             }
+        }
+        ObservationKind::TypeAnswer => {
+            super::TypeAnswerRequest::from_mapping(map)?;
         }
         ObservationKind::Text => {
             TextRequest::from_mapping(map)?;

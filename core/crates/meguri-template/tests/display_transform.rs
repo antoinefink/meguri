@@ -53,3 +53,68 @@ fn tts_content_is_inserted_once_and_hidden_buttons_do_not_touch_lists() {
     assert!(html.starts_with("<b>猫</b>[anki:play:q:9]"));
     assert!(html.contains("postMessage('play:q:1')"));
 }
+
+#[test]
+fn media_encoding_precedes_play_and_type_transforms_but_keeps_av_filenames_raw() {
+    use meguri_template::{
+        ParsedTemplate,
+        card::{CardRender, Outcome},
+        type_answer::{self, Field, WarningForm},
+    };
+    let card = CardRender {
+        question: Some(
+            "<img src=\"my file#1.jpg\"><img src=\"https://example.org/a b.png\">[anki:play:q:0][anki:play:q:1]".into(),
+        ),
+        answer: Some("[[type:F]]".into()),
+        question_av: vec![
+            AvTag::Sound {
+                name: "voice clip.mp3".into(),
+            },
+            AvTag::Tts {
+                language: "en".into(),
+                content: "<img src=\"tts image#2.jpg\">[anki:play:q:9]".into(),
+            },
+        ],
+        answer_av: vec![],
+        outcome: Outcome::Rendered,
+    };
+    let sides = display::compose(
+        &card,
+        "<img src=\"css logo.png\">[[type:F]]",
+        0,
+        RenderHost {
+            platform: Platform::Mac,
+            hide_play_buttons: false,
+        },
+    );
+    assert!(sides.question.contains("css%20logo.png"));
+    assert!(sides.question.contains("my%20file%231.jpg"));
+    assert!(sides.question.contains("https://example.org/a b.png"));
+    assert!(sides.question.contains("tts%20image%232.jpg"));
+    assert!(
+        sides.question.contains("[anki:play:q:9]"),
+        "inserted content is never rescanned for play markers"
+    );
+    let (question, descriptor) = type_answer::question(
+        &sides.question,
+        &ParsedTemplate::parse("{{type:F}}"),
+        &[Field {
+            name: "F",
+            value: "<img src=\"raw image.jpg\">ka",
+            font: "Arial",
+            size: 20,
+        }],
+        1,
+        WarningForm::Display,
+        true,
+    )
+    .unwrap();
+    assert!(question.contains("spellcheck=\"false\""));
+    assert_eq!(descriptor.unwrap().expected, "<img src=\"raw image.jpg\">ka");
+    assert_eq!(
+        card.question_av[0],
+        AvTag::Sound {
+            name: "voice clip.mp3".into()
+        }
+    );
+}

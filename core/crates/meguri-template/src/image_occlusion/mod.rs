@@ -1,10 +1,11 @@
-//! Image-occlusion storage, without rendering or editor UI.
+//! Image-occlusion storage and render data, without editor UI.
 //!
 //! Behavior: `specs/render/image-occlusion-format.md` F1–F12. Use
 //! [`parse_raw`] for compatibility and [`parse`] before editing. Preserve
 //! the returned [`Document`] and each shape's source across edits.
 mod format;
 pub mod ordinals;
+pub mod render;
 mod shapes;
 
 pub use format::{

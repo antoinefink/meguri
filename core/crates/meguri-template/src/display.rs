@@ -51,7 +51,7 @@ pub fn markers(text: &str, question: &[AvTag], answer: &[AvTag], host: RenderHos
                 let entries = if bytes[11] == b'q' { question } else { answer };
                 let entry = tail[13..end].parse::<usize>().ok().and_then(|index| entries.get(index));
                 if let Some(AvTag::Tts { content, .. }) = entry {
-                    out.push_str(content);
+                    out.push_str(&crate::media_display::encode_for_display(content));
                 } else if !host.hide_play_buttons {
                     out.push_str(&button(&tail[6..end], host.platform));
                 }
@@ -115,17 +115,22 @@ pub fn compose(card: &CardRender, css: &str, ord: u32, host: RenderHost) -> Disp
             answer: html,
         };
     }
-    let transform = |text: &str| markers(text, &card.question_av, &card.answer_av, host);
+    let transform = |text: &str| {
+        let whole = wrap(css, text);
+        markers(
+            &crate::media_display::encode_for_display(&whole),
+            &card.question_av,
+            &card.answer_av,
+            host,
+        )
+    };
     let mut question = transform(card.question.as_deref().unwrap_or_default());
     let answer = if let Outcome::Blank(kind) = card.outcome {
         let notice = blank_notice(kind, ord);
         question.push_str(&notice);
-        notice
+        transform(&notice)
     } else {
         transform(card.answer.as_deref().unwrap_or_default())
     };
-    DisplaySides {
-        question: wrap(css, &question),
-        answer: wrap(css, &answer),
-    }
+    DisplaySides { question, answer }
 }
