@@ -1,5 +1,5 @@
 harvest_id,language,source,area,classification,reason,scenarios,status
-hf7c80804a0ae,rust,tag,browser,unclassified,,,open
+hf7c80804a0ae,rust,tag,browser,in-scope,"U86/U246: regex replacement across multiple note types must count changed notes, list applicable field names and skip notes lacking a selected field.",,deferred
 h05c549f3f6aa,rust,supplementary,deckconfig,in-scope,updating a preset,decks/presets/add-clone-rename,done
 h06c17c5eb2f4,rust,supplementary,deckconfig,not-applicable,an API error for an unknown preset id,,done
 h07c1d1d6c593,rust,supplementary,deckconfig,in-scope,the default preset cannot be removed,decks/presets/remove,done
@@ -275,7 +275,7 @@ h5714739d928e,python,tag,engine,not-applicable,Dispatch into a registered Python
 h5d08ad2ebcf9,python,tag,engine,not-applicable,Python extension filters composing return values belong to an unshipped extension interface (R1879).,,done
 h69f4adbd5970,python,tag,engine,in-scope,U250/U246: extend reopen stamp coverage with refusal to create a collection at an unwritable file or directory; existing reopen cases omit permissions.,,deferred
 h6b9234c17a08,python,tag,engine,not-applicable,Stopping Python extension dispatch after an exception concerns an unshipped callback runtime (R1879).,,done
-h6dcf8bd3ec8f,python,tag,engine,in-scope,"Adding tags affects only selected notes, removes duplicates and stores names in canonical order (R822-R825).",tags/bulk/add,done
+h6dcf8bd3ec8f,python,tag,engine,in-scope,"Adding tags affects only selected notes, removes duplicates and stores names in canonical order.",tags/bulk/add,done
 h795ae9753da0,python,tag,engine,not-applicable,Looking up Python extension callbacks by name has no native-app equivalent (R1879).,,done
 h7e4c18df6974,python,tag,engine,in-scope,"U167/U246: verify English rendering-error text and singular/plural review messages through native string resources, without the foreign translation runtime (R192,R195).",,deferred
 h89de56ad40bd,python,tag,engine,not-applicable,Removing a failing Python extension callback is not an on-disk compatibility behavior (R1879).,,done
@@ -497,115 +497,115 @@ h12f7b83a0cdb,typescript,tag,notetypes,in-scope,Change Note Type: field and temp
 hcd2cb9d07eec,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
 he3cfa1e1e429,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
 hfe06705a799b,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
-h543bc62a3163,python,tag,package,unclassified,,,open
-h686eb06786f4,python,tag,package,unclassified,,,open
-h6bd4a40af394,python,tag,package,unclassified,,,open
-hb8a40db6f911,python,tag,package,unclassified,,,open
-hf844f0b31fa4,python,tag,package,unclassified,,,open
-hffc0559fcb06,python,tag,package,unclassified,,,open
-h0027cf15abc1,rust,tag,package,unclassified,,,open
-h0333a2ef3878,rust,tag,package,unclassified,,,open
-h041056a28ba5,rust,tag,package,unclassified,,,open
-h04d7eb3084a8,rust,tag,package,unclassified,,,open
-h054c99c6afa0,rust,tag,package,unclassified,,,open
-h07f221b07463,rust,tag,package,unclassified,,,open
-h0dfab78112de,rust,tag,package,unclassified,,,open
-h13bd2beaffe5,rust,tag,package,unclassified,,,open
-h189770d86c7a,rust,tag,package,unclassified,,,open
-h1b462ab5b1f6,rust,tag,package,unclassified,,,open
-h1f2f223fd59f,rust,tag,package,unclassified,,,open
-h2071dec13b10,rust,tag,package,unclassified,,,open
-h210a9935737d,rust,tag,package,unclassified,,,open
-h21c395ca34ed,rust,tag,package,unclassified,,,open
-h23592efff85b,rust,tag,package,unclassified,,,open
-h2550760e6fd3,rust,tag,package,unclassified,,,open
-h2cd0efb7e7cf,rust,tag,package,unclassified,,,open
-h2d5da75d9660,rust,tag,package,unclassified,,,open
-h3154129ed251,rust,tag,package,unclassified,,,open
-h35a1a315775a,rust,tag,package,unclassified,,,open
-h3680103347a5,rust,tag,package,unclassified,,,open
-h386c4ed293d8,rust,tag,package,unclassified,,,open
-h3a5a5f091ca7,rust,tag,package,unclassified,,,open
-h3abdc470143c,rust,tag,package,unclassified,,,open
-h3e6565cbd5bd,rust,tag,package,unclassified,,,open
-h4188879b097f,rust,tag,package,unclassified,,,open
-h421b073e2a4d,rust,tag,package,unclassified,,,open
-h4545a8f89d8a,rust,tag,package,unclassified,,,open
-h47699fddba50,rust,tag,package,unclassified,,,open
-h498ea23c7daa,rust,tag,package,unclassified,,,open
-h49da24bc1cea,rust,tag,package,unclassified,,,open
-h4b3ba12ee1a3,rust,tag,package,unclassified,,,open
-h4b7cb8d2e4a8,rust,tag,package,unclassified,,,open
-h4cebf655a477,rust,tag,package,unclassified,,,open
-h4d39d9345011,rust,tag,package,unclassified,,,open
-h4d841a7c9c8d,rust,tag,package,unclassified,,,open
-h4ece49a2de4b,rust,tag,package,unclassified,,,open
-h514ddcb4bec7,rust,tag,package,unclassified,,,open
-h522f5887f377,rust,tag,package,unclassified,,,open
-h5535b141d283,rust,tag,package,unclassified,,,open
-h55ee1aa36e5f,rust,tag,package,unclassified,,,open
-h563cc1097e30,rust,tag,package,unclassified,,,open
-h579c4d299fc7,rust,tag,package,unclassified,,,open
-h5a29dea977b6,rust,tag,package,unclassified,,,open
-h5bb0094d4eae,rust,tag,package,unclassified,,,open
-h5bf32a768a1d,rust,tag,package,unclassified,,,open
-h5d6433926c9e,rust,tag,package,unclassified,,,open
-h6acf9cf9c5c8,rust,tag,package,unclassified,,,open
-h6d941db6b0ef,rust,tag,package,unclassified,,,open
-h6ee2440b2399,rust,tag,package,unclassified,,,open
-h6f014d7a2318,rust,tag,package,unclassified,,,open
-h6f73f6341530,rust,tag,package,unclassified,,,open
-h7804718662be,rust,tag,package,unclassified,,,open
-h7b0f7e46e988,rust,tag,package,unclassified,,,open
-h7d6317981a90,rust,tag,package,unclassified,,,open
-h7e4e3e3dd8d6,rust,tag,package,unclassified,,,open
-h7ee03d076a12,rust,tag,package,unclassified,,,open
-h8119e88ae78c,rust,tag,package,unclassified,,,open
-h8279b9f1799c,rust,tag,package,unclassified,,,open
-h82acec02ac76,rust,tag,package,unclassified,,,open
-h850b05eec6f3,rust,tag,package,unclassified,,,open
-h8672411fcc3d,rust,tag,package,unclassified,,,open
-h878944447c76,rust,tag,package,unclassified,,,open
-h8b0f0f6b526c,rust,tag,package,unclassified,,,open
-h8b46fbe450ad,rust,tag,package,unclassified,,,open
-h8d3d51e33cd4,rust,tag,package,unclassified,,,open
-h8d4e99e0e2ad,rust,tag,package,unclassified,,,open
-h8ee8470f9917,rust,tag,package,unclassified,,,open
-h93b19bbf7327,rust,tag,package,unclassified,,,open
-h971a1befdcd3,rust,tag,package,unclassified,,,open
-h9cb3f01bf91e,rust,tag,package,unclassified,,,open
-ha2937b5878ea,rust,tag,package,unclassified,,,open
-ha767ae2500f3,rust,tag,package,unclassified,,,open
-ha843c024b7b9,rust,tag,package,unclassified,,,open
-ha93250437e8c,rust,tag,package,unclassified,,,open
-hab7041f55c2e,rust,tag,package,unclassified,,,open
-hacfa2e72158f,rust,tag,package,unclassified,,,open
-haf97d9ad038f,rust,tag,package,unclassified,,,open
-hb92931900f3e,rust,tag,package,unclassified,,,open
-hb92ed5858653,rust,tag,package,unclassified,,,open
-hba7d0082f2e4,rust,tag,package,unclassified,,,open
-hbb3384a70458,rust,tag,package,unclassified,,,open
-hbbb0c4aeb3f7,rust,tag,package,unclassified,,,open
-hbf210d17bac5,rust,tag,package,unclassified,,,open
-hbfce523210a9,rust,tag,package,unclassified,,,open
-hc8af83acb892,rust,tag,package,unclassified,,,open
-hc9b88c959c3c,rust,tag,package,unclassified,,,open
-hcb2f77ca961e,rust,tag,package,unclassified,,,open
-hce3535999ac4,rust,tag,package,unclassified,,,open
-hd565ba5684ec,rust,tag,package,unclassified,,,open
-hd679e0bfa181,rust,tag,package,unclassified,,,open
-hd9088b506c61,rust,tag,package,unclassified,,,open
-hdedee146c6c0,rust,tag,package,unclassified,,,open
-he137c434afe0,rust,tag,package,unclassified,,,open
-he15c9ac00fb6,rust,tag,package,unclassified,,,open
-he94bfe933315,rust,tag,package,unclassified,,,open
-he9d62061aee3,rust,tag,package,unclassified,,,open
-hee3738c37da3,rust,tag,package,unclassified,,,open
-hf37a3578ec3e,rust,tag,package,unclassified,,,open
-hf98264ff82e2,rust,tag,package,unclassified,,,open
-hfaaf3e4a2202,rust,tag,package,unclassified,,,open
-hfeb5fe0f2419,rust,tag,package,unclassified,,,open
-hff5fae693296,rust,tag,package,unclassified,,,open
+h543bc62a3163,python,tag,package,in-scope,U120/U122/U123/U246: package export with scheduling followed by import must retain reviewed state and repetition count.,,deferred
+h686eb06786f4,python,tag,package,not-applicable,Deprecation warnings and aliases for Python importer/exporter classes are not a shipped Apple interface (R1879).,,done
+h6bd4a40af394,python,tag,package,in-scope,U120/U122/U123/U246: whole-collection note-package export/import must retain notes and their nondefault deck placement.,,deferred
+hb8a40db6f911,python,tag,package,in-scope,U120/U122/U123/U246: deck-limited package export must omit unrelated notes and retain the selected deck on import.,,deferred
+hf844f0b31fa4,python,tag,package,in-scope,U120/U122/U123/U246: exporting without scheduling must reset imported cards to new with zero repetitions.,,deferred
+hffc0559fcb06,python,tag,package,in-scope,U120/U122/U123/U246: referenced image bytes must survive note-package export and import into another collection.,,deferred
+h0027cf15abc1,rust,tag,package,preservation-only,"U120/U122/U246: scheduled package round-trips retain parameter lists of lengths 17, 19 and 21, including inactive generations (R762).",,deferred
+h0333a2ef3878,rust,tag,package,in-scope,U120/U246: package media collision remapping must rewrite imported note references to the chosen destination filename.,,deferred
+h041056a28ba5,rust,tag,package,out-of-scope,CSV/foreign note import is excluded; this case retains old field content when an imported update omits a column.,,done
+h04d7eb3084a8,rust,tag,package,out-of-scope,CSV/text import is excluded; this case parses a selected pipe separator while retaining commas inside fields.,,done
+h054c99c6afa0,rust,tag,package,in-scope,U122/U246: exporting a selected note-id list must gather only notes identified by that list.,,deferred
+h07f221b07463,rust,tag,package,out-of-scope,CSV/text import is excluded; this case accepts a valid delimited file and returns its import report.,,done
+h0dfab78112de,rust,tag,package,out-of-scope,"CSV/text export is excluded; this case aligns metadata column numbers with identifier, type, deck, fields and tags.",,done
+h13bd2beaffe5,rust,tag,package,in-scope,U122/U246: package gathering must include valid selected notes with their original record content.,,deferred
+h189770d86c7a,rust,tag,package,out-of-scope,CSV/text export is excluded; this case strips markup when exporting rendered card text without HTML.,,done
+h1b462ab5b1f6,rust,tag,package,in-scope,U124/U246: latest and legacy collection packages must restore notes and identical media bytes into a fresh destination.,,deferred
+h1f2f223fd59f,rust,tag,package,in-scope,"U120/U122/U246: normalize unsafe legacy media names on import, but reject noncanonical names in the newer manifest rather than trusting them.",,deferred
+h2071dec13b10,rust,tag,package,in-scope,U122/U246: exporting a note package to an invalid destination must return an error rather than report success.,,deferred
+h210a9935737d,rust,tag,package,out-of-scope,CSV/text import is excluded; this case builds preview rows from initial data lines and strips preview markup.,,done
+h21c395ca34ed,rust,tag,package,out-of-scope,"CSV/text import is excluded; this case chooses a separator from headers, data, fallback or an explicit override.",,done
+h23592efff85b,rust,tag,package,out-of-scope,CSV/text import is excluded; this case reports a missing delimited input file.,,done
+h2550760e6fd3,rust,tag,package,out-of-scope,CSV/text import is excluded; this case detects column counts despite quoted embedded line breaks.,,done
+h2cd0efb7e7cf,rust,tag,package,out-of-scope,CSV/text import is excluded; this case reads note-type names from a designated data column.,,done
+h2d5da75d9660,rust,tag,package,out-of-scope,CSV/text import is excluded; this case resolves a header's note type by either its name or numeric identifier.,,done
+h3154129ed251,rust,tag,package,in-scope,"U120/U246: deck import must create missing parents, avoid filtered-parent conflicts and reconcile ancestor casing independently of record order.",,deferred
+h35a1a315775a,rust,tag,package,out-of-scope,Foreign JSON note import is excluded; this case accepts a minimal JSON document with an empty note list.,,done
+h3680103347a5,rust,tag,package,in-scope,U121/U246: repeated package imports must merge prior duplicated note types by original identity while retaining added fields and note content.,,deferred
+h386c4ed293d8,rust,tag,package,in-scope,U120/U246: importing a package with a genuinely new note type must create its record with the incoming identity when available.,,deferred
+h3a5a5f091ca7,rust,tag,package,in-scope,U121/U246: composing two field-remapping generations must retain the original field values in the correct final columns and leave genuinely new fields blank.,,deferred
+h3abdc470143c,rust,tag,package,preservation-only,"U122/U246: gathering scheduled package data must keep all stored FSRS parameter lists, not only the currently supported one (R762).",,deferred
+h3e6565cbd5bd,rust,tag,package,out-of-scope,CSV/text import is excluded; this case recognizes legacy and current tag-header syntax only in their permitted header positions.,,done
+h4188879b097f,rust,tag,package,out-of-scope,Foreign note import is excluded; this case combines note-specific and global import tags on the created note.,,done
+h421b073e2a4d,rust,tag,package,out-of-scope,CSV/text import is excluded; this case permits rows with missing field columns.,,done
+h4545a8f89d8a,rust,tag,package,in-scope,U120/U121/U246: a matching GUID with a conflicting remapped note type must be logged as a conflict without overwriting the existing note.,,deferred
+h47699fddba50,rust,tag,package,out-of-scope,CSV/text import is excluded; this case treats a legacy first-line tag header as metadata rather than a note row.,,done
+h498ea23c7daa,rust,tag,package,in-scope,U122/U246: an omitted package-export selection must gather the whole collection.,,deferred
+h49da24bc1cea,rust,tag,package,out-of-scope,CSV/text export is excluded; this case limits rendered-card rows to a selected deck.,,done
+h4b3ba12ee1a3,rust,tag,package,out-of-scope,CSV/text export is excluded; this case writes rendered front and back text into their respective columns.,,done
+h4b7cb8d2e4a8,rust,tag,package,out-of-scope,CSV/text export is excluded; this case exposes the exported note count through its foreign service reply.,,done
+h4cebf655a477,rust,tag,package,in-scope,U122/U246: exporting an empty collection as a note package must create a valid package rather than fail or omit the file.,,deferred
+h4d39d9345011,rust,tag,package,out-of-scope,CSV/text import is excluded; this case permits a Unicode BOM before separator or tag metadata.,,done
+h4d841a7c9c8d,rust,tag,package,out-of-scope,Foreign/text note import is excluded; this case changes duplicate matching according to the note-text normalization setting.,,done
+h4ece49a2de4b,rust,tag,package,out-of-scope,CSV/text import is excluded; this case ignores a leading BOM and metadata-only lines when reading note rows.,,done
+h514ddcb4bec7,rust,tag,package,in-scope,U122/U246: exporting without scheduling must remove FSRS parameter lists from the gathered preset data instead of leaking scheduling state.,,deferred
+h522f5887f377,rust,tag,package,in-scope,U120/U246: a successful package import response must include both its operation changes and its import summary.,,deferred
+h5535b141d283,rust,tag,package,in-scope,U122/U246: exporting selected card identifiers must constrain package gathering to those cards and their required note data.,,deferred
+h55ee1aa36e5f,rust,tag,package,in-scope,U120/U121/U246: an older incoming note type with a matching schema must not overwrite the destination's newer values.,,deferred
+h563cc1097e30,rust,tag,package,out-of-scope,CSV/text export is excluded; this case returns the exported card count for one note.,,done
+h579c4d299fc7,rust,tag,package,out-of-scope,CSV/text export is excluded; this case returns the number of exported notes.,,done
+h5a29dea977b6,rust,tag,package,out-of-scope,CSV/text export is excluded; this case writes separator and HTML-mode headers before card rows.,,done
+h5bb0094d4eae,rust,tag,package,out-of-scope,Foreign JSON import is excluded; this case accepts a minimal valid JSON file with no notes.,,done
+h5bf32a768a1d,rust,tag,package,out-of-scope,CSV/text import is excluded; this case distinguishes freeform header values from numeric/boolean metadata with delimiter suffixes.,,done
+h5d6433926c9e,rust,tag,package,out-of-scope,CSV/text export is excluded; this case suppresses metadata-column headers when those columns are disabled.,,done
+h6acf9cf9c5c8,rust,tag,package,out-of-scope,CSV/text import is excluded; this case maps source columns into a different note-field order.,,done
+h6d941db6b0ef,rust,tag,package,in-scope,U124/U246: collection-package export must refuse noncanonical media names with a media-check error and remove its incomplete output.,,deferred
+h6ee2440b2399,rust,tag,package,in-scope,"U120/U122/U123/U246: latest/legacy package round-trips must preserve cross-deck siblings, resolve media conflicts and undo imported records atomically.",,deferred
+h6f014d7a2318,rust,tag,package,in-scope,U120/U246: importing decks must translate today's limit overrides between collection day origins and clear expired overrides.,,deferred
+h6f73f6341530,rust,tag,package,out-of-scope,CSV/text export is excluded; this case emits a header and zero count for an empty card collection.,,done
+h7804718662be,rust,tag,package,out-of-scope,CSV/text import is excluded; this case splits a designated tag column into note tags.,,done
+h7b0f7e46e988,rust,tag,package,out-of-scope,CSV/text export is excluded; this case reports an invalid destination for rendered-card output.,,done
+h7d6317981a90,rust,tag,package,out-of-scope,CSV/text export is excluded; this case restricts note rows and their count to the selected deck.,,done
+h7e4e3e3dd8d6,rust,tag,package,out-of-scope,Foreign/text note import is excluded; this case deliberately adds another note when duplicate mode permits duplication.,,done
+h7ee03d076a12,rust,tag,package,out-of-scope,CSV/text import is excluded; this case assigns tags to the next unused source column.,,done
+h8119e88ae78c,rust,tag,package,out-of-scope,CSV/text export is excluded; this case returns the rendered-card count through its foreign service reply.,,done
+h8279b9f1799c,rust,tag,package,out-of-scope,Foreign/text note import is excluded; this case merges global import tags with per-note tags.,,done
+h82acec02ac76,rust,tag,package,in-scope,U120/U246: an imported unique GUID with a colliding numeric note id must allocate another id and add the note.,,deferred
+h850b05eec6f3,rust,tag,package,in-scope,U120/U246: a newer incoming note matching an existing GUID must update that note even when its numeric id differs.,,deferred
+h8672411fcc3d,rust,tag,package,in-scope,U120/U246: the real package import service must accept a valid note package and return an import summary.,,deferred
+h878944447c76,rust,tag,package,out-of-scope,CSV/text import is excluded; this case infers HTML mode from the first parsed field unless an explicit header overrides it.,,done
+h8b0f0f6b526c,rust,tag,package,out-of-scope,CSV/text import is excluded; this case reads destination deck names from a designated source column.,,done
+h8b46fbe450ad,rust,tag,package,out-of-scope,CSV/text export is excluded; this case marks card output as plain rather than HTML in its header.,,done
+h8d3d51e33cd4,rust,tag,package,in-scope,"U121/U246: merge fields by identity, preserve destination-only fields and map incoming values into their final ordinals.",,deferred
+h8d4e99e0e2ad,rust,tag,package,in-scope,U122/U246: a deck-scoped package export must include that deck's descendants in its selection.,,deferred
+h8ee8470f9917,rust,tag,package,in-scope,"U120/U246: fresh package-import preferences must use the declared defaults for note-type merge, scheduling and preset import.",,deferred
+h93b19bbf7327,rust,tag,package,in-scope,U120/U121/U246: matching stable field identities permit a newer imported field rename without treating it as an incompatible schema.,,deferred
+h971a1befdcd3,rust,tag,package,out-of-scope,"CSV/text export is excluded; this case positions note GUID and field values correctly, including CSV quoting.",,done
+h9cb3f01bf91e,rust,tag,package,out-of-scope,"CSV/text import is excluded; this case resolves numeric deck headers by id first, then falls back to a deck name.",,done
+ha2937b5878ea,rust,tag,package,in-scope,"U121/U246: template merging must retain destination templates, rename matched incoming templates and remap imported card ordinals.",,deferred
+ha767ae2500f3,rust,tag,package,in-scope,U121/U246: note-type merge must resolve older duplicated schemas lacking original-id metadata and delete the now-unused duplicate without losing fields.,,deferred
+ha843c024b7b9,rust,tag,package,out-of-scope,CSV/text import is excluded; this case leaves the tags column unset when all source columns are already mapped to fields.,,done
+ha93250437e8c,rust,tag,package,out-of-scope,CSV/text export is excluded; this case preserves note-field markup when HTML output is enabled.,,done
+hab7041f55c2e,rust,tag,package,in-scope,U122/U246: package gathering must refuse malformed note identifiers rather than exporting a corrupt record.,,deferred
+hacfa2e72158f,rust,tag,package,in-scope,U122/U123/U246: copying package media in compressed and legacy modes must retain exact bytes and report their true size and digest.,,deferred
+haf97d9ad038f,rust,tag,package,in-scope,U120/U246: a GUID-matched incoming note older than the destination must be reported as a duplicate without overwriting newer fields.,,deferred
+hb92931900f3e,rust,tag,package,out-of-scope,CSV/text import is excluded; this case maps unnamed data columns to note fields after reserved metadata columns.,,done
+hb92ed5858653,rust,tag,package,in-scope,U120/U246: a missing note-package input must produce a typed read error without modifying the collection.,,deferred
+hba7d0082f2e4,rust,tag,package,out-of-scope,CSV/text export is excluded; this case omits GUID values when identifier export is disabled while retaining note fields.,,done
+hbb3384a70458,rust,tag,package,out-of-scope,CSV/text import is excluded; the exercised behavior computes data-column labels and widths using separator hints or explicit metadata.,,done
+hbbb0c4aeb3f7,rust,tag,package,out-of-scope,CSV/text import is excluded; this case resolves deck metadata by name/id and falls back to the default deck for blank metadata.,,done
+hbf210d17bac5,rust,tag,package,in-scope,"U121/U246: reimport a changed schema twice, compare refusal with merging disabled against consolidation with merging enabled.",,deferred
+hbfce523210a9,rust,tag,package,out-of-scope,CSV/text import is excluded; this case escapes field markup in plain mode and retains it when HTML input is declared.,,done
+hc8af83acb892,rust,tag,package,in-scope,U120/U121/U246: a GUID collision with another note type must report a conflict and retain the destination note unchanged.,,deferred
+hc9b88c959c3c,rust,tag,package,out-of-scope,Foreign JSON import is excluded; this case reports a missing JSON input file.,,done
+hcb2f77ca961e,rust,tag,package,out-of-scope,CSV/text export is excluded; this case reports an invalid destination for note output.,,done
+hce3535999ac4,rust,tag,package,out-of-scope,CSV/text export is excluded; this case strips markup from note fields when HTML output is disabled.,,done
+hd565ba5684ec,rust,tag,package,out-of-scope,CSV/text import is excluded; this case skips comment lines before and between data rows.,,done
+hd679e0bfa181,rust,tag,package,in-scope,U120/U121/U246: a newer incoming note type with matching schema must update the destination values.,,deferred
+hd9088b506c61,rust,tag,package,in-scope,U120/U121/U246: imported notes must use the resolved destination note type when an incoming id was remapped.,,deferred
+hdedee146c6c0,rust,tag,package,out-of-scope,CSV/text import is excluded; this case accepts valid case-insensitive HTML flags and leaves malformed flags unspecified.,,done
+he137c434afe0,rust,tag,package,out-of-scope,CSV/text export is excluded; this case returns a rendered-card row count for multiple notes.,,done
+he15c9ac00fb6,rust,tag,package,out-of-scope,CSV/text export is excluded; this case retains markup in rendered card output when HTML mode is enabled.,,done
+he94bfe933315,rust,tag,package,in-scope,"U120/U121/U246: incompatible imported note types need a new identity, which later compatible imports must reuse and update instead of duplicating again.",,deferred
+he9d62061aee3,rust,tag,package,out-of-scope,CSV/text export is excluded; this case returns the note-row count for multiple notes.,,done
+hee3738c37da3,rust,tag,package,in-scope,U120/U122/U246: a package exported without scheduling must reimport without any of the stored FSRS parameter lists.,,deferred
+hf37a3578ec3e,rust,tag,package,out-of-scope,CSV/text import is excluded; this case maps source columns to note fields by supplied column names.,,done
+hf98264ff82e2,rust,tag,package,out-of-scope,Foreign/text note import is excluded; this case updates a matching note's supplied fields rather than duplicating it.,,done
+hfaaf3e4a2202,rust,tag,package,out-of-scope,Foreign JSON import is excluded; this case refuses malformed JSON text.,,done
+hfeb5fe0f2419,rust,tag,package,out-of-scope,Foreign/text note import is excluded; this case preserves existing duplicate content instead of applying incoming updates.,,done
+hff5fae693296,rust,tag,package,out-of-scope,Foreign/text note import is excluded; this case limits duplicate updates to the matching deck while retaining another deck's note.,,done
 h095feffe1089,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
 h2a067e44c2ac,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
 h2dc9493eef0e,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
@@ -716,241 +716,241 @@ hd03c2e9b5063,typescript,tag,review,out-of-scope,Deduplicating concurrent MathJa
 he1f7c4ce9bf3,typescript,tag,review,out-of-scope,R563 excludes retaining a lazily loaded MathJax library for subsequent cards.,,done
 he5cb8d3fb44b,typescript,tag,review,not-applicable,"Mutating a JavaScript scheduling-state union through generated JSON bindings is not a shipped Apple interface (R764,R1879).",,done
 hfe671bb51af8,typescript,tag,review,out-of-scope,A custom scheduling script replacing one rating's custom payload is excluded by R764; stored custom data preservation is separately required.,,done
-h07a0e8e761e3,python,tag,sched,unclassified,,,open
-h10adc68e72c5,python,tag,sched,unclassified,,,open
-h1b8a7b774a45,python,tag,sched,unclassified,,,open
-h1f57b66e6c57,python,tag,sched,unclassified,,,open
-h2112a6880d74,python,tag,sched,unclassified,,,open
-h25bc326d314f,python,tag,sched,unclassified,,,open
+h07a0e8e761e3,python,tag,sched,in-scope,"U43/U44/U246: cover fractional learning steps, remaining counts, logged delays and graduation through real answers; SM-2 graduation constants are excluded by R752.",,deferred
+h10adc68e72c5,python,tag,sched,out-of-scope,SM-2 interval spacing and the hard-factor option are excluded by the FSRS-only policy (R752).,,done
+h1b8a7b774a45,python,tag,sched,in-scope,"U41/U43/U44/U246: adding a new card must increase the new count, fetch it and move it into learning on Again with a valid due time.",,deferred
+h1f57b66e6c57,python,tag,sched,in-scope,"U48/U246: manual and sibling burial must exclude cards from review and support selective user-only, scheduler-only and combined restoration.",,deferred
+h2112a6880d74,python,tag,sched,in-scope,U48/U246: setting a new card due today or tomorrow must convert it to review and retain an interval floor of one day.,,deferred
+h25bc326d314f,python,tag,sched,in-scope,U48/U246: suspend/restore must preserve intraday relearning timing and existing filtered home/due data while removing suspended cards from queues.,,deferred
 h381d4b819a8e,python,tag,sched,preservation-only,Learning state inside a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
 h3ec3f77f5c5c,python,tag,sched,preservation-only,Previewing in a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
-h5566e8764422,python,tag,sched,unclassified,,,open
-h55746f87d38f,python,tag,sched,unclassified,,,open
-h56c0cea0f0c6,python,tag,sched,unclassified,,,open
-h660dab1d7e25,python,tag,sched,unclassified,,,open
-h69f8e4b9fca9,python,tag,sched,unclassified,,,open
-h6e88f0974790,python,tag,sched,unclassified,,,open
-h85d4fffafbab,python,tag,sched,unclassified,,,open
-h890208756a97,python,tag,sched,unclassified,,,open
-h9ee8c470c9b4,python,tag,sched,unclassified,,,open
-ha06ea8f4e666,python,tag,sched,unclassified,,,open
-ha3c7f933a25b,python,tag,sched,unclassified,,,open
-ha57b6191cc59,python,tag,sched,unclassified,,,open
-ha8b070f64ade,python,tag,sched,unclassified,,,open
-hade25a755a24,python,tag,sched,unclassified,,,open
-hbf8df3ee14ff,python,tag,sched,unclassified,,,open
-hc296a5b7e05e,python,tag,sched,unclassified,,,open
-hc4e4156f3624,python,tag,sched,unclassified,,,open
-hde1130f9fb2d,python,tag,sched,unclassified,,,open
-hdf5598f4cd0f,python,tag,sched,unclassified,,,open
-he3a4a3e5014c,python,tag,sched,unclassified,,,open
-head34b2562fb,python,tag,sched,unclassified,,,open
-hee69ed088c05,python,tag,sched,unclassified,,,open
+h5566e8764422,python,tag,sched,in-scope,U44/U246: an Again answer with no relearning steps must return directly to review instead of leaving the card in a nonexistent step.,,deferred
+h55746f87d38f,python,tag,sched,in-scope,U48/U246: Reset must convert a review card back to new and update review/new queue counts.,,deferred
+h56c0cea0f0c6,python,tag,sched,in-scope,U41/U246: parent and child new limits must cap the gathered total and preserve the correct first deck's cards.,,deferred
+h660dab1d7e25,python,tag,sched,out-of-scope,Multiplying a lapsed card's interval by the SM-2 lapse multiplier is excluded by R752.,,done
+h69f8e4b9fca9,python,tag,sched,in-scope,"U41/U43/U44/U246: a failed card stays behind due reviews until its learning time arrives, then takes priority when due.",,deferred
+h6e88f0974790,python,tag,sched,in-scope,"U41/U43/U44/U246: learn-ahead must return future learning cards after other work is exhausted, then finish once both graduate.",,deferred
+h85d4fffafbab,python,tag,sched,in-scope,"U41/U43/U44/U246: new/learning/review counts must track Again, Good, Easy, graduation and a failed review across a complete answer sequence.",,deferred
+h890208756a97,python,tag,sched,out-of-scope,"Randomizing, ordering and shifting persisted new-card positions is the explicitly excluded Reposition feature.",,done
+h9ee8c470c9b4,python,tag,sched,in-scope,"U41/U43/U44/U246: multi-day learning steps must switch between timestamp/day queues, survive undo and update counts on relearning; use FSRS graduation.",,deferred
+ha06ea8f4e666,python,tag,sched,in-scope,U41/U43/U44/U246: fetching a card must not decrement queue counts; only answering changes its count category.,,deferred
+ha3c7f933a25b,python,tag,sched,in-scope,U44/U246: first-step Hard must schedule the averaged delay and store that exact negative-seconds interval in history.,,deferred
+ha57b6191cc59,python,tag,sched,in-scope,U44/U246: preserve preview/answer consistency through custom learning and relearning steps; SM-2 review multipliers and fixed graduation intervals are excluded (R752).,,deferred
+ha8b070f64ade,python,tag,sched,in-scope,U44/U246: Again moves a review card into relearning and Easy graduates it with due equal to today plus its FSRS interval.,,deferred
+hade25a755a24,python,tag,sched,in-scope,"U41/U246: deck-tree counts must aggregate children, retain child-local counts and tolerate cards pointing to missing decks.",,deferred
+hbf8df3ee14ff,python,tag,sched,in-scope,U41/U43/U44/U246: collapsed learning must avoid immediately repeating the card just failed when another card is available.,,deferred
+hc296a5b7e05e,python,tag,sched,in-scope,U41/U43/U246: requesting a study card from an empty collection must return no card.,,deferred
+hc4e4156f3624,python,tag,sched,in-scope,"U41/U43/U44/U246: with sibling burial disabled, a new note's card ordinals must appear in order across consecutive answers.",,deferred
+hde1130f9fb2d,python,tag,sched,preservation-only,U48/U246: Empty on an existing filtered deck must restore a negative original due day unchanged; creation/rebuild are excluded (R706).,,deferred
+hdf5598f4cd0f,python,tag,sched,in-scope,U41/U43/U44/U246: parent-deck study must traverse the parent and lexically ordered children while preserving counts and answer progression.,,deferred
+he3a4a3e5014c,python,tag,sched,in-scope,U41/U43/U44/U246: child answers decrement local and ancestor daily counters; tree and session totals must agree.,,deferred
+head34b2562fb,python,tag,sched,in-scope,U41/U246: the deck-count tree must contain each ancestor once even when several nested decks share it.,,deferred
+hee69ed088c05,python,tag,sched,in-scope,U49/U44/U246: a pending learning card accepts another Hard answer after its configured step list shrinks.,,deferred
 hf03d0a912671,python,tag,sched,preservation-only,Reviewing early in a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
-hf248f368b2b9,python,tag,sched,unclassified,,,open
-hf44d25b35e71,python,tag,sched,unclassified,,,open
-hf76a58bb5a76,python,tag,sched,unclassified,,,open
+hf248f368b2b9,python,tag,sched,not-applicable,"Rejecting execution of an unfrozen test near midnight is a test-harness guard, not a product rollover behavior (R1879).",,done
+hf44d25b35e71,python,tag,sched,in-scope,"U44/U246: verify answer counters, due/interval consistency and leech tagging/suspension; SM-2 ease-factor changes and multipliers are excluded (R752).",,deferred
+hf76a58bb5a76,python,tag,sched,in-scope,U49/U44/U246: removing lapse steps during relearning must allow the next Again answer to complete safely.,,deferred
 h00a233a3c403,rust,tag,sched,in-scope,Hard repeats the current learning step,sched/steps/learning-progress sched/steps/hard-delays,done
 h010d3289404d,rust,tag,sched,in-scope,Good on a relearning step stays in relearning,sched/steps/relearning,done
 h0348591aa08e,rust,tag,sched,in-scope,A new collection is on day 0 with its next boundary in the future.,sched/day/creation-after-rollover-tokyo,done
-h04ac07a21de7,rust,tag,sched,unclassified,,,open
-h05a411d3dbbc,rust,tag,sched,unclassified,,,open
+h04ac07a21de7,rust,tag,sched,in-scope,"U48/U246: user-only unbury must restore manually buried cards and retain scheduler-buried siblings, with matching queue counts.",,deferred
+h05a411d3dbbc,rust,tag,sched,in-scope,U43/U44/U246: undo and redo of adding and answering must restore all queue-category counts through the complete learning sequence.,,deferred
 h0875e3e791c6,rust,tag,sched,out-of-scope,SM-2 hard interval multiplier; Meguri schedules with FSRS,,done
-h0c5d8c72ae63,rust,tag,sched,unclassified,,,open
-h0cc7ca135634,rust,tag,sched,unclassified,,,open
+h0c5d8c72ae63,rust,tag,sched,in-scope,"U48/U246: due-date input must accept single offsets, normalized ranges and forced-reset suffixes while refusing empty, malformed and negative values.",,deferred
+h0cc7ca135634,rust,tag,sched,in-scope,U41/U43/U44/U246: review limits must reserve capacity for new cards and counts must update correctly through learning graduation.,,deferred
 h0d55a293e421,rust,tag,sched,in-scope,A Reset row drops the history before it; the training form is checked with the optimizer (U47),sched/memory/reset sched/memory/crafted-rows,done
-h0d7374461795,rust,tag,sched,unclassified,,,open
-h10961bb95b4d,rust,tag,sched,unclassified,,,open
+h0d7374461795,rust,tag,sched,in-scope,U41/U43/U155/U246: empty-deck completion data must report no remaining work or buried cards and a valid next-learning sentinel.,,deferred
+h10961bb95b4d,rust,tag,sched,out-of-scope,The retention-advice workload simulation and its increasing-cost trend are excluded by R752.,,done
 h14c25ad44110,rust,tag,sched,in-scope,Training leaves out cards whose learning started before the ignore date; checked with the optimizer (U47),,deferred
 h151bd9c1b80b,rust,tag,sched,in-scope,"A card's last new position: its own position while it is new (the original due in a filtered deck), otherwise its saved pos; Forget and Set Due Date use it",sched/data/positions,deferred
-h19b87e6f451b,rust,tag,sched,unclassified,,,open
-h1a440165e319,rust,tag,sched,unclassified,,,open
+h19b87e6f451b,rust,tag,sched,in-scope,U97/U104: a studied-today message built from supplied count/time must include the correct total and average duration.,,deferred
+h1a440165e319,rust,tag,sched,preservation-only,"U246: preserve stored random/shift defaults through unrelated work; executing Reposition or rewriting those defaults is excluded (R1266,R2017).",,deferred
 h1a6dc1b4024f,rust,tag,sched,in-scope,Set-due-date rows do not count in a card's history,sched/memory/skipped-rows,done
-h1d5bffd22663,rust,tag,sched,unclassified,,,open
+h1d5bffd22663,rust,tag,sched,in-scope,U41/U246: available reviews must not consume the new-card limit until the shared review limit actually constrains the queue.,,deferred
 h2023616b1a59,rust,tag,sched,in-scope,Cram rows (filtered reviews without rescheduling) do not count in a card's history,sched/memory/skipped-rows,done
 h20b239907832,rust,tag,sched,in-scope,Easy graduates from any learning step,sched/steps/learning-progress,done
 h23a9ff8b09f0,rust,tag,sched,in-scope,Leech threshold and every half threshold after it,sched/fsrs/review-again,done
-h23b15f93e355,rust,tag,sched,unclassified,,,open
-h23fc56a0a5b6,rust,tag,sched,unclassified,,,open
+h23b15f93e355,rust,tag,sched,in-scope,U41/U43/U155/U246: completion data must distinguish new work remaining from review or learning work.,,deferred
+h23fc56a0a5b6,rust,tag,sched,out-of-scope,Extending today's new limit through Custom Study is explicitly excluded; ordinary deck-option limit editing is a different operation.,,done
 h256ac6828508,rust,tag,sched,out-of-scope,SM-2 Easy in relearning (interval + 1 day); Meguri schedules with FSRS,,done
 h279126fd92b9,rust,tag,sched,in-scope,"Minimum and maximum review intervals, the maximum at least 1",sched/fsrs/max-interval,done
 h2bf702951408,rust,tag,sched,in-scope,A history wholly before the ignore date gives no item,sched/memory/ignore-before,done
-h319667c38026,rust,tag,sched,unclassified,,,open
+h319667c38026,rust,tag,sched,in-scope,"U44/U246: the review state's leech status must reflect the resulting leech flag, including the false case.",,deferred
 h34810b99051e,rust,tag,sched,in-scope,"Hard without learning steps leaves learning (FSRS interval, or short-term)",sched/fsrs/short-term,done
-h37681aedbc38,rust,tag,sched,unclassified,,,open
+h37681aedbc38,rust,tag,sched,in-scope,U48/U246: Reset must independently control restoring the original new position and clearing repetitions/lapses.,,deferred
 h3ba7c0fbc8f2,rust,tag,sched,in-scope,Again without relearning steps leaves relearning (FSRS form),sched/steps/relearning,done
-h3d0ce2bbaef8,rust,tag,sched,unclassified,,,open
+h3d0ce2bbaef8,rust,tag,sched,out-of-scope,Assigning selected new cards consecutive positions from a chosen offset is excluded Reposition behavior.,,done
 h3dbeef95c3db,rust,tag,sched,out-of-scope,SM-2 interval modifier; Meguri schedules with FSRS,,done
 h3dcf94a2f6fe,rust,tag,sched,out-of-scope,Saving deck options with FSRS turned off removes memory states; Meguri never turns FSRS off (R702),,done
-h3f11a775e29c,rust,tag,sched,unclassified,,,open
+h3f11a775e29c,rust,tag,sched,in-scope,U41/U246: verify new cards stay eligible in independent-limit mode when review capacity is exhausted.,,deferred
 h4037ce91c431,rust,tag,sched,in-scope,Easy leaves relearning,sched/steps/relearning,done
-h40a4438f58cc,rust,tag,sched,unclassified,,,open
+h40a4438f58cc,rust,tag,sched,out-of-scope,Applying requested desired retention to cards in the FSRS simulator is excluded with the simulator UI (R752).,,done
 h40e3819d7877,rust,tag,sched,in-scope,"Again, Hard and Good delays of learning steps",sched/steps/hard-delays sched/steps/learning-progress,done
 h419067ffeea3,rust,tag,sched,in-scope,Day count from the creation date and offset and the current offset and rollover hour.,sched/day/matrix/europe-paris sched/day/dst-america-new-york sched/day/created-tokyo-studied-los-angeles,done
-h431af1c97841,rust,tag,sched,unclassified,,,open
-h4705ef5c9c23,rust,tag,sched,unclassified,,,open
-h4833ddf59228,rust,tag,sched,unclassified,,,open
-h49565ba9b7dc,rust,tag,sched,unclassified,,,open
-h4ad2bd959137,rust,tag,sched,unclassified,,,open
-h4d0c7354dfcd,rust,tag,sched,unclassified,,,open
+h431af1c97841,rust,tag,sched,in-scope,"U41/U246: new-card gathering must honor nested limits across deck, increasing-position and decreasing-position orders while retaining sibling order.",,deferred
+h4705ef5c9c23,rust,tag,sched,in-scope,"U48/U246: burying selected notes must resolve their cards, bury the correct records and report the affected count.",,deferred
+h4833ddf59228,rust,tag,sched,in-scope,U41/U43/U44/U246: new-before-review order with review-sibling burial must not count or serve a sibling that the preceding answer removes.,,deferred
+h49565ba9b7dc,rust,tag,sched,in-scope,U48/U246: burying an already suspended card must retain explicit suspension so daily unbury cannot restore it.,,deferred
+h4ad2bd959137,rust,tag,sched,in-scope,U48/U246: restoring a buried card must recover its original queue and make it available to queue counts again.,,deferred
+h4d0c7354dfcd,rust,tag,sched,in-scope,U48/U246: unbury-all for a selected deck must restore its buried card and update available counts.,,deferred
 h4dcd915bda8e,rust,tag,sched,in-scope,Next day boundary before and after the rollover hour.,sched/day/matrix/utc sched/day/ae84-kathmandu,done
 h4eb04b88ea52,rust,tag,sched,in-scope,"Again without learning steps leaves learning (FSRS interval, or short-term)",sched/fsrs/short-term,done
 h53acbb05c3fb,rust,tag,sched,in-scope,A deck's studied-today counters after answers,sched/data/deck-counters,done
 h53ef76bc5048,rust,tag,sched,in-scope,Again in relearning restarts the relearning steps,sched/steps/relearning,done
 h557e34da0263,rust,tag,sched,in-scope,Hard leaving relearning without steps with the FSRS interval,sched/steps/relearning,done
 h55e6099a6eb9,rust,tag,sched,in-scope,Easy graduates above the Good interval,sched/steps/learning-progress sched/steps/new-card-buttons,done
-h561dc186a5dc,rust,tag,sched,unclassified,,,open
+h561dc186a5dc,rust,tag,sched,in-scope,U48/U246: scheduler-only unbury must retain user burial and restore only scheduler-buried cards.,,deferred
 h567aebc9fabb,rust,tag,sched,out-of-scope,"Upgrading a v1-scheduler collection: Meguri refuses v1 collections and has no scheduler upgrade (R705, R1482)",,done
 h5811eae76235,rust,tag,sched,in-scope,Delays over a day rounded to whole days,sched/steps/hard-delays,done
 h5b374d4c4d55,rust,tag,sched,in-scope,"No-regression minimum of a review interval, inside and outside the fuzz range",sched/fsrs/review-buttons,done
 h5ba74e3a7864,rust,tag,sched,in-scope,"Review-interval fuzz range and pick, with bounds",sched/fuzz/table-bounds fp-probe/corpus/fuzz-table,done
-h5c6480ebd12f,rust,tag,sched,unclassified,,,open
-h5e228991cac8,rust,tag,sched,unclassified,,,open
+h5c6480ebd12f,rust,tag,sched,out-of-scope,Counting available new cards for a Custom Study dialog belongs to the excluded Custom Study interface.,,done
+h5e228991cac8,rust,tag,sched,out-of-scope,Building cram/preview searches from included and excluded tags is part of excluded filtered-deck creation and Custom Study.,,done
 h6139479db902,rust,tag,sched,in-scope,Graded rows within a day before the first interday one do not start a history without learning rows,sched/memory/sm2-history,done
-h63e4063e58e3,rust,tag,sched,unclassified,,,open
+h63e4063e58e3,rust,tag,sched,in-scope,"U41/U43/U155/U246: an empty normal deck must report no new, review or learning work in completion data.",,deferred
 h6a2f74d641e5,rust,tag,sched,in-scope,Leaving relearning without steps on Again with the FSRS interval,sched/steps/relearning,done
-h6a6910e0bd6f,rust,tag,sched,unclassified,,,open
-h6b7f3a469b26,rust,tag,sched,unclassified,,,open
+h6a6910e0bd6f,rust,tag,sched,in-scope,"U48/U246: suspension must set the suspended queue, remove the card from study counts and return the affected-card count.",,deferred
+h6b7f3a469b26,rust,tag,sched,in-scope,"U48/U246: manual burial must set the user-buried queue, remove the card from study counts and report its mutation.",,deferred
 h72885e1b6734,rust,tag,sched,in-scope,Fuzz bounds when the minimum is above the maximum interval,sched/fsrs/max-interval sched/fuzz/table-bounds,done
-h72fe93fb7887,rust,supplementary,sched,unclassified,,,open
-h74c71d98d02e,rust,tag,sched,unclassified,,,open
-h77ff41ec7a24,rust,tag,sched,unclassified,,,open
+h72fe93fb7887,rust,supplementary,sched,out-of-scope,"Review-priority callbacks already feed the pinned FSRS simulator, but simulator execution is excluded by R752.",,done
+h74c71d98d02e,rust,tag,sched,in-scope,U48/U246: reset preferences saved from review must persist independently from Browser reset preferences.,,deferred
+h77ff41ec7a24,rust,tag,sched,in-scope,All four answer choices expose a nonempty interval label through the real next-state label provider (R656).,sched/labels/units,done
 h78e12bdba938,rust,tag,sched,preservation-only,Building filtered decks is out of scope; existing ones and their cards are only preserved,preservation/sync/filtered-deck,done
 h78eed3fe65c6,rust,tag,sched,in-scope,"Elapsed seconds of a learning card's current state, intraday and interday",sched/steps/learning-fuzz sched/steps/interday,done
-h7ae0194021c8,rust,tag,sched,unclassified,,,open
+h7ae0194021c8,rust,tag,sched,in-scope,U48/U246: Set Due Date must apply the requested offset and save its input history under the correct dialog-context key.,,deferred
 h7b1a4d17232a,rust,tag,sched,in-scope,Hard without relearning steps leaves relearning (FSRS form),sched/steps/relearning,done
 h7bbb73ef0d28,rust,tag,sched,in-scope,Again resets two relearning steps to the first,sched/steps/relearning,done
-h7bd9a5ed79b8,rust,tag,sched,unclassified,,,open
+h7bd9a5ed79b8,rust,tag,sched,in-scope,U41/U43/U48/U155/U246: completion data must report user-buried cards while excluding them from new work.,,deferred
 h7c2050819592,rust,tag,sched,in-scope,Hard repeats the relearning step,sched/steps/relearning,done
-h837dc023b887,rust,tag,sched,unclassified,,,open
-h847bead54db9,rust,tag,sched,unclassified,,,open
+h837dc023b887,rust,tag,sched,in-scope,U44/U246: applying deck studied deltas must add independent new/review counts visible through the daily-count reader.,,deferred
+h847bead54db9,rust,tag,sched,out-of-scope,Randomized Reposition assigning a unique permutation of new positions is explicitly excluded.,,done
 h881b1bb6d254,rust,tag,sched,in-scope,Good leaving relearning with the FSRS interval,sched/steps/relearning,done
-h8c930cc4ef19,rust,tag,sched,unclassified,,,open
-h8e0d45cd0649,rust,tag,sched,unclassified,,,open
-h91b2e4482736,rust,tag,sched,unclassified,,,open
-h969273d973dd,rust,tag,sched,unclassified,,,open
+h8c930cc4ef19,rust,tag,sched,out-of-scope,"Persisted new-card repositioning by input order, note identity or randomness with start/step controls is excluded.",,done
+h8e0d45cd0649,rust,tag,sched,in-scope,"U44/U48/U246: scheduler burial must remain distinct from manual burial in stored queue values, available counts and completion data.",,deferred
+h91b2e4482736,rust,tag,sched,in-scope,U48/U246: reset preferences saved from Browse must not overwrite the independent reviewer defaults.,,deferred
+h969273d973dd,rust,tag,sched,out-of-scope,Lowering studied counters to extend today's limits is the explicitly excluded Custom Study limit-extension mechanism.,,done
 h971848f00f1e,rust,tag,sched,in-scope,Short-term Again keeps a card in relearning,sched/steps/relearning sched/fsrs/short-term,done
-h9a5ca7ceecd6,rust,tag,sched,unclassified,,,open
-h9f3550e3fa5f,rust,tag,sched,unclassified,,,open
+h9a5ca7ceecd6,rust,tag,sched,in-scope,"U41/U43/U246: a fetched new-card batch must identify the added card and report one new, zero learning and zero review.",,deferred
+h9f3550e3fa5f,rust,tag,sched,out-of-scope,Shifting existing new-card positions by step times selection size is excluded Reposition behavior.,,done
 ha2425ed999f7,rust,tag,sched,in-scope,Good on the last learning step graduates,sched/steps/learning-progress,done
-ha258d562e101,rust,tag,sched,unclassified,,,open
+ha258d562e101,rust,tag,sched,in-scope,U43/U44/U246: redoing an answer after deck-selection undo/redo invalidates queues must rebuild them after restoring card state.,,deferred
 ha338afcecf02,rust,tag,sched,in-scope,Buried cards return to their queues at the first day query of a later day.,sched/unbury-on-rollover/both-kinds sched/unbury-on-rollover/last-unburied-window,done
 ha8aa8d31b248,rust,tag,sched,in-scope,A card whose history has no learning row begins from the SM-2 form of its first interday graded row,sched/memory/sm2-history,done
-hab96efc6f164,rust,tag,sched,unclassified,,,open
-habaf407e202f,rust,tag,sched,unclassified,,,open
-habc95d948b8b,rust,tag,sched,unclassified,,,open
-had8092d884ac,rust,tag,sched,unclassified,,,open
+hab96efc6f164,rust,tag,sched,in-scope,U97/U104: long duration labels must select seconds/minutes/months/years and preserve the declared precision and boundary rounding.,,deferred
+habaf407e202f,rust,tag,sched,in-scope,U44/U246: applying Again to a new card must persist both learning type and intraday-learning queue.,,deferred
+habc95d948b8b,rust,tag,sched,in-scope,U43/U44/U246: consecutive Good answers must advance a real card through learning and into review after the final step.,,deferred
+had8092d884ac,rust,tag,sched,in-scope,U41/U43/U155/U246: completion data must report review work due today after Set Due Date and remove that card from new work.,,deferred
 hb4123149e0de,rust,tag,sched,in-scope,Legacy day count of collections without a creation offset; the v1 count it also checks is out of scope because v1 collections are refused.,sched/day/legacy-timing,done
-hb46e7a2d004c,rust,tag,sched,unclassified,,,open
-hb643b497ade7,rust,tag,sched,unclassified,,,open
-hb7be1ced7f3a,rust,tag,sched,unclassified,,,open
-hb8dcf303d0e0,rust,tag,sched,unclassified,,,open
+hb46e7a2d004c,rust,tag,sched,in-scope,"U44/U246: persisted card state must agree with previewed learning, graduation and relearning transitions; SM-2 interval/ease constants are excluded (R752).",,deferred
+hb643b497ade7,rust,tag,sched,in-scope,U44/U246: applying Easy to a new card must persist review type/queue and a positive FSRS interval.,,deferred
+hb7be1ced7f3a,rust,tag,sched,in-scope,"U41/U246: queue mixing must distribute shorter and longer streams evenly, retain per-stream order and handle an empty stream.",,deferred
+hb8dcf303d0e0,rust,tag,sched,in-scope,"U44/U246: first-step Hard and Again both enter learning, but Hard must use the longer averaged delay when two steps exist.",,deferred
 hbafc4dc77cce,rust,tag,sched,in-scope,A single learning row gives a memory item but no training item; the training form is checked with the optimizer (U47),sched/memory/on-the-fly sched/memory/ignore-before,done
 hbc3d71afcb34,rust,tag,sched,in-scope,A card without a usable history gets its memory state from its own interval and ease,sched/memory/no-history sched/memory/sm2-history,done
 hc05411e145f1,rust,tag,sched,preservation-only,Preview states in a filtered deck are out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
-hc3bd9890e06a,rust,tag,sched,unclassified,,,open
+hc3bd9890e06a,rust,tag,sched,out-of-scope,"Repositioning all new cards in a deck is explicitly excluded, even when no randomization is requested.",,done
 hc67d7d3b1875,rust,tag,sched,in-scope,Easy leaving relearning uses the FSRS interval above the fuzzed Good interval,sched/steps/relearning,done
 hc96dda7dd94f,rust,tag,sched,in-scope,Again in learning returns to the first step,sched/steps/learning-progress,done
-hcbe165cda562,rust,tag,sched,unclassified,,,open
+hcbe165cda562,rust,tag,sched,out-of-scope,Direct out-of-session grading by arbitrary card id is not a supported product operation; managed review answers remain required under U44.,,done
 hccc87afa9021,rust,tag,sched,in-scope,Training items are sorted by review time with their card ids aligned; checked with the optimizer (U47),,deferred
-hceea58e626d5,rust,tag,sched,unclassified,,,open
+hceea58e626d5,rust,tag,sched,out-of-scope,"Mutating scheduler-v1 cards into later scheduler states, including filtered variants, is excluded; Meguri refuses v1 collections through its compatibility policy.",,done
 hcf4081192234,rust,tag,sched,in-scope,Good on a learning step moves to the next step,sched/steps/learning-progress,done
 hd5745d5de78c,rust,tag,sched,in-scope,A card without a memory state gets one from its history when its states are computed,sched/memory/on-the-fly,done
 hd79744504c35,rust,tag,sched,in-scope,Offsets stored as minutes west of UTC in the timing config keys.,sched/day/creation-after-rollover-tokyo sched/day/config-values,done
 hda7aa551feeb,rust,tag,sched,in-scope,"Answer button labels (seconds, minutes, months)",sched/labels/units,done
-hda9e7531d7db,rust,tag,sched,unclassified,,,open
-hdb3d8a73ac7b,rust,tag,sched,unclassified,,,open
-hdbe181187e8a,rust,tag,sched,unclassified,,,open
-hdd2d2f703388,rust,tag,sched,unclassified,,,open
+hda9e7531d7db,rust,tag,sched,in-scope,A new card exposes its current state plus previews for all four buttons through the real FSRS engine (R642).,sched/steps/new-card-buttons,done
+hdb3d8a73ac7b,rust,tag,sched,in-scope,"U97/U104: a fresh collection's studied-today message must show zero count, zero duration and a zero average.",,deferred
+hdbe181187e8a,rust,tag,sched,out-of-scope,Overriding stored card retention with a simulator request is part of excluded simulation and retention-advice tools (R752).,,done
+hdd2d2f703388,rust,tag,sched,in-scope,U48/U246: resetting a graduated card must persist new type and new queue with the requested logging/position behavior.,,deferred
 hdeb239c0cf40,rust,tag,sched,in-scope,A new collection starts its day 0 at the 04:00 boundary at or before its creation.,sched/day/creation-before-rollover sched/day/creation-at-rollover-utc sched/day/creation-after-rollover-tokyo,done
 hdf5b05a2842f,rust,tag,sched,in-scope,Training leaves out a card whose learning rows straddle the ignore date; checked with the optimizer (U47),,deferred
 he2dcd7bd5b1c,rust,tag,sched,in-scope,"With an ignore date and no learning row, the history starts at the first interday graded row after the date",sched/memory/ignore-before sched/memory/ignore-before-boundary,done
-he31eded34d00,rust,tag,sched,unclassified,,,open
+he31eded34d00,rust,tag,sched,preservation-only,U48/U246: Empty on an existing filtered deck must restore each card's home deck; creating or rebuilding the filtered deck is outside product scope (R706).,,deferred
 he4c4fc933d44,rust,tag,sched,in-scope,Good on the last relearning step leaves relearning,sched/steps/relearning,done
 he544632aa73a,rust,tag,sched,in-scope,A deck's own desired retention wins over its preset's when a card is answered,sched/data/desired-retention,done
 he594f0a7a983,rust,tag,sched,in-scope,Elapsed days between a card's reviews counted in days back from the next day boundary,sched/memory/on-the-fly sched/memory/sm2-history,done
 he71ab01c9816,rust,tag,sched,in-scope,An ignore date inside a card's learning rows makes its history start after the date,sched/memory/ignore-before,done
-he7fa6992322b,rust,tag,sched,unclassified,,,open
-heceeaa17fdbb,rust,tag,sched,unclassified,,,open
+he7fa6992322b,rust,tag,sched,in-scope,U41/U246: no reviews are gathered when the configured daily cap is zero.,,deferred
+heceeaa17fdbb,rust,tag,sched,in-scope,"U48/U246: due-date changes must distinguish shifting versus interval reset, handle relearning and restore filtered home/due fields; retain FSRS-only policy.",,deferred
 hee209ed2ac1b,rust,tag,sched,in-scope,Short-term Good keeps a card in relearning,sched/fsrs/short-term,done
-hee2d6b23e65c,rust,tag,sched,unclassified,,,open
+hee2d6b23e65c,rust,tag,sched,in-scope,"U43/U44/U246: answer undo/redo must restore sibling burial, leech tags, revlog and deck counts atomically; use FSRS intervals instead of excluded SM-2 constants.",,deferred
 hf37768bcec15,rust,tag,sched,out-of-scope,SM-2 lapse multiplier (New interval); Meguri schedules lapses with FSRS (R653),,done
-hf54cd97685d7,rust,tag,sched,unclassified,,,open
-hf55838aff7f6,rust,tag,sched,unclassified,,,open
-hf70661f6f3cb,rust,tag,sched,unclassified,,,open
-hf8783ee88750,rust,tag,sched,unclassified,,,open
+hf54cd97685d7,rust,tag,sched,in-scope,U41/U246: inherited caps prevent study in a subdeck from bypassing a depleted ancestor.,,deferred
+hf55838aff7f6,rust,tag,sched,in-scope,"U41/U246: relative-overdue review ordering must account for both due day and interval, including ties, before serving the queue.",,deferred
+hf70661f6f3cb,rust,tag,sched,preservation-only,U246: preserve saved Custom Study include/exclude tags through unrelated operations; its dialog and filtered-deck creation remain excluded (R2017).,,deferred
+hf8783ee88750,rust,tag,sched,in-scope,U48/U246: setting a new card due in three days must convert it to review with a matching interval and review queue.,,deferred
 hf87bc805c0cf,rust,tag,sched,in-scope,Good on a relearning step lowers the remaining count,sched/steps/relearning,done
 hfa3da761639b,rust,tag,sched,in-scope,Hard keeps the remaining count of two relearning steps,sched/steps/relearning,done
 hfb93da3c2901,rust,tag,sched,in-scope,Short-term Hard keeps a card in relearning,sched/fsrs/short-term,done
-hfea722b04230,rust,tag,sched,unclassified,,,open
-h6d2b664432d7,python,tag,search,unclassified,,,open
-hce3457dc5c85,python,tag,search,unclassified,,,open
-hefdc4581f106,python,tag,search,unclassified,,,open
-h0218dc5d4063,rust,tag,search,unclassified,,,open
-h04f566130b07,rust,tag,search,unclassified,,,open
-h0d07ce6ed51b,rust,tag,search,unclassified,,,open
-h1147e041f6aa,rust,tag,search,unclassified,,,open
-h1814f80ec140,rust,tag,search,unclassified,,,open
-h1e2bc38446e3,rust,tag,search,unclassified,,,open
-h1e765459935f,rust,tag,search,unclassified,,,open
-h1f546a2494d6,rust,tag,search,unclassified,,,open
-h239bcdef1181,rust,tag,search,unclassified,,,open
-h2e49ab2ea87a,rust,tag,search,unclassified,,,open
+hfea722b04230,rust,tag,sched,in-scope,U41/U246: concatenated queue sources must preserve each source's internal card order and place the second stream after the first.,,deferred
+h6d2b664432d7,python,tag,search,in-scope,"U86/U246: replacement must support no-match, all-field, field-scoped and regex modes with correct changed-note counts.",,deferred
+hce3457dc5c85,python,tag,search,out-of-scope,A collection-wide duplicate-group report with optional search restriction is the explicitly excluded Find Duplicates feature; per-note warnings and dupe: search remain required.,,done
+hefdc4581f106,python,tag,search,in-scope,"U81/U82/U84/U91: cover the combined search matrix for wildcards, tags, states, ids, fields, names, properties, rated/added dates and sorting; parser cases alone are insufficient.",,deferred
+h0218dc5d4063,rust,tag,search,in-scope,"U88/U246: state-filter construction must map new, learning, review, due, suspended and buried choices to their correct search predicates.",,deferred
+h04f566130b07,rust,tag,search,in-scope,U88/U246: building a search from an empty explicit group must return a typed invalid-input error.,,deferred
+h0d07ce6ed51b,rust,tag,search,in-scope,U84/U246: the Browser column catalog must expose a nonempty supported column set.,,deferred
+h1147e041f6aa,rust,tag,search,in-scope,U81/U82/U91: executing a tag predicate must return tagged cards while excluding an otherwise valid untagged card.,,deferred
+h1814f80ec140,rust,tag,search,in-scope,U88/U246: a generated single-note search must retain its full numeric note identifier.,,deferred
+h1e2bc38446e3,rust,tag,search,in-scope,U88/U246: build an AND expression from a pair of structured filter inputs.,,deferred
+h1e765459935f,rust,tag,search,in-scope,U88/U246: retain two child predicates when constructing an intersection group.,,deferred
+h1f546a2494d6,rust,tag,search,in-scope,U88/U246: a generated recently-edited predicate must preserve the requested day count.,,deferred
+h239bcdef1181,rust,tag,search,in-scope,U88/U246: the any-flag choice must search for a nonzero flag rather than one particular color.,,deferred
+h2e49ab2ea87a,rust,tag,search,in-scope,U88/U246: converting an empty explicit search group must refuse it rather than silently treating it as the whole collection.,,deferred
 h3007a5ce27b9,rust,tag,search,in-scope,"search text read into items, terms, keys and values: whitespace, quoting, escapes, negation and groups",search/lexing/whitespace search/lexing/terms search/lexing/escapes search/lexing/colons search/lexing/keys search/lexing/hyphens search/structure/groups search/structure/negation search/canonical/leaves,done
-h39a4ffc60079,rust,tag,search,unclassified,,,open
-h3b56f50b724c,rust,tag,search,unclassified,,,open
-h3cb2e631185c,rust,tag,search,unclassified,,,open
-h438f4d8ed7d7,rust,tag,search,unclassified,,,open
-h4506a7c0ae63,rust,tag,search,unclassified,,,open
-h4bf38055f427,rust,tag,search,unclassified,,,open
-h555785228ea2,rust,tag,search,unclassified,,,open
-h565039430e2d,rust,tag,search,unclassified,,,open
-h5b05256eb14d,rust,tag,search,unclassified,,,open
-h5cdce206bbe1,rust,tag,search,unclassified,,,open
+h39a4ffc60079,rust,tag,search,in-scope,U88/U246: joining two generated filters by union must emit disjunction and preserve both predicates.,,deferred
+h3b56f50b724c,rust,tag,search,in-scope,"U82/U91: executing a note-type predicate must exclude cards of another note type, including cloze cards.",,deferred
+h3cb2e631185c,rust,tag,search,not-applicable,Defaulting an unknown enum in the foreign search RPC is generated-binding behavior; Meguri's typed API does not expose that RPC enum (R1879).,,done
+h438f4d8ed7d7,rust,tag,search,in-scope,U84/U85/U246: map the selected Browser column and descending-order option into the executable sort.,,deferred
+h4506a7c0ae63,rust,tag,search,in-scope,U88/U246: constructing a note-type-name filter must retain the supplied name as a note-type predicate.,,deferred
+h4bf38055f427,rust,tag,search,in-scope,U84/U246: each column's advertised card/note sorting availability must agree with the executable order it supplies.,,deferred
+h555785228ea2,rust,tag,search,in-scope,U88/U246: the unflagged choice must generate the zero-flag predicate.,,deferred
+h565039430e2d,rust,tag,search,in-scope,"U81/U82/U91: prove wildcard escaping, field/history/deck/property/custom-data predicates and injection-safe parameters through result equivalence; internal SQL text need not match.",,deferred
+h5b05256eb14d,rust,tag,search,in-scope,U88/U246: constructing a recently-added search must retain its requested number of days.,,deferred
+h5cdce206bbe1,rust,tag,search,in-scope,U88/U246: a generated due-within-days search must use an inclusive upper bound.,,deferred
 h63a23874d7e3,rust,tag,search,in-scope,"canonical search text: redundant quotes and escapes dropped, needed ones added, OR in capitals, numbers normalized",search/canonical/quoting search/canonical/leaves search/canonical/numbers search/canonical/round-trips search/structure/operators,done
-h66aebcbc4027,rust,tag,search,unclassified,,,open
-h66d9a93ef6e9,rust,tag,search,unclassified,,,open
-h6b3ffb448b14,rust,tag,search,unclassified,,,open
-h6becb38c0590,rust,tag,search,unclassified,,,open
-h7594406238d4,rust,tag,search,unclassified,,,open
-h75a546f3b68f,rust,tag,search,unclassified,,,open
-h75c01d18f14a,rust,tag,search,unclassified,,,open
-h765dd9e980ae,rust,tag,search,unclassified,,,open
-h7669cd3519d0,rust,tag,search,unclassified,,,open
+h66aebcbc4027,rust,tag,search,in-scope,U82/U91: executing a deck predicate must include its card and exclude a card stored in another deck.,,deferred
+h66d9a93ef6e9,rust,tag,search,in-scope,U84/U85/U246: selecting Browser columns must update the active row-projection state.,,deferred
+h6b3ffb448b14,rust,tag,search,in-scope,"U86/U246: literal replacement text containing a dollar and digits must be stored verbatim, without capture expansion.",,deferred
+h6becb38c0590,rust,tag,search,in-scope,U88/U246: constructing a tag filter must retain its value as a tag predicate.,,deferred
+h7594406238d4,rust,tag,search,in-scope,U88/U246: literal query generation must quote wildcard metacharacters and the escape character.,,deferred
+h75a546f3b68f,rust,tag,search,in-scope,U88/U246: replacing a filter kind must update matching nodes inside nested searches while preserving unrelated kinds and negation.,,deferred
+h75c01d18f14a,rust,tag,search,not-applicable,Passing an arbitrary SQL order clause through the foreign RPC is not a supported native Browser sort API or persisted format (R1879).,,done
+h765dd9e980ae,rust,tag,search,in-scope,U88/U246: negating a generated filter must preserve its child predicate under logical negation.,,deferred
+h7669cd3519d0,rust,tag,search,in-scope,U88/U246: a generated group containing one filter must reduce to that filter without changing its meaning.,,deferred
 h79e4ec8d2c86,rust,tag,search,in-scope,a committed search of several items keeps its items and loses only an outer group's brackets,search/canonical/top-level search/structure/groups,done
-h7c1c920002b6,rust,tag,search,unclassified,,,open
-h855ecd06d4e6,rust,tag,search,unclassified,,,open
-h88ad03350510,rust,tag,search,unclassified,,,open
-h8b9aff97d516,rust,tag,search,unclassified,,,open
-h8f79a3f11361,rust,tag,search,unclassified,,,open
-h944eb618c913,rust,tag,search,unclassified,,,open
-h993a80697567,rust,tag,search,unclassified,,,open
+h7c1c920002b6,rust,tag,search,in-scope,U88/U246: all seven flag-color choices must generate their corresponding stored flag numbers.,,deferred
+h855ecd06d4e6,rust,tag,search,in-scope,U88/U246: replacing a filter inside a group must leave a different filter kind intact.,,deferred
+h88ad03350510,rust,tag,search,in-scope,U88/U246: an absent generated filter must represent an unrestricted collection search.,,deferred
+h8b9aff97d516,rust,tag,search,in-scope,U86/U246: Find and Replace must report the number of changed notes when the request selects the full collection.,,deferred
+h8f79a3f11361,rust,tag,search,in-scope,U88/U246: constructing a duplicate predicate must preserve both note-type identity and first-field text.,,deferred
+h944eb618c913,rust,tag,search,in-scope,U88/U246: a generated field-text filter must retain both the field name and its search text.,,deferred
+h993a80697567,rust,tag,search,in-scope,U88/U246: a generated multi-note filter must preserve the complete identifier list in valid search syntax.,,deferred
 h9d1214dbd878,rust,tag,search,in-scope,a card search returns the matching card ids,search/structure/precedence-results search/structure/card-note-modes,done
-ha95e1702a2fa,rust,tag,search,unclassified,,,open
-haaeb313b212e,rust,tag,search,unclassified,,,open
-habf4018f4772,rust,tag,search,unclassified,,,open
-had58959b0fc6,rust,tag,search,unclassified,,,open
-hb32e7c6fa35a,rust,tag,search,unclassified,,,open
-hb42dc5c927d9,rust,tag,search,unclassified,,,open
+ha95e1702a2fa,rust,tag,search,in-scope,"U88/U246: negating a generated predicate twice must restore its original meaning, including state filters.",,deferred
+haaeb313b212e,rust,tag,search,in-scope,U88/U246: generated card-template ordinal filters must preserve their requested ordinal.,,deferred
+habf4018f4772,rust,tag,search,in-scope,U85/U246: an explicitly unordered search must avoid imposing a Browser sort.,,deferred
+had58959b0fc6,rust,tag,search,in-scope,U88/U246: a generated field-presence filter must match nonempty content in the named field rather than every note type.,,deferred
+hb32e7c6fa35a,rust,tag,search,in-scope,U85/U246: an omitted sort request must preserve the unordered-search default.,,deferred
+hb42dc5c927d9,rust,tag,search,in-scope,"U88/U246: generated rated-history filters must distinguish the four buttons, any rated answer and manual rescheduling.",,deferred
 hba8e30116b92,rust,tag,search,in-scope,committing an invalid search text is a parse error,search/errors/kinds,done
 hc2037626ba58,rust,tag,search,in-scope,a committed search of one item is written without extra brackets,search/canonical/top-level,done
-hc3217305a1d5,rust,tag,search,unclassified,,,open
-hc518b95b631b,rust,tag,search,unclassified,,,open
-hc6331517314c,rust,tag,search,unclassified,,,open
+hc3217305a1d5,rust,tag,search,in-scope,U88/U246: a generated introduced-within-days filter must retain the supplied day count.,,deferred
+hc518b95b631b,rust,tag,search,in-scope,U88/U246: a two-child union group must preserve both predicates under disjunction.,,deferred
+hc6331517314c,rust,tag,search,in-scope,U88/U246: the public search builder must serialize a tag choice into valid canonical tag search text.,,deferred
 hc98944e6bdef,rust,tag,search,in-scope,"which rows a search tests in cards and notes mode, from the scopes of its terms",search/structure/damaged-rows search/structure/whole-collection search/structure/card-note-modes,done
-hcd65bea8e67f,rust,tag,search,unclassified,,,open
-hcf4fefe3e9ef,rust,tag,search,unclassified,,,open
-hd007ebca9ed4,rust,tag,search,unclassified,,,open
+hcd65bea8e67f,rust,tag,search,in-scope,U88/U246: a generated due-on-day filter must use equality rather than a range bound.,,deferred
+hcf4fefe3e9ef,rust,tag,search,in-scope,U88/U246: replacing a standalone filter with another of the same kind must discard the old value.,,deferred
+hd007ebca9ed4,rust,tag,search,not-applicable,Combining adjacent integer ranges is an internal SQL-planning optimization; exact helper output is not a persisted or native-app interface (R1879).,,done
 hdff0242575ab,rust,tag,search,in-scope,the empty search returns every card,search/structure/whole-collection,done
-he244355f799a,rust,tag,search,unclassified,,,open
-he2a0ba83d1b8,rust,tag,search,unclassified,,,open
-he56ed2a516b3,rust,tag,search,unclassified,,,open
-he8cfded7f1d7,rust,tag,search,unclassified,,,open
+he244355f799a,rust,tag,search,in-scope,U82/U91: a memory-state predicate must find cards with stored FSRS stability and exclude new cards lacking it; SQL spelling is implementation-specific.,,deferred
+he2a0ba83d1b8,rust,tag,search,in-scope,"U84/U85/U246: Browser row projection must return the requested card's sort field, deck and note type in the requested column order.",,deferred
+he56ed2a516b3,rust,tag,search,in-scope,U88/U246: a generated rated-history filter must retain both its time window and chosen answer button.,,deferred
+he8cfded7f1d7,rust,tag,search,not-applicable,Unknown flag-enum fallback in a foreign generated search RPC is not Meguri's typed filter contract (R1879).,,done
 he8f1b333539e,rust,tag,search,in-scope,search parse error kinds and the texts each reports,search/errors/kinds search/errors/order search/errors/escapes search/errors/arguments,done
-he93785c73a0f,rust,tag,search,unclassified,,,open
-hfa4a20b50574,rust,tag,search,unclassified,,,open
+he93785c73a0f,rust,tag,search,in-scope,U88/U246: constructing a deck-name filter must retain its value as a deck predicate.,,deferred
+hfa4a20b50574,rust,tag,search,in-scope,U88/U246: preserve grouped precedence when composing search expressions; explicitly flat composition has different semantics.,,deferred
 hfd43294d32a2,rust,tag,search,in-scope,a note search returns the notes with a matching card,search/structure/precedence-results search/structure/card-note-modes,done
-h36e914747858,python,tag,stats,in-scope,U98/U104: an empty collection must still yield a valid complete Stats data response and native empty states.,,deferred
+h36e914747858,python,tag,stats,out-of-scope,Producing the legacy HTML statistics report for an empty collection belongs to the explicitly excluded legacy Stats screen.,,done
 ha2f22cc588c8,python,tag,stats,in-scope,U92/U104: Card Info must identify its note and include both recorded answers after consecutive reviews.,,deferred
 haf31e8129655,python,tag,stats,not-applicable,Writing a desktop HTML statistics document to a temporary file is not Meguri's native charts or native PDF export interface (R1879).,,done
 h05cbe1cb9526,rust,tag,stats,in-scope,"U97/U104: the studied-today line must format review count, total time and per-card average correctly across seconds and minutes.",,deferred

@@ -4,10 +4,22 @@
   "method": "Individual pinned test-body review; supplementary behavior checked in pinned implementation. Classifications are neutral obligations, not pass evidence. Original classified rows preserved.",
   "rows": [
     {
+      "harvest_id": "h0027cf15abc1",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/tests.rs",
+      "source_file_sha256": "a439c1b0dee73a6edc24177551881b118a3e13270ccc0e8d02685587850f45d6"
+    },
+    {
       "harvest_id": "h012e392276c1",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/typeanswer.rs",
       "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "h0218dc5d4063",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
     },
     {
       "harvest_id": "h025050fe6ac6",
@@ -16,16 +28,58 @@
       "source_file_sha256": "3d20c75d0cc6c4f09a1c661cc99c12aab5e6740e74eb49ceb0f246f29ea0bac4"
     },
     {
+      "harvest_id": "h0333a2ef3878",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
+    },
+    {
+      "harvest_id": "h041056a28ba5",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/import.rs",
+      "source_file_sha256": "e73a377029293e8619c89c047f18c33b26e78b2a7fef2f9fd30643f33b4cf5ff"
+    },
+    {
+      "harvest_id": "h04ac07a21de7",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
       "harvest_id": "h04ca4d75662a",
       "evidence_kind": "pinned-test",
       "source_file": "ts/tests/e2e/context-switching.spec.ts",
       "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
     },
     {
+      "harvest_id": "h04d7eb3084a8",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/import.rs",
+      "source_file_sha256": "55e618432f4e0da9e1079959b01a3e00a13557d6ce264513fbbad910dab1a1db"
+    },
+    {
+      "harvest_id": "h04f566130b07",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
+    },
+    {
       "harvest_id": "h054820efe6cf",
       "evidence_kind": "pinned-implementation",
       "source_file": "rslib/src/sync/collection/upload.rs",
       "source_file_sha256": "17d46e0382d227c8ccc12979d4147449988bff73fea7c54f939c3eecd3d10ce1"
+    },
+    {
+      "harvest_id": "h054c99c6afa0",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
+      "harvest_id": "h05a411d3dbbc",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/queue/undo.rs",
+      "source_file_sha256": "3e2e978b12f04db4c27a6c509d897794f76bc4ccfe4fcda5f81a0ade216a7b02"
     },
     {
       "harvest_id": "h05cbe1cb9526",
@@ -38,6 +92,18 @@
       "evidence_kind": "pinned-test",
       "source_file": "ts/tests/e2e/context-switching.spec.ts",
       "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
+    },
+    {
+      "harvest_id": "h07a0e8e761e3",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
+      "harvest_id": "h07f221b07463",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
     },
     {
       "harvest_id": "h08dfde967274",
@@ -70,16 +136,46 @@
       "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
     },
     {
+      "harvest_id": "h0c5d8c72ae63",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/reviews.rs",
+      "source_file_sha256": "5af11598fcac28a1251f027dc09928c9be4339124f8fdd877361def750771860"
+    },
+    {
+      "harvest_id": "h0cc7ca135634",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/answering/mod.rs",
+      "source_file_sha256": "8b4be53a9f812699186922da8f898103457fe83e150eb3cd666210a64ddbde47"
+    },
+    {
+      "harvest_id": "h0d07ce6ed51b",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
+    },
+    {
       "harvest_id": "h0d325c734b77",
       "evidence_kind": "pinned-test",
       "source_file": "ts/tests/e2e/context-switching.spec.ts",
       "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
     },
     {
+      "harvest_id": "h0d7374461795",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/congrats.rs",
+      "source_file_sha256": "6695de897a6105aaf2ccd731ea30afa49aa5b84052a137ff6aa165edf8a7cdea"
+    },
+    {
       "harvest_id": "h0de8cd79d6ba",
       "evidence_kind": "pinned-test",
       "source_file": "ts/routes/deck-options/lib.test.ts",
       "source_file_sha256": "11b4732b580eaaa8303226fb1ed1602f5e26c1bc935beec8894f1d12dcbd8c20"
+    },
+    {
+      "harvest_id": "h0dfab78112de",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
     },
     {
       "harvest_id": "h0e52b45b7b7a",
@@ -100,16 +196,40 @@
       "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
     },
     {
+      "harvest_id": "h10961bb95b4d",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/fsrs/simulator.rs",
+      "source_file_sha256": "960a57a13c9cda9cf245cf9830f9cbaf28132a0ab744094fdc28e6948139e871"
+    },
+    {
+      "harvest_id": "h10adc68e72c5",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
       "harvest_id": "h1126a583e576",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/card_rendering/service.rs",
       "source_file_sha256": "5db5fcbb8478536442b3b0dc149a31682584298387a0591918632e67922d562f"
     },
     {
+      "harvest_id": "h1147e041f6aa",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
+    },
+    {
       "harvest_id": "h13b7128734ea",
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/domlib/surround/surround.test.ts",
       "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "h13bd2beaffe5",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/gather.rs",
+      "source_file_sha256": "f0cd893f960aaa0d6c84725c6d64ee3533d726d482bf09f55254ad1fe6df11df"
     },
     {
       "harvest_id": "h14162d344ef9",
@@ -136,16 +256,52 @@
       "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
     },
     {
+      "harvest_id": "h1814f80ec140",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "h189770d86c7a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
       "harvest_id": "h19a3e91fc826",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/dbcheck.rs",
       "source_file_sha256": "636054c65b35a88344f5cc1e2af5c4edb5366c789919358a776bac714fb90f08"
     },
     {
+      "harvest_id": "h19b87e6f451b",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "h1a440165e319",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "h1b462ab5b1f6",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/colpkg/tests.rs",
+      "source_file_sha256": "3e51865f2046b9db22db71326f552679580a78fed92154ba154653fe12c3ec98"
+    },
+    {
       "harvest_id": "h1b75a8055e30",
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/editable/change-timer.test.ts",
       "source_file_sha256": "0a3e8829fa20de00f03bc9b9895c22a68e823bfef7cee49cf757e4159f61fc7f"
+    },
+    {
+      "harvest_id": "h1b8a7b774a45",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
     },
     {
       "harvest_id": "h1c1a2a378925",
@@ -166,6 +322,12 @@
       "source_file_sha256": "413e03393654cd99c07ecbb3d7c8950242c65ae77155ca591acf03f95d727eaa"
     },
     {
+      "harvest_id": "h1d5bffd22663",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/queue/builder/mod.rs",
+      "source_file_sha256": "66c08d5f19a874c2c27a42391f3e34c550f283d06e9c6b89d1daeee4aa730633"
+    },
+    {
       "harvest_id": "h1dc1c50d96e2",
       "evidence_kind": "pinned-test",
       "source_file": "ts/routes/deck-options/steps.test.ts",
@@ -178,16 +340,64 @@
       "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
     },
     {
+      "harvest_id": "h1e2bc38446e3",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
+    },
+    {
       "harvest_id": "h1e72f458212b",
       "evidence_kind": "pinned-test",
       "source_file": "ts/routes/deck-options/steps.test.ts",
       "source_file_sha256": "808b2e72033331dff940521129ed757c375acdaf42718ff2525c9d5989fa0004"
     },
     {
+      "harvest_id": "h1e765459935f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "h1f2f223fd59f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/media.rs",
+      "source_file_sha256": "29f28c10b3f291d45e3f439749a98a85e938a94bf3b9ac90f8bf44b1178b80cd"
+    },
+    {
+      "harvest_id": "h1f546a2494d6",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "h1f57b66e6c57",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
+      "harvest_id": "h2071dec13b10",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
       "harvest_id": "h209248bdfb33",
       "evidence_kind": "pinned-implementation",
       "source_file": "rslib/src/storage/card/filtered.rs",
       "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
+    },
+    {
+      "harvest_id": "h210a9935737d",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
+    },
+    {
+      "harvest_id": "h2112a6880d74",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
     },
     {
       "harvest_id": "h2129dd2678c2",
@@ -202,10 +412,40 @@
       "source_file_sha256": "e42521c0a36dc06898cc6d1e472a05051a77a418910d1ef362a67f3d04f7246a"
     },
     {
+      "harvest_id": "h21c395ca34ed",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
+    },
+    {
       "harvest_id": "h22e00b0f1c78",
       "evidence_kind": "pinned-implementation",
       "source_file": "rslib/src/typeanswer.rs",
       "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "h23592efff85b",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
+      "harvest_id": "h239bcdef1181",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "h23b15f93e355",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "h23fc56a0a5b6",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
     },
     {
       "harvest_id": "h24131047d2ce",
@@ -220,6 +460,18 @@
       "source_file_sha256": "17d46e0382d227c8ccc12979d4147449988bff73fea7c54f939c3eecd3d10ce1"
     },
     {
+      "harvest_id": "h2550760e6fd3",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
+    },
+    {
+      "harvest_id": "h25bc326d314f",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
       "harvest_id": "h27c58d269610",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/deckconfig/update.rs",
@@ -230,6 +482,18 @@
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/domlib/surround/surround.test.ts",
       "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "h2cd0efb7e7cf",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/import.rs",
+      "source_file_sha256": "55e618432f4e0da9e1079959b01a3e00a13557d6ce264513fbbad910dab1a1db"
+    },
+    {
+      "harvest_id": "h2d5da75d9660",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
     },
     {
       "harvest_id": "h2dc788fb8e1b",
@@ -244,6 +508,12 @@
       "source_file_sha256": "413e03393654cd99c07ecbb3d7c8950242c65ae77155ca591acf03f95d727eaa"
     },
     {
+      "harvest_id": "h2e49ab2ea87a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
       "harvest_id": "h2e7c980ee2f6",
       "evidence_kind": "pinned-test",
       "source_file": "pylib/tests/test_collection.py",
@@ -254,6 +524,18 @@
       "evidence_kind": "pinned-test",
       "source_file": "pylib/tests/test_hooks.py",
       "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h3154129ed251",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/decks.rs",
+      "source_file_sha256": "0f1a0ea8f4619e0c8738f6ed6a91cafb729bc518db2cd1b101a4169ba33bcc0e"
+    },
+    {
+      "harvest_id": "h319667c38026",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
     },
     {
       "harvest_id": "h3219d2cb2ba0",
@@ -286,6 +568,12 @@
       "source_file_sha256": "baae1be9f022045f496f0d3e365fef7e329568eed5a462b10e7a680ceffcee91"
     },
     {
+      "harvest_id": "h35a1a315775a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
       "harvest_id": "h35f01eb07a7f",
       "evidence_kind": "pinned-test",
       "source_file": "ts/routes/deck-options/steps.test.ts",
@@ -298,10 +586,22 @@
       "source_file_sha256": "daf96b531cbd5e3108e608dac0ee64da1922a0a15171f38ee68e806391d9c771"
     },
     {
+      "harvest_id": "h3680103347a5",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
+    },
+    {
       "harvest_id": "h36e914747858",
       "evidence_kind": "pinned-test",
       "source_file": "pylib/tests/test_stats.py",
       "source_file_sha256": "78fc945fcb6f23dbdea9803670462008b5b67b7139c6849ed6f1389d4be78367"
+    },
+    {
+      "harvest_id": "h37681aedbc38",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/new.rs",
+      "source_file_sha256": "9fe6f04a1612e0040b7f2396fccfbd7d20420c4055d586c5cf4b9cbb2a7f7cde"
     },
     {
       "harvest_id": "h37999c439a16",
@@ -316,10 +616,28 @@
       "source_file_sha256": "ceef9627741fe05e46ab2d926fb5d2a45884c65515d36b342622c57d9d8d734b"
     },
     {
+      "harvest_id": "h386c4ed293d8",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
+    },
+    {
       "harvest_id": "h389b8fd94c14",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/sync/media/tests.rs",
       "source_file_sha256": "5ea9878c438be103151d09757a5c64cd728a7f8e291fa25fa480bfcf9cd17629"
+    },
+    {
+      "harvest_id": "h39a4ffc60079",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
+    },
+    {
+      "harvest_id": "h3a5a5f091ca7",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
     },
     {
       "harvest_id": "h3a731837bd25",
@@ -328,10 +646,46 @@
       "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
     },
     {
+      "harvest_id": "h3abdc470143c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/gather.rs",
+      "source_file_sha256": "f0cd893f960aaa0d6c84725c6d64ee3533d726d482bf09f55254ad1fe6df11df"
+    },
+    {
       "harvest_id": "h3ad6e171d247",
       "evidence_kind": "pinned-test",
       "source_file": "ts/reviewer/lib.test.ts",
       "source_file_sha256": "f1e59a8eb841833850070c00e589ce4083ddd007d0f616bad933de5982d37d5a"
+    },
+    {
+      "harvest_id": "h3b56f50b724c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
+    },
+    {
+      "harvest_id": "h3cb2e631185c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "h3d0ce2bbaef8",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "h3e6565cbd5bd",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
+    },
+    {
+      "harvest_id": "h3f11a775e29c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/queue/builder/mod.rs",
+      "source_file_sha256": "66c08d5f19a874c2c27a42391f3e34c550f283d06e9c6b89d1daeee4aa730633"
     },
     {
       "harvest_id": "h400e0628f27d",
@@ -346,10 +700,22 @@
       "source_file_sha256": "baae1be9f022045f496f0d3e365fef7e329568eed5a462b10e7a680ceffcee91"
     },
     {
+      "harvest_id": "h40a4438f58cc",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/fsrs/simulator.rs",
+      "source_file_sha256": "960a57a13c9cda9cf245cf9830f9cbaf28132a0ab744094fdc28e6948139e871"
+    },
+    {
       "harvest_id": "h413f1956a499",
       "evidence_kind": "pinned-test",
       "source_file": "ts/routes/deck-options/lib.test.ts",
       "source_file_sha256": "11b4732b580eaaa8303226fb1ed1602f5e26c1bc935beec8894f1d12dcbd8c20"
+    },
+    {
+      "harvest_id": "h4188879b097f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/import.rs",
+      "source_file_sha256": "e73a377029293e8619c89c047f18c33b26e78b2a7fef2f9fd30643f33b4cf5ff"
     },
     {
       "harvest_id": "h420d96663fe4",
@@ -358,10 +724,28 @@
       "source_file_sha256": "701df6dfb1b5f0b5c9602e07eaeead8991bf23c4a51ac0ad2a756d50c22003bd"
     },
     {
+      "harvest_id": "h421b073e2a4d",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/import.rs",
+      "source_file_sha256": "55e618432f4e0da9e1079959b01a3e00a13557d6ce264513fbbad910dab1a1db"
+    },
+    {
+      "harvest_id": "h431af1c97841",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/queue/builder/mod.rs",
+      "source_file_sha256": "66c08d5f19a874c2c27a42391f3e34c550f283d06e9c6b89d1daeee4aa730633"
+    },
+    {
       "harvest_id": "h434af44650c7",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/io/src/lib.rs",
       "source_file_sha256": "9c6bb07d9b300aed15171881c4ec0be1fc9db1371440f4d8ace2eb4d606d71b8"
+    },
+    {
+      "harvest_id": "h438f4d8ed7d7",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
     },
     {
       "harvest_id": "h4442659ae131",
@@ -370,10 +754,22 @@
       "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
     },
     {
+      "harvest_id": "h4506a7c0ae63",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
       "harvest_id": "h45394f1a8123",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/dbcheck.rs",
       "source_file_sha256": "636054c65b35a88344f5cc1e2af5c4edb5366c789919358a776bac714fb90f08"
+    },
+    {
+      "harvest_id": "h4545a8f89d8a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
     },
     {
       "harvest_id": "h46a2e2a48929",
@@ -392,6 +788,18 @@
       "evidence_kind": "pinned-test",
       "source_file": "ts/tests/e2e/deck-options.test.ts",
       "source_file_sha256": "5ea1d2889fcd08517f0235b2767acfaa2fd24ed98c884647355a59b7744e4a71"
+    },
+    {
+      "harvest_id": "h4705ef5c9c23",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "h47699fddba50",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/import.rs",
+      "source_file_sha256": "55e618432f4e0da9e1079959b01a3e00a13557d6ce264513fbbad910dab1a1db"
     },
     {
       "harvest_id": "h4779ed3690a3",
@@ -418,6 +826,12 @@
       "source_file_sha256": "dacaddc3b1182dc2ffb3e071dbe96d2bc738d6c71f3cb6c6b1114d3e0535c536"
     },
     {
+      "harvest_id": "h4833ddf59228",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/queue/builder/mod.rs",
+      "source_file_sha256": "66c08d5f19a874c2c27a42391f3e34c550f283d06e9c6b89d1daeee4aa730633"
+    },
+    {
       "harvest_id": "h4939abe921e2",
       "evidence_kind": "pinned-implementation",
       "source_file": "rslib/src/deckconfig/service.rs",
@@ -430,10 +844,64 @@
       "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
     },
     {
+      "harvest_id": "h49565ba9b7dc",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "h498ea23c7daa",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
+      "harvest_id": "h49da24bc1cea",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
+      "harvest_id": "h4ad2bd959137",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
       "harvest_id": "h4b173b76b6d5",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/card_rendering/service.rs",
       "source_file_sha256": "5db5fcbb8478536442b3b0dc149a31682584298387a0591918632e67922d562f"
+    },
+    {
+      "harvest_id": "h4b3ba12ee1a3",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
+      "harvest_id": "h4b7cb8d2e4a8",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
+      "harvest_id": "h4bf38055f427",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/mod.rs",
+      "source_file_sha256": "876fc82cde06ecaf2c1da84fe50c7d21927eb910decb35cf72364c8e097c4e11"
+    },
+    {
+      "harvest_id": "h4cebf655a477",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
+      "harvest_id": "h4d0c7354dfcd",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
     },
     {
       "harvest_id": "h4d2c40a0930e",
@@ -442,16 +910,46 @@
       "source_file_sha256": "b23a71d463cd5a3ba5df43c84e573c9af1389eb02f520dff8c6fb5e8b11065e6"
     },
     {
+      "harvest_id": "h4d39d9345011",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
+    },
+    {
+      "harvest_id": "h4d841a7c9c8d",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/import.rs",
+      "source_file_sha256": "e73a377029293e8619c89c047f18c33b26e78b2a7fef2f9fd30643f33b4cf5ff"
+    },
+    {
+      "harvest_id": "h4ece49a2de4b",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/import.rs",
+      "source_file_sha256": "55e618432f4e0da9e1079959b01a3e00a13557d6ce264513fbbad910dab1a1db"
+    },
+    {
       "harvest_id": "h4f44f64a9d78",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/deckconfig/update.rs",
       "source_file_sha256": "4ac00e112c80a40f379ced04b3aa23fc541a0e7c896f3fd91ad5ea66b8c0d9fe"
     },
     {
+      "harvest_id": "h514ddcb4bec7",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/gather.rs",
+      "source_file_sha256": "f0cd893f960aaa0d6c84725c6d64ee3533d726d482bf09f55254ad1fe6df11df"
+    },
+    {
       "harvest_id": "h51930b326444",
       "evidence_kind": "pinned-implementation",
       "source_file": "rslib/src/storage/card/filtered.rs",
       "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
+    },
+    {
+      "harvest_id": "h522f5887f377",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
     },
     {
       "harvest_id": "h5304b7b612e0",
@@ -466,6 +964,36 @@
       "source_file_sha256": "791543f3451ecf4faa0e5a7ddbad48c4b48e0259b2edbf1bad49dc03a4ebb171"
     },
     {
+      "harvest_id": "h543bc62a3163",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_importing_exporting.py",
+      "source_file_sha256": "28cdb591086b00debc446d9acc6f3b1310b8898e98a7c3ff716366a2f7b84873"
+    },
+    {
+      "harvest_id": "h5535b141d283",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
+      "harvest_id": "h555785228ea2",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "h5566e8764422",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
+      "harvest_id": "h55746f87d38f",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
       "harvest_id": "h55b5f8508781",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/error/not_found.rs",
@@ -476,6 +1004,36 @@
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/sync/media/tests.rs",
       "source_file_sha256": "5ea9878c438be103151d09757a5c64cd728a7f8e291fa25fa480bfcf9cd17629"
+    },
+    {
+      "harvest_id": "h55ee1aa36e5f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
+    },
+    {
+      "harvest_id": "h561dc186a5dc",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "h563cc1097e30",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
+      "harvest_id": "h565039430e2d",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/sqlwriter.rs",
+      "source_file_sha256": "f00f3823b400f5d482baa6e742eeebe942f39e02537c9f9c4f36ab766537a5bd"
+    },
+    {
+      "harvest_id": "h56c0cea0f0c6",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
     },
     {
       "harvest_id": "h56ce4672d339",
@@ -490,16 +1048,34 @@
       "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
     },
     {
+      "harvest_id": "h579c4d299fc7",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
       "harvest_id": "h5889068b7624",
       "evidence_kind": "pinned-implementation",
       "source_file": "ts/routes/card-info/lib.test.ts",
       "source_file_sha256": "baae1be9f022045f496f0d3e365fef7e329568eed5a462b10e7a680ceffcee91"
     },
     {
+      "harvest_id": "h5a29dea977b6",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
       "harvest_id": "h5a31d6105048",
       "evidence_kind": "pinned-implementation",
       "source_file": "rslib/src/storage/revlog/mod.rs",
       "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
+    },
+    {
+      "harvest_id": "h5b05256eb14d",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
     },
     {
       "harvest_id": "h5b5bc3629af2",
@@ -514,10 +1090,46 @@
       "source_file_sha256": "baae1be9f022045f496f0d3e365fef7e329568eed5a462b10e7a680ceffcee91"
     },
     {
+      "harvest_id": "h5bb0094d4eae",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
+      "harvest_id": "h5bf32a768a1d",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
+    },
+    {
+      "harvest_id": "h5c6480ebd12f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "h5cdce206bbe1",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
       "harvest_id": "h5d08ad2ebcf9",
       "evidence_kind": "pinned-test",
       "source_file": "pylib/tests/test_hooks.py",
       "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h5d6433926c9e",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
+      "harvest_id": "h5e228991cac8",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/filtered/custom_study.rs",
+      "source_file_sha256": "8701f9bbd428ab3651e6343af9a6567a4ed28c094269b4b2dab20b5810e1732a"
     },
     {
       "harvest_id": "h5e274df557cf",
@@ -550,10 +1162,34 @@
       "source_file_sha256": "5ea9878c438be103151d09757a5c64cd728a7f8e291fa25fa480bfcf9cd17629"
     },
     {
+      "harvest_id": "h63e4063e58e3",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
       "harvest_id": "h65243b54e871",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/sync/media/tests.rs",
       "source_file_sha256": "5ea9878c438be103151d09757a5c64cd728a7f8e291fa25fa480bfcf9cd17629"
+    },
+    {
+      "harvest_id": "h660dab1d7e25",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
+      "harvest_id": "h66aebcbc4027",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
+    },
+    {
+      "harvest_id": "h66d9a93ef6e9",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
     },
     {
       "harvest_id": "h67bebd174839",
@@ -562,10 +1198,22 @@
       "source_file_sha256": "0a49c8bbae7090d7a9da517e1e9b806a0aa87d665ee761e0df167d7f3005a0cb"
     },
     {
+      "harvest_id": "h686eb06786f4",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_importing_exporting.py",
+      "source_file_sha256": "28cdb591086b00debc446d9acc6f3b1310b8898e98a7c3ff716366a2f7b84873"
+    },
+    {
       "harvest_id": "h69f4adbd5970",
       "evidence_kind": "pinned-test",
       "source_file": "pylib/tests/test_collection.py",
       "source_file_sha256": "791543f3451ecf4faa0e5a7ddbad48c4b48e0259b2edbf1bad49dc03a4ebb171"
+    },
+    {
+      "harvest_id": "h69f8e4b9fca9",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
     },
     {
       "harvest_id": "h6a3197e57c5e",
@@ -574,16 +1222,52 @@
       "source_file_sha256": "5db5fcbb8478536442b3b0dc149a31682584298387a0591918632e67922d562f"
     },
     {
+      "harvest_id": "h6a6910e0bd6f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "h6acf9cf9c5c8",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/import.rs",
+      "source_file_sha256": "55e618432f4e0da9e1079959b01a3e00a13557d6ce264513fbbad910dab1a1db"
+    },
+    {
+      "harvest_id": "h6b3ffb448b14",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
+    },
+    {
       "harvest_id": "h6b5987957b1c",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/typeanswer.rs",
       "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
     },
     {
+      "harvest_id": "h6b7f3a469b26",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
       "harvest_id": "h6b9234c17a08",
       "evidence_kind": "pinned-test",
       "source_file": "pylib/tests/test_hooks.py",
       "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h6bd4a40af394",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_importing_exporting.py",
+      "source_file_sha256": "28cdb591086b00debc446d9acc6f3b1310b8898e98a7c3ff716366a2f7b84873"
+    },
+    {
+      "harvest_id": "h6becb38c0590",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
     },
     {
       "harvest_id": "h6cb0e154dd0f",
@@ -598,10 +1282,28 @@
       "source_file_sha256": "55522715c7cc10887cf8e921da3709e1fedac4662b4e13b8363c3cc14be29c8c"
     },
     {
+      "harvest_id": "h6d2b664432d7",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_find.py",
+      "source_file_sha256": "d95ffa39a957e2b6dd94ad25ef6edb226248dd48611a3b3f9be14070d2b60e4b"
+    },
+    {
+      "harvest_id": "h6d941db6b0ef",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/colpkg/tests.rs",
+      "source_file_sha256": "3e51865f2046b9db22db71326f552679580a78fed92154ba154653fe12c3ec98"
+    },
+    {
       "harvest_id": "h6dcf8bd3ec8f",
       "evidence_kind": "pinned-test",
       "source_file": "pylib/tests/test_collection.py",
       "source_file_sha256": "791543f3451ecf4faa0e5a7ddbad48c4b48e0259b2edbf1bad49dc03a4ebb171"
+    },
+    {
+      "harvest_id": "h6e88f0974790",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
     },
     {
       "harvest_id": "h6e8d74322421",
@@ -610,10 +1312,22 @@
       "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
     },
     {
+      "harvest_id": "h6ee2440b2399",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/tests.rs",
+      "source_file_sha256": "a439c1b0dee73a6edc24177551881b118a3e13270ccc0e8d02685587850f45d6"
+    },
+    {
       "harvest_id": "h6efeaad807ac",
       "evidence_kind": "pinned-implementation",
       "source_file": "rslib/src/storage/card/filtered.rs",
       "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
+    },
+    {
+      "harvest_id": "h6f014d7a2318",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/decks.rs",
+      "source_file_sha256": "0f1a0ea8f4619e0c8738f6ed6a91cafb729bc518db2cd1b101a4169ba33bcc0e"
     },
     {
       "harvest_id": "h6f0c84dadbdb",
@@ -622,10 +1336,22 @@
       "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
     },
     {
+      "harvest_id": "h6f73f6341530",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
       "harvest_id": "h70e1bda7fbd5",
       "evidence_kind": "pinned-implementation",
       "source_file": "rslib/src/deckconfig/service.rs",
       "source_file_sha256": "ceef9627741fe05e46ab2d926fb5d2a45884c65515d36b342622c57d9d8d734b"
+    },
+    {
+      "harvest_id": "h72fe93fb7887",
+      "evidence_kind": "pinned-implementation",
+      "source_file": "rslib/src/scheduler/fsrs/simulator.rs",
+      "source_file_sha256": "960a57a13c9cda9cf245cf9830f9cbaf28132a0ab744094fdc28e6948139e871"
     },
     {
       "harvest_id": "h7489852a175a",
@@ -640,10 +1366,58 @@
       "source_file_sha256": "701df6dfb1b5f0b5c9602e07eaeead8991bf23c4a51ac0ad2a756d50c22003bd"
     },
     {
+      "harvest_id": "h74c71d98d02e",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
       "harvest_id": "h7508907b7b47",
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/domlib/surround/unsurround.test.ts",
       "source_file_sha256": "a9ff5a499f26cc90648bb4eb107ad932fb0d6b41aaa08e99c901bba66b8b606a"
+    },
+    {
+      "harvest_id": "h7594406238d4",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "h75a546f3b68f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/writer.rs",
+      "source_file_sha256": "545d2fcbae3ab02c34761e24eb55650845f3229a3bb7c700fe078c4da72bdf23"
+    },
+    {
+      "harvest_id": "h75c01d18f14a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
+    },
+    {
+      "harvest_id": "h765dd9e980ae",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "h7669cd3519d0",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "h77ff41ec7a24",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "h7804718662be",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/import.rs",
+      "source_file_sha256": "55e618432f4e0da9e1079959b01a3e00a13557d6ce264513fbbad910dab1a1db"
     },
     {
       "harvest_id": "h788f98b55f1d",
@@ -664,16 +1438,58 @@
       "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
     },
     {
+      "harvest_id": "h7ae0194021c8",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
       "harvest_id": "h7b088f7049ca",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/collection/backup.rs",
       "source_file_sha256": "a43edc8df3b3cd2466a93b6a668ed3d7f829b9bc0fe1507b1aa704ac552df9c6"
     },
     {
+      "harvest_id": "h7b0f7e46e988",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
+      "harvest_id": "h7bd9a5ed79b8",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "h7c1c920002b6",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "h7d6317981a90",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
       "harvest_id": "h7e4c18df6974",
       "evidence_kind": "pinned-test",
       "source_file": "pylib/tests/test_collection.py",
       "source_file_sha256": "791543f3451ecf4faa0e5a7ddbad48c4b48e0259b2edbf1bad49dc03a4ebb171"
+    },
+    {
+      "harvest_id": "h7e4e3e3dd8d6",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/import.rs",
+      "source_file_sha256": "e73a377029293e8619c89c047f18c33b26e78b2a7fef2f9fd30643f33b4cf5ff"
+    },
+    {
+      "harvest_id": "h7ee03d076a12",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
     },
     {
       "harvest_id": "h7f342d9e2c48",
@@ -694,16 +1510,40 @@
       "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
     },
     {
+      "harvest_id": "h8119e88ae78c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
       "harvest_id": "h81d3f640e8fd",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/deckconfig/update.rs",
       "source_file_sha256": "4ac00e112c80a40f379ced04b3aa23fc541a0e7c896f3fd91ad5ea66b8c0d9fe"
     },
     {
+      "harvest_id": "h8279b9f1799c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/import.rs",
+      "source_file_sha256": "e73a377029293e8619c89c047f18c33b26e78b2a7fef2f9fd30643f33b4cf5ff"
+    },
+    {
+      "harvest_id": "h82acec02ac76",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
+    },
+    {
       "harvest_id": "h82c4a097602a",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/card_rendering/service.rs",
       "source_file_sha256": "5db5fcbb8478536442b3b0dc149a31682584298387a0591918632e67922d562f"
+    },
+    {
+      "harvest_id": "h837dc023b887",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
     },
     {
       "harvest_id": "h83f55b823be2",
@@ -718,6 +1558,12 @@
       "source_file_sha256": "5db5fcbb8478536442b3b0dc149a31682584298387a0591918632e67922d562f"
     },
     {
+      "harvest_id": "h847bead54db9",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
       "harvest_id": "h84ceecde6896",
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/domlib/surround/surround.test.ts",
@@ -730,10 +1576,28 @@
       "source_file_sha256": "17d46e0382d227c8ccc12979d4147449988bff73fea7c54f939c3eecd3d10ce1"
     },
     {
+      "harvest_id": "h850b05eec6f3",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
+    },
+    {
+      "harvest_id": "h855ecd06d4e6",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
+    },
+    {
       "harvest_id": "h859f07d44ca0",
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/domlib/surround/surround.test.ts",
       "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "h85d4fffafbab",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
     },
     {
       "harvest_id": "h85e031554808",
@@ -742,16 +1606,58 @@
       "source_file_sha256": "ff28b67f686a05babec28b7d64a8eecaa250ccc4232c9852e8283b6385fab277"
     },
     {
+      "harvest_id": "h8672411fcc3d",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
+      "harvest_id": "h878944447c76",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
+    },
+    {
+      "harvest_id": "h88ad03350510",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
       "harvest_id": "h88ee1a8ec135",
       "evidence_kind": "pinned-test",
       "source_file": "ts/routes/editor/rich-text-input/data-transfer.test.ts",
       "source_file_sha256": "b23a71d463cd5a3ba5df43c84e573c9af1389eb02f520dff8c6fb5e8b11065e6"
     },
     {
+      "harvest_id": "h890208756a97",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
       "harvest_id": "h89de56ad40bd",
       "evidence_kind": "pinned-test",
       "source_file": "pylib/tests/test_hooks.py",
       "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
+    },
+    {
+      "harvest_id": "h8b0f0f6b526c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/import.rs",
+      "source_file_sha256": "55e618432f4e0da9e1079959b01a3e00a13557d6ce264513fbbad910dab1a1db"
+    },
+    {
+      "harvest_id": "h8b46fbe450ad",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
+      "harvest_id": "h8b9aff97d516",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
     },
     {
       "harvest_id": "h8bba9c90dc5d",
@@ -766,10 +1672,34 @@
       "source_file_sha256": "36bfcdded55d3628d85eaa40f7202373efd2a47034c301957867b2df15f5255b"
     },
     {
+      "harvest_id": "h8c930cc4ef19",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/new.rs",
+      "source_file_sha256": "9fe6f04a1612e0040b7f2396fccfbd7d20420c4055d586c5cf4b9cbb2a7f7cde"
+    },
+    {
       "harvest_id": "h8d2949298ebc",
       "evidence_kind": "pinned-test",
       "source_file": "ts/reviewer/lib.test.ts",
       "source_file_sha256": "f1e59a8eb841833850070c00e589ce4083ddd007d0f616bad933de5982d37d5a"
+    },
+    {
+      "harvest_id": "h8d3d51e33cd4",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
+    },
+    {
+      "harvest_id": "h8d4e99e0e2ad",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
+      "harvest_id": "h8e0d45cd0649",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
     },
     {
       "harvest_id": "h8e35ff39a69f",
@@ -778,10 +1708,28 @@
       "source_file_sha256": "05a975e375e95389d9137c080259efabe67faf839147a88e8f5771ce534d4621"
     },
     {
+      "harvest_id": "h8ee8470f9917",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
+      "harvest_id": "h8f79a3f11361",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
       "harvest_id": "h90b32cd0020c",
       "evidence_kind": "pinned-test",
       "source_file": "ts/routes/deck-options/steps.test.ts",
       "source_file_sha256": "808b2e72033331dff940521129ed757c375acdaf42718ff2525c9d5989fa0004"
+    },
+    {
+      "harvest_id": "h91b2e4482736",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
     },
     {
       "harvest_id": "h92ef3cd2c306",
@@ -796,6 +1744,18 @@
       "source_file_sha256": "cfda3c334fca8574b24082b8ea743201c33124091c459fb30d4b9aa873270d88"
     },
     {
+      "harvest_id": "h93b19bbf7327",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
+    },
+    {
+      "harvest_id": "h944eb618c913",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
       "harvest_id": "h94ade20fdbd8",
       "evidence_kind": "pinned-test",
       "source_file": "ts/reviewer/mathjax.test.ts",
@@ -808,16 +1768,46 @@
       "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
     },
     {
+      "harvest_id": "h969273d973dd",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "h971a1befdcd3",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
       "harvest_id": "h984772533897",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/dbcheck.rs",
       "source_file_sha256": "636054c65b35a88344f5cc1e2af5c4edb5366c789919358a776bac714fb90f08"
     },
     {
+      "harvest_id": "h993a80697567",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
       "harvest_id": "h9a09160808bf",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/ankidroid/db.rs",
       "source_file_sha256": "ff28b67f686a05babec28b7d64a8eecaa250ccc4232c9852e8283b6385fab277"
+    },
+    {
+      "harvest_id": "h9a5ca7ceecd6",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "h9cb3f01bf91e",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
     },
     {
       "harvest_id": "h9de5cb7af907",
@@ -832,16 +1822,46 @@
       "source_file_sha256": "ff28b67f686a05babec28b7d64a8eecaa250ccc4232c9852e8283b6385fab277"
     },
     {
+      "harvest_id": "h9ee8c470c9b4",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
+      "harvest_id": "h9f3550e3fa5f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
       "harvest_id": "h9f50c1c0f487",
       "evidence_kind": "pinned-test",
       "source_file": "ts/tests/e2e/context-switching.spec.ts",
       "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
     },
     {
+      "harvest_id": "ha06ea8f4e666",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
       "harvest_id": "ha1793751ed20",
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/html-filter/index.test.ts",
       "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
+    },
+    {
+      "harvest_id": "ha258d562e101",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/queue/undo.rs",
+      "source_file_sha256": "3e2e978b12f04db4c27a6c509d897794f76bc4ccfe4fcda5f81a0ade216a7b02"
+    },
+    {
+      "harvest_id": "ha2937b5878ea",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
     },
     {
       "harvest_id": "ha29e26f021f6",
@@ -856,6 +1876,18 @@
       "source_file_sha256": "78fc945fcb6f23dbdea9803670462008b5b67b7139c6849ed6f1389d4be78367"
     },
     {
+      "harvest_id": "ha3c7f933a25b",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
+      "harvest_id": "ha57b6191cc59",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
       "harvest_id": "ha59b9ffb5db2",
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/domlib/surround/surround.test.ts",
@@ -868,16 +1900,82 @@
       "source_file_sha256": "baae1be9f022045f496f0d3e365fef7e329568eed5a462b10e7a680ceffcee91"
     },
     {
+      "harvest_id": "ha767ae2500f3",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
+    },
+    {
       "harvest_id": "ha80fc2c2d74d",
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/domlib/surround/surround.test.ts",
       "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
     },
     {
+      "harvest_id": "ha843c024b7b9",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
+    },
+    {
       "harvest_id": "ha86f3657ab34",
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/html-filter/index.test.ts",
       "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
+    },
+    {
+      "harvest_id": "ha8b070f64ade",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
+      "harvest_id": "ha93250437e8c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
+      "harvest_id": "ha95e1702a2fa",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/builder.rs",
+      "source_file_sha256": "0b5fe9ca6b2113849321620e31b26ba3b1f1c785237f8a7768bdd68ab8e524d2"
+    },
+    {
+      "harvest_id": "haaeb313b212e",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "hab7041f55c2e",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/gather.rs",
+      "source_file_sha256": "f0cd893f960aaa0d6c84725c6d64ee3533d726d482bf09f55254ad1fe6df11df"
+    },
+    {
+      "harvest_id": "hab96efc6f164",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/timespan.rs",
+      "source_file_sha256": "c60af0020084132ac68583d338263fcff3f8fcccd74956fddc9bbd33218ad7a1"
+    },
+    {
+      "harvest_id": "habaf407e202f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "habc95d948b8b",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "habf4018f4772",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
     },
     {
       "harvest_id": "haccda9311c93",
@@ -898,10 +1996,34 @@
       "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
     },
     {
+      "harvest_id": "hacfa2e72158f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/colpkg/export.rs",
+      "source_file_sha256": "2695706805ab4a8058369d1c0942a68ab070893728225c9b0b6e564ce950afb6"
+    },
+    {
       "harvest_id": "hacfb5a333b1c",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/sync/collection/tests.rs",
       "source_file_sha256": "4e9308ef827b4e20d29278a944e2e805380f4c13ad2897045613528045efc51d"
+    },
+    {
+      "harvest_id": "had58959b0fc6",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "had8092d884ac",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "hade25a755a24",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
     },
     {
       "harvest_id": "hae529870cada",
@@ -922,6 +2044,12 @@
       "source_file_sha256": "78fc945fcb6f23dbdea9803670462008b5b67b7139c6849ed6f1389d4be78367"
     },
     {
+      "harvest_id": "haf97d9ad038f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
+    },
+    {
       "harvest_id": "hafc40dbe3447",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/typeanswer.rs",
@@ -938,6 +2066,24 @@
       "evidence_kind": "pinned-implementation",
       "source_file": "rslib/src/storage/revlog/mod.rs",
       "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
+    },
+    {
+      "harvest_id": "hb32e7c6fa35a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
+    },
+    {
+      "harvest_id": "hb42dc5c927d9",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "hb46e7a2d004c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/answering/mod.rs",
+      "source_file_sha256": "8b4be53a9f812699186922da8f898103457fe83e150eb3cd666210a64ddbde47"
     },
     {
       "harvest_id": "hb4f60ade2634",
@@ -958,16 +2104,70 @@
       "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
     },
     {
+      "harvest_id": "hb643b497ade7",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "hb7be1ced7f3a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/queue/builder/intersperser.rs",
+      "source_file_sha256": "698bd875580f932975b38c1d755a40be2b28bed14f6ba07721a208399cd98a1d"
+    },
+    {
       "harvest_id": "hb7dfd31a030e",
       "evidence_kind": "pinned-test",
       "source_file": "ts/tests/e2e/context-switching.spec.ts",
       "source_file_sha256": "0e11a5e4f56f53159e1638d67b85809a80ab3b2fa74e091be28b0afe0a3b5dce"
     },
     {
+      "harvest_id": "hb8a40db6f911",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_importing_exporting.py",
+      "source_file_sha256": "28cdb591086b00debc446d9acc6f3b1310b8898e98a7c3ff716366a2f7b84873"
+    },
+    {
+      "harvest_id": "hb8dcf303d0e0",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "hb92931900f3e",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
+    },
+    {
+      "harvest_id": "hb92ed5858653",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
       "harvest_id": "hb93c4bd5833b",
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/domlib/surround/surround.test.ts",
       "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "hba7d0082f2e4",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
+      "harvest_id": "hbb3384a70458",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
+    },
+    {
+      "harvest_id": "hbbb0c4aeb3f7",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
     },
     {
       "harvest_id": "hbcc38ba4659c",
@@ -988,10 +2188,28 @@
       "source_file_sha256": "b23a71d463cd5a3ba5df43c84e573c9af1389eb02f520dff8c6fb5e8b11065e6"
     },
     {
+      "harvest_id": "hbf210d17bac5",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
+    },
+    {
       "harvest_id": "hbf81ece4b03e",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/typeanswer.rs",
       "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
+    },
+    {
+      "harvest_id": "hbf8df3ee14ff",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
+      "harvest_id": "hbfce523210a9",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/import.rs",
+      "source_file_sha256": "55e618432f4e0da9e1079959b01a3e00a13557d6ce264513fbbad910dab1a1db"
     },
     {
       "harvest_id": "hc01768203874",
@@ -1012,16 +2230,52 @@
       "source_file_sha256": "df60cf36cf4328939d67c467015c67ad1a564c69369e70f212e40485b25c4f22"
     },
     {
+      "harvest_id": "hc296a5b7e05e",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
+      "harvest_id": "hc3217305a1d5",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "hc3bd9890e06a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "hc4e4156f3624",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
       "harvest_id": "hc4e797f560a0",
       "evidence_kind": "pinned-implementation",
       "source_file": "rslib/src/storage/card/filtered.rs",
       "source_file_sha256": "c81ca66fbf05e2eab69e2d11612bd8f959216944e8b63ab2a116abb2ab85a28b"
     },
     {
+      "harvest_id": "hc518b95b631b",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
       "harvest_id": "hc53d1db14186",
       "evidence_kind": "pinned-test",
       "source_file": "ts/routes/editor/rich-text-input/data-transfer.test.ts",
       "source_file_sha256": "b23a71d463cd5a3ba5df43c84e573c9af1389eb02f520dff8c6fb5e8b11065e6"
+    },
+    {
+      "harvest_id": "hc6331517314c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
     },
     {
       "harvest_id": "hc6cc252a0cb5",
@@ -1036,10 +2290,70 @@
       "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
     },
     {
+      "harvest_id": "hc8af83acb892",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
+    },
+    {
+      "harvest_id": "hc9b88c959c3c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
+      "harvest_id": "hcb2f77ca961e",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
+    },
+    {
+      "harvest_id": "hcbe165cda562",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "hcd65bea8e67f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
       "harvest_id": "hcddb2db9708d",
       "evidence_kind": "pinned-test",
       "source_file": "ts/routes/editor/rich-text-input/data-transfer.test.ts",
       "source_file_sha256": "b23a71d463cd5a3ba5df43c84e573c9af1389eb02f520dff8c6fb5e8b11065e6"
+    },
+    {
+      "harvest_id": "hce3457dc5c85",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_find.py",
+      "source_file_sha256": "d95ffa39a957e2b6dd94ad25ef6edb226248dd48611a3b3f9be14070d2b60e4b"
+    },
+    {
+      "harvest_id": "hce3535999ac4",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
+      "harvest_id": "hceea58e626d5",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/upgrade.rs",
+      "source_file_sha256": "ed5114e8994010f141d0140b474cb64e2709d7d1c011be50368036f8e588b65a"
+    },
+    {
+      "harvest_id": "hcf4fefe3e9ef",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
+    },
+    {
+      "harvest_id": "hd007ebca9ed4",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/sqlwriter.rs",
+      "source_file_sha256": "f00f3823b400f5d482baa6e742eeebe942f39e02537c9f9c4f36ab766537a5bd"
     },
     {
       "harvest_id": "hd03c2e9b5063",
@@ -1052,6 +2366,18 @@
       "evidence_kind": "pinned-test",
       "source_file": "ts/routes/editor/rich-text-input/data-transfer.test.ts",
       "source_file_sha256": "b23a71d463cd5a3ba5df43c84e573c9af1389eb02f520dff8c6fb5e8b11065e6"
+    },
+    {
+      "harvest_id": "hd565ba5684ec",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/import.rs",
+      "source_file_sha256": "55e618432f4e0da9e1079959b01a3e00a13557d6ce264513fbbad910dab1a1db"
+    },
+    {
+      "harvest_id": "hd679e0bfa181",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
     },
     {
       "harvest_id": "hd717744a70ee",
@@ -1076,6 +2402,12 @@
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/sync/collection/tests.rs",
       "source_file_sha256": "4e9308ef827b4e20d29278a944e2e805380f4c13ad2897045613528045efc51d"
+    },
+    {
+      "harvest_id": "hd9088b506c61",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
     },
     {
       "harvest_id": "hd919a62a1c8a",
@@ -1108,10 +2440,46 @@
       "source_file_sha256": "daf96b531cbd5e3108e608dac0ee64da1922a0a15171f38ee68e806391d9c771"
     },
     {
+      "harvest_id": "hda9e7531d7db",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
       "harvest_id": "hdaef1892f535",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/sync/media/changes.rs",
       "source_file_sha256": "b3417a1d15d89514dc123680d47692dec5cc43a0cffb4e46a1e7902e220d7823"
+    },
+    {
+      "harvest_id": "hdb3d8a73ac7b",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "hdbe181187e8a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/fsrs/simulator.rs",
+      "source_file_sha256": "960a57a13c9cda9cf245cf9830f9cbaf28132a0ab744094fdc28e6948139e871"
+    },
+    {
+      "harvest_id": "hdd2d2f703388",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "hde1130f9fb2d",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
+      "harvest_id": "hdedee146c6c0",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
     },
     {
       "harvest_id": "hdf1ad6d4cdf4",
@@ -1126,6 +2494,12 @@
       "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
     },
     {
+      "harvest_id": "hdf5598f4cd0f",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
       "harvest_id": "he0cb4f886c79",
       "evidence_kind": "pinned-implementation",
       "source_file": "rslib/src/sync/collection/upload.rs",
@@ -1138,6 +2512,18 @@
       "source_file_sha256": "4ac00e112c80a40f379ced04b3aa23fc541a0e7c896f3fd91ad5ea66b8c0d9fe"
     },
     {
+      "harvest_id": "he137c434afe0",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
+      "harvest_id": "he15c9ac00fb6",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
+    },
+    {
       "harvest_id": "he1ecc4d09556",
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/domlib/surround/surround.test.ts",
@@ -1148,6 +2534,36 @@
       "evidence_kind": "pinned-test",
       "source_file": "ts/reviewer/mathjax.test.ts",
       "source_file_sha256": "55522715c7cc10887cf8e921da3709e1fedac4662b4e13b8363c3cc14be29c8c"
+    },
+    {
+      "harvest_id": "he244355f799a",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/sqlwriter.rs",
+      "source_file_sha256": "f00f3823b400f5d482baa6e742eeebe942f39e02537c9f9c4f36ab766537a5bd"
+    },
+    {
+      "harvest_id": "he2a0ba83d1b8",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/mod.rs",
+      "source_file_sha256": "5223e1f7968168c4d5b0e447d86f3c8a0e3032bb577485b84f94de1013a4e97c"
+    },
+    {
+      "harvest_id": "he31eded34d00",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "he3a4a3e5014c",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
+      "harvest_id": "he56ed2a516b3",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
     },
     {
       "harvest_id": "he5cb8d3fb44b",
@@ -1180,10 +2596,40 @@
       "source_file_sha256": "dfd84384e9ed3a9321968986f3f1be806d4418465c6fce4b6cc09f893138ac97"
     },
     {
+      "harvest_id": "he7fa6992322b",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/queue/builder/mod.rs",
+      "source_file_sha256": "66c08d5f19a874c2c27a42391f3e34c550f283d06e9c6b89d1daeee4aa730633"
+    },
+    {
       "harvest_id": "he8aa29c82e65",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/latex.rs",
       "source_file_sha256": "3c4b8b1ee50d452c56c7cf850ceb2556a643a808933d84c530f2b48fa06fb3d1"
+    },
+    {
+      "harvest_id": "he8cfded7f1d7",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "he93785c73a0f",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/service/search_node.rs",
+      "source_file_sha256": "ab840ff8afd36b3c1e504ecb70f3cd0cc5348d7c7514fe09e371d0840f2cf5f4"
+    },
+    {
+      "harvest_id": "he94bfe933315",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/import/notes.rs",
+      "source_file_sha256": "c4d23e222dd124eb0c6932ae7c5ba9c98101402e68d983bcfe4c0a405ddaa18f"
+    },
+    {
+      "harvest_id": "he9d62061aee3",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/export.rs",
+      "source_file_sha256": "8dd385c117b0bacd8fd547413987bf8540a0e95b89b36011f4e79488c1f51578"
     },
     {
       "harvest_id": "he9f3ecd2d21f",
@@ -1196,6 +2642,12 @@
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/error/network.rs",
       "source_file_sha256": "05a975e375e95389d9137c080259efabe67faf839147a88e8f5771ce534d4621"
+    },
+    {
+      "harvest_id": "head34b2562fb",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
     },
     {
       "harvest_id": "heaf6b0314ef9",
@@ -1228,10 +2680,22 @@
       "source_file_sha256": "636054c65b35a88344f5cc1e2af5c4edb5366c789919358a776bac714fb90f08"
     },
     {
+      "harvest_id": "heceeaa17fdbb",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/reviews.rs",
+      "source_file_sha256": "5af11598fcac28a1251f027dc09928c9be4339124f8fdd877361def750771860"
+    },
+    {
       "harvest_id": "hedaf87a0aa38",
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/domlib/surround/surround.test.ts",
       "source_file_sha256": "cabc2680fc889ef88c53a4527502848548df68149dd9be97a7c87060ff4ddbbb"
+    },
+    {
+      "harvest_id": "hee2d6b23e65c",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/queue/undo.rs",
+      "source_file_sha256": "3e2e978b12f04db4c27a6c509d897794f76bc4ccfe4fcda5f81a0ade216a7b02"
     },
     {
       "harvest_id": "hee35c52dd8b3",
@@ -1240,16 +2704,64 @@
       "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
     },
     {
+      "harvest_id": "hee3738c37da3",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/package/apkg/tests.rs",
+      "source_file_sha256": "a439c1b0dee73a6edc24177551881b118a3e13270ccc0e8d02685587850f45d6"
+    },
+    {
+      "harvest_id": "hee69ed088c05",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
       "harvest_id": "hef00e615d756",
       "evidence_kind": "pinned-test",
       "source_file": "ts/lib/domlib/surround/unsurround.test.ts",
       "source_file_sha256": "a9ff5a499f26cc90648bb4eb107ad932fb0d6b41aaa08e99c901bba66b8b606a"
     },
     {
+      "harvest_id": "hefdc4581f106",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_find.py",
+      "source_file_sha256": "d95ffa39a957e2b6dd94ad25ef6edb226248dd48611a3b3f9be14070d2b60e4b"
+    },
+    {
+      "harvest_id": "hf248f368b2b9",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
       "harvest_id": "hf27c621cefe8",
       "evidence_kind": "pinned-test",
       "source_file": "ts/routes/card-info/lib.test.ts",
       "source_file_sha256": "baae1be9f022045f496f0d3e365fef7e329568eed5a462b10e7a680ceffcee91"
+    },
+    {
+      "harvest_id": "hf37a3578ec3e",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/csv/metadata.rs",
+      "source_file_sha256": "b581abfb8417071a408104f7544fa8f1abe69dae4827d8c637e3c568226f92a7"
+    },
+    {
+      "harvest_id": "hf44d25b35e71",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
+      "harvest_id": "hf54cd97685d7",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/queue/builder/mod.rs",
+      "source_file_sha256": "66c08d5f19a874c2c27a42391f3e34c550f283d06e9c6b89d1daeee4aa730633"
+    },
+    {
+      "harvest_id": "hf55838aff7f6",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/queue/builder/mod.rs",
+      "source_file_sha256": "66c08d5f19a874c2c27a42391f3e34c550f283d06e9c6b89d1daeee4aa730633"
     },
     {
       "harvest_id": "hf613c9b636bd",
@@ -1270,6 +2782,48 @@
       "source_file_sha256": "d63e385513f616cd5588d58b7e6903aaf42949402bf015dd3b1ebabfd0ad90b7"
     },
     {
+      "harvest_id": "hf70661f6f3cb",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/filtered/custom_study.rs",
+      "source_file_sha256": "8701f9bbd428ab3651e6343af9a6567a4ed28c094269b4b2dab20b5810e1732a"
+    },
+    {
+      "harvest_id": "hf76a58bb5a76",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_schedv3.py",
+      "source_file_sha256": "264aad2af447211fa374b36d0ad45d50e36fb0dfe60326b19d021a37277a3bee"
+    },
+    {
+      "harvest_id": "hf7c80804a0ae",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/findreplace.rs",
+      "source_file_sha256": "20cdb5d114bdb7f606fa1e015f390d3bd31c3e380e26de3a311c850c28459152"
+    },
+    {
+      "harvest_id": "hf844f0b31fa4",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_importing_exporting.py",
+      "source_file_sha256": "28cdb591086b00debc446d9acc6f3b1310b8898e98a7c3ff716366a2f7b84873"
+    },
+    {
+      "harvest_id": "hf8783ee88750",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/service/mod.rs",
+      "source_file_sha256": "de65847d35d79aba01143053f55a3498ad2e007228edfad9ad9910e606569f3e"
+    },
+    {
+      "harvest_id": "hf98264ff82e2",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/import.rs",
+      "source_file_sha256": "e73a377029293e8619c89c047f18c33b26e78b2a7fef2f9fd30643f33b4cf5ff"
+    },
+    {
+      "harvest_id": "hfa4a20b50574",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/search/builder.rs",
+      "source_file_sha256": "0b5fe9ca6b2113849321620e31b26ba3b1f1c785237f8a7768bdd68ab8e524d2"
+    },
+    {
       "harvest_id": "hfa50e8665fce",
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/collection/backup.rs",
@@ -1280,6 +2834,12 @@
       "evidence_kind": "pinned-test",
       "source_file": "rslib/src/sync/collection/tests.rs",
       "source_file_sha256": "4e9308ef827b4e20d29278a944e2e805380f4c13ad2897045613528045efc51d"
+    },
+    {
+      "harvest_id": "hfaaf3e4a2202",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/service.rs",
+      "source_file_sha256": "24307d4034ce83acbf8601f6c40f09a5c1882ce5e43de40b414503decd98203e"
     },
     {
       "harvest_id": "hfb0061ec0b9b",
@@ -1298,6 +2858,30 @@
       "evidence_kind": "pinned-test",
       "source_file": "ts/reviewer/lib.test.ts",
       "source_file_sha256": "f1e59a8eb841833850070c00e589ce4083ddd007d0f616bad933de5982d37d5a"
+    },
+    {
+      "harvest_id": "hfea722b04230",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/scheduler/queue/builder/sized_chain.rs",
+      "source_file_sha256": "6cb7b7bec2e7d2d45a17086e859a7d460b30363c673fe5866820a834b7d05591"
+    },
+    {
+      "harvest_id": "hfeb5fe0f2419",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/import.rs",
+      "source_file_sha256": "e73a377029293e8619c89c047f18c33b26e78b2a7fef2f9fd30643f33b4cf5ff"
+    },
+    {
+      "harvest_id": "hff5fae693296",
+      "evidence_kind": "pinned-test",
+      "source_file": "rslib/src/import_export/text/import.rs",
+      "source_file_sha256": "e73a377029293e8619c89c047f18c33b26e78b2a7fef2f9fd30643f33b4cf5ff"
+    },
+    {
+      "harvest_id": "hffc0559fcb06",
+      "evidence_kind": "pinned-test",
+      "source_file": "pylib/tests/test_importing_exporting.py",
+      "source_file_sha256": "28cdb591086b00debc446d9acc6f3b1310b8898e98a7c3ff716366a2f7b84873"
     }
   ]
 }
