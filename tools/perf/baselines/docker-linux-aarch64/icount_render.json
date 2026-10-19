@@ -1,0 +1,42 @@
+{
+  "kind": "instruction-count",
+  "measured_commit": "f439e944066e63b512c5929e3e32b2f097bbbb0d",
+  "reason": "Initial U62 30 KiB script and 5 MiB card rendering baselines, measured from clean reviewed source",
+  "rows": [
+    {
+      "metric": "instructions",
+      "name": "render.cold",
+      "test": "icount_render::render::cold script_30kb",
+      "unit": "count",
+      "value": 4053871
+    },
+    {
+      "metric": "instructions",
+      "name": "render.cold",
+      "test": "icount_render::render::cold template_5mb",
+      "unit": "count",
+      "value": 694441675
+    },
+    {
+      "metric": "instructions",
+      "name": "render.warm",
+      "test": "icount_render::render::warm script_30kb",
+      "unit": "count",
+      "value": 3738999
+    },
+    {
+      "metric": "instructions",
+      "name": "render.warm",
+      "test": "icount_render::render::warm template_5mb",
+      "unit": "count",
+      "value": 635062435
+    }
+  ],
+  "runner": {
+    "id": "docker/linux-aarch64",
+    "kind": "docker",
+    "os": "linux"
+  },
+  "schema_version": 1,
+  "suite": "icount_render"
+}
