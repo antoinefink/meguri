@@ -332,7 +332,8 @@
   for (let i = 0; i < TAP_TYPES.length; i++) tracked[TAP_TYPES[i]] = true;
   for (let i = 0; i < KEY_TYPES.length; i++) tracked[KEY_TYPES[i]] = true;
 
-  // target -> { type: [{ callback: WeakRef, capture, once }] }. Native owns
+  // target -> type -> null-prototype indexed entries with an explicit length.
+  // Each entry holds { callback: WeakRef, capture, once }. Native owns
   // active callbacks; stale once entries must not own old card content.
   const registry = new WeakMapCtor();
 
@@ -388,6 +389,7 @@
 
   function removeEntryAt(entries, index) {
     for (let j = index + 1; j < entries.length; j++) entries[j - 1] = entries[j];
+    delete entries[entries.length - 1];
     entries.length -= 1;
   }
 
@@ -407,7 +409,8 @@
     let entries = byType[type];
     if (entries) pruneEntries(entries);
     if (!entries && create) {
-      entries = [];
+      entries = createObject(null);
+      entries.length = 0;
       byType[type] = entries;
     }
     return entries || null;
@@ -460,6 +463,7 @@
     }
     const entry = { callback: new WeakRefCtor(callback), capture: capture, once: observed.once };
     entries[entries.length] = entry;
+    entries.length += 1;
     if (signal) {
       call(nativeAdd, signal, "abort", abortCleanup(new WeakRefCtor(target), type, new WeakRefCtor(entry)), { once: true });
     }

@@ -623,6 +623,78 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test(arguments: ["object", "array"])
+        func trackedListenersIgnoreInheritedIndexes(_ prototype: String) async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                try await page.showPresentedQuestion(#"<div id="probe"></div><div id="control"></div>"#)
+                let results = try await page.json([ListenerArgumentResult].self, #"""
+                    const frame = document.createElement("iframe");
+                    frame.hidden = true;
+                    frame.src = "about:blank";
+                    await new Promise(resolve => { frame.onload = resolve; document.body.appendChild(frame); });
+                    const native = frame.contentWindow.EventTarget.prototype;
+                    const wrapped = EventTarget.prototype;
+                    const define = Object.defineProperty, descriptor = Object.getOwnPropertyDescriptor;
+                    const apply = Reflect.apply;
+                    const targetPrototype = prototype === "object" ? Object.prototype : Array.prototype;
+                    const results = [];
+                    for (const api of [wrapped, native]) {
+                      const target = document.getElementById(api === wrapped ? "probe" : "control");
+                      const probe = Object.create(null);
+                      probe.trace = "";
+                      probe.calls = 0;
+                      const first = function () { probe.calls++; };
+                      const second = function () { probe.calls++; };
+                      const args = Object.create(null);
+                      args.length = 2;
+                      args[0] = "keydown";
+                      args[1] = first;
+                      const saved = descriptor(targetPrototype, "0");
+                      const add = api.addEventListener, remove = api.removeEventListener;
+                      let returned;
+                      try {
+                        define(targetPrototype, "0", { configurable: true,
+                          get() { probe.trace += "get;"; return undefined; },
+                          set(value) { probe.trace += "set;"; throw new Error("indexed entry write"); }
+                        });
+                        returned = apply(add, target, args);
+                        args[1] = second;
+                        returned = apply(add, target, args);
+                      } catch (error) {
+                        probe.error = error.name;
+                      } finally {
+                        if (saved) define(targetPrototype, "0", saved);
+                        else delete targetPrototype[0];
+                      }
+                      probe.outcome = probe.error ? "throw:" + probe.error : "return:" + String(returned);
+                      apply(api.dispatchEvent, target, [new KeyboardEvent("keydown", { bubbles: true })]);
+                      results.push({ trace: [probe.trace], outcome: probe.outcome, calls: probe.calls });
+                      target.__removeIndexedListenerProbe = function (last) {
+                        apply(remove, target, ["keydown", last ? second : first]);
+                        const before = probe.calls;
+                        apply(api.dispatchEvent, target, [new KeyboardEvent("keydown", { bubbles: true })]);
+                        return probe.calls - before;
+                      };
+                    }
+                    frame.remove();
+                    return JSON.stringify(results);
+                    """#, ["prototype": prototype])
+                #expect(results.count == 2)
+                let wrapped = try #require(results.first)
+                #expect(wrapped == results.last, "\(prototype): \(results)")
+                #expect(wrapped.trace == [""] && wrapped.outcome == "return:undefined" && wrapped.calls == 2)
+                #expect(try await page.hasCardListener("keydown", at: "#probe"))
+                #expect(try await !page.hasCardListener("keydown", at: "#control"))
+                let remaining = try await page.json([Int].self, #"return JSON.stringify(["probe", "control"].map(id => document.getElementById(id).__removeIndexedListenerProbe(false)));"#)
+                #expect(remaining == [1, 1])
+                #expect(try await page.hasCardListener("keydown", at: "#probe"))
+                let removed = try await page.json([Int].self, #"return JSON.stringify(["probe", "control"].map(id => document.getElementById(id).__removeIndexedListenerProbe(true)));"#)
+                #expect(removed == [0, 0])
+                #expect(try await !page.hasCardListener("keydown", at: "#probe"))
+                #expect(harness.diagnostics.isEmpty)
+            }
+        }
+
         @Test func registryReportsAScriptKeyListener() async throws {
             try await WebTestHarness.withPage { harness, page async throws in
                 try await page.showPresentedQuestion(
