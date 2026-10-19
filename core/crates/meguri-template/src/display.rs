@@ -22,14 +22,14 @@ pub struct DisplaySides {
 }
 
 fn button(command: &str, platform: Platform) -> String {
-    // Product Contract R526 literal, compact as D4 requires. The command
+    // Original Meguri graphic, compact as D4 requires. The command
     // comes only from a q/a marker followed by ASCII digits, never HTML.
     let action = match platform {
         Platform::Mac => format!("pycmd('{command}')"),
         Platform::Ios => format!("window.webkit.messageHandlers.meguri.postMessage('{command}')"),
     };
     format!(
-        r##"<a class="replay-button soundLink" href=# onclick="{action}; return false;" draggable="false"><svg class="playImage" data-meguri-replay-pending="true"></svg></a>"##
+        r##"<a class="replay-button soundLink" href=# onclick="{action}; return false;" draggable="false"><svg class="playImage" viewBox="0 0 48 48" version="1.1"><rect x="3" y="3" width="42" height="42" rx="12" fill="none" stroke="currentColor" stroke-width="2" /><path d="M18 14L34 24L18 34Z" fill="currentColor" /></svg></a>"##
     )
 }
 
