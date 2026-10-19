@@ -13,13 +13,14 @@ use crate::scenario::{
     TemplateCase, TemplateNotetype, TemplateRequest,
 };
 
-/// Registers template, cloze and stored-card pipeline observations.
+/// Registers template, cloze, stored-card and image-occlusion observations.
 pub(super) fn register(registry: &mut Registry) {
     registry.observation("template", observe);
     registry.observation("cloze", observe_cloze);
     registry.observation_part("template.card");
     registry.observation("render", observe_render);
     registry.observation("render_status", observe_status);
+    registry.observation("image_occlusion", observe_image_occlusion);
 }
 
 fn invalid(detail: impl Into<String>) -> ExecError {
@@ -215,4 +216,72 @@ fn stored(s: &mut Session<'_>, request: &ObservationRequest, status: bool) -> Re
         out.insert(reference.to_string(), value);
     }
     Ok(out.into())
+}
+
+/// J3: raw template reading and engine field roles, without a collection.
+fn observe_image_occlusion(_session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
+    use crate::scenario::ImageOcclusionRequest;
+    use meguri_engine::image_occlusion::field_roles;
+    use meguri_model::notetype::NotetypeField;
+    use meguri_model::proto::{ProtoBlob, notetype::FieldConfig};
+    use meguri_template::image_occlusion::parse_raw;
+    let ObservationArgs::Mapping(map) = &request.args else {
+        return Err(invalid("image_occlusion takes {fns, inputs}"));
+    };
+    match ImageOcclusionRequest::from_mapping(map).map_err(|e| invalid(e.to_string()))? {
+        ImageOcclusionRequest::Parse(texts) => {
+            let outputs: Vec<_> = texts
+                .iter()
+                .map(|text| {
+                    let raw = parse_raw(text);
+                    let numbers: Vec<_> = raw
+                        .numbers
+                        .into_iter()
+                        .map(|n| {
+                            let shapes: Vec<_> = n
+                                .shapes
+                                .into_iter()
+                                .map(|s| json!({"shape":s.shape,"props":s.props}))
+                                .collect();
+                            json!({"number":n.number,"shapes":shapes})
+                        })
+                        .collect();
+                    json!({"hide_all":raw.hide_all,"numbers":numbers})
+                })
+                .collect();
+            Ok(json!({"parse":outputs}))
+        }
+        ImageOcclusionRequest::Fields(inputs) => {
+            let outputs: Vec<_> = inputs
+                .into_iter()
+                .map(|tags| {
+                    let fields: Vec<_> = tags
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, tag)| {
+                            let mut config = FieldConfig::default();
+                            config.tag = tag;
+                            NotetypeField {
+                                ord: i as u32,
+                                name: format!("F{i}"),
+                                prior_ord: None,
+                                config: ProtoBlob::new(config),
+                            }
+                        })
+                        .collect();
+                    field_roles(&fields)
+                        .map(|r| {
+                            json!({
+                                "occlusions": r.occlusions,
+                                "image": r.image,
+                                "header": r.header,
+                                "back_extra": r.back_extra,
+                            })
+                        })
+                        .unwrap_or(Value::Null)
+                })
+                .collect();
+            Ok(json!({"fields":outputs}))
+        }
+    }
 }

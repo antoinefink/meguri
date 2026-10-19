@@ -22,6 +22,7 @@ pub mod cloze;
 pub mod display;
 pub mod error;
 pub mod filters;
+pub mod image_occlusion;
 pub mod parser;
 pub mod render;
 

@@ -1,0 +1,20 @@
+# specs/render/image-occlusion-format.md F3, F5, F6: Anki's raw reading of
+# Occlusion fields as its editors write them: every kind, shared numbers,
+# text labels as number 0, rotation, colors, both modes (R1003, R1004, R1007,
+# R1008), and the pre-24.06 layout (F14).
+id: render/image-occlusion/format/parse-basic
+description: "raw reading of Anki-style Occlusion fields"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - image_occlusion:
+          fns: [parse]
+          inputs:
+            - ""
+            - "{{c1::image-occlusion:rect:left=.4127:top=.2209:width=.1785:height=.0612:oi=1}}<br>"
+            - "{{c1::image-occlusion:rect:left=.0812:top=.1133:width=.2504:height=.0931:oi=1}}<br>{{c2::image-occlusion:ellipse:left=.5:top=.12:rx=.0833:ry=.05:oi=1}}<br>{{c3::image-occlusion:polygon:left=.2:top=.55:points=.2,.6 .31,.55 .36,.72 .24,.78:oi=1}}<br>{{c4::image-occlusion:rect:left=.62:top=.48:angle=833:width=.15:height=.07:fill=#5a9bd5:oi=1}}<br>{{c0::image-occlusion:text:left=.05:top=.9:text=Legend:scale=1.:fs=.0417:oi=1}}<br>"
+            - "{{c1::image-occlusion:rect:left=.0812:top=.1133:width=.2504:height=.0931}}<br>{{c2::image-occlusion:ellipse:left=.5:top=.12:rx=.0833:ry=.05}}<br>{{c0::image-occlusion:text:left=.05:top=.9:angle=9583:text=Legend:scale=1.25:fs=.0417:fill=#d0021b}}<br>"
+            - "{{c2::image-occlusion:rect:left=.1:top=.1:width=.1:height=.1:oi=1}}<br>{{c2::image-occlusion:rect:left=.3:top=.1:width=.1:height=.1:oi=1}}<br>{{c1::image-occlusion:ellipse:left=.6:top=.6:rx=.05:ry=.05:oi=1}}<br>{{c2::image-occlusion:polygon:left=.1:top=.5:points=.1,.5 .2,.6 .1,.6:oi=1}}<br>"
+            - "{{c1::image-occlusion:rect:left=.25:top=.25:fill=#ff8800:width=.5:height=.125:oi=1}}<br>{{c0::image-occlusion:text:left=.4:top=.05:fill=#000000:text=Title:scale=1.:oi=1}}<br>"
+            - "{{c0::image-occlusion:text:left=.3:top=.3:text=only a label:scale=2.:fs=.06:oi=1}}<br>"
+            - "{{c5::image-occlusion:rect:left=.:top=.0000:width=1.:height=1.}}<br>{{c7::image-occlusion:ellipse:left=-0.02:top=.98:rx=.04:ry=.04}}<br>"

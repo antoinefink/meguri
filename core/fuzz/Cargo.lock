@@ -959,6 +959,7 @@ dependencies = [
  "meguri-sched",
  "meguri-search",
  "meguri-storage",
+ "meguri-template",
  "meguri-text",
  "regex",
  "tracing",

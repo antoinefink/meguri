@@ -38,10 +38,9 @@ fn fail(message: impl std::fmt::Display) -> i32 {
     1
 }
 
-/// The R1942 checks. U249 registers them (`private_suite/`); until then the
-/// suite runs none.
+/// U63's field round trip; U249 adds the remaining R1942 checks here.
 fn registered_checks() -> Vec<Box<dyn Check>> {
-    Vec::new()
+    vec![Box::new(crate::private_suite::IoRoundtrip)]
 }
 
 /// `--name value` options; every one of `allowed` at most once.

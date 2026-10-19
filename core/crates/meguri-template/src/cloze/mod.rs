@@ -9,7 +9,7 @@
 
 mod numbers;
 mod render;
-mod tokenizer;
+pub(crate) mod tokenizer;
 mod typing;
 
 pub use numbers::{has_cloze, numbers};

@@ -1,0 +1,30 @@
+# specs/render/image-occlusion-format.md F3, F5: which clozes are shapes
+# (top level, prefix first, closed), number lists and number 0, field order
+# under each number, `::` inside a shape text, and the first-`oi` rule for
+# the mode (R1003, R1007).
+id: render/image-occlusion/format/parse-structure
+description: "clozes, numbers and mode of Occlusion fields"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - image_occlusion:
+          fns: [parse]
+          inputs:
+            - "{{c4::image-occlusion:rect:k=1}}<br>{{c2::image-occlusion:rect:k=2}}<br>{{c4::image-occlusion:ellipse:k=3}}<br>{{c2::image-occlusion:polygon:k=4}}<br>"
+            - "{{c2,1::image-occlusion:rect:k=1}}{{c1::image-occlusion:ellipse:k=2}}"
+            - "{{c3,0::image-occlusion:rect:k=1}}{{c0::image-occlusion:text:text=t}}"
+            - "{{c1,1,01::image-occlusion:rect:k=1}}"
+            - "{{c0::image-occlusion:text:text=t:oi=1}}{{c1::image-occlusion:rect:k=1}}"
+            - "{{c1::image-occlusion:rect:k=1:oi=1}}{{c2::image-occlusion:rect:k=2}}"
+            - "{{c1::image-occlusion:rect:oi=2:oi=1}}{{c2::image-occlusion:rect:oi=1:oi=0}}"
+            - "{{c1::image-occlusion:rect:oi=0:oi=1}}"
+            - "{{c1::image-occlusion:rect:oi=yes}}{{c2::image-occlusion:rect:oi=1 }}{{c3::image-occlusion:rect:OI=1}}"
+            - "{{c1::image-occlusion:rect}}{{c2::image-occlusion:rect:k=2}}"
+            - "{{c3::outer {{c1::image-occlusion:rect:k=1}}}}"
+            - "{{c1::image-occlusion:rect:k=1{{c2::inner}}tail}}"
+            - "{{c1::image-occlusion:rect:k=1}}{{c2::image-occlusion:rect:k=2"
+            - "{{c1:: image-occlusion:rect:k=1}}{{c2::Image-occlusion:rect:k=2}}"
+            - "{{c1::image-occlusion:rect:k=1::hint}}"
+            - "{{c1::image-occlusion:text:text=a}}b:scale=1.}}"
+            - "{{c1::plain}}<br>{{c2::image-occlusion:rect:k=2}}<br>stray }} text"
+            - "<div>{{c6::image-occlusion:rect:k=6}}</div>"

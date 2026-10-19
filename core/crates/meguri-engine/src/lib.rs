@@ -27,6 +27,7 @@ pub mod error;
 pub mod executor;
 pub mod external_change;
 pub mod flags;
+pub mod image_occlusion;
 pub mod jobs;
 pub mod lifecycle;
 pub mod marked;

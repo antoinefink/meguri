@@ -1,0 +1,257 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "image_occlusion": {
+          "parse": [
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["text", "a:b\\c"],
+                        ["scale", "1."],
+                        ["fs", ".05"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["text", ":edge:"],
+                        ["scale", "1."],
+                        ["fs", ".05"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["text", "\\\\"],
+                        ["scale", "1."]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["text", "ratio 3:2 \\ path C:\\tmp"],
+                        ["scale", "1."]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["text", "東京:大阪 → café"],
+                        ["scale", "1."],
+                        ["fs", ".05"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["text", "first line\nsecond\tline"],
+                        ["scale", "1."]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["text", "a=b {x} <i>y</i> &amp; z"],
+                        ["scale", "1."]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["text", "h:m:s"],
+                        ["scale", "1."]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["text", "x:y"],
+                        ["z:scale", "1."],
+                        ["fs", ".05"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["width", ".1"],
+                        ["height", ".1"],
+                        ["note\\", "key=v"],
+                        ["pa\\th", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["width", ".1"],
+                        ["height", ".1"],
+                        ["fill", "rgb(1:2)"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "6ec0471caa7ac410187b9a65e4f507f035131593c035c72ebe301727f32db313",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/image-occlusion/format/parse-escapes",
+  "scenario_sha256": "0ac0a5336036183c1edecd958b7afda058e66062c3a7c200d3778e922d255698",
+  "tz": "UTC"
+}

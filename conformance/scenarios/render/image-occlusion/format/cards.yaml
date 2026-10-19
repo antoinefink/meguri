@@ -1,0 +1,25 @@
+# specs/render/image-occlusion-format.md F1, F10: an Occlusion field's cards.
+# Masks sharing a number share a card, text labels (c0) create none, and
+# numbers keep their gaps (AE33, R1008).
+id: render/image-occlusion/format/cards
+description: "cards created by Occlusion fields"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Mask Probe
+      kind: cloze
+      fields: [Occlusion, Image, Header, Back Extra]
+      templates:
+        - {name: Mask, front: "{{cloze:Occlusion}}{{Header}}", back: "{{cloze:Occlusion}}{{Back Extra}}"}
+steps:
+  - add_note:
+      notetype: Mask Probe
+      fields:
+        - "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1:oi=1}}<br>{{c2::image-occlusion:ellipse:left=.5:top=.4:rx=.1:ry=.05:oi=1}}<br>{{c0::image-occlusion:text:left=.4:top=.05:text=Label:scale=1.:fs=.05:oi=1}}<br>"
+        - "<img src=\"probe-a.png\">"
+  - add_note:
+      notetype: Mask Probe
+      fields:
+        - "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1}}<br>{{c3::image-occlusion:rect:left=.4:top=.1:width=.2:height=.1}}<br>{{c3::image-occlusion:polygon:left=.4:top=.4:points=.4,.4 .6,.45 .5,.6}}<br>{{c0::image-occlusion:text:left=.1:top=.8:text=A:scale=1.:fs=.05}}<br>{{c0::image-occlusion:text:left=.3:top=.8:text=B:scale=1.:fs=.05}}<br>"
+        - "<img src=\"probe-b.png\">"
+  - observe: [card]

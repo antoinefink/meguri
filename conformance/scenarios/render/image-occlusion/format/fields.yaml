@@ -1,0 +1,30 @@
+# specs/render/image-occlusion-format.md F2: the field roles of a note type
+# from its fields' tags: all four tags (reordered, repeated, beside tag 4),
+# partial or foreign tags falling back to positions 0-3, and three fields with
+# no roles at all (R990).
+id: render/image-occlusion/format/fields
+description: "image-occlusion field roles from field tags"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - image_occlusion:
+          fns: [fields]
+          inputs:
+            - [0, 1, 2, 3]
+            - [3, 2, 1, 0]
+            - [0, 1, 2, 3, 4]
+            - [4, 0, 1, 2, 3]
+            - [null, 0, 1, 2, 3]
+            - [1, 0, null, 2, 3]
+            - [0, 0, 1, 2, 3]
+            - [3, 1, null, 2, 0]
+            - [2, null, 3, 1, null, 0]
+            - [null, 0, 1, 2]
+            - [0, 1, 2, null]
+            - [null, null, null, null]
+            - [7, 7, 7, 7]
+            - [4294967295, 5, 4, null, null]
+            - [null, null, null, null, null, null]
+            - [0, 1, 2]
+            - [null, null, null]
+            - [0]

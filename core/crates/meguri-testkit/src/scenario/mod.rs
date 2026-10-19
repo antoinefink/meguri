@@ -1,6 +1,7 @@
 //! Scenario files: parsing (YAML 1.2 core schema subset or JSON), the scenario
 //! hash and the typed model (specs/conformance/dsl.md D1-D7).
 
+mod image_occlusion;
 mod model;
 mod validate;
 mod yaml;
@@ -11,6 +12,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+pub use image_occlusion::ImageOcclusionRequest;
 pub use model::*;
 pub use validate::draft_requirements;
 

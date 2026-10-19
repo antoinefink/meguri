@@ -1832,6 +1832,8 @@ pub enum ObservationKind {
     UndoStatus,
     /// cloze-ops.md Z1.
     Cloze,
+    /// image-occlusion-ops.md J1.
+    ImageOcclusion,
     /// float-determinism.md F5.
     FsrsNext,
     /// deck-options-ops.md E2.
@@ -1862,7 +1864,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 35] = [
+    pub const ALL: [ObservationKind; 36] = [
         ObservationKind::MediaDir,
         ObservationKind::MediaTrash,
         ObservationKind::MediaPending,
@@ -1893,6 +1895,7 @@ impl ObservationKind {
         ObservationKind::Text,
         ObservationKind::UndoStatus,
         ObservationKind::Cloze,
+        ObservationKind::ImageOcclusion,
         ObservationKind::FsrsNext,
         ObservationKind::IgnoredBeforeCount,
         ObservationKind::TagTree,
@@ -1932,6 +1935,7 @@ impl ObservationKind {
             ObservationKind::Text => "text",
             ObservationKind::UndoStatus => "undo_status",
             ObservationKind::Cloze => "cloze",
+            ObservationKind::ImageOcclusion => "image_occlusion",
             ObservationKind::FsrsNext => "fsrs_next",
             ObservationKind::IgnoredBeforeCount => "ignored_before_count",
             ObservationKind::TagTree => "tag_tree",
@@ -1973,6 +1977,7 @@ impl ObservationKind {
             | ObservationKind::FieldsCheck
             | ObservationKind::Text
             | ObservationKind::Cloze
+            | ObservationKind::ImageOcclusion
             | ObservationKind::FsrsNext
             | ObservationKind::IgnoredBeforeCount => ArgShape::Mapping,
             ObservationKind::Queue
@@ -2010,6 +2015,7 @@ impl ObservationRequest {
         match self.kind {
             ObservationKind::Text
             | ObservationKind::Cloze
+            | ObservationKind::ImageOcclusion
             | ObservationKind::FsrsNext
             | ObservationKind::CanonicalSearch => true,
             ObservationKind::Template => match &self.args {

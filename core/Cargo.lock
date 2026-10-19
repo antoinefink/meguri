@@ -1637,6 +1637,9 @@ name = "meguri-cli"
 version = "0.0.0"
 dependencies = [
  "jiff",
+ "meguri-engine",
+ "meguri-model",
+ "meguri-storage",
  "meguri-testkit",
  "serde_json",
  "sha2",

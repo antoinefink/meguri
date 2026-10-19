@@ -1,0 +1,117 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "image_occlusion": {
+          "fields": [
+            {
+              "back_extra": 3,
+              "header": 2,
+              "image": 1,
+              "occlusions": 0
+            },
+            {
+              "back_extra": 0,
+              "header": 1,
+              "image": 2,
+              "occlusions": 3
+            },
+            {
+              "back_extra": 3,
+              "header": 2,
+              "image": 1,
+              "occlusions": 0
+            },
+            {
+              "back_extra": 4,
+              "header": 3,
+              "image": 2,
+              "occlusions": 1
+            },
+            {
+              "back_extra": 4,
+              "header": 3,
+              "image": 2,
+              "occlusions": 1
+            },
+            {
+              "back_extra": 4,
+              "header": 3,
+              "image": 0,
+              "occlusions": 1
+            },
+            {
+              "back_extra": 4,
+              "header": 3,
+              "image": 2,
+              "occlusions": 0
+            },
+            {
+              "back_extra": 0,
+              "header": 3,
+              "image": 1,
+              "occlusions": 4
+            },
+            {
+              "back_extra": 2,
+              "header": 0,
+              "image": 3,
+              "occlusions": 5
+            },
+            {
+              "back_extra": 3,
+              "header": 2,
+              "image": 1,
+              "occlusions": 0
+            },
+            {
+              "back_extra": 3,
+              "header": 2,
+              "image": 1,
+              "occlusions": 0
+            },
+            {
+              "back_extra": 3,
+              "header": 2,
+              "image": 1,
+              "occlusions": 0
+            },
+            {
+              "back_extra": 3,
+              "header": 2,
+              "image": 1,
+              "occlusions": 0
+            },
+            {
+              "back_extra": 3,
+              "header": 2,
+              "image": 1,
+              "occlusions": 0
+            },
+            {
+              "back_extra": 3,
+              "header": 2,
+              "image": 1,
+              "occlusions": 0
+            },
+            null,
+            null,
+            null
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "6ec0471caa7ac410187b9a65e4f507f035131593c035c72ebe301727f32db313",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/image-occlusion/format/fields",
+  "scenario_sha256": "1ac057a5383c5901ef967832dfeba0320e3515b4b1814462495bc32d9c637c0c",
+  "tz": "UTC"
+}

@@ -1,0 +1,325 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "image_occlusion": {
+          "parse": [
+            {
+              "hide_all": false,
+              "numbers": []
+            },
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".4127"],
+                        ["top", ".2209"],
+                        ["width", ".1785"],
+                        ["height", ".0612"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".05"],
+                        ["top", ".9"],
+                        ["text", "Legend"],
+                        ["scale", "1."],
+                        ["fs", ".0417"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                },
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".0812"],
+                        ["top", ".1133"],
+                        ["width", ".2504"],
+                        ["height", ".0931"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 2,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".5"],
+                        ["top", ".12"],
+                        ["rx", ".0833"],
+                        ["ry", ".05"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "ellipse"
+                    }
+                  ]
+                },
+                {
+                  "number": 3,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".2"],
+                        ["top", ".55"],
+                        ["points", ".2,.6 .31,.55 .36,.72 .24,.78"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "polygon"
+                    }
+                  ]
+                },
+                {
+                  "number": 4,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".62"],
+                        ["top", ".48"],
+                        ["angle", "833"],
+                        ["width", ".15"],
+                        ["height", ".07"],
+                        ["fill", "#5a9bd5"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".05"],
+                        ["top", ".9"],
+                        ["angle", "9583"],
+                        ["text", "Legend"],
+                        ["scale", "1.25"],
+                        ["fs", ".0417"],
+                        ["fill", "#d0021b"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                },
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".0812"],
+                        ["top", ".1133"],
+                        ["width", ".2504"],
+                        ["height", ".0931"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 2,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".5"],
+                        ["top", ".12"],
+                        ["rx", ".0833"],
+                        ["ry", ".05"]
+                      ],
+                      "shape": "ellipse"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".6"],
+                        ["top", ".6"],
+                        ["rx", ".05"],
+                        ["ry", ".05"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "ellipse"
+                    }
+                  ]
+                },
+                {
+                  "number": 2,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["width", ".1"],
+                        ["height", ".1"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    },
+                    {
+                      "props": [
+                        ["left", ".3"],
+                        ["top", ".1"],
+                        ["width", ".1"],
+                        ["height", ".1"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    },
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".5"],
+                        ["points", ".1,.5 .2,.6 .1,.6"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "polygon"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".4"],
+                        ["top", ".05"],
+                        ["fill", "#000000"],
+                        ["text", "Title"],
+                        ["scale", "1."],
+                        ["oi", "1"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                },
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".25"],
+                        ["top", ".25"],
+                        ["fill", "#ff8800"],
+                        ["width", ".5"],
+                        ["height", ".125"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".3"],
+                        ["top", ".3"],
+                        ["text", "only a label"],
+                        ["scale", "2."],
+                        ["fs", ".06"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 5,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", "."],
+                        ["top", ".0000"],
+                        ["width", "1."],
+                        ["height", "1."]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 7,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", "-0.02"],
+                        ["top", ".98"],
+                        ["rx", ".04"],
+                        ["ry", ".04"]
+                      ],
+                      "shape": "ellipse"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "6ec0471caa7ac410187b9a65e4f507f035131593c035c72ebe301727f32db313",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/image-occlusion/format/parse-basic",
+  "scenario_sha256": "fbcc6b2df39429acdf4bd4a7dee4d9df42771bf5ca29d368ab0f8fd0737d5b31",
+  "tz": "UTC"
+}

@@ -79,3 +79,27 @@ bafmt
 mtime_secs
 marked
 cb
+# render/image-occlusion-format: shape kinds and property keys, the fill
+# keyword the writer drops, and the field role names of Anki's
+# image-occlusion field indexes message (the cloze prefix is listed above).
+rect
+ellipse
+polygon
+text
+left
+top
+width
+height
+angle
+rx
+ry
+points
+scale
+fs
+fill
+oi
+transparent
+occlusions
+image
+header
+back_extra

@@ -73,3 +73,10 @@ path = "fuzz_targets/sync_json.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "io_parse"
+path = "fuzz_targets/io_parse.rs"
+test = false
+doc = false
+bench = false

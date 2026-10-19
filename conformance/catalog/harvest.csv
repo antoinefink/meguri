@@ -629,7 +629,7 @@ h163ba9c3036c,rust,tag,render,in-scope,Plain HTML stripping (text area),text/str
 h176cf97aef7a,rust,tag,render,unclassified,,,open
 h1a3728db5353,rust,tag,render,not-applicable,"A backend render mode without the reviewer's chain completion; Meguri reproduces the reviewer, where an unknown filter ends the chain",,done
 h1f36598666ed,rust,tag,render,in-scope,Preview render from a schema-11 template object,render/special-fields/new-note,done
-h1f6151e74934,rust,tag,render,in-scope,Image-occlusion clozes with several numbers; U63/U64,,deferred
+h1f6151e74934,rust,tag,render,in-scope,Image-occlusion clozes with several numbers: shapes listed under each number (U63); their card markup waits for U64,render/image-occlusion/format/parse-structure,deferred
 h21a1ea45b18d,rust,tag,render,unclassified,,,open
 h22e00b0f1c78,rust,supplementary,render,unclassified,,,open
 h2d70fb39c79e,rust,tag,render,in-scope,TTS filter markup,render/filters/tts,done
@@ -648,7 +648,7 @@ h4b173b76b6d5,rust,tag,render,unclassified,,,open
 h50201233953a,rust,tag,render,in-scope,Nested cloze markup and the numbers of nested clozes,render/cloze/nesting render/cloze/numbers,done
 h5060a7cb5258,rust,tag,render,in-scope,Alternate tag delimiters,render/template/delimiters,done
 h5ab01c535673,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
-h5cd95f995780,rust,tag,render,in-scope,Image-occlusion shape text with escaped colons; U63,,deferred
+h5cd95f995780,rust,tag,render,in-scope,Image-occlusion shape text with escaped colons and backslashes,render/image-occlusion/format/parse-escapes,done
 h5e0630507a22,rust,tag,render,not-applicable,Argument checking of a backend call Meguri does not expose,,done
 h6442084ed16c,rust,tag,render,in-scope,"Template tokenizing: tags, comments, white space, stray braces, structural errors",render/template/tags render/template/comments render/template/errors render/corpus/templates-01,done
 h67f6485701c2,rust,tag,render,in-scope,cloze: output by card number and side; empty when no cloze is active,render/cloze/basic,done
@@ -675,7 +675,7 @@ h9f15a141659a,rust,tag,render,in-scope,Type-in cloze extraction collapses answer
 ha390fa79d2c0,rust,tag,render,in-scope,Cloze markers removed from field text for searching; specified with search text matching (U81),,deferred
 ha3f6f53e53e7,rust,tag,render,in-scope,"Both sides of a card, FrontSide and the blank question",render/template/blank render/special-fields/new-note,done
 haccda9311c93,rust,tag,render,unclassified,,,open
-hae0105ed752c,rust,tag,render,unclassified,,,open
+hae0105ed752c,rust,tag,render,in-scope,Image-occlusion shape data attributes in card markup; U64,,deferred
 hafc40dbe3447,rust,tag,render,unclassified,,,open
 hb1cbcd219c60,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 hb6a47ef46c2d,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
