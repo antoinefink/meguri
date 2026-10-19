@@ -18,7 +18,7 @@ The scenario ops and the observation kind the note type scenarios need: adding n
 
 Adds a note type from scratch (`notetypes/records` N5.1) as one undoable local change, with the template checks (a checked save).
 
-- **Argument** `{name, kind?, fields, templates, css?}`, as a `setup.notetypes` entry (`dsl.md` D6.4): `kind` `standard` (default) or `cloze`; `fields` a non-empty list of names; `templates` a non-empty list of `{name, front?, back?}` (texts empty when missing); `css` a string, `""` when missing.
+- **Argument** `{name, kind?, fields, templates, css?}`, as a `setup.notetypes` entry (`dsl.md` D6.4): `kind` `standard` (default) or `cloze`; `fields` a non-empty list of names; `templates` a non-empty list of `{name, front?, back?, browser_front?, browser_back?}` (texts empty when missing; the browser formats are stored as given, unchecked); `css` a string, `""` when missing.
 - **Effect.** The note type of N5.1 with these values: new fields as N5.2 (fresh random ids), new templates as N5.3 (fresh random ids), `original_stock_kind` 1, the default LaTeX header and footer, `curModel` set to the new id. N4 normalizes the names.
 - **Output** `{add_notetype: {name: <stored name>}}`.
 - **Rejections** T7.

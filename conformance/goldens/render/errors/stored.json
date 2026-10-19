@@ -1,0 +1,169 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "question"
+              }
+            },
+            "review": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "question"
+              }
+            }
+          },
+          "#c2": {
+            "browser": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "answer"
+              }
+            },
+            "review": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "answer"
+              }
+            }
+          },
+          "#c3": {
+            "browser": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "answer"
+              }
+            },
+            "review": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "answer"
+              }
+            }
+          },
+          "#c4": {
+            "browser": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "answer"
+              }
+            },
+            "review": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "answer"
+              }
+            }
+          },
+          "#c5": {
+            "browser": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "answer"
+              }
+            },
+            "review": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "answer"
+              }
+            }
+          }
+        }
+      },
+      {},
+      {},
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "question"
+              }
+            },
+            "review": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "question"
+              }
+            }
+          },
+          "#c2": {
+            "browser": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "answer"
+              }
+            },
+            "review": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "answer"
+              }
+            }
+          },
+          "#c3": {
+            "browser": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "answer"
+              }
+            },
+            "review": {
+              "answer": null,
+              "answer_av": [],
+              "blank": "empty_front",
+              "question": "",
+              "question_av": []
+            }
+          },
+          "#c4": {
+            "browser": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "answer"
+              }
+            },
+            "review": {
+              "error": {
+                "kind": "unknown_conditional",
+                "side": "answer"
+              }
+            }
+          },
+          "#c5": {
+            "browser": {
+              "answer": null,
+              "blank": "missing_cloze",
+              "question": ""
+            },
+            "review": {
+              "answer": null,
+              "answer_av": [],
+              "blank": "missing_cloze",
+              "question": "",
+              "question_av": []
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "0d1f8a76f22edf02e8f9efc68013502cc7ea25d71e4bafe7122409299f17cafb",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/errors/stored",
+  "scenario_sha256": "438939f944646f2eb4c602422f89bcbbd685d62e6f1ecafd819c16bf273b4084",
+  "tz": "UTC"
+}

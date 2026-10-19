@@ -4,7 +4,8 @@
 them, and their template text and CSS never reach an observation.
 
 setup.notetypes: [{name, kind?: standard|cloze, fields: [names],
-                   templates: [{name, front?, back?}], css?: text}]
+                   templates: [{name, front?, back?, browser_front?,
+                                browser_back?}], css?: text}]
     each added in list order as add_notetype adds one (dsl.md D6.4).
 add_notetype {name, kind?, fields, templates, css?} -> {name}   (T2)
 add_stock_notetype {kind, name?} -> {name}   (T3)
@@ -13,6 +14,11 @@ update_notetype {notetype, edits, skip_checks?} -> {name}   (T5)
 ensure_io_notetype {} -> {name}   (T6)
     The adds and the update record {error: <T7 kind>} when the save refuses.
 notetype_structure (observation): every note type, or {notetypes: [name]}   (T8)
+
+browser_front and browser_back (dsl.md D6.4, T2) are the schema-11 bqfmt and
+bafmt, set on the new template before the add: a save stores them without
+checking them, so they may hold template errors. setup.notetypes templates
+are checked before any collection exists (scenario_check).
 
 Names are the stored ones, compared exactly (T1). The adds go through the
 backend's legacy add called directly: the Python model manager's add renames
@@ -39,11 +45,13 @@ from anki import backend_pb2, links_pb2, notetypes_pb2
 from anki._backend import backend_exception_to_pylib
 
 from ..errors import DriverError, Rejected, invalid
-from ..registry import observation, op, setup_section
+from ..registry import observation, op, scenario_check, setup_section
 from .model import NATIVE_SEPARATOR, _record_id
 
 NOTETYPE_KEYS = {"name", "kind", "fields", "templates", "css"}
 TEMPLATE_KEYS = {"name", "front", "back"}
+# A new note type's templates (D6.4, T2) also take the browser formats.
+NEW_TEMPLATE_KEYS = TEMPLATE_KEYS | {"browser_front", "browser_back"}
 KINDS = {"standard": 0, "cloze": 1}
 KIND_NAMES = {0: "standard", 1: "cloze"}
 STOCK = notetypes_pb2.StockNotetype.Kind
@@ -205,7 +213,29 @@ def _new_template(session, tmpl: dict) -> dict:
     t = session.col.models.new_template(tmpl["name"])
     t["qfmt"] = tmpl.get("front", "")
     t["afmt"] = tmpl.get("back", "")
+    for key, legacy in (("browser_front", "bqfmt"), ("browser_back", "bafmt")):
+        if key in tmpl:
+            t[legacy] = tmpl[key]
     return t
+
+
+def _check_new_template(tmpl: Any) -> None:
+    if not isinstance(tmpl, dict) or set(tmpl) - NEW_TEMPLATE_KEYS or "name" not in tmpl:
+        raise invalid("a template is {name, front?, back?, browser_front?, browser_back?}")
+    if not all(isinstance(tmpl.get(k, ""), str) for k in NEW_TEMPLATE_KEYS):
+        raise invalid("a template's name and texts are strings")
+
+
+@scenario_check
+def check_setup_templates(scenario: dict) -> None:
+    """The templates of setup.notetypes, before any collection; the rest of a
+    note type is checked when the section runs."""
+    setup = scenario.get("setup")
+    items = setup.get("notetypes") if isinstance(setup, dict) else None
+    for item in items if isinstance(items, list) else []:
+        templates = item.get("templates") if isinstance(item, dict) else None
+        for tmpl in templates if isinstance(templates, list) else []:
+            _check_new_template(tmpl)
 
 
 def _from_spec(session, item: Any, what: str) -> dict:
@@ -223,10 +253,7 @@ def _from_spec(session, item: Any, what: str) -> dict:
         raise invalid("templates is a non-empty list")
     _checked(item.get("css", ""), "str", "css")
     for tmpl in templates:
-        if not isinstance(tmpl, dict) or set(tmpl) - TEMPLATE_KEYS or "name" not in tmpl:
-            raise invalid("a template is {name, front, back}")
-        if not all(isinstance(tmpl.get(k, ""), str) for k in TEMPLATE_KEYS):
-            raise invalid("a template's name, front and back are strings")
+        _check_new_template(tmpl)
     models = session.col.models
     nt = models.new(item["name"])
     nt["type"] = KINDS[kind]

@@ -1,0 +1,25 @@
+# TTS directives (specs/render/av-tags.md A4-A6, R559, R564, R967): the tts
+# filter and literal directives become play markers and TTS entries that keep
+# their index; a directive with no language adds no entry and does not count;
+# a sound inside TTS content is part of the content; a directive named TTS is
+# not a TTS directive.
+id: render/av-tags/tts
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Spoken
+      fields: [Text, Note]
+      templates:
+        - name: Filter
+          front: "{{tts ja_JP:Text}}[sound:after.mp3]"
+          back: "{{FrontSide}}<hr id=answer>[anki:tts lang=ja_JP voices=Kyoko]猫[/anki:tts]{{Text}}[sound:last.mp3]"
+        - name: No Language
+          front: "[anki:tts]{{Text}}[/anki:tts]{{Note}}[sound:b.mp3]"
+          back: "{{FrontSide}}|{{tts :Text}}[sound:c.mp3]"
+        - name: Options
+          front: "[anki:tts  lang=\"en US\" speed=1.2 cloze_blank=gap\n]{{Note}} [sound:inside.mp3][/anki:tts][anki:TTS lang=en]up[/anki:TTS][sound:x.mp3]"
+          back: "{{FrontSide}}|[anki:tts lang=en lang=fr]{{Note}}[/anki:tts][anki:tts lang=]empty[/anki:tts][sound:y.mp3]"
+  notes:
+    - {notetype: Spoken, fields: ["ねこ", "<b>cat</b>"]}
+steps:
+  - observe: [render]

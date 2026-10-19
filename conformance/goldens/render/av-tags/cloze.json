@@ -1,0 +1,126 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "answer": "<span class=\"cloze\" data-ordinal=\"1\">犬[sound:inu.mp3]</span> and <span class=\"cloze-inactive\" data-ordinal=\"2\">猫[sound:neko.mp3]</span> [sound:always.mp3]<br>[sound:extra.mp3]",
+              "blank": null,
+              "question": "<span class=\"cloze\" data-cloze=\"犬&#x5B;sound&#x3A;inu&#x2E;mp3&#x5D;\" data-ordinal=\"1\">[...]</span> and <span class=\"cloze-inactive\" data-ordinal=\"2\">猫[sound:neko.mp3]</span> [sound:always.mp3]"
+            },
+            "review": {
+              "answer": "<span class=\"cloze\" data-ordinal=\"1\">犬[anki:play:a:0]</span> and <span class=\"cloze-inactive\" data-ordinal=\"2\">猫[anki:play:a:1]</span> [anki:play:a:2]<br>[anki:play:a:3]",
+              "answer_av": [
+                {
+                  "sound": "inu.mp3"
+                },
+                {
+                  "sound": "neko.mp3"
+                },
+                {
+                  "sound": "always.mp3"
+                },
+                {
+                  "sound": "extra.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "<span class=\"cloze\" data-cloze=\"犬&#x5B;sound&#x3A;inu&#x2E;mp3&#x5D;\" data-ordinal=\"1\">[...]</span> and <span class=\"cloze-inactive\" data-ordinal=\"2\">猫[anki:play:q:0]</span> [anki:play:q:1]",
+              "question_av": [
+                {
+                  "sound": "neko.mp3"
+                },
+                {
+                  "sound": "always.mp3"
+                }
+              ]
+            }
+          },
+          "#c2": {
+            "browser": {
+              "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">犬[sound:inu.mp3]</span> and <span class=\"cloze\" data-ordinal=\"2\">猫[sound:neko.mp3]</span> [sound:always.mp3]<br>[sound:extra.mp3]",
+              "blank": null,
+              "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">犬[sound:inu.mp3]</span> and <span class=\"cloze\" data-cloze=\"猫&#x5B;sound&#x3A;neko&#x2E;mp3&#x5D;\" data-ordinal=\"2\">[...]</span> [sound:always.mp3]"
+            },
+            "review": {
+              "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">犬[anki:play:a:0]</span> and <span class=\"cloze\" data-ordinal=\"2\">猫[anki:play:a:1]</span> [anki:play:a:2]<br>[anki:play:a:3]",
+              "answer_av": [
+                {
+                  "sound": "inu.mp3"
+                },
+                {
+                  "sound": "neko.mp3"
+                },
+                {
+                  "sound": "always.mp3"
+                },
+                {
+                  "sound": "extra.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">犬[anki:play:q:0]</span> and <span class=\"cloze\" data-cloze=\"猫&#x5B;sound&#x3A;neko&#x2E;mp3&#x5D;\" data-ordinal=\"2\">[...]</span> [anki:play:q:1]",
+              "question_av": [
+                {
+                  "sound": "inu.mp3"
+                },
+                {
+                  "sound": "always.mp3"
+                }
+              ]
+            }
+          },
+          "#c3": {
+            "browser": {
+              "answer": "<hr id=answer>The <span class=\"cloze\" data-ordinal=\"1\">sun</span> is a <span class=\"cloze-inactive\" data-ordinal=\"2\">star</span>.",
+              "blank": null,
+              "question": "The <span class=\"cloze\" data-cloze=\"sun\" data-ordinal=\"1\">[...]</span> is a <span class=\"cloze-inactive\" data-ordinal=\"2\">star</span>.[anki:tts lang=en_US]The <span class=\"cloze\" data-cloze=\"sun\" data-ordinal=\"1\">[...]</span> is a <span class=\"cloze-inactive\" data-ordinal=\"2\">star</span>.[/anki:tts]"
+            },
+            "review": {
+              "answer": "The <span class=\"cloze\" data-cloze=\"sun\" data-ordinal=\"1\">[...]</span> is a <span class=\"cloze-inactive\" data-ordinal=\"2\">star</span>.[anki:play:q:0]<hr id=answer>The <span class=\"cloze\" data-ordinal=\"1\">sun</span> is a <span class=\"cloze-inactive\" data-ordinal=\"2\">star</span>.",
+              "answer_av": [],
+              "blank": null,
+              "question": "The <span class=\"cloze\" data-cloze=\"sun\" data-ordinal=\"1\">[...]</span> is a <span class=\"cloze-inactive\" data-ordinal=\"2\">star</span>.[anki:play:q:0]",
+              "question_av": [
+                {
+                  "tts": "en_US"
+                }
+              ]
+            }
+          },
+          "#c4": {
+            "browser": {
+              "answer": "<hr id=answer>The <span class=\"cloze-inactive\" data-ordinal=\"1\">sun</span> is a <span class=\"cloze\" data-ordinal=\"2\">star</span>.",
+              "blank": null,
+              "question": "The <span class=\"cloze-inactive\" data-ordinal=\"1\">sun</span> is a <span class=\"cloze\" data-cloze=\"star\" data-ordinal=\"2\">[kind]</span>.[anki:tts lang=en_US]The <span class=\"cloze-inactive\" data-ordinal=\"1\">sun</span> is a <span class=\"cloze\" data-cloze=\"star\" data-ordinal=\"2\">[kind]</span>.[/anki:tts]"
+            },
+            "review": {
+              "answer": "The <span class=\"cloze-inactive\" data-ordinal=\"1\">sun</span> is a <span class=\"cloze\" data-cloze=\"star\" data-ordinal=\"2\">[kind]</span>.[anki:play:q:0]<hr id=answer>The <span class=\"cloze-inactive\" data-ordinal=\"1\">sun</span> is a <span class=\"cloze\" data-ordinal=\"2\">star</span>.",
+              "answer_av": [],
+              "blank": null,
+              "question": "The <span class=\"cloze-inactive\" data-ordinal=\"1\">sun</span> is a <span class=\"cloze\" data-cloze=\"star\" data-ordinal=\"2\">[kind]</span>.[anki:play:q:0]",
+              "question_av": [
+                {
+                  "tts": "en_US"
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "0d1f8a76f22edf02e8f9efc68013502cc7ea25d71e4bafe7122409299f17cafb",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/av-tags/cloze",
+  "scenario_sha256": "20496bdda216f8b07a488b3893783b763c758048cb4cfc2cabed86eec0d36482",
+  "tz": "UTC"
+}

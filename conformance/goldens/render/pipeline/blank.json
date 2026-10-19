@@ -1,0 +1,180 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "answer": "<hr id=answer>house",
+              "blank": null,
+              "question": "Haus"
+            },
+            "review": {
+              "answer": "Haus<hr id=answer>house",
+              "answer_av": [],
+              "blank": null,
+              "question": "Haus",
+              "question_av": []
+            }
+          },
+          "#c2": {
+            "browser": {
+              "answer": "|house",
+              "blank": null,
+              "question": "das Haus"
+            },
+            "review": {
+              "answer": "das Haus|house",
+              "answer_av": [],
+              "blank": null,
+              "question": "das Haus",
+              "question_av": []
+            }
+          },
+          "#c3": {
+            "browser": {
+              "answer": "|house[sound:back.mp3]",
+              "blank": null,
+              "question": "Listen [sound:prompt.mp3]das Haus"
+            },
+            "review": {
+              "answer": "Listen [anki:play:q:0]das Haus|house[anki:play:a:0]",
+              "answer_av": [
+                {
+                  "sound": "back.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "Listen [anki:play:q:0]das Haus",
+              "question_av": [
+                {
+                  "sound": "prompt.mp3"
+                }
+              ]
+            }
+          },
+          "#c4": {
+            "browser": {
+              "answer": "<span class=\"cloze\" data-ordinal=\"1\">Berlin</span> is in <span class=\"cloze-inactive\" data-ordinal=\"2\">Germany</span><br>capital",
+              "blank": null,
+              "question": "<span class=\"cloze\" data-cloze=\"Berlin\" data-ordinal=\"1\">[...]</span> is in <span class=\"cloze-inactive\" data-ordinal=\"2\">Germany</span>"
+            },
+            "review": {
+              "answer": "<span class=\"cloze\" data-ordinal=\"1\">Berlin</span> is in <span class=\"cloze-inactive\" data-ordinal=\"2\">Germany</span><br>capital",
+              "answer_av": [],
+              "blank": null,
+              "question": "<span class=\"cloze\" data-cloze=\"Berlin\" data-ordinal=\"1\">[...]</span> is in <span class=\"cloze-inactive\" data-ordinal=\"2\">Germany</span>",
+              "question_av": []
+            }
+          },
+          "#c5": {
+            "browser": {
+              "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Berlin</span> is in <span class=\"cloze\" data-ordinal=\"2\">Germany</span><br>capital",
+              "blank": null,
+              "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Berlin</span> is in <span class=\"cloze\" data-cloze=\"Germany\" data-ordinal=\"2\">[...]</span>"
+            },
+            "review": {
+              "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Berlin</span> is in <span class=\"cloze\" data-ordinal=\"2\">Germany</span><br>capital",
+              "answer_av": [],
+              "blank": null,
+              "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Berlin</span> is in <span class=\"cloze\" data-cloze=\"Germany\" data-ordinal=\"2\">[...]</span>",
+              "question_av": []
+            }
+          }
+        }
+      },
+      {},
+      {},
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "answer": "<hr id=answer>house",
+              "blank": null,
+              "question": "Haus"
+            },
+            "review": {
+              "answer": "Haus<hr id=answer>house",
+              "answer_av": [],
+              "blank": null,
+              "question": "Haus",
+              "question_av": []
+            }
+          },
+          "#c2": {
+            "browser": {
+              "answer": "|house",
+              "blank": null,
+              "question": ""
+            },
+            "review": {
+              "answer": null,
+              "answer_av": [],
+              "blank": "empty_front",
+              "question": "",
+              "question_av": []
+            }
+          },
+          "#c3": {
+            "browser": {
+              "answer": "|house[sound:back.mp3]",
+              "blank": null,
+              "question": "Listen [sound:prompt.mp3]"
+            },
+            "review": {
+              "answer": null,
+              "answer_av": [],
+              "blank": "empty_front",
+              "question": "Listen [anki:play:q:0]",
+              "question_av": [
+                {
+                  "sound": "prompt.mp3"
+                }
+              ]
+            }
+          },
+          "#c4": {
+            "browser": {
+              "answer": "<span class=\"cloze\" data-ordinal=\"1\">Berlin</span> is in Germany<br>capital",
+              "blank": null,
+              "question": "<span class=\"cloze\" data-cloze=\"Berlin\" data-ordinal=\"1\">[...]</span> is in Germany"
+            },
+            "review": {
+              "answer": "<span class=\"cloze\" data-ordinal=\"1\">Berlin</span> is in Germany<br>capital",
+              "answer_av": [],
+              "blank": null,
+              "question": "<span class=\"cloze\" data-cloze=\"Berlin\" data-ordinal=\"1\">[...]</span> is in Germany",
+              "question_av": []
+            }
+          },
+          "#c5": {
+            "browser": {
+              "answer": null,
+              "blank": "missing_cloze",
+              "question": ""
+            },
+            "review": {
+              "answer": null,
+              "answer_av": [],
+              "blank": "missing_cloze",
+              "question": "",
+              "question_av": []
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "0d1f8a76f22edf02e8f9efc68013502cc7ea25d71e4bafe7122409299f17cafb",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/pipeline/blank",
+  "scenario_sha256": "0085ca5e1b16c766da2d2b2f435d3816eaa8bd2b5b23da8aa662853da54579b1",
+  "tz": "UTC"
+}

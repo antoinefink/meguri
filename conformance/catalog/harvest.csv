@@ -426,7 +426,7 @@ hd3484a3787d3,python,tag,notetypes,not-applicable,Deprecated helpers of Anki's P
 he8993d36dc09,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
 heb9c41d43b4a,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
 h0477377c20e5,rust,tag,notetypes,in-scope,A note type's field names in order,notetypes/records/stock-new-collection,done
-h147c5a8d09f4,rust,tag,notetypes,in-scope,"Card rendering with special fields (U60, U62)",,deferred
+h147c5a8d09f4,rust,tag,notetypes,in-scope,"A card's field map holds the note fields and the special fields only, each with its value",render/special-fields/cards render/special-fields/new-note render/pipeline/specials,done
 h16006d8f10dd,rust,tag,notetypes,in-scope,"Per-note-type config key names, as the note type's last deck _nt_<id>_lastDeck uses them (notes/note-records A4)",notes/records/add cardgen/placement/new-note,done
 h166c2f8e68af,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
 h1bd8d77a66bd,rust,tag,notetypes,in-scope,Renaming a note type is saved,notetypes/records/names,done
@@ -449,7 +449,7 @@ h5dab017523ab,rust,tag,notetypes,not-applicable,Errors of Anki's backend lookups
 h5f775d295960,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
 h5fa3b00a8f49,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
 h6288de9d6fb5,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
-h675f93f3e234,rust,tag,notetypes,in-scope,"Card rendering with special fields (U60, U62)",,deferred
+h675f93f3e234,rust,tag,notetypes,in-scope,"A card renders in full on both sides, FrontSide on the answer, and unknown filters do not stop it",render/pipeline/basic render/pipeline/read-only render/special-fields/new-note,done
 h68d09bf06f67,rust,tag,notetypes,in-scope,"Note type list with note counts for the Note Types screen (U37, U200)",,deferred
 h6ac9613310a8,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
 h6df8b626e405,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
@@ -606,18 +606,18 @@ hf98264ff82e2,rust,tag,package,unclassified,,,open
 hfaaf3e4a2202,rust,tag,package,unclassified,,,open
 hfeb5fe0f2419,rust,tag,package,unclassified,,,open
 hff5fae693296,rust,tag,package,unclassified,,,open
-h095feffe1089,python,tag,render,unclassified,,,open
-h2a067e44c2ac,python,tag,render,unclassified,,,open
-h2dc9493eef0e,python,tag,render,unclassified,,,open
-h3ce253a641a9,python,tag,render,unclassified,,,open
+h095feffe1089,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
+h2a067e44c2ac,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
+h2dc9493eef0e,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
+h3ce253a641a9,python,tag,render,not-applicable,Desktop playback of a path with folders outside the media folder; card audio entries play base names only,,done
 h550f70cfd497,python,tag,render,in-scope,FrontSide on the answer after an unknown filter on the question,render/filters/chains render/special-fields/new-note,done
-h7f11536c09e7,python,tag,render,unclassified,,,open
+h7f11536c09e7,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
 h7f342d9e2c48,python,tag,render,unclassified,,,open
-ha45c328241fe,python,tag,render,unclassified,,,open
-ha7fabd60b085,python,tag,render,unclassified,,,open
-hb2bdcde89b3a,python,tag,render,unclassified,,,open
-hf42c35381599,python,tag,render,unclassified,,,open
-hf55fc72cd71b,python,tag,render,unclassified,,,open
+ha45c328241fe,python,tag,render,not-applicable,Add-on hook that renames a played media file; Meguri has no add-on hooks,,done
+ha7fabd60b085,python,tag,render,not-applicable,Desktop playback of an absolute file path for add-ons; card audio entries play base names only,,done
+hb2bdcde89b3a,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
+hf42c35381599,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
+hf55fc72cd71b,python,tag,render,in-scope,"Card audio plays an entry's base name from the media folder (render/av-tags A6): U67's player, checked by Meguri's tests; no oracle observation",,deferred
 h012e392276c1,rust,tag,render,unclassified,,,open
 h03d7c32a8571,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h04f16e0d77d0,rust,tag,render,not-applicable,Argument checking of a backend call Meguri does not expose,,done
@@ -637,8 +637,8 @@ h3448f09e0c2c,rust,tag,render,in-scope,Image-occlusion cloze element; shape attr
 h3a116c42ce7b,rust,tag,render,in-scope,Media name encoding and decoding (text area),text/refs/iri,done
 h3e9a29035981,rust,tag,render,in-scope,Field emptiness for sections and the blank check,render/template/conditionals render/template/blank text/fields/empty,done
 h3ea8cdc8e835,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
-h3f026c7e31bb,rust,tag,render,unclassified,,,open
-h429c8ae08c83,rust,tag,render,unclassified,,,open
+h3f026c7e31bb,rust,tag,render,in-scope,"AV tag grammar: sound tags, directives, options, broken and unclosed tags",render/av-tags/grammar render/av-tags/tts,done
+h429c8ae08c83,rust,tag,render,in-scope,"AV extraction: play markers per side, a TTS entry, a TTS directive with no language",render/av-tags/tts render/av-tags/numbering,done
 h450787d61876,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h4726941374ef,rust,tag,render,in-scope,"Preview render of a note not yet added, both sides",render/special-fields/new-note render/template/blank,done
 h47dca159695d,rust,tag,render,unclassified,,,open
@@ -662,13 +662,13 @@ h73a554417784,rust,tag,render,in-scope,Legacy per-template card rules stored whe
 h74230fbcabe8,rust,tag,render,in-scope,cloze-only: output on the front and the back,render/cloze/only,done
 h7489852a175a,rust,tag,render,unclassified,,,open
 h79f7d4c21f4b,rust,tag,render,in-scope,Numbers of a cloze with a number list,render/cloze/numbers,done
-h7ff155030ad4,rust,tag,render,unclassified,,,open
+h7ff155030ad4,rust,tag,render,not-applicable,Error for an unknown card id in a backend call; Meguri's render reports a missing card as its own not-found error,,done
 h82c4a097602a,rust,tag,render,unclassified,,,open
 h8459f3ce87b7,rust,tag,render,unclassified,,,open
 h883b6ddbca06,rust,tag,render,in-scope,Nested clozes with the same number,render/cloze/nesting,done
 h88486ccb2459,rust,tag,render,in-scope,Cloze numbers of a text; its LaTeX expansion check serves LaTeX image generation which is out of scope (R565),render/cloze/numbers,done
 h8aa9e4f267aa,rust,tag,render,in-scope,Shared and separate clozes on each of their cards,render/cloze/multi-number,done
-h90e678492b7b,rust,tag,render,unclassified,,,open
+h90e678492b7b,rust,tag,render,in-scope,A sound tag becomes a play marker and an AV entry,render/av-tags/numbering,done
 h9580bee2a34f,rust,tag,render,not-applicable,Argument checking of a backend call Meguri does not expose,,done
 h9ecf3ff97171,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h9f15a141659a,rust,tag,render,in-scope,Type-in cloze extraction collapses answers only when all are identical,render/cloze/typing,done
@@ -688,11 +688,11 @@ hcd3a8431fb29,rust,tag,render,in-scope,Text before a replacement that an unknown
 hd3092e9a68c4,rust,tag,render,in-scope,Built-in filter applied in a preview render,render/filters/text,done
 hd575b853e8bf,rust,tag,render,in-scope,One-line text of field HTML (text area),text/strip/text-line,done
 hdff9a98c5773,rust,tag,render,in-scope,Ruby filters,render/filters/furigana,done
-he0d5169d5e60,rust,tag,render,in-scope,Card render of a cloze note through the render pipeline (U62),,deferred
+he0d5169d5e60,rust,tag,render,in-scope,"Card render of a cloze note: the question hides the active cloze, the answer shows it",render/pipeline/blank render/av-tags/cloze render/cloze/templates,done
 he406938dc7f7,rust,tag,render,in-scope,Nested clozes with number lists,render/cloze/multi-number render/cloze/nesting,done
 he505c5cfe56e,rust,tag,render,in-scope,Blank question in a preview render,render/template/blank,done
 he79db754bc77,rust,tag,render,unclassified,,,open
-he865b016fdd9,rust,tag,render,unclassified,,,open
+he865b016fdd9,rust,tag,render,in-scope,Directives other than TTS are written back in normal form,render/av-tags/grammar,done
 he8aa29c82e65,rust,tag,render,unclassified,,,open
 hea39d04c13ef,rust,tag,render,in-scope,Unknown filter ends the chain with the text so far,render/filters/chains,done
 heb300a3dbe24,rust,tag,render,unclassified,,,open

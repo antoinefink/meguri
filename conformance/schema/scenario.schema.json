@@ -254,7 +254,9 @@
             "properties": {
               "name": { "type": "string" },
               "front": { "type": "string" },
-              "back": { "type": "string" }
+              "back": { "type": "string" },
+              "browser_front": { "type": "string", "description": "dsl.md D6.4: the browser question format (bqfmt); empty when missing." },
+              "browser_back": { "type": "string", "description": "dsl.md D6.4: the browser answer format (bafmt); empty when missing." }
             }
           }
         },

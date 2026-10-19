@@ -1,0 +1,22 @@
+# Audio extraction and numbering (specs/render/av-tags.md A1, A5, A8, R525,
+# R528, R961): numbering per side from 0; sound tags inside a <script> string
+# and an attribute value are replaced too; the answer's FrontSide keeps the
+# question's markers while the answer list holds only the answer's own tags.
+id: render/av-tags/numbering
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Listening
+      fields: [Word, Audio, Extra]
+      templates:
+        - {name: Hear, front: "{{Word}}{{Audio}}", back: "{{FrontSide}}<hr id=answer>{{Extra}}"}
+        - name: Scripted
+          front: "<script>var clip = '[sound:script.mp3]';</script><img alt=\"[sound:attr.mp3]\" src=\"pic.png\">{{Extra}}"
+          back: "{{Audio}}"
+        - name: Repeat
+          front: "{{Extra}}{{Extra}}"
+          back: "{{Word}}{{Audio}}{{FrontSide}}"
+  notes:
+    - {notetype: Listening, fields: ["犬", "[sound:inu.mp3] [sound:inu-slow.mp3]", "dog [sound:dog.mp3]"]}
+steps:
+  - observe: [render]

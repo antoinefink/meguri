@@ -1,0 +1,36 @@
+# Browser mode (specs/render/card-render-pipeline.md K5, R935): the browser
+# formats replace the review templates side by side when not empty, a format of
+# only white space is used, FrontSide is empty, nothing is extracted, and errors
+# that only the unchecked browser formats hold appear in browser mode only.
+id: render/pipeline/browser
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Browse Probe
+      fields: [Front, Back]
+      templates:
+        - name: Both Formats
+          front: "{{Front}}[sound:front.mp3]"
+          back: "{{FrontSide}}<hr id=answer>{{Back}}"
+          browser_front: "<i>{{Back}}</i>"
+          browser_back: "{{Back}}|{{FrontSide}}|{{Front}}"
+        - name: Question Only
+          front: "{{Back}}"
+          back: "{{FrontSide}}<hr id=answer>{{Front}}[sound:back.mp3]"
+          browser_front: "Q: {{Back}}"
+        - name: Spaces
+          front: "<div>{{Front}}</div>"
+          back: "{{Back}}"
+          browser_back: "  "
+        - name: Broken Question
+          front: "<p>{{Front}}</p>"
+          back: "{{Back}}"
+          browser_front: "{{#Front}}open"
+        - name: Broken Answer
+          front: "<span>{{Front}}</span>"
+          back: "{{Back}}"
+          browser_back: "{{Nope}}"
+  notes:
+    - {notetype: Browse Probe, fields: ["Baum", "tree [sound:tree.mp3]"]}
+steps:
+  - observe: [render]

@@ -1,0 +1,128 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 164307679,
+              "data": "",
+              "flags": 0,
+              "flds": "energy [sound:e.mp3]\u001fE = mc²",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "energy [sound:e.mp3]",
+              "tags": " physics ",
+              "usn": -1
+            }
+          }
+        }
+      },
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "answer": "<hr id=answer>E = mc² \\[\\sum_i i\\]",
+              "blank": null,
+              "question": "energy [sound:e.mp3] \\(x^2\\) [anki:tts lang=en_US]energy [sound:e.mp3][/anki:tts] energy [sound:e.mp3] \n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint2a59102cb3252e7e').style.display='block';\nreturn false;\" draggable=false>\nBack</a>\n<div id=\"hint2a59102cb3252e7e\" class=hint style=\"display: none\">E = mc²</div>\n"
+            },
+            "review": {
+              "answer": "energy [anki:play:q:0] \\(x^2\\) [anki:play:q:1] energy [anki:play:q:2] \n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint2a59102cb3252e7e').style.display='block';\nreturn false;\" draggable=false>\nBack</a>\n<div id=\"hint2a59102cb3252e7e\" class=hint style=\"display: none\">E = mc²</div>\n<hr id=answer>E = mc² \\[\\sum_i i\\]",
+              "answer_av": [],
+              "blank": null,
+              "question": "energy [anki:play:q:0] \\(x^2\\) [anki:play:q:1] energy [anki:play:q:2] \n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint2a59102cb3252e7e').style.display='block';\nreturn false;\" draggable=false>\nBack</a>\n<div id=\"hint2a59102cb3252e7e\" class=hint style=\"display: none\">E = mc²</div>\n",
+              "question_av": [
+                {
+                  "sound": "e.mp3"
+                },
+                {
+                  "tts": "en_US"
+                },
+                {
+                  "sound": "e.mp3"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 164307679,
+              "data": "",
+              "flags": 0,
+              "flds": "energy [sound:e.mp3]\u001fE = mc²",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "energy [sound:e.mp3]",
+              "tags": " physics ",
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "0d1f8a76f22edf02e8f9efc68013502cc7ea25d71e4bafe7122409299f17cafb",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/pipeline/read-only",
+  "scenario_sha256": "dff7ca31f594af9867422630ae41b0de9f0df7e52d6983a843f442f9c8da7b3c",
+  "tz": "UTC"
+}

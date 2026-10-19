@@ -12,6 +12,29 @@
   },
   "$defs": {
     "card_key": { "type": "string", "pattern": "^#c[1-9][0-9]*$" },
+    "render_av_entry": {
+      "description": "render-ops.md Q5.2, specs/render/av-tags.md A6: a sound entry by its decoded name, or a TTS entry by its language.",
+      "oneOf": [
+        { "type": "object", "required": ["sound"], "additionalProperties": false, "properties": { "sound": { "type": "string" } } },
+        { "type": "object", "required": ["tts"], "additionalProperties": false, "properties": { "tts": { "type": "string", "minLength": 1 } } }
+      ]
+    },
+    "render_error": {
+      "type": "object",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": ["kind", "side"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "enum": ["unclosed_conditional", "unopened_conditional", "mismatched_conditional", "unknown_field", "unknown_conditional"] },
+            "side": { "enum": ["question", "answer"] }
+          }
+        }
+      }
+    },
     "note_key": { "type": "string", "pattern": "^#n[1-9][0-9]*$" },
     "deck_name": { "type": ["string", "null"] },
     "f32": { "type": "number", "description": "Shortest round-trip f32 decimal (O6)." },
@@ -417,6 +440,77 @@
                       "kind": { "enum": ["unclosed_conditional", "unopened_conditional", "mismatched_conditional", "unknown_field", "unknown_conditional"] },
                       "side": { "enum": ["question", "answer"] }
                     }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "render": {
+          "description": "specs/conformance/render-ops.md Q5.2: per card, the card render pipeline's outputs in review and browser mode; null for a card that no longer exists.",
+          "type": "object",
+          "propertyNames": { "pattern": "^#c[1-9][0-9]*$" },
+          "additionalProperties": {
+            "anyOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "required": ["review", "browser"],
+                "additionalProperties": false,
+                "properties": {
+                  "review": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "required": ["question", "answer", "question_av", "answer_av", "blank"],
+                        "additionalProperties": false,
+                        "properties": {
+                          "question": { "type": "string" },
+                          "answer": { "type": "string" },
+                          "question_av": { "type": "array", "items": { "$ref": "#/$defs/render_av_entry" } },
+                          "answer_av": { "type": "array", "items": { "$ref": "#/$defs/render_av_entry" } },
+                          "blank": { "type": "null" }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "required": ["question", "answer", "question_av", "answer_av", "blank"],
+                        "additionalProperties": false,
+                        "properties": {
+                          "question": { "type": "string" },
+                          "answer": { "type": "null" },
+                          "question_av": { "type": "array", "items": { "$ref": "#/$defs/render_av_entry" } },
+                          "answer_av": { "type": "array", "maxItems": 0 },
+                          "blank": { "enum": ["empty_front", "missing_cloze"] }
+                        }
+                      },
+                      { "$ref": "#/$defs/render_error" }
+                    ]
+                  },
+                  "browser": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "required": ["question", "answer", "blank"],
+                        "additionalProperties": false,
+                        "properties": {
+                          "question": { "type": "string" },
+                          "answer": { "type": "string" },
+                          "blank": { "type": "null" }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "required": ["question", "answer", "blank"],
+                        "additionalProperties": false,
+                        "properties": {
+                          "question": { "type": "string" },
+                          "answer": { "type": "null" },
+                          "blank": { "const": "missing_cloze" }
+                        }
+                      },
+                      { "$ref": "#/$defs/render_error" }
+                    ]
                   }
                 }
               }
