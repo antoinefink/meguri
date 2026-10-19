@@ -121,8 +121,9 @@ case "$*" in
 esac'
 }
 
-# The VM: simctl is the fake simctl (its database $FAKE_SIM_DB), devicectl
-# logs, and xcodebuild checks the test products at the -xctestrun path (they
+# The VM: simctl and devicectl VoiceOver disable use the fake simulator
+# database ($FAKE_SIM_DB), other devicectl calls log, and xcodebuild checks
+# the test products at the -xctestrun path (they
 # must have been copied there) and the destination simulator (booted in the
 # VM), logs its arguments, TEST_RUNNER_ environment and whether the host lease
 # is held, and writes a result bundle: a summary; for a drive script the
@@ -133,6 +134,7 @@ esac'
 # makes it ignore SIGTERM, as a real VM's run never gets the SIGTERM that
 # tools/mg sends the job's process tree when it cancels the job. Paths are
 # logged as the VM sees them (without the fake file system's prefix).
+# FAKE_VM_TEST_VOICEOVER=1 leaves VoiceOver enabled as a killed XCTest does.
 vm_stubs() {
   stub "$FAKE_VM_BIN/sudo" 'exec "$@"'
   # The process check jobs make before they start work there (U19c).
@@ -166,7 +168,13 @@ case "$1" in
       exit 1
     fi
     exec "'"$REPO_ROOT"'/tools/tests/sim_pool_fake_xcrun.sh" "$@" ;;
-  devicectl) s="${*:2}"; echo "vm-devicectl ${s//"$FAKE_VM_FS"/}" >>"$STUB_LOG" ;;
+  devicectl)
+    s="${*:2}"; echo "vm-devicectl ${s//"$FAKE_VM_FS"/}" >>"$STUB_LOG"
+    case "$s" in
+      "device settings voiceover "*)
+        echo "vm-voiceover-lease $([ -e "$FAKE_VM_MIRROR/mac-vm.$FAKE_VM_NAME.lock/holder.json" ] && echo held || echo free)" >>"$STUB_LOG"
+        exec "'"$REPO_ROOT"'/tools/tests/sim_pool_fake_xcrun.sh" "$@" ;;
+    esac ;;
   *) echo "vm-xcrun $s" >>"$STUB_LOG"; exit 97 ;;
 esac'
   stub "$FAKE_VM_BIN/xcodebuild" '
@@ -193,6 +201,7 @@ echo "vm-products $(unmap "$products") $(cat "$app")" >>"$STUB_LOG"
 udid="${dest#id=}"
 state="$(xcrun simctl __state "$udid" 2>/dev/null)"
 [ "$state" = Booted ] || { echo "xcodebuild: error: Unable to find a destination matching $dest"; exit 70; }
+[ "${FAKE_VM_TEST_VOICEOVER:-}" != 1 ] || xcrun simctl __voiceover "$udid" enabled >/dev/null || exit 70
 # The driver launches the app with the fixtures its script names: they must
 # be in the VM (launch.fixture relative to the checkout).
 if [ -n "${TEST_RUNNER_MEGURI_DRIVE_SCRIPT:-}" ] && [ -f "$TEST_RUNNER_MEGURI_DRIVE_SCRIPT" ]; then
@@ -417,6 +426,60 @@ assert_host_untouched() {
   [ ! -e "$(vm_fs meguri-mac "$dir/iphone.xcresult")" ]
   # The device went back to the pool; the VM lease is released.
   [ ! -e "$(vm_lease "$u")" ]
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  assert_host_untouched
+  validate "$result"
+}
+
+@test "VoiceOver cleanup after cancelling a11y --device runs under the VM lease and retains the caller lease" {
+  local u job rc=0
+  u="$(lease_in_sandbox iphone)"
+  [ -n "$u" ]
+  cp "$(vm_lease "$u")" "$BATS_TEST_TMPDIR/caller-lease.json"
+  : >"$STUB_LOG"
+  FAKE_VM_TEST_VOICEOVER=1 FAKE_VM_IGNORE_TERM=1 FAKE_VM_XCODEBUILD_UNTIL="$BATS_TEST_TMPDIR/never" \
+    "$SB/tools/mg" a11y --platform iphone --device "$u" \
+    >"$BATS_TEST_TMPDIR/job.out" 2>"$BATS_TEST_TMPDIR/job.err" 3>&- &
+  job=$!
+  bg_track "$job"
+  wait_for "$BATS_TEST_TMPDIR/never.started"
+  [ "$(vm_sim meguri-mac __voiceover "$u")" = enabled ]
+  vm_tests_running meguri-mac
+  kill -TERM "$job"
+  wait "$job" || rc=$?
+  [ "$rc" -eq 2 ]
+  result="$(tail -n 1 "$BATS_TEST_TMPDIR/job.out")"
+  [ "$(field .status)" = error ]
+  [ "$(field '[.failures[].id] | index("cancelled") != null')" = true ]
+  called "^vm-devicectl device settings voiceover --device $u --disable\$"
+  called '^vm-voiceover-lease held$'
+  not_called '^vm-voiceover-lease free$'
+  [ "$(vm_sim meguri-mac __voiceover "$u")" = disabled ]
+  cmp "$BATS_TEST_TMPDIR/caller-lease.json" "$(vm_lease "$u")"
+  not_called "^xcrun simctl (uninstall|privacy|keychain) $u "
+  ! vm_tests_running meguri-mac
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  assert_host_untouched
+  validate "$result"
+}
+
+@test "VoiceOver cleanup failure makes an otherwise passing a11y --device run error and retains the caller lease" {
+  local u
+  u="$(lease_in_sandbox iphone)"
+  [ -n "$u" ]
+  cp "$(vm_lease "$u")" "$BATS_TEST_TMPDIR/caller-lease.json"
+  vm_sim meguri-mac __voiceover_disable_fail "$u" true
+  : >"$STUB_LOG"
+  FAKE_VM_TEST_VOICEOVER=1 mg a11y --platform iphone --device "$u"
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '[.failures[].id] | index("voiceover-cleanup") != null')" = true ]
+  [ "$(field .summary.passed)" = 12 ]
+  [ "$(vm_sim meguri-mac __voiceover "$u")" = enabled ]
+  called "^vm-devicectl device settings voiceover --device $u --disable\$"
+  called '^vm-voiceover-lease held$'
+  not_called '^vm-voiceover-lease free$'
+  cmp "$BATS_TEST_TMPDIR/caller-lease.json" "$(vm_lease "$u")"
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
   assert_host_untouched
   validate "$result"

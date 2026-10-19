@@ -22,6 +22,15 @@ mg_a11y__usage() {
   mg_status error
 }
 
+mg_a11y__disable_voiceover() {
+  if ! mg_devicectl device settings voiceover --device "$1" --disable >&2; then
+    mg_failure voiceover-cleanup "could not disable simulator VoiceOver on $1; see log.txt" "tools/mg sim reset '$1'"
+    mg_message "a11y: could not disable simulator VoiceOver on $1; see log.txt"
+    mg_status error
+    return 1
+  fi
+}
+
 mg_a11y() {
   local platform=iphone device="" suites="" only=() s result since udid
   while [ "$#" -gt 0 ]; do
@@ -80,6 +89,7 @@ mg_a11y() {
     udid="$MG_SIM_UDID"
     mg_sim_check_runtime "$udid" || return 0
   fi
+  mg_on_exit "mg_a11y__disable_voiceover '$udid'"
   mg_sim_prepare "$udid" || return 0
   mg_app_xcodebuild_test "$MG_RUN_DIR/$platform" "$platform" "id=$udid" Debug "${only[@]}"
   result=$?

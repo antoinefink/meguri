@@ -26,7 +26,7 @@
 #   sim-pool.sh renew <udid> [--ttl-min N]
 #   sim-pool.sh release <udid>
 #       Reset the device (user apps, privacy, keychain, UI options, status
-#       bar), leave it booted, drop the lease.
+#       bar, VoiceOver), leave it booted, drop the lease.
 #   sim-pool.sh reset <udid>
 #       Reset a leased device the same way and keep the lease.
 #   sim-pool.sh status
@@ -388,9 +388,17 @@ sp_prepare_springboard() {
   done
 }
 
+sp_disable_voiceover() {
+  xcrun devicectl device settings voiceover --device "$1" --disable >&2 || {
+    sp_log "disabling VoiceOver on $1 failed"
+    return 1
+  }
+}
+
 # sp_reset <udid>: back to a clean state, still booted.
 sp_reset() {
   local udid="$1" apps bid rc=0
+  sp_disable_voiceover "$udid" || rc=1
   if apps="$(xcrun simctl listapps "$udid")"; then
     apps="$(printf '%s\n' "$apps" | sp_user_apps)"
     while IFS= read -r bid; do
@@ -534,6 +542,8 @@ sp_acquire() {
   sp_prepare_springboard "$SP_UDID" "$SP_NAME" || exit 1
   if [ "$SP_HOW" = takeover ]; then
     sp_reset "$SP_UDID" || exit 1
+  else
+    sp_disable_voiceover "$SP_UDID" || exit 1
   fi
   SP_PENDING=""
   sp_log "leased $SP_NAME ($SP_UDID, $SP_HOW) to $holder for $ttl min; release it with: sim-pool.sh release $SP_UDID"

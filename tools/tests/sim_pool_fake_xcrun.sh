@@ -1,5 +1,6 @@
 #!/bin/bash
-# A stand-in for `xcrun simctl`, installed as `xcrun` on PATH by the sim-pool
+# A stand-in for `xcrun simctl` and devicectl's VoiceOver disable command,
+# installed as `xcrun` on PATH by the sim-pool
 # self-tests (sim_pool.bats, mg_host_selftest.sh). It never calls the real
 # simctl. Devices live in $FAKE_SIM_DB (JSON), device directories under
 # $MEGURI_SIM_DEVICES_DIR, and every call except the test-only `__` commands
@@ -10,6 +11,8 @@
 #   xcrun simctl __app <udid> <bundle id> <User|System>
 #   xcrun simctl __state <udid>
 #   xcrun simctl __apps <udid>                                  bundle ids, one per line
+#   xcrun simctl __voiceover <udid> [enabled|disabled]           set or read state
+#   xcrun simctl __voiceover_disable_fail <udid> <true|false>
 #
 # FAKE_SIM_RT27_BUILD sets the iOS 27.0 runtime's build (default 24A434);
 # FAKE_SIM_FOLDABLE=1 adds a foldable iPhone device type. `io <udid>
@@ -24,9 +27,10 @@
 # until `runtime add <image>` adds it.
 
 set -u
-[ "${1:-}" = simctl ] || { echo "fake xcrun: only simctl is faked" >&2; exit 97; }
+tool="${1:-}"
+case "$tool" in simctl | devicectl) ;; *) echo "fake xcrun: unexpected tool: $tool" >&2; exit 97 ;; esac
 shift
-case "${1:-}" in __*) ;; *) printf 'xcrun simctl %s\n' "$*" >>"$STUB_LOG" ;; esac
+case "$tool ${1:-}" in "simctl __"*) ;; *) printf 'xcrun %s %s\n' "$tool" "$*" >>"$STUB_LOG" ;; esac
 
 DB="$FAKE_SIM_DB"
 RT_NEW=com.apple.CoreSimulator.SimRuntime.iOS-27-0
@@ -54,13 +58,25 @@ add() { # add <name> <state> <type> <runtime>: prints the UDID
   n="$(jq -r .next "$DB")"
   udid="$(printf '00000000-0000-4000-8000-%012d' "$n")"
   upd --arg u "$udid" --arg n "$1" --arg s "$2" --arg t "$3" --arg r "$4" --arg sb "${FAKE_SIM_SB:-ok}" '.next += 1 |
-    .devices += [{udid: $u, name: $n, state: $s, type: $t, runtime: $r, appearance: "light", springboard: $sb, restarts: 0,
+    .devices += [{udid: $u, name: $n, state: $s, type: $t, runtime: $r, appearance: "light", springboard: $sb, restarts: 0, voiceover: false,
       apps: [{id: "com.apple.Preferences", type: "System"}, {id: "com.apple.mobilesafari", type: "System"}]}]'
   mkdir -p "$MEGURI_SIM_DEVICES_DIR/$udid/data"
   printf '%s\n' "$udid"
 }
 
 lock
+if [ "$tool" = devicectl ]; then
+  [ "$#" -eq 6 ] && [ "$1 $2 $3 $4 $6" = "device settings voiceover --device --disable" ] || {
+    echo "fake devicectl: unexpected call: $*" >&2; exit 97;
+  }
+  need_booted "$5" "disable VoiceOver"
+  if jq -e --arg u "$5" '.devices[] | select(.udid == $u) | .voiceover_disable_fail == true' "$DB" >/dev/null; then
+    echo "fake devicectl: VoiceOver disable failed for $5" >&2
+    exit 1
+  fi
+  upd --arg u "$5" '(.devices[] | select(.udid == $u) | .voiceover) = false'
+  exit $?
+fi
 case "${1:-} ${2:-}" in
   "list runtimes")
     rt27='{"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-0", "version": "27.0", "buildversion": "'"${FAKE_SIM_RT27_BUILD:-24A434}"'", "isAvailable": true, "platform": "iOS"},'
@@ -225,6 +241,21 @@ EOF
     ;;
   __apps\ *)
     jq -r --arg u "$2" '.devices[] | select(.udid == $u) | .apps[].id' "$DB"
+    ;;
+  __voiceover\ *)
+    need "$2"
+    case "${3:-}" in
+      enabled | disabled)
+        upd --arg u "$2" --arg s "$3" '(.devices[] | select(.udid == $u) | .voiceover) = ($s == "enabled")' || exit 1 ;;
+      "") ;;
+      *) echo "fake simctl __voiceover: want enabled or disabled" >&2; exit 97 ;;
+    esac
+    jq -r --arg u "$2" '.devices[] | select(.udid == $u) | if .voiceover then "enabled" else "disabled" end' "$DB"
+    ;;
+  __voiceover_disable_fail\ *)
+    need "$2"
+    case "${3:-}" in true | false) ;; *) exit 97 ;; esac
+    upd --arg u "$2" --argjson f "$3" '(.devices[] | select(.udid == $u) | .voiceover_disable_fail) = $f'
     ;;
   *)
     echo "fake simctl: unexpected call: $*" >&2

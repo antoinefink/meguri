@@ -124,6 +124,113 @@ assert_pool_devices_untouched() {
   [ -d "$LEASES/$u" ]
 }
 
+@test "VoiceOver left enabled by a stopped test is disabled on release and next acquire" {
+  pool acquire iphone
+  [ "$status" -eq 0 ]
+  local u="${lines[0]}"
+  sim __voiceover "$u" enabled
+  : >"$STUB_LOG"
+  pool release "$u"
+  [ "$status" -eq 0 ]
+  called "^xcrun devicectl device settings voiceover --device $u --disable\$"
+  [ "$(sim __voiceover "$u")" = disabled ]
+  [ "$(sim __state "$u")" = Booted ]
+  [ ! -e "$LEASES/$u" ]
+
+  pool acquire iphone
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$u" ]
+  [ "$(sim __voiceover "$u")" = disabled ]
+  [ "$(count_calls "^xcrun devicectl device settings voiceover --device $u --disable\$")" -eq 2 ]
+  assert_pool_devices_untouched
+}
+
+@test "VoiceOver missed by prior cleanup is disabled when an already free device is acquired" {
+  local u
+  u="$(sim __add Meguri-Pool-iphone-1 Booted)"
+  sim __voiceover "$u" enabled
+  [ ! -e "$LEASES/$u" ]
+  pool acquire iphone
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$u" ]
+  [ "$(sim __voiceover "$u")" = disabled ]
+  called "^xcrun devicectl device settings voiceover --device $u --disable\$"
+  not_called '^xcrun simctl (create|boot) '
+  assert_pool_devices_untouched
+}
+
+@test "VoiceOver is disabled on acquire after booting or creating a device" {
+  local u created
+  u="$(sim __add Meguri-Pool-iphone-1 Shutdown)"
+  sim __voiceover "$u" enabled
+  pool acquire iphone
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$u" ]
+  [ "$(sim __voiceover "$u")" = disabled ]
+  called "^xcrun simctl boot $u\$"
+  called "^xcrun devicectl device settings voiceover --device $u --disable\$"
+
+  pool acquire ipad
+  [ "$status" -eq 0 ]
+  created="${lines[0]}"
+  [ "$(sim __voiceover "$created")" = disabled ]
+  called "^xcrun simctl boot $created\$"
+  called "^xcrun devicectl device settings voiceover --device $created --disable\$"
+  assert_pool_devices_untouched
+}
+
+@test "VoiceOver disable failure blocks acquire and drops its pending lease" {
+  local u
+  u="$(sim __add Meguri-Pool-iphone-1 Booted)"
+  sim __voiceover "$u" enabled
+  sim __voiceover_disable_fail "$u" true
+  pool acquire iphone
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  called "^xcrun devicectl device settings voiceover --device $u --disable\$"
+  [ "$(sim __voiceover "$u")" = enabled ]
+  [ ! -e "$LEASES/$u" ]
+  [ ! -e "$MEGURI_SIM_POOL_DIR/pool.lock" ]
+  assert_pool_devices_untouched
+}
+
+@test "VoiceOver reset disables the service and keeps the caller lease" {
+  pool acquire iphone --holder caller
+  [ "$status" -eq 0 ]
+  local u="${lines[0]}"
+  sim __voiceover "$u" enabled
+  : >"$STUB_LOG"
+  pool reset "$u"
+  [ "$status" -eq 0 ]
+  [ "$(sim __voiceover "$u")" = disabled ]
+  [ "$(lease "$u" .holder)" = caller ]
+  [ "$(sim __state "$u")" = Booted ]
+  called "^xcrun devicectl device settings voiceover --device $u --disable\$"
+  assert_pool_devices_untouched
+}
+
+@test "VoiceOver disable failure is reported by reset and release and blocks subsequent acquire" {
+  pool acquire iphone --holder caller
+  [ "$status" -eq 0 ]
+  local u="${lines[0]}"
+  sim __voiceover "$u" enabled
+  sim __voiceover_disable_fail "$u" true
+  pool reset "$u"
+  [ "$status" -eq 1 ]
+  [ "$(sim __voiceover "$u")" = enabled ]
+  [ "$(lease "$u" .holder)" = caller ]
+
+  pool release "$u"
+  [ "$status" -eq 1 ]
+  [ "$(sim __voiceover "$u")" = enabled ]
+  [ ! -e "$LEASES/$u" ]
+  pool acquire iphone
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [ ! -e "$LEASES/$u" ]
+  assert_pool_devices_untouched
+}
+
 @test "after a boot the pool checks that SpringBoard applies a change to dark; a healthy one is left alone, and a reused device is not checked again" {
   pool acquire iphone
   [ "$status" -eq 0 ]
