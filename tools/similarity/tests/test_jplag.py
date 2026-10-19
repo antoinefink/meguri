@@ -76,7 +76,15 @@ class RequiredReferences(unittest.TestCase):
         self.assert_incomplete([], 3, 0)
 
     def test_missing_subset_never_starts_comparison(self):
-        self.assert_incomplete(["1.0"], 1, 1)
+        self.assert_incomplete(["1.0"], 2, 1)
+
+    def test_latest_only_requires_pinned_maximum(self):
+        self.cfg["jplag"]["tags"] = ["latest"]
+        self.assert_incomplete(["1.0"], 1, 0)
+
+    def test_latest_with_older_references_requires_pinned_maximum(self):
+        self.cfg["jplag"]["tags"] = ["latest", "1.0", "1.5"]
+        self.assert_incomplete(["1.0", "1.5"], 1, 2)
 
     def test_no_selected_tags_fails(self):
         self.cfg["jplag"]["tags"] = []
