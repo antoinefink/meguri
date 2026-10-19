@@ -40,8 +40,9 @@ setup() {
   export HOME="$BATS_TEST_TMPDIR/home"
   export MEGURI_HOST_LEASE_DIR="$BATS_TEST_TMPDIR/host.lock" MEGURI_HOST_LEASE_POLL_SECONDS=1
   export MEGURI_MAC_UI_DIR="$BATS_TEST_TMPDIR/mac-ui"
-  # No test VM: Mac and simulator runs here take the host path (mac_vm.bats
-  # and sim_vm.bats cover the VM).
+  # Snapshot dispatch uses a fake VM with a separate filesystem and HOME.
+  # mac_vm.bats and sim_vm.bats cover the real routing helpers.
+  export FX_GUEST_HOME="$BATS_TEST_TMPDIR/guest-home" FX_GUEST_FS="$BATS_TEST_TMPDIR/guest-fs"
   export MEGURI_MAC_VM_CONFIG="$BATS_TEST_TMPDIR/no-mac-vm.json" MEGURI_MAC_UI_ALLOW_HOST=1 MEGURI_SIM_ALLOW_HOST=1
   export TMPDIR="$BATS_TEST_TMPDIR/tmp"
   mkdir -p "$HOME" "$TMPDIR"
@@ -117,8 +118,32 @@ mg_image_tools() {
     *) (cd "$MG_ROOT" && "${args[@]}") ;;
   esac
 }
+mg_sim_begin() {
+  MG_SIM_RUNNER=vm
+  if [ "${FX_VM_UNAVAILABLE:-}" = 1 ]; then
+    MG_SIM_RUNNER="" MG_MAC_VM_REASON="fake VM unavailable"
+    mg__mac_vm_queued "fake VM unavailable" "$MG_VM_PART"
+    return 2
+  fi
+  return 0
+}
+mg_snapshots__sim_lease() { echo "fake VM lease" >>"$STUB_LOG"; MG_SNAP_SIM_LEASED=1; return 0; }
+mg_mac_vm_ssh() {
+  echo "fake VM ssh $*" >>"$STUB_LOG"
+  local cmd="$1"
+  if [ "$cmd" = 'printf "%s" "$HOME"' ]; then printf '%s' "$FX_GUEST_HOME"; return 0; fi
+  cmd="${cmd//"$MG_RUN_DIR"/"$FX_GUEST_FS$MG_RUN_DIR"}"
+  cmd="${cmd//"$FX_GUEST_HOME"/"$FX_GUEST_FS$FX_GUEST_HOME"}"
+  bash -c "$cmd"
+}
+mg_sim_fetch() {
+  echo "fake VM fetch $1" >>"$STUB_LOG"
+  mkdir -p "$(dirname "$1")"
+  cp -R "$FX_GUEST_FS$1" "$1" && rm -rf "$FX_GUEST_FS$1"
+}
 mg_snapshots__xcodebuild() {
-  local out="$1" dest="$2" suites="$3" mode="" dir="" target="" group="" fx
+  local out="$1" dest="$2" suites="$3" mode="" dir="" target="" group="" fx guest
+  MG_SNAP_NO_OUTPUT=""
   shift 3
   for a in "$@"; do
     case "$a" in
@@ -129,17 +154,21 @@ mg_snapshots__xcodebuild() {
     esac
   done
   echo "fake snapshot run mode=$mode dest=$dest suites=$suites target=$target group=$group" >>"$STUB_LOG"
-  mkdir -p "$dir" "$out.xcresult"
+  guest="$FX_GUEST_FS$dir"
+  mkdir -p "$guest" "$out.xcresult"
+  echo "fake VM output $dir" >>"$STUB_LOG"
   echo "xcodebuild log" >"$out.log"
   if [ "$mode" = plan ]; then
-    [ -z "${FX_PLAN:-}" ] || cp "$FX_PLAN" "$dir/plan.jsonl"
-    return 0
+    [ -z "${FX_PLAN:-}" ] || cp "$FX_PLAN" "$guest/plan.jsonl"
+    mg_sim_fetch "$out"
+    return
   fi
-  [ -z "${FX_IMAGES:-}" ] || cp -R "$FX_IMAGES/." "$dir/"
+  [ -z "${FX_IMAGES:-}" ] || cp -R "$FX_IMAGES/." "$guest/"
   fx="$FX_RESULTS"
   [ -z "${FX_RESULTS_DIR:-}" ] || [ ! -f "$FX_RESULTS_DIR/$target-$group.jsonl" ] || fx="$FX_RESULTS_DIR/$target-$group.jsonl"
-  sed "s|@OUT@|$dir|g; s|@MODE@|$mode|g" "$fx" >"$dir/results.jsonl"
-  [ -n "${FX_NO_COVERAGE:-}" ] || echo '{"screens": [{"id": "home.deckList", "states": ["typical"], "platforms": ["iphone", "mac"]}], "problems": []}' >"$dir/state-coverage.json"
+  sed "s|@OUT@|$dir|g; s|@MODE@|$mode|g" "$fx" >"$guest/results.jsonl"
+  [ -n "${FX_NO_COVERAGE:-}" ] || echo '{"screens": [{"id": "home.deckList", "states": ["typical"], "platforms": ["iphone", "mac"]}], "problems": []}' >"$guest/state-coverage.json"
+  [ -z "$target" ] || mg_sim_fetch "$out" || return
   return 0
 }
 mg_sim_lease() { echo "fake lease $1" >>"$STUB_LOG"; MG_SIM_UDID="FAKE-$1"; return 0; }
@@ -163,6 +192,11 @@ baseline() { mkdir -p "$(dirname "$SB/app/Snapshots/$KEY/$1.png")" && printf '%s
 @test "snapshots rejects bad arguments before building" {
   mg snapshots --platform watch
   [ "$(field .status)" = error ]
+  # An available VM can inspect its pool even though host overrides are ignored.
+  cat >"$SB/tools/scripts/sim-pool.sh" <<'EOF'
+#!/bin/bash
+[ "$1" != status ] || echo '{"devices": []}'
+EOF
   mg snapshots --platform iphone,ipad --device 0000
   [ "$(field .status)" = error ]
   [ "$(field '.failures[0].message')" = "snapshots: --device 0000 is not one of the kinds --platform iphone,ipad renders on (iphone iphone-small ipad)" ]
@@ -194,9 +228,11 @@ baseline() { mkdir -p "$(dirname "$SB/app/Snapshots/$KEY/$1.png")" && printf '%s
   [ "$(field '[.artifacts[] | select(.kind == "diff")] | length')" -eq 1 ]
   called 'fake snapshot run mode=verify dest=platform=macOS'
   [ "$(head -n 1 "$SB/app/Snapshots/$KEY/home.deckList/typical/light-standard-macDefault.png")" = "look: blue" ]
-  # The Mac run's images were moved out of the sandboxed app's container.
-  [ ! -d "$HOME/Library/Containers/com.antoinefink.meguri.dev/Data/tmp/meguri-snapshots" ] ||
-    [ -z "$(ls -A "$HOME/Library/Containers/com.antoinefink.meguri.dev/Data/tmp/meguri-snapshots")" ]
+  # Output uses the guest HOME; staging and fetch remove both guest copies.
+  called "fake VM output $FX_GUEST_HOME/Library/Containers/"
+  [ ! -d "$HOME/Library/Containers" ]
+  [ -z "$(find "$FX_GUEST_FS$FX_GUEST_HOME" -name results.jsonl)" ]
+  [ ! -e "$FX_GUEST_FS$(dirname "$result")/mac/mac" ]
 
   # Recording: the failing and the missing image are taken; the passing
   # baseline stays byte for byte.
@@ -289,34 +325,44 @@ probe_fixture() {
 }
 
 # bats test_tags=gate
-@test "snapshots on a locked Mac keep the simulators' results and queue the Mac part (host-session); a simulator failure still fails (U19b)" {
+@test "snapshots on a locked host run Mac and simulators in the VM; an independent simulator failure still fails" {
   probe_fixture
-  # The simulators run in the test VM, which needs no host lease; the Mac's
-  # in-process run takes it.
-  cat >>"$SB/tools/mg.d/zz-fakes.sh" <<'EOF'
-mg_sim_begin() { MG_SIM_RUNNER=vm; return 0; }
-mg_snapshots__sim_lease() { MG_SNAP_SIM_LEASED=1; return 0; }
-EOF
   stub ioreg 'echo "+-o Root  <class IORegistryEntry>"; echo "  \"IOConsoleUsers\" = ({\"kCGSSessionOnConsoleKey\"=Yes,\"CGSSessionScreenIsLocked\"=Yes})"'
-  mg snapshots --platform mac,iphone
+  STUB_LOCKED=1 mg snapshots --platform mac,iphone
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.host_lease)" = null ]
+  [ "$(field '.failures | length')" = 0 ]
+  called 'mode=verify dest=platform=macOS'
+  called 'mode=verify dest=id=FAKE-iphone suites=all target=iphone '
+  called 'mode=verify dest=id=FAKE-iphone-small suites=all target=iphone-small '
+  [ "$(field .details.counts.pass)" -ge 3 ]
+  not_called '^xcodebuild '
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+
+  # Only the simulator fixture gains a failure; the Mac remains passing.
+  export FX_RESULTS_DIR="$BATS_TEST_TMPDIR/by-group"
+  mkdir -p "$FX_RESULTS_DIR"
+  cp "$FX_RESULTS" "$FX_RESULTS_DIR/iphone-rt0-rm0-t50.jsonl"
+  result_line home.deckList/typical/light-standard-iphoneLarge fail >>"$FX_RESULTS_DIR/iphone-rt0-rm0-t50.jsonl"
+  STUB_LOCKED=1 mg snapshots --platform mac,iphone
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[].id] | unique | join(" ")')" = "snapshot/home.deckList/typical/light-standard-iphoneLarge" ]
+  not_called '^xcodebuild '
+}
+
+@test "snapshots with an unavailable VM queue mac-vm without executing Mac or simulator tests" {
+  probe_fixture
+  FX_VM_UNAVAILABLE=1 mg snapshots --platform mac,iphone
   [ "$status" -eq 0 ]
   [ "$(field .status)" = warn ]
   [ "$(field .details.queued)" = true ]
-  [ "$(field '[.details.queued_parts[] | "\(.user_step) \(.part)"] | join(", ")')" = "host-session mac" ]
+  [ "$(field '[.details.queued_parts[].user_step] | unique | join(" ")')" = mac-vm ]
   [ "$(field '.failures | length')" = 0 ]
-  called 'mode=verify dest=id=FAKE-iphone suites=all target=iphone '
-  called 'mode=verify dest=id=FAKE-iphone-small suites=all target=iphone-small '
-  not_called 'dest=platform=macOS'
-  [ "$(field .details.counts.pass)" -ge 1 ]
-  [[ "$(field .message)" == *"queued: mac"*"host-session"* ]]
-
-  # A failing iPhone snapshot fails the run, Mac queued or not.
-  result_line home.deckList/typical/light-standard-iphoneLarge fail >>"$FX_RESULTS"
-  mg snapshots --platform mac,iphone
-  [ "$status" -eq 1 ]
-  [ "$(field .status)" = fail ]
-  [ "$(field .details.queued)" = false ]
-  [ "$(field '[.failures[].id] | unique | join(" ")')" = "snapshot/home.deckList/typical/light-standard-iphoneLarge" ]
+  not_called 'fake snapshot run'
+  not_called '^xcodebuild '
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
 }
 
 @test "a settings group without its probe image fails the run" {

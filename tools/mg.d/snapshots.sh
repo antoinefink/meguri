@@ -132,7 +132,7 @@ mg_snapshots() {
     if [ "$p" = mac ]; then
       mg_snapshots__mac
       rc=$?
-      if [ "$rc" -eq 0 ]; then ran="$ran mac"; else [ "$rc" -eq 2 ] || MG_SNAP_BROKEN=1; fi
+      if [ "$rc" -eq 0 ]; then [ -n "${MG_SNAP_NO_OUTPUT:-}" ] || ran="$ran mac"; else [ "$rc" -eq 2 ] || MG_SNAP_BROKEN=1; fi
       continue
     fi
     for kind in $(mg_snapshots__kinds "$p"); do
@@ -141,7 +141,7 @@ mg_snapshots() {
       rc=$?
       [ "$rc" -eq 0 ] || break
     done
-    if [ "$rc" -eq 0 ]; then ran="$ran $p"; else [ "$rc" -eq 2 ] || MG_SNAP_BROKEN=1; fi
+    if [ "$rc" -eq 0 ]; then [ -n "${MG_SNAP_NO_OUTPUT:-}" ] || ran="$ran $p"; else [ "$rc" -eq 2 ] || MG_SNAP_BROKEN=1; fi
   done
   # Include outputs already returned even if a later platform was queued
   # or failed. Never let queuing hide an independent snapshot failure.
@@ -188,8 +188,11 @@ mg_snapshots__session() {
 # and it comes back here. Records tests that failed outside the snapshot
 # suites (their snapshot failures come from results.jsonl). Returns 2 when
 # the test VM could not be reached (queued, mg__mac_vm_unreachable).
+# MG_SNAP_NO_OUTPUT marks a failed test that legitimately wrote no output.
 mg_snapshots__xcodebuild() {
   local out="$1" dest="$2" suites="$3" only=() s rc summary e sdk=iphonesimulator
+  local output="" failures probe err="$1.output.log"
+  MG_SNAP_NO_OUTPUT=""
   shift 3
   mg_snapshots__session || return
   if [ "$suites" != all ]; then
@@ -199,7 +202,10 @@ mg_snapshots__xcodebuild() {
   mkdir -p "$(dirname "$out")"
   [ "$dest" != "platform=macOS,arch=arm64" ] || sdk=macosx
   # mg_vm_xcodebuild_test passes the exported TEST_RUNNER_ variables.
-  for e in "$@"; do export "${e?}"; done
+  for e in "$@"; do
+    export "${e?}"
+    case "$e" in TEST_RUNNER_MEGURI_SNAPSHOT_OUT=*) output="${e#*=}" ;; esac
+  done
   rm -rf "$out"
   mg_vm_xcodebuild_test "$out" Snapshot "$sdk" "$dest" Debug ${only[0]+"${only[@]}"}
   rc=$?
@@ -210,27 +216,57 @@ mg_snapshots__xcodebuild() {
     MG_SNAP_BROKEN=1
     return 1
   fi
-  # Mac output lives in its guest sandbox until mg_snapshots__mac stages it.
-  if [ "$sdk" != macosx ]; then
-    mg_sim_fetch "$out"
-    case $? in 0) ;; 2) return 2 ;; *) MG_SNAP_BROKEN=1 && return 1 ;; esac
-  fi
   mg_artifact log "$out.log" "xcodebuild test $(basename "$(dirname "$out")")/$(basename "$out")"
   summary="$(xcrun xcresulttool get test-results summary --path "$out.xcresult" 2>/dev/null |
-    jq -c '{result, passed: .passedTests, failed: .failedTests, skipped: .skippedTests}')" || summary=""
+    jq -ec 'select((.result | type) == "string" and (.passedTests | type) == "number"
+      and (.failedTests | type) == "number" and (.skippedTests | type) == "number")
+      | {result, passed: .passedTests, failed: .failedTests, skipped: .skippedTests}')" || summary=""
   echo "snapshots: $(basename "$out"): exit $rc ${summary:-no result}" >&2
   if [ -z "$summary" ]; then
     mg_failure xcodebuild-test "xcodebuild test-without-building could not run (exit $rc); see $out.log"
     MG_SNAP_BROKEN=1
     return 1
   fi
-  xcrun xcresulttool get test-results tests --path "$out.xcresult" 2>/dev/null | jq -c '
+  failures="$(xcrun xcresulttool get test-results tests --path "$out.xcresult" 2>/dev/null | jq -c '
     [.. | objects | select(.nodeType? == "Test Case" and .result? == "Failed")
       | select((.nodeIdentifier // "") | test("^(GalleryComponentSnapshots|ScreenSnapshots)/") | not)
-      | {id: .nodeIdentifier, message: ([.children[]? | select(.nodeType == "Failure Message") | .name] | join("; ") | .[0:600])}] | .[]' |
+      | {id: .nodeIdentifier, message: ([.children[]? | select(.nodeType == "Failure Message") | .name] | join("; ") | .[0:600])}] | .[]')" || {
+    mg_failure xcodebuild-test "invalid test results in $out.xcresult; see $out.log"
+    MG_SNAP_BROKEN=1
+    return 1
+  }
+  if [ -n "$failures" ]; then
     while IFS= read -r f; do
       mg_failure "test/$(jq -r .id <<<"$f")" "$(jq -r .message <<<"$f")"
-    done
+    done <<<"$failures"
+  fi
+  if [ "$rc" -ne 0 ] || [ -n "$failures" ] || ! jq -e '.result == "Passed" and .failed == 0' <<<"$summary" >/dev/null; then
+    # A returned test failure is blocking before any optional output copy.
+    [ "$(cat "$MG_STATE/status")" = error ] || mg_status fail
+    [ -n "$failures" ] || mg_failure xcodebuild-test "snapshot tests: exit $rc $summary; see $out.log"
+    # Tests can fail before writing output. Only absence is optional; an
+    # unreachable probe queues transport while preserving the test failure.
+    mg_mac_vm_ssh "if [ -d $(mvl_q "$output") ]; then exit 0; elif [ ! -e $(mvl_q "$output") ]; then exit 3; else exit 1; fi" >"$err" 2>&1
+    probe=$?
+    case "$probe" in
+      0) ;;
+      3) MG_SNAP_NO_OUTPUT=1; return 0 ;;
+      *)
+        if mvl_unreachable "$probe" "$(cat "$err")"; then
+          mg__mac_vm_unreachable "could not check snapshot output$(mvl_last "$err")"
+          return 2
+        fi
+        mg_failure mac-vm-copy "could not check snapshot output; see $err"
+        MG_SNAP_BROKEN=1
+        return 1
+        ;;
+    esac
+  fi
+  # Mac output lives in its guest sandbox until mg_snapshots__mac stages it.
+  if [ "$sdk" != macosx ]; then
+    mg_sim_fetch "$out"
+    case $? in 0) ;; 2) return 2 ;; *) MG_SNAP_BROKEN=1 && return 1 ;; esac
+  fi
   return 0
 }
 
@@ -288,6 +324,7 @@ mg_snapshots__simulator() {
     mg_status error
     return 1
   }
+  [ -z "$MG_SNAP_NO_OUTPUT" ] || return 0
   groups="$( (echo "$MG_SNAP_DEFAULT_GROUP"; [ ! -f "$dir/plan/plan.jsonl" ] || jq -r 'select(.deferred == null) | .group' "$dir/plan/plan.jsonl" | sort -u) |
     awk '!seen[$0]++')"
   mg_detail "groups_$(printf '%s' "$kind" | tr '-' '_')" "$(printf '%s\n' $groups | jq -R . | jq -sc .)"
@@ -312,6 +349,7 @@ mg_snapshots__simulator() {
       mg_status error
       return 1
     }
+    [ -z "$MG_SNAP_NO_OUTPUT" ] || return 0
   done
   mg_snapshots__settings "$udid" "$MG_SNAP_DEFAULT_GROUP" >/dev/null 2>&1
   return 0
@@ -346,6 +384,7 @@ mg_snapshots__mac() {
     TEST_RUNNER_MEGURI_INVENTORY_JSON="$MG_RUN_DIR/inventory.json"
   rc=$?
   [ "$rc" -eq 0 ] || { [ "$rc" -eq 2 ] || mg_status error; return "$rc"; }
+  [ -z "$MG_SNAP_NO_OUTPUT" ] || return 0
   mg_mac_vm_ssh "mkdir -p $(mvl_q "$dir") && cp -R $(mvl_q "$box/.") $(mvl_q "$dir/") && rm -rf $(mvl_q "$box")" >"$err" 2>&1
   rc=$?
   if [ "$rc" -ne 0 ]; then

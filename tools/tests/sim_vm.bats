@@ -113,7 +113,8 @@ for ((i = 0; i < ${#a[@]}; i++)); do
 done
 case "$*" in
   "xcresulttool get test-results summary "*) cat "$path/summary.json" ;;
-  "xcresulttool get test-results tests "*) echo "{\"testNodes\": []}" ;;
+  "xcresulttool get test-results tests "*)
+    if [ -f "$path/tests.json" ]; then cat "$path/tests.json"; else echo "{\"testNodes\": []}"; fi ;;
   "xcresulttool export attachments "*)
     mkdir -p "$out"
     if [ -d "$path/attachments" ]; then cp -R "$path/attachments/." "$out/"; else echo "[]" >"$out/manifest.json"; fi ;;
@@ -237,6 +238,13 @@ mkdir -p "$bundle"
 echo "{\"result\": \"Passed\", \"passedTests\": 12, \"failedTests\": 0, \"skippedTests\": 0}" >"$bundle/summary.json"
 if [ -n "${TEST_RUNNER_MEGURI_SNAPSHOT_OUT:-}" ]; then
   out="$TEST_RUNNER_MEGURI_SNAPSHOT_OUT"
+  if [ "${TEST_RUNNER_MEGURI_SNAPSHOT_MODE:-}" != plan ] &&
+      [ "${TEST_RUNNER_MEGURI_SNAPSHOT_TARGET:-mac}" = "${FAKE_VM_SNAPSHOT_TEST_FAIL:-}" ]; then
+    echo "{\"result\":\"Failed\",\"passedTests\":0,\"failedTests\":1,\"skippedTests\":0}" >"$bundle/summary.json"
+    echo "{\"testNodes\":[{\"nodeType\":\"Test Case\",\"nodeIdentifier\":\"StateCoverageTests/testIndependentFailure\",\"result\":\"Failed\",\"children\":[{\"nodeType\":\"Failure Message\",\"name\":\"concrete independent test failure\"}]}]}" >"$bundle/tests.json"
+    if [ "${FAKE_VM_SNAPSHOT_NO_OUTPUT:-}" != 1 ]; then mkdir -p "$out"; fi
+    exit 65
+  fi
   mkdir -p "$out"
   if [ "${TEST_RUNNER_MEGURI_SNAPSHOT_MODE:-}" = plan ]; then
     : >"$out/plan.jsonl"
@@ -763,13 +771,67 @@ assert_host_untouched() {
   [ "$(field .status)" = warn ]
   [ "$(field .details.queued)" = true ]
   rm "$MEGURI_MAC_VM_CONFIG"
-  cat >>"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'
+  cat >>"$SB/tools/mg.d/zz-sim-vm-fakes.sh" <<'EOF'
 mg_app_build() { mg_failure build "independent host build failure"; mg_status fail; return 1; }
 EOF
   mg snapshots --platform mac
   [ "$(field .status)" = fail ]
   [ "$(field '.failures[0].id')" = build ]
   assert_host_untouched
+}
+
+# These returned-failure regressions can be applied before the production fix.
+assert_snapshot_test_failure() {
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[].id] | unique | join(" ")')" = test/StateCoverageTests/testIndependentFailure ]
+  [ "$(field '.failures[0].message')" = "concrete independent test failure" ]
+  assert_host_untouched
+}
+
+@test "result precedence: a failed Mac snapshot test without output retains its concrete failure" {
+  FAKE_VM_SNAPSHOT_TEST_FAIL=mac FAKE_VM_SNAPSHOT_NO_OUTPUT=1 mg snapshots --platform mac
+  assert_snapshot_test_failure
+  [ "$(field '.details.queued // false')" = false ]
+  not_called "^ssh .*cp -R .*meguri-snapshots"
+  not_called "^ssh .*tar -C .* -cf - 'mac'$"
+}
+
+@test "result precedence: a failed simulator snapshot test without output retains its concrete failure" {
+  FAKE_VM_SNAPSHOT_TEST_FAIL=ipad FAKE_VM_SNAPSHOT_NO_OUTPUT=1 mg snapshots --platform ipad
+  assert_snapshot_test_failure
+  [ "$(field '.details.queued // false')" = false ]
+  not_called "^ssh .*tar -C .* -cf - 'rt0-rm0-t50'$"
+}
+
+@test "result precedence: a failed Mac snapshot test stays blocking when staging or fetch is unreachable" {
+  local refuse
+  for refuse in 'cp -R .*meguri-snapshots' "tar -C .* -cf - 'mac'$"; do
+    : >"$STUB_LOG"
+    FAKE_VM_SNAPSHOT_TEST_FAIL=mac FAKE_VM_SSH_REFUSE="$refuse" mg snapshots --platform mac
+    assert_snapshot_test_failure
+    [ "$(field .details.queued)" = false ]
+    [ "$(field '[.details.queued_parts[].user_step] | unique | join(" ")')" = mac-vm ]
+    called "^ssh .*$refuse"
+  done
+}
+
+@test "result precedence: a failed simulator snapshot test stays blocking when output fetch is unreachable" {
+  FAKE_VM_SNAPSHOT_TEST_FAIL=ipad FAKE_VM_SSH_REFUSE="tar -C .* -cf - 'rt0-rm0-t50'$" mg snapshots --platform ipad
+  assert_snapshot_test_failure
+  [ "$(field .details.queued)" = false ]
+  [ "$(field '[.details.queued_parts[].user_step] | unique | join(" ")')" = mac-vm ]
+  called "^ssh .*tar -C .* -cf - 'rt0-rm0-t50'$"
+}
+
+@test "result precedence: failed Mac and simulator tests stay blocking when absent output cannot be probed" {
+  local platform
+  for platform in mac ipad; do
+    FAKE_VM_SNAPSHOT_TEST_FAIL="$platform" FAKE_VM_SNAPSHOT_NO_OUTPUT=1 FAKE_VM_SSH_REFUSE='^if \[ -d .*' mg snapshots --platform "$platform"
+    assert_snapshot_test_failure
+    [ "$(field .details.queued)" = false ]
+    [ "$(field '[.details.queued_parts[].user_step] | unique | join(" ")')" = mac-vm ]
+  done
 }
 
 @test "Mac snapshots report malformed guest HOME and actual baseline copy failures as errors" {

@@ -73,6 +73,7 @@ case "$name $*" in
   "xcrun xcresulttool get build-results "*) echo '{"errorCount":0,"warningCount":0,"warnings":[]}' ;;
   "xcrun xcresulttool get "*)
     if [ "${STUB_BAD_SUMMARY:-}" = 1 ] && [[ "$*" = *summary*mac-unit.xcresult* ]]; then echo '{}'
+    elif [ -n "${STUB_UNIT_SUMMARY:-}" ] && [[ "$*" = *summary*mac-unit.xcresult* ]]; then printf '%s\n' "$STUB_UNIT_SUMMARY"
     else echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}'; fi ;;
 
   "xcodebuild build "*)
@@ -652,4 +653,27 @@ EOF
   tap_line '# the VM run returned no readable test summary; log: .*'
   tap_line 'ok [0-9]+ mac-app-hosted: Passed .*'
   not_called '^xcodebuild test '
+}
+
+@test "result precedence: a Failed Mac Unit summary with exit zero fails TAP" {
+  FAKE_VM_TEST_RC=0 STUB_UNIT_SUMMARY='{"result":"Failed","passedTests":0,"failedTests":1,"skippedTests":0}' check_project --phase devices
+  tap_line 'not ok [0-9]+ mac-unit: Failed passed=0 failed=1 skipped=0'
+  tap_line 'ok [0-9]+ mac-app-hosted: Passed .*'
+  ! grep -Eq '^ok [0-9]+ mac-unit' <<<"$output"
+  not_called '^xcodebuild test( |-)'
+}
+
+@test "result precedence: a Passed Mac Unit summary with positive failedTests fails TAP" {
+  FAKE_VM_TEST_RC=0 STUB_UNIT_SUMMARY='{"result":"Passed","passedTests":1,"failedTests":1,"skippedTests":0}' check_project --phase devices
+  tap_line 'not ok [0-9]+ mac-unit: Passed passed=1 failed=1 skipped=0'
+  tap_line 'ok [0-9]+ mac-app-hosted: Passed .*'
+  ! grep -Eq '^ok [0-9]+ mac-unit' <<<"$output"
+  not_called '^xcodebuild test( |-)'
+}
+
+@test "result precedence: a Passed Mac Unit summary with zero failedTests and exit zero passes TAP" {
+  FAKE_VM_TEST_RC=0 STUB_UNIT_SUMMARY='{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' check_project --phase devices
+  tap_line 'ok [0-9]+ mac-unit: Passed passed=1 failed=0 skipped=0'
+  ! grep -Eq '^not ok [0-9]+ mac-unit' <<<"$output"
+  not_called '^xcodebuild test( |-)'
 }

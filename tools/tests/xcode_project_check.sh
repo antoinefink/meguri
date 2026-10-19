@@ -607,7 +607,7 @@ run_tests() {
     return 0
   fi
   test_in_vm "$name" "$scheme" "$plan" "$config" "$dest" "$@"
-  local rc=$? summary
+  local rc=$? summary outcome
   if [ "$rc" -eq 72 ] && [ -n "$VM_QUEUE_REASON" ]; then
     vm_queued "$name" "$VM_QUEUE_REASON"
     return 0
@@ -616,15 +616,15 @@ run_tests() {
     not_ok "$name: not run" "$VM_LOST"
     return 0
   fi
-  summary="$(xcrun xcresulttool get test-results summary --path "$result" 2>/dev/null |
-    jq -er 'select((.result | type) == "string" and (.passedTests | type) == "number"
-      and (.failedTests | type) == "number" and (.skippedTests | type) == "number")
-      | "\(.result) passed=\(.passedTests) failed=\(.failedTests) skipped=\(.skippedTests)"')"
+  outcome="$(xcrun xcresulttool get test-results summary --path "$result" 2>/dev/null |
+    jq -ec 'select((.result | type) == "string" and (.passedTests | type) == "number"
+      and (.failedTests | type) == "number" and (.skippedTests | type) == "number")')"
+  summary="$(jq -r '"\(.result) passed=\(.passedTests) failed=\(.failedTests) skipped=\(.skippedTests)"' <<<"$outcome")"
   if [ "$rc" -eq 0 ] && [ -z "$summary" ]; then
     not_ok "$name: no result" "the VM run returned no readable test summary; log: $LOGS/$name.log"
-  elif [ "$rc" -eq 0 ]; then
+  elif [ "$rc" -eq 0 ] && jq -e '.result == "Passed" and .failedTests == 0' <<<"$outcome" >/dev/null; then
     ok "$name: $summary"
-  elif grep -q 'failed to initialize for UI testing' "$LOGS/$name.log"; then
+  elif [ "$rc" -ne 0 ] && grep -q 'failed to initialize for UI testing' "$LOGS/$name.log"; then
     skip "$name" "user step uitest-automation: macOS has not allowed UI automation (docs/process/one-time-setup.md)"
   else
     not_ok "$name: ${summary:-no result}" "xcodebuild exit $rc; log: $LOGS/$name.log" \

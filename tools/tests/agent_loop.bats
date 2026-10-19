@@ -638,18 +638,32 @@ assert_mac_presence_missing() {
   ! mac_app_running
 }
 
-@test "xcode-check builds without the host lease, then queues for it before launches, simulators and tests" {
+@test "xcode-check builds before waiting for the VM lease, then dispatches its numbered devices phase without a host lease" {
   add_fixture_jobs
   cat >>"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'
 mg_lint_ui_first() { return 0; }
 mg__xcframework() { return 0; }
+mg_sim_begin() {
+  MG_SIM_RUNNER=vm
+  MG_MAC_VMS='[{"name":"fake-mac","ssh":"/fake/vm-ssh"}]'
+  MG_MAC_VM="$(jq -c '.[0]' <<<"$MG_MAC_VMS")"
+  return 0
+}
+mg_sim_take() { mg__mac_vm_lease; }
+mg_job fx-vm-lease host fx_vm_lease "fixture: hold the VM lease"
+fx_vm_lease() {
+  mg_sim_begin && mg_sim_take || return
+  echo "start $1" >>"$FX_LOG"
+  while [ ! -e "$FX_UNTIL" ]; do sleep 0.1; done
+  echo "end $1" >>"$FX_LOG"
+}
 EOF
   # The project check logs each phase it runs and where its numbering starts.
   cat >"$SB/tools/tests/xcode_project_check.sh" <<'EOF'
 #!/bin/bash
-phase=all first=0
+phase=all first=0 runner=""
 while [ "$#" -gt 0 ]; do
-  case "$1" in --phase) phase="$2" && shift ;; --continue-from) first="$2" && shift ;; esac
+  case "$1" in --phase) phase="$2" && shift ;; --continue-from) first="$2" && shift ;; --vm-ssh) runner="$2" && shift ;; --no-sims) runner=queued ;; esac
   shift
 done
 echo "phase $phase from $first" >>"$FX_LOG"
@@ -659,35 +673,63 @@ if [ "$phase" = builds ]; then
   echo "not ok 2 mac-Profile builds"
   exit 1
 fi
+if [ "$runner" = queued ]; then
+  echo "ok $((first + 1)) mac-Debug launched hidden stays up: Home # SKIP queued: no test VM (user step mac-vm)"
+  echo "1..$((first + 1))"
+  exit 0
+fi
+[ "$runner" = /fake/vm-ssh ] || { echo "host execution forbidden" >>"$STUB_LOG"; exit 1; }
 echo "ok $((first + 1)) mac-Debug launched hidden stays up: Home"
 echo "1..$((first + 1))"
 EOF
-  FX_HOLD=3 "$SB/tools/mg" fx-lease a >/dev/null 2>&1 &
-  local first=$!
-  for _ in $(seq 1 50); do [ -s "$FX_LOG" ] && break; sleep 0.1; done
-  mg xcode-check
+  export MEGURI_MAC_VM_POLL_SECONDS=1 MEGURI_MAC_VM_LEASE_WAIT_SECONDS=20
+  FX_UNTIL="$BATS_TEST_TMPDIR/release-vm" "$SB/tools/mg" fx-vm-lease a >/dev/null 2>&1 3>&- &
+  local first=$! check
+  bg_track "$first"
+  for _ in $(seq 1 50); do grep -q '^start a' "$FX_LOG" && break; sleep 0.1; done
+  grep -q '^start a' "$FX_LOG"
+  STUB_LOCKED=1 "$SB/tools/mg" xcode-check >"$BATS_TEST_TMPDIR/check.out" 2>"$BATS_TEST_TMPDIR/check.err" 3>&- &
+  check=$!
+  bg_track "$check"
+  for _ in $(seq 1 100); do grep -q 'VM lease: waiting' "$BATS_TEST_TMPDIR/check.err" && break; sleep 0.1; done
+  grep -q 'VM lease: waiting for the VM (fake-mac: fx-vm-lease' "$BATS_TEST_TMPDIR/check.err"
+  [ "$(awk '$1 == "phase" {print $2}' "$FX_LOG")" = builds ]
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+  touch "$BATS_TEST_TMPDIR/release-vm"
   wait "$first"
+  status=0
+  wait "$check" || status=$?
+  result="$(tail -n 1 "$BATS_TEST_TMPDIR/check.out")"
+  stderr="$(cat "$BATS_TEST_TMPDIR/check.err")"
   [ "$status" -eq 1 ]
   [ "$(awk '{print $1 $2}' "$FX_LOG" | tr '\n' ' ')" = "starta phasebuilds enda phasedevices " ]
   [ "$(awk '$2 == "devices" {print $4}' "$FX_LOG")" = 2 ]
-  [[ "$stderr" == *"host lease: waiting for fx-lease in $SB"* ]]
-  [ "$(field '.details.host_lease.job')" = xcode-check ]
+  [[ "$stderr" == *"VM lease: waiting for the VM (fake-mac: fx-vm-lease in $SB"* ]]
+  [ "$(field '.details.mac_vm.lease.job')" = xcode-check ]
+  [ "$(field '.details.host_lease')" = null ]
+  not_called '^host execution|^xcodebuild |^simctl |^open '
   [ "$(field '.summary | "\(.total) \(.passed) \(.failed)"')" = "3 2 1" ]
   [ "$(field '.failures[0].id')" = "mac-Profile builds" ]
 
-  # A locked Mac keeps the builds' results: a failing build is a failure.
+  # A missing VM keeps the builds' results: a failing build is a failure.
+  cat >>"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'
+mg_sim_begin() { MG_SIM_RUNNER="" MG_MAC_VM_REASON="fake VM unavailable"; mg__mac_vm_queued "fake VM unavailable" "$MG_VM_PART"; return 2; }
+EOF
   : >"$FX_LOG"
   STUB_LOCKED=1 mg xcode-check
   [ "$status" -eq 1 ]
   [ "$(field .status)" = fail ]
-  [ "$(cat "$FX_LOG")" = "phase builds from 0" ]
+  [ "$(cat "$FX_LOG")" = "$(printf 'phase builds from 0\nphase devices from 2')" ]
   [ "$(field '[.failures[].id] | sort | join(" ")')" = "mac-Profile builds" ]
-  [ "$(field '.summary.total')" = 2 ]
+  [ "$(field '.summary.total')" = 3 ]
   [ "$(field .details.queued)" = false ]
+  [ "$(field '[.details.queued_parts[].user_step] | unique | join(" ")')" = mac-vm ]
+  not_called '^host execution|^xcodebuild |^simctl |^open '
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
 }
 
 # bats test_tags=gate
-@test "xcode-check whose builds pass while the Mac is locked is queued, naming host-session and the devices phase (U19b)" {
+@test "xcode-check whose builds pass with an unavailable VM queues mac-vm and never executes on the locked host" {
   add_fixture_jobs
   cat >>"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'
 mg_lint_ui_first() { return 0; }
@@ -696,21 +738,27 @@ EOF
   cat >"$SB/tools/tests/xcode_project_check.sh" <<'EOF'
 #!/bin/bash
 echo "phase $*" >>"$FX_LOG"
-echo "ok 1 mac-Debug builds"
-echo "ok 2 mac-Profile builds"
+case " $* " in
+  *" --phase builds "*) echo "ok 1 mac-Debug builds"; echo "ok 2 mac-Profile builds" ;;
+  *" --phase devices --continue-from 2 --no-sims "*)
+    echo "ok 3 mac-Debug launched hidden stays up: Home # SKIP queued: no test VM (user step mac-vm)"
+    echo "1..3" ;;
+  *) echo "host execution forbidden" >>"$STUB_LOG"; exit 1 ;;
+esac
 EOF
   STUB_LOCKED=1 mg xcode-check
   [ "$status" -eq 0 ]
   [ "$(field .status)" = warn ]
   [ "$(field .details.queued)" = true ]
-  [ "$(grep -c phase "$FX_LOG")" = 1 ]
-  [ "$(field '.summary | "\(.total) \(.passed) \(.failed)"')" = "2 2 0" ]
+  [ "$(grep -c phase "$FX_LOG")" = 2 ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed)"')" = "3 2 0" ]
   [ "$(field '.failures | length')" = 0 ]
   [ "$(field '[.details.queued_parts[] | "\(.user_step): \(.part)"] | join("; ")')" = \
-    "host-session: the devices phase (hidden Mac launches, simulators, test runs)" ]
-  [ "$(field '.user_steps[] | select(.id == "host-session") | .state')" = missing ]
-  [[ "$(field .message)" == *"the builds passed"*"queued"*"host-session"* ]]
+    "mac-vm: the devices phase (hidden Mac launches, simulators, test runs)" ]
+  [ "$(field '.user_steps[] | select(.id == "mac-vm") | .state')" = missing ]
+  [[ "$(field .message)" == *"builds checked"*"queued"*"mac-vm"* ]]
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+  not_called '^host execution|^xcodebuild |^simctl |^open '
 }
 
 # --- Mac UI gate ----------------------------------------------------------------
