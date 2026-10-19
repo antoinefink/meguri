@@ -4,6 +4,6 @@ assertion_line: 26
 expression: text
 ---
 QUESTION
-<style>.card { color: navy; }</style>猫<a class="replay-button soundLink" href=# onclick="window.webkit.messageHandlers.meguri.postMessage('play:q:1'); return false;" draggable="false"><svg class="playImage" viewBox="0 0 64 64" version="1.1"><circle cx="32" cy="32" r="29" /><path d="M56.502,32.301l-37.502,20.101l0.329,-40.804l37.173,20.703Z" /></svg></a>
+<style>.card { color: navy; }</style>猫<a class="replay-button soundLink" href=# onclick="window.webkit.messageHandlers.meguri.postMessage('play:q:1'); return false;" draggable="false"><svg class="playImage" viewBox="0 0 48 48" version="1.1"><rect x="3" y="3" width="42" height="42" rx="12" fill="none" stroke="currentColor" stroke-width="2" /><path d="M18 14L34 24L18 34Z" fill="currentColor" /></svg></a>
 ANSWER
-<style>.card { color: navy; }</style>猫<a class="replay-button soundLink" href=# onclick="window.webkit.messageHandlers.meguri.postMessage('play:q:1'); return false;" draggable="false"><svg class="playImage" viewBox="0 0 64 64" version="1.1"><circle cx="32" cy="32" r="29" /><path d="M56.502,32.301l-37.502,20.101l0.329,-40.804l37.173,20.703Z" /></svg></a>
+<style>.card { color: navy; }</style>猫<a class="replay-button soundLink" href=# onclick="window.webkit.messageHandlers.meguri.postMessage('play:q:1'); return false;" draggable="false"><svg class="playImage" viewBox="0 0 48 48" version="1.1"><rect x="3" y="3" width="42" height="42" rx="12" fill="none" stroke="currentColor" stroke-width="2" /><path d="M18 14L34 24L18 34Z" fill="currentColor" /></svg></a>

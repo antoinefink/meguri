@@ -29,7 +29,7 @@ fn button(command: &str, platform: Platform) -> String {
         Platform::Ios => format!("window.webkit.messageHandlers.meguri.postMessage('{command}')"),
     };
     format!(
-        r##"<a class="replay-button soundLink" href=# onclick="{action}; return false;" draggable="false"><svg class="playImage" viewBox="0 0 64 64" version="1.1"><circle cx="32" cy="32" r="29" /><path d="M56.502,32.301l-37.502,20.101l0.329,-40.804l37.173,20.703Z" /></svg></a>"##
+        r##"<a class="replay-button soundLink" href=# onclick="{action}; return false;" draggable="false"><svg class="playImage" data-meguri-replay-pending="true"></svg></a>"##
     )
 }
 
