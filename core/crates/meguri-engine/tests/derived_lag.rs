@@ -821,6 +821,19 @@ fn child_killed_between_commit_and_derived_update() {
     opened.settle();
     let ids = add_cards(&opened.collection, &[701, 702]);
     opened.host.flush().unwrap();
+    // Persist a known baseline, then reopen it as an active, unclean session.
+    // The injected op below is the only work absent from the derived file.
+    opened.close();
+    let opened = open(&path);
+    opened.settle();
+    // A different sidecar mark would test external-edit invalidation instead
+    // of D5.2's derived-only crash catch-up.
+    let sidecar = meguri_storage::sidecar::Sidecar::load(&Path::new(&dir).join("meguri-sidecar.json")).unwrap();
+    let mark = opened.collection.reader(ReaderRole::Query).unwrap().col().unwrap();
+    assert_eq!(
+        (sidecar.last_mod, sidecar.last_scm),
+        (mark.modified.0, mark.schema_modified.0)
+    );
     if std::env::var_os("MEGURI_DERIVED_KILL_NOW").is_some() {
         // An unclean end with nothing left to apply.
         std::process::abort();
@@ -858,7 +871,13 @@ fn run_child(dir: &Path, now: bool) {
         command.env("MEGURI_DERIVED_KILL_NOW", "1");
     }
     let status = command.status().unwrap();
-    assert!(!status.success(), "the child was not killed");
+    use std::os::unix::process::ExitStatusExt;
+    // SIGABRT is 6 on both supported test hosts (Darwin and Linux).
+    assert_eq!(
+        status.signal(),
+        Some(6),
+        "the child must reach its abort fault, not panic in setup: {status}"
+    );
 }
 
 #[test]
