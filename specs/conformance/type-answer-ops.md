@@ -43,6 +43,6 @@ Two observation kinds for U64: `type_answer` evaluates the type-in comparison on
 
 ## K4. Status
 
-- Both kinds are in the oracle driver and listed in `conformance/schema/protocol.json`. The goldens of `render/type-answer/*` (the corpus included), `render/media-escape/cards`, `render/image-occlusion/render/cards` and `render/image-occlusion/render/audio` are recorded. `render/image-occlusion/render/audio-tags` uses U62's `render` kind and is recorded once the driver has it.
+- Both kinds are in the oracle driver and listed in `conformance/schema/protocol.json`. The goldens of `render/type-answer/*` (the corpus included), `render/media-escape/cards`, `render/image-occlusion/render/cards` and `render/image-occlusion/render/audio` are recorded. `render/image-occlusion/render/audio-tags` uses U62's real `render` kind and now has its recorded golden. The whole-side and replacement-escape cases are recorded too.
 - `render/image-occlusion/render/divs` (the `cloze` kind) and `render/media-escape/strings` (the `text` kind) have goldens now.
 - Both observation providers must pass the recorded cases before U64 adds their active entries to `conformance/scenarios/render/area.yaml`.

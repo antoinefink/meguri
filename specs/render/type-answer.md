@@ -80,7 +80,7 @@ Meguri also reads modifiers from the question template (A9).
 
 1. **No field** (or, for a cloze type-in, an empty extraction): every marker of the question is replaced by a warning (A8): the cloze warning for a cloze type-in, otherwise the unknown-field warning with the field name. The card has no type-in.
 2. **Empty expected text** (not a cloze type-in): the field's value is the empty string. Every marker of the question is removed. The card has no type-in. A value that only looks empty is not empty here: `<br>`, a space or `&nbsp;` gives the box, and the comparison then expects the empty string (A6.1).
-3. **Otherwise** every marker of the question is replaced by the box (A4.4). All markers, not just the first: `{{type:Back}}|{{type:Extra}}` gives two identical boxes with Back's font and size. Only the first one's input is read at reveal (U67), so later boxes do nothing. The card's type-in is the expected text, the mode and the field's font and size.
+3. **Otherwise** every marker of the question is replaced by the box (A4.4). All markers, not just the first (subject to A4.5 replacement expansion): `{{type:Back}}|{{type:Extra}}` gives two identical boxes with Back's font and size. Only the first one's input is read at reveal (U67), so later boxes do nothing. The card's type-in is the expected text, the mode and the field's font and size.
 
 ### A4.4 The box
 
@@ -307,7 +307,7 @@ Folding examples: `Σ`, `σ` and `ς` all fold to `σ`; `K` (U+212A KELVIN SIGN)
 | Template | Expected | Typed | Meguri's comparison |
 |---|---|---|---|
 | `{{type:ci:Answer}}` | `Qavru Vexal` | `qavru vexal` | `<code id=typeans><span class=typeGood>Qavru Vexal</span></code>` |
-| `{{type:ci:Answer}}` | `Qavru Vexal` | `qavru vexul` | Good `hola amig`, Bad `o` \| Good `Hola Amig`, Missed `a` |
+| `{{type:ci:Answer}}` | `Qavru Vexal` | `qavru vexul` | Good `qavru vex`, Bad `u`, Good `l` \| Good `Qavru Vex`, Missed `a`, Good `l` |
 | `{{type:nc:ci:Answer}}`, `{{type:ci:nc:Answer}}` | `Qëvax` | `QEVAX`, `qevax` | Good `Qëvax` |
 | `{{type:cloze:nc:Text}}`, card 1 | `{{c1::café}} y {{c1::té}}` | `cafe, te` | Good `café, té` |
 | `{{type:ci:cloze:Text}}`, card 1 | `{{c1::Paris}} is big` | `paris` | Good `Paris` |
