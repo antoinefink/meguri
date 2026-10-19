@@ -23,8 +23,8 @@ holds temporary authentication; cleanup removes authentication on success,
 failure or cancellation. Every invocation first proves permitted writes, missing
 host/source paths, denied credential-directory reads and a denied connection to
 a listener proven reachable outside the command sandbox. Probe failure stops the
-run. Codex may create an empty `.git` protection directory; the runner accepts
-only that empty guard and removes it after the sandbox exits.
+run. Codex may create empty `.git` and `.codex` protection directories; the runner
+removes only empty guards after the sandbox exits. Nonempty guards fail the run.
 
 The container permits nested unprivileged namespaces for bubblewrap: its Docker
 seccomp and system-path masks are disabled, with a read-only
@@ -38,7 +38,6 @@ the restricted runner has no Docker socket or warmed dependency cache. Main
 checkout access remains necessary for integration and black-box verification;
 its owner must not read forbidden sources or raw similarity reports.
 
-Runtime configuration follows the [OpenAI sandbox documentation](https://developers.openai.com/codex/sandbox)
-and [configuration reference](https://developers.openai.com/codex/config-reference).
+Runtime configuration follows the [OpenAI configuration reference](https://developers.openai.com/codex/config-reference).
 Isolation does not prove independent authorship. Specs, provenance review
 and similarity checks remain required for code and assets.
