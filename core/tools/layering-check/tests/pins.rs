@@ -71,6 +71,26 @@ fn messages(report: &PinReport) -> String {
     report.violations.iter().map(|v| format!("{v}\n")).collect()
 }
 
+/// A pin failure must identify the crate on every violation and explain all
+/// the required parts of the workspace, lockfile or member dependency drift.
+fn assert_pin_failure(report: &PinReport, subject: &str, count: usize, fragments: &[&str]) {
+    let text = messages(report);
+    assert_eq!(report.violations.len(), count, "{text}");
+    for violation in &report.violations {
+        assert_eq!(
+            (violation.rule, violation.subject.as_str()),
+            (Rule::Pin, subject),
+            "unexpected violation identity: {violation:?}\n{text}"
+        );
+    }
+    for &fragment in fragments {
+        assert!(
+            text.contains(fragment),
+            "missing diagnostic fragment {fragment:?}:\n{text}"
+        );
+    }
+}
+
 #[test]
 fn the_real_files_pass_with_no_pending_pins() {
     let report = Files::real().check();
@@ -84,21 +104,18 @@ fn unicase_bumped_to_2_7_0_in_the_workspace_fails_naming_unicase() {
     files.manifest = files.manifest.replace("unicase = \"=2.6.0\"", "unicase = \"=2.7.0\"");
     files.lock = bump_lock(&files.lock, "unicase", "2.6.0", "2.7.0");
 
-    let report = files.check();
-    let text = messages(&report);
-    assert_eq!(report.violations.len(), 3, "{text}");
-    assert!(
-        report
-            .violations
-            .iter()
-            .all(|v| v.rule == Rule::Pin && v.subject == "unicase"),
-        "{text}"
+    assert_pin_failure(
+        &files.check(),
+        "unicase",
+        3,
+        &[
+            "[workspace.dependencies] requires =2.7.0",
+            "Cargo.lock has unicase 2.7.0",
+            "meguri-text depends on unicase 2.7.0",
+            "pins.toml pins 2.6.0",
+            "anki 26.09.3",
+        ],
     );
-    assert!(text.contains("[workspace.dependencies] requires =2.7.0"), "{text}");
-    assert!(text.contains("Cargo.lock has unicase 2.7.0"), "{text}");
-    assert!(text.contains("meguri-text depends on unicase 2.7.0"), "{text}");
-    assert!(text.contains("pins.toml pins 2.6.0"), "{text}");
-    assert!(text.contains("anki 26.09.3"), "{text}");
 }
 
 #[test]
@@ -177,20 +194,17 @@ fn a_workspace_crate_using_the_rand_that_fsrs_brings_fails() {
     // resolves it to the rand 0.10.1 already in the graph for fsrs.
     files.lock = add_lock_dependency(&files.lock, "meguri-search", "rand 0.10.1");
 
-    let report = files.check();
-    let text = messages(&report);
-    assert_eq!(report.violations.len(), 1, "{text}");
-    assert_eq!(
-        (report.violations[0].rule, report.violations[0].subject.as_str()),
-        (Rule::Pin, "rand")
+    assert_pin_failure(
+        &files.check(),
+        "rand",
+        1,
+        &[
+            "meguri-search depends on rand 0.10.1",
+            "pins.toml pins 0.9.4 from the anki 26.09.3 lockfile",
+            "rand 0.10.1 only as the version fsrs brings",
+            "rand.workspace = true",
+        ],
     );
-    assert!(text.contains("meguri-search depends on rand 0.10.1"), "{text}");
-    assert!(
-        text.contains("pins.toml pins 0.9.4 from the anki 26.09.3 lockfile"),
-        "{text}"
-    );
-    assert!(text.contains("rand 0.10.1 only as the version fsrs brings"), "{text}");
-    assert!(text.contains("rand.workspace = true"), "{text}");
 }
 
 #[test]
@@ -202,22 +216,16 @@ fn a_renamed_workspace_dependency_on_the_fsrs_rand_fails() {
     );
     files.lock = add_lock_dependency(&files.lock, "meguri-sched", "rand 0.10.1");
 
-    let report = files.check();
-    let text = messages(&report);
-    assert_eq!(report.violations.len(), 2, "{text}");
-    assert!(
-        report
-            .violations
-            .iter()
-            .all(|v| v.rule == Rule::Pin && v.subject == "rand"),
-        "{text}"
+    assert_pin_failure(
+        &files.check(),
+        "rand",
+        2,
+        &[
+            "rand (as rand010): core/Cargo.toml [workspace.dependencies] requires =0.10.1",
+            "must be exactly \"=0.9.4\"",
+            "meguri-sched depends on rand 0.10.1",
+        ],
     );
-    assert!(
-        text.contains("rand (as rand010): core/Cargo.toml [workspace.dependencies] requires =0.10.1"),
-        "{text}"
-    );
-    assert!(text.contains("must be exactly \"=0.9.4\""), "{text}");
-    assert!(text.contains("meguri-sched depends on rand 0.10.1"), "{text}");
 }
 
 #[test]
@@ -229,16 +237,16 @@ fn a_second_unpinned_version_of_a_parity_crate_in_a_workspace_crate_fails() {
     files.lock = add_lock_package(&files.lock, "unicase", "1.4.2");
     files.lock = add_lock_dependency(&files.lock, "meguri-search", "unicase 1.4.2");
 
-    let report = files.check();
-    let text = messages(&report);
-    assert_eq!(report.violations.len(), 1, "{text}");
-    assert_eq!(
-        (report.violations[0].rule, report.violations[0].subject.as_str()),
-        (Rule::Pin, "unicase")
+    assert_pin_failure(
+        &files.check(),
+        "unicase",
+        1,
+        &[
+            "meguri-search depends on unicase 1.4.2",
+            "pins.toml pins 2.6.0",
+            "anki 26.09.3",
+        ],
     );
-    assert!(text.contains("meguri-search depends on unicase 1.4.2"), "{text}");
-    assert!(text.contains("pins.toml pins 2.6.0"), "{text}");
-    assert!(text.contains("anki 26.09.3"), "{text}");
 }
 
 #[test]
