@@ -542,6 +542,87 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        /// Indexed prototype hooks are installed only across the call under
+        /// test. Probe storage and argument lists have no prototype, so the
+        /// test itself cannot trigger those hooks.
+        @Test func listenerArgumentsIgnoreInheritedIndexesBeforeNativeValidation() async throws {
+            try await WebTestHarness.withPage { _, page async throws in
+                let results = try await page.json([[String]].self, #"""
+                    const frame = document.createElement("iframe");
+                    frame.hidden = true;
+                    frame.src = "about:blank";
+                    await new Promise(resolve => { frame.onload = resolve; document.body.appendChild(frame); });
+                    const native = frame.contentWindow.EventTarget.prototype;
+                    const wrapped = EventTarget.prototype;
+                    const results = [];
+                    const define = Object.defineProperty, descriptor = Object.getOwnPropertyDescriptor;
+                    const apply = Reflect.apply;
+                    const target = document.createElement("div");
+                    const callback = function () {};
+                    for (const method of ["addEventListener", "removeEventListener"]) {
+                      for (const count of [0, 1, 2, 3]) {
+                        for (const invalid of [false, true]) {
+                          const pair = [];
+                          for (const api of [native, wrapped]) {
+                            const probe = Object.create(null);
+                            probe.trace = "";
+                            const args = Object.create(null);
+                            args.length = count;
+                            if (count > 0) args[0] = { [Symbol.toPrimitive](hint) {
+                              probe.trace += "type:" + hint + ";";
+                              return "untracked-index-probe";
+                            } };
+                            if (count > 1) args[1] = callback;
+                            if (count > 2) args[2] = { get capture() { probe.trace += "capture;"; return false; },
+                              get once() { probe.trace += "once;"; return false; },
+                              get passive() { probe.trace += "passive;"; return false; },
+                              get signal() { probe.trace += "signal;"; return undefined; } };
+                            const savedObject = Object.create(null), savedArray = Object.create(null);
+                            for (const key of ["0", "2"]) {
+                              savedObject[key] = descriptor(Object.prototype, key);
+                              savedArray[key] = descriptor(Array.prototype, key);
+                            }
+                            const operation = api[method], receiver = invalid ? {} : target;
+                            try {
+                              for (const key of ["0", "2"]) {
+                                define(Object.prototype, key, { configurable: true, get() {
+                                  probe.trace += "object-get:" + key + ";";
+                                  return undefined;
+                                } });
+                                define(Array.prototype, key, { configurable: true, set(value) {
+                                  probe.trace += "array-set:" + key + ";";
+                                  throw new Error("indexed array write");
+                                } });
+                              }
+                              try { probe.outcome = "return:" + String(apply(operation, receiver, args)); }
+                              catch (error) { probe.outcome = "throw:" + error.name; }
+                            } finally {
+                              for (const key of ["0", "2"]) {
+                                if (savedArray[key]) define(Array.prototype, key, savedArray[key]);
+                                else delete Array.prototype[key];
+                                if (savedObject[key]) define(Object.prototype, key, savedObject[key]);
+                                else delete Object.prototype[key];
+                              }
+                            }
+                            pair.push(probe.outcome + ":" + probe.trace);
+                            // Cleanup with pristine methods, after restoring prototypes.
+                            apply(native.removeEventListener, target, ["untracked-index-probe", callback]);
+                          }
+                          results.push(pair);
+                        }
+                      }
+                    }
+                    frame.remove();
+                    return JSON.stringify(results);
+                    """#)
+                #expect(results.count == 16)
+                for pair in results {
+                    #expect(pair.count == 2 && pair.first == pair.last, "native/wrapped: \(pair)")
+                    #expect(pair.allSatisfy { !$0.contains("object-get:") && !$0.contains("array-set:") })
+                }
+            }
+        }
+
         @Test func registryReportsAScriptKeyListener() async throws {
             try await WebTestHarness.withPage { harness, page async throws in
                 try await page.showPresentedQuestion(

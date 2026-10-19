@@ -29,6 +29,7 @@
   const CustomEventCtor = CustomEvent;
   const CSSStyleSheetCtor = CSSStyleSheet;
   const WeakMapCtor = WeakMap;
+  const WeakRefCtor = WeakRef;
   const SetCtor = Set;
   const ElementCtor = Element;
   const HTMLElementCtor = HTMLElement;
@@ -42,6 +43,7 @@
   const regexpExec = RegExp.prototype.exec;
   const weakMapGet = WeakMap.prototype.get;
   const weakMapSet = WeakMap.prototype.set;
+  const weakRefDeref = WeakRef.prototype.deref;
   const setHas = Set.prototype.has;
   const setAdd = Set.prototype.add;
 
@@ -330,8 +332,8 @@
   for (let i = 0; i < TAP_TYPES.length; i++) tracked[TAP_TYPES[i]] = true;
   for (let i = 0; i < KEY_TYPES.length; i++) tracked[KEY_TYPES[i]] = true;
 
-  // target -> { type: [{ callback, capture, once }] }, one entry per add
-  // WebKit may have registered. An abort removes only its own add's entry.
+  // target -> { type: [{ callback: WeakRef, capture, once }] }. Native owns
+  // active callbacks; stale once entries must not own old card content.
   const registry = new WeakMapCtor();
 
   function isObject(value) {
@@ -342,10 +344,15 @@
   // and arity checks. Empty proxy targets avoid invariants on frozen inputs;
   // getters and conversion methods still receive the caller's original object.
   function listenerArguments(original) {
-    const observed = { args: [], type: original[0], capture: false, once: false, signal: undefined };
+    const observed = { args: createObject(null), type: undefined, capture: false, once: false, signal: undefined };
     const args = observed.args;
-    for (let i = 0; i < original.length; i++) args[i] = original[i];
-    const type = original[0];
+    args.length = original.length;
+    for (let i = 0; i < original.length; i++) {
+      const supplied = describeProperty(original, i);
+      if (supplied) args[i] = supplied.value;
+    }
+    const type = args.length > 0 ? args[0] : undefined;
+    observed.type = type;
     if (isObject(type)) {
       args[0] = new ProxyCtor(createObject(null), {
         get: function (_, key) {
@@ -360,7 +367,7 @@
         },
       });
     }
-    const options = original[2];
+    const options = args.length > 2 ? args[2] : undefined;
     if (isObject(options)) {
       args[2] = new ProxyCtor(createObject(null), {
         get: function (_, key) {
@@ -384,6 +391,12 @@
     entries.length -= 1;
   }
 
+  function pruneEntries(entries) {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (call(weakRefDeref, entries[i].callback) === undefined) removeEntryAt(entries, i);
+    }
+  }
+
   function entriesOf(target, type, create) {
     let byType = call(weakMapGet, registry, target);
     if (!byType) {
@@ -392,6 +405,7 @@
       call(weakMapSet, registry, target, byType);
     }
     let entries = byType[type];
+    if (entries) pruneEntries(entries);
     if (!entries && create) {
       entries = [];
       byType[type] = entries;
@@ -405,7 +419,7 @@
     const entries = entriesOf(target, type, false);
     if (!entries) return;
     for (let i = entries.length - 1; i >= 0; i--) {
-      if (entries[i].callback === callback && entries[i].capture === capture) removeEntryAt(entries, i);
+      if (call(weakRefDeref, entries[i].callback) === callback && entries[i].capture === capture) removeEntryAt(entries, i);
     }
   }
 
@@ -421,6 +435,16 @@
     }
   }
 
+  // Keep this closure outside track's scope: a live controller must retain
+  // neither the target nor the original callback, even indirectly.
+  function abortCleanup(targetRef, type, entryRef) {
+    return function () {
+      const target = call(weakRefDeref, targetRef);
+      const entry = call(weakRefDeref, entryRef);
+      if (target && entry) untrackEntry(target, type, entry);
+    };
+  }
+
   function track(target, type, callback, observed) {
     if (!tracked[type] || callback === null || callback === undefined) return;
     const capture = observed.capture;
@@ -432,14 +456,12 @@
     // it gets its own entry (counting too much is allowed, C13).
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
-      if (entry.callback === callback && entry.capture === capture && !entry.once) return;
+      if (call(weakRefDeref, entry.callback) === callback && entry.capture === capture && !entry.once) return;
     }
-    const entry = { callback: callback, capture: capture, once: observed.once };
+    const entry = { callback: new WeakRefCtor(callback), capture: capture, once: observed.once };
     entries[entries.length] = entry;
     if (signal) {
-      call(nativeAdd, signal, "abort", function () {
-        untrackEntry(target, type, entry);
-      }, { once: true });
+      call(nativeAdd, signal, "abort", abortCleanup(new WeakRefCtor(target), type, new WeakRefCtor(entry)), { once: true });
     }
   }
 
