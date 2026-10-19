@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "spec": "render/card-runtime#C4.1",
+  "compiler": {
+    "version": "1.102.0"
+  },
+  "calculation": "Scale alpha linearly; scale lightness or saturation in HSL. Positive percent moves toward the channel maximum; negative percent moves toward zero. Compare exact interpolated CSS color text, without numeric normalization.",
+  "cases": [
+    {
+      "property": "--canvas-glass",
+      "appearance": "light",
+      "color": "#ffffff",
+      "channel": "alpha",
+      "scale_percent": -60,
+      "expected": "rgba(255, 255, 255, 0.4)"
+    },
+    {
+      "property": "--canvas-glass",
+      "appearance": "dark",
+      "color": "#363636",
+      "channel": "alpha",
+      "scale_percent": -60,
+      "expected": "rgba(54, 54, 54, 0.4)"
+    },
+    {
+      "property": "--button-disabled",
+      "appearance": "light",
+      "color": "#d6d6d6",
+      "channel": "alpha",
+      "scale_percent": -50,
+      "expected": "rgba(214, 214, 214, 0.5)"
+    },
+    {
+      "property": "--button-disabled",
+      "appearance": "dark",
+      "color": "#454545",
+      "channel": "alpha",
+      "scale_percent": -50,
+      "expected": "rgba(69, 69, 69, 0.5)"
+    },
+    {
+      "property": "--highlight-bg",
+      "appearance": "light",
+      "color": "#2563eb",
+      "channel": "alpha",
+      "scale_percent": -50,
+      "expected": "rgba(37, 99, 235, 0.5)"
+    },
+    {
+      "property": "--highlight-bg",
+      "appearance": "dark",
+      "color": "#93c5fd",
+      "channel": "alpha",
+      "scale_percent": -50,
+      "expected": "rgba(147, 197, 253, 0.5)"
+    },
+    {
+      "property": "--selected-bg",
+      "appearance": "light",
+      "color": "#d6d6d6",
+      "channel": "alpha",
+      "scale_percent": -50,
+      "expected": "rgba(214, 214, 214, 0.5)"
+    },
+    {
+      "property": "--selected-bg",
+      "appearance": "dark",
+      "color": "#93c5fd",
+      "channel": "alpha",
+      "scale_percent": -50,
+      "expected": "rgba(147, 197, 253, 0.5)"
+    },
+    {
+      "property": "--button-bg",
+      "appearance": "dark",
+      "color": "#363636",
+      "channel": "lightness",
+      "scale_percent": 5,
+      "expected": "rgb(25.1176470588%, 25.1176470588%, 25.1176470588%)"
+    },
+    {
+      "property": "--button-gradient-start",
+      "appearance": "dark",
+      "color": "#363636",
+      "channel": "lightness",
+      "scale_percent": 10,
+      "expected": "rgb(29.0588235294%, 29.0588235294%, 29.0588235294%)"
+    },
+    {
+      "property": "--button-gradient-end",
+      "appearance": "dark",
+      "color": "#363636",
+      "channel": "lightness",
+      "scale_percent": 5,
+      "expected": "rgb(25.1176470588%, 25.1176470588%, 25.1176470588%)"
+    },
+    {
+      "property": "--button-primary-bg",
+      "appearance": "light",
+      "color": "#2563eb",
+      "channel": "lightness",
+      "scale_percent": 5,
+      "expected": "rgb(18.7843137255%, 41.8823529412%, 92.5490196078%)"
+    },
+    {
+      "property": "--button-primary-bg",
+      "appearance": "dark",
+      "color": "#1d4ed8",
+      "channel": "saturation",
+      "scale_percent": -10,
+      "expected": "rgb(15.0392156863%, 32.3333333333%, 81.0392156863%)"
+    },
+    {
+      "property": "--button-primary-gradient-end",
+      "appearance": "light",
+      "color": "#2563eb",
+      "channel": "lightness",
+      "scale_percent": 5,
+      "expected": "rgb(18.7843137255%, 41.8823529412%, 92.5490196078%)"
+    },
+    {
+      "property": "--button-primary-gradient-end",
+      "appearance": "dark",
+      "color": "#1d4ed8",
+      "channel": "saturation",
+      "scale_percent": -10,
+      "expected": "rgb(15.0392156863%, 32.3333333333%, 81.0392156863%)"
+    },
+    {
+      "property": "--button-primary-gradient-start",
+      "appearance": "dark",
+      "color": "#2563eb",
+      "channel": "saturation",
+      "scale_percent": -10,
+      "expected": "rgb(18.3921568627%, 40.2745098039%, 88.2745098039%)"
+    },
+    {
+      "property": "--button-primary-disabled",
+      "appearance": "dark",
+      "color": "#3b82f6",
+      "channel": "saturation",
+      "scale_percent": -10,
+      "expected": "rgb(26.8039215686%, 51.862745098%, 92.8039215686%)"
+    }
+  ]
+}

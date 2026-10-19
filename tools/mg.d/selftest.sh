@@ -90,7 +90,7 @@ mg_job image-tools-selftest docker:image-tools mg_image_tools_selftest \
   "Tests of the image-tools scripts in their container: contact-sheet, hierarchy-check (U8), image-diff, screen-status, critic and gallery (U10), perf-compare (U12); args go to unittest, e.g. -k overlap"
 
 # Every script directory with a tests/ folder that runs in image-tools.
-MG_IMAGE_TOOLS_TESTED="tools/scripts/hierarchy-check tools/scripts/contact-sheet tools/scripts/image-diff tools/scripts/screen-status tools/scripts/critic tools/scripts/gallery tools/scripts/perf-compare"
+MG_IMAGE_TOOLS_TESTED="tools/scripts/hierarchy-check tools/scripts/contact-sheet tools/scripts/image-diff tools/scripts/screen-status tools/scripts/critic tools/scripts/gallery tools/scripts/perf-compare tools/scripts/research"
 
 mg_image_tools_selftest() {
   local dir rc=0 log failed=0 ran=0 n f

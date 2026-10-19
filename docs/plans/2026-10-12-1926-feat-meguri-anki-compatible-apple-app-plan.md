@@ -720,7 +720,7 @@ flowchart TB
 **Card JavaScript surface**
 - R505. `pycmd` and `bridgeCommand` are not defined on iOS/iPadOS (matching AnkiMobile), so templates take their mobile code paths.
 - R506. On Mac, `pycmd(cmd, callback)` and `bridgeCommand` are defined: `ans` reveals the answer when on the question side, `play:q:N` / `play:a:N` stop the queue and play that side's Nth AV tag, and every other command is ignored without throwing and logged (deviation: Anki also honours `ease1`–`ease4`, `edit`, `more`).
-- R507. When a `pycmd` callback is supplied, it is called asynchronously with `undefined`.
+- R507. When a `pycmd` callback is supplied, it is called asynchronously with `null` (Antoine's settled pinned-parity decision, 2026-10-17).
 - R508. A global `_typeAnsPress()` exists on every platform, reads `window.event`, and reveals the answer when the key is Enter on the question side, even on cards without `{{type:}}`.
 - R509. Global `onUpdateHook` and `onShownHook` arrays exist and are reset each side, their functions may return promises that are awaited, and each runs isolated from the others' exceptions.
 - R510. `require("anki/reviewer")` returns the same `onUpdateHook` and `onShownHook` arrays, and `require("anki/bridgecommand")` returns the bridge function on Mac.
@@ -7070,7 +7070,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 - `import('/_mod.js')` and `import('./_mod.js')` both resolve via the scheme handler (R520).
 - The FrontSide script runs again on the answer, and its `<input>` is a new element (R469).
 - The globals snapshot of the page world equals the R516/R510/R512–R515 allowlist exactly. `AnkiDroidJS`, `showAnswer` and `study` are undefined (R516, R517).
-- Covers AE18 (page part): on Mac, `pycmd("ans")` posts a reveal and its callback receives `undefined` asynchronously; `pycmd("ease3")` is ignored without throwing; on iOS, `typeof pycmd === "undefined"` (R505–R507).
+- Covers AE18 (page part): on Mac, `pycmd("ans")` posts a reveal and its callback receives `null` asynchronously; `pycmd("ease3")` is ignored without throwing; on iOS, `typeof pycmd === "undefined"` (R505–R507).
 - `_typeAnsPress()` with Enter on a card without `{{type:}}` reveals; Enter during an active composition does not; Enter after `compositionend` does (AE17 IME part, R508, R535).
 - Computed styles: `body` margin 20px, `#typeans` box-sizing, `.typeGood` background, `#_flag` fixed right 10px. `--canvas` is `#f5f5f5` in light and `#2c2c2c` in dark. `html` text-size-adjust is 100% (R479–R487).
 - S13: `.card{background:white}` is overridden by `body.nightMode`; `.card.nightMode{…}` wins; `prefers-color-scheme: dark` agrees with the classes; `.latex` is inverted; IO mask colors are unchanged (R488, R489, R491, R492).

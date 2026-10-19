@@ -75,6 +75,21 @@ SURROGATE_PAIR = re.compile(r"\\u(d[89ab][0-9a-f]{2})\\u(d[c-f][0-9a-f]{2})", re
 ESCAPE = re.compile(r"\\(?:u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|x([0-9a-fA-F]{2}))")
 SNIFF = 8192
 
+# Fixed interoperability spellings (render/card-runtime C4.1) and compiler
+# names, module and archive from the official version 1.102.0 distribution,
+# independently verified by css-reference's pinned archive and module check.
+# Only complete literal spans qualify;
+# no caller-provided file or list can exempt surrounding text. Match before
+# case folding, including in each decoded variant the scanner already checks.
+PUBLIC_IDENTIFIERS = ("--canvas-elevated", "canvas-elevated", "dart-sass/sass", "dart-sass", "sass:color", "sass")
+PUBLIC_COMPILER_URL = "https://github.com/sass/dart-sass/releases/download/1.102.0/dart-sass-1.102.0-linux-arm64.tar.gz"
+PUBLIC_LITERAL = re.compile(
+    r"(?<![^\s\"'`<>()\[\]{},;:=|])(?:" + "|".join(map(re.escape, PUBLIC_IDENTIFIERS)) +
+    r")(?=$|[\s\"'`<>()\[\]{},;:=|])"
+    r"|(?<![^\s\"'`<>()\[\]{},;=|])" + re.escape(PUBLIC_COMPILER_URL) +
+    r"(?=$|[\s\"'`<>()\[\]{},;|])"
+)
+
 
 def words(text):
     """The words of `text`: NFC, case-folded, maximal runs of letters and digits."""
@@ -110,18 +125,38 @@ class Matcher:
                 self.lengths.setdefault(token[0], set()).add(len(token))
         self.count = len(self.single) + len(self.multi)
 
-    def find(self, ws):
-        """Yields each token found in `ws` (with repeats)."""
+    def occurrences(self, ws):
+        """Yields each token and its word interval (with repeats)."""
         for i, w in enumerate(ws):
             if w in self.single:
-                yield (w,)
+                yield (w,), i, i + 1
             for n in self.lengths.get(w, ()):
                 token = tuple(ws[i : i + n])
                 if len(token) == n and token in self.multi:
-                    yield token
+                    yield token, i, i + n
+
+    def find(self, ws):
+        """Yields each token found in `ws` (with repeats)."""
+        for token, _, _ in self.occurrences(ws):
+            yield token
+
+    def scan_tokens(self, text):
+        """Retain every match except those fully inside fixed public facts."""
+        text = unicodedata.normalize("NFC", text)
+        spans = [(len(text[:m.start()].casefold()), len(text[:m.end()].casefold()))
+                 for m in PUBLIC_LITERAL.finditer(text)]
+        if not spans:
+            yield from self.find(words(text))
+            return
+        matches = list(WORD.finditer(text.casefold()))
+        ws = [m.group() for m in matches]
+        for token, first, end in self.occurrences(ws):
+            start_char, end_char = matches[first].start(), matches[end - 1].end()
+            if not any(start <= start_char and end_char <= stop for start, stop in spans):
+                yield token
 
     def hit(self, text):
-        for _ in self.find(words(text)):
+        for _ in self.scan_tokens(text):
             return True
         return False
 
@@ -408,7 +443,7 @@ def _runs_hit(matcher, data, start, end, run, min_bytes):
             continue
         text = m.group(0).decode("utf-8")
         for v in variants(text):
-            for token in matcher.find(words(v)):
+            for token in matcher.scan_tokens(v):
                 if sum(len(w.encode("utf-8")) for w in token) >= min_bytes:
                     return True
     return False

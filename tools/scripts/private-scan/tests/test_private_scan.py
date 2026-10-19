@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 import zlib
 
@@ -578,6 +579,100 @@ class Staged(unittest.TestCase):
         git(self.repo, "add", "-A")
         r, out = self.scan()
         self.assertEqual((r.returncode, out["files"], out["files_scanned"]), (0, [], 1))
+
+
+class PublicInterfaceTests(unittest.TestCase):
+    """Fixed public facts do not exempt surrounding or modified text."""
+
+    key = "--public-surface"
+    url = "https://github.com/sass/dart-sass/releases/download/1.102.0/dart-sass-1.102.0-linux-arm64.tar.gz"
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = self.temp.name
+        git(self.repo, "init", "-q")
+        # Exercise modified fixtures through the same
+        # production boundary expression. Public facts are checked separately.
+        pattern = private_scan.PUBLIC_LITERAL.pattern.replace(re.escape("canvas-elevated"), re.escape("public-surface"))
+        patch = mock.patch.object(private_scan, "PUBLIC_LITERAL", re.compile(pattern))
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.matcher = private_scan.Matcher({("public",), ("surface",),
+                                             tuple(private_scan.words("dart-sass")), ("sentinelprivate",)})
+
+    def check_all(self, text, expected, matcher=None):
+        matcher = matcher or self.matcher
+        for binary in (False, True):
+            data = text.encode("utf-8") + (b"\0" if binary else b"\n")
+            full = os.path.join(self.repo, "report.bin" if binary else "report.txt")
+            write(full, data, "wb")
+            git(self.repo, "add", "--", os.path.basename(full))
+            staged, _ = private_scan.scan_staged(matcher, self.repo)
+            self.assertEqual(bool(staged), expected, (text, "staged", binary))
+            files, _ = private_scan.scan_paths(matcher, [full], repo=self.repo)
+            self.assertEqual(bool(files), expected, (text, "file", binary))
+            git(self.repo, "reset", "-q")
+
+    def test_exact_public_interface_and_compiler_url(self):
+        for text in (self.key, "public-surface", "dart-sass", self.url,
+                     '`%s`: white; value="%s"' % (self.key, self.url)):
+            self.check_all(text, False)
+
+    def test_modified_literals_and_longer_identifiers_are_scanned(self):
+        for text in ("--public_surface", self.key + "-extra", "x" + self.key,
+                     self.key.upper(), self.key + "\u0301", "\u0301" + self.key,
+                     self.url.replace("1.102.0", "1.101.0"), self.url + "/extra",
+                     self.url + ".evil", self.url + "?extra", "x" + self.url, "?" + self.url, "%" + self.url):
+            self.check_all(text, True)
+
+    def test_surrounding_private_text_is_scanned(self):
+        for literal in (self.key, self.url):
+            for text in ("sentinelprivate " + literal, literal + " sentinelprivate",
+                         literal + "?sentinelprivate", literal + "#sentinelprivate"):
+                self.check_all(text, True)
+
+    def test_multiword_tokens_crossing_public_spans_still_match(self):
+        cases = [("before " + self.key, ("before", "public")),
+                 (self.key + " after", ("surface", "after")),
+                 (self.key + " " + self.key, ("surface", "public"))]
+        for text, token in cases:
+            self.check_all(text, True, private_scan.Matcher({token}))
+
+    def test_normalization_before_the_literal_preserves_match_positions(self):
+        for text in ("Straße " + self.key, "Ho\u0308r " + self.url):
+            self.check_all(text, False)
+
+    def test_clean_working_file_never_hides_private_index_text(self):
+        full = os.path.join(self.repo, "report.txt")
+        write(full, self.key + " sentinelprivate\n")
+        git(self.repo, "add", "report.txt")
+        write(full, self.key + "\n")
+        staged, _ = private_scan.scan_staged(self.matcher, self.repo)
+        self.assertEqual(staged, [{"path": "report.txt", "lines": [1]}])
+
+
+class FixedPublicFactsTests(unittest.TestCase):
+    def test_known_interface_spellings_and_archive_are_exact(self):
+        facts = ("--canvas-elevated", "canvas-elevated", "dart-sass", "dart-sass/sass", "sass:color", "sass",
+                 "https://github.com/sass/dart-sass/releases/download/1.102.0/dart-sass-1.102.0-linux-arm64.tar.gz")
+        matcher = private_scan.Matcher({(word,) for fact in facts for word in private_scan.words(fact)})
+        for fact in facts:
+            self.assertFalse(matcher.hit(fact))
+            self.assertTrue(matcher.hit(fact.upper()))
+
+    def test_real_facts_do_not_exempt_surrounding_file_or_index_text(self):
+        with tempfile.TemporaryDirectory() as repo:
+            git(repo, "init", "-q")
+            matcher = private_scan.Matcher({("sentinelprivate",)})
+            for fact in private_scan.PUBLIC_IDENTIFIERS + (private_scan.PUBLIC_COMPILER_URL,):
+                for binary in (False, True):
+                    full = os.path.join(repo, "report")
+                    write(full, (fact + " sentinelprivate").encode() + (b"\0" if binary else b"\n"), "wb")
+                    git(repo, "add", "report")
+                    self.assertTrue(private_scan.scan_paths(matcher, [full], repo)[0])
+                    write(full, fact.encode(), "wb")
+                    self.assertTrue(private_scan.scan_staged(matcher, repo)[0])
 
 
 class PublicNoticeTests(unittest.TestCase):

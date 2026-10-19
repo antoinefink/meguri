@@ -49,4 +49,4 @@
 
 - `u38-wiring --milestone <id>` runs the on-demand host provider-owner test against the normalized milestone manifest. Ordinary core tests skip that one check while providers are expected to be pending; M1R and M1 run it through their distinct T3 run IDs.
 
-- Private scans permit only the exact Unicode notice at `specs/render/unicode-data-LICENSE.txt` with the SHA pinned in `private_scan.py`. A notice edit is scanned again; never expand this rule to paths, prefixes or editable manifests.
+- Private scans permit the exact Unicode notice at `specs/render/unicode-data-LICENSE.txt` with the SHA pinned in `private_scan.py`; edits are scanned again. Fixed public interface/compiler literals there exempt only fully contained matches in complete, case-sensitive literal spans (also in decoded variants), never surrounding or crossing tokens. Never use path, prefix or editable-manifest exemptions.

@@ -192,7 +192,7 @@ runs:
     tier: T0
     placement: docker:image-tools
     class: tooling
-    triggers: [tools/scripts/contact-sheet/, tools/scripts/hierarchy-check/, tools/scripts/image-diff/, tools/scripts/screen-status/, tools/scripts/critic/, tools/scripts/gallery/, tools/scripts/perf-compare/, "docker/image-tools.Dockerfile*", tools/mg.d/selftest.sh]
+    triggers: [tools/scripts/contact-sheet/, tools/scripts/hierarchy-check/, tools/scripts/image-diff/, tools/scripts/screen-status/, tools/scripts/critic/, tools/scripts/gallery/, tools/scripts/perf-compare/, tools/scripts/research/, "docker/image-tools.Dockerfile*", tools/mg.d/selftest.sh]
     budget_s: 900
   - id: lint-ui-selftest
     job: lint-ui-selftest
@@ -715,6 +715,7 @@ runs:
     user_step: device-run
 
 utilities:
+  - {job: css-reference, why: "spec-side public compiler check: neutral JSON facts only; runtime tests verify the resulting contract"}
   - {job: corpus-generate, why: "spec side: generates the comparison corpus as run artifacts; conformance checks published scenarios"}
   - {job: cleanroom, why: "restricted Codex implementation runner; boundary probes run before every invocation"}
   - {job: cleanroom-image, why: "builds the restricted Codex runtime; cleanroom verifies it before use"}

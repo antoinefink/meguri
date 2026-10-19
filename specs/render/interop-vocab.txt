@@ -84,6 +84,127 @@ flds
 tmpls
 latexPre
 latexPost
+
+# Interface names the render specs use (specs/render/card-runtime.md): the card
+# page's element ids and classes that templates target, the page-world globals,
+# package names and bridge commands templates call, the forbidden client
+# globals they probe, the reviewer CSS custom properties, and the collection
+# config key for extra review HTML. Ordinary words that are also interface
+# names here (card, answer, canvas, require, ans, cb, ...) are left out on
+# purpose: these are ordinary words, so they stay visible to the scan.
+# Element ids and classes
+qa
+typeans
+_flag
+_mark
+nightMode
+night_mode
+night-mode
+macos-dark-mode
+isMac
+data-bs-theme
+typeGood
+typeBad
+typeMissed
+replay-button
+soundLink
+playImage
+latex
+image-occlusion-container
+image-occlusion-canvas
+# Page-world globals and their members
+onUpdateHook
+onShownHook
+_showQuestion
+_showAnswer
+_updateQA
+_drawFlag
+_drawMark
+getTypedAnswer
+_typeAnsPress
+ankiPlatform
+pycmd
+bridgeCommand
+mutateNextCardStates
+imageOcclusion
+setupImageCloze
+MathJax
+typesetPromise
+typesetClear
+jQuery
+# Packages
+listPackages
+hasPackages
+# Bridge commands and AnkiMobile's handler
+ankitap
+# Globals of other clients that must stay undefined
+AnkiDroidJS
+showAnswer
+buttonAnswerEase1
+buttonAnswerEase2
+buttonAnswerEase3
+buttonAnswerEase4
+setInnerHTML
+_queueAction
+_emulateMobile
+_blockDefaultDragDropBehavior
+# Collection config key
+reviewExtra
+# Reviewer CSS custom properties
+fg
+fg-subtle
+fg-disabled
+fg-faint
+fg-link
+canvas-elevated
+canvas-inset
+canvas-overlay
+canvas-code
+canvas-glass
+border-subtle
+border-strong
+border-focus
+button-bg
+button-gradient-start
+button-gradient-end
+button-hover-border
+button-disabled
+button-primary-bg
+button-primary-gradient-start
+button-primary-gradient-end
+button-primary-disabled
+scrollbar-bg
+scrollbar-bg-hover
+scrollbar-bg-active
+shadow-inset
+shadow-subtle
+shadow-focus
+accent-card
+accent-note
+accent-danger
+flag-1
+flag-2
+flag-3
+flag-4
+flag-5
+flag-6
+flag-7
+state-new
+state-learn
+state-review
+state-buried
+state-suspended
+state-marked
+highlight-bg
+highlight-fg
+selected-bg
+selected-fg
+border-radius-medium
+border-radius-large
+transition-medium
+transition-slow
+focus-color
+QWebChannel
 # render/cloze
 cloze-inactive
 cloze-highlight
