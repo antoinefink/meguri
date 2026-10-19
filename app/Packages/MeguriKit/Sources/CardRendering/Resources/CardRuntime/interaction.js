@@ -18,6 +18,33 @@
 
   // The side of the update that started most recently.
   let side = null;
+  let identity = null;
+  const owners = new WeakMap();
+  const failed = new Map();
+
+  function observed(signal, element) {
+    const owner = element && owners.get(element) || identity;
+    if (owner) {
+      signal.card = owner.card;
+      signal.generation = owner.generation;
+      signal.side = owner.side;
+    }
+    post(SIGNALS, signal);
+  }
+
+  // Keep the identity of detached old nodes: an error/input queued before
+  // re-prepare must never acquire the new update's identity at receipt.
+  new MutationObserver(function (records) {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        if (identity) owners.set(node, identity);
+        for (const child of node.querySelectorAll("*")) {
+          if (identity) owners.set(child, identity);
+        }
+      }
+    }
+  }).observe(document, { childList: true, subtree: true });
 
   function post(handler, message) {
     try {
@@ -51,6 +78,11 @@
     switch (signal.signal) {
       case "started":
         side = signal.side;
+        identity = isNumber(signal.card) && isNumber(signal.generation)
+          ? { card: signal.card, generation: signal.generation, side: side } : null;
+        selected = false;
+        focusState = "none";
+        failed.clear();
         break;
       case "visibleReady":
         confirmVisible(signal);
@@ -94,15 +126,39 @@
     if (!(target instanceof Element) || !MEDIA_TAGS[target.localName]) return;
     if (target.hasAttribute("data-meguri-preload")) return;
     const url = target.currentSrc || target.src || target.href || target.data || target.getAttribute("src") || "";
-    post(SIGNALS, { signal: "mediaError", tag: target.localName, url: String(url), side: side });
+    if (failed.size >= 256) failed.delete(failed.keys().next().value);
+    failed.set(target, String(url));
+    observed({ signal: "mediaError", tag: target.localName, url: String(url) }, target);
   }, true);
 
   document.fonts.addEventListener("loadingerror", function (event) {
     const faces = event.fontfaces || [];
     for (let i = 0; i < faces.length; i++) {
-      post(SIGNALS, { signal: "mediaError", tag: "font", url: "", family: String(faces[i].family), side: side });
+      observed({ signal: "mediaError", tag: "font", url: "", family: String(faces[i].family) }, faces[i]);
     }
   });
+  document.fonts.addEventListener("loading", function () {
+    for (const face of document.fonts) {
+      if (face.status === "loading" && !owners.has(face) && identity) owners.set(face, identity);
+    }
+  });
+
+  // A bounded state report only, so native can balance shared ducking with
+  // HTML media as well as its AV queue. No new page-world API.
+  let htmlPlaying = false;
+  function playbackChanged() {
+    let playing = false;
+    for (const media of document.querySelectorAll("audio,video")) {
+      if (!media.paused && !media.ended) { playing = true; break; }
+    }
+    if (playing !== htmlPlaying) {
+      htmlPlaying = playing;
+      observed({ signal: "mediaPlayback", playing: playing });
+    }
+  }
+  for (const name of ["playing", "pause", "ended", "emptied", "error"]) {
+    window.addEventListener(name, playbackChanged, true);
+  }
 
   // Whether a selection exists (R406), reported when that changes.
   let selected = false;
@@ -111,7 +167,7 @@
     const now = !!selection && selection.rangeCount > 0 && !selection.isCollapsed;
     if (now === selected) return;
     selected = now;
-    post(SIGNALS, { signal: "selection", selected: now });
+    observed({ signal: "selection", selected: now });
   });
 
   // Focus in editable elements (R425), reported when that changes.
@@ -127,7 +183,7 @@
     const state = isEditable ? (isTypeans ? "typeans" : "editable") : "none";
     if (state === focusState) return;
     focusState = state;
-    post(SIGNALS, { signal: "focus", editable: isEditable, typeans: isTypeans });
+    observed({ signal: "focus", editable: isEditable, typeans: isTypeans }, element);
   }
   window.addEventListener("focusin", function (event) {
     focusChanged(event.target);
@@ -137,18 +193,18 @@
   }, true);
 
   // IME composition (R535).
-  window.addEventListener("compositionstart", function () {
-    post(SIGNALS, { signal: "composition", active: true });
+  window.addEventListener("compositionstart", function (event) {
+    observed({ signal: "composition", active: true }, event.target);
   }, true);
-  window.addEventListener("compositionend", function () {
-    post(SIGNALS, { signal: "composition", active: false });
+  window.addEventListener("compositionend", function (event) {
+    observed({ signal: "composition", active: false }, event.target);
   }, true);
 
   // What is typed in #typeans (R538 continuity; the answer reads C10.3).
   window.addEventListener("input", function (event) {
     const target = event.target;
     if (target instanceof Element && target.id === "typeans") {
-      post(SIGNALS, { signal: "typedText", text: String(target.value) });
+      observed({ signal: "typedText", text: String(target.value) }, target);
     }
   }, true);
 
@@ -164,12 +220,85 @@
     present: function (token) {
       toRuntime({ op: "present", token: isNumber(token) ? token : null });
     },
+    resume: function (token) {
+      toRuntime({ op: "resume", token: isNumber(token) ? token : null });
+    },
     unpresent: function () {
       toRuntime({ op: "unpresent" });
     },
     // Loads what `html` needs, without inserting it (C7.5).
     warm: function (html) {
       toRuntime({ op: "warm", html: String(html) });
+    },
+    // Retry load attributes, never the side renderer. CSS rules are parsed
+    // afresh for a failed font/background; inputs and scripts stay intact.
+    mediaArrived: function (names) {
+      const wanted = new Set(names.map(function (name) { return String(name).normalize("NFC"); }));
+      const retried = new Set();
+      function decoded(path) {
+        const input = new TextEncoder().encode(path);
+        const bytes = [];
+        for (let i = 0; i < input.length; i++) {
+          const triplet = String.fromCharCode(input[i + 1], input[i + 2]);
+          if (input[i] === 37 && /^[0-9a-f]{2}$/i.test(triplet)) {
+            bytes.push(parseInt(triplet, 16));
+            i += 2;
+          } else bytes.push(input[i]);
+        }
+        return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes));
+      }
+      function matches(url, base) {
+        try {
+          const parsed = new URL(url, base || document.baseURI);
+          if (parsed.protocol !== "meguri-media:" || parsed.host !== "media") return false;
+          const name = decoded(parsed.pathname.slice(1)).normalize("NFC");
+          let matched = false;
+          for (const candidate of wanted) {
+            if (candidate.toLowerCase() === name.toLowerCase()) {
+              retried.add(candidate);
+              matched = true;
+            }
+          }
+          return matched;
+        } catch (error) { return false; }
+      }
+      for (const [element, url] of failed) {
+        // An already-started script cannot be retried safely in place.
+        if (!element.isConnected || element.localName === "script") continue;
+        let attr = element.localName === "link" ? "href" : element.localName === "object" ? "data" : "src";
+        if (!element.hasAttribute(attr) && element.hasAttribute("srcset")) attr = "srcset";
+        if (!element.hasAttribute(attr) || !matches(url)) continue;
+        const value = element.getAttribute(attr);
+        element.removeAttribute(attr);
+        element.setAttribute(attr, value);
+        if (element.localName === "source" && element.parentElement instanceof HTMLMediaElement) element.parentElement.load();
+        if (element.localName === "img" && element.parentElement && element.parentElement.localName === "picture") {
+          for (const source of element.parentElement.querySelectorAll("source[srcset]")) {
+            source.setAttribute("srcset", source.getAttribute("srcset"));
+          }
+        }
+        failed.delete(element);
+      }
+      for (const sheet of Array.from(document.styleSheets)) {
+        const owner = sheet.ownerNode;
+        if (!(owner instanceof Element)) continue;
+        let touched = false;
+        try {
+          for (const rule of sheet.cssRules) {
+            for (const url of rule.cssText.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/gi)) {
+              if (matches(url[1] || url[2] || url[3] || "", sheet.href)) touched = true;
+            }
+          }
+        } catch (error) { /* A cross-origin sheet cannot be inspected. */ }
+        if (touched && owner.localName === "style") owner.textContent = owner.textContent;
+        if (touched && owner.localName === "link") owner.href = owner.href;
+      }
+      for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
+        if (matches(link.href)) link.href = link.href;
+      }
+      // Some style sheets cannot reload in place. Let
+      // the caller report names for which no in-place retry was available.
+      return Array.from(wanted).filter(function (name) { return !retried.has(name); });
     },
     // Whether a card listener could see an input of `types` ("tap", "key"
     // or one event type) aimed at `element`; for keys without an element,

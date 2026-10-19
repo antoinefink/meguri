@@ -1,5 +1,6 @@
 #if MEGURI_TEST_HOOKS
 import DesignSystem
+import CardRendering
 import Foundation
 import Instrumentation
 import Metal
@@ -35,7 +36,7 @@ extension TestHooks {
     /// Throwaway: U67's CardPagePair and U243's frame probe replace it.
     /// CardSwapTimingSpikeTests drives it and reads `reportJSON`.
     @Observable
-    final class CardSwapSpike: NSObject, WKScriptMessageHandler {
+    final class CardSwapSpike: NSObject {
         enum Mode: String {
             case timing
             /// Each page swap's frame is captured and must show the new
@@ -146,11 +147,12 @@ extension TestHooks {
         @ObservationIgnored let mode: Mode
         @ObservationIgnored let stage = Stage()
         @ObservationIgnored private var report = Report()
-        @ObservationIgnored private let handler = MediaOriginSpike.Handler()
-        @ObservationIgnored private let probeWorld = WKContentWorld.world(name: "meguri")
+        @ObservationIgnored private var pair: CardPagePair!
+        @ObservationIgnored private var prepared: CardUpdate?
+        @ObservationIgnored private var mediaRoot: URL?
         @ObservationIgnored private var front: SpikePage!
         @ObservationIgnored private var back: SpikePage!
-        @ObservationIgnored private lazy var recorder = SwapRecorder { [weak self] sample in self?.record(sample) }
+        private var recorder: SwapRecorder { pair.swaps }
         @ObservationIgnored private let probe = FrameProbe()
         @ObservationIgnored private var displayLink: AnyObject?
         @ObservationIgnored private var period: TimeInterval = 1.0 / 60
@@ -189,15 +191,6 @@ extension TestHooks {
         func start() {
             guard !started else { return }
             started = true
-            handler.files["/_anki/card.html"] = (Data(Self.skeleton.utf8), "text/html")
-            handler.files["/_img.png"] = (Self.png, "image/png")
-            let configuration = MediaOriginSpike.configuration(handler, persistent: false)
-            configuration.userContentController.add(self, contentWorld: probeWorld, name: VisibleConfirmation.messageName)
-            back = SpikePage(configuration)
-            front = SpikePage(configuration)
-            stage.install(pages: [back.webView, front.webView], probe: probe.view) { [weak self] time in
-                self?.input(at: time)
-            }
             report.probe = probe.available ? "metal" : "displayLink"
             startDisplayLink()
             triggers = [
@@ -211,6 +204,8 @@ extension TestHooks {
         }
 
         func stop() {
+            pair?.close()
+            if let mediaRoot { try? FileManager.default.removeItem(at: mediaRoot) }
             triggers.forEach { $0.stop() }
             triggers = []
             (displayLink as? CADisplayLink)?.invalidate()
@@ -222,13 +217,37 @@ extension TestHooks {
         }
 
         private func load() async {
-            guard await front.open(), await back.open() else {
-                report.ready = false
-                publish()
-                return
+            do {
+                let root = FileManager.default.temporaryDirectory.appending(path: "meguri-s1-\(UUID())", directoryHint: .isDirectory)
+                try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                mediaRoot = root
+                try Self.png.write(to: root.appending(path: "_img.png"))
+                let resolver = try await MediaPathResolver.open(root: root, trackedNames: [])
+                pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: resolver,
+                                    onSample: { [weak self] sample in self?.record(sample) },
+                                    makeWebView: { SpikeWebView(frame: $0, configuration: $1) })
+                pair.ownsKeyboardFocus = mode == .typein
+                pair.onCommitted = { [weak self] update, token in
+                    guard let self, self.report.ready else { return }
+                    Task { await self.afterSwap(token: token, card: update.card) }
+                }
+                front = SpikePage(pair.current); back = SpikePage(pair.idle)
+                pair.onInteraction = { [weak self] signal, body in
+                    guard let self, signal == "visible", let token = body["token"] as? NSNumber else { return }
+                    self.report.messages += 1
+                    self.report.lastConfirm = "posted"
+                    self.confirmations.removeValue(forKey: token.uint64Value)?.resume()
+                }
+                stage.install(pages: [pair.container], probe: probe.view) { [weak self] time in self?.input(at: time) }
+                try await pair.load()
+                for page in [front!, back!] { _ = await page.run(Self.tracking) }
+                let first = try await pair.prepare(CardPayload(cardID: 1, question: Self.card(1, mode: mode), answer: ""))
+                _ = try pair.present(first)
+                (front, back) = (back, front)
+                await prepare(nextCard)
+            } catch {
+                report.ready = false; report.lastConfirm = "error: production pair preparation"; publish(); return
             }
-            _ = await front.run("show(id, html); return 'ok';", ["id": 1, "html": Self.card(1, mode: mode)])
-            await prepare(nextCard)
             // S1(a): animation frames in each page over one second.
             async let frontRate = front.run(Self.rafCounter)
             async let beneathRate = back.run(Self.rafCounter)
@@ -290,18 +309,9 @@ extension TestHooks {
             }
             settled = false
             let card = nextCard
-            let token = recorder.beginSwap(to: card, inputTime: input)
+            guard let prepared, let token = try? pair.present(prepared, inputTime: input) else { return nil }
             (front, back) = (back, front)
-            stage.bringToFront(front.webView)
-            #if !os(macOS)
-            if mode == .typein { _ = front.webView.becomeFirstResponder() }
-            #endif
             mark(Record(web: true, input: input, handled: CACurrentMediaTime(), token: token, signpost: nil, card: card))
-            CATransaction.setCompletionBlock { [weak self] in
-                // After the commit: shown hooks, the confirmation, and the
-                // next card beneath (no web-content call before the swap).
-                Task { await self?.afterSwap(token: token, card: card) }
-            }
             return token
         }
 
@@ -344,15 +354,8 @@ extension TestHooks {
         }
 
         private func afterSwap(token: SwapToken, card: Int64) async {
-            let page: SpikePage = front
             if mode == .typein {
-                // The shown hook (R534).
-                report.focused = await page.run("document.getElementById('typeans').focus(); return document.activeElement.id || 'none';")
-            }
-            Task {
-                let result = await page.run(Self.confirm, ["token": NSNumber(value: token.sequence)], in: probeWorld)
-                report.lastConfirm = result
-                publish()
+                report.focused = await front.run("return document.activeElement.id || 'none';")
             }
             nextCard += 1
             await prepare(nextCard)
@@ -364,21 +367,14 @@ extension TestHooks {
         /// Puts `card` in the page beneath; settled after a double
         /// requestAnimationFrame there.
         private func prepare(_ card: Int64) async {
-            let result = await back.run(Self.prepareScript, ["id": card, "html": Self.card(card, mode: mode, retaining: retaining)])
-            settled = result == String(card)
+            do {
+                prepared = try await pair.prepare(CardPayload(cardID: card, question: Self.card(card, mode: mode, retaining: retaining), answer: ""))
+                settled = true
+            } catch { settled = false; report.lastConfirm = "error: prepare failed" }
             publish()
         }
 
         // MARK: Messages and samples
-
-        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-            report.messages += 1
-            guard let parsed = recorder.receive(message.body, at: CACurrentMediaTime()) else {
-                report.lastConfirm = "unparsed \(message.body)"
-                return
-            }
-            confirmations.removeValue(forKey: parsed.token)?.resume()
-        }
 
         private func record(_ sample: VisibleSample) {
             switch sample.outcome {
@@ -846,67 +842,28 @@ extension TestHooks {
             let typein = mode == .typein ? #"<input id="typeans" type="text" autocomplete="off">"# : ""
             let keep = retaining ? " window.kept = (window.kept || []); window.kept.push(new Uint8Array(65536).fill(window.cards % 251 + 1));" : ""
             return """
+                <style>html,body {margin:0;height:100%;background:rgb(253,246,227)} #qa {padding:16px}
+                .marker {position:fixed;left:0;right:0;top:30%;height:40%}</style>
                 <div class="marker" style="background: rgb(\(red), \(green), \(blue))"></div>
                 <h1>Card \(id)</h1>\(typein)<img src="_img.png" width="64" height="64">
                 <p>\(String(repeating: "Meguri ", count: 30))</p><script>window.cards += 1;\(keep)</script>
                 """
         }
 
-        /// The runtime stand-in each page loads once: `show(id, html)`
-        /// replaces the card and runs its scripts, as U66's prepare will.
-        static let skeleton = """
-            <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-            <base href="meguri-media://media/">
-            <style>
-            html, body { margin: 0; height: 100%; font: -apple-system-body; background: rgb(253, 246, 227); }
-            #qa { padding: 16px; }
-            /* S1(c): each card's marker, a band across the middle of the page. */
-            .marker { position: fixed; left: 0; right: 0; top: 30%; height: 40%; }
-            </style>
-            <script>
-            window.cards = 0;
-            window.cardsRegistered = 0;
-            window.cardsFinalized = 0;
+        // Measurement only; insertion, scripts, settling and confirmation
+        // are the accepted runtime and production pair's responsibilities.
+        static let tracking = """
+            window.cards = 0; window.cardsRegistered = 0; window.cardsFinalized = 0;
             const finalization = new FinalizationRegistry(() => { window.cardsFinalized += 1; });
-            window.show = (id, html) => {
-              const qa = document.getElementById("qa");
-              qa.innerHTML = html;
-              qa.dataset.card = String(id);
-              for (const old of qa.querySelectorAll("script")) {
-                const script = document.createElement("script");
-                script.textContent = old.textContent;
-                old.replaceWith(script);
+            new MutationObserver((records) => {
+              if (!window.trackCards) return;
+              for (const record of records) if (record.target.id === 'qa') {
+                for (const node of record.addedNodes) if (node.nodeType === 1 && node.isConnected && node.localName !== 'style') {
+                  finalization.register.call(finalization, node, 0); window.cardsRegistered += 1;
+                }
               }
-              // S1(f): each card's elements, to see whether old cards are
-              // collected (a weak registration keeps nothing alive). Called
-              // through .call so tools/mg xcode-check's route scan, which
-              // reads every register( in TestHooks, does not take it for one.
-              if (window.trackCards) {
-                for (const element of qa.children) { finalization.register.call(finalization, element, 0); window.cardsRegistered += 1; }
-              }
-            };
-            </script></head><body><div id="qa"></div></body></html>
-            """
-
-        static let prepareScript = """
-            show(id, html);
-            await Promise.all([...document.images].map((image) => image.decode().catch(() => {})));
-            await document.fonts.ready;
-            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-            return String(id);
-            """
-
-        /// The post-swap confirmation, from Meguri's isolated world
-        /// (VisibleConfirmation).
-        static let confirm = """
-            try {
-              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-              const card = Number(document.getElementById("qa").dataset.card);
-              window.webkit.messageHandlers.meguriVisible.postMessage({ token, card, phase: "visible" });
-              return "posted";
-            } catch (error) {
-              return "error " + error;
-            }
+            }).observe(document.getElementById('qa'), {childList: true});
+            return 'ok';
             """
 
         /// Animation frames a second, counted over two seconds after one
@@ -939,52 +896,22 @@ extension TestHooks {
         }()
     }
 
-    /// One card page of the spike pair.
-    final class SpikePage: NSObject, WKNavigationDelegate {
-        let webView: SpikeWebView
-        private var loaded: CheckedContinuation<Bool, Never>?
-        private(set) var terminations = 0
+    /// Observation wrapper over the pair's persistent production page.
+    final class SpikePage {
+        let page: CardPage
+        var webView: SpikeWebView { page.webView as! SpikeWebView }
+        var terminations: Int { page.terminations }
         var windowMoves: Int { webView.windowMoves }
-
-        init(_ configuration: WKWebViewConfiguration) {
-            webView = SpikeWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 480), configuration: configuration)
-            super.init()
-            webView.navigationDelegate = self
-            #if !os(macOS)
-            webView.isOpaque = true
-            webView.scrollView.isScrollEnabled = false
-            #endif
-        }
-
-        func open() async -> Bool {
-            await withCheckedContinuation { continuation in
-                loaded = continuation
-                webView.load(URLRequest(url: MediaOriginSpike.origin.appending(path: "_anki/card.html")))
-            }
-        }
-
+        init(_ page: CardPage) { self.page = page }
         func run(_ script: String, _ arguments: [String: Any] = [:], in world: WKContentWorld = .page) async -> String {
-            do {
-                return try await webView.callAsyncJavaScript(script, arguments: arguments, contentWorld: world) as? String ?? ""
-            } catch {
-                return "error: \(error.localizedDescription)"
-            }
+            do { return try await webView.callAsyncJavaScript(script, arguments: arguments, contentWorld: world) as? String ?? "" }
+            catch { return "error: \(error.localizedDescription)" }
         }
-
-        private func done(_ ok: Bool) {
-            loaded?.resume(returning: ok)
-            loaded = nil
-        }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { done(true) }
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) { done(false) }
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) { done(false) }
-        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { terminations += 1 }
     }
 
     /// A card page that counts its moves into or out of a window: a swap
     /// must never reparent it (S1(f)).
-    final class SpikeWebView: WKWebView {
+    final class SpikeWebView: CardNativeWebView {
         private(set) var windowMoves = 0
 
         #if os(macOS)

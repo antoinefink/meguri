@@ -1,3 +1,4 @@
+import CardRendering
 import Darwin
 import Foundation
 import Testing
@@ -15,8 +16,7 @@ extension RenderingSpikes {
     /// persistence (S2(d)) and the iOS media checks are in
     /// `app/MeguriUITests/CardSwapTimingSpikeTests.swift`.
     @Suite struct CustomSchemeMediaSpikeTests {
-        /// A page that runs card scripts, at `/_anki/` with the media root as
-        /// its base, as the runtime page would be.
+        /// A synthetic document at the production origin root.
         static func page(body: String = "", head: String = "") -> String {
             """
             <!doctype html><html><head><meta charset="utf-8"><base href="\(Spike.origin.absoluteString)">\(head)</head>
@@ -26,15 +26,15 @@ extension RenderingSpikes {
 
         /// A handler, a page and its window, torn down after `body`.
         static func withPage<T>(
-            _ handler: SpikeMediaHandler, html: String = page(), store: WKWebsiteDataStore = .nonPersistent(),
+            _ handler: MediaFixture, html: String = page(), store: WKWebsiteDataStore = .nonPersistent(),
             origin: URL = Spike.origin, _ body: (SpikeWebView) async throws -> T
         ) async throws -> T {
-            handler.add("/_anki/card.html", text: html, "text/html")
-            let configuration = Spike.configuration(handler: handler, store: store)
+            let configuration = try await Spike.configuration(handler: handler, store: store)
             let page = SpikeWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 600), configuration: configuration)
             let window = SpikeWindow(page)
-            defer { window.close() }
-            try await page.open(origin.appending(path: "_anki/card.html"))
+            defer { handler.handler.unbind(page); window.close() }
+            try await handler.bind(page, document: html)
+            try await page.open(origin)
             return try await body(page)
         }
 
@@ -74,7 +74,7 @@ extension RenderingSpikes {
 
         /// The ranged answers to requests for `path`: 206s whose Content-Range
         /// names the bytes sent and the file's length.
-        static func rangedAnswers(_ handler: SpikeMediaHandler, path: String, total: Int) -> [SpikeMediaHandler.Request] {
+        static func rangedAnswers(_ handler: MediaFixture, path: String, total: Int) -> [MediaFixture.Request] {
             handler.requests(for: path).filter { request in
                 guard request.status == 206, let header = request.contentRange,
                     let match = header.wholeMatch(of: /bytes (\d+)-(\d+)\/(\d+)/),
@@ -101,7 +101,7 @@ extension RenderingSpikes {
             "Audio playback requires confirmed real hardware (kern.hv_vmm_present); the test VM has no audio route."
         ))
         func anEightMegabyteMP3SeeksToNinetyPercentAndPlaysThroughRangeRequests() async throws {
-            let handler = SpikeMediaHandler()
+            let handler = MediaFixture()
             let mp3 = SpikeAssets.silentMP3(minimumBytes: 8 * 1024 * 1024)
             handler.add("/_long.mp3", mp3.data, "audio/mpeg")
             let html = Self.page(body: #"<audio id="media" src="_long.mp3" preload="auto"></audio>"#)
@@ -125,10 +125,11 @@ extension RenderingSpikes {
             }
             #expect(!late.isEmpty, "no ranged request near 90 %: \(handler.requests(for: "/_long.mp3"))")
             print("S2(a) mp3: duration \(result.duration) s, seeked to \(result.seekedTo), played to \(result.playedTo); requests: \(handler.requests(for: "/_long.mp3"))")
+            try await NativeCardAudioChecks.securelyOpenedSilentFileActuallyAdvancesAndSeeks()
         }
 
         @Test func aVideoSeeksToNinetyPercentAndPlaysThroughRangeRequests() async throws {
-            let handler = SpikeMediaHandler()
+            let handler = MediaFixture()
             let mp4 = try await Spike.deadline("making the MP4", timeout: .seconds(30)) { try await TestMedia.mp4() }
             handler.add("/_clip.mp4", mp4, "video/mp4")
             let html = Self.page(body: #"<video id="media" src="_clip.mp4" preload="auto" muted playsinline width="320" height="240"></video>"#)
@@ -160,13 +161,13 @@ extension RenderingSpikes {
             }
             """
 
-        static func addModuleAndData(_ handler: SpikeMediaHandler) {
+        static func addModuleAndData(_ handler: MediaFixture) {
             handler.add("/_lib.js", text: #"export const value = "from the module";"#, "text/javascript")
             handler.add("/_data.json", text: #"{"value": "from the data"}"#, "application/json")
         }
 
         @Test func aCardPageImportsAModuleAndFetchesDataFromTheMediaOrigin() async throws {
-            let handler = SpikeMediaHandler()
+            let handler = MediaFixture()
             Self.addModuleAndData(handler)
             let result = try await Self.withPage(handler) { page in
                 try await page.json(FetchImportResult.self, Self.fetchImportScript)
@@ -187,7 +188,7 @@ extension RenderingSpikes {
         }
 
         @Test func rootRelativeFontFacesAndRelativeMediaResolveAgainstTheMediaRoot() async throws {
-            let handler = SpikeMediaHandler()
+            let handler = MediaFixture()
             let fonts = try SpikeAssets.fonts(2)
             handler.add("/_root.ttf", fonts[0], "font/ttf")
             handler.add("/_relative.ttf", fonts[1], "font/ttf")
@@ -230,7 +231,7 @@ extension RenderingSpikes {
         // MARK: S2(e): scripts in media documents
 
         @Test func anSVGOpenedAsADocumentRunsNoScriptWhileTheCardsOwnScriptRuns() async throws {
-            let handler = SpikeMediaHandler()
+            let handler = MediaFixture()
             // Each script tells the handler it ran by fetching a marker path.
             handler.add("/_x.js", text: #"fetch("/_marker/card-script");"#, "text/javascript")
             handler.add(
@@ -311,9 +312,9 @@ extension RenderingSpikes {
         /// S2(f): the origin forms tried. The scheme with a fixed host is a
         /// tuple origin where everything works; the decision record lists what
         /// the others did.
-        @Test(arguments: ["meguri-media://media/", "meguri-media:///", "meguri-media://Media.Local/"])
+        @Test(arguments: ["meguri-media://media/"])
         func originForm(_ form: String) async throws {
-            let handler = SpikeMediaHandler()
+            let handler = MediaFixture()
             Self.addModuleAndData(handler)
             let origin = try #require(URL(string: form))
             let value = UUID().uuidString
@@ -357,13 +358,13 @@ extension RenderingSpikes {
                 failure = error
             }
             // The stores live under ~/Library/WebKit: never leave them behind.
-            try? await WKWebsiteDataStore.remove(forIdentifier: identifier)
-            try? await WKWebsiteDataStore.remove(forIdentifier: other)
+            do { try await WKWebsiteDataStore.remove(forIdentifier: identifier) } catch { if failure == nil { failure = error } }
+            do { try await WKWebsiteDataStore.remove(forIdentifier: other) } catch { if failure == nil { failure = error } }
             if let failure { throw failure }
         }
 
-        private func storeHandler() -> SpikeMediaHandler {
-            let handler = SpikeMediaHandler()
+        private func storeHandler() -> MediaFixture {
+            let handler = MediaFixture()
             Self.addModuleAndData(handler)
             return handler
         }
@@ -371,13 +372,14 @@ extension RenderingSpikes {
         // MARK: The handler itself
 
         @Test func rangeHeadersMapToByteRanges() {
-            #expect(SpikeMediaHandler.bounds(of: "bytes=100-199", total: 1000) == .some(100..<200))
-            #expect(SpikeMediaHandler.bounds(of: "bytes=900-", total: 1000) == .some(900..<1000))
-            #expect(SpikeMediaHandler.bounds(of: "bytes=-100", total: 1000) == .some(900..<1000))
-            #expect(SpikeMediaHandler.bounds(of: "bytes=0-1", total: 1000) == .some(0..<2))
-            #expect(SpikeMediaHandler.bounds(of: "bytes=990-2000", total: 1000) == .some(990..<1000))
-            #expect(SpikeMediaHandler.bounds(of: "bytes=1000-", total: 1000) == .some(nil))
-            #expect(SpikeMediaHandler.bounds(of: "items=0-1", total: 1000) == nil)
+            #expect(RangeResponder(total: 1000, header: "bytes=100-199").offset == 100)
+            #expect(RangeResponder(total: 1000, header: "bytes=100-199").count == 100)
+            #expect(RangeResponder(total: 1000, header: "bytes=900-").count == 100)
+            #expect(RangeResponder(total: 1000, header: "bytes=-100").offset == 900)
+            #expect(RangeResponder(total: 1000, header: "bytes=0-1").count == 2)
+            #expect(RangeResponder(total: 1000, header: "bytes=990-2000").count == 10)
+            #expect(RangeResponder(total: 1000, header: "bytes=1000-").status == 416)
+            #expect(RangeResponder(total: 1000, header: "items=0-1").status == 200)
         }
     }
 }

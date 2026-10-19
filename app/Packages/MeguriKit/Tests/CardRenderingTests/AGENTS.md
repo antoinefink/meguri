@@ -11,4 +11,4 @@
 - Native audio playback requires confirmed real hardware: the VM has no audio route, and loading audio there can block the next video test. Skip audio before creating its page; keep video enabled.
 - Before reading finalization counts, request explicit GC through the test-only pool SPI only after all memory readings, then drain bounded event-loop turns; allocation pressure does not guarantee collection.
 - `WKWebsiteDataStore(forIdentifier:)` writes under `~/Library/WebKit/`: use a fresh identifier per test and remove it afterwards, also on failure.
-- `Spikes/Support/` is U65's throwaway harness (`SpikeMediaHandler`, `SpikePagePair`). When U67's `MediaSchemeHandler` and `CardPagePair` land, point the spike tests at them and delete the support (decision records `docs/design/decisions/s1-*.md`, `s2-*.md`).
+- S1 uses `CardPagePair`; S2 uses `MediaSchemeHandler` over `MediaFixture`'s synthetic files. Keep recording/asset/window helpers, never another renderer or range server. The S1 footprint known issue and hardware skips remain evidence limits, not native-component approvals.

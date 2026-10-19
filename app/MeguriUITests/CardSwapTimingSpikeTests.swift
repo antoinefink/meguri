@@ -326,11 +326,19 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
     /// origin, in the persistent store with the fixed identifier, is read
     /// back after the app is relaunched (R502).
     func testStorageOnTheMediaOriginSurvivesARelaunch() throws {
-        let writer = launch(MeguriLaunch(animations: false, route: "spike/storage/write"))
+        let store = UUID().uuidString
+        let arguments = ["-CardRenderingTestStore", store]
+        defer {
+            XCUIApplication().terminate()
+            let cleanup = launch(MeguriLaunch(animations: false, route: "spike/storage/read", extra: arguments + ["-CardRenderingTestCleanup", "YES"]))
+            XCTAssertEqual(text(cleanup.staticTexts["spike.storage.result"], notEqualTo: "running", timeout: 30), "removed")
+            cleanup.terminate()
+        }
+        let writer = launch(MeguriLaunch(animations: false, route: "spike/storage/write", extra: arguments))
         let written = text(writer.staticTexts["spike.storage.result"], notEqualTo: "running", timeout: 30)
         let value = try XCTUnwrap(written.wholeMatch(of: /written ([0-9A-F-]{36})/)?.1, written)
         writer.terminate()
-        let reader = launch(MeguriLaunch(animations: false, route: "spike/storage/read"))
+        let reader = launch(MeguriLaunch(animations: false, route: "spike/storage/read", extra: arguments))
         let read = text(reader.staticTexts["spike.storage.result"], notEqualTo: "running", timeout: 30)
         XCTContext.runActivity(named: "S2(d) wrote \(value), read \(read)") { _ in }
         XCTAssertEqual(read, "read \(value) \(value)")

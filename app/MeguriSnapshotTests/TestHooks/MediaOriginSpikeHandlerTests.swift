@@ -21,13 +21,14 @@ import WebKit
         var body = Data()
         var finished = false
         var failure: (any Error)?
+        var completion: CheckedContinuation<Void, Never>?
 
         init(_ request: URLRequest) { self.request = request }
 
         func didReceive(_ response: URLResponse) { self.response = response as? HTTPURLResponse }
         func didReceive(_ data: Data) { body.append(data) }
-        func didFinish() { finished = true }
-        func didFailWithError(_ error: any Error) { failure = error }
+        func didFinish() { finished = true; completion?.resume(); completion = nil }
+        func didFailWithError(_ error: any Error) { failure = error; completion?.resume(); completion = nil }
     }
 
     struct Case: CustomTestStringConvertible, Sendable {
@@ -54,11 +55,18 @@ import WebKit
         Case(range: nil, status: 200, contentRange: nil, body: "0123456789"),
     ]
 
-    func answer(_ range: String?, handler: TestHooks.MediaOriginSpike.Handler) -> RecordingTask {
+    func answer(_ range: String?, handler: TestHooks.MediaOriginSpike.Handler) async throws -> RecordingTask {
         var request = URLRequest(url: TestHooks.MediaOriginSpike.origin.appending(path: "_digits.bin"))
         if let range { request.setValue(range, forHTTPHeaderField: "Range") }
         let task = RecordingTask(request)
-        handler.webView(WKWebView(), start: task)
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let page = WKWebView(frame: .zero, configuration: configuration)
+        try await handler.bind(page, document: "<!doctype html>")
+        await withCheckedContinuation { continuation in
+            task.completion = continuation
+            handler.webView(page, start: task)
+        }
         return task
     }
 
@@ -69,9 +77,9 @@ import WebKit
     }
 
     @Test(arguments: cases)
-    func aRangeGetsTheBytesItAsksFor(_ expected: Case) throws {
+    func aRangeGetsTheBytesItAsksFor(_ expected: Case) async throws {
         let handler = handler()
-        let task = answer(expected.range, handler: handler)
+        let task = try await answer(expected.range, handler: handler)
         let response = try #require(task.response)
         #expect(task.finished && task.failure == nil)
         #expect(response.statusCode == expected.status)

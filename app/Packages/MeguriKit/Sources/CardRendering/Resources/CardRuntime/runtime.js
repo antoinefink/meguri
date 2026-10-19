@@ -1276,6 +1276,12 @@
       case "present":
         present(message.token);
         break;
+      case "resume":
+        // Native lifecycle return: discard attempts held during suspension.
+        // Ordinary page presentation still resumes pre-rendered media (C8.2).
+        held = [];
+        present(message.token);
+        break;
       case "unpresent":
         unpresent();
         break;

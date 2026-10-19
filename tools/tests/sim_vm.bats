@@ -584,14 +584,14 @@ assert_host_untouched() {
   [ "$(field .status)" = pass ]
   [ "$(field .details.sim_runner)" = vm ]
   [ "$(field .details.host_lease)" = null ]
-  [ "$(field '.details.only | join(",")')" = CardRenderingTests/WebKitSuites/CardRuntimeSuites ]
+  [ "$(field '.details.only | join(",")')" = CardRenderingTests/WebKitSuites/CardRuntimeSuites,CardRenderingTests/WebKitSuites/CardPagePairTests,CardRenderingTests/WebKitSuites/MediaSchemeHandlerTests,CardRenderingTests/WebKitSuites/BridgeAllowlistTests,CardRenderingTests/MediaPathResolverTests,CardRenderingTests/CardAudioControllerTests ]
   [ "$(field '.summary | "\(.passed) \(.failed)"')" = "12 0" ]
-  [ "$(field .message)" = "unit-sim: 12 passed, 0 skipped on ipad (CardRenderingTests/WebKitSuites/CardRuntimeSuites)" ]
+  [ "$(field .message)" = "unit-sim: 12 passed, 0 skipped on ipad (CardRenderingTests/WebKitSuites/CardRuntimeSuites CardRenderingTests/WebKitSuites/CardPagePairTests CardRenderingTests/WebKitSuites/MediaSchemeHandlerTests CardRenderingTests/WebKitSuites/BridgeAllowlistTests CardRenderingTests/MediaPathResolverTests CardRenderingTests/CardAudioControllerTests)" ]
   called "^fake build ios-sim Debug Unit Meguri ARCHS=arm64\$"
   local u
   u="$(field .details.device.udid)"
   [ "$(field .details.device.kind)" = ipad ]
-  called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri_Unit_iphonesimulator27.0-arm64.xctestrun -destination id=$u -resultBundlePath $SB/build/mg/unit-sim/[^ ]+/unit.xcresult -collect-test-diagnostics never -only-testing:CardRenderingTests/WebKitSuites/CardRuntimeSuites\$"
+  called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri_Unit_iphonesimulator27.0-arm64.xctestrun -destination id=$u -resultBundlePath $SB/build/mg/unit-sim/[^ ]+/unit.xcresult -collect-test-diagnostics never -only-testing:CardRenderingTests/WebKitSuites/CardRuntimeSuites -only-testing:CardRenderingTests/WebKitSuites/CardPagePairTests -only-testing:CardRenderingTests/WebKitSuites/MediaSchemeHandlerTests -only-testing:CardRenderingTests/WebKitSuites/BridgeAllowlistTests -only-testing:CardRenderingTests/MediaPathResolverTests -only-testing:CardRenderingTests/CardAudioControllerTests\$"
   [ -d "$(dirname "$result")/unit.xcresult" ]
   # CardRenderingTests is hosted in the Debug app (window scenes); other
   # bundles stay hostless.

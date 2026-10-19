@@ -16,12 +16,19 @@
 # XCTest's bundle injection) before the products go to the VM.
 
 mg_job unit-sim host mg_unit_sim \
-  "Unit-plan package test bundles on a pool simulator in the macOS test VM (queued without it): [--platform iphone|ipad] [--device <leased udid>] [--only <Target[/Suite...[/test]]>]... (default CardRenderingTests/WebKitSuites/CardRuntimeSuites: the card runtime suites); Debug build-for-testing of the Unit plan, then test-without-building there"
+  "Unit-plan package test bundles on a pool simulator in the macOS test VM (queued without it): [--platform iphone|ipad] [--device <leased udid>] [--only <Target[/Suite...[/test]]>]... (default runtime, page pair, media, bridge and audio suites); Debug build-for-testing of the Unit plan, then test-without-building there"
 
-# The card runtime suites. The bundle's U65 rendering spikes are Mac-host
+# The runtime and native component suites. U65 rendering spikes are Mac-host
 # checks: their iOS legs run in the app (perf-ui), and their audio, seek and
 # web content footprint checks cannot run in a simulator in the VM.
-MG_UNIT_SIM_DEFAULT=CardRenderingTests/WebKitSuites/CardRuntimeSuites
+MG_UNIT_SIM_DEFAULT=(
+  CardRenderingTests/WebKitSuites/CardRuntimeSuites
+  CardRenderingTests/WebKitSuites/CardPagePairTests
+  CardRenderingTests/WebKitSuites/MediaSchemeHandlerTests
+  CardRenderingTests/WebKitSuites/BridgeAllowlistTests
+  CardRenderingTests/MediaPathResolverTests
+  CardRenderingTests/CardAudioControllerTests
+)
 MG_UNIT_SIM_HOSTED=CardRenderingTests
 
 mg_unit_sim__usage() {
@@ -50,7 +57,7 @@ mg_unit_sim() {
       *) mg_unit_sim__usage "unknown argument '$1'"; return 0 ;;
     esac
   done
-  [ "${#only[@]}" -gt 0 ] || only=("$MG_UNIT_SIM_DEFAULT")
+  [ "${#only[@]}" -gt 0 ] || only=("${MG_UNIT_SIM_DEFAULT[@]}")
   for o in "${only[@]}"; do args[${#args[@]}]="-only-testing:$o"; done
   mg_detail only "$(mg_json_array "${only[@]}")"
   mg_detail platform "$(jq -n --arg p "$kind" '$p')"

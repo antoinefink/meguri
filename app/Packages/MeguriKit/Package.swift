@@ -48,8 +48,12 @@ let package = Package(
         ),
         .target(
             name: "CardRendering",
-            dependencies: ["DesignSystem"],
-            exclude: ["Resources/CardRuntime/AGENTS.md"],
+            dependencies: [
+                "DesignSystem",
+                .product(name: "CoreBridge", package: "MeguriCore"),
+                .product(name: "Instrumentation", package: "MeguriCore"),
+            ],
+            exclude: ["AGENTS.md", "Resources/CardRuntime/AGENTS.md"],
             // Copied flat into the bundle; CardRuntime serves them under
             // /_anki/ (specs/render/card-runtime.md).
             resources: [
@@ -70,7 +74,11 @@ let package = Package(
         .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"], swiftSettings: settings),
         .testTarget(
             name: "CardRenderingTests",
-            dependencies: ["CardRendering", .product(name: "Instrumentation", package: "MeguriCore")],
+            dependencies: [
+                "CardRendering",
+                .product(name: "CoreBridge", package: "MeguriCore"),
+                .product(name: "Instrumentation", package: "MeguriCore"),
+            ],
             exclude: ["AGENTS.md"],
             resources: [.copy("Fixtures")],
             swiftSettings: settings

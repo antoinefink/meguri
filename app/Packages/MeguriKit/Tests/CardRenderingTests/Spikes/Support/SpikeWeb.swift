@@ -1,3 +1,4 @@
+import CardRendering
 import Foundation
 import Synchronization
 import WebKit
@@ -7,9 +8,8 @@ import AppKit
 import UIKit
 #endif
 
-/// Throwaway web view support for the rendering spikes S1 and S2 (U65).
-/// U67's `CardPagePair`, `CardWebConfiguration` and `MediaSchemeHandler`
-/// replace it; the spike tests then run against those.
+/// General WebKit timing/window/observation helpers for retained S1/S2 checks.
+/// Rendering and media serving belong to the production components.
 enum Spike {
     static let scheme = "meguri-media"
     /// The origin form S2(f) chose: the scheme with a fixed host.
@@ -24,17 +24,10 @@ enum Spike {
 
     /// A configuration for card pages: the scheme handler, no user action
     /// needed to play media (R560), `store` (non-persistent by default).
-    static func configuration(
-        handler: SpikeMediaHandler, scheme: String = scheme, store: WKWebsiteDataStore = .nonPersistent()
-    ) -> WKWebViewConfiguration {
-        let configuration = WKWebViewConfiguration()
-        configuration.setURLSchemeHandler(handler, forURLScheme: scheme)
-        configuration.websiteDataStore = store
-        configuration.mediaTypesRequiringUserActionForPlayback = []
-        #if !os(macOS)
-        configuration.allowsInlineMediaPlayback = true
-        #endif
-        return configuration
+    static func configuration(handler: MediaFixture, store: WKWebsiteDataStore = .nonPersistent()) async throws -> WKWebViewConfiguration {
+        let native = CardWebConfiguration(store: store, media: handler.handler)
+        try await native.ready()
+        return native.configuration
     }
 
     /// Waits for a WebKit callback, failing after `timeout` instead of
@@ -82,7 +75,7 @@ enum Spike {
 
 /// A card page: a web view that counts its live instances and every move
 /// into or out of a window (S1(f): a swap must never reparent a page).
-final class SpikeWebView: WKWebView {
+final class SpikeWebView: CardNativeWebView {
     /// Pages created in this process so far.
     nonisolated static let created = Atomic<Int>(0)
 
@@ -210,54 +203,6 @@ final class SpikeMessages: NSObject, WKScriptMessageHandler {
     }
 }
 
-/// Two card pages that share one configuration, stacked full-frame and
-/// opaque in one container, the idle page beneath (KTD11, S1). `swap()`
-/// changes their order in place: neither page leaves the container or its
-/// window.
-final class SpikePagePair {
-    let container: PlatformView
-    private(set) var front: SpikeWebView
-    private(set) var back: SpikeWebView
-
-    init(configuration: WKWebViewConfiguration, size: CGSize) {
-        let frame = CGRect(origin: .zero, size: size)
-        container = PlatformView(frame: frame)
-        back = SpikeWebView(frame: frame, configuration: configuration)
-        front = SpikeWebView(frame: frame, configuration: configuration)
-        for page in [back, front] {
-            #if os(macOS)
-            page.autoresizingMask = [.width, .height]
-            #else
-            page.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            page.isOpaque = true
-            #endif
-            // Bottom first: `front` ends on top.
-            container.addSubview(page)
-        }
-    }
-
-    /// Brings the idle page to the front.
-    func swap() {
-        (front, back) = (back, front)
-        #if os(macOS)
-        let target = Unmanaged.passUnretained(front).toOpaque()
-        container.sortSubviews(
-            { first, second, context in
-                // The page in `context` sorts last, so it is drawn on top.
-                let top = context.map { Unmanaged<NSView>.fromOpaque($0).takeUnretainedValue() }
-                if first === top { return .orderedDescending }
-                if second === top { return .orderedAscending }
-                return .orderedSame
-            }, context: target)
-        #else
-        container.bringSubviewToFront(front)
-        #endif
-    }
-
-    /// The page drawn on top: the container's last subview.
-    var topmost: PlatformView? { container.subviews.last }
-}
-
 #if os(macOS)
 typealias PlatformView = NSView
 #else
@@ -279,7 +224,7 @@ final class SpikeWindow {
 
     init(_ content: PlatformView) {
         #if os(macOS)
-        window = NSWindow(
+        window = ReportedVisibleWindow(
             contentRect: CGRect(origin: CGPoint(x: -30_000, y: -30_000), size: content.frame.size),
             styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

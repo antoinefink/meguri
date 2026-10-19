@@ -463,7 +463,7 @@ final class TestPage {
 /// frames (the settle and visible confirmations need them, C6.6, C14) and
 /// `document.visibilityState` is `visible`, as for the occluded page in the
 /// app (S1).
-private final class ReportedVisibleWindow: NSWindow {
+final class ReportedVisibleWindow: NSWindow {
     override var isVisible: Bool { true }
     override var occlusionState: NSWindow.OcclusionState { .visible }
 }

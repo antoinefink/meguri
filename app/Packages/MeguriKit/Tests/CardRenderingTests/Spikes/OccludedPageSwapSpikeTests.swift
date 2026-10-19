@@ -1,3 +1,4 @@
+@testable import CardRendering
 import Foundation
 import Instrumentation
 import Testing
@@ -25,14 +26,6 @@ extension RenderingSpikes {
     @Suite struct OccludedPageSwapSpikeTests {
         static let size = CGSize(width: 390, height: 844)
 
-        /// A card page under `/_anki/`, the media root as its base.
-        static func card(_ body: String, head: String = "") -> String {
-            """
-            <!doctype html><html><head><meta charset="utf-8"><base href="\(Spike.origin.absoluteString)">
-            <style>html, body { margin: 0; background: #fdf6e3; }</style>\(head)</head><body>\(body)</body></html>
-            """
-        }
-
         // MARK: S1(a)
 
         struct Settled: Decodable {
@@ -44,7 +37,7 @@ extension RenderingSpikes {
         }
 
         @Test func aBeneathPageSettlesTwelveBlockingFontFacesABigImageAndItsScriptsBeforeTheSwap() async throws {
-            let handler = SpikeMediaHandler()
+            let handler = MediaFixture()
             let fonts = try SpikeAssets.fonts(12)
             for (index, font) in fonts.enumerated() { handler.add("/_face\(index + 1).ttf", font, "font/ttf") }
             let image = try SpikeAssets.noisePNG(minimumBytes: 2 * 1024 * 1024)
@@ -55,22 +48,16 @@ extension RenderingSpikes {
                 #"@font-face { font-family: \#(face); src: url("_face\#(index + 1).ttf"); font-display: block; }"#
             }
             let spans = faces.map { #"<span style="font-family: \#($0)">Meguri \#($0)</span>"# }
-            handler.add("/_anki/front.html", text: Self.card("<p>Card A</p>"), "text/html")
-            handler.add(
-                "/_anki/beneath.html",
-                text: Self.card(
-                    spans.joined() + #"<img id="big" src="_big.png" width="300"><script>window.ran = ["inline"];</script><script src="_card.js"></script>"#,
-                    head: "<style>\(styles.joined(separator: "\n"))</style>"),
-                "text/html")
-
-            let pair = SpikePagePair(configuration: Spike.configuration(handler: handler), size: Self.size)
+            let content = "<style>" + styles.joined(separator: "\n") + "</style>" + spans.joined()
+                + #"<img id="big" src="_big.png" width="300"><script>window.ran = ["inline"];</script><script src="_card.js"></script>"#
+            let pair = try await Self.makePair(handler)
             let window = SpikeWindow(pair.container)
-            defer { window.close() }
+            defer { pair.close(); window.close() }
             let front = pair.front
             let beneath = pair.back
-            try await front.open(Spike.origin.appending(path: "_anki/front.html"))
+            try await pair.load()
             let started = Spike.now
-            try await beneath.open(Spike.origin.appending(path: "_anki/beneath.html"))
+            let update = try await pair.prepare(CardPayload(cardID: 1, question: content, answer: "answer"))
             let settled = try await beneath.json(
                 Settled.self,
                 """
@@ -91,7 +78,7 @@ extension RenderingSpikes {
             #expect(settled.scripts == ["inline", "src"])
             for index in 1...12 { #expect(handler.requests(for: "/_face\(index).ttf").map(\.status) == [200]) }
             #expect(handler.requests(for: "/_big.png").first?.bodyLength == image.count)
-            pair.swap()
+            _ = try pair.present(update)
             #expect(pair.topmost === beneath)
             print("S1(a) host: 12 faces (\(fonts.map(\.count).reduce(0, +)) bytes) and a \(image.count)-byte image settled beneath in \(Int(elapsed)) ms")
         }
@@ -105,37 +92,27 @@ extension RenderingSpikes {
         /// double requestAnimationFrame before it needs frames: the app's
         /// CardSwapTimingSpikeTests check that part.)
         @Test func aConfirmationFromTheIsolatedWorldCompletesTheSwapsSample() async throws {
-            let handler = SpikeMediaHandler()
-            handler.add("/_anki/card.html", text: Self.card(#"<div id="qa" data-card="7"></div>"#), "text/html")
-            let configuration = Spike.configuration(handler: handler)
-            let world = WKContentWorld.world(name: "meguri")
-            let messages = SpikeMessages()
-            configuration.userContentController.add(messages, contentWorld: world, name: VisibleConfirmation.messageName)
-            let pair = SpikePagePair(configuration: configuration, size: Self.size)
-            let window = SpikeWindow(pair.container)
-            defer { window.close() }
-            for page in [pair.front, pair.back] { try await page.open(Spike.origin.appending(path: "_anki/card.html")) }
+            let handler = MediaFixture()
             var samples: [VisibleSample] = []
-            let recorder = SwapRecorder(emitter: IntervalEmitter(begin: Signposts.begin, end: Signposts.end)) { samples.append($0) }
-            messages.onReceive = { recorder.receive($0.body, at: $0.time) }
-            let post = """
-                const card = Number(document.getElementById("qa").dataset.card);
-                window.webkit.messageHandlers.meguriVisible.postMessage({ token, card, phase: "visible" });
-                return typeof window.show;
-                """
-            // The right card, then a swap whose page names another card.
-            for expected in [Int64(7), 8] {
-                let token = recorder.beginSwap(to: expected, inputTime: Spike.now)
-                pair.swap()
-                recorder.presented(token, frameTime: Spike.now)
-                // The page world's globals are not visible from the probe's world.
-                #expect(try await pair.front.string(post, arguments: ["token": token.sequence], in: world) == "undefined")
-                try await Task.sleep(for: .milliseconds(100))
-            }
+            let pair = try await Self.makePair(handler, onSample: { samples.append($0) })
+            let window = SpikeWindow(pair.container)
+            defer { pair.close(); window.close() }
+            try await pair.load()
+            let update = try await pair.prepare(CardPayload(cardID: 7, question: "seven", answer: "answer"))
+            let token = try pair.present(update)
+            pair.swaps.presented(token, frameTime: Spike.now)
+            try await Task.sleep(for: .milliseconds(150))
+            #expect(samples.map(\.outcome) == [.confirmed])
+            // An invalid isolated receipt cannot complete another swap.
+            pair.current.confirm(["token": token.sequence, "card": 8, "phase": "visible"])
+            #expect(samples.count == 1)
+            // U12's independent wrong-card control remains a miss.
+            let recorder = SwapRecorder { samples.append($0) }
+            let wrong = recorder.beginSwap(to: 8, inputTime: Spike.now)
+            recorder.presented(wrong, frameTime: Spike.now)
+            recorder.receive(["token": wrong.sequence, "card": 7, "phase": "visible"], at: Spike.now)
             recorder.finish()
             #expect(samples.map(\.outcome) == [.confirmed, .wrongCard(reported: 7)])
-            #expect(messages.received.allSatisfy { $0.webView === pair.back || $0.webView === pair.front })
-            // A page-world script cannot post to the probe's handler.
             let fromPage = try await pair.front.string(
                 "return String(Boolean(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.meguriVisible));")
             #expect(fromPage == "false")
@@ -144,12 +121,11 @@ extension RenderingSpikes {
         // MARK: S1(d)
 
         @Test func callAsyncJavaScriptRoundTripsCostWellUnderAFrame() async throws {
-            let handler = SpikeMediaHandler()
-            handler.add("/_anki/card.html", text: Self.card("<p>Card</p>"), "text/html")
-            let pair = SpikePagePair(configuration: Spike.configuration(handler: handler), size: Self.size)
+            let handler = MediaFixture()
+            let pair = try await Self.makePair(handler)
             let window = SpikeWindow(pair.container)
-            defer { window.close() }
-            try await pair.front.open(Spike.origin.appending(path: "_anki/card.html"))
+            defer { pair.close(); window.close() }
+            try await pair.load()
             let isolated = WKContentWorld.world(name: "meguri")
             var report: [String] = []
             for (name, world) in [("page", WKContentWorld.page), ("isolated", isolated)] {
@@ -179,30 +155,26 @@ extension RenderingSpikes {
         /// finalization (a weak registration keeps nothing alive), so a test
         /// can see whether old cards are collected after an explicit test
         /// collection and event-loop turns for the finalization callbacks.
-        static let skeleton = card(
-            #"<div id="qa"></div>"#,
-            head: """
-                <script>
-                window.cards = 0;
-                window.cardsRegistered = 0;
-                window.cardsFinalized = 0;
-                const finalization = new FinalizationRegistry(() => { window.cardsFinalized += 1; });
-                window.show = (id, html) => {
-                  const qa = document.getElementById("qa");
-                  qa.innerHTML = html;
-                  qa.dataset.card = id;
-                  for (const old of qa.querySelectorAll("script")) {
-                    const script = document.createElement("script");
-                    script.textContent = old.textContent;
-                    old.replaceWith(script);
-                  }
-                  if (window.trackCards) {
-                    for (const element of qa.children) { finalization.register(element, 0); window.cardsRegistered += 1; }
-                  }
-                  return document.getElementsByTagName("*").length;
-                };
-                </script>
-                """)
+        static let tracking = """
+            window.cards = 0; window.cardsRegistered = 0; window.cardsFinalized = 0;
+            const finalization = new FinalizationRegistry(() => { window.cardsFinalized += 1; });
+            new MutationObserver((records) => {
+              if (!window.trackCards) return;
+              for (const record of records) if (record.target.id === 'qa') {
+                for (const node of record.addedNodes) if (node.nodeType === 1 && node.isConnected) {
+                  finalization.register(node, 0); window.cardsRegistered += 1;
+                }
+              }
+            }).observe(document.getElementById('qa'), {childList: true});
+            """
+
+        static func makePair(_ media: MediaFixture, onSample: @escaping (VisibleSample) -> Void = { _ in }) async throws -> CardPagePair {
+            let configuration = CardWebConfiguration(store: .nonPersistent())
+            let pair = CardPagePair(configuration: configuration, resolver: try await media.resolved(), size: Self.size, onSample: onSample,
+                                    makeWebView: { SpikeWebView(frame: $0, configuration: $1) })
+            configuration.media.onResponse = media.handler.onResponse
+            return pair
+        }
 
         /// Memory at a point of a burst, in bytes: this process, and the web
         /// content processes that render the pair.
@@ -340,24 +312,24 @@ extension RenderingSpikes {
         /// after loading, at swaps 100 and 1,000 and after the session closed
         /// (each after 3 s of rest); then counts the collected card elements.
         static func burst(script: String = "window.cards += 1;") async throws -> Burst {
-            let handler = SpikeMediaHandler()
-            handler.add("/_anki/card.html", text: Self.skeleton, "text/html")
+            let handler = MediaFixture()
             handler.add("/_img.png", try SpikeAssets.solidPNG(side: 64), "image/png")
-            let pair = SpikePagePair(configuration: Spike.configuration(handler: handler), size: Self.size)
+            let pair = try await Self.makePair(handler)
             let window = SpikeWindow(pair.container)
-            defer { window.close() }
+            defer { pair.close(); window.close() }
             var burst = Burst(pages: [pair.front, pair.back])
+            try await pair.load()
             for page in burst.pages {
-                try await page.open(Spike.origin.appending(path: "_anki/card.html"))
+                try await page.run(Self.tracking)
                 try await page.run("window.trackCards = true;")
             }
             burst.warmWebContent = try await Self.restedWebContent(burst.pages).bytes
             let created = SpikeWebView.created.load(ordering: .relaxed)
             for cycle in 1...1000 {
                 let html = #"<h1>Card \#(cycle)</h1><img src="_img.png"><p>\#(String(repeating: "word ", count: 40))</p><script>\#(script)</script>"#
-                let count = try await pair.back.string("return String(show(id, html));", arguments: ["id": cycle, "html": html])
-                burst.nodes[cycle] = Int(count)
-                pair.swap()
+                let update = try await pair.prepare(CardPayload(cardID: Int64(cycle), question: html, answer: "answer"))
+                burst.nodes[cycle] = try await pair.back.json(Int.self, "return JSON.stringify(document.getElementsByTagName('*').length);")
+                _ = try pair.present(update)
                 // At most one card a frame, as a reviewer sees them.
                 try await Task.sleep(for: .milliseconds(16))
                 if cycle == 100 || cycle == 1000 {
@@ -414,17 +386,18 @@ extension RenderingSpikes {
         }
 
         @Test func explicitCollectionKeepsRetainedRemovedElementsUntilReleased() async throws {
-            let handler = SpikeMediaHandler()
-            handler.add("/_anki/card.html", text: Self.skeleton, "text/html")
-            let pair = SpikePagePair(configuration: Spike.configuration(handler: handler), size: Self.size)
+            let handler = MediaFixture()
+            let pair = try await Self.makePair(handler)
             let window = SpikeWindow(pair.container)
-            defer { window.close() }
+            defer { pair.close(); window.close() }
             let page = pair.front
-            try await page.open(Spike.origin.appending(path: "_anki/card.html"))
+            try await pair.load()
+            try await page.run(Self.tracking)
             try await page.run(
                 """
                 window.trackCards = true;
-                show(1, "<h1>Retained</h1><p>Removed</p><span>Card</span><div>Elements</div>");
+                document.getElementById("qa").innerHTML = "<h1>Retained</h1><p>Removed</p><span>Card</span><div>Elements</div>";
+                await Promise.resolve();
                 window.retainedElements = [...document.getElementById("qa").children];
                 document.getElementById("qa").innerHTML = "";
                 """)
@@ -451,4 +424,10 @@ extension RenderingSpikes {
             #expect((burst.growth(\.webContent) ?? 0) >= 40 * 1024 * 1024, "\(burst.summary)")
         }
     }
+}
+
+private extension CardPagePair {
+    var front: SpikeWebView { current.webView as! SpikeWebView }
+    var back: SpikeWebView { idle.webView as! SpikeWebView }
+    var topmost: CardPlatformView? { container.subviews.last }
 }

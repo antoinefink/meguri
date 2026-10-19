@@ -1,6 +1,7 @@
 #if MEGURI_TEST_HOOKS
 import AVFoundation
 import DesignSystem
+import CardRendering
 import Foundation
 import SwiftUI
 import WebKit
@@ -20,17 +21,15 @@ extension TestHooks {
     enum MediaOriginSpike {
         static let scheme = "meguri-media"
         static let origin = URL(string: "meguri-media://media/")!
-        /// The spike's persistent store; never the production one (R502).
-        static let storeIdentifier = UUID(uuidString: "6D656775-7269-5350-494B-453230303032")!
+        // Fresh per test, passed unchanged across the two app launches.
+        static var storeIdentifier: UUID? { UserDefaults.standard.string(forKey: "CardRenderingTestStore").flatMap(UUID.init(uuidString:)) }
 
         static func configuration(_ handler: Handler, persistent: Bool) -> WKWebViewConfiguration {
-            let configuration = WKWebViewConfiguration()
+            let engine = CardWebConfiguration(store: persistent ? storeIdentifier.map { WKWebsiteDataStore(forIdentifier: $0) } ?? .nonPersistent() : .nonPersistent())
+            handler.engine = engine
+            // Measurement proxy only: all responses come from production.
+            let configuration = engine.configuration.copy() as! WKWebViewConfiguration
             configuration.setURLSchemeHandler(handler, forURLScheme: scheme)
-            configuration.websiteDataStore = persistent ? WKWebsiteDataStore(forIdentifier: storeIdentifier) : .nonPersistent()
-            configuration.mediaTypesRequiringUserActionForPlayback = []
-            #if !os(macOS)
-            configuration.allowsInlineMediaPlayback = true
-            #endif
             return configuration
         }
 
@@ -90,109 +89,103 @@ extension TestHooks {
         final class Handler: NSObject, WKURLSchemeHandler {
             struct Answer {
                 let path: String
-                /// The request's `Range` header.
                 let requested: String?
                 let status: Int
                 let first: Int?
                 let contentRange: String?
                 let length: Int
-                /// What a ranged request got back (`rangeProblems` compares it
-                /// with the file).
                 let body: Data?
             }
-
-            var files: [String: (data: Data, type: String)] = [:]
+            var engine = CardWebConfiguration(store: .nonPersistent())
+            let root = FileManager.default.temporaryDirectory.appending(path: "meguri-s2-\(UUID())", directoryHint: .isDirectory)
+            private var resolver: MediaPathResolver?
+            var files: [String: (data: Data, type: String)] = [:] {
+                didSet {
+                    for (path, file) in files where !path.hasPrefix("/_anki/") {
+                        precondition(!path.dropFirst().contains("/"))
+                        try! file.data.write(to: root.appending(path: String(path.dropFirst())))
+                    }
+                }
+            }
             private(set) var answers: [Answer] = []
-
+            private var tasks: [ObjectIdentifier: Proxy] = [:]
+            override init() {
+                super.init()
+                try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            }
+            isolated deinit { engine.media.close(); try? FileManager.default.removeItem(at: root) }
+            func bind(_ page: WKWebView, document: String) async throws {
+                if resolver == nil { resolver = try await MediaPathResolver.open(root: root, trackedNames: []) }
+                try await engine.ready()
+                engine.media.bind(page, to: .init(resolver: resolver!, document: document, diagnostics: CardDiagnostics()))
+            }
             func webView(_ webView: WKWebView, start task: any WKURLSchemeTask) {
-                guard let url = task.request.url else { return task.didFailWithError(URLError(.badURL)) }
-                let path = url.path(percentEncoded: false)
-                let requested = task.request.value(forHTTPHeaderField: "Range")
-                guard let file = files[path] else {
-                    return finish(task, url, path, requested, status: 404, first: nil, headers: [:], body: Data())
-                }
-                var headers = ["Content-Type": file.type, "Accept-Ranges": "bytes", "Cache-Control": "no-store"]
-                let total = file.data.count
-                if let range = requested, let bounds = Self.bounds(range, total: total) {
-                    headers["Content-Range"] = "bytes \(bounds.first)-\(bounds.last)/\(total)"
-                    return finish(
-                        task, url, path, requested, status: 206, first: bounds.first, headers: headers,
-                        body: file.data.subdata(in: bounds.first..<(bounds.last + 1)))
-                }
-                finish(task, url, path, requested, status: 200, first: nil, headers: headers, body: file.data)
+                let proxy = Proxy(task, owner: self)
+                tasks[ObjectIdentifier(task)] = proxy
+                engine.media.webView(webView, start: proxy)
             }
-
-            func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {}
-
-            /// The first and last byte a single-range `Range` header asks for
-            /// (`bytes=a-b`, `bytes=a-`, or the suffix `bytes=-n`), or nil.
+            func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {
+                if let proxy = tasks.removeValue(forKey: ObjectIdentifier(task)) { engine.media.webView(webView, stop: proxy) }
+            }
+            // Expectation helper, not a server. Fixed independent byte cases
+            // in MediaOriginSpikeHandlerTests hold it to the contract.
             static func bounds(_ header: String, total: Int) -> (first: Int, last: Int)? {
-                guard let match = header.wholeMatch(of: /bytes=(\d*)-(\d*)/), total > 0 else { return nil }
-                if match.1.isEmpty {
-                    guard let suffix = Int(match.2), suffix > 0 else { return nil }
-                    return (max(0, total - suffix), total - 1)
-                }
-                guard let first = Int(match.1), first < total else { return nil }
-                let last = min(Int(match.2) ?? (total - 1), total - 1)
-                return last >= first ? (first, last) : nil
+                let result = RangeResponder(total: UInt64(total), header: header)
+                guard result.status == 206 else { return nil }
+                return (Int(result.offset), Int(result.offset + result.count - 1))
             }
-
-            /// What is wrong with the answers to ranged requests for `path`
-            /// (R495): each must be a 206 whose `Content-Range` names the
-            /// first byte asked for, the last one asked for (or the file's
-            /// last), and the file's length, with exactly those bytes of the
-            /// file. The expected range comes from `bounds`, which
-            /// MediaOriginSpikeHandlerTests holds to fixed answers.
             func rangeProblems(_ path: String) -> [String] {
                 guard let file = files[path]?.data else { return ["\(path): no such file"] }
-                let total = file.count
                 return answers.filter { $0.path == path && $0.requested != nil }.compactMap { answer in
-                    let requested = answer.requested ?? ""
-                    guard let bounds = Self.bounds(requested, total: total) else {
-                        return "\(requested): not a satisfiable single range"
-                    }
-                    let expected = "bytes \(bounds.first)-\(bounds.last)/\(total)"
-                    guard answer.status == 206, answer.contentRange == expected, answer.length == bounds.last - bounds.first + 1 else {
-                        return "\(requested): \(answer.status) \(answer.contentRange ?? "no Content-Range") with \(answer.length) bytes, not 206 \(expected)"
-                    }
-                    guard answer.body == file.subdata(in: bounds.first..<(bounds.last + 1)) else {
-                        return "\(requested): 206 \(expected), but not the file's bytes \(bounds.first)-\(bounds.last)"
-                    }
+                    guard let bounds = Self.bounds(answer.requested ?? "", total: file.count) else { return "not a single satisfiable range" }
+                    let expected = "bytes \(bounds.first)-\(bounds.last)/\(file.count)"
+                    guard answer.status == 206, answer.contentRange == expected, answer.length == bounds.last - bounds.first + 1,
+                          answer.body == file.subdata(in: bounds.first..<(bounds.last + 1)) else { return "incorrect ranged body/headers: \(answer.requested ?? "")" }
                     return nil
                 }
             }
-
-            private func finish(
-                _ task: any WKURLSchemeTask, _ url: URL, _ path: String, _ requested: String?, status: Int, first: Int?,
-                headers: [String: String], body: Data
-            ) {
-                var headers = headers
-                headers["Content-Length"] = String(body.count)
-                answers.append(
-                    Answer(
-                        path: path, requested: requested, status: status, first: first, contentRange: headers["Content-Range"], length: body.count,
-                        body: requested == nil ? nil : body))
-                task.didReceive(HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!)
-                task.didReceive(body)
-                task.didFinish()
+            private final class Proxy: NSObject, WKURLSchemeTask {
+                let target: any WKURLSchemeTask
+                weak var owner: Handler?
+                var request: URLRequest { target.request }
+                var response: HTTPURLResponse?
+                var bytes = Data()
+                init(_ target: any WKURLSchemeTask, owner: Handler) { self.target = target; self.owner = owner }
+                func didReceive(_ response: URLResponse) { self.response = response as? HTTPURLResponse; target.didReceive(response) }
+                func didReceive(_ data: Data) { bytes.append(data); target.didReceive(data) }
+                func didFinish() {
+                    let range = request.value(forHTTPHeaderField: "Range")
+                    let contentRange = response?.value(forHTTPHeaderField: "Content-Range")
+                    let first = contentRange.flatMap { Int($0.wholeMatch(of: /bytes (\d+)-.*/)?.1 ?? "") }
+                    owner?.answers.append(Answer(path: request.url?.path(percentEncoded: false) ?? "", requested: range,
+                                                  status: response?.statusCode ?? 0, first: first, contentRange: contentRange,
+                                                  length: bytes.count, body: range == nil ? nil : bytes))
+                    owner?.tasks[ObjectIdentifier(target)] = nil
+                    target.didFinish()
+                }
+                func didFailWithError(_ error: any Error) { owner?.tasks[ObjectIdentifier(target)] = nil; target.didFailWithError(error) }
             }
         }
 
         /// A web view that reports when its page finished loading.
         final class Page: NSObject, WKNavigationDelegate {
             let webView: WKWebView
+            let handler: Handler
             private var loaded: CheckedContinuation<Bool, Never>?
 
-            init(_ configuration: WKWebViewConfiguration) {
+            init(_ configuration: WKWebViewConfiguration, handler: Handler) {
+                self.handler = handler
                 webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 240), configuration: configuration)
                 super.init()
                 webView.navigationDelegate = self
             }
 
             func open(_ path: String) async -> Bool {
-                await withCheckedContinuation { continuation in
+                let text = handler.files["/" + path].map { String(decoding: $0.data, as: UTF8.self) } ?? "<!doctype html>"
+                do { try await handler.bind(webView, document: text) } catch { return false }
+                return await withCheckedContinuation { continuation in
                     loaded = continuation
-                    webView.load(URLRequest(url: MediaOriginSpike.origin.appending(path: path)))
+                    webView.load(URLRequest(url: MediaOriginSpike.origin))
                 }
             }
 
@@ -306,12 +299,18 @@ extension TestHooks {
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onAppear {
+                if UserDefaults.standard.bool(forKey: "CardRenderingTestCleanup") { return }
                 if page == nil {
                     handler.files["/_anki/storage.html"] = (Data("<!doctype html><title>storage</title>".utf8), "text/html")
-                    page = MediaOriginSpike.Page(MediaOriginSpike.configuration(handler, persistent: true))
+                    page = MediaOriginSpike.Page(MediaOriginSpike.configuration(handler, persistent: true), handler: handler)
                 }
             }
             .task(id: page == nil) {
+                if UserDefaults.standard.bool(forKey: "CardRenderingTestCleanup"), let identifier = MediaOriginSpike.storeIdentifier {
+                    do { try await WKWebsiteDataStore.remove(forIdentifier: identifier); result = "removed" }
+                    catch { result = "error: store cleanup" }
+                    return
+                }
                 guard let page else { return }
                 guard await page.open("_anki/storage.html") else {
                     result = "error: the page did not load"
@@ -405,7 +404,7 @@ extension TestHooks {
                     handler.files["/_anki/media.html"] = (
                         Data(#"<!doctype html><base href="meguri-media://media/"><body></body>"#.utf8), "text/html"
                     )
-                    page = MediaOriginSpike.Page(MediaOriginSpike.configuration(handler, persistent: false))
+                    page = MediaOriginSpike.Page(MediaOriginSpike.configuration(handler, persistent: false), handler: handler)
                 }
             }
             .task(id: page == nil) {
