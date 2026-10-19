@@ -39,7 +39,7 @@ Integrator, in `meguri-wt/U8b` (unit/U8b); the similarity scan ran from the main
   - A run with the host locked was not exercised here. `tools/tests/mac_vm.bats` covers it with a fake session.
 - Provenance: `meguri-wt/U8b` was made by `tools/mg worktree new` (sparse `/*`, `!/oracle/`); no `oracle/` is on disk.
 
-## Remaining hosted checks: migration in progress (2026-10-19)
+## Remaining hosted checks: VM migration (2026-10-19)
 
 Start: `f06073394f2394777ef485bb393d9fbe0a43b6f0` on master. This supplement is not accepted; its full unit gate and the M0 gate remain pending.
 
@@ -69,4 +69,8 @@ All four differences are in `dark-standard-macDefault`:
 | `sample.deckOverview/typical` | 0.99997884 | 0.93789065 |
 | `sample.deckOverview/overflow` | 0.99995846 | 0.93421876 |
 
-Required fractions remain 1.0 and 0.98 respectively. The differences are preserved, not waived. A reference/VM/diff comparison was prepared under `build/orchestration/U8b-mac-vm-comparison.html`. Under U8c's baseline rule, Antoine was asked whether to establish separate VM references. His answer is pending. Existing host references and the approval ledger are unchanged; no new references have been recorded. Default migration acceptance, execution-document changes and the final full gate wait on that decision.
+Required fractions remain 1.0 and 0.98. Antoine approved VM-specific baselines in chat on 2026-10-19 after reviewing the four differences. The comparison is `build/orchestration/U8b-mac-vm-comparison.html`. Host references and comparison tolerances remain unchanged.
+
+- Recording (`snapshots/20261019T171900Z-56838`): 60 references created only under `app/Snapshots/VirtualMac2,1-26A434/`; committed in `5a037342` with the chat approval recorded. Existing host reference files and the signature approval ledger are unchanged.
+- Fresh default verification (`snapshots/20261019T171952Z-59085`) on clean `5a037342`: all 60 comparisons passed without record mode, a filter or a reference-key override. The returned test bundle had 63 passed, zero failed and one existing skip.
+- The execution documents now place these hosted checks in the VM. The final review of this documentation/reference delta and full unit gate remain pending; the unit is not accepted yet.
