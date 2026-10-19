@@ -1,0 +1,34 @@
+# The `nc` marker (specs/render/type-answer.md A4.1, A6, R964, R537): `type:nc:` and
+# the legacy `type-nc:` ignore combining characters in the comparison only;
+# the box is the same. Chains that Anki 26.09.3 reads as the plain marker
+# (`type:ci:`, combined modifiers) compare as plain markers here; Meguri's own
+# reading of them is render/type-answer/meguri-modifiers.
+id: render/type-answer/modifiers
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Accents
+      fields: [Word, Spelling]
+      templates:
+        - {name: Plain, front: "1 {{Word}}{{type:Spelling}}", back: "{{FrontSide}}<hr id=answer>{{Spelling}}"}
+        - {name: No combining, front: "2 {{Word}}{{type:nc:Spelling}}", back: "{{FrontSide}}<hr id=answer>{{Spelling}}"}
+        - {name: Legacy, front: "3 {{Word}}{{type-nc:Spelling}}", back: "{{FrontSide}}<hr id=answer>{{Spelling}}"}
+  notes:
+    # #c1-#c3
+    - {notetype: Accents, fields: [CV, qávul]}
+    # #c4-#c6
+    - {notetype: Accents, fields: [book, "ゐゑ<br>ゔ"]}
+    # #c7-#c9
+    - {notetype: Accents, fields: [qavprompt, "¿Qávru véxu la zóvra de qel?"]}
+steps:
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: qavul}
+          - {card: "#c2", typed: qavul}
+          - {card: "#c3", typed: qavul}
+          - {card: "#c2", typed: qávul}
+          - {card: "#c2", typed: qavuls}
+          - {card: "#c4", typed: ゐゑ ゐ}
+          - {card: "#c5", typed: ゐゑ ゐ}
+          - {card: "#c8", typed: qavru vexu la zovra de qe}
+          - {card: "#c7", typed: qavru vexu la zovra de qe}

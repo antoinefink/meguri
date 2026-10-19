@@ -1,0 +1,130 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "review_html": [
+          {
+            "answer": "<style></style>qav|<hr id=answer>\n<div style=\"font-family: 'Qav\\nVex'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>|<hr id=answer>\n<div style=\"font-family: 'Qav\\nVex'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>",
+            "question": "<style></style>qav|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav\nVex'; font-size: 20px;\">\n</center>\n|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav\nVex'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "error": "invalid_type_answer_replacement"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "answer": "<style></style>qav|<hr id=answer>\n<div style=\"font-family: 'Qav\\1'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>|<hr id=answer>\n<div style=\"font-family: 'Qav\\1'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>",
+            "question": "<style></style>qav|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'QavResponse'; font-size: 20px;\">\n</center>\n|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'QavPrompt'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "answer": "<style></style>qav|<hr id=answer>\n<div style=\"font-family: 'Qav\\g<0>'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>|<hr id=answer>\n<div style=\"font-family: 'Qav\\g<0>'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>",
+            "question": "<style></style>qav|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav[[type:Response]]'; font-size: 20px;\">\n</center>\n|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav[[type:Prompt]]'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "answer": "<style></style>qav|<hr id=answer>\n<div style=\"font-family: 'Qav\\g<1>'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>|<hr id=answer>\n<div style=\"font-family: 'Qav\\g<1>'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>",
+            "question": "<style></style>qav|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'QavResponse'; font-size: 20px;\">\n</center>\n|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'QavPrompt'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "answer": "<style></style>qav|<hr id=answer>\n<div style=\"font-family: 'Qav\\101'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>|<hr id=answer>\n<div style=\"font-family: 'Qav\\101'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>",
+            "question": "<style></style>qav|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'QavA'; font-size: 20px;\">\n</center>\n|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'QavA'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "answer": "<style></style>qav|<hr id=answer>\n<div style=\"font-family: 'Qav\\tVex'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>|<hr id=answer>\n<div style=\"font-family: 'Qav\\tVex'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>",
+            "question": "<style></style>qav|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav\tVex'; font-size: 20px;\">\n</center>\n|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav\tVex'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "answer": "<style></style>qav|<hr id=answer>\n<div style=\"font-family: 'Qav\\&Vex'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>|<hr id=answer>\n<div style=\"font-family: 'Qav\\&Vex'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>",
+            "question": "<style></style>qav|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav\\&Vex'; font-size: 20px;\">\n</center>\n|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav\\&Vex'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "error": "invalid_type_answer_replacement"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "error": "invalid_type_answer_replacement"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "answer": "<style></style>qav|<hr id=answer>\n<div style=\"font-family: 'Qav\\'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>|<hr id=answer>\n<div style=\"font-family: 'Qav\\'; font-size: 20px\"><code id=typeans><span class=typeGood>vex</span></code></div>",
+            "question": "<style></style>qav|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav\\'; font-size: 20px;\">\n</center>\n|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav\\'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "error": "invalid_type_answer_replacement"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "error": "invalid_type_answer_replacement"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "062ae6ff44c68c31d6039aa308090fc439c77f939154f6ce270b04ce60ffadc7",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/type-answer/replacement-escapes",
+  "scenario_sha256": "c1da562cd142a3ebd5d107b4fd373661ac19dde2b55f7ec37d9a46f77eaaaa6e",
+  "tz": "UTC"
+}

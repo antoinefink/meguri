@@ -1,0 +1,30 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "review_html": [
+          {
+            "answer": "<style></style><div class=io hidden><div class=\"cloze-inactive\" data-ordinal=\"1\" data-shape=\"rect\" data-left=\".1\" data-top=\".1\" data-width=\".2\" data-height=\".1\" ></div><br><div class=\"cloze-inactive\" data-ordinal=\"2\" data-shape=\"rect\" data-left=\".4\" data-top=\".1\" data-width=\".2\" data-height=\".1\" ></div><br><div class=\"cloze-highlight\" data-ordinal=\"3\" data-shape=\"rect\" data-left=\".7\" data-top=\".1\" data-width=\".2\" data-height=\".1\" ></div><br></div><img src=\"chart.png\"><div style=\"display:none\"><span class=\"cloze\" data-ordinal=\"3\">[anki:play:a:0]</span></div>",
+            "question": "<style></style><div class=io hidden><div class=\"cloze-inactive\" data-ordinal=\"1\" data-shape=\"rect\" data-left=\".1\" data-top=\".1\" data-width=\".2\" data-height=\".1\" ></div><br><div class=\"cloze-inactive\" data-ordinal=\"2\" data-shape=\"rect\" data-left=\".4\" data-top=\".1\" data-width=\".2\" data-height=\".1\" ></div><br><div class=\"cloze\" data-ordinal=\"3\" data-shape=\"rect\" data-left=\".7\" data-top=\".1\" data-width=\".2\" data-height=\".1\" ></div><br></div><img src=\"chart.png\"><div style=\"display:none\"><span class=\"cloze\" data-cloze=\"&#x5B;sound&#x3A;x&#x2E;mp3&#x5D;\" data-ordinal=\"3\">[...]</span></div>"
+          },
+          {
+            "answer": "<style></style><div class=io hidden><div class=\"cloze-highlight\" data-ordinal=\"1\" data-shape=\"rect\" data-left=\".1\" data-top=\".1\" data-width=\".2\" data-height=\".1\" ></div><br><div class=\"cloze-inactive\" data-ordinal=\"2\" data-shape=\"rect\" data-left=\".4\" data-top=\".1\" data-width=\".2\" data-height=\".1\" ></div><br><div class=\"cloze-inactive\" data-ordinal=\"3\" data-shape=\"rect\" data-left=\".7\" data-top=\".1\" data-width=\".2\" data-height=\".1\" ></div><br></div><img src=\"chart.png\"><div style=\"display:none\"><span class=\"cloze\" data-ordinal=\"1\">[anki:play:a:0]</span></div>",
+            "question": "<style></style><div class=io hidden><div class=\"cloze\" data-ordinal=\"1\" data-shape=\"rect\" data-left=\".1\" data-top=\".1\" data-width=\".2\" data-height=\".1\" ></div><br><div class=\"cloze-inactive\" data-ordinal=\"2\" data-shape=\"rect\" data-left=\".4\" data-top=\".1\" data-width=\".2\" data-height=\".1\" ></div><br><div class=\"cloze-inactive\" data-ordinal=\"3\" data-shape=\"rect\" data-left=\".7\" data-top=\".1\" data-width=\".2\" data-height=\".1\" ></div><br></div><img src=\"chart.png\"><div style=\"display:none\"><span class=\"cloze\" data-cloze=\"&#x5B;sound&#x3A;a&#x2E;mp3&#x5D;\" data-ordinal=\"1\">[...]</span></div>"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "264f247b173391197d43b610110ff13d928321605d96770b57a5ad87494d0d40",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/image-occlusion/render/audio",
+  "scenario_sha256": "29a04b3b799e4e132f144cf530be967dc9d421ad9e43d02acbc4278c76717818",
+  "tz": "UTC"
+}

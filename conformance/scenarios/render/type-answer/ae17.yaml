@@ -1,0 +1,26 @@
+# AE17, comparison part (specs/render/type-answer.md A3-A5, R532, R537): a
+# Japanese syllabary card with {{type:Romaji}}, the Romaji field in its own
+# font and size; typed `ka`, `kq` and nothing.
+id: render/type-answer/ae17
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Syllabary
+      fields: [Kana, Romaji]
+      css: ".kana { font-size: 64px; }"
+      templates:
+        - {name: Reading, front: "<div class=kana>{{Kana}}</div>{{type:Romaji}}", back: "{{FrontSide}}<hr id=answer>{{Romaji}}"}
+  notes:
+    - {notetype: Syllabary, fields: [か, ka]}
+steps:
+  - legacy_update:
+      notetype: Syllabary
+      patch:
+        flds:
+          - {name: Kana, ord: 0, sticky: false, rtl: false, font: Hiragino Sans, size: 40}
+          - {name: Romaji, ord: 1, sticky: false, rtl: false, font: Menlo, size: 24}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: ka}
+          - {card: "#c1", typed: kq}
+          - {card: "#c1"}

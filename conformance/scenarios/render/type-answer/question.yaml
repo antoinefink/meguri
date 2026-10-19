@@ -1,0 +1,56 @@
+# The question side's type-in box (specs/render/type-answer.md A3, A4, R532):
+# the first marker decides the field; every marker becomes the same box with
+# that field's font and size; an empty field removes them all; a field holding
+# only <br> is not empty; a marker naming no field of the note type (a special
+# field, a literal marker) shows the unknown-field warning token (A8); a marker
+# written in a field counts like one from the template. Each case also shows
+# the answer the reviewer builds for it (A5).
+id: render/type-answer/question
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Typing
+      fields: [Front, Back, Extra]
+      css: ".card { text-align: center; }"
+      templates:
+        - {name: Basic, front: "{{Front}}<br>{{type:Back}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+        - {name: Twice, front: "{{Front}}|{{type:Back}}|{{type:Extra}}|", back: "{{FrontSide}}"}
+        - {name: Special, front: "{{Front}}{{type:Tags}}", back: "{{FrontSide}}"}
+        - {name: Literal, front: "{{Front}}[[type:Missing]]", back: "{{FrontSide}}"}
+        - {name: Field first, front: "{{Extra}}{{type:Back}}", back: "{{FrontSide}}"}
+  notes:
+    # #c1-#c5: one card per template, in template order (and so on below).
+    - {notetype: Typing, fields: [qav, qavrul, x], tags: [qavtag]}
+    # #c6-#c10: Back is empty.
+    - {notetype: Typing, fields: [zex, "", zexul]}
+    # #c11-#c15: Back holds only a line break, which is not empty here.
+    - {notetype: Typing, fields: [vux, "<br>", vuxel]}
+    # #c16-#c20: Extra holds a literal marker for Front.
+    - {notetype: Typing, fields: [quz, quzul, "[[type:Front]]"]}
+steps:
+  - observe:
+      - review_html:
+          - {card: "#c1"}
+  # Give each field its own font and size (schema-11 `font` and `size`).
+  - legacy_update:
+      notetype: Typing
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: "Noto Sans", size: 16}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: "Qav Serif", size: 28}
+          - {name: Extra, ord: 2, sticky: false, rtl: false, font: Arial, size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: qavrul}
+          - {card: "#c2", typed: qavrul}
+          - {card: "#c3", typed: qavtag}
+          - {card: "#c4", typed: x}
+          - {card: "#c5", typed: qavrul}
+          - {card: "#c6", typed: zex}
+          - {card: "#c7", typed: zexul}
+          - {card: "#c8"}
+          - {card: "#c11", typed: vuxel}
+          - {card: "#c11"}
+          - {card: "#c12"}
+          - {card: "#c20", typed: quz}
+          - {card: "#c20", typed: fsh}

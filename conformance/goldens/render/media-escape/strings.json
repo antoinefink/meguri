@@ -1,0 +1,23 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "text": {
+          "iri_encode": ["<img src=\"my%20file%231.jpg\">", "<img src=\"日本.png\">", "<img src=\"a&quot;b.jpg\">", "<img src=\"https://example.org/a b.png\">", "<img src=\"http://example.org/a b.png\">", "<img src='single%20quoted.png'>", "<img src=plain.png alt=\"x y\">", "<audio src=\"clip%20one.mp3\"></audio><video src=\"film%20%232.mp4\"></video>", "<video><source src=\"a%20b.webm\"></video>", "<object data=\"plan%20v2.svg\"></object>", "<img data-src=\"lazy%20one.png\">", "[sound:voice clip.mp3]", "<img src=\"100%%20sure.png\">", "<img src=\"tab%09here.png\">", "<img src=\"q&amp;a.png\">", "<img src=\"ünïcödé%20ñame.png\">", "<IMG SRC=\"UPPER%20CASE.PNG\">", "<img src=\"a%20b.png\"><img src=\"a%20b.png\">"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "5bee71d09f87c854fdefbfbd315b9b5a9daa7736bee75c3e2fc98b56cf1ccf8f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/media-escape/strings",
+  "scenario_sha256": "956a2146c5bc912b86d777d7b0621efd805d868173b128710a2bac6124361bc3",
+  "tz": "UTC"
+}

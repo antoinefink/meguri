@@ -1,0 +1,48 @@
+# The answer side (specs/render/type-answer.md A5, R537): every marker becomes
+# the comparison inside the field's font div; every `<hr id=answer>` (that
+# exact text) is removed and one is put before each comparison; an answer with
+# such a rule but no marker left stays as rendered; the answer's own marker is
+# compared with the question's field whatever field it names; the typed text is
+# compared as typed (case, spaces, markup), the expected text without its
+# markup, media and surrounding white space; media names on the answer side
+# are encoded for display while the comparison uses the field as stored.
+id: render/type-answer/answer
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Answers
+      fields: [Country, Capital]
+      templates:
+        - {name: Rule after, front: "1. {{Country}} {{type:Capital}}", back: "{{FrontSide}}<hr id=answer>{{Capital}}"}
+        - {name: Rule before, front: "2. {{Country}} {{type:Capital}}", back: "{{Country}}<hr id=answer>{{FrontSide}}"}
+        - {name: No rule, front: "3. {{Country}} {{type:Capital}}", back: "{{FrontSide}}<br>{{Capital}}"}
+        - {name: Two rules, front: "4. {{Country}} {{type:Capital}}", back: "<hr id=answer>{{FrontSide}}<hr id=answer>{{Capital}}"}
+        - {name: Quoted rule, front: "5. {{Country}} {{type:Capital}}", back: "{{FrontSide}}<hr id=\"answer\">{{Capital}}"}
+        - {name: Own marker, front: "6. {{Country}} {{type:Capital}}", back: "{{Country}}<hr id=answer>{{type:Country}}"}
+        - {name: Rule only, front: "7. {{Country}} {{type:Capital}}", back: "{{Country}}<hr id=answer>{{Capital}}"}
+        - {name: Rule inside, front: "8. {{Country}} {{type:Capital}}", back: "{{FrontSide}}[[type:<hr id=answer>Capital]]"}
+  notes:
+    # #c1-#c8
+    - {notetype: Answers, fields: [Spain, Madrid]}
+    # #c9-#c16
+    - {notetype: Answers, fields: [France, "<img src=\"my map.png\"> <b>Paris</b>&nbsp;[sound:paris city.mp3]<br>"]}
+steps:
+  - observe:
+      - review_html:
+          - {card: "#c1"}
+          - {card: "#c1", typed: Madrid}
+          - {card: "#c1", typed: Madird}
+          - {card: "#c1", typed: madrid}
+          - {card: "#c1", typed: " Madrid "}
+          - {card: "#c1", typed: "<b>Madrid</b>"}
+          - {card: "#c1", typed: "Madrid & Co"}
+          - {card: "#c2", typed: Madrid}
+          - {card: "#c3", typed: Madrid}
+          - {card: "#c4", typed: Madrid}
+          - {card: "#c5", typed: Madrid}
+          - {card: "#c6", typed: Madrid}
+          - {card: "#c7", typed: Madrid}
+          - {card: "#c8", typed: Madrid}
+          - {card: "#c9", typed: Paris}
+          - {card: "#c9", typed: Pari}
+          - {card: "#c9"}

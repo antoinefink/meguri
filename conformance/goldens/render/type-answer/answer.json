@@ -1,0 +1,90 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "review_html": [
+          {
+            "answer": "<style></style>1. Spain <hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans>Madrid</code></div>Madrid",
+            "question": "<style></style>1. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1. Spain <hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Madrid</span></code></div>Madrid",
+            "question": "<style></style>1. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1. Spain <hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Mad</span><span class=typeMissed>-</span><span class=typeGood>i</span><span class=typeBad>r</span><span class=typeGood>d</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>Mad</span><span class=typeMissed>r</span><span class=typeGood>i</span><span class=typeGood>d</span></code></div>Madrid",
+            "question": "<style></style>1. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1. Spain <hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>m</span><span class=typeGood>adrid</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>M</span><span class=typeGood>adrid</span></code></div>Madrid",
+            "question": "<style></style>1. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1. Spain <hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad> </span><span class=typeGood>Madrid</span><span class=typeBad> </span><br><span id=typearrow>&darr;</span><br><span class=typeGood>Madrid</span></code></div>Madrid",
+            "question": "<style></style>1. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1. Spain <hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>&lt;b&gt;</span><span class=typeGood>Madrid</span><span class=typeBad>&lt;/b&gt;</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>Madrid</span></code></div>Madrid",
+            "question": "<style></style>1. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1. Spain <hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Madrid</span><span class=typeBad> &amp; Co</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>Madrid</span></code></div>Madrid",
+            "question": "<style></style>1. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>Spain2. Spain <hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Madrid</span></code></div>",
+            "question": "<style></style>2. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>3. Spain \n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Madrid</span></code></div><br>Madrid",
+            "question": "<style></style>3. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>4. Spain <hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Madrid</span></code></div>Madrid",
+            "question": "<style></style>4. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>5. Spain \n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Madrid</span></code></div><hr id=\"answer\">Madrid",
+            "question": "<style></style>5. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>Spain<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Madrid</span></code></div>",
+            "question": "<style></style>6. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>Spain<hr id=answer>Madrid",
+            "question": "<style></style>7. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>8. Spain <hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Madrid</span></code></div><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Madrid</span></code></div>",
+            "question": "<style></style>8. Spain \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1. France <hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Paris</span></code></div><img src=\"my%20map.png\"> <b>Paris</b>&nbsp;[anki:play:a:0]<br>",
+            "question": "<style></style>1. France \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1. France <hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Pari</span><span class=typeMissed>-</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>Pari</span><span class=typeMissed>s</span></code></div><img src=\"my%20map.png\"> <b>Paris</b>&nbsp;[anki:play:a:0]<br>",
+            "question": "<style></style>1. France \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1. France <hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans>Paris</code></div><img src=\"my%20map.png\"> <b>Paris</b>&nbsp;[anki:play:a:0]<br>",
+            "question": "<style></style>1. France \n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "264f247b173391197d43b610110ff13d928321605d96770b57a5ad87494d0d40",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/type-answer/answer",
+  "scenario_sha256": "0bd30b82352bdf4ae3cc572aa776115fc43b4d751f4f0b9f001a8158e1e2c844",
+  "tz": "UTC"
+}

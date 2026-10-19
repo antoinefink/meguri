@@ -1,0 +1,25 @@
+# AE16, core part, audio tag lists (specs/render/image-occlusion-render.md I6,
+# R1020, R545): the card for mask 3 has no question tags and exactly x.mp3 on
+# the answer. Uses the `render` observation of U62 (render/card-render-
+# pipeline); its golden is recorded once the oracle driver has that kind.
+id: render/image-occlusion/render/audio-tags
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Mask audio
+      kind: cloze
+      fields: [Occlusion, Image, A01, A02, A03]
+      templates:
+        - name: Mask
+          front: "<div class=io hidden>{{cloze:Occlusion}}</div>{{Image}}<div style=\"display:none\">{{cloze:A01}}{{cloze:A02}}{{cloze:A03}}</div>"
+          back: "<div class=io hidden>{{cloze:Occlusion}}</div>{{Image}}<div style=\"display:none\">{{cloze:A01}}{{cloze:A02}}{{cloze:A03}}</div>"
+  notes:
+    - notetype: Mask audio
+      fields:
+        - "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1}}<br>{{c2::image-occlusion:rect:left=.4:top=.1:width=.2:height=.1}}<br>{{c3::image-occlusion:rect:left=.7:top=.1:width=.2:height=.1}}<br>"
+        - "<img src=\"chart.png\">"
+        - "{{c1::[sound:a.mp3]}}"
+        - "{{c2::[sound:b.mp3]}}"
+        - "{{c3::[sound:x.mp3]}}"
+steps:
+  - observe: ["render(#c3, #c1)"]

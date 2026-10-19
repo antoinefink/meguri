@@ -363,6 +363,32 @@
             }
           }
         },
+        "type_answer": {
+          "description": "specs/conformance/type-answer-ops.md K1: one array per requested function, one comparison per input in input order.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "compare": { "$ref": "#/$defs/text_strings" },
+            "compare_nc": { "$ref": "#/$defs/text_strings" }
+          }
+        },
+        "review_html": {
+          "description": "specs/conformance/type-answer-ops.md K2: ordered HTML results or a typed replacement refusal.",
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object", "required": ["question", "answer"], "additionalProperties": false,
+                "properties": { "question": { "type": "string" }, "answer": { "type": "string" } }
+              },
+              {
+                "type": "object", "required": ["error"], "additionalProperties": false,
+                "properties": { "error": { "const": "invalid_type_answer_replacement" } }
+              }
+            ]
+          }
+        },
         "text": {
           "description": "O4 text: one array per requested function, one output per input in input order.",
           "type": "object",

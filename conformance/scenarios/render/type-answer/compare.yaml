@@ -1,0 +1,100 @@
+# Comparison HTML of a stored expected text and a typed text (specs/render/
+# type-answer.md A6, A7; R537, R941, AE17 comparison part): `compare` keeps
+# combining characters (the plain and cloze markers), `compare_nc` drops them
+# (the nc marker). Expected values come from the oracle.
+id: render/type-answer/compare
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - type_answer:
+          fns: [compare, compare_nc]
+          inputs:
+            # AE17 and the preview's inputs (R941)
+            - ["ka", "ka"]
+            - ["ka", "kq"]
+            - ["ka", ""]
+            - ["example", "sample"]
+            # Exact, collapsed; wrong, not collapsed; shorter and longer typed texts
+            - ["456", "456"]
+            - ["456", "4456"]
+            - ["5", "67"]
+            - ["56", "5"]
+            - ["дом", "дм"]
+            - ["Madrid", "Madird"]
+            # Case and accents (plain and nc)
+            - ["Hola", "hola"]
+            - ["qávul", "qavul"]
+            - ["Qëvax", "qevax"]
+            # Expected text: markup, entities, line breaks, media and white space
+            - ["<div>456</div>", "456"]
+            - ["<div>789</div>", ""]
+            - ["[sound:qavtone.ogg]<i>7</i> &nbsp;8", "7  8"]
+            - ["<b>x</b>&amp;y", "x&y"]
+            - ["a & b <b>c</b>", ""]
+            - ["it's \"q\"", ""]
+            - ["a&nbsp;b", "a b"]
+            - ["&bogus; <i>x</i>", "&bogus; x"]
+            - ["  a<br>b\n<div>c</div> ", "a b c"]
+            - ["a<BR/>b<br />c<br\t>d<DIV>e</Div>f<div class=x>g", ""]
+            - ["one<br><br>\n<div>two</div>", "one two"]
+            - ["　a ", "a"]
+            - ["\ta\n", "a"]
+            - ["<!-- note -->kept", "kept"]
+            - ["[anki:tts lang=en_US]hello[/anki:tts]world", "world"]
+            # Other directives are written back; with two distinct option keys their
+            # order is not fixed in Anki (A6.1.1), so no input has two.
+            - ["[anki:foo  a='b']x[/anki:foo]", ""]
+            - ["[anki:foo c=\"d e\"]x[/anki:foo]", ""]
+            - ["[anki:foo a=1 a=2]x[/anki:foo]", ""]
+            - ["[anki:foo\tk=v ]z[/anki:foo]", ""]
+            - ["[anki:foo k=\"\"]z[/anki:foo]", ""]
+            - ["[anki:foo][sound:x.mp3][/anki:foo]y", ""]
+            - ["[anki:tts]x[/anki:tts]y", "y"]
+            - ["[anki:foo]x[/anki:bar]", ""]
+            - ["[sound:]x", ""]
+            - ["[sound:a]b]c", ""]
+            - ["<img src=\"a b.png\">pic", "pic"]
+            - ["<br>", "x"]
+            - ["<br>", ""]
+            - ["", ""]
+            - ["", "x"]
+            # Typed text is compared and shown as typed
+            - ["cd <path>/x && ls", "cd <path>/x && ls"]
+            - ["a<b", "a<b"]
+            - ["a", "<i>"]
+            - ["a", " "]
+            - ["Madrid", " Madrid "]
+            # Normalization: NFC in the plain mode, NFKD without marks in nc
+            - ["é", "é"]
+            - ["é", "é"]
+            - ["ﬁ①", "fi1"]
+            - ["ﬁ①", "fx1"]
+            - ["ﬁ", "fi"]
+            - ["́ab", "ab"]
+            - ["ぱ", "は"]
+            - ["が", "か"]
+            - ["ほん が", "ゐゑ ゐ"]
+            - ["한국", "한구"]
+            - ["읽다쓰다", "익다쓰타"]
+            - ["שָׁלוֹם", "שלום"]
+            - ["שָׁלוֹם", "שלם"]
+            - ["كَتَبَ", "كتب"]
+            - ["नमस्ते", "नमस्त"]
+            # A typed or expected token that starts with a mark gets a no-break space (Unicode 10 marks only)
+            - ["xy", "x̵y"]
+            - ["x̵y", "xy"]
+            - ["xy", "x࣓y"]
+            - ["xy", "x᫁y"]
+            - ["❤", "❤️"]
+            # Long texts: the pinned sequence matcher at 200 or more expected characters
+            - ["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxabcyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", "abc"]
+            - ["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxabc", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxabd"]
+            - ["abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab", "ababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababxababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab"]
+            - ["Каждый модуль решает ровно одну задачу в своей программе", "Each module решает одну задачу в программе, и всё."]
+            # Repeats and other scripts
+            - ["aaa", "a"]
+            - ["abcabc", "abc"]
+            - ["東京", "東亰"]
+            - ["👍🏽 ok", "👍 ok"]
+            - ["Straße", "Strasse"]
+            - ["İqav", "iqav"]

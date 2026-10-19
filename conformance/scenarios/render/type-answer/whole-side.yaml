@@ -1,0 +1,18 @@
+# A3: display preparation sees the style element and body as one string.
+id: render/type-answer/whole-side
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Whole side
+      fields: [Prompt, Response]
+      css: '/* [[type:Response]] <hr id=answer> <img src="style media.png"> */'
+      templates:
+        - name: Side
+          front: "{{Prompt}}|{{type:Prompt}}"
+          back: "{{FrontSide}}|[[type:Prompt]]|<hr id=answer>"
+  notes:
+    - {notetype: Whole side, fields: [question, response]}
+steps:
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: response}

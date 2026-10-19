@@ -6934,7 +6934,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 - `conformance/scenarios/render/type-answer/**.yaml`, `conformance/scenarios/render/media-escape/**.yaml`, `conformance/scenarios/render/image-occlusion/render/**.yaml` and goldens
 
 **Approach:**
-- **Question side:** the display transform replaces the first type marker with the R532 box plus the R533 attributes. Later markers are removed. Empty or unknown expected fields are handled per R532.
+- **Question side:** the first type marker selects one descriptor (expected field, mode, font and size). Every question marker becomes the same R532 box with the R533 attributes; only the first input supplies the typed text at reveal. Empty or unknown expected fields follow R532. This follows pinned parity under R1907.
 - **Answer side:** pre-rendered HTML carries a placeholder. At reveal, U67 reads the typed text (R536) and calls `compareTypedAnswer(descriptor, typed)` on the interactive lane. That call returns the R537 block, including the `<hr id=answer>` relocation. Cost is microseconds, so the reveal budget R1809 holds.
 - **Comparison algorithm:** it follows `specs/render/type-answer.md` and covers NFC, HTML stripping of the expected text, the `nc`/`ci` modes and cloze extraction (U61). The diff must reproduce the oracle's opcodes. The decision is to use the same third-party sequence-diff crate as the oracle's lockfile (`difflib`, `=`-pinned as a parity crate) rather than a hand-written diff. Cross-area: KTD2 list.
 - **Media encoding:** `media_display.rs` percent-encodes local names in `src` per R530 (consistent with R988), implemented from the spec and differential-tested against the oracle's IRI-encoding call. No Ankitects-hosted git dependency.
@@ -6945,7 +6945,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 **Patterns to follow:** U62 display-transform layering (oracle-comparable output vs display output); parity-crate pin rule (KTD2).
 
 **Test scenarios:**
-- `{{type:Romaji}}` on the front yields exactly one R532 input with the field's font and size and the R533 attributes; a second `{{type:Other}}` is removed; an empty Romaji field yields no box; `{{type:Nope}}` yields the warning text (R532, R533).
+- `{{type:Romaji}}` on the front yields an R532 input with the field's font and size and the R533 attributes; a second `{{type:Other}}` yields an identical input, with only the first active at reveal. An empty Romaji field removes all boxes. A literal `[[type:Nope]]` or special-field marker yields the warning; an ordinary template replacement naming an absent field is a template error before this step (R532, R533, R1907).
 - Covers AE17 (comparison part): expected `ka`, typed `ka`, `kq` and empty each produce HTML equal to the oracle's compare output (R537).
 - `{{type:nc:F}}` with expected `résumé` and typed `resume` is correct; `{{type:ci:F}}` treats `Hola` and `hola` as equal (R964, R537).
 - `{{type:cloze:Text}}` against `{{c1::a}} {{c1::b}}` compares with `a, b` (R977).

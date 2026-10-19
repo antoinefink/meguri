@@ -1,0 +1,83 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "review_html": [
+          {
+            "answer": "<style>.card { text-align: center; }</style>qav<br><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans>qavrul</code></div>qavrul",
+            "question": "<style>.card { text-align: center; }</style>qav<br>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "answer": "<style>.card { text-align: center; }</style>qav<br><hr id=answer>\n<div style=\"font-family: 'Qav Serif'; font-size: 28px\"><code id=typeans><span class=typeGood>qavrul</span></code></div>qavrul",
+            "question": "<style>.card { text-align: center; }</style>qav<br>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav Serif'; font-size: 28px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>qav|\n<div style=\"font-family: 'Qav Serif'; font-size: 28px\"><code id=typeans><span class=typeGood>qavrul</span></code></div>|\n<div style=\"font-family: 'Qav Serif'; font-size: 28px\"><code id=typeans><span class=typeGood>qavrul</span></code></div>|",
+            "question": "<style>.card { text-align: center; }</style>qav|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav Serif'; font-size: 28px;\">\n</center>\n|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav Serif'; font-size: 28px;\">\n</center>\n|"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>qav",
+            "question": "<style>.card { text-align: center; }</style>qav[[warning:unknown_field:Tags]]"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>qav",
+            "question": "<style>.card { text-align: center; }</style>qav[[warning:unknown_field:Missing]]"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>x\n<div style=\"font-family: 'Qav Serif'; font-size: 28px\"><code id=typeans><span class=typeGood>qavrul</span></code></div>",
+            "question": "<style>.card { text-align: center; }</style>x\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav Serif'; font-size: 28px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>zex<br><hr id=answer>",
+            "question": "<style>.card { text-align: center; }</style>zex<br>"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>zex|||",
+            "question": "<style>.card { text-align: center; }</style>zex|||"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>zex",
+            "question": "<style>.card { text-align: center; }</style>zex[[warning:unknown_field:Tags]]"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>vux<br><hr id=answer>\n<div style=\"font-family: 'Qav Serif'; font-size: 28px\"><code id=typeans><span class=typeBad>vuxel</span><br><span id=typearrow>&darr;</span><br></code></div><br>",
+            "question": "<style>.card { text-align: center; }</style>vux<br>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav Serif'; font-size: 28px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>vux<br><hr id=answer>\n<div style=\"font-family: 'Qav Serif'; font-size: 28px\"><code id=typeans></code></div><br>",
+            "question": "<style>.card { text-align: center; }</style>vux<br>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav Serif'; font-size: 28px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>vux|\n<div style=\"font-family: 'Qav Serif'; font-size: 28px\"><code id=typeans></code></div>|\n<div style=\"font-family: 'Qav Serif'; font-size: 28px\"><code id=typeans></code></div>|",
+            "question": "<style>.card { text-align: center; }</style>vux|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav Serif'; font-size: 28px;\">\n</center>\n|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Qav Serif'; font-size: 28px;\">\n</center>\n|"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>\n<div style=\"font-family: 'Noto Sans'; font-size: 16px\"><code id=typeans><span class=typeGood>quz</span></code></div>\n<div style=\"font-family: 'Noto Sans'; font-size: 16px\"><code id=typeans><span class=typeGood>quz</span></code></div>",
+            "question": "<style>.card { text-align: center; }</style>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Noto Sans'; font-size: 16px;\">\n</center>\n\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Noto Sans'; font-size: 16px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>\n<div style=\"font-family: 'Noto Sans'; font-size: 16px\"><code id=typeans><span class=typeBad>fsh</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>quz</span></code></div>\n<div style=\"font-family: 'Noto Sans'; font-size: 16px\"><code id=typeans><span class=typeBad>fsh</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>quz</span></code></div>",
+            "question": "<style>.card { text-align: center; }</style>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Noto Sans'; font-size: 16px;\">\n</center>\n\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Noto Sans'; font-size: 16px;\">\n</center>\n"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "062ae6ff44c68c31d6039aa308090fc439c77f939154f6ce270b04ce60ffadc7",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/type-answer/question",
+  "scenario_sha256": "3de7908d9c5320bd801cbd97c2e5fe00cb087832d241a165d84d29601dece3a9",
+  "tz": "UTC"
+}

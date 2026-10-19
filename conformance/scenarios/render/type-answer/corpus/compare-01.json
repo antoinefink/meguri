@@ -1,0 +1,1227 @@
+{
+ "id": "render/type-answer/corpus/compare-01",
+ "description": "Generated type-in comparisons, part 1 of 10 (corpora/type-answer/generate.py).",
+ "tags": [
+  "generated"
+ ],
+ "clock": {
+  "tz": "UTC",
+  "start": "2030-01-15T10:00:00"
+ },
+ "steps": [
+  {
+   "observe": [
+    {
+     "type_answer": {
+      "fns": [
+       "compare",
+       "compare_nc"
+      ],
+      "inputs": [
+       [
+        "々 a-b",
+        "々 a-b"
+       ],
+       [
+        "½, ぱゑ, \"qav\"",
+        "½, ぱゑd \"qav\""
+       ],
+       [
+        "Qurav",
+        "Qura"
+       ],
+       [
+        "̀鬱蒼 ①② ½",
+        "̀u蒼 ①② ½"
+       ],
+       [
+        "a-b",
+        "a-"
+       ],
+       [
+        "<!-- c -->ثَغْظَة",
+        "ثغظة"
+       ],
+       [
+        "<div>Qurav &amp; ①②</div><div></div>",
+        "Qurav か①②"
+       ],
+       [
+        "　쯤뾰&amp;nbsp;Жфэю<br />",
+        "쯤뾰 Жэфю"
+       ],
+       [
+        "Φρέξα",
+        "Φρεξα"
+       ],
+       [
+        "&nbsp;Φρέξα<div>q'v<div>🇯🇵<div>ﬁqav<div>Qëvax<div>Φρέξα<div>q'v<div>🇯🇵<div>ﬁqav<div>Qëvax,<div>ヷヸヹ<div>ָёфж<div>3.14,<div>ξλαφ<div>qävox<div>qav<div>צָׁקְף<div>鬱蒼<div>ヰヱヮ,<div>Φρέξα<div>q'v<div>🇯🇵<div>ﬁqav<div>Qëvax<div>Φρέξα<div>q'v<div>🇯🇵<div>ﬁqav<div>Qëvax<div>Φρέξα<div>q'v<div>🇯🇵<div>ﬁqav<div>Qëvax,<div>🇯🇵<div>צקף<div>齟齬<div>Φρέξα<div>q'v<div>🇯🇵<div>ﬁqav<div>Qëvax",
+        "Φρέξα q'v 🇯🇵 ﬁqav Qëvax Φρέξα q'v 🇯🇵 ﬁqav Qëvax, ヷヸヹ ָёфж 3.14, ξλαφ qävox qav צָׁקְף 鬱蒼 ヰヱヮ, Φρέξα q'v 🇯🇵 ﬁqav Qëvax Φρέξα q'v 🇯🇵 ﬁqav Qëvax Φρέξα q'v 🇯🇵 ﬁqav Qëvax, 🇯🇵 צקף 齟齬 Φρέξα q'v 🇯🇵 ﬁqav Qëvax"
+       ],
+       [
+        "<div><i>鬱龘 ıqır ?! ฬิฌี</i></div>",
+        "鬱龘ıqır?!ฬิฌี"
+       ],
+       [
+        "&nbsp;❤̇&nbsp;Qav[sound:say it.mp3]",
+        "❤̇ ａｖ"
+       ],
+       [
+        "qävox 鬱龘 👍 Жфэю \"qav\" qävox, qävox 鬱龘 👍 Жфэю \"qav\" qävox, 龘齉 ξλαφ झफठ 쀼쐬 qème vûlée झफठَ, qävox 鬱龘 👍 Жфэю \"qav\" qävox ❤ ゐゑゎ 🇯🇵 qävox 鬱龘 👍 Жфэю \"qav\" qävox qävox 鬱龘 👍 Жфэю \"qav\" qävox qävox 鬱龘 👍 Жфэю \"qav\" qävox",
+        "qävox 鬱龘 👍 Жфэю \"qav\" qävox, qävox 鬱龘 👍 Жфэю \"qav\" qävox, 龘齉 ξλαφ झफठ 쀼쐬 q️ème vûlée झफठَ, qävox 鬱龘 👍 Жфэю \"qav\" qävox ❤ ゐゑゎ 🇯🇵 qävox 鬱龘 👍 Жфэю \"qav\" qävox qävox 鬱龘 👍 Жфэю \"qav\" qävox qävox 鬱龘 👍 Жфэю \"qav\" qävox"
+       ],
+       [
+        "<i>齟齬</i>",
+        "齟"
+       ],
+       [
+        "🇯🇵",
+        "🇯"
+       ],
+       [
+        "쀼쐬",
+        "쀼쐬"
+       ],
+       [
+        " <!-- c -->ظَغَثَ́ ",
+        "ظَغثَ́"
+       ],
+       [
+        "<br>麒麟 ظَغَثَ",
+        "麒麟 ظَغَثs"
+       ],
+       [
+        "ξλαφ",
+        "ξλαφ"
+       ],
+       [
+        "zúvñel",
+        "zuvnel"
+       ],
+       [
+        "<br>3.14",
+        "ぱゑ"
+       ],
+       [
+        "齾靐, ıqır, 쀼쐬<br>[sound:say it.mp3]",
+        "齾靐, ıqır, t쐬"
+       ],
+       [
+        "<div><i>ıqır</i></div>",
+        "ıqr"
+       ],
+       [
+        "&nbsp;zúvñel",
+        "zúveñl"
+       ],
+       [
+        "ǅavul",
+        ""
+       ],
+       [
+        "ฬิฌี ™ qav",
+        "ฬิฌี ™ qav"
+       ],
+       [
+        "\n쀼쐬, vüber",
+        "쀼쐬ä, vüber"
+       ],
+       [
+        "❤️ 3.14 齾靐 ظغث",
+        "❤️ 3δ.14 齾靐 ظغ ث"
+       ],
+       [
+        "झफठ<div>ǅavul",
+        "झफठǅavul"
+       ],
+       [
+        "쯤뾰, ظَغَثَ, a-b",
+        ""
+       ],
+       [
+        "vexul&nbsp;",
+        "vexul"
+       ],
+       [
+        "Åqvöm",
+        "Åqvöβ"
+       ],
+       [
+        "q'v qav zex цжф",
+        "q'v qaßv zex цжф"
+       ],
+       [
+        "&nbsp;[sound:a.ogg]Zovik, zúvñel, ǅavul, qávul",
+        "zovik, zúvñel, ǆavul, qávul"
+       ],
+       [
+        "qav zex",
+        "qav zex"
+       ],
+       [
+        "<i>&quot;qav&quot; &quot;qav&quot;</i>",
+        "\"qav\" \"qav\"\"qav\" \"qav\""
+       ],
+       [
+        "\"qav\"",
+        "qav\""
+       ],
+       [
+        "½",
+        "F"
+       ],
+       [
+        "<span style=\"color: red\">ظَغَثَ, ❤️</span>",
+        "ظغث, ❤"
+       ],
+       [
+        "झिफी, 쯤뾰",
+        "झिफी, 쯤뾰"
+       ],
+       [
+        "ξλαφ, ΞΛΑΦ",
+        "ヷヸヹ vüber"
+       ],
+       [
+        "々 vexul",
+        "々 vexul"
+       ],
+       [
+        "<br>Qëvax 👍 ظَغَثَ Ævø̇",
+        "Qëvax 👍 ظَغَثp Ævø̇"
+       ],
+       [
+        "vexul &amp;amp; цжф",
+        "Vexul цжф"
+       ],
+       [
+        "?! 齾靐",
+        "?! 齾靐"
+       ],
+       [
+        "\tξλάφ̃\n",
+        "ξλάx̃"
+       ],
+       [
+        "3.14",
+        ""
+       ],
+       [
+        "ثَغْظَة צָׁקְף[sound:say it.mp3]",
+        "ثَغْظَة צָׁקְף"
+       ],
+       [
+        "\n½َ<img src=\"pic.png\">",
+        "ßt½"
+       ],
+       [
+        "　qörvå",
+        "qörvå"
+       ],
+       [
+        "<i>齾靐️</i>",
+        "齾靐う"
+       ],
+       [
+        "　ΞΛΑΦ qörvå",
+        "ΞΛΑΦ  qörvå"
+       ],
+       [
+        "<i>ΞΛΑΦ̵ 🇯🇵</i>",
+        ""
+       ],
+       [
+        "쀼쐬",
+        "쐬"
+       ],
+       [
+        "vexul ξλάφ",
+        "vexul ξλάφ"
+       ],
+       [
+        " <i>Φρέξα️</i> ",
+        "Φαρέξα️"
+       ],
+       [
+        "qème / vûlée",
+        " qème vûlée"
+       ],
+       [
+        "<b>Ævø</b>",
+        "Ævø"
+       ],
+       [
+        "צקף झफठ qçavel",
+        "צקף झफठ qçvel"
+       ],
+       [
+        "Zovik",
+        "קף"
+       ],
+       [
+        "Ｑａｖ qème vûlée",
+        "쯤뾰"
+       ],
+       [
+        "❤️",
+        "❤️"
+       ],
+       [
+        " झिफी ฌฬฆ 3.14 ",
+        "झिफी ฌฬฆ 3.14"
+       ],
+       [
+        "ǅavul 鬱龘 qav झिफी ฌฬฆ, ıqır ฬิฌี ❤ ǅavul 鬱龘 qav झिफी ฌฬฆ, ǅavul 鬱龘 qav झिफी ฌฬฆ, фжэ צקף qav zex צקף ❤️ ΞΛΑΦ ǅavul 鬱龘 qav झिफी ฌฬฆ ﬁqav Ævø x², ǅavul 鬱龘 qav झिफी ฌฬฆ ǅavul 鬱龘 qav झिफी ฌฬฆ, ǅavul 鬱龘 qav झिफी ฌฬฆ",
+        "ǅavul 鬱龘 qav झिफが ฌฬฆ, ıqır ฬิฌี ❤ ǅavul 鬱龘 qav झिफी ฌฬฆ, ǅavul 鬱龘 qav झिफी ฌฬฆ, фжэ צקף qav zex צקף ❤️ ΞΛΑΦ ǅavul 鬱龘 qav झिफी ฌฬฆ ﬁqav Ævø x², ǅavul 鬱龘 qav झिफी ฌฬฆ ǅavul 鬱龘 qav झिफी ฌฬฆ, ǅavul 鬱龘 qav झिफी ฌฬฆ"
+       ],
+       [
+        "&quot;qav&quot;, Їфж",
+        "\"qa\"v, Їфж"
+       ],
+       [
+        "&nbsp;ΞΛΑΦ<img src=\"pic.png\">",
+        "ΞΑΛΦ"
+       ],
+       [
+        "<i>ฬิฌี צָׁקְף</i>",
+        "ฬฌ צקף"
+       ],
+       [
+        "zúvñel",
+        "zúvñeñ"
+       ],
+       [
+        "Qurav",
+        "Qurav"
+       ],
+       [
+        "<b>İqav, 3.14</b>",
+        "İqav, 3.14"
+       ],
+       [
+        "َฌฬฆ",
+        "َฌฬฆ"
+       ],
+       [
+        "<br>½, 鬱龘, Qurav, zúvñel",
+        "½, 鬱龘,字Qurav, zúvñel"
+       ],
+       [
+        "<i>\tvexul\n</i>",
+        "vkexul"
+       ],
+       [
+        "vexul",
+        "vexul"
+       ],
+       [
+        "&nbsp;Qraße 麒麟",
+        "?!, x², ゐゑゎ"
+       ],
+       [
+        "<i><span style=\"color: red\">ǅavul, ΞΛΑΦ</span></i>",
+        "ǅavul, ΞΛΑΦ"
+       ],
+       [
+        "<span style=\"color: red\">쐐쭈</span>",
+        "β쐐쭈"
+       ],
+       [
+        "<span style=\"color: red\">q'v,<br>Åqvöm,<br>ثَغْظَة</span>",
+        "q'v, åqvöm, ثَغْظَة"
+       ],
+       [
+        "<!-- c --><b>qème vûlée qav qav</b>",
+        "qème vblée qav qav"
+       ],
+       [
+        "<span style=\"color: red\">ゐゑゎ, 3.14, ❤️</span>",
+        "麒麟 ヰヱヮ"
+       ],
+       [
+        "\t쀼쐬, qörvå\n",
+        "쀼"
+       ],
+       [
+        "qörvå Åqvöm İqav цжф ظغث qörvå Åqvöm İqav цжф ظغث qörvå Åqvöm İqav цжф ظغث, 쀼쐬 ثَغْظَة झफठ qörvå Åqvöm İqav цжф ظغث, qörvå Åqvöm İqav цжф ظغث qörvå Åqvöm İqav цжф ظغث qörvå Åqvöm İqav цжф ظغث Łivź Łivź̃ ｦｧｨ",
+        "QÖRVÅ åQVÖM i̇QAV ЦЖФ ظغث QÖRVÅ åQVÖM i̇QAV ЦЖФ ظغث QÖRVÅ åQVÖM i̇QAV ЦЖФ ظغث, 쀼쐬 ثَغْظَة झफठ QÖRVÅ åQVÖM i̇QAV ЦЖФ ظغث, QÖRVÅ åQVÖM i̇QAV ЦЖФ ظغث QÖRVÅ åQVÖM i̇QAV ЦЖФ ظغث QÖRVÅ åQVÖM i̇QAV ЦЖФ ظغث łIVŹ łIVŹ̃ ｦｧｨ"
+       ],
+       [
+        "[sound:a.ogg] ヷヸヹ゚ ",
+        "ヷヸヹ゚"
+       ],
+       [
+        "qav<br>q'v",
+        "фжэ ﬁqav"
+       ],
+       [
+        "<!-- c -->ثَغْظَة 👍🏽",
+        "ثغظة 👍🏽"
+       ],
+       [
+        "qçavel 々",
+        "çavel 々"
+       ],
+       [
+        "Qëvaxَ 쐐쭈 ヰヱヮ",
+        "Qëvaxَ 쐐쭈 ヰヱヮ"
+       ],
+       [
+        "\nǅavulָ",
+        "ǅavulָ"
+       ],
+       [
+        "ヷヸヹ",
+        "가ヸヹ"
+       ],
+       [
+        "<!-- c -->qävox",
+        "qvox"
+       ],
+       [
+        "❤️,\nָzúvñel[sound:say it.mp3]",
+        "❤️, ָzúvñel"
+       ],
+       [
+        "\"qav\"<br />",
+        "\"qav\""
+       ],
+       [
+        " ゔゐ[sound:say it.mp3] ",
+        "ゔ"
+       ],
+       [
+        "a/b̧, ™, Їфж",
+        "aa/b̧, ™, Їфж"
+       ],
+       [
+        "ぱゑ゚[sound:say it.mp3]",
+        "はゑ"
+       ],
+       [
+        "<!-- c -->Qëvax q'v",
+        "Qëvaxq'v"
+       ],
+       [
+        "ぱゑ<br />",
+        "ぱ漢ゑ"
+       ],
+       [
+        "龘齉",
+        ""
+       ],
+       [
+        "ฌฬฆ, Åqvöm",
+        "ฌฬ, Åqvöm"
+       ],
+       [
+        "qävox 龘齉 ıqır ぱゑ",
+        "qävox ú龘齉 ıqır ぱゑ"
+       ],
+       [
+        "　qav zex",
+        "qav zwx"
+       ],
+       [
+        "ıqır<br />",
+        "gıqır"
+       ],
+       [
+        "ヷヸヹ",
+        "ワヰヱ"
+       ],
+       [
+        "　ǅavulָ",
+        "ǅavulָ"
+       ],
+       [
+        "Їфж",
+        "cavel ץקפף"
+       ],
+       [
+        "①② qav zex 々",
+        "①②qavzex々"
+       ],
+       [
+        "Qurav 龘齉 42 ﬁqav ฬิฌี 👩‍👩‍👧, Qurav 龘齉 42 ﬁqav ฬิฌี 👩‍👩‍👧, 鬱蒼 a/b ❤️ ゔゐ ヰヱヮ ظغث Qurav 龘齉 42 ﬁqav ฬิฌี 👩‍👩‍👧 Qurav 龘齉 42 ﬁqav ฬิฌี 👩‍👩‍👧 Ｑａｖ 3.14 q'v, Qurav 龘齉 42 ﬁqav ฬิฌี 👩‍👩‍👧 Qurav 龘齉 42 ﬁqav ฬิฌี 👩‍👩‍👧",
+        "Qurav 龘齉 42 ﬁqav ฬิฌี 👩‍👩‍👧, Qurav 龘齉 42 ﬁqav ฬิฌี 👩‍👩‍👧, 鬱蒼 a/b ❤️ ゔゐ ヰヱヮ ظغث Qurav 龘齉 42 ﬁqav ฬิฌี 👩‍👩‍👧 Qurav 龘齉 42 ﬁqav ฬิฌี 👩‍👩‍👧 Ｑａｖ 3.14 q'v, Qurav 龘齉 42 ﬁqav ฬิฌี 👩‍👩‍👧 Qurav 龘齉 42 ﬁqav ฬิฌี 👩‍👩‍👧"
+       ],
+       [
+        "\n鬱蒼\n™",
+        "鬱蒼 ™"
+       ],
+       [
+        "q'v",
+        "b'v"
+       ],
+       [
+        "齟齬, ΞΛΑΦ",
+        "齟齬, ΞΛΑΦ"
+       ],
+       [
+        "ㄲㅃㅉ<img src=\"pic.png\">",
+        "ㄲㅃㅉ"
+       ],
+       [
+        "ゐゑゎ<br />",
+        "oゐゑゎ"
+       ],
+       [
+        "qávul ½ Ævø[sound:say it.mp3]",
+        "qáqul ½ Ævø"
+       ],
+       [
+        "Φρέξα צקף \"qav\" 3.14, Φρέξα צקף \"qav\" 3.14 \"qav\" 쯤뾰 Жфэю Φρέξα Åqvöm qav zex, Φρέξα צקף \"qav\" 3.14 Qraße ½ Qurav Φρέξα צקף \"qav\" 3.14 鬱蒼 ظَغَثَ 々, 々 ıqır 쀼쐬 Φρέξα צקף \"qav\" 3.14, Φρέξα צקף \"qav\" 3.14 Φρέξα צקף \"qav\" 3.14",
+        "Φρεξα צקף \"qav\" 3.14, Φρεξα צקף \"qav\" 3.14 \"qav\" 쯤뾰 Жфэю Φρεξα Aqvom qav zex, Φρεξα צקף \"qav\" 3.14 Qraße ½ Qurav Φρεξα צקף \"qav\" 3.14 鬱蒼 ظгث 々, 々 ıqır 쀼쐬 Φρεξα צקף \"qav\" 3.14, Φρξα צקף \"qav\" 3.14 Φρεξα צקף \"qav\" 3.14"
+       ],
+       [
+        "צקף ثَغْظَة̈<br>",
+        "צקף ثَغْظَة̈ צקף ثَغْظَة̈"
+       ],
+       [
+        "　쐐쭈",
+        "쐐쭈"
+       ],
+       [
+        "[sound:a.ogg]ㄲㅃㅉ Їфж",
+        "ㄲㅃㅉ Їфж"
+       ],
+       [
+        "\nqème, vûlée, ヰヱヮ, ぱゑ̈, ﬁqav, qème, vûlée, ヰヱヮ, ぱゑ̈, ﬁqav, qème, vûlée, ヰヱヮ, ぱゑ̈, ﬁqav,, qème, vûlée, ヰヱヮ, ぱゑ̈, ﬁqav, qème, vûlée, ヰヱヮ, ぱゑ̈, ﬁqav,, qav, ıqır, 齟齬, qème, vûlée, ヰヱヮ, ぱゑ̈, ﬁqav,, 3.14, Qraße, 👍, qème, vûlée, ヰヱヮ, ぱゑ̈, ﬁqav,, qème, vûlée, ヰヱヮ, ぱゑ̈, ﬁqav",
+        "qème  vûlée  ヰヱヮ  ぱゑ̈  ﬁqav  qème  vûlée  ヰヱヮ  ぱゑ̈  ﬁqav  qème  vûlée  ヰヱヮ  ぱゑ̈  ﬁqav,  qème  vûlée  ヰヱヮ  ぱゑ̈  ﬁqav  qème  vûlée  ヰヱヮ  ぱゑ̈  ﬁqav,  qav  ıqır  齟齬  qème  vûlée  ヰヱヮ  ぱゑ̈  ﬁqav,  3.14  Qraße  👍  qème  vûlée  ヰヱヮ  ぱゑ̈  ﬁqav,  qème  vûlée  ヰヱヮ  ぱゑ̈  ﬁqav"
+       ],
+       [
+        " qávul ",
+        "qávu"
+       ],
+       [
+        "<div>vexul</div><div></div>",
+        "vexul"
+       ],
+       [
+        "\t42 齾靐\n",
+        "42 靐"
+       ],
+       [
+        "Zovik",
+        ""
+       ],
+       [
+        "<i>צקף a/b</i>",
+        "צקף a/َb"
+       ],
+       [
+        "цжф qçavel",
+        "цжф qçavelцжф qçavel"
+       ],
+       [
+        "фжэ Qurav",
+        "фжэ Qurav"
+       ],
+       [
+        "42 qávul ΞΛΑΦ 쐐쭈 qävox צקף Zovik 쐐쭈 42 qávul ΞΛΑΦ 쐐쭈 qävox 42 qávul ΞΛΑΦ 쐐쭈 qävox 42 qávul ΞΛΑΦ 쐐쭈 qävox 42 qávul ΞΛΑΦ 쐐쭈 qävox 42 qávul ΞΛΑΦ 쐐쭈 qävox, 42 qávul ΞΛΑΦ 쐐쭈 qävox, 42 qávul ΞΛΑΦ 쐐쭈 qävox Łivź qörvå a-b",
+        "42 qávul ΞΛΑΦ 쐐쭈 qävox צקף Zovik 쐐쭈 42 qávul ΞΛΑΦ 쐐쭈 qävox 42 qávul ΞΛΑΦ 쐐쭈 qävox 42 qávul ΞΛΑΦ 쐐쭈 qävox 42 qávul ΞΛΑΦ 쐐쭈 qävox 42 qávul ΞΛΑΦ 쐐쭈 qävox, 42 qávul ΞΛΑΦ 쐐쭈 qäox, 42 qávul ΞΛΑΦ 쐐쭈 qävox Łivź qörvå a-b"
+       ],
+       [
+        "❤️<div>qçavel<div>Łivź",
+        "❤️ qmavel Łivź"
+       ],
+       [
+        "<br> ξλάφ 쐐쭈 ץְקֵפִׁף ﬁqav ",
+        "ぎλάφ 쐐쭈 ץְקֵפִׁף ﬁqav"
+       ],
+       [
+        "qav qème vûléeَ",
+        "qavíqème vûlδeَ"
+       ],
+       [
+        "фжэ, ぱゑ, Жфэю, ぱゑ",
+        "фжэ, ぱゑ, Жфэю, ぱゑ"
+       ],
+       [
+        "<div>ゔゐ</div><div></div>",
+        "pゐ"
+       ],
+       [
+        " झिफी vüber ",
+        "झफ vuber"
+       ],
+       [
+        "ξλάφ 쯤뾰",
+        "Ξλάφ 쯤뾰"
+       ],
+       [
+        "<span style=\"color: red\"><div>vexul(x+y)</div><div></div></span>",
+        "vexuöl (x + y)"
+       ],
+       [
+        "ﬁqav qávul ฌฬฆ צקף zúvñel фжэ झफठ ❤️ ❤ Åqvöm 龘齉 qörvå, ﬁqav qávul ฌฬฆ צקף zúvñel фжэ ½̵ ﬁqav qav zex, ξλάφ ثَغْظَة ıqır ﬁqav qávul ฌฬฆ צקף zúvñel фжэ, ﬁqav qávul ฌฬฆ צקף zúvñel фжэ, ﬁqav qávul ฌฬฆ צקף zúvñel фжэ",
+        "ﬁqav qávul ฌฬฆ צקף zúvñel фжэ झफठ ❤️ ❤ Åqvöm 龘齉 qörhå, ﬁqav qávul ฌฬฆ צקף zúvñel фжэ ½̵ ﬁqav qav zex, ξλάφ ثَغْظَة ıqır ﬁqav qávul ฌฬฆ צקף zúvñel фжэ, ﬁqav qávul ฌฬฆ צקף zúvñel фжэ, ﬁqav qávul ฌฬฆ צקף zúvñel фжэ"
+       ],
+       [
+        "zúvñel 쐐쭈️ 齾靐",
+        "zúvññel 쐐쭈️ 齾靐"
+       ],
+       [
+        "zúvñel",
+        "zَúvñel"
+       ],
+       [
+        "<br>(x + y), ?!️",
+        "(x + y), ?!️"
+       ],
+       [
+        "ظَغَثَ, ぱゑ",
+        "ظَغَثَ, ぱゑ"
+       ],
+       [
+        "<b>Qurav 쀼쐬 쐐쭈</b>",
+        "Qurav 쀼쐬 쐐쭈"
+       ],
+       [
+        "　фжэ, ظغث",
+        "ゐゑゎ️ Ｑａｖ"
+       ],
+       [
+        "<br>\nझफठ",
+        ""
+       ],
+       [
+        "\nξλαφ",
+        "ξλαφ"
+       ],
+       [
+        "Qraßeָ, a/b",
+        "Qraße, a/b"
+       ],
+       [
+        "3.14 ❤",
+        " 3.14 ❤"
+       ],
+       [
+        "qème vûlée",
+        "qème jûlée"
+       ],
+       [
+        "　\"qav\"ָ 麒麟",
+        "\"qav\"ָ 麟麒"
+       ],
+       [
+        "<div>\nץְקֵפִׁף, ①②</div>",
+        "ץְקֵפִׁף, ①②"
+       ],
+       [
+        "ёфӝ Åqvöm[sound:say it.mp3]",
+        "ёфӝ Åqvöぎ"
+       ],
+       [
+        "쀼쐬̵ qörvå[sound:say it.mp3]",
+        "ξλαφ̇"
+       ],
+       [
+        "½[sound:say it.mp3]",
+        "i"
+       ],
+       [
+        "&nbsp;齾靐, ｦｧｨ",
+        "齾靐, ｦｧｨ"
+       ],
+       [
+        "ظَغَثَ̈&nbsp;👍🏽",
+        "ظَغَثَ̈ 👍🏽"
+       ],
+       [
+        "vexul̀",
+        "vexul"
+       ],
+       [
+        "👩‍👩‍👧 qème vûlée 👩‍👩‍👧ָ<img src=\"pic.png\">",
+        "👩‍👩‍👧 qème vûlée 👩‍n👩‍👧ָ"
+       ],
+       [
+        "фжэ झिफी",
+        "фжэ झफ"
+       ],
+       [
+        "<div>צקף</div><div></div>",
+        "צקף"
+       ],
+       [
+        "vexul 鬱龘 qav zex",
+        "vexul"
+       ],
+       [
+        "ฬิฌี",
+        "ฬิีฌ"
+       ],
+       [
+        "　&nbsp;qav",
+        "av"
+       ],
+       [
+        "&nbsp;<b>齟齬</b>",
+        "齟齬"
+       ],
+       [
+        "(x + y)",
+        "(x + y)"
+       ],
+       [
+        "쐐쭈 Łivź \"qav\" 쐐쭈 Łivź \"qav\" 쐐쭈 Łivź \"qav\" 쐐쭈 Łivź \"qav\" 쐐쭈 Łivź \"qav\" ฌฬฆ ½ ثَغْظَة 쐐쭈 Łivź \"qav\" 쐐쭈 Łivź \"qav\", 쐐쭈 Łivź \"qav\" 쐐쭈 Łivź \"qav\" qávul झिफी 쀼쐬 쐐쭈 Łivź \"qav\", ثَغْظَة 々 ヰヱヮ Ｑａｖ 麒麟 צָׁקְף, 쐐쭈 Łivź \"qav\"",
+        "쐐쭈  Łivź  \"qav\"  쐐쭈  Łivź  \"qav\"  쐐쭈  Łivź  \"qav\"  쐐쭈  Łivź  \"qav\"  쐐쭈  Łivź  \"qav\"  ฌฬฆ  ½  ثَغْظَة  쐐쭈  Łivź  \"qav\"  쐐쭈  Łivź  \"qav\",  쐐쭈  Łivź  \"qav\"  쐐쭈  Łivź  \"qav\"  qávul  झिफी  쀼쐬  쐐쭈  Łivź  \"qav\",  ثَغْظَة  々  ヰヱヮ  Ｑａｖ  麒麟  צָׁקְף,  쐐쭈  Łivź  \"qav\""
+       ],
+       [
+        "qävox",
+        "qavox"
+       ],
+       [
+        "x²",
+        "x"
+       ],
+       [
+        "❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟, ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟, ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟, ™ ΞΛΑΦ ̇❤️, qème vûlée 42 Qraße, ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟, ❤️ ❤️ 麒麟, ıqır ゐゑゎ ıqır ½ 👍🏽 x² фжэ vüber a-b̀ ❤️ ❤️ 麒麟",
+        "❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟, ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟, ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟, TM ΞΛΑΦ ̇❤️, qème vûlée 42 Qraße, ❤️ ❤️ 麒麟 ❤️ ❤️ 麒麟, ❤️ ❤️ 麒麟, ıqır ゐゑゎ ıqır 1⁄2 👍🏽 x2 фжэ vüber a-b̀ ❤️ ❤️ 麒麟"
+       ],
+       [
+        "齾靐, 龘齉, 👩‍👩‍👧, ฌฬฆَ",
+        " 齾靐, 龘齉, 👩‍👩‍👧, ฌฬฆَ"
+       ],
+       [
+        "　Ævø",
+        "Ævø"
+       ],
+       [
+        "Їфж<br />",
+        "їфж"
+       ],
+       [
+        "qörvå",
+        "qövå"
+       ],
+       [
+        "<div>İqav 👩‍👩‍👧</div><div></div>",
+        "İqzv 👩‍👩‍👧"
+       ],
+       [
+        " 麒麟\nİqav\nＱａｖ ",
+        "麒麟 Iqav Ｑａｖ"
+       ],
+       [
+        "qav zex",
+        "QAV ZEX"
+       ],
+       [
+        "Zovik Åqvöm̧",
+        "аovik Åqvöm̧"
+       ],
+       [
+        "qav zex ?!",
+        "av zex ?!"
+       ],
+       [
+        "龘齉 Їфж",
+        "龘齉Їфж"
+       ],
+       [
+        "<!-- c -->qörvå̵",
+        "qorva"
+       ],
+       [
+        "Ævø",
+        " Ævø"
+       ],
+       [
+        "龘齉",
+        "k龘齉"
+       ],
+       [
+        "Жфэю&nbsp;ぱゑ&nbsp;a/b&nbsp;❤&nbsp;👩‍👩‍👧&nbsp;麒麟&nbsp;Жфэю&nbsp;ぱゑ&nbsp;a/b&nbsp;❤&nbsp;👩‍👩‍👧&nbsp;麒麟&nbsp;Жфэю&nbsp;ぱゑ&nbsp;a/b&nbsp;❤&nbsp;👩‍👩‍👧&nbsp;麒麟,&nbsp;Жфэю&nbsp;ぱゑ&nbsp;a/b&nbsp;❤&nbsp;👩‍👩‍👧&nbsp;麒麟&nbsp;qävox&nbsp;ฬิฌี&nbsp;qörvå,&nbsp;qävox&nbsp;ץְקֵפִׁף&nbsp;ｦｧｨ,&nbsp;Жфэю&nbsp;ぱゑ&nbsp;a/b&nbsp;❤&nbsp;👩‍👩‍👧&nbsp;麒麟,&nbsp;Жфэю&nbsp;ぱゑ&nbsp;a/b&nbsp;❤&nbsp;👩‍👩‍👧&nbsp;麒麟&nbsp;a-b&nbsp;👍&nbsp;?!&nbsp;Жфэю&nbsp;ぱゑ&nbsp;a/b&nbsp;❤&nbsp;👩‍👩‍👧&nbsp;麒麟",
+        "Жфэю ぱゑa/b ❤ 👩‍👩‍👧 麒麟 Жфэю ぱゑ a/b ❤ 👩‍👩‍👧 麒麟 Жфэю ぱゑ a/b ❤ 👩‍👩‍👧 麒麟, Жфэю ぱゑ a/b ❤ 👩‍👩‍👧 麒麟 qävox ฬิฌี qörvå, qävox ץְקֵפִׁף ｦｧｨ, Жфэю ぱゑ a/b ❤ 👩‍👩‍👧 麒麟, Жфэю ぱゑ a/b ❤ 👩‍👩‍👧 麒麟 a-b 👍 ?! Жфэю ぱゑ a/b ❤ 👩‍👩‍👧 麒麟"
+       ],
+       [
+        "qçavel ظغث vexul ?!",
+        "qçavel ظغث vexul ?!"
+       ],
+       [
+        "झफठ, Qurav",
+        "झफठ, Qurav झफठ, Qurav"
+       ],
+       [
+        "Ævø 鬱龘",
+        "vÆø 鬱龘"
+       ],
+       [
+        "½<img src=\"pic.png\">",
+        "̀½"
+       ],
+       [
+        "<!-- c -->ゔゐ / zúvñel",
+        "ゔゐ závñel"
+       ],
+       [
+        "ΞΛΑΦ\n쯤뾰",
+        "Qraße 👍🏽️"
+       ],
+       [
+        "qème vûlée<br>",
+        "qème vûlée "
+       ],
+       [
+        "ﬁqav ゐゑゎَ Їфж ❤️ ゔゐ, ﬁqav ゐゑゎَ Їфж ❤️ ゔゐ, ﬁqav ゐゑゎَ Їфж ❤️ ゔゐ ǅavul ™ ぱゑ ﬁqav ゐゑゎَ Їфж ❤️ ゔゐ ﬁqav ゐゑゎَ Їфж ❤️ ゔゐ, Їфж Łivź 齾靐 ﬁqav ゐゑゎَ Їфж ❤️ ゔゐ ﬁqav 齟齬 ָ42, ﬁqav ゐゑゎَ Їфж ❤️ ゔゐ 鬱蒼 ❤ Φρέξα ﬁqav ゐゑゎَ Їфж ❤️ ゔゐ",
+        "fiqav ゐゑゎَ Їфж ❤️ ゔゐ, fiqav ゐゑゎَ Їфж ❤️ ゔゐ, fiqav ゐゑゎَ Їфж ❤️ ゔゐ Džavul TM ぱゑ fiqav ゐゑゎَ Їфж ❤️ ゔゐ fiqav ゐゑゎَ Їфж ❤️ ゔゐ, Їфж Łivź 齾靐 fiqav ゐゑゎَ Їфж ❤️ ゔゐ fiqav 齟齬 ָ42, fiqav ゐゑゎَ Їфж ❤️ ゔゐ 鬱蒼 ❤ Φρέξα fiqav ゐゑゎَ Їфж ❤️ ゔゐ"
+       ],
+       [
+        "\tЖфэю, ฌฬฆ\n",
+        "Жфэю, ฌฬฆ"
+       ],
+       [
+        "々",
+        "々"
+       ],
+       [
+        "龘齉̇, &amp; 42",
+        "Quraṽ"
+       ],
+       [
+        "\nｦｧｨ",
+        "ｦｧｨ"
+       ],
+       [
+        "Ｑａｖ&lt;div>쯤뾰&lt;div>Łivź",
+        ""
+       ],
+       [
+        "ぱゑ",
+        "ぱゑ"
+       ],
+       [
+        "鬱龘",
+        "t龘"
+       ],
+       [
+        "<br>龘齉 麒麟̵ 齟齬",
+        "龘齉 麒麟̵ 齟齬"
+       ],
+       [
+        "vexul zúvñel 麒麟 쀼쐬 vexul ぱゑ 🇯🇵 龘齉, İqav ヰヱヮ ฬิฌี ｦｧｨ 쐐쭈 ™ Жфэю ﬁqav ظَغَثَ vexul zúvñel 麒麟 쀼쐬 vexul, ﬁqav ץְקֵפִׁף x², vexul zúvñel 麒麟 쀼쐬 vexul vexul zúvñel 麒麟 쀼쐬 vexul, vüber 🇯🇵 Жфэю ฌฬฆ 々 झफठ, ظغث 麒麟 ゐゑゎ[sound:say it.mp3]",
+        "vexul zúvñel 麒麟 쀼쐬 vexul ぱゑ 🇯🇵 龘齉, İqav ヰヱヮ ฬิฌี ｦｧｨ 쐐쭈 ™ Жфэю ﬁqav ظَغَثَ vexul zúvñel 麒麟 쀼쐬 vexul, ﬁqav ץְקֵפִׁף x², vexul zúvñel 麒麟 쀼쐬v exul vexul zúvñel 麒麟 쀼쐬 vexul, vüber 🇯🇵 Жфэю ฌฬฆ 々 झफठ, ظغث 麒麟 ゐゑゎ"
+       ],
+       [
+        "鬱龘 qörvå zúvñel",
+        "鬱龘 qörvóå zúvñel"
+       ],
+       [
+        "Ævø<br />",
+        "ÆVØ"
+       ],
+       [
+        "цжф 👍🏽 Φρέξα झफठ цжф 👍🏽 Φρέξα झफठ цжф 👍🏽 Φρέξα झफठ цжф 👍🏽 Φρέξα झफठ ぱゑ 42 42 🇯🇵 \"qav\" Åqvöm, цжф 👍🏽 Φρέξα झफठ цжф 👍🏽 Φρέξα झफठ цжф 👍🏽 Φρέξα झफठ ｦｧｨ vexul vexul цжф 👍🏽 Φρέξα झफठ, Qëvax́ 👍🏽 ゐゑゎ цжф 👍🏽 Φρέξα झफठ",
+        "цжф 👍🏽 Φρέξα झफठ цжф 👍🏽 Φρέξα झyफठ цжф 👍🏽 Φρέξα झफठ цжф 👍🏽 Φρέξα झफठ ぱゑ 42 42 🇯🇵 \"qav\" Åqvöm, цжф 👍🏽 Φρέξα झफठ цжф 👍🏽 Φρέξα झफठ цжф 👍🏽 Φρέξα झफठ ｦｧｨ vexul vexul цжф 👍🏽 Φρέξα झफठ, Qëvax́ 👍🏽 ゐゑゎ цжф 👍🏽 Φρέξα झफठ"
+       ],
+       [
+        "ｦｧｨ",
+        "Çｨ"
+       ],
+       [
+        "[sound:a.ogg]👩‍👩‍👧 Ｑａｖ",
+        "👩i‍👩‍"
+       ],
+       [
+        "<i>齟齬 ξλάφ ヰヱヮ qav zex</i>",
+        "齟齬 ξλαφ ヰヱヮ qav zex"
+       ],
+       [
+        "Åqvöm̧ / ξλάφ",
+        "Aqvom ξλαφ"
+       ],
+       [
+        "42,\n❤",
+        "42, ❤"
+       ],
+       [
+        "a-b झफठ",
+        "qörvå qèmeá vûlée"
+       ],
+       [
+        "™<br />",
+        "™"
+       ],
+       [
+        "[sound:a.ogg]qav zex",
+        "qavzex"
+       ],
+       [
+        "<span style=\"color: red\">َqörvå, q'v, 42</span>",
+        "َqörvå, q'v, 42"
+       ],
+       [
+        "[sound:a.ogg]zúvñel",
+        "ZÚVÑEL"
+       ],
+       [
+        "\t™ a-b 👍\n",
+        "™ A-B 👍"
+       ],
+       [
+        "<!-- c -->❤ ½ ❤️",
+        "❤ ½ ❤"
+       ],
+       [
+        "　qav<br>zex<br>qörvåָ<br>❤️",
+        "qav zex qorva ❤"
+       ],
+       [
+        "&nbsp;<div>vexul&nbsp;❤</div><div></div>",
+        "vexul ❤"
+       ],
+       [
+        "麒麟 ヰヱヮ ヷヸヹ",
+        "麒麟qヰヮ ヷヸヹ"
+       ],
+       [
+        "Qëvax, צָׁקְף, a/b",
+        "3.14"
+       ],
+       [
+        "Łivź",
+        "Łivź "
+       ],
+       [
+        "Qraße̵",
+        "Qraße̵"
+       ],
+       [
+        "ゐゑゎ 쯤뾰 Åqvöm",
+        "ゐゑゎ쯤뾰"
+       ],
+       [
+        "　Φρέξα,, ヰヱヮ&nbsp;",
+        "Φρέξα,"
+       ],
+       [
+        "qav, &amp; झिफी️",
+        "qav, झफ"
+       ],
+       [
+        "\t צָׁקְף \n",
+        "ָׁקְף"
+       ],
+       [
+        "<div>Ævø - 👩‍👩‍👧</div><div></div>",
+        "Ævø 👩‍👩‍👧"
+       ],
+       [
+        "\t쐐쭈\n",
+        "쐐쭈"
+       ],
+       [
+        "<i>™</i>",
+        "ä"
+       ],
+       [
+        "ゐゑゎ",
+        "ゐвゑゎ óゑゎ"
+       ],
+       [
+        "<i>фжэ qçavel َЖфэю ξλαφ</i>",
+        "фжэ qçavel َжфэю ξλαφ"
+       ],
+       [
+        "👍🏽 qávul ™ ёфж",
+        "👍🏽 qávul ™ ёфж 👍🏽 qávul ™ ёфж"
+       ],
+       [
+        "(x, +, y), qávul",
+        "(x + y) qvául"
+       ],
+       [
+        "❤️",
+        "❤"
+       ],
+       [
+        "[sound:a.ogg]\n(x + y)",
+        "(x+ y)"
+       ],
+       [
+        "<br>齟齬, 👍🏽<img src=\"pic.png\">",
+        "a/ḃ"
+       ],
+       [
+        "ıqır",
+        "ıqır"
+       ],
+       [
+        "ぱゑ ゐゑゎ",
+        "ぱَゑ ゐゑゎ"
+       ],
+       [
+        "Ævø, - ™̈, - ｦｧｨ<img src=\"pic.png\">",
+        "Ævø, ™̈, ｦｧｨÆvø, ™̈, ｦｧｨ"
+       ],
+       [
+        "👩‍👩‍👧",
+        "👩‍👩‍👧"
+       ],
+       [
+        "q'v ξλάφ qçavel",
+        "q'v ξλάφ бqçöv"
+       ],
+       [
+        "&nbsp;👍, झिफी, 鬱蒼",
+        "👍, झिफी, 鬱蒼"
+       ],
+       [
+        "<span style=\"color: red\">Qurav Ævø</span>",
+        "Qurav Ævø"
+       ],
+       [
+        "Qurav Ævøَ&nbsp;",
+        "Qurav"
+       ],
+       [
+        "\na/b, ёфж",
+        "a/bß, ёфж"
+       ],
+       [
+        "　цжф",
+        "цжうф"
+       ],
+       [
+        "❤️ 3.14 ظغث",
+        "❤️ 3.e4 ظغث"
+       ],
+       [
+        "<b>qème vûlée झिफी qème vûlée</b>",
+        "qème vûlée झिी qème vûlée"
+       ],
+       [
+        "🇯🇵ָ",
+        "s🇯🇵ָ"
+       ],
+       [
+        "Ævø, &amp; 々",
+        "Ævø, 々"
+       ],
+       [
+        "qävox",
+        "qävo"
+       ],
+       [
+        "<i><span style=\"color: red\">🇯🇵, 👍🏽, Ævø</span></i>",
+        "🇯🇵, 👍b🏽, Ævø"
+       ],
+       [
+        "<b>\n3.14, 鬱蒼, qörvå</b>",
+        "쀼쐬 ゐゑゎ झिफी ぱゑ 齟齬 쀼쐬 ゐゑゎ झिफी ぱゑ 齟齬 쀼쐬 ゐゑゎ झिफी ぱゑ 齟齬 Їфж \"qav\" фжэ 々 ?! 쀼쐬, ぱゑ Φρέξα Ævø qème vûlée zúvñel ❤ 쀼쐬 ゐゑゎ झिफी ぱゑ 齟齬 쀼쐬 ゐゑゎ झिफी ぱゑ 齟齬 ?! Φρέξα ξλαφ 쀼쐬 ゐゑゎ झिफी ぱゑ 齟齬, झिफी ㄲㅃㅉ Qraße 쀼쐬 ゐゑゎ झिफी ぱゑ 齟齬"
+       ],
+       [
+        "👍🏽<br>",
+        "👍🏽"
+       ],
+       [
+        "Ævøָ झिफी",
+        "Ævøָ झिफी"
+       ],
+       [
+        "ヷヸヹ a-b ゔゐ",
+        "ワヰヱ a-b うゐ"
+       ],
+       [
+        "<span style=\"color: red\">צקף, a-b</span>",
+        "צקף, m-b"
+       ],
+       [
+        "　<div>鬱蒼 ظغث</div>",
+        "g鬱蒼 ظغث"
+       ],
+       [
+        "ｦｧｨ̈",
+        "ｦｧｨ̈"
+       ],
+       [
+        "qävox Zovik ぱゑ",
+        "qävox Zovik ぱゑ"
+       ],
+       [
+        "qávul (x + y)",
+        "qávul (x + y)"
+       ],
+       [
+        "qörvå ظَغَثَ \"qav\"",
+        "①②"
+       ],
+       [
+        "&nbsp;①②̧, 麒麟",
+        "①②̧, 麒麟"
+       ],
+       [
+        "a-b a-b",
+        "a-b a"
+       ],
+       [
+        "👍",
+        "👍"
+       ],
+       [
+        "3.14",
+        "3.14"
+       ],
+       [
+        "[sound:a.ogg]İqav,\n쯤뾰",
+        "İqav, 쯤뾰"
+       ],
+       [
+        "q'v&amp;nbsp;ㄲㅃㅉ&amp;nbsp;Qraße",
+        "ξλάφ ㄲㅃㅉ"
+       ],
+       [
+        "3.14",
+        "3ó.14"
+       ],
+       [
+        "<div>™ ξλάφ झफठ цжф Qraße ฬิฌีָ Жфэю 3.14 qav ™ ξλάφ झफठ цжф Qraße ฬิฌีָ ™ ξλάφ झफठ цжф Qraße ฬิฌีָ qävox ξλαφ qème vûlée ξλάφ 鬱蒼 ץְקֵפִׁף ץְקֵפִׁף ץְקֵפִׁף 👩‍👩‍👧, ™ ξλάφ झफठ цжф Qraße ฬิฌีָ, ™ ξλάφ झफठ цжф Qraße ฬิฌีָ</div>",
+        "צָׁקְף ξλάφ"
+       ],
+       [
+        "<div>\tqörvå\n</div><div></div>",
+        "qörvå"
+       ],
+       [
+        "ظَغَثَ цжфָ ™",
+        "ظَغَثَ ЦЖФָ ™"
+       ],
+       [
+        "　42, झफठ, َvüber, vüber",
+        "42, झफठ, َvüber, vüber "
+       ],
+       [
+        "vüber<br><br>",
+        "vдüber"
+       ],
+       [
+        "쯤뾰 ฌฬฆ",
+        "쯤뾰d ฌฬฆ"
+       ],
+       [
+        "Їфж̵ ǅavul",
+        "き ǅav"
+       ],
+       [
+        "&nbsp;ヷヸヹ&nbsp;ΞΛΑΦ&nbsp;齟齬",
+        "ヷヸヹ ΞΑΛΦ 齟齬"
+       ],
+       [
+        "<b>Qëvax ヷヸヹ vüber ظغث qème vûlée vüber 鬱蒼 ぱゑ 鬱龘 vexul qçavel, Qëvax ヷヸヹ vüber ظغث qème vûlée, Qëvax ヷヸヹ vüber ظغث qème vûlée, ①② ظَغَثَ ฬิฌี Qëvax ヷヸヹ vüber ظغث qème vûlée, Qëvax ヷヸヹ vüber ظغث qème vûlée</b>",
+        "qëvax  ヷヸヹ  vüber  ظغث  qème  vûlée  vüber  鬱蒼  ぱゑ  鬱龘  vexul  qçavel,  qëvax  ヷヸヹ  vüber  ظغث  qème  vûlée,  qëvax  ヷヸヹ  vüber  ظغث  qème  vûlée,  ①②  ظَغَثَ  ฬิฌี  qëvax  ヷヸヹ  vüber  ظغث  qème  ̃vûlée,  qëvax  ヷヸヹ  vüber  ظغث  qème  vûlée"
+       ],
+       [
+        "<div>ظغث</div><div></div>",
+        "ظثغ"
+       ],
+       [
+        "<!-- c -->齾靐 🇯🇵<img src=\"pic.png\">",
+        "齾靐 🇯"
+       ],
+       [
+        "<div> Жфэю, qörvå, \"qav\" </div>",
+        "жФЭЮ, QÖRVÅ, \"QAV\""
+       ],
+       [
+        "ظَغَثَ, - ❤&nbsp;",
+        "ظَغ漢َثَ, ❤"
+       ],
+       [
+        "[sound:a.ogg]<div>Qraße ½</div><div></div>",
+        "Qraße ½"
+       ],
+       [
+        "ξλάφ<div>ぱゑ<div>Ｑａｖ",
+        "ΞΛΆΦ ぱゑ ＱＡＶ"
+       ],
+       [
+        " צָׁקְף ½ 々 ",
+        "צָׁק️ְף ½ 々"
+       ],
+       [
+        "\nzúvñel",
+        "гúvñel"
+       ],
+       [
+        "<div>qörvå</div>",
+        " qörvå"
+       ],
+       [
+        "ｦｧｨ",
+        "ヲァィ"
+       ],
+       [
+        "\tqav 鬱蒼َ ﬁqav 々\n<img src=\"pic.png\">",
+        "qav 鬱蒼َ fiqav 々"
+       ],
+       [
+        " Φρέξα (x + y) ?! Qurav ?! 齟齬, 쯤뾰 ゐゑゎ Жфэю, Φρέξα (x + y) ?! Qurav ?! 齟齬, Φρέξα (x + y) ?! Qurav ?! 齟齬 Ævø ㄲㅃㅉ qävox Φρέξα (x + y) ?! Qurav ?! 齟齬, Φρέξα (x + y) ?! Qurav ?! 齟齬 qav zex ぱゑ צָׁקְף Φρέξα (x + y) ?! Qurav ?! 齟齬 ",
+        "Φρέξα (x + y) ?! Qurav ?! 齟齬, 쯤뾰 ゐゑゎ Жфэю, Φρέξα (x + y) ?! Qurav ?! 齟齬, Φρέξα (x + y) ?! Qurav ?! 齟齬 Ævø ㄲㅃㅉ qävox Φρέξα (x + y) ?! Qurav ?! 齟齬, "
+       ],
+       [
+        "<b>①② qav 쀼쐬 vexul</b>",
+        "①② qav 쀼쐬 vexul"
+       ],
+       [
+        "<!-- c -->Qëvax",
+        "àëvax"
+       ],
+       [
+        "Φρέξα 齾靐 ثَغْظَة<img src=\"pic.png\">",
+        "Φρέξα 齾靐 ثَغْظَة"
+       ],
+       [
+        "qávul",
+        "ゐゑゎ 鬱蒼"
+       ],
+       [
+        "龘齉<img src=\"pic.png\">",
+        "½, фжэ"
+       ],
+       [
+        "Åqvöm, ץְקֵפִׁף",
+        "Åqvöm,ץְקֵפִׁף"
+       ],
+       [
+        "qávul",
+        "qávul"
+       ],
+       [
+        "Qurav",
+        "uQrav"
+       ],
+       [
+        "　Ｑａｖ ثَغْظَة̧<br>",
+        "Ｑａｖ ثَغْظَة̧"
+       ],
+       [
+        "цжф",
+        "жцф"
+       ],
+       [
+        "цжф",
+        ""
+       ],
+       [
+        "齾靐 42",
+        "齾靐 42"
+       ],
+       [
+        "Qëvax",
+        "Qëvfx"
+       ],
+       [
+        "齟齬 qav ثَغْظَة a-b[sound:say it.mp3]",
+        "ǅavul̃ 👍"
+       ]
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

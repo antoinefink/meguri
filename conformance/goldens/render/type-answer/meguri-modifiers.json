@@ -1,0 +1,50 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "review_html": [
+          {
+            "answer": "<style></style>1 qavprompt<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Qavru Vexal</span></code></div>Qavru Vexal",
+            "question": "<style></style>1 qavprompt\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1 qavprompt<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>q</span><span class=typeGood>avru </span><span class=typeBad>v</span><span class=typeGood>exal</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>Q</span><span class=typeGood>avru </span><span class=typeMissed>V</span><span class=typeGood>exal</span></code></div>Qavru Vexal",
+            "question": "<style></style>1 qavprompt\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1 qavprompt<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>q</span><span class=typeGood>avru </span><span class=typeBad>v</span><span class=typeGood>ex</span><span class=typeBad>u</span><span class=typeGood>l</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>Q</span><span class=typeGood>avru </span><span class=typeMissed>V</span><span class=typeGood>ex</span><span class=typeMissed>a</span><span class=typeGood>l</span></code></div>Qavru Vexal",
+            "question": "<style></style>1 qavprompt\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>2 zexprompt<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Q</span><span class=typeBad>EVAX</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>Q</span><span class=typeMissed>ëvax</span></code></div>Qëvax",
+            "question": "<style></style>2 zexprompt\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>3 zexprompt<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>qe</span><span class=typeGood>vax</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>Që</span><span class=typeGood>vax</span></code></div>Qëvax",
+            "question": "<style></style>3 zexprompt\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style><span class=\"cloze\" data-ordinal=\"1\">café</span> y <span class=\"cloze\" data-ordinal=\"1\">té</span><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeMissed>------</span><span class=typeGood>caf</span><span class=typeBad>e,</span><span class=typeGood> </span><span class=typeMissed>--------</span><span class=typeGood>t</span><span class=typeBad>e</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>{{c1::</span><span class=typeGood>caf</span><span class=typeMissed>é}}</span><span class=typeGood> </span><span class=typeMissed>y {{c1::</span><span class=typeGood>t</span><span class=typeMissed>é}}</span></code></div>",
+            "question": "<style></style><span class=\"cloze\" data-cloze=\"caf&#xE9;\" data-ordinal=\"1\">[...]</span> y <span class=\"cloze\" data-cloze=\"t&#xE9;\" data-ordinal=\"1\">[...]</span>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style><span class=\"cloze\" data-ordinal=\"1\">Paris</span> is big<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>p</span><span class=typeGood>aris</span><span class=typeMissed>---------</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>{{c1::P</span><span class=typeGood>aris</span><span class=typeMissed>}} is big</span></code></div>",
+            "question": "<style></style><span class=\"cloze\" data-cloze=\"Paris\" data-ordinal=\"1\">[...]</span> is big\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "062ae6ff44c68c31d6039aa308090fc439c77f939154f6ce270b04ce60ffadc7",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/type-answer/meguri-modifiers",
+  "scenario_sha256": "6248c2ef5212fa87e8483cd66076b8de8c2364080e29b8b0a02a239917bdab71",
+  "tz": "UTC"
+}

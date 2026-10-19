@@ -1,0 +1,53 @@
+# Cloze type-in (specs/render/type-answer.md A4.2, A4.3, R977): the expected
+# text is the card's cloze answers (render/cloze#C10), joined with ", " unless
+# all are identical; a cloze marker whose field is missing or holds no answer
+# for the card shows the empty-cards warning token (A8), also on a standard
+# note type, where the card number is the template ordinal plus one.
+id: render/type-answer/cloze
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gaps
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}<br>{{type:cloze:Text}}", back: "{{cloze:Text}}<hr id=answer>{{type:cloze:Text}}<br>{{Extra}}"}
+    - name: Extra gaps
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}{{type:cloze:Extra}}", back: "{{cloze:Text}}<hr id=answer>{{type:cloze:Extra}}"}
+    - name: Literal gaps
+      kind: cloze
+      fields: [Text]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}[[type:cloze:Missing]]", back: "{{cloze:Text}}"}
+    - name: Numbered
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "1 {{Front}}{{type:cloze:Back}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+        - {name: Two, front: "2 {{Front}}{{type:cloze:Back}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+  notes:
+    # #c1 (cloze 1), #c2 (cloze 2)
+    - {notetype: Gaps, fields: ["{{c1::a}} {{c1::b}} {{c2::<i>c</i>}}", note]}
+    # #c3
+    - {notetype: Gaps, fields: ["{{c1::Rhône}} and {{c1::Rhône}}", ""]}
+    # #c4 (cloze 1), #c5 (cloze 2)
+    - {notetype: Extra gaps, fields: ["{{c1::x}} {{c2::y}}", "{{c1::ex}}"]}
+    # #c6
+    - {notetype: Literal gaps, fields: ["{{c1::z}}"]}
+    # #c7, #c8
+    - {notetype: Numbered, fields: [Seine, "{{c1::Paris}} {{c2::Rouen::city}}"]}
+steps:
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: "a, b"}
+          - {card: "#c1", typed: "a b"}
+          - {card: "#c2", typed: c}
+          - {card: "#c2"}
+          - {card: "#c3", typed: Rhone}
+          - {card: "#c4", typed: ex}
+          - {card: "#c5", typed: y}
+          - {card: "#c6", typed: z}
+          - {card: "#c7", typed: Paris}
+          - {card: "#c8", typed: Rouen}

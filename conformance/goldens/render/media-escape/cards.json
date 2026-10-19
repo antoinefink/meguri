@@ -1,0 +1,38 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "review_html": [
+          {
+            "answer": "<style>.card img { height: 120px; }</style>le chat<br><img src=\"my%20file%231.jpg\"><img src=\"日本.png\"><img src=\"a&quot;b.jpg\"><img src=\"cat%20photo%203.jpg\"><img src=\"_shared%20logo.png\">[anki:play:q:0]<audio src=\"meow%202.ogg\" controls></audio><hr id=answer><img src=\"https://example.org/remote pic.png\">",
+            "question": "<style>.card img { height: 120px; }</style>le chat<br><img src=\"my%20file%231.jpg\"><img src=\"日本.png\"><img src=\"a&quot;b.jpg\"><img src=\"cat%20photo%203.jpg\"><img src=\"_shared%20logo.png\">[anki:play:q:0]<audio src=\"meow%202.ogg\" controls></audio>"
+          },
+          {
+            "answer": "<style>.card img { height: 120px; }</style><img src=\"cat%20photo%203.jpg\"><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>le chat</span></code></div><img src=\"my%20file%231.jpg\"><img src=\"日本.png\"><img src=\"a&quot;b.jpg\">",
+            "question": "<style>.card img { height: 120px; }</style><img src=\"cat%20photo%203.jpg\">\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style>.card img { height: 120px; }</style><img src=\"word%20art.png\"> chien<br><img src=\"dog.jpg\"><img src=\"_shared%20logo.png\"><hr id=answer><img src=\"https://example.org/remote pic.png\">",
+            "question": "<style>.card img { height: 120px; }</style><img src=\"word%20art.png\"> chien<br><img src=\"dog.jpg\"><img src=\"_shared%20logo.png\">"
+          },
+          {
+            "answer": "<style>.card img { height: 120px; }</style><img src=\"dog.jpg\"><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>chien</span></code></div>",
+            "question": "<style>.card img { height: 120px; }</style><img src=\"dog.jpg\">\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "264f247b173391197d43b610110ff13d928321605d96770b57a5ad87494d0d40",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/media-escape/cards",
+  "scenario_sha256": "24cd843003d1f1df3cc74533589a8c4395db1eed6c823ac7bb3384b6db59a488",
+  "tz": "UTC"
+}

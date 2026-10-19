@@ -95,7 +95,7 @@ What review does with this markup (R967: show the text, do not speak it) is the 
 
 ## F7. Type-in markers
 
-- `type` outputs `[[type:` + `KEY` + `]]`; `type-nc` outputs `[[type:nc:` + `KEY` + `]]`; `type-cloze` outputs `[[type:cloze:` + `KEY` + `]]`. `KEY` is the replacement's key as written; the current text is discarded. U64 later turns the marker into the answer box and the comparison.
+- `type` outputs `[[type:` + `KEY` + `]]`; `type-nc` outputs `[[type:nc:` + `KEY` + `]]`; `type-cloze` outputs `[[type:cloze:` + `KEY` + `]]`. `KEY` is the replacement's key as written; the current text is discarded. U64 later turns the marker into the answer box and the comparison (`render/type-answer`).
 - After F1's rewrite, a chain whose outermost filter is `type` is a single marker filter. `type`, `type-nc` and `type-cloze` met elsewhere in a chain are ordinary built-in filters: later filters see the marker as text. `{{text:type:F}}` gives `[[type:F]]`; `{{furigana:type:F}}` gives `<ruby><rb>[</rb><rt>type:F</rt></ruby>]`; `{{type-cloze:text:F}}` gives `[[type:cloze:F]]`; `{{nc:type:F}}` gives `[[type:F]]` (then `nc` ends the chain).
 - `{{type:}}` has an empty key: no marker, no output (T7 rule 2). `{{type:FrontSide}}` is the FrontSide text (T7 rule 1).
 
@@ -114,7 +114,7 @@ Built in (they never end a chain). What they output depends on the card ordinal 
 ## F9. Differences from the Product Contract's wording
 
 - R968 says later filters still apply after an unknown one. In Anki 26.09.3 no filter applied after an unknown one has any effect (F1). Meguri follows the oracle (R1907). The common add-on form, with the unknown filter outermost (`{{editable:furigana:F}}`, `{{edit:F}}`, `{{clickable:F}}`), is unaffected.
-- R964 asks for a `ci` modifier and modifiers combined in any order. Anki 26.09.3 has no `ci`: every chain other than exactly `type:nc` and `type:cloze` gives the plain `[[type:KEY]]` marker (F7). Meguri's engine emits Anki's marker. The parse result keeps every replacement's filter names (`template-syntax.md` T12), so U64 can read the modifiers R964 lists from the template; any typing behavior Meguri adds on top is U64's, with its deviation entry.
+- R964 asks for a `ci` modifier and modifiers combined in any order. Anki 26.09.3 has no `ci`: every chain other than exactly `type:nc` and `type:cloze` gives the plain `[[type:KEY]]` marker (F7). Meguri's engine emits Anki's marker. The parse result keeps every replacement's filter names (`template-syntax.md` T12), so U64 can read the modifiers R964 lists from the template; any typing behavior Meguri adds on top is U64's, with its deviation entry (`render/type-answer#A9`).
 - R965 says empty text gives nothing: text that is only white space comes back unchanged (F5).
 
 ## F10. Scenarios

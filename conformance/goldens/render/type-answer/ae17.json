@@ -1,0 +1,35 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "review_html": [
+          {
+            "answer": "<style>.kana { font-size: 64px; }</style><div class=kana>か</div><hr id=answer>\n<div style=\"font-family: 'Menlo'; font-size: 24px\"><code id=typeans><span class=typeGood>ka</span></code></div>ka",
+            "question": "<style>.kana { font-size: 64px; }</style><div class=kana>か</div>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Menlo'; font-size: 24px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style>.kana { font-size: 64px; }</style><div class=kana>か</div><hr id=answer>\n<div style=\"font-family: 'Menlo'; font-size: 24px\"><code id=typeans><span class=typeGood>k</span><span class=typeBad>q</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>k</span><span class=typeMissed>a</span></code></div>ka",
+            "question": "<style>.kana { font-size: 64px; }</style><div class=kana>か</div>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Menlo'; font-size: 24px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style>.kana { font-size: 64px; }</style><div class=kana>か</div><hr id=answer>\n<div style=\"font-family: 'Menlo'; font-size: 24px\"><code id=typeans>ka</code></div>ka",
+            "question": "<style>.kana { font-size: 64px; }</style><div class=kana>か</div>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Menlo'; font-size: 24px;\">\n</center>\n"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "264f247b173391197d43b610110ff13d928321605d96770b57a5ad87494d0d40",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/type-answer/ae17",
+  "scenario_sha256": "ce4b6807e87d6b345b329cb30588608f9bc6b5659073c39dd578084a464e2a7f",
+  "tz": "UTC"
+}

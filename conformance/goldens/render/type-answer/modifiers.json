@@ -1,0 +1,58 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "review_html": [
+          {
+            "answer": "<style></style>1 CV<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>q</span><span class=typeBad>a</span><span class=typeGood>vul</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>q</span><span class=typeMissed>á</span><span class=typeGood>vul</span></code></div>qávul",
+            "question": "<style></style>1 CV\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>2 CV<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>qávul</span></code></div>qávul",
+            "question": "<style></style>2 CV\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>3 CV<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>qávul</span></code></div>qávul",
+            "question": "<style></style>3 CV\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>2 CV<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>qávul</span></code></div>qávul",
+            "question": "<style></style>2 CV\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>2 CV<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>qavul</span><span class=typeBad>s</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>qávul</span></code></div>qávul",
+            "question": "<style></style>2 CV\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1 book<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>ゐゑ </span><span class=typeBad>ゐ</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>ゐゑ </span><span class=typeMissed>ゔ</span></code></div>ゐゑ<br>ゔ",
+            "question": "<style></style>1 book\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>2 book<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>ゐゑ </span><span class=typeBad>ゐ</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>ゐゑ </span><span class=typeMissed>ゔ</span></code></div>ゐゑ<br>ゔ",
+            "question": "<style></style>2 book\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>2 qavprompt<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>q</span><span class=typeGood>avru vexu la zovra de qe</span><span class=typeMissed>--</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>¿Q</span><span class=typeGood>ávru véxu la zóvra de qe</span><span class=typeMissed>l?</span></code></div>¿Qávru véxu la zóvra de qel?",
+            "question": "<style></style>2 qavprompt\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1 qavprompt<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>qa</span><span class=typeGood>vru v</span><span class=typeBad>e</span><span class=typeGood>xu la z</span><span class=typeBad>o</span><span class=typeGood>vra de qe</span><span class=typeMissed>--</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>¿Qá</span><span class=typeGood>vru v</span><span class=typeMissed>é</span><span class=typeGood>xu la z</span><span class=typeMissed>ó</span><span class=typeGood>vra de qe</span><span class=typeMissed>l?</span></code></div>¿Qávru véxu la zóvra de qel?",
+            "question": "<style></style>1 qavprompt\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "062ae6ff44c68c31d6039aa308090fc439c77f939154f6ce270b04ce60ffadc7",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/type-answer/modifiers",
+  "scenario_sha256": "cd3eedfef83e2a72390b48deb5d9658a536743063bde0c8204e6b0f9be53a13e",
+  "tz": "UTC"
+}

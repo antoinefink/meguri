@@ -1,0 +1,129 @@
+# Question replacements parse escape syntax; answer fonts remain literal.
+id: render/type-answer/replacement-escapes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Escapes
+      fields: [Prompt, Response]
+      templates:
+        - {name: Side, front: '{{Prompt}}|{{type:Response}}|{{type:Prompt}}', back: '{{FrontSide}}<hr id=answer>'}
+  notes:
+    - {notetype: Escapes, fields: [qav, vex]}
+steps:
+  - legacy_update:
+      notetype: Escapes
+      patch:
+        flds:
+          - {name: Prompt, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Response, ord: 1, sticky: false, rtl: false, font: 'Qav\nVex', size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: vex}
+  - legacy_update:
+      notetype: Escapes
+      patch:
+        flds:
+          - {name: Prompt, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Response, ord: 1, sticky: false, rtl: false, font: 'Qav\Vex', size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: vex}
+  - legacy_update:
+      notetype: Escapes
+      patch:
+        flds:
+          - {name: Prompt, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Response, ord: 1, sticky: false, rtl: false, font: 'Qav\1', size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: vex}
+  - legacy_update:
+      notetype: Escapes
+      patch:
+        flds:
+          - {name: Prompt, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Response, ord: 1, sticky: false, rtl: false, font: 'Qav\g<0>', size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: vex}
+  - legacy_update:
+      notetype: Escapes
+      patch:
+        flds:
+          - {name: Prompt, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Response, ord: 1, sticky: false, rtl: false, font: 'Qav\g<1>', size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: vex}
+  - legacy_update:
+      notetype: Escapes
+      patch:
+        flds:
+          - {name: Prompt, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Response, ord: 1, sticky: false, rtl: false, font: 'Qav\101', size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: vex}
+  - legacy_update:
+      notetype: Escapes
+      patch:
+        flds:
+          - {name: Prompt, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Response, ord: 1, sticky: false, rtl: false, font: 'Qav\tVex', size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: vex}
+  - legacy_update:
+      notetype: Escapes
+      patch:
+        flds:
+          - {name: Prompt, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Response, ord: 1, sticky: false, rtl: false, font: 'Qav\&Vex', size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: vex}
+  - legacy_update:
+      notetype: Escapes
+      patch:
+        flds:
+          - {name: Prompt, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Response, ord: 1, sticky: false, rtl: false, font: 'Qav\q', size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: vex}
+  - legacy_update:
+      notetype: Escapes
+      patch:
+        flds:
+          - {name: Prompt, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Response, ord: 1, sticky: false, rtl: false, font: 'Qav\2', size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: vex}
+  - legacy_update:
+      notetype: Escapes
+      patch:
+        flds:
+          - {name: Prompt, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Response, ord: 1, sticky: false, rtl: false, font: 'Qav\', size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: vex}
+  - legacy_update:
+      notetype: Escapes
+      patch:
+        flds:
+          - {name: Prompt, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Response, ord: 1, sticky: false, rtl: false, font: 'Qav\400', size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: vex}
+  - legacy_update:
+      notetype: Escapes
+      patch:
+        flds:
+          - {name: Prompt, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Response, ord: 1, sticky: false, rtl: false, font: 'Qav\g<missing>', size: 20}
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: vex}
