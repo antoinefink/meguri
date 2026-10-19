@@ -40,7 +40,7 @@ Every marker that D5 does not claim becomes this original Meguri replay button, 
 <a class="replay-button soundLink" href=# onclick="ACTION; return false;" draggable="false"><svg class="playImage" viewBox="0 0 48 48" version="1.1"><rect x="3" y="3" width="42" height="42" rx="12" fill="none" stroke="currentColor" stroke-width="2" /><path d="M18 14L34 24L18 34Z" fill="currentColor" /></svg></a>
 ```
 
-The transform adds no leading or trailing line break and no indentation. The rounded-square frame and filled triangle were specified for Meguri from simple geometry on 2026-10-19, without an external image, code or asset as an input. This graphic replaces the earlier graphic literal; its presence in the old Product Contract did not prove independent authorship. R1960 and R1907 require this original graphics while preserving the outer anchor attributes and classes, native actions and AV behavior.
+The transform adds no leading or trailing line break and no indentation. The rounded-square frame and filled triangle were specified for Meguri from simple geometry on 2026-10-19, without an external image, code or asset as an input. This graphic replaces the earlier graphic literal; its presence in the old Product Contract did not prove independent authorship. R1960 and R1907 require the original graphic while preserving the outer anchor attributes and classes, native actions and AV behavior. Base styling preserves the unfilled frame and inherits the card foreground for its `currentColor` stroke and triangle fill, including dark mode and preview (R483).
 
 ACTION:
 
