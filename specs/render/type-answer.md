@@ -226,7 +226,7 @@ When T and X are equal character by character: `<code id=typeans><span class=typ
    | `replace` | `typeBad`: T[i1..i2] | `typeMissed`: X[j1..j2] |
 
 3. **Token text.**
-   - Typed tokens, and expected tokens in plain mode: the token's characters. When the first of them is a mark by **Unicode 10.0.0** (General_Category Mn, Mc or Me as the `unic-ucd-category` 0.9.0 crate has it), a U+00A0 is put in front, so the mark does not join the token before it. Characters that became marks after Unicode 10.0.0 (U+08D3, U+1AC1, ...) get none.
+   - Typed tokens, and expected tokens in plain mode: the token's characters. When the first of them is a mark by **Unicode 10.0.0** (General_Category Mn, Mc or Me in the official database; canonical scalar ranges and provenance: `render/unicode10-marks.md`), a U+00A0 is put in front, so the mark does not join the token before it. Characters that became marks after Unicode 10.0.0 (U+08D3, U+1AC1, ...) get none.
    - Expected tokens in nc mode: the display texts of X's elements j1..j2 (their entries), joined; no U+00A0 is added.
    - Then M (A6.6).
 4. **Output**: `<code id=typeans>` + the typed tokens + `<br><span id=typearrow>&darr;</span><br>` + the expected tokens + `</code>`, each token written `<span class=` CLASS `>` text `</span>` (class unquoted). Tokens are never merged: two neighbouring `typeGood` tokens stay two spans.
@@ -241,7 +241,7 @@ For reviewers; the crate is authoritative. The matcher finds the longest block o
 
 ### A6.8 Two Unicode versions
 
-The comparison uses Unicode 16.0.0 for NFC, NFKD and the marks of nc mode (A6.3), and Unicode 10.0.0 for the marks that get a U+00A0 in token texts (A6.5). Meguri must not unify them: `xy` against typed `x` U+08D3 `y` shows a bad token U+08D3 without a U+00A0, while U+0335 in its place gets one.
+The comparison uses Unicode 16.0.0 for NFC, NFKD and the marks of nc mode (A6.3), and the official Unicode 10.0.0 category ranges of `unicode10-marks.json` for the marks that get a U+00A0 in token texts (A6.5). Meguri must not unify them: `xy` against typed `x` U+08D3 `y` shows a bad token U+08D3 without a U+00A0, while U+0335 in its place gets one.
 
 ## A7. Comparison examples
 
