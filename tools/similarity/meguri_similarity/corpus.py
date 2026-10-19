@@ -138,7 +138,11 @@ def plan_corpus(refs_dir: str, cfg: dict, vocab_digest: str, stopwords) -> Plan:
                     rel = os.path.relpath(full, path)
                     if os.path.splitext(rel)[1].lower() in ccfg["extensions"]:
                         st = os.stat(full)
-                        files.append((rel, st.st_size, int(st.st_mtime)))
+                        digest = hashlib.sha256()
+                        with open(full, "rb") as f:
+                            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                                digest.update(chunk)
+                        files.append((rel, st.st_size, digest.hexdigest()))
             sources.append({"name": extra["name"], "kind": "dir", "path": path, "files": sorted(files)})
         else:
             missing.append(extra["name"])
@@ -200,7 +204,7 @@ def enumerate_blobs(plan: Plan):
                         continue
                     blobs.append((sha, si, tag, path, language_of(path)))
         else:
-            for rel, size, _mtime in src["files"]:
+            for rel, size, _digest in src["files"]:
                 full = os.path.join(src["path"], rel)
                 if size > max_bytes:
                     skipped_large += 1

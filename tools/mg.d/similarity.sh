@@ -316,11 +316,18 @@ mg_similarity_nightly() {
     mg_status error
     return 0
   fi
-  local report
+  local report error
   for report in "$MG_RUN_DIR"/jplag/*.jplag; do
     [ -f "$report" ] && mg_artifact jplag-report "$report" "open with: java -jar jplag.jar -M VIEW <file> (embeds Anki sources; main checkout only)"
   done
   mg_detail jplag "$(jq -c . "$summary")"
+  error="$(jq -r '.error // empty' "$summary")"
+  if [ -n "$error" ]; then
+    mg_failure jplag:error "$error" "tools/mg similarity-nightly"
+    mg_message "similarity-nightly: $error"
+    mg_status error
+    return 0
+  fi
   jq -c '.languages | to_entries[] | select(.value.error) |
     {id: ("jplag:" + .key), message: .value.error, repro: "tools/mg similarity-nightly"}' "$summary" >>"$MG_STATE/failures.jsonl"
   mg_message "$(jq -r '"similarity-nightly: " + ([.languages | to_entries[] | "\(.key) " + (if .value.skipped then "skipped (\(.value.skipped))" elif .value.error then "error" else "max \(.value.max_similarity * 100 | floor)%" end)] | join(", ")) + "; tags " + (.tags | join(" "))' "$summary")"

@@ -28,7 +28,6 @@ SHIM
 mg__hook_install_one() {
   local dir="$1" name="$2" target tmp marker
   target="$dir/$name"
-  tmp="$target.tmp"
   marker="$(mg__hook_marker "$name")"
   if [ -e "$target" ] && ! grep -qF "$marker" "$target" 2>/dev/null; then
     MG_HOOKS_FAILURE=hook-exists
@@ -40,6 +39,11 @@ mg__hook_install_one() {
     MG_HOOKS_MESSAGE="could not create $dir"
     return 1
   fi
+  if ! tmp="$(mktemp "$target.tmp.XXXXXX")"; then
+    MG_HOOKS_MESSAGE="could not create a temporary hook in $dir"
+    return 1
+  fi
+  mg_on_exit "rm -f $(printf '%q' "$tmp")"
   if ! mg__hook_shim "$name" >"$tmp" || ! chmod +x "$tmp"; then
     rm -f "$tmp" 2>/dev/null
     MG_HOOKS_MESSAGE="could not write $tmp"

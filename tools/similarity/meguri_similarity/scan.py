@@ -115,7 +115,7 @@ class Scanner:
                 if entry.covers(path, channel, int(first[i]), int(last[i])):
                     keep[i] = False
                     break
-        hashes, first, last = hashes[keep], first[keep], last[keep]
+        hashes = hashes[keep]
         if labels is not None:
             labels = [l for l, k in zip(labels, keep) if k]
         found, blobs, clines = self.index.lookup(channel, hashes)
@@ -128,7 +128,10 @@ class Scanner:
                     f"{channel} {res.score:.0%} of {res.fingerprints} fingerprints match (threshold {cfg['threshold']:.0%})"
                 )
             if channel == "struct":
-                run, run_start = longest_true_run(found)
+                # Exempt fingerprints break runs in the original sequence.
+                run_mask = np.zeros(len(keep), dtype=bool)
+                run_mask[keep] = found
+                run, run_start = longest_true_run(run_mask)
                 res.longest_run = run
                 if run >= cfg["consecutive"]:
                     res.reasons.append(
@@ -139,7 +142,7 @@ class Scanner:
             what = "comment" if channel == "com" else "text"
             res.reasons.append(f"{res.matched} {what} run(s) of {n}+ words match")
         if res.matched:
-            res.regions = self._regions(found, first, last, blobs, clines, labels)
+            res.regions = self._regions(found, first[keep], last[keep], blobs, clines, labels)
         return res
 
     def _regions(self, found, first, last, blobs, clines, labels):

@@ -49,23 +49,38 @@ def _export_tag(anki, tag, suffixes, dest):
     return count
 
 
+def _write_summary(summary, out):
+    path = os.path.join(out, "jplag-summary.json")
+    with open(path, "w") as f:
+        json.dump(summary, f, indent=1)
+    print(json.dumps({"status": summary["status"], "summary": path}))
+    return {"pass": 0, "warn": 0}.get(summary["status"], 2)
+
+
 def main(args, log):
     cfg = load_config(args.config)
     jcfg = cfg["jplag"]
     anki = os.path.join(args.refs, cfg["corpus"]["anki_repo"])
     tags, missing = _tags(anki, cfg)
-    files = read_list(args.files_from, args.null)
-    files = [p for p in files if not any(glob_match(p, g) for g in cfg["scan"].get("exclude") or [])]
     os.makedirs(args.out, exist_ok=True)
     summary = {"status": "pass", "tags": tags, "missing_tags": missing, "languages": {}}
+    if missing or not tags:
+        summary["status"] = "error"
+        summary["error"] = (
+            f"required JPlag references are incomplete: {len(missing)} configured tag(s) missing; "
+            f"{len(tags)} tag(s) selected"
+        )
+        return _write_summary(summary, args.out)
+    files = read_list(args.files_from, args.null)
+    files = [p for p in files if not any(glob_match(p, g) for g in cfg["scan"].get("exclude") or [])]
     work = tempfile.mkdtemp(prefix="jplag-")
     try:
         for lang, suffixes in jcfg["languages"].items():
             mine = [p for p in files if os.path.splitext(p)[1] in suffixes and os.path.isfile(os.path.join(args.root, p))]
             entry = {"meguri_files": len(mine)}
             summary["languages"][lang] = entry
-            if not mine or not tags:
-                entry["skipped"] = "no Meguri files in this language" if not mine else "no tags"
+            if not mine:
+                entry["skipped"] = "no Meguri files in this language"
                 continue
             new_root = os.path.join(work, lang, "new", "meguri")
             for p in mine:
@@ -109,7 +124,4 @@ def main(args, log):
                 summary["status"] = "warn"
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    with open(os.path.join(args.out, "jplag-summary.json"), "w") as f:
-        json.dump(summary, f, indent=1)
-    print(json.dumps({"status": summary["status"], "summary": os.path.join(args.out, "jplag-summary.json")}))
-    return {"pass": 0, "warn": 0}.get(summary["status"], 2)
+    return _write_summary(summary, args.out)
