@@ -84,6 +84,10 @@ The first full Mac render used the VM's actual key, `VirtualMac2,1-26A434`, whic
 
 `tools/mg snapshots --platform mac --record '*'` recorded 60 files only under `app/Snapshots/VirtualMac2,1-26A434/` (`20261019T171900Z-56838`, committed in `5a037342`). Host references and the signature approval ledger were preserved. A fresh unfiltered verification without record mode or a reference-key override passed all 60 comparisons on clean `5a037342` (`20261019T171952Z-59085`); the test bundle reported 63 passed, zero failed and one existing skip. The final unit gate remains required before accepting the migration.
 
+The first full gate exposed an existing native audio probe that still assumed host hardware. With no audio route, its play promise timed out and the following video navigation stalled. The native MP3 test now uses the same real-hardware condition as the UI audio test, before creating a page. Video stays enabled. A focused host control on clean `baaa7a2d` passed all eight native media tests, including audio and video, with no skips (`swift-test/20261019T174510Z-20111`). The full VM Unit plan must confirm the audio skip and successful video execution. Physical iOS S2(a) and the recorded S1(f) footprint issue remain open.
+
+Keep host Apple jobs serial. Swift package tests and Xcode builds share the generated core framework across configurations. In the first gate, a parallel Debug package build replaced that framework while the AppStore build read its stamp; the configuration safety check correctly failed. Rust and image checks may overlap Apple work, but the strict XCFramework timing selftest runs alone on a quiet machine.
+
 ## The Mac app on the host (U8d)
 
 Before the 2026-10-19 migration, two paths started the Mac app on this Mac: app-hosted tests (including Mac snapshots) and explicit hidden launches through `tools/mg run` and `screenshot`. The app-hosted tests now run in the VM; explicit host run/capture jobs retain the hidden-launch safeguards below. On 2026-10-16 Antoine saw the app in his Dock while tests ran, and chose this fix:
