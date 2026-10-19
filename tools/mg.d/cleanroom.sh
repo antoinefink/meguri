@@ -2,14 +2,13 @@
 mg_job cleanroom host mg_cleanroom \
   "Isolated Codex runner: --check probes its boundaries without authentication; --prompt <file> --session <id> [--effort high|xhigh]; exports changes.patch for review, never edits master"
 mg_job cleanroom-image host mg_cleanroom_image \
-  "Build the version-pinned isolated Codex runtime from Meguri's dev image"
+  "Build the version-pinned isolated Codex runtime from a digest-pinned Linux base"
 
 mg_cleanroom_image() {
   local project rc
   project="$(mg_compose_project)"
-  mg_compose --progress plain build dev || { mg_failure dev-image "dev image build failed"; mg_status error; return 0; }
   BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker build --progress plain \
-    -f "$MG_ROOT/docker/cleanroom.Dockerfile" --build-arg "DEV_IMAGE=$project-dev" \
+    -f "$MG_ROOT/docker/cleanroom.Dockerfile" \
     -t "$project-cleanroom" "$MG_ROOT"
   rc=$?
   if [ "$rc" -ne 0 ]; then
