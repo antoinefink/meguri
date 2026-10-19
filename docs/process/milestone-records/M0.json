@@ -1,0 +1,722 @@
+{
+  "record_version": 1,
+  "milestone": "M0",
+  "name": "Foundations",
+  "closed_at": "2026-10-19T18:43:05Z",
+  "gate_commit": "d0d006cd13853aa9bb774eae9f10147e40221e8d",
+  "head": "d0d006cd13853aa9bb774eae9f10147e40221e8d",
+  "evidence_commits": [],
+  "suites": [
+    {
+      "id": "static",
+      "run": "static",
+      "job": "static-checks",
+      "args": [
+        "--base",
+        "d0d006cd13853aa9bb774eae9f10147e40221e8d"
+      ],
+      "since": "M0",
+      "run_id": "20261019T174813Z-23071",
+      "status": "pass",
+      "summary": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "static-tree",
+      "run": "static-tree",
+      "job": "static-checks",
+      "args": [
+        "--base",
+        "d0d006cd13853aa9bb774eae9f10147e40221e8d"
+      ],
+      "since": "M0",
+      "run_id": "20261019T174813Z-23071",
+      "status": "pass",
+      "summary": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "similarity",
+      "run": "similarity-whole-tree",
+      "job": "similarity",
+      "args": [
+        "--rev",
+        "d0d006cd13853aa9bb774eae9f10147e40221e8d"
+      ],
+      "since": "M0",
+      "run_id": "20261019T184250Z-42940",
+      "status": "pass",
+      "summary": {
+        "total": 849,
+        "passed": 849,
+        "failed": 0,
+        "skipped": 2230,
+        "allowlisted": 1
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "similarity-selftest",
+      "run": "similarity-selftest",
+      "job": "similarity-selftest",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T175349Z-35455",
+      "status": "pass",
+      "summary": {
+        "total": 79,
+        "passed": 79,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "oracle-test",
+      "run": "oracle-test",
+      "job": "oracle",
+      "args": [
+        "test"
+      ],
+      "since": "M0",
+      "run_id": "20261019T183835Z-18566",
+      "status": "pass",
+      "summary": {
+        "total": 371,
+        "passed": 371,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "pin-canary",
+      "run": "pin-canary",
+      "job": "core-test",
+      "args": [
+        "--canaries"
+      ],
+      "since": "M0",
+      "run_id": "20261019T174840Z-23710",
+      "status": "pass",
+      "summary": {
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "canary-scenarios",
+      "run": "canary-scenarios",
+      "job": "conformance",
+      "args": [
+        "--lane",
+        "all",
+        "fp-probe/corpus/fuzz-table",
+        "smoke/fuzz-table-small",
+        "text/fold/unicase",
+        "storage/open/collation"
+      ],
+      "since": "M0",
+      "run_id": "20261019T174836Z-23435",
+      "status": "pass",
+      "summary": {
+        "total": 4,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "pending": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "conformance",
+      "run": "conformance",
+      "job": "conformance",
+      "args": [
+        "--lane",
+        "all"
+      ],
+      "since": "M0",
+      "run_id": "20261019T175110Z-28860",
+      "status": "pass",
+      "summary": {
+        "total": 528,
+        "passed": 455,
+        "failed": 0,
+        "skipped": 73,
+        "pending": 59
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "goldens-check",
+      "run": "goldens-check",
+      "job": "goldens-check",
+      "args": [
+        "--base",
+        "d0d006cd13853aa9bb774eae9f10147e40221e8d"
+      ],
+      "since": "M0",
+      "run_id": "20261019T175200Z-32699",
+      "status": "pass",
+      "summary": {
+        "total": 528,
+        "passed": 528,
+        "failed": 0,
+        "skipped": 0,
+        "changed": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "harvest-report",
+      "run": "harvest-report",
+      "job": "harvest-report",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T175349Z-35271",
+      "status": "pass",
+      "summary": {
+        "total": 1179,
+        "passed": 1179,
+        "failed": 0,
+        "skipped": 0,
+        "unclassified": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "harvest-coverage",
+      "run": "harvest-coverage",
+      "job": "harvest-report",
+      "args": [
+        "--live-report",
+        "/Users/antoine/code/meguri/build/mg/conformance/20261019T183836Z-19098/t1-live.json"
+      ],
+      "since": "M0",
+      "run_id": "20261019T184250Z-42947",
+      "status": "pass",
+      "summary": {
+        "total": 1179,
+        "passed": 1179,
+        "failed": 0,
+        "skipped": 0,
+        "unclassified": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "live-oracle",
+      "run": "live-oracle",
+      "job": "conformance",
+      "args": [
+        "--live-only",
+        "--lane",
+        "native"
+      ],
+      "since": "M0",
+      "run_id": "20261019T183836Z-19098",
+      "status": "pass",
+      "summary": {
+        "total": 528,
+        "passed": 515,
+        "failed": 0,
+        "skipped": 13,
+        "pending": 13
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "fixtures-check",
+      "run": "fixtures-check",
+      "job": "fixtures-check",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T183836Z-19097",
+      "status": "pass",
+      "summary": {
+        "total": 15,
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "core-lint",
+      "run": "core-lint",
+      "job": "core-lint",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T175113Z-29269",
+      "status": "pass",
+      "summary": {
+        "total": 4,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "core-deny",
+      "run": "core-deny",
+      "job": "core-deny",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T175111Z-29052",
+      "status": "pass",
+      "summary": {
+        "total": 4,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "core-test",
+      "run": "core-test",
+      "job": "core-test",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T175113Z-29292",
+      "status": "pass",
+      "summary": {
+        "total": 2102,
+        "passed": 2093,
+        "failed": 0,
+        "skipped": 9
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "swift-test-core",
+      "run": "swift-test-core",
+      "job": "swift-test",
+      "args": [
+        "--package",
+        "MeguriCore"
+      ],
+      "since": "M0",
+      "run_id": "20261019T175114Z-29734",
+      "status": "pass",
+      "summary": {
+        "total": 34,
+        "passed": 34,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "swift-test-kit",
+      "run": "swift-test-kit",
+      "job": "swift-test",
+      "args": [
+        "--package",
+        "MeguriKit"
+      ],
+      "since": "M0",
+      "run_id": "20261019T175952Z-73005",
+      "status": "pass",
+      "summary": {
+        "total": 87,
+        "passed": 87,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "build-app-ios",
+      "run": "build-app-ios",
+      "job": "build-app",
+      "args": [
+        "--platform",
+        "ios-sim"
+      ],
+      "since": "M0",
+      "run_id": "20261019T180115Z-74180",
+      "status": "pass",
+      "summary": {
+        "total": 0,
+        "passed": 0,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "build-app-mac",
+      "run": "build-app-mac",
+      "job": "build-app",
+      "args": [
+        "--platform",
+        "mac"
+      ],
+      "since": "M0",
+      "run_id": "20261019T180128Z-75063",
+      "status": "pass",
+      "summary": {
+        "total": 0,
+        "passed": 0,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "xcode-check",
+      "run": "xcode-check",
+      "job": "xcode-check",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T180140Z-75919",
+      "status": "pass",
+      "summary": {
+        "total": 123,
+        "passed": 122,
+        "failed": 0,
+        "skipped": 1
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "mac-ui",
+      "run": "mac-ui",
+      "job": "mac-ui",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T183219Z-9803",
+      "status": "pass",
+      "summary": {
+        "total": 7,
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "errors": 0,
+        "queued": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "lint-ui",
+      "run": "lint-ui",
+      "job": "lint-ui",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T184117Z-38492",
+      "status": "pass",
+      "summary": {
+        "total": 69,
+        "passed": 69,
+        "failed": 0,
+        "skipped": 0,
+        "findings": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "lint-ui-selftest",
+      "run": "lint-ui-selftest",
+      "job": "lint-ui-selftest",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T175347Z-34952",
+      "status": "pass",
+      "summary": {
+        "total": 18,
+        "passed": 18,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "design-docs",
+      "run": "design-docs",
+      "job": "design-docs",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T175350Z-35504",
+      "status": "pass",
+      "summary": {
+        "total": 0,
+        "passed": 0,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "snapshots",
+      "run": "snapshots",
+      "job": "snapshots",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T181551Z-88927",
+      "status": "pass",
+      "summary": {
+        "total": 293,
+        "passed": 231,
+        "failed": 0,
+        "skipped": 62
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "a11y-iphone",
+      "run": "a11y-iphone",
+      "job": "a11y",
+      "args": [
+        "--platform",
+        "iphone"
+      ],
+      "since": "M0",
+      "run_id": "20261019T181949Z-98845",
+      "status": "pass",
+      "summary": {
+        "total": 12,
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "a11y-mac",
+      "run": "a11y-mac",
+      "job": "a11y",
+      "args": [
+        "--platform",
+        "mac"
+      ],
+      "since": "M0",
+      "run_id": "20261019T182550Z-2499",
+      "status": "pass",
+      "summary": {
+        "total": 12,
+        "passed": 11,
+        "failed": 0,
+        "skipped": 1
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "image-tools-selftest",
+      "run": "image-tools-selftest",
+      "job": "image-tools-selftest",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T175202Z-32891",
+      "status": "pass",
+      "summary": {
+        "total": 148,
+        "passed": 148,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "perf-smoke",
+      "run": "perf-smoke",
+      "job": "perf-ui",
+      "args": [
+        "--platform",
+        "iphone"
+      ],
+      "since": "M0",
+      "run_id": "20261019T183637Z-15919",
+      "status": "pass",
+      "summary": {
+        "total": 0,
+        "passed": 0,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "perf-ui-gate",
+      "run": "perf-gate-ui",
+      "job": "perf-gate",
+      "args": [
+        "--require",
+        "perf-ui"
+      ],
+      "since": "M0",
+      "run_id": "20261019T184249Z-42706",
+      "status": "pass",
+      "summary": {
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "inputs": 1,
+        "refused": 0,
+        "untracked": 19
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "selftest",
+      "run": "selftest",
+      "job": "selftest",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T175152Z-32434",
+      "status": "pass",
+      "summary": {
+        "total": 488,
+        "passed": 488,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "selftest-host",
+      "run": "selftest-host",
+      "job": "selftest-host",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T175658Z-37686",
+      "status": "pass",
+      "summary": {
+        "total": 28,
+        "passed": 28,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "selftest-xcframework",
+      "run": "selftest-xcframework",
+      "job": "selftest-xcframework",
+      "args": [],
+      "since": "M0",
+      "run_id": "20261019T174859Z-24083",
+      "status": "pass",
+      "summary": {
+        "total": 12,
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0
+      },
+      "outcome": "pass"
+    },
+    {
+      "id": "milestones",
+      "run": "milestones",
+      "job": "milestone-gate",
+      "args": [
+        "--check"
+      ],
+      "since": "M0",
+      "run_id": "20261019T175948Z-72184",
+      "status": "pass",
+      "summary": {
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "problems": 0
+      },
+      "outcome": "pass"
+    }
+  ],
+  "units": [
+    "U1",
+    "U2",
+    "U3",
+    "U4",
+    "U5",
+    "U6",
+    "U7",
+    "U8",
+    "U8b",
+    "U8c",
+    "U9",
+    "U10",
+    "U11",
+    "U12",
+    "U13",
+    "U19",
+    "U20",
+    "U21",
+    "U22",
+    "U23",
+    "U240",
+    "U241"
+  ],
+  "user_steps": [
+    {
+      "id": "xcode-license",
+      "type": "setup",
+      "evidence": "build/mg/doctor/",
+      "outcome": "pass",
+      "message": "done (tools/mg doctor lists no xcode-license step)",
+      "details": {
+        "state": "done"
+      }
+    },
+    {
+      "id": "ios-runtime",
+      "type": "setup",
+      "evidence": "build/mg/doctor/",
+      "outcome": "pass",
+      "message": "done (tools/mg doctor lists no ios-runtime step)",
+      "details": {
+        "state": "done"
+      }
+    },
+    {
+      "id": "xcode-external-agents",
+      "type": "setup",
+      "evidence": "build/mg/doctor/",
+      "outcome": "pass",
+      "message": "tools/mg doctor cannot check xcode-external-agents; recorded as unverified",
+      "details": {
+        "state": "unverified"
+      }
+    }
+  ],
+  "quarantine": [],
+  "deferred": [],
+  "global": [
+    {
+      "id": "quarantine",
+      "kind": "quarantine",
+      "outcome": "pass",
+      "message": "0 open entries, none protected"
+    },
+    {
+      "id": "native-oracle",
+      "kind": "suite",
+      "outcome": "not-applicable",
+      "message": "applies from M1R"
+    },
+    {
+      "id": "nightly-divergences",
+      "kind": null,
+      "outcome": "not-applicable",
+      "message": "applies from M2"
+    }
+  ]
+}
