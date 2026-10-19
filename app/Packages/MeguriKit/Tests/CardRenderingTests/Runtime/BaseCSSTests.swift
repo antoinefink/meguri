@@ -289,16 +289,41 @@ extension WebKitSuites.CardRuntimeSuites {
 
         // MARK: BC14
 
-        @Test func replayButtonSize() async throws {
-            try await WebTestHarness.withPage(log: false) { _, page async throws in
+        @Test(arguments: CardRuntime.Appearance.allCases)
+        func replayButtonLayoutAndColour(appearance: CardRuntime.Appearance) async throws {
+            try await WebTestHarness.withPage(appearance: appearance, log: false) { _, page async throws in
                 try await page.showPresentedQuestion(
-                    ##"<a class="replay-button" href="#"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="29"></circle><path d="M56.502,32.301l-37.502,20.101l0.329,-40.804l37.173,20.703Z"></path></svg></a>"##)
+                    ##"<div id="replay"><a class="replay-button soundLink" href=# onclick="return false;" draggable="false"><svg class="playImage" viewBox="0 0 48 48" version="1.1"><rect x="3" y="3" width="42" height="42" rx="12" fill="none" stroke="currentColor" stroke-width="2" /><path d="M18 14L34 24L18 34Z" fill="currentColor" /></svg></a></div>"##,
+                    bodyClass: CardRuntime.bodyClasses(platform: .mac, appearance: appearance, cardOrdinal: 0))
                 #expect(try await Self.computed(page, ".replay-button svg", ["width", "height"]) == ["width": "40px", "height": "40px"])
-                #expect(try await Self.computed(page, ".replay-button", ["display", "vertical-align", "margin-top", "text-decoration-line"]) == [
-                    "display": "inline-flex", "vertical-align": "middle", "margin-top": "3px", "text-decoration-line": "none",
+                #expect(try await Self.computed(page, ".replay-button", ["display", "vertical-align", "margin-top", "margin-right", "margin-bottom", "margin-left", "text-decoration-line"]) == [
+                    "display": "inline-flex", "vertical-align": "middle", "margin-top": "3px", "margin-right": "3px",
+                    "margin-bottom": "3px", "margin-left": "3px", "text-decoration-line": "none",
                 ])
-                #expect(try await Self.computed(page, ".replay-button svg circle", ["fill", "stroke"]) == ["fill": "rgb(255, 255, 255)", "stroke": "rgb(65, 65, 65)"])
-                #expect(try await Self.computed(page, ".replay-button svg path", ["fill"]) == ["fill": "rgb(65, 65, 65)"])
+                // The base link colour changes with appearance; the frame
+                // and mark follow it without filling the frame.
+                let colour = appearance == .dark ? "rgb(191, 219, 254)" : "rgb(29, 78, 216)"
+                #expect(try await Self.computed(page, ".replay-button svg rect", ["fill", "stroke"]) == ["fill": "none", "stroke": colour])
+                #expect(try await Self.computed(page, ".replay-button svg path", ["fill"]) == ["fill": colour])
+
+                // Presentation attributes in the current display transform
+                // must not mask missing or obsolete base stylesheet rules.
+                try await page.run("""
+                    document.querySelector(".replay-button rect").removeAttribute("fill");
+                    document.querySelector(".replay-button rect").removeAttribute("stroke");
+                    document.querySelector(".replay-button path").removeAttribute("fill");
+                    """)
+                #expect(try await Self.computed(page, ".replay-button svg rect", ["fill", "stroke"]) == ["fill": "none", "stroke": colour])
+                #expect(try await Self.computed(page, ".replay-button svg path", ["fill"]) == ["fill": colour])
+
+                // Templates can make links inherit their surrounding text
+                // colour; both SVG parts must follow that colour as well.
+                try await page.run("""
+                    document.getElementById("replay").style.color = "rgb(123, 45, 67)";
+                    document.querySelector(".soundLink").style.color = "inherit";
+                    """)
+                #expect(try await Self.computed(page, ".replay-button svg rect", ["fill", "stroke"]) == ["fill": "none", "stroke": "rgb(123, 45, 67)"])
+                #expect(try await Self.computed(page, ".replay-button svg path", ["fill"]) == ["fill": "rgb(123, 45, 67)"])
             }
         }
 

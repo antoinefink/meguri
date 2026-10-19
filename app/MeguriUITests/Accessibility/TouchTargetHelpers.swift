@@ -54,8 +54,10 @@ enum TouchTargets {
     /// the glass circle, not their hit region). Every control the app adds
     /// carries an identifier (R1964), so the app's own bar buttons are
     /// measured.
+    @MainActor
     static func elements(of snapshot: any XCUIElementSnapshot, visible: CGRect) -> [Element] {
         var result: [Element] = []
+        @MainActor
         func walk(_ node: any XCUIElementSnapshot, inNavigationBar: Bool) {
             let systemBarButton = inNavigationBar && node.identifier.isEmpty
             if interactiveTypes.contains(node.elementType), node.frame.intersects(visible), !node.frame.isEmpty,
