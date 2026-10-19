@@ -3,7 +3,8 @@
 # add-on filters (sparkle, mathpretty), TTS, furigana, kana, type-in and hint
 # filters on fields holding MathJax, LaTeX, TTS and sound tags. Rendering
 # changes nothing: the raw dump after equals the one before. The template
-# texts below are the fixture's (N9.4); U62 adds the stored-template render.
+# texts below are the fixture's (N9.4); the render observation also runs the
+# stored-template pipeline, including AV extraction, for every adopted card.
 id: preservation/render/every-card
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
 steps:
@@ -33,5 +34,6 @@ steps:
             - {card: "#c17", front: "{{Front}}", back: '{{FrontSide}}<hr id=answer>{{Back}}<div class="src">{{mathpretty:Source}}</div>'}
             - {card: "#c18", front: "{{Front}}", back: '{{FrontSide}}<hr id=answer>{{Back}}<div class="src">{{mathpretty:Source}}</div>'}
             - {card: "#c19", front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{hint:Extra}}"}
+      - render
   - observe:
       - {db_dump: {raw: true}}

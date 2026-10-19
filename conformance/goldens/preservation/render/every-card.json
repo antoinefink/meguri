@@ -1484,6 +1484,306 @@
         }
       },
       {
+        "render": {
+          "#c1": {
+            "browser": {
+              "answer": "to eat",
+              "blank": null,
+              "question": "食べる"
+            },
+            "review": {
+              "answer": "<div class=\"word\">食べる</div>[anki:play:q:0]<hr id=answer>to eat<div class=\"reading\"><ruby><rb>食</rb><rt>た</rt></ruby>べる</div>[anki:play:a:0]",
+              "answer_av": [
+                {
+                  "sound": "taberu.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "<div class=\"word\">食べる</div>[anki:play:q:0]",
+              "question_av": [
+                {
+                  "tts": "ja_JP"
+                }
+              ]
+            }
+          },
+          "#c10": {
+            "browser": {
+              "answer": "<hr id=answer>がっこう<div class=\"fx\">学校</div>",
+              "blank": null,
+              "question": "<div class=\"meaning\">school</div>[[type:Word]]"
+            },
+            "review": {
+              "answer": "<div class=\"meaning\">school</div>[[type:Word]]<hr id=answer>がっこう<div class=\"fx\">学校</div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "<div class=\"meaning\">school</div>[[type:Word]]",
+              "question_av": []
+            }
+          },
+          "#c11": {
+            "browser": {
+              "answer": "quiet",
+              "blank": null,
+              "question": "静か"
+            },
+            "review": {
+              "answer": "<div class=\"word\">静か</div>[anki:play:q:0]<hr id=answer>quiet<div class=\"reading\"><ruby><rb>静</rb><rt>しず</rt></ruby>か</div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "<div class=\"word\">静か</div>[anki:play:q:0]",
+              "question_av": [
+                {
+                  "tts": "ja_JP"
+                }
+              ]
+            }
+          },
+          "#c12": {
+            "browser": {
+              "answer": "<hr id=answer>しずか<div class=\"fx\">静か</div>",
+              "blank": null,
+              "question": "<div class=\"meaning\">quiet</div>[[type:Word]]"
+            },
+            "review": {
+              "answer": "<div class=\"meaning\">quiet</div>[[type:Word]]<hr id=answer>しずか<div class=\"fx\">静か</div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "<div class=\"meaning\">quiet</div>[[type:Word]]",
+              "question_av": []
+            }
+          },
+          "#c13": {
+            "browser": {
+              "answer": "<span class=\"cloze\" data-ordinal=\"1\">Paris</span> is the capital of <span class=\"cloze-inactive\" data-ordinal=\"2\">France</span>.<br>\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hintf04c2dcf0ad654a3').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hintf04c2dcf0ad654a3\" class=hint style=\"display: none\">geography</div>\n",
+              "blank": null,
+              "question": "<span class=\"cloze\" data-cloze=\"Paris\" data-ordinal=\"1\">[...]</span> is the capital of <span class=\"cloze-inactive\" data-ordinal=\"2\">France</span>."
+            },
+            "review": {
+              "answer": "<span class=\"cloze\" data-ordinal=\"1\">Paris</span> is the capital of <span class=\"cloze-inactive\" data-ordinal=\"2\">France</span>.<br>\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hintf04c2dcf0ad654a3').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hintf04c2dcf0ad654a3\" class=hint style=\"display: none\">geography</div>\n",
+              "answer_av": [],
+              "blank": null,
+              "question": "<span class=\"cloze\" data-cloze=\"Paris\" data-ordinal=\"1\">[...]</span> is the capital of <span class=\"cloze-inactive\" data-ordinal=\"2\">France</span>.",
+              "question_av": []
+            }
+          },
+          "#c14": {
+            "browser": {
+              "answer": "Water boils at <span class=\"cloze\" data-ordinal=\"1\">100 °C</span> at sea level, \\(T_b = 373.15\\,\\mathrm{K}\\).<br>",
+              "blank": null,
+              "question": "Water boils at <span class=\"cloze\" data-cloze=\"100&#x20;&#xB0;C\" data-ordinal=\"1\">[temperature]</span> at sea level, \\(T_b = 373.15\\,\\mathrm{K}\\)."
+            },
+            "review": {
+              "answer": "Water boils at <span class=\"cloze\" data-ordinal=\"1\">100 °C</span> at sea level, \\(T_b = 373.15\\,\\mathrm{K}\\).<br>",
+              "answer_av": [],
+              "blank": null,
+              "question": "Water boils at <span class=\"cloze\" data-cloze=\"100&#x20;&#xB0;C\" data-ordinal=\"1\">[temperature]</span> at sea level, \\(T_b = 373.15\\,\\mathrm{K}\\).",
+              "question_av": []
+            }
+          },
+          "#c15": {
+            "browser": {
+              "answer": "<hr id=answer>\\(A = \\pi r^2\\)<div class=\"src\">[$]A=\\pi r^2[/$]</div>",
+              "blank": null,
+              "question": "Area of a circle"
+            },
+            "review": {
+              "answer": "Area of a circle<hr id=answer>\\(A = \\pi r^2\\)<div class=\"src\">[$]A=\\pi r^2[/$]</div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "Area of a circle",
+              "question_av": []
+            }
+          },
+          "#c16": {
+            "browser": {
+              "answer": "<hr id=answer>\\[e^{i\\pi} + 1 = 0\\]<div class=\"src\">[latex]$e^{i\\pi}+1=0$[/latex]</div>",
+              "blank": null,
+              "question": "Euler's identity"
+            },
+            "review": {
+              "answer": "Euler's identity<hr id=answer>\\[e^{i\\pi} + 1 = 0\\]<div class=\"src\">[latex]$e^{i\\pi}+1=0$[/latex]</div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "Euler's identity",
+              "question_av": []
+            }
+          },
+          "#c17": {
+            "browser": {
+              "answer": "<hr id=answer>\\(x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}\\)<div class=\"src\">[$$]x=\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}[/$$]</div>",
+              "blank": null,
+              "question": "Quadratic formula"
+            },
+            "review": {
+              "answer": "Quadratic formula<hr id=answer>\\(x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}\\)<div class=\"src\">[$$]x=\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}[/$$]</div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "Quadratic formula",
+              "question_av": []
+            }
+          },
+          "#c18": {
+            "browser": {
+              "answer": "<hr id=answer>\\(\\cos x\\)<div class=\"src\"></div>",
+              "blank": null,
+              "question": "Derivative of sine"
+            },
+            "review": {
+              "answer": "Derivative of sine<hr id=answer>\\(\\cos x\\)<div class=\"src\"></div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "Derivative of sine",
+              "question_av": []
+            }
+          },
+          "#c19": {
+            "browser": {
+              "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Paris</span> is the capital of <span class=\"cloze\" data-ordinal=\"2\">France</span>.<br>\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hintf04c2dcf0ad654a3').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hintf04c2dcf0ad654a3\" class=hint style=\"display: none\">geography</div>\n",
+              "blank": null,
+              "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Paris</span> is the capital of <span class=\"cloze\" data-cloze=\"France\" data-ordinal=\"2\">[...]</span>."
+            },
+            "review": {
+              "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Paris</span> is the capital of <span class=\"cloze\" data-ordinal=\"2\">France</span>.<br>\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hintf04c2dcf0ad654a3').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hintf04c2dcf0ad654a3\" class=hint style=\"display: none\">geography</div>\n",
+              "answer_av": [],
+              "blank": null,
+              "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Paris</span> is the capital of <span class=\"cloze\" data-cloze=\"France\" data-ordinal=\"2\">[...]</span>.",
+              "question_av": []
+            }
+          },
+          "#c2": {
+            "browser": {
+              "answer": "<hr id=answer>たべる<div class=\"fx\">食べる</div>",
+              "blank": null,
+              "question": "<div class=\"meaning\">to eat</div>[[type:Word]]"
+            },
+            "review": {
+              "answer": "<div class=\"meaning\">to eat</div>[[type:Word]]<hr id=answer>たべる<div class=\"fx\">食べる</div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "<div class=\"meaning\">to eat</div>[[type:Word]]",
+              "question_av": []
+            }
+          },
+          "#c3": {
+            "browser": {
+              "answer": "to drink",
+              "blank": null,
+              "question": "飲む"
+            },
+            "review": {
+              "answer": "<div class=\"word\">飲む</div>[anki:play:q:0]<hr id=answer>to drink<div class=\"reading\"><ruby><rb>飲</rb><rt>の</rt></ruby>む</div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "<div class=\"word\">飲む</div>[anki:play:q:0]",
+              "question_av": [
+                {
+                  "tts": "ja_JP"
+                }
+              ]
+            }
+          },
+          "#c4": {
+            "browser": {
+              "answer": "<hr id=answer>のむ<div class=\"fx\">飲む</div>",
+              "blank": null,
+              "question": "<div class=\"meaning\">to drink</div>[[type:Word]]"
+            },
+            "review": {
+              "answer": "<div class=\"meaning\">to drink</div>[[type:Word]]<hr id=answer>のむ<div class=\"fx\">飲む</div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "<div class=\"meaning\">to drink</div>[[type:Word]]",
+              "question_av": []
+            }
+          },
+          "#c5": {
+            "browser": {
+              "answer": "book",
+              "blank": null,
+              "question": "本"
+            },
+            "review": {
+              "answer": "<div class=\"word\">本</div>[anki:play:q:0]<hr id=answer>book<div class=\"reading\"><ruby><rb>本</rb><rt>ほん</rt></ruby></div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "<div class=\"word\">本</div>[anki:play:q:0]",
+              "question_av": [
+                {
+                  "tts": "ja_JP"
+                }
+              ]
+            }
+          },
+          "#c6": {
+            "browser": {
+              "answer": "<hr id=answer>ほん<div class=\"fx\">本</div>",
+              "blank": null,
+              "question": "<div class=\"meaning\">book</div>[[type:Word]]"
+            },
+            "review": {
+              "answer": "<div class=\"meaning\">book</div>[[type:Word]]<hr id=answer>ほん<div class=\"fx\">本</div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "<div class=\"meaning\">book</div>[[type:Word]]",
+              "question_av": []
+            }
+          },
+          "#c7": {
+            "browser": {
+              "answer": "water",
+              "blank": null,
+              "question": "水"
+            },
+            "review": {
+              "answer": "<div class=\"word\">水</div>[anki:play:q:0]<hr id=answer>water<div class=\"reading\"><ruby><rb>水</rb><rt>みず</rt></ruby></div>[anki:play:a:0]",
+              "answer_av": [
+                {
+                  "tts": "ja_JP"
+                }
+              ],
+              "blank": null,
+              "question": "<div class=\"word\">水</div>[anki:play:q:0]",
+              "question_av": [
+                {
+                  "tts": "ja_JP"
+                }
+              ]
+            }
+          },
+          "#c8": {
+            "browser": {
+              "answer": "<hr id=answer>みず<div class=\"fx\">水</div>",
+              "blank": null,
+              "question": "<div class=\"meaning\">water</div>[[type:Word]]"
+            },
+            "review": {
+              "answer": "<div class=\"meaning\">water</div>[[type:Word]]<hr id=answer>みず<div class=\"fx\">水</div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "<div class=\"meaning\">water</div>[[type:Word]]",
+              "question_av": []
+            }
+          },
+          "#c9": {
+            "browser": {
+              "answer": "school",
+              "blank": null,
+              "question": "学校"
+            },
+            "review": {
+              "answer": "<div class=\"word\">学校</div>[anki:play:q:0]<hr id=answer>school<div class=\"reading\"><ruby><rb>学校</rb><rt>がっこう</rt></ruby></div>",
+              "answer_av": [],
+              "blank": null,
+              "question": "<div class=\"word\">学校</div>[anki:play:q:0]",
+              "question_av": [
+                {
+                  "tts": "ja_JP"
+                }
+              ]
+            }
+          }
+        },
         "template": [
           {
             "answer": "<div class=\"word\">食べる</div>[anki:tts lang=ja_JP speed=0.9]食べる[/anki:tts]<hr id=answer>to eat<div class=\"reading\"><ruby><rb>食</rb><rt>た</rt></ruby>べる</div>[sound:taberu.mp3]",
@@ -3057,10 +3357,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "bcab61c009004f7722d333a8f10d8065f4582526675135b1e55ae9e4520186eb",
+    "driver_sha256": "154f3e08a1bb2562eabdf6c3b02d7c78718c5f3a92f883a1d60187dffbe989bb",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "preservation/render/every-card",
-  "scenario_sha256": "176f229d9f814ac868d6db2539a82f294a80ce75e6b27b6e80c4e4794c04dc93",
+  "scenario_sha256": "c88c0c6628d91c2377cfb8033769324281577d234079278adb9f8f4b5d0f8eab",
   "tz": "UTC"
 }

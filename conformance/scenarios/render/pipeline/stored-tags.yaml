@@ -1,0 +1,36 @@
+# Stored notes.tags is read with SPACE and IDEOGRAPHIC SPACE separators.
+# Other white space remains inside a tag; order and duplicates are preserved.
+# Raw SQL deliberately represents text left by another client, without a
+# note save normalizing it. Both rendering observations must see the same list.
+id: render/pipeline/stored-tags
+description: Stored tag delimiters preserve tag text, order and duplicates during read-only rendering.
+clock: {tz: UTC, start: "2030-06-01T10:00:00"}
+setup:
+  notetypes:
+    - name: Stored Tags
+      fields: [Front]
+      templates: [{name: Forward, front: "{{Front}}|{{Tags}}", back: "{{Tags}}"}]
+  notes:
+    - {notetype: Stored Tags, fields: [two-separators]}
+    - {notetype: Stored Tags, fields: [tab-inside]}
+    - {notetype: Stored Tags, fields: [nbsp-around]}
+    - {notetype: Stored Tags, fields: [lf-inside]}
+steps:
+  - db_exec:
+      sql: >-
+        UPDATE notes SET tags = CASE sfld
+          WHEN 'two-separators' THEN '  omega' || char(12288) || 'MARKED' || char(12288) || 'alpha  alpha  '
+          WHEN 'tab-inside' THEN ' alpha' || char(9) || 'marked beta '
+          WHEN 'nbsp-around' THEN ' ' || char(160) || 'marked' || char(160) || ' '
+          WHEN 'lf-inside' THEN ' marked' || char(10) || ' beta '
+        END
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - observe:
+      - template:
+          cases:
+            - {card: "#c1", front: "{{Front}}|{{Tags}}", back: "{{Tags}}"}
+            - {card: "#c2", front: "{{Front}}|{{Tags}}", back: "{{Tags}}"}
+            - {card: "#c3", front: "{{Front}}|{{Tags}}", back: "{{Tags}}"}
+            - {card: "#c4", front: "{{Front}}|{{Tags}}", back: "{{Tags}}"}
+  - observe: [render]
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}

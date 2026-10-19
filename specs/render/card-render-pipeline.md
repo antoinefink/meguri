@@ -91,7 +91,7 @@ Read from the collection config when a card is rendered:
 For `_drawFlag` and `_drawMark` (R478, U66):
 
 - **flag**: the card's `flags` value with only its low three bits (0–7): a stored 9 gives flag 1, unlike `CardFlag` (P3), which shows the whole value;
-- **marked**: the note has a tag equal to `marked` after both are lower-cased with the Unicode default lowercase mapping (`Marked` and `MARKED` count).
+- **marked**: the note has a tag equal to `marked` after both are lower-cased with the Unicode default lowercase mapping (`Marked` and `MARKED` count). The stored tag list is the same two-separator read used for `Tags` (`special-fields.md` P3): split only at U+0020 and U+3000, drop empty pieces, and do not trim a tag. Thus `alpha` U+3000 `marked` includes a marked tag, while `alpha` TAB `marked` and NBSP `marked` NBSP do not.
 
 ## K11. Meguri contract
 
@@ -109,6 +109,7 @@ For `_drawFlag` and `_drawMark` (R478, U66):
 
 - `render/pipeline/basic`: K4 on a custom Basic-like note type with a reverse template: FrontSide holds the question text with its play markers (R469, R528).
 - `render/pipeline/specials`: K3 through stored templates: nested decks, `Subdeck`, a card with `odid` set showing its original deck, flags, tags, the template name (R960).
+- `render/pipeline/stored-tags`: K3 and `special-fields.md` P3: the two stored-tag separators, literal TAB/LF/NBSP inside tags, and stored order and duplicates through both `template` card cases and the real render pipeline. K10's marked membership over the same list is a direct engine test.
 - `render/pipeline/blank`: K4 step 2 and K5 step 3: an empty front in review but not in browser mode, a blank question that keeps its text and audio, a missing cloze in both modes (R976).
 - `render/pipeline/browser`: K5 step 1 and 4: browser formats, the fallback per side, a white-space-only format, FrontSide empty, errors only in browser formats (R935).
 - `render/pipeline/type-in`: type-in markers through K4 and K5: standard, `nc` and cloze markers kept as text, FrontSide carrying the question's marker, audio around them still extracted (R1908).

@@ -91,3 +91,29 @@ to the oracle while Browse adds no notices (R976). Raw LaTeX text remains
 visible; existing image references are media, with no generated-image rewrite.
 The engine read consistency and cache obligations are Meguri design. These
 clarifications change no scenario input or golden.
+
+## Stored tags and the preservation pipeline
+
+The focused `render/pipeline/stored-tags` oracle case confirms the existing
+two-separator tag contract through both stored-card `template` cases and
+`render`: U+0020 and U+3000 split the stored text; TAB, LF and NBSP remain
+inside tags. Rendering retains order and duplicates and leaves note tags,
+mtime and usn unchanged. K10's marked flag uses that same list in Meguri's
+direct engine test; it is not an additional oracle observation.
+
+`preservation/render/every-card` now also observes the stored-template `render`
+pipeline beside its existing `template` cases, covering all 19 adopted cards.
+Both raw dump observations and all earlier template outputs remain equal to
+the prior committed golden; the raw before and after dumps are identical.
+
+Independent Linux recordings:
+
+- Stored tags: `build/mg/oracle/20261019T054152Z-94983/result.json`.
+- Preservation: `build/mg/oracle/20261019T054226Z-96284/result.json`.
+
+Both cases replayed successfully on Linux and Apple, with no Apple overlays:
+
+- Linux: `build/mg/oracle/20261019T054243Z-97191/result.json`.
+- Apple recording: `build/mg/oracle/20261019T054244Z-97480/result.json`.
+- Apple replay: `build/mg/oracle/20261019T054318Z-98612/result.json`.
+- Freshness/schema: `build/mg/goldens-check/20261019T054316Z-98364/result.json`.

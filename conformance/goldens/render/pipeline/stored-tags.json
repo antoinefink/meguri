@@ -1,0 +1,127 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-06-01T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["  omega　MARKED　alpha  alpha  ", 1906538400, -1],
+            [" alpha\tmarked beta ", 1906538400, -1],
+            ["  marked  ", 1906538400, -1],
+            [" marked\n beta ", 1906538400, -1]
+          ]
+        }
+      },
+      {
+        "template": [
+          {
+            "answer": "omega MARKED alpha alpha",
+            "empty": false,
+            "question": "two-separators|omega MARKED alpha alpha"
+          },
+          {
+            "answer": "alpha\tmarked beta",
+            "empty": false,
+            "question": "tab-inside|alpha\tmarked beta"
+          },
+          {
+            "answer": " marked ",
+            "empty": false,
+            "question": "nbsp-around| marked "
+          },
+          {
+            "answer": "marked\n beta",
+            "empty": false,
+            "question": "lf-inside|marked\n beta"
+          }
+        ]
+      },
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "answer": "omega MARKED alpha alpha",
+              "blank": null,
+              "question": "two-separators|omega MARKED alpha alpha"
+            },
+            "review": {
+              "answer": "omega MARKED alpha alpha",
+              "answer_av": [],
+              "blank": null,
+              "question": "two-separators|omega MARKED alpha alpha",
+              "question_av": []
+            }
+          },
+          "#c2": {
+            "browser": {
+              "answer": "alpha\tmarked beta",
+              "blank": null,
+              "question": "tab-inside|alpha\tmarked beta"
+            },
+            "review": {
+              "answer": "alpha\tmarked beta",
+              "answer_av": [],
+              "blank": null,
+              "question": "tab-inside|alpha\tmarked beta",
+              "question_av": []
+            }
+          },
+          "#c3": {
+            "browser": {
+              "answer": " marked ",
+              "blank": null,
+              "question": "nbsp-around| marked "
+            },
+            "review": {
+              "answer": " marked ",
+              "answer_av": [],
+              "blank": null,
+              "question": "nbsp-around| marked ",
+              "question_av": []
+            }
+          },
+          "#c4": {
+            "browser": {
+              "answer": "marked\n beta",
+              "blank": null,
+              "question": "lf-inside|marked\n beta"
+            },
+            "review": {
+              "answer": "marked\n beta",
+              "answer_av": [],
+              "blank": null,
+              "question": "lf-inside|marked\n beta",
+              "question_av": []
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["  omega　MARKED　alpha  alpha  ", 1906538400, -1],
+            [" alpha\tmarked beta ", 1906538400, -1],
+            ["  marked  ", 1906538400, -1],
+            [" marked\n beta ", 1906538400, -1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "154f3e08a1bb2562eabdf6c3b02d7c78718c5f3a92f883a1d60187dffbe989bb",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/pipeline/stored-tags",
+  "scenario_sha256": "e5e992f385032ba46d2f418ce3a0d15bb0d4c5a042910f9048f867f140cfdff9",
+  "tz": "UTC"
+}

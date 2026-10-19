@@ -34,6 +34,8 @@ For one card of one note, the map holds, in this order of precedence:
 | `CardID` | the card's id in decimal; `0` for a card not yet added |
 | `c<ordinal+1>` | `1` |
 
+For a stored note, read `notes.tags` by splitting only at U+0020 SPACE and U+3000 IDEOGRAPHIC SPACE and dropping empty pieces (`tags/tags` T1, T6.1). Keep each remaining tag's text, order and duplicates; do not normalize, trim, sort or deduplicate on this read. In particular TAB, LF, NBSP and other Unicode white space remain inside a tag. `Tags` joins that list with one U+0020. New-note preview cases already supply a list and keep that list as given.
+
 So a card not yet added (template preview of a new note, U71) has `Deck` and `Subdeck` `(Deck)`, `CardFlag` `flag0` and `CardID` `0`.
 
 ## P4. FrontSide
