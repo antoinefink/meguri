@@ -2040,18 +2040,14 @@ impl ObservationRequest {
         let kind = ObservationKind::from_name(name).ok_or_else(|| unknown_kind(name))?;
         let args = match inner {
             None => ObservationArgs::None,
+            Some(inner) if inner.trim().is_empty() => ObservationArgs::None,
             Some(inner) => {
                 let refs: Vec<LogicalRef> = inner
                     .split(',')
                     .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::parse)
+                    .map(|s| if s.is_empty() { Err(bad()) } else { s.parse() })
                     .collect::<Result<_, _>>()?;
-                if refs.is_empty() {
-                    ObservationArgs::None
-                } else {
-                    ObservationArgs::Refs(refs)
-                }
+                ObservationArgs::Refs(refs)
             }
         };
         ObservationRequest::checked(kind, args)
