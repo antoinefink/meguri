@@ -215,7 +215,7 @@ milestones:
     suites:
       - {id: static, run: static, plan: [provenance-trailer check, are enforced (U2)], why: "provenance trailers and the static checks (U2, U19)"}
       - {id: static-tree, run: static-tree, why: "the static checks over the whole tree (U19)"}
-      - {id: similarity, run: similarity, plan: [The similarity scan, are enforced (U2)], why: "the similarity scan is enforced (U2)"}
+      - {id: similarity, run: similarity-whole-tree, plan: [The similarity scan, are enforced (U2)], why: "the similarity scan is enforced (U2)"}
       - {id: similarity-selftest, run: similarity-selftest, why: "the scanner and its calibration (U2)"}
       - {id: oracle-test, run: oracle-test, plan: [The oracle image builds, U3], why: "the oracle image builds (U3)"}
       - {id: pin-canary, run: pin-canary, why: "pins first (U5, AE82)"}

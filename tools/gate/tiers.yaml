@@ -607,6 +607,17 @@ runs:
     pending: U118
 
   # --- T3: milestone and release ----------------------------------------------
+  - id: similarity-whole-tree
+    job: similarity
+    args: [--rev, "{tip}"]
+    merge_args: [--rev, "{tip}"]
+    tier: T3
+    placement: [host, docker:similarity]
+    needs: [refs]
+    class: similarity
+    budget_s: 600
+    local: false
+    where: main
   - id: private-suite
     job: private
     args: [suite]
