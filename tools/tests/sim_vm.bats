@@ -134,7 +134,8 @@ esac'
 # makes it ignore SIGTERM, as a real VM's run never gets the SIGTERM that
 # tools/mg sends the job's process tree when it cancels the job. Paths are
 # logged as the VM sees them (without the fake file system's prefix).
-# FAKE_VM_TEST_VOICEOVER=1 leaves VoiceOver enabled as a killed XCTest does.
+# FAKE_VM_TEST_VOICEOVER=1 enables VoiceOver and re-enables it after a disable
+# while the test pid is live. FAKE_VM_UNKILLABLE=1 makes pkill leave it alive.
 vm_stubs() {
   stub "$FAKE_VM_BIN/sudo" 'exec "$@"'
   # The process check jobs make before they start work there (U19c).
@@ -149,8 +150,10 @@ done
 exit "$rc"'
   stub "$FAKE_VM_BIN/pkill" '
 echo "vm-pkill $*" >>"$STUB_LOG"
+echo "vm-test-stop-lease $([ -e "$FAKE_VM_MIRROR/mac-vm.$FAKE_VM_NAME.lock/holder.json" ] && echo held || echo free)" >>"$STUB_LOG"
 sig=TERM
 [ "$1" != -9 ] || sig=KILL
+[ "${FAKE_VM_UNKILLABLE:-}" != 1 ] || exit 0
 pids="$(pgrep -f "${!#}")" || exit 1
 kill -s "$sig" $pids 2>/dev/null
 exit 0'
@@ -173,7 +176,14 @@ case "$1" in
     case "$s" in
       "device settings voiceover "*)
         echo "vm-voiceover-lease $([ -e "$FAKE_VM_MIRROR/mac-vm.$FAKE_VM_NAME.lock/holder.json" ] && echo held || echo free)" >>"$STUB_LOG"
-        exec "'"$REPO_ROOT"'/tools/tests/sim_pool_fake_xcrun.sh" "$@" ;;
+        "'"$REPO_ROOT"'/tools/tests/sim_pool_fake_xcrun.sh" "$@" || exit $?
+        # Model the live test writing again immediately after disable. Each
+        # fake command releases its DB lock before the next one starts.
+        if [ "${FAKE_VM_TEST_VOICEOVER:-}" = 1 ] && pgrep -f "xcodebuild[ ]test-without-building" >/dev/null; then
+          "'"$REPO_ROOT"'/tools/tests/sim_pool_fake_xcrun.sh" simctl __voiceover "$6" enabled >/dev/null || exit $?
+          echo "vm-voiceover-reenabled-by-live-test" >>"$STUB_LOG"
+        fi
+        exit 0 ;;
     esac ;;
   *) echo "vm-xcrun $s" >>"$STUB_LOG"; exit 97 ;;
 esac'
@@ -454,10 +464,53 @@ assert_host_untouched() {
   called "^vm-devicectl device settings voiceover --device $u --disable\$"
   called '^vm-voiceover-lease held$'
   not_called '^vm-voiceover-lease free$'
+  # Disabling while the producer lives deterministically re-enables VO;
+  # stopping it afterwards leaves that stale state on the caller device.
   [ "$(vm_sim meguri-mac __voiceover "$u")" = disabled ]
+  not_called '^vm-voiceover-reenabled-by-live-test$'
+  called '^vm-pkill -f '
+  called '^vm-pkill -9 -f '
+  called '^vm-test-stop-lease held$'
+  not_called '^vm-test-stop-lease free$'
   cmp "$BATS_TEST_TMPDIR/caller-lease.json" "$(vm_lease "$u")"
   not_called "^xcrun simctl (uninstall|privacy|keychain) $u "
   ! vm_tests_running meguri-mac
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  assert_host_untouched
+  validate "$result"
+}
+
+@test "cancelled a11y records a stop-confirmation failure before VoiceOver disable and keeps orphan-stop fallback" {
+  local u job rc=0
+  u="$(lease_in_sandbox iphone)"
+  [ -n "$u" ]
+  cp "$(vm_lease "$u")" "$BATS_TEST_TMPDIR/caller-lease.json"
+  : >"$STUB_LOG"
+  FAKE_VM_TEST_VOICEOVER=1 FAKE_VM_IGNORE_TERM=1 FAKE_VM_UNKILLABLE=1 FAKE_VM_XCODEBUILD_UNTIL="$BATS_TEST_TMPDIR/never" \
+    "$SB/tools/mg" a11y --platform iphone --device "$u" \
+    >"$BATS_TEST_TMPDIR/job.out" 2>"$BATS_TEST_TMPDIR/job.err" 3>&- &
+  job=$!
+  bg_track "$job"
+  wait_for "$BATS_TEST_TMPDIR/never.started"
+  vm_tests_running meguri-mac
+  kill -TERM "$job"
+  wait "$job" || rc=$?
+  [ "$rc" -eq 2 ]
+  result="$(tail -n 1 "$BATS_TEST_TMPDIR/job.out")"
+  [ "$(field .status)" = error ]
+  [ "$(field '[.failures[].id] | index("cancelled") != null')" = true ]
+  [ "$(field '[.failures[].id] | index("voiceover-cleanup") != null')" = true ]
+  [[ "$(field '.failures[] | select(.id == "voiceover-cleanup") | .message')" == *"still running"* ]]
+  not_called "^vm-devicectl device settings voiceover --device $u --disable\$"
+  [ "$(vm_sim meguri-mac __voiceover "$u")" = enabled ]
+  vm_tests_running meguri-mac
+  # The failed confirmation leaves the active marker for registered orphan
+  # cleanup, which also tries to stop it before releasing the VM lease.
+  [ "$(grep -c '^vm-pkill -9 -f ' "$STUB_LOG")" -eq 2 ]
+  called '^vm-test-stop-lease held$'
+  not_called '^vm-test-stop-lease free$'
+  cmp "$BATS_TEST_TMPDIR/caller-lease.json" "$(vm_lease "$u")"
+  not_called "^xcrun simctl (uninstall|privacy|keychain) $u "
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
   assert_host_untouched
   validate "$result"

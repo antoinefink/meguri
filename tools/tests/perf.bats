@@ -165,7 +165,8 @@ use_vm() {
 vm_stub() { printf '#!/bin/bash\n%s\n' "$2" >"$FAKE_VM_BIN/$1" && chmod +x "$FAKE_VM_BIN/$1"; }
 
 # The VM's tools. pgrep and pkill see only the fake VM's processes (those
-# running from vm-bin). simctl is the fake simctl. xcodebuild checks the
+# running from vm-bin). simctl and devicectl VoiceOver disable use the
+# simulator fake. xcodebuild checks the
 # test products at the -xctestrun path (they must have been copied there)
 # and the destination simulator (booted there), logs its arguments and
 # writes a result bundle. xctrace record makes the trace bundle, checks its
@@ -213,7 +214,7 @@ EOF
 #!/bin/bash
 unmap() { local s="$*"; printf '%s' "${s//"$FAKE_VM_FS"/}"; }
 case "$1" in
-  simctl) exec "$FAKE_SIMCTL" "$@" ;;
+  simctl | devicectl) exec "$FAKE_SIMCTL" "$@" ;;
   xctrace) ;;
   *) echo "vm-xcrun $(unmap "$*")" >>"$STUB_LOG" && exit 97 ;;
 esac

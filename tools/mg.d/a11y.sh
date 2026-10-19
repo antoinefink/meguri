@@ -23,6 +23,18 @@ mg_a11y__usage() {
 }
 
 mg_a11y__disable_voiceover() {
+  # Exit actions are LIFO: this runs before the VM's orphan cleanup. A live
+  # XCTest can re-enable VoiceOver, so confirm it stopped under our lease
+  # before disabling it. Leave the active marker for orphan cleanup on error.
+  if [ "$MG_SIM_RUNNER" = vm ] && [ -n "$MG_MAC_VM_TESTING" ]; then
+    if ! mg__mac_vm_stop_tests; then
+      mg_failure voiceover-cleanup "could not confirm the remote test stopped before disabling simulator VoiceOver on $1 ($MG_MAC_VM_STOP_REASON); see log.txt" "tools/mg sim reset '$1'"
+      mg_message "a11y: could not confirm the remote test stopped before VoiceOver cleanup on $1; see log.txt"
+      mg_status error
+      return 1
+    fi
+    MG_MAC_VM_TESTING=""
+  fi
   if ! mg_devicectl device settings voiceover --device "$1" --disable >&2; then
     mg_failure voiceover-cleanup "could not disable simulator VoiceOver on $1; see log.txt" "tools/mg sim reset '$1'"
     mg_message "a11y: could not disable simulator VoiceOver on $1; see log.txt"
