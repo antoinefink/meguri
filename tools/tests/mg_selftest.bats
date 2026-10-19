@@ -240,6 +240,9 @@ copy_core() {
   # Rust tests embed neutral conformance goldens with include_str!.
   mkdir -p "$SB/conformance"
   cp -R "$REPO_ROOT/conformance/goldens" "$SB/conformance/"
+  # The Unicode10 unit test embeds this independent neutral reference.
+  mkdir -p "$SB/specs/render"
+  cp "$REPO_ROOT/specs/render/unicode10-marks.json" "$SB/specs/render/"
   CARGO_NET_OFFLINE=false cargo fetch --locked --manifest-path "$SB/core/Cargo.toml" >&2
   export CARGO_TARGET_DIR="$BATS_FILE_TMPDIR/core-target"
 }
