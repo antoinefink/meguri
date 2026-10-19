@@ -19,7 +19,7 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
     func unregister(_ page: CardPage) { pages[ObjectIdentifier(page.webView)] = nil }
 
     public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
-                                      replyHandler: @escaping (Any?, String?) -> Void) {
+                                      replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
         defer { replyHandler(nil, nil) }
         guard let webView = message.webView, let page = pages[ObjectIdentifier(webView)]?.value else { return }
         let origin = message.frameInfo.securityOrigin
