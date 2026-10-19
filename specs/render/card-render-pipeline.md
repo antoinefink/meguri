@@ -71,7 +71,7 @@ Rendering in any mode only reads. It writes no note, card, note type, deck, conf
 
 ## K8. Not part of the pipeline
 
-- **LaTeX.** Anki's review rendering also turns `[latex]…[/latex]`, `[$]…[/$]` and `[$$]…[/$$]` into references to generated images (and appends an error when an image is missing and cannot be made). That step is outside this pipeline and outside the `render` observation; whether Meguri converts these tags so that already generated images show (R565) is open in the plan. Until it is decided, the text stays as written.
+- **LaTeX.** Anki's review rendering also turns `[latex]…[/latex]`, `[$]…[/$]` and `[$$]…[/$$]` into references to generated images (and appends an error when an image is missing and cannot be made). That step is outside this pipeline and outside the `render` observation. The plan's fallback keeps these tags visible as text; Meguri never generates images or rewrites them into generated-image references. Existing `<img>` references to pre-generated LaTeX media display like other media (R565; the media display and night-mode layers own that behavior).
 - **Media-name encoding and the type-in box** are U64's display steps (`display-transform.md` D2).
 - **Rendering a note not yet added** (the template editor, the Add screen's preview) is U71's.
 
@@ -96,12 +96,13 @@ For `_drawFlag` and `_drawMark` (R478, U66):
 ## K11. Meguri contract
 
 - **Call.** One engine call renders one card in one mode for one host and returns a `RenderedCard`: card id, ordinal, mode; for review and preview, the question and answer display HTML (`display-transform.md` D9) and both AV lists (sound: name; TTS: language and content); for browser, the K5 texts; the outcome (rendered, blank with its kind, or template error with kind and side); the note type CSS; the K9 values; the K10 flag and marked state; a type-in descriptor that U64 fills (none until then). It runs on the interactive lane (KTD9, R1857) and never on the main thread.
+- **Read consistency.** The card, note, note type, decks and config for one call come from one reader snapshot. A concurrent edit cannot combine a previous note or template with a newer card or configuration in the same result. The cache may reuse parsed syntax only after validating it against that snapshot's stored template text.
 - **Comparable form.** The engine also exposes the K4 and K5 outputs before any display step, which the testkit's `render` executor reports (`render-ops.md` Q5); its `render_status` executor reports the K4 outcome as a status (Q4).
 - **Parse cache.** Parsed templates may be cached per note type. A note type's `mtime_secs` has one-second resolution, so two edits within a second keep it: a cache keyed by note type id and mtime must also be cleared on every note type change event (local edit, undo, sync, import, Check Database, collection replaced), or be keyed by the template texts themselves. A render never uses a parse of text that is no longer stored.
 
 ## K12. Differences from the Product Contract's wording
 
-- R976 places both notices outside Browse. In Anki 26.09.3 the missing-cloze check also runs in browser mode (K5 step 3); only the empty-front check is skipped there. Meguri follows Anki, since U84's columns must match.
+- R976 places both notices outside Browse. The comparable browser result retains Anki's missing-cloze outcome (K5 step 3), while the browser has no display transform and adds neither notice. The missing-cloze metadata is not permission for U84 to insert a notice into a Browse column. The standard empty-front check is skipped entirely in browser mode.
 - R531 and R959 disagree on template-error wording; `display-transform.md` D11 records the choice.
 
 ## K13. Scenarios

@@ -2,10 +2,10 @@
 
 Spec: render/display-transform
 Requirements: R469, R470, R526, R527, R528, R531, R559, R564, R976, R1907
-Anki: 26.09.3
+Anki: none (Meguri display contract from the requirements; no GUI assets)
 Scenarios: none (Meguri snapshot tests; see D12)
 
-What turns the outputs of the card render pipeline (`card-render-pipeline.md` K4) into the HTML that a card page shows in review and preview: replay buttons, TTS text, hidden play buttons, the blank-card and template-error notices, and the style block. In Anki this happens in the desktop GUI layer, which the oracle does not contain, so these rules are verified by Meguri's own tests (R1907 allows exactly this normalization of replay-button markup). Browser mode has no display transform (K5).
+What turns the outputs of the card render pipeline (`card-render-pipeline.md` K4) into the HTML that a card page shows in review and preview: replay buttons, TTS text, hidden play buttons, the blank-card and template-error notices, and the style block. The oracle does not produce this display HTML. These rules come from R469–R470, R526–R528, R531, R559 and R564 and are verified by Meguri's own tests (R1907 allows this normalization of replay-button markup). No Anki GUI asset is an input. Browser mode has no display transform (K5).
 
 ## D1. Inputs and output
 
@@ -34,19 +34,13 @@ A **marker** is the text `[anki:play:` + side + `:` + digits + `]`, where side i
 
 ## D4. Replay button
 
-Every marker that D5 does not claim becomes a replay button: exactly the bytes below (U+000A line breaks, spaces as shown), with ACTION in place:
+Every marker that D5 does not claim becomes the exact compact replay markup required by R526, with ACTION in place:
 
+```html
+<a class="replay-button soundLink" href=# onclick="ACTION; return false;" draggable="false"><svg class="playImage" viewBox="0 0 64 64" version="1.1"><circle cx="32" cy="32" r="29" /><path d="M56.502,32.301l-37.502,20.101l0.329,-40.804l37.173,20.703Z" /></svg></a>
 ```
 
-<a class="replay-button soundLink" href=# onclick="ACTION; return false;" draggable="false">
-    <svg class="playImage" viewBox="0 0 64 64" version="1.1">
-        <circle cx="32" cy="32" r="29" />
-        <path d="M56.502,32.301l-37.502,20.101l0.329,-40.804l37.173,20.703Z" />
-    </svg>
-</a>
-```
-
-That is: one U+000A, the `<a …>` line, U+000A, four spaces and the `<svg …>` line, U+000A, eight spaces and the `<circle … />` line, U+000A, eight spaces and the `<path … />` line, U+000A, four spaces and `</svg>`, U+000A, then `</a>` with no line break after it. The leading line break matters: between text and a button it shows as a space, as in Anki.
+The transform adds no leading or trailing line break and no indentation. The markup above is the Product Contract's literal string; no desktop GUI template or web asset is used.
 
 ACTION:
 
@@ -119,7 +113,6 @@ Links (exact): `https://docs.ankiweb.net/templates/errors.html#front-of-card-is-
 
 ## D11. Differences from the Product Contract's wording
 
-- R526 writes the replay markup on one line without white space. Anki's markup has the line breaks and indentation of D4, and the leading line break shows as a space between text and button; the Goal Capsule makes Anki's observable behavior the reference where no deviation is marked, so D4 keeps Anki's bytes. R526's rules that matter (classes, attributes, SVG, the platform action, no backtick and no `${`) all hold.
 - Anki turns more text into buttons than D3: a marker with any single character other than U+000A in place of `q`/`a`, or with non-ASCII decimal digits, becomes a button that plays nothing, or is removed when buttons are hidden. The pipeline never writes such markers; they appear only when note text contains them literally. Meguri leaves them as text, which keeps the markup free of quotes and backticks it does not control.
 - R526 leaves the iOS action open (a post to Meguri's native message handler), and the render coverage note proposed a play message to AnkiMobile's `cb` handler. D4 uses a handler of Meguri's own, `meguri`, instead: `cb` keeps exactly AnkiMobile's protocol, under which every message other than its taps is ignored (R511), and a plain command string needs no JSON quoted inside the `onclick` attribute. A handler name is a member of `window.webkit.messageHandlers`, not a page-world global, so R516 holds.
 - R531 asks for Anki's wording for template errors too, while R959 makes it Meguri's; this file follows R959 for template errors (as `template-syntax.md` T9 does) and R531 for the two blank notices.

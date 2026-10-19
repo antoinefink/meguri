@@ -73,3 +73,21 @@ folder-path and `media_file_filter` hook cases are add-on playback paths that
 Meguri does not have (`pylib/anki/template.py` reduces card tags to base names
 before `SoundOrVideoTag.path` sees them). `render/pipeline/type-in` checks the
 K4 statement that type-in markers pass through as text.
+
+## 2026-10-19 prepared-spec intake
+
+Resumed the prepared U62 history with spec-writer session
+`s-20261019T051101Z-82de9be1`, without further Anki source research. Both pinned
+oracle lanes replayed the 11 new pipeline/AV/error cases and stored-card
+special-fields case successfully:
+
+- Linux 12/12: `build/mg/oracle/20261019T051313Z-74771/result.json`.
+- Apple 12/12, no overlays: `build/mg/oracle/20261019T051314Z-74991/result.json`.
+
+The display contract now derives its exact compact replay markup directly from
+R526; the older GUI-whitespace description in D4 is superseded, with no GUI
+asset used for implementation. Browser missing-cloze metadata remains comparable
+to the oracle while Browse adds no notices (R976). Raw LaTeX text remains
+visible; existing image references are media, with no generated-image rewrite.
+The engine read consistency and cache obligations are Meguri design. These
+clarifications change no scenario input or golden.
