@@ -26,3 +26,9 @@ Session s-20261019T202103Z-b8f1a55a:
 - R507 and the U66 test wording now match the explicit human null callback decision.
 
 Independent upstream library check: official https://code.jquery.com/jquery-3.7.1.min.js,87533bytes,SHA256fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a. The prepared vendor file matches these bytes exactly. Keep its upstream MIT notice. No reference-app asset was used for this check.
+
+## Deferred inline-module diagnostics (Meguri WebKit evidence)
+
+Session s-20261019T202103Z-b8f1a55a. The iPhone simulator probe in the test VM used unchanged literal module text and native scheduling. Its diagnostic observation is recorded in `build/mg/unit-sim/20261019T205137Z-99291/unit.log`, tagged `U66_INLINE_MODULE_DIAGNOSTIC`; the enclosing receipt is `build/mg/unit-sim/20261019T205137Z-99291/result.json`. The module probe passed. The enclosing run failed on a separate C13 listener-registry assertion, so this is not a passing receipt for the full suite.
+
+The log sequence was classic-before, classic-microtask, classic-after, inline-module. The error record held the module message, line3, phase `later`, null index and source `inline`. C6.5/C12/SS20 now describe that result. R522 still requires message, available engine location and card-template data. Only the unsupported promise of an index for every script was removed. The test changed neither module text nor timing. Classic errors and source-script errors keep an index when their script is known. The evidence comes from Meguri's WebKit runtime alone.

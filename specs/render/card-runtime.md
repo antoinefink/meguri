@@ -362,7 +362,7 @@ After insertion, every `<script>` element in `#qa` is made to run by replacing i
   - The raw nonempty `type` equal to `module`, ASCII case-insensitively, selects a module. Do not trim it for this test: `MODULE` qualifies, but ` module ` and TAB + `module` + LF do not. A `nomodule` attribute suppresses a classic script; it does not suppress a module. Its value does not matter.
 - **Waiting:** a recognized classic script without `nomodule`, or a module, with a `src` attribute waits for its own `load` or `error`. Missing or invalid sources can fail promptly through `error`. Skip the wait for other script categories, which never produce the expected completion event (C15 D9). Apply C7.4's external budget only to non-media-origin URLs. A slow media-origin dependency retains load/error ordering; there is no arbitrary local timeout.
 - **Timing between scripts:** an inline classic script runs while it is being inserted. Promise jobs that a script's top-level code queues run before the next script starts. Timers, events and rendering do not happen between two scripts, unless the walk is waiting on a `src` script.
-- **Script failures:** a failed script does not prevent subsequent scripts or hooks from running (R521). This includes compile-time `SyntaxError`. Normal page error listeners still receive the failure; diagnostics record phase `script` and its position (C12).
+- **Script failures:** a failed script does not stop subsequent scripts or hooks (R521), including a compile-time `SyntaxError`. Page error listeners still receive the failure. A synchronous classic error has phase `script` and the script position, counted from 1 (C12); a `src` error keeps these fields when its script is known. Inline modules run after insertion without a wait here. When an inline module fails later and its script cannot be identified, record phase `later` without an index. Keep its text and engine timing unchanged: no wrapper, source annotation or extra wait to obtain an index.
 - `document.currentScript` is the running script element while a classic script's top-level code runs. So `document.currentScript.dataset` reads the copied `data-*` attributes. It is `null` in modules, as the platform defines.
 - `onload` and `onerror` attributes on `src` scripts fire on the new element (R519).
 
@@ -603,13 +603,14 @@ Record the following fields for the card diagnostics and Template Errors view (R
 | `kind` | `exception` (uncaught), `rejection` (unhandled promise rejection) or `hook` (caught by the runtime, C6.4) |
 | `message` | for an `Error`: its name, `: ` and its message (`TypeError: null is not an object (evaluating 'null.x')`). Otherwise the value converted to a string, or `<unprintable>` when that conversion throws. At most 2,000 characters |
 | `line`, `column` | as the engine reports them (for an inline script, WebKit counts from the start of that script's own text, line 1). Absent for rejections and hooks |
-| `source` | the script URL for a `src` script or module, otherwise `inline` |
-| `phase` | `script` plus its 1-based `index` for execution or compilation of a walked script; `update-hook` or `shown-hook` for those callbacks; `later` for subsequent events, timers or promise jobs |
+| `source` | the URL of a `src` script; for an inline module, use the engine's source value if useful, else `inline`; otherwise `inline`. Do not create a URL for attribution |
+| `phase` | `script` plus its 1-based `index` for synchronous execution or compilation of a walked classic script, and for reliably attributed `src` errors; `update-hook` or `shown-hook` for those callbacks; `later` for subsequent events, timers, promise jobs or deferred inline-module errors without reliable attribution. In that inline-module case, `index` is absent or null; never infer it from the walk position |
 | `side` | `question` or `answer`: the side of the update that started most recently in this page |
 | identity | of that update (C6.8) |
 
 - Uncaught exceptions and unhandled rejections come from any page-world code: card scripts, `reviewExtra`, event handlers, timers, and code Meguri calls such as card-supplied hooks (R522).
 - Reading a rejection's reason may only work from the page world. The runtime is responsible for the `rejection` text.
+- Deferred inline-module errors still record the message, available engine line and column, and the current side and update identity above. The associated card template remains available to the Template Errors view (R522). Missing script attribution does not suppress a diagnostic or cancel normal page error delivery.
 - Failed media loads are recorded separately (C14 `mediaError`, R498).
 
 ## C13. Listener registry (Meguri)
@@ -730,6 +731,7 @@ Synthetic content only: no Anki templates or CSS (R1959, R1960), and no Migaku c
 | SS17 | `<script a"b="v">log(document.currentScript.getAttribute('a"b'))</script><script>log("next")</script>` | `v, next`; no `updateFailed` |
 | SS18 | `<template><script>window.__t = 1</script></template><script>log(typeof window.__t)</script>` | `undefined` |
 | SS19 | S9, a persistence round trip in the style of the community persistence scripts, written for the test: the question logs `typeof sessionStorage`, `typeof py` and `typeof qt`, then stores `k` = `v` in `sessionStorage`; the answer logs `sessionStorage.getItem("k")`; then a second page (as for the next card) logs the same item on its first question | `object`, `undefined`, `undefined`; `v`; `null` (R503) |
+| SS20 | classic script logs `classic-before` and queues `classic-microtask`; inline module logs `inline-module`, then throws on line 3; next classic script logs `classic-after`; text unchanged | log: `classic-before, classic-microtask, classic-after, inline-module`. Diagnostic: error message, line 3, phase `later`, no index, source `inline` if no useful engine source; retain side and template data. Page error listeners also receive the error |
 
 The SS12 source-request matrix is fixed as follows. Attribute values are shown after HTML entity decoding; TAB/LF/VT/NBSP name the corresponding characters. `nomodule` means that boolean attribute is present.
 
