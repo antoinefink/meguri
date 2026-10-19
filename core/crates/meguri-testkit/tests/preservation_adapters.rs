@@ -165,19 +165,22 @@ fn blob_decode_does_not_misclassify_non_blob_columns_missing_names_or_missing_de
 }
 
 #[test]
-fn stored_card_template_cases_wait_for_their_own_capability() {
+fn stored_card_template_cases_declare_their_real_capability() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../conformance/scenarios");
     let stored = scenario::load(&root.join("preservation/render/every-card.yaml")).unwrap();
     assert!(stored.scenario.needs().observations.contains("template.card"));
     let new_note = scenario::load(&root.join("render/template/blank.yaml")).unwrap();
     assert!(!new_note.scenario.needs().observations.contains("template.card"));
     assert!(
-        !MeguriExecutor::core_registry()
+        MeguriExecutor::core_registry()
             .capabilities()
             .observations
             .contains("template.card")
     );
-    let mut registry = MeguriExecutor::core_registry();
-    registry.observation_part("template.card");
-    assert!(registry.capabilities().observations.contains("template.card"));
+    assert!(
+        !MeguriExecutor::area_registry(&["text"])
+            .capabilities()
+            .observations
+            .contains("template.card")
+    );
 }

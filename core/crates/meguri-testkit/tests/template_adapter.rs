@@ -147,9 +147,9 @@ fn malformed_requests_are_invalid_scenarios() {
 
 // Q3: card cases wait for notes and cards in the executor.
 #[test]
-fn work_of_later_units_is_refused_not_guessed() {
+fn stored_cases_refuse_unknown_card_references() {
     let card = "  - observe:\n      - template: {cases: [{card: \"#c1\", front: \"{{Deck}}\"}]}\n";
-    assert_eq!(run(card).unwrap_err().kind, "unsupported_observation");
+    assert_eq!(run(card).unwrap_err().kind, "unknown_ref");
 }
 
 // filters.md F8, render/cloze C1, C6, C9: the cloze filters render for the
