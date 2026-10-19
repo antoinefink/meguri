@@ -41,7 +41,7 @@ Integrator, in `meguri-wt/U8b` (unit/U8b); the similarity scan ran from the main
 
 ## Remaining hosted checks: VM migration (2026-10-19)
 
-Start: `f06073394f2394777ef485bb393d9fbe0a43b6f0` on master. This supplement is not accepted; its full unit gate and the M0 gate remain pending.
+Start: `f06073394f2394777ef485bb393d9fbe0a43b6f0` on master. Acceptance requires a clean full unit gate from this start; M0 closure is evaluated separately.
 
 Antoine asked for unattended runs with the host locked and reported occasional Meguri windows on the host. The U11 supplement already moved fixture argument launches to the VM. This supplement moves Mac snapshots, Xcode's hidden Debug launch probes and its Mac Unit/Snapshot plans there too. Builds stay on the host. Execution uses the existing VM lease, with no host fallback in these wrappers. Hidden-launch liveness, Dock and foreground checks remain intact.
 
@@ -73,4 +73,5 @@ Required fractions remain 1.0 and 0.98. Antoine approved VM-specific baselines i
 
 - Recording (`snapshots/20261019T171900Z-56838`): 60 references created only under `app/Snapshots/VirtualMac2,1-26A434/`; committed in `5a037342` with the chat approval recorded. Existing host reference files and the signature approval ledger are unchanged.
 - Fresh default verification (`snapshots/20261019T171952Z-59085`) on clean `5a037342`: all 60 comparisons passed without record mode, a filter or a reference-key override. The returned test bundle had 63 passed, zero failed and one existing skip.
-- The execution documents now place these hosted checks in the VM. The final review of this documentation/reference delta and full unit gate remain pending; the unit is not accepted yet.
+- Round 3 through `53c2b0ba`: no P0–P1 or material P2 findings. The reviewer checked the isolated 58 PNG and two HTML references, unchanged host reference set and tolerances, explicit approval, execution documents and fresh comparison receipts. This does not add signature-ledger approvals: its guard checked zero signature entries.
+- The final tip carries `Unit: U8b`. Accept only after `tools/mg gate --base f06073394f2394777ef485bb393d9fbe0a43b6f0` passes on that clean tip; focused checks and the snapshot comparison alone are not acceptance evidence. M0 closure is not claimed by this supplement.
