@@ -18,7 +18,7 @@ active:
   - "av-tags/*"
   - "errors/*"
 
-# U63 F16; cards awaits U27 cloze card generation.
+# U63 F16: raw format functions plus real cloze card generation (no U64 render).
   - "image-occlusion/format/parse-basic"
   - "image-occlusion/format/parse-escapes"
   - "image-occlusion/format/parse-numbers"
@@ -26,3 +26,4 @@ active:
   - "image-occlusion/format/parse-structure"
   - "image-occlusion/format/written"
   - "image-occlusion/format/fields"
+  - "image-occlusion/format/cards"
