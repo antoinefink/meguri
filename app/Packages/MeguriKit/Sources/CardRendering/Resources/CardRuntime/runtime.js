@@ -12,6 +12,9 @@
   const win = window;
   const doc = document;
   const apply = Reflect.apply;
+  const reflectGet = Reflect.get;
+  const ProxyCtor = Proxy;
+  const toPrimitiveSymbol = Symbol.toPrimitive;
   const describeProperty = Object.getOwnPropertyDescriptor;
   const defineProperty = Object.defineProperty;
   const createObject = Object.create;
@@ -331,10 +334,49 @@
   // WebKit may have registered. An abort removes only its own add's entry.
   const registry = new WeakMapCtor();
 
-  function captureOf(options) {
-    if (typeof options === "boolean") return options;
-    if (options !== null && typeof options === "object") return !!options.capture;
-    return false;
+  function isObject(value) {
+    return value !== null && (typeof value === "object" || typeof value === "function");
+  }
+
+  // Observe only the conversions native actually performs, after its receiver
+  // and arity checks. Empty proxy targets avoid invariants on frozen inputs;
+  // getters and conversion methods still receive the caller's original object.
+  function listenerArguments(original) {
+    const observed = { args: [], type: original[0], capture: false, once: false, signal: undefined };
+    const args = observed.args;
+    for (let i = 0; i < original.length; i++) args[i] = original[i];
+    const type = original[0];
+    if (isObject(type)) {
+      args[0] = new ProxyCtor(createObject(null), {
+        get: function (_, key) {
+          const method = reflectGet(type, key, type);
+          if ((key !== toPrimitiveSymbol && key !== "toString" && key !== "valueOf") || typeof method !== "function") return method;
+          return function () {
+            const value = apply(method, type, arguments);
+            // Native must itself reject Symbols and failed ToPrimitive results.
+            if (!isObject(value) && typeof value !== "symbol") observed.type = StringCtor(value);
+            return value;
+          };
+        },
+      });
+    }
+    const options = original[2];
+    if (isObject(options)) {
+      args[2] = new ProxyCtor(createObject(null), {
+        get: function (_, key) {
+          const value = reflectGet(options, key, options);
+          if (key === "capture") observed.capture = !!value;
+          else if (key === "once") observed.once = !!value;
+          else if (key === "signal") observed.signal = value;
+          return value;
+        },
+      });
+    } else {
+      // The boolean branch of Web IDL's (dictionary or boolean) union also
+      // accepts non-object primitives. Null/undefined have the default false.
+      observed.capture = !!options;
+    }
+    return observed;
   }
 
   function removeEntryAt(entries, index) {
@@ -379,12 +421,10 @@
     }
   }
 
-  function track(target, type, callback, options) {
-    type = StringCtor(type);
+  function track(target, type, callback, observed) {
     if (!tracked[type] || callback === null || callback === undefined) return;
-    const capture = captureOf(options);
-    const object = options !== null && typeof options === "object";
-    const signal = object ? options.signal : undefined;
+    const capture = observed.capture;
+    const signal = observed.signal;
     if (signal && call(abortedGetter, signal)) return;
     const entries = entriesOf(target, type, true);
     // A live entry means WebKit ignored this add, signal included. A `once`
@@ -394,7 +434,7 @@
       const entry = entries[i];
       if (entry.callback === callback && entry.capture === capture && !entry.once) return;
     }
-    const entry = { callback: callback, capture: capture, once: object && !!options.once };
+    const entry = { callback: callback, capture: capture, once: observed.once };
     entries[entries.length] = entry;
     if (signal) {
       call(nativeAdd, signal, "abort", function () {
@@ -409,9 +449,10 @@
   }
 
   EventTarget.prototype.addEventListener = function addEventListener(type, callback) {
-    const result = apply(nativeAdd, this, arguments);
+    const observed = listenerArguments(arguments);
+    const result = apply(nativeAdd, this, observed.args);
     try {
-      track(targetOf(this), type, callback, arguments[2]);
+      track(targetOf(this), StringCtor(observed.type), callback, observed);
     } catch (error) {
       // Never let bookkeeping fail a card's call.
     }
@@ -419,9 +460,10 @@
   };
 
   EventTarget.prototype.removeEventListener = function removeEventListener(type, callback) {
-    const result = apply(nativeRemove, this, arguments);
+    const observed = listenerArguments(arguments);
+    const result = apply(nativeRemove, this, observed.args);
     try {
-      untrack(targetOf(this), StringCtor(type), callback, captureOf(arguments[2]));
+      untrack(targetOf(this), StringCtor(observed.type), callback, observed.capture);
     } catch (error) {
       // As above.
     }

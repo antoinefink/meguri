@@ -364,6 +364,184 @@ extension WebKitSuites.CardRuntimeSuites {
 
         // MARK: SU12, C13
 
+        private struct ListenerArgumentResult: Decodable, Equatable {
+            let trace: [String]
+            let outcome: String
+            let calls: Int
+        }
+
+        // Each run uses fresh caller objects for the wrapped method and an
+        // unwrapped method from an about:blank realm, on sibling page elements.
+        // Comparing dispatch as well as the registry catches false negatives;
+        // comparing traces catches extra reads even when their values agree.
+        private static let listenerArgumentProbe = #"""
+            const frame = document.createElement("iframe");
+            frame.hidden = true;
+            frame.src = "about:blank";
+            await new Promise(resolve => { frame.onload = resolve; document.body.appendChild(frame); });
+            const native = frame.contentWindow.EventTarget.prototype;
+            const methods = [EventTarget.prototype, native];
+            const results = [];
+            for (let i = 0; i < methods.length; i++) {
+              const target = document.getElementById(i === 0 ? "probe" : "control");
+              const add = methods[i].addEventListener;
+              const remove = methods[i].removeEventListener;
+              const trace = [];
+              const sentinel = new Error("synthetic listener conversion failure");
+              let calls = 0, reads = 0;
+              const handler = () => { calls++; };
+              let type = "keydown", options, operation = add, receiver = target, args;
+              const dictionary = (capture, signal, callable = false) => {
+                const value = callable ? function () {} : {};
+                for (const key of ["capture", "once", "passive", "signal"]) {
+                  Object.defineProperty(value, key, { get() {
+                    trace.push(key + ":" + (this === value));
+                    if (key === "capture") return capture();
+                    if (key === "signal") return signal();
+                    return false;
+                  } });
+                }
+                return Object.freeze(value);
+              };
+              const tracedType = () => {
+                const value = {};
+                Object.defineProperty(value, "toString", { get() {
+                  trace.push("toString.get:" + (this === value));
+                  return function () {
+                    trace.push("toString.call:" + (this === value));
+                    return ++reads === 1 ? "keydown" : "untracked-synthetic-event";
+                  };
+                } });
+                return Object.freeze(value);
+              };
+              if (scenario === "signal-changes" || scenario === "signal-throws-again") {
+                const aborted = new AbortController();
+                aborted.abort();
+                options = dictionary(() => false, () => {
+                  if (++reads === 1) return undefined;
+                  if (scenario === "signal-throws-again") throw sentinel;
+                  return aborted.signal;
+                });
+              } else if (scenario === "remove-capture-changes") {
+                Reflect.apply(add, target, [type, handler, false]);
+                operation = remove;
+                options = dictionary(() => ++reads === 1, () => undefined);
+              } else if (scenario === "type-changes" || scenario === "remove-type-changes") {
+                if (scenario === "remove-type-changes") {
+                  Reflect.apply(add, target, [type, handler]);
+                  operation = remove;
+                }
+                type = tracedType();
+              } else if (scenario === "string-hint" || scenario === "object-symbol") {
+                type = { [Symbol.toPrimitive](hint) {
+                  trace.push("primitive:" + hint + ":" + (this === type));
+                  return scenario === "object-symbol" ? Symbol("synthetic") : "keydown";
+                } };
+              } else if (scenario === "fallback-type") {
+                type = {
+                  toString() { trace.push("toString:" + (this === type)); return {}; },
+                  valueOf() { trace.push("valueOf:" + (this === type)); return "keydown"; }
+                };
+              } else if (scenario === "symbol") {
+                type = Symbol("synthetic");
+              } else if (scenario === "type-throws") {
+                type = { [Symbol.toPrimitive]() { trace.push("type-throws"); throw sentinel; } };
+              } else if (scenario === "options-throws") {
+                type = tracedType();
+                options = dictionary(() => { throw sentinel; }, () => undefined);
+              } else if (scenario.startsWith("invalid-receiver") || scenario.startsWith("missing-")) {
+                type = tracedType();
+                options = dictionary(() => false, () => undefined);
+                if (scenario.startsWith("invalid-receiver")) receiver = {};
+                if (scenario.endsWith("remove")) operation = remove;
+              } else if (scenario === "invalid-callback") {
+                type = tracedType();
+                options = dictionary(() => false, () => undefined);
+              } else if (scenario === "callable-options") {
+                options = dictionary(() => true, () => undefined, true);
+              } else {
+                options = {
+                  "boolean-false": false, "boolean-true": true, "null": null,
+                  "undefined": undefined, "zero": 0, "one": 1,
+                  "empty-string": "", "string": "capture", "symbol-options": Symbol("capture"),
+                  "bigint-options": 1n
+                }[scenario];
+              }
+              args = [type, scenario === "invalid-callback" ? 7 : handler, options];
+              if (scenario.startsWith("missing-type")) args = [];
+              else if (scenario.startsWith("missing-callback")) args = [type];
+              else if (scenario === "omitted-options") args = [type, handler];
+              let outcome;
+              try { outcome = "return:" + String(Reflect.apply(operation, receiver, args)); }
+              catch (error) { outcome = error === sentinel ? "throw:sentinel" : error.name + ":" + error.message; }
+              // Snapshot caller access before dispatch/cleanup can add noise.
+              const access = trace.slice();
+              target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true }));
+              results.push({ trace: access, outcome, calls });
+              target.__removeFalseListenerProbe = () => {
+                Reflect.apply(remove, target, ["keydown", handler, false]);
+                const before = calls;
+                target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true }));
+                return calls - before;
+              };
+              target.__cleanupListenerProbe = () => {
+                Reflect.apply(remove, target, ["keydown", handler, false]);
+                Reflect.apply(remove, target, ["keydown", handler, true]);
+                const before = calls;
+                target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true }));
+                return calls - before;
+              };
+            }
+            frame.remove();
+            return JSON.stringify(results);
+            """#
+
+        @Test(arguments: [
+            "signal-changes", "signal-throws-again", "remove-capture-changes", "type-changes", "remove-type-changes",
+            "string-hint", "fallback-type", "callable-options", "boolean-false", "boolean-true",
+            "null", "undefined", "omitted-options", "zero", "one", "empty-string", "string", "symbol-options", "bigint-options"
+        ])
+        func registryUsesTheArgumentsNativeConsumed(_ scenario: String) async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                try await page.showPresentedQuestion(#"<div id="probe"></div><div id="control"></div>"#)
+                let results = try await page.json([ListenerArgumentResult].self, Self.listenerArgumentProbe, ["scenario": scenario])
+                #expect(results.count == 2)
+                let wrapped = try #require(results.first)
+                #expect(wrapped == results.last, "\(scenario): \(results)")
+                #expect(wrapped.outcome == "return:undefined")
+                let registered = scenario != "remove-type-changes"
+                #expect(wrapped.calls == (registered ? 1 : 0))
+                #expect(try await page.hasCardListener("keydown", at: "#probe") == registered)
+                let afterFalse = try await page.json([Int].self, #"return JSON.stringify(["probe", "control"].map(id => document.getElementById(id).__removeFalseListenerProbe()));"#)
+                let captured = ["boolean-true", "one", "string", "symbol-options", "bigint-options", "callable-options"].contains(scenario)
+                #expect(afterFalse == (captured ? [1, 1] : [0, 0]))
+                #expect(try await page.hasCardListener("keydown", at: "#probe") == captured)
+                let afterCleanup = try await page.json([Int].self, #"return JSON.stringify(["probe", "control"].map(id => document.getElementById(id).__cleanupListenerProbe()));"#)
+                #expect(afterCleanup == [0, 0])
+                #expect(try await !page.hasCardListener("keydown", at: "#probe"))
+                #expect(harness.diagnostics.isEmpty)
+            }
+        }
+
+        @Test(arguments: [
+            "type-throws", "options-throws", "symbol", "object-symbol", "invalid-callback",
+            "invalid-receiver-add", "invalid-receiver-remove", "missing-type-add", "missing-type-remove",
+            "missing-callback-add", "missing-callback-remove"
+        ])
+        func listenerFailuresKeepNativeConversionOrderAndDoNotRegister(_ scenario: String) async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                try await page.showPresentedQuestion(#"<div id="probe"></div><div id="control"></div>"#)
+                let results = try await page.json([ListenerArgumentResult].self, Self.listenerArgumentProbe, ["scenario": scenario])
+                #expect(results.count == 2)
+                let wrapped = try #require(results.first)
+                #expect(wrapped == results.last, "\(scenario): \(results)")
+                #expect(wrapped.outcome != "return:undefined")
+                #expect(wrapped.calls == 0)
+                #expect(try await !page.hasCardListener("keydown", at: "#probe"))
+                #expect(harness.diagnostics.isEmpty)
+            }
+        }
+
         @Test func registryReportsAScriptKeyListener() async throws {
             try await WebTestHarness.withPage { harness, page async throws in
                 try await page.showPresentedQuestion(

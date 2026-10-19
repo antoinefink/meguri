@@ -329,6 +329,47 @@ extension WebKitSuites.CardRuntimeSuites {
 
         // MARK: C12
 
+        // Actual-engine evidence for C12's inline-module attribution question.
+        // The module text and scheduling stay native; index is evidence only.
+        @Test func inlineModuleDiagnosticProbe() async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                let message = "u66-inline-module-\(UUID().uuidString)"
+                let messageData = try JSONEncoder().encode(message)
+                let literal = try #require(String(data: messageData, encoding: .utf8))
+                try await page.showPresentedQuestion(
+                    """
+                    <script>log("classic-before"); Promise.resolve().then(function () { log("classic-microtask"); });</script>
+                    <script type="module">
+                    log("inline-module");
+                    throw new Error(\(literal));
+                    </script>
+                    <script>log("classic-after");</script>
+                    """)
+                try await harness.until("the synthetic inline-module diagnostic") {
+                    harness.diagnostics.contains { ($0["message"] as? String)?.contains(message) == true }
+                }
+                let diagnostic = try #require(harness.diagnostics.first { ($0["message"] as? String)?.contains(message) == true })
+                let order = try await page.log(count: 4)
+                let evidence: [String: Any] = [
+                    "message": diagnostic["message"] ?? NSNull(),
+                    "phase": diagnostic["phase"] ?? NSNull(),
+                    "index": diagnostic["index"] ?? NSNull(),
+                    "source": diagnostic["source"] ?? NSNull(),
+                    "line": diagnostic["line"] ?? NSNull(),
+                    "order": order,
+                ]
+                let json = try JSONSerialization.data(withJSONObject: evidence, options: [.sortedKeys])
+                let evidenceLine = try #require(String(data: json, encoding: .utf8))
+                print("U66_INLINE_MODULE_DIAGNOSTIC \(evidenceLine)")
+                #expect(diagnostic["message"] as? String == "Error: \(message)")
+                #expect(diagnostic["kind"] as? String == "exception" && diagnostic.side == "question")
+                #expect(["script", "later"].contains(diagnostic["phase"] as? String ?? ""))
+                #expect((diagnostic["source"] as? String)?.isEmpty == false)
+                #expect((diagnostic["line"] as? Int ?? 0) > 0)
+                #expect(order == ["classic-before", "classic-microtask", "classic-after", "inline-module"])
+            }
+        }
+
         @Test func diagnosticsCarryKindPhaseAndSource() async throws {
             try await WebTestHarness.withPage { harness, page async throws in
                 harness.media.add("/_bad.js", text: "window.__bad = 1;\nundefinedFunction();")
