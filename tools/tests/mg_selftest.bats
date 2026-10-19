@@ -237,6 +237,9 @@ write_file() { # write_file <path under the sandbox> <contents>
 copy_core() {
   rm -rf "$SB/core"
   (cd "$REPO_ROOT" && tar cf - --exclude=core/target core) | (cd "$SB" && tar xf -)
+  # Rust tests embed neutral conformance goldens with include_str!.
+  mkdir -p "$SB/conformance"
+  cp -R "$REPO_ROOT/conformance/goldens" "$SB/conformance/"
   CARGO_NET_OFFLINE=false cargo fetch --locked --manifest-path "$SB/core/Cargo.toml" >&2
   export CARGO_TARGET_DIR="$BATS_FILE_TMPDIR/core-target"
 }
@@ -930,6 +933,9 @@ mod tests {
   mg core-lint
   [ "$status" -eq 1 ]
   [ "$(field .status)" = fail ]
+  # Preserve actionable compiler diagnostics if the deliberately changed
+  # graph also exposes a fixture build error.
+  jq -r '.failures[] | "\(.id): \(.message)"' "$result" >&2
   [ "$(failure_ids)" = "layering/edge/meguri-package -> meguri-stats
 layering/edge/meguri-search -> meguri-sched
 layering/restricted/meguri-sched -> tokio" ]
