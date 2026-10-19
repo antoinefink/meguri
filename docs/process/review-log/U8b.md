@@ -38,3 +38,35 @@ Integrator, in `meguri-wt/U8b` (unit/U8b); the similarity scan ran from the main
   - Full `mac-ui` (20261015T115928Z-72610), 259 s: agent-driver, a11y, mac-window-sizes and sample-routes passed. test-hooks, open-sample-sheet and sample-transition ended `blocked: mac-input`: the VM runs macOS 27.0.1, which drops XCUITest's synthesized input as on the host (user step `mac-input`).
   - A run with the host locked was not exercised here. `tools/tests/mac_vm.bats` covers it with a fake session.
 - Provenance: `meguri-wt/U8b` was made by `tools/mg worktree new` (sparse `/*`, `!/oracle/`); no `oracle/` is on disk.
+
+## Remaining hosted checks: migration in progress (2026-10-19)
+
+Start: `f06073394f2394777ef485bb393d9fbe0a43b6f0` on master. This supplement is not accepted; its full unit gate and the M0 gate remain pending.
+
+Antoine asked for unattended runs with the host locked and reported occasional Meguri windows on the host. The U11 supplement already moved fixture argument launches to the VM. This supplement moves Mac snapshots, Xcode's hidden Debug launch probes and its Mac Unit/Snapshot plans there too. Builds stay on the host. Execution uses the existing VM lease, with no host fallback in these wrappers. Hidden-launch liveness, Dock and foreground checks remain intact.
+
+Restricted fixer sessions `s-20261019T155858Z-92af408b` and `s-20261019T162312Z-ff77d373` produced source commits `32585412` and `7ca1cb31`. Both clean-room runs passed their boundary probes and removed their temporary authentication. No app, core, specification or baseline changed.
+
+Reviewer session `s-20261019T161902Z-fe1aeb46` completed two rounds:
+
+- Round 1 found three P2 groups: output transport could hide a completed snapshot failure; a typed Failed Xcode summary could pass TAP with exit zero; six older regression fixtures still assumed host execution.
+- Round 2 found no P0–P2 issues after the fix. Snapshot failures become blocking before optional transport. Xcode requires exit zero, a Passed summary and zero failed tests. Migrated fixtures preserve phase numbering, lease waiting, independent build failures, diff artifacts, selective recording and unchanged passing reference bytes.
+
+Verification so far:
+
+- Original routing regressions: five RED failures before the routing patch (`selftest/20261019T161626Z-61174`). All five passed afterward; the broader first run retained six fixture failures (`selftest/20261019T161711Z-61779`), subsequently fixed.
+- New failure-precedence regressions: seven RED failures before the second production patch (`selftest/20261019T163240Z-2422`). The focused run afterward passed 56/56, with no skips (`selftest/20261019T163257Z-2857`). These are working-tree checks, not clean-tip acceptance evidence.
+- Host Bash 3.2: 28/28 passed on clean `7ca1cb31` (`selftest-host/20261019T163803Z-8799`).
+- Full unfiltered VM Mac matrix (`snapshots/20261019T163420Z-3630`): its actual model key, `VirtualMac2,1-26A434`, had no references. All 60 comparisons were new; this did not prove image equivalence.
+- Controlled comparison with the existing reference-key option, `TEST_RUNNER_MEGURI_SNAPSHOT_KEY=Mac15,9-26A434`, against the unchanged committed images (`snapshots/20261019T163541Z-6266`): 56 passed, four failed at the existing tolerances. The VM's renderer identity remains distinct from the reference key.
+
+All four differences are in `dark-standard-macDefault`:
+
+| Subject/state | Matching pixel fraction | Lowest perceptual precision |
+|---|---:|---:|
+| `designsystem.emptyState/typical` | 0.9999644 | 0.96458983 |
+| `sample.deckOverview/empty` | 0.9999957 | 0.96458983 |
+| `sample.deckOverview/typical` | 0.99997884 | 0.93789065 |
+| `sample.deckOverview/overflow` | 0.99995846 | 0.93421876 |
+
+Required fractions remain 1.0 and 0.98 respectively. The differences are preserved, not waived. A reference/VM/diff comparison was prepared under `build/orchestration/U8b-mac-vm-comparison.html`. Under U8c's baseline rule, Antoine was asked whether to establish separate VM references. His answer is pending. Existing host references and the approval ledger are unchanged; no new references have been recorded. Default migration acceptance, execution-document changes and the final full gate wait on that decision.
