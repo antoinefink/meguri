@@ -81,7 +81,9 @@ SNIFF = 8192
 # Only complete literal spans qualify;
 # no caller-provided file or list can exempt surrounding text. Match before
 # case folding, including in each decoded variant the scanner already checks.
-PUBLIC_IDENTIFIERS = ("--canvas-elevated", "canvas-elevated", "dart-sass/sass", "dart-sass", "sass:color", "sass")
+# The DOM EventInit dictionary's public flag is also required by synthetic
+# event fixtures. Its exact name is specified by the public DOM interface.
+PUBLIC_IDENTIFIERS = ("--canvas-elevated", "canvas-elevated", "dart-sass/sass", "dart-sass", "sass:color", "sass", "bubbles")
 PUBLIC_COMPILER_URL = "https://github.com/sass/dart-sass/releases/download/1.102.0/dart-sass-1.102.0-linux-arm64.tar.gz"
 PUBLIC_LITERAL = re.compile(
     r"(?<![^\s\"'`<>()\[\]{},;:=|])(?:" + "|".join(map(re.escape, PUBLIC_IDENTIFIERS)) +
@@ -581,11 +583,17 @@ def load_tokens(paths):
 # No caller-controlled manifest or partial content can exempt added text.
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
+PUBLIC_ARTIFACTS = {
+    PUBLIC_NOTICE_PATH: PUBLIC_NOTICE_SHA256,
+    "specs/licenses/jquery-3.7.1-LICENSE.txt": "d4db9ebe6f29f5168eac45ad713f055623ac5d0dcd5ba92da23d650ae012020d",
+    "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/vendor/jquery-3.7.1.min.js":
+        "fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a",
+}
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 
 
-def public_notice(path, data):
-    return path == PUBLIC_NOTICE_PATH and hashlib.sha256(data).hexdigest() == PUBLIC_NOTICE_SHA256
+def public_artifact(path, data):
+    return path in PUBLIC_ARTIFACTS and hashlib.sha256(data).hexdigest() == PUBLIC_ARTIFACTS[path]
 
 
 def scan_paths(matcher, paths, repo=None):
@@ -604,7 +612,7 @@ def scan_paths(matcher, paths, repo=None):
         with open(path, "rb") as f:
             data = f.read()
         relative = os.path.relpath(os.path.abspath(path), repo or PROJECT_ROOT)
-        if public_notice(relative, data):
+        if public_artifact(relative, data):
             continue
         if is_binary(data):
             if binary_hit(matcher, data):
@@ -664,10 +672,10 @@ def scan_staged(matcher, repo):
         if added == b"-":
             binary.append(os.fsdecode(path))
     public = set()
-    if PUBLIC_NOTICE_PATH in staged:
-        data = git(repo, "cat-file", "blob", ":" + PUBLIC_NOTICE_PATH)
-        if public_notice(PUBLIC_NOTICE_PATH, data):
-            public.add(PUBLIC_NOTICE_PATH)
+    for path in set(PUBLIC_ARTIFACTS).intersection(staged):
+        data = git(repo, "cat-file", "blob", ":" + path)
+        if public_artifact(path, data):
+            public.add(path)
     found = {}
     if len(binary) < len(staged):
         diff = git(

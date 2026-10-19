@@ -4,8 +4,12 @@ import Testing
 import WebKit
 
 /// The rendering spikes (U65) share WebKit, one window server and this
-/// process's memory: their suites run one test at a time.
-@Suite(.serialized, .timeLimit(.minutes(2))) enum RenderingSpikes {}
+/// process's memory: their suites run one test at a time, and never beside
+/// the card runtime's (`WebKitSuites`).
+extension WebKitSuites {
+    @Suite(.serialized, .timeLimit(.minutes(2))) enum RenderingSpikes {}
+}
+typealias RenderingSpikes = WebKitSuites.RenderingSpikes
 
 extension RenderingSpikes {
     /// Spike S1 (U65): two full-frame, opaque pages share one configuration,

@@ -329,6 +329,26 @@ runs:
     class: ui
     triggers: *ui-test
     budget_s: 1800
+  # U66: the card runtime suites on iOS simulators in the VM (swift-test-kit
+  # runs them on this Mac), from a build-for-testing of the Unit plan.
+  - id: unit-sim-iphone
+    job: unit-sim
+    args: [--platform, iphone]
+    tier: T0
+    placement: [host, vm]
+    needs: [simulator]
+    class: unit
+    triggers: &unit-sim [app/Packages/MeguriKit/Package.swift, app/Packages/MeguriKit/Sources/CardRendering/, app/Packages/MeguriKit/Sources/DesignSystem/, app/Packages/MeguriKit/Tests/CardRenderingTests/, app/Packages/MeguriCore/Sources/Instrumentation/, app/TestPlans/Unit.xctestplan, tools/mg.d/unit-sim.sh]
+    budget_s: 1800
+  - id: unit-sim-ipad
+    job: unit-sim
+    args: [--platform, ipad]
+    tier: T0
+    placement: [host, vm]
+    needs: [simulator]
+    class: unit
+    triggers: *unit-sim
+    budget_s: 1800
   - id: mac-ui
     job: mac-ui
     tier: T0

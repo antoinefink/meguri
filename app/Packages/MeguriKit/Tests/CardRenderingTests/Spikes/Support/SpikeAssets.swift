@@ -1,4 +1,3 @@
-import AVFoundation
 import CoreGraphics
 import CoreText
 import Foundation
@@ -173,46 +172,5 @@ enum SpikeAssets {
                 with: [UInt8(adjustment >> 24), UInt8(adjustment >> 16 & 0xFF), UInt8(adjustment >> 8 & 0xFF), UInt8(adjustment & 0xFF)])
         }
         return out
-    }
-
-    // MARK: Video
-
-    /// An H.264 MP4 of `seconds` seconds, `fps` frames a second, each second
-    /// a different grey, with its index at the front of the file (fast
-    /// start), as a card's `<video>` would be.
-    @concurrent nonisolated static func mp4(seconds: Int = 20, fps: Int = 10, size: CGSize = CGSize(width: 320, height: 240)) async throws -> Data {
-        let url = FileManager.default.temporaryDirectory.appending(path: "spike-\(UUID().uuidString).mp4")
-        defer { try? FileManager.default.removeItem(at: url) }
-        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
-        writer.shouldOptimizeForNetworkUse = true
-        let input = AVAssetWriterInput(
-            mediaType: .video,
-            outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: Int(size.width), AVVideoHeightKey: Int(size.height)])
-        let attributes = CVPixelBufferCreationAttributes(
-            pixelFormatType: CVPixelFormatType(rawValue: kCVPixelFormatType_32BGRA), size: CVImageSize(width: Int(size.width), height: Int(size.height)))
-        let receiver = writer.inputPixelBufferReceiver(for: input, pixelBufferAttributes: attributes)
-        try writer.start()
-        writer.startSession(atSourceTime: .zero)
-        for index in 0..<(seconds * fps) {
-            let frame = try CVMutablePixelBuffer(attributes)
-            let grey = Int32(truncatingIfNeeded: 40 + (index / fps) * 9)
-            frame.withUnsafeBuffer { buffer in
-                CVPixelBufferLockBaseAddress(buffer, [])
-                memset(CVPixelBufferGetBaseAddress(buffer), grey, CVPixelBufferGetDataSize(buffer))
-                CVPixelBufferUnlockBaseAddress(buffer, [])
-            }
-            // `append` sometimes never resumed (a hung run): poll instead.
-            let ready = CVReadOnlyPixelBuffer(frame)
-            let time = CMTime(value: CMTimeValue(index), timescale: CMTimeScale(fps))
-            let deadline = ContinuousClock.now + .seconds(10)
-            while try !receiver.appendImmediately(ready, with: time) {
-                guard ContinuousClock.now < deadline else { throw Spike.Failure("the MP4 writer took no frame \(index) for 10 s") }
-                try await Task.sleep(for: .milliseconds(2))
-            }
-        }
-        receiver.finish()
-        await writer.finishWriting()
-        guard writer.status == .completed else { throw Spike.Failure("the MP4 did not finish: \(String(describing: writer.error))") }
-        return try Data(contentsOf: url)
     }
 }

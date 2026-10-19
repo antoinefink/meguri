@@ -272,7 +272,9 @@ final class SpikeWindow {
     #if os(macOS)
     private let window: NSWindow
     #else
-    private let window: UIWindow
+    /// Nil without a window scene: a UIWindow needs one (`init(frame:)` is
+    /// deprecated since iOS 26), and only a run with an app host has one.
+    private let window: UIWindow?
     #endif
 
     init(_ content: PlatformView) {
@@ -283,8 +285,8 @@ final class SpikeWindow {
         window.isReleasedWhenClosed = false
         window.contentView = content
         #else
-        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-        window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: content.frame)
+        window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first.map { UIWindow(windowScene: $0) }
+        guard let window else { return }
         window.frame = content.frame
         let controller = UIViewController()
         controller.view = content
@@ -298,8 +300,8 @@ final class SpikeWindow {
         window.contentView = nil
         window.close()
         #else
-        window.isHidden = true
-        window.rootViewController = nil
+        window?.isHidden = true
+        window?.rootViewController = nil
         #endif
     }
 }
@@ -332,11 +334,16 @@ func spikeWebContentFootprint(_ pages: [WKWebView]) -> (processes: Int, bytes: I
 /// Another process's memory footprint, in bytes, or nil when the system
 /// does not tell.
 func spikeFootprint(pid: pid_t) -> Int? {
+    #if os(macOS)
     var usage = rusage_info_v4()
     let result = withUnsafeMutablePointer(to: &usage) { pointer in
         pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
     }
     return result == 0 ? Int(usage.ri_phys_footprint) : nil
+    #else
+    // The iOS SDK has no proc_pid_rusage.
+    return nil
+    #endif
 }
 
 /// This process's memory footprint (what Xcode and jetsam count), in bytes.

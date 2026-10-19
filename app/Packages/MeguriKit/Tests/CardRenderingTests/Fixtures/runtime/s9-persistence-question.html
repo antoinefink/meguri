@@ -1,0 +1,10 @@
+<p>front</p>
+<script>
+(function () {
+  // Desktop-only bridges are absent; the page's own session store is used.
+  log(typeof sessionStorage);
+  log(typeof py);
+  log(typeof qt);
+  sessionStorage.setItem("k", "v");
+})();
+</script>

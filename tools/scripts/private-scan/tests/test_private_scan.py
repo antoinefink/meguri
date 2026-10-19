@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+from pathlib import Path
 import re
 import struct
 import subprocess
@@ -655,6 +656,7 @@ class PublicInterfaceTests(unittest.TestCase):
 class FixedPublicFactsTests(unittest.TestCase):
     def test_known_interface_spellings_and_archive_are_exact(self):
         facts = ("--canvas-elevated", "canvas-elevated", "dart-sass", "dart-sass/sass", "sass:color", "sass",
+                 "bubbles",
                  "https://github.com/sass/dart-sass/releases/download/1.102.0/dart-sass-1.102.0-linux-arm64.tar.gz")
         matcher = private_scan.Matcher({(word,) for fact in facts for word in private_scan.words(fact)})
         for fact in facts:
@@ -673,6 +675,32 @@ class FixedPublicFactsTests(unittest.TestCase):
                     self.assertTrue(private_scan.scan_paths(matcher, [full], repo)[0])
                     write(full, fact.encode(), "wb")
                     self.assertTrue(private_scan.scan_staged(matcher, repo)[0])
+
+
+class PublicLibraryTests(unittest.TestCase):
+    def test_public_asset_mutations(self):
+        root = Path(SCRIPT).resolve().parents[3]
+        for path, digest in private_scan.PUBLIC_ARTIFACTS.items():
+            if path == private_scan.PUBLIC_NOTICE_PATH:
+                continue
+            data = (root / path).read_bytes()
+            self.assertEqual(hashlib.sha256(data).hexdigest(), digest)
+            matcher = private_scan.Matcher({(word,) for word in private_scan.words(data.decode("utf-8"))}
+                                           | {("sentinelprivate",)})
+            with tempfile.TemporaryDirectory() as repo:
+                git(repo, "init", "-q")
+                full = os.path.join(repo, path)
+                for changed, expected in ((data, False), (data + b" ", True),
+                                          (data + b"\nsentinelprivate\n", True)):
+                    write(full, changed, "wb")
+                    git(repo, "add", "--", path)
+                    self.assertEqual(bool(private_scan.scan_staged(matcher, repo)[0]), expected)
+                    self.assertEqual(bool(private_scan.scan_paths(matcher, [full], repo)[0]), expected)
+                write(full, data, "wb")
+                self.assertTrue(private_scan.scan_staged(matcher, repo)[0])
+                other = os.path.join(repo, "other.txt")
+                write(other, data, "wb")
+                self.assertTrue(private_scan.scan_paths(matcher, [other], repo)[0])
 
 
 class PublicNoticeTests(unittest.TestCase):
