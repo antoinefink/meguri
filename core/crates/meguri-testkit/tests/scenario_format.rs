@@ -389,7 +389,10 @@ fn observation_text_rejects_empty_list_entries_at_the_format_boundary() {
         "timing(,)",
         "queue(,)",
     ] {
-        assert!(model_accepts(json!({"observe": [request]})).is_err(), "accepted {request:?}");
+        assert!(
+            model_accepts(json!({"observe": [request]})).is_err(),
+            "accepted {request:?}"
+        );
         let quoted = serde_json::to_string(request).unwrap();
         let text = format!(
             "id: area/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{{observe: [{quoted}]}}]\n"
@@ -443,7 +446,10 @@ fn observation_text_preserves_empty_arguments_refs_and_structured_syntax() {
     }
     // Required mapping/list arguments still go through checked-kind validation.
     for request in ["text()", "text( \t )", "search()", "search( \t )"] {
-        assert!(model_accepts(json!({"observe": [request]})).is_err(), "accepted {request:?}");
+        assert!(
+            model_accepts(json!({"observe": [request]})).is_err(),
+            "accepted {request:?}"
+        );
     }
 }
 
