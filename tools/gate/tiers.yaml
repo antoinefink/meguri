@@ -715,6 +715,7 @@ runs:
     user_step: device-run
 
 utilities:
+  - {job: corpus-generate, why: "spec side: generates the comparison corpus as run artifacts; conformance checks published scenarios"}
   - {job: cleanroom, why: "restricted Codex implementation runner; boundary probes run before every invocation"}
   - {job: cleanroom-image, why: "builds the restricted Codex runtime; cleanroom verifies it before use"}
   - {job: core-format, why: "rewrites Rust source formatting; core-lint verifies the result"}
