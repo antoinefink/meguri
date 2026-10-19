@@ -56,8 +56,8 @@ a reason to mark a row done.
 | h7f11536c09e7 | U246, U66, U67 | Close the deferred display-transform assertion gap under H3. |
 | hb2bdcde89b3a | U246, U66, U67 | Close the deferred display-transform assertion gap under H3. |
 | hf42c35381599 | U246, U66, U67 | Close the deferred display-transform assertion gap under H3. |
-| h1f6151e74934 | U64, U246 | Add actual IO card-markup observations for clozes with several numbers; U63 shape decoding alone does not close it. |
-| h3448f09e0c2c | U64, U246 | Add the IO element/render-data observation; accepted storage-format parsing is not markup proof. |
+| h1f6151e74934 | U64 complete | Closed by format parsing plus actual IO div and stored-card review observations. |
+| h3448f09e0c2c | U64 complete | Closed by the actual IO div observation, including attribute and class rules. |
 
 ## H3. Display proof and original graphics
 

@@ -416,7 +416,7 @@ h3db0bf46358b,python,tag,notetypes,in-scope,Change Note Type: field and template
 h51425d9fe4e8,python,tag,notetypes,in-scope,"A cloze note's cards take their ordinals from its cloze numbers, whatever filters the template chains (notes/card-generation G4)",cardgen/cloze/numbers,done
 h6ace0b701063,python,tag,notetypes,not-applicable,Add-on entries in Anki's own stock note type list,,done
 h6ebbfe4093c4,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
-h76dd5ce91b19,python,tag,notetypes,in-scope,Type-in answers on cloze cards (U64),,deferred
+h76dd5ce91b19,python,tag,notetypes,in-scope,Type-in answers on cloze cards (U64; verified stored-card review HTML),render/type-answer/cloze,done
 h7cd15bfd9337,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
 h8057000b72f1,python,tag,notetypes,in-scope,Template filters when rendering (U60),,deferred
 h93567ad3543f,python,tag,notetypes,not-applicable,Add-on entries in Anki's own stock note type list,,done
@@ -618,7 +618,7 @@ ha7fabd60b085,python,tag,render,not-applicable,Desktop playback of an absolute f
 hb2bdcde89b3a,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
 hf42c35381599,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
 hf55fc72cd71b,python,tag,render,in-scope,"Card audio plays an entry's base name from the media folder (render/av-tags A6): U67's player, checked by Meguri's tests; no oracle observation",,deferred
-h012e392276c1,rust,tag,render,in-scope,U64/U246: verify mixed correct/incorrect Korean syllables remain separate typed-answer segments without Unicode indexing errors.,,deferred
+h012e392276c1,rust,tag,render,in-scope,U64: verify mixed correct/incorrect Korean syllables remain separate typed-answer segments without Unicode indexing errors.,render/type-answer/compare,done
 h03d7c32a8571,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h04f16e0d77d0,rust,tag,render,not-applicable,Argument checking of a backend call Meguri does not expose,,done
 h0714128d5513,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
@@ -626,14 +626,14 @@ h0e52b45b7b7a,rust,tag,render,out-of-scope,"Expanding clozes to generate formula
 h1126a583e576,rust,tag,render,in-scope,U246: add a direct sound-directive removal observation; rendering AV extraction alone does not prove the standalone text helper.,,deferred
 h12960db75e39,rust,tag,render,in-scope,"Template rendering: replacements, sections, card-number keys, unknown fields and filters",render/template/conditionals render/template/errors render/template/tags render/filters/chains,done
 h163ba9c3036c,rust,tag,render,in-scope,Plain HTML stripping (text area),text/strip/markup,done
-h176cf97aef7a,rust,tag,render,in-scope,"U64/U246: typed-answer differences must distinguish replacements, inserted punctuation and a missing internal space.",,deferred
+h176cf97aef7a,rust,tag,render,in-scope,"U64: typed-answer differences must distinguish replacements, inserted punctuation and a missing internal space.",render/type-answer/compare render/type-answer/corpus/compare-01,done
 h1a3728db5353,rust,tag,render,not-applicable,"A backend render mode without the reviewer's chain completion; Meguri reproduces the reviewer, where an unknown filter ends the chain",,done
 h1f36598666ed,rust,tag,render,in-scope,Preview render from a schema-11 template object,render/special-fields/new-note,done
-h1f6151e74934,rust,tag,render,in-scope,Image-occlusion clozes with several numbers: shapes listed under each number (U63); their card markup waits for U64,render/image-occlusion/format/parse-structure,deferred
+h1f6151e74934,rust,tag,render,in-scope,U63/U64: several-number IO shape decoding and active/inactive card markup are covered by the format and render cases.,render/image-occlusion/format/parse-structure render/image-occlusion/render/divs render/image-occlusion/render/cards,done
 h21a1ea45b18d,rust,tag,render,in-scope,"U246: cover plain-text stripping of sound and spoken-text directives, including an unknown directive; display fallback is a different operation.",,deferred
 h22e00b0f1c78,rust,supplementary,render,not-applicable,The pinned typed-answer comparison normalizes composition but does not fold letter case; the supplementary case-folding behavior is absent.,,done
 h2d70fb39c79e,rust,tag,render,in-scope,TTS filter markup,render/filters/tts,done
-h3448f09e0c2c,rust,tag,render,in-scope,Image-occlusion cloze element; shape attributes are U63/U64,,deferred
+h3448f09e0c2c,rust,tag,render,in-scope,"U64: IO element markup covers classes, shape attributes, repeated keys, omitted values and raw label encoding.",render/image-occlusion/render/divs,done
 h3a116c42ce7b,rust,tag,render,in-scope,Media name encoding and decoding (text area),text/refs/iri,done
 h3e9a29035981,rust,tag,render,in-scope,Field emptiness for sections and the blank check,render/template/conditionals render/template/blank text/fields/empty,done
 h3ea8cdc8e835,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
@@ -641,7 +641,7 @@ h3f026c7e31bb,rust,tag,render,in-scope,"AV tag grammar: sound tags, directives, 
 h429c8ae08c83,rust,tag,render,in-scope,"AV extraction: play markers per side, a TTS entry, a TTS directive with no language",render/av-tags/tts render/av-tags/numbering,done
 h450787d61876,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h4726941374ef,rust,tag,render,in-scope,"Preview render of a note not yet added, both sides",render/special-fields/new-note render/template/blank,done
-h47dca159695d,rust,tag,render,in-scope,U64/U246: expected typed-answer text must discard HTML and audio references while preserving decoded visible spacing.,,deferred
+h47dca159695d,rust,tag,render,in-scope,U64: expected typed-answer text must discard HTML and audio references while preserving decoded visible spacing.,render/type-answer/compare,done
 h4820dda6cd77,rust,tag,render,in-scope,U131/U246: report a blank reverse card while retaining its note when another card remains nonempty.,,deferred
 h492c28d52d9d,rust,tag,render,in-scope,cloze-only: with number lists,render/cloze/only,done
 h4b173b76b6d5,rust,tag,render,out-of-scope,Replacing formula source with generated media references belongs to excluded LaTeX rendering parity (R565).,,done
@@ -654,17 +654,17 @@ h6442084ed16c,rust,tag,render,in-scope,"Template tokenizing: tags, comments, whi
 h67f6485701c2,rust,tag,render,in-scope,cloze: output by card number and side; empty when no cloze is active,render/cloze/basic,done
 h6954b568831d,rust,tag,render,in-scope,Hints on clozes with number lists,render/cloze/multi-number render/cloze/hints,done
 h6a3197e57c5e,rust,tag,render,in-scope,U131/U246: an Empty Cards report must identify when deleting every empty card would also delete its note.,,deferred
-h6b5987957b1c,rust,tag,render,in-scope,"U64/U246: a missing non-ASCII character must count as one displayed gap, independent of UTF-8 byte length.",,deferred
+h6b5987957b1c,rust,tag,render,in-scope,"U64: a missing non-ASCII character must count as one displayed gap, independent of UTF-8 byte length.",render/type-answer/compare,done
 h6d969fd370f8,rust,tag,render,in-scope,Nested clozes and hints on both sides,render/cloze/nesting render/cloze/hints,done
 h71a7fc765fe3,rust,tag,render,in-scope,Type-in markers and the chain rewrite,render/filters/type,done
 h71ac67d3a8db,rust,tag,render,in-scope,Hint filter markup and ids,render/filters/hint,done
 h73a554417784,rust,tag,render,in-scope,Legacy per-template card rules stored when a note type is saved,render/template/legacy-req,done
 h74230fbcabe8,rust,tag,render,in-scope,cloze-only: output on the front and the back,render/cloze/only,done
-h7489852a175a,rust,tag,render,in-scope,U64/U246: an empty typed response shows escaped expected text without diff highlighting.,,deferred
+h7489852a175a,rust,tag,render,in-scope,U64: an empty typed response shows escaped expected text without diff highlighting.,render/type-answer/compare,done
 h79f7d4c21f4b,rust,tag,render,in-scope,Numbers of a cloze with a number list,render/cloze/numbers,done
 h7ff155030ad4,rust,tag,render,not-applicable,Error for an unknown card id in a backend call; Meguri's render reports a missing card as its own not-found error,,done
 h82c4a097602a,rust,tag,render,in-scope,U155/U246: Markdown deck descriptions must retain ordinary content while removing executable markup (R82).,,deferred
-h8459f3ce87b7,rust,tag,render,in-scope,U64/U246: a fully matching typed response must render only the correct-answer span.,,deferred
+h8459f3ce87b7,rust,tag,render,in-scope,U64: a fully matching typed response must render only the correct-answer span.,render/type-answer/compare,done
 h883b6ddbca06,rust,tag,render,in-scope,Nested clozes with the same number,render/cloze/nesting,done
 h88486ccb2459,rust,tag,render,in-scope,Cloze numbers of a text; its LaTeX expansion check serves LaTeX image generation which is out of scope (R565),render/cloze/numbers,done
 h8aa9e4f267aa,rust,tag,render,in-scope,Shared and separate clozes on each of their cards,render/cloze/multi-number,done
@@ -674,13 +674,13 @@ h9ecf3ff97171,rust,supplementary,render,not-applicable,Main-branch test of MathJ
 h9f15a141659a,rust,tag,render,in-scope,Type-in cloze extraction collapses answers only when all are identical,render/cloze/typing,done
 ha390fa79d2c0,rust,tag,render,in-scope,Cloze markers removed from field text for searching; specified with search text matching (U81),,deferred
 ha3f6f53e53e7,rust,tag,render,in-scope,"Both sides of a card, FrontSide and the blank question",render/template/blank render/special-fields/new-note,done
-haccda9311c93,rust,tag,render,in-scope,U64/U246: typed-answer gaps must reflect deleted expected characters without inventing gaps for wholly incorrect typed text.,,deferred
-hae0105ed752c,rust,tag,render,in-scope,Image-occlusion shape data attributes in card markup; U64,,deferred
-hafc40dbe3447,rust,tag,render,in-scope,U64/U246: markup surrounding expected text must not create a typed-answer mismatch.,,deferred
+haccda9311c93,rust,tag,render,in-scope,U64: typed-answer gaps must reflect deleted expected characters without inventing gaps for wholly incorrect typed text.,render/type-answer/compare,done
+hae0105ed752c,rust,tag,render,in-scope,U64: real IO cloze rendering verifies ordered shape data attributes and unknown-property handling.,render/image-occlusion/render/divs,done
+hafc40dbe3447,rust,tag,render,in-scope,U64: markup surrounding expected text must not create a typed-answer mismatch.,render/type-answer/compare,done
 hb1cbcd219c60,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 hb6a47ef46c2d,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
-hbf81ece4b03e,rust,tag,render,in-scope,U64/U246: extra typed characters must keep the two-line mismatch display rather than collapse to a correct result.,,deferred
-hc6cc252a0cb5,rust,tag,render,in-scope,U64/U246: diacritic-insensitive comparison restores accents in expected output but still detects different base letters.,,deferred
+hbf81ece4b03e,rust,tag,render,in-scope,U64: extra typed characters must keep the two-line mismatch display rather than collapse to a correct result.,render/type-answer/compare,done
+hc6cc252a0cb5,rust,tag,render,in-scope,U64: diacritic-insensitive comparison restores accents in expected output but still detects different base letters.,render/type-answer/compare,done
 hc74368fae72d,rust,tag,render,in-scope,Stripping that keeps media names (text area),text/strip/keep-media,done
 hcafcd1e3bdc2,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 hcb43355dfe31,rust,tag,render,in-scope,data-ordinal lists every number of the cloze on each card,render/cloze/multi-number,done
@@ -691,11 +691,11 @@ hdff9a98c5773,rust,tag,render,in-scope,Ruby filters,render/filters/furigana,done
 he0d5169d5e60,rust,tag,render,in-scope,"Card render of a cloze note: the question hides the active cloze, the answer shows it",render/pipeline/blank render/av-tags/cloze render/cloze/templates,done
 he406938dc7f7,rust,tag,render,in-scope,Nested clozes with number lists,render/cloze/multi-number render/cloze/nesting,done
 he505c5cfe56e,rust,tag,render,in-scope,Blank question in a preview render,render/template/blank,done
-he79db754bc77,rust,tag,render,in-scope,U64/U246: long mixed-script typed responses must produce a valid difference result without panicking.,,deferred
+he79db754bc77,rust,tag,render,in-scope,U64: long mixed-script typed responses must produce a valid difference result without panicking.,render/type-answer/compare render/type-answer/corpus/compare-01,done
 he865b016fdd9,rust,tag,render,in-scope,Directives other than TTS are written back in normal form,render/av-tags/grammar,done
 he8aa29c82e65,rust,tag,render,out-of-scope,"Formula parsing, hashing and generated PNG/SVG references are excluded LaTeX rendering parity; existing media display is retained by R565.",,done
 hea39d04c13ef,rust,tag,render,in-scope,Unknown filter ends the chain with the text so far,render/filters/chains,done
-heb300a3dbe24,rust,tag,render,in-scope,U64/U246: an exact typed-answer match must collapse to one correct line with no arrow.,,deferred
+heb300a3dbe24,rust,tag,render,in-scope,U64: an exact typed-answer match must collapse to one correct line with no arrow.,render/type-answer/compare,done
 heba27d0f9639,rust,tag,render,in-scope,Type-in cloze extraction by card number,render/cloze/typing,done
 hebddab91941f,rust,tag,render,in-scope,U155/U246: a Markdown heading in a deck description must render as a heading (R81-R82).,,deferred
 hee35c52dd8b3,rust,supplementary,render,not-applicable,The pinned accent-insensitive typed-answer mode removes combining marks but does not fold case; the supplementary combined behavior is absent.,,done
@@ -703,7 +703,7 @@ heed8d3ae61bd,rust,tag,render,in-scope,Whether a template renders something for 
 hf064837658a8,rust,tag,render,in-scope,Markup inside MathJax removed from cloze output with entities kept,render/cloze/mathjax,done
 hf2d2c23247a1,rust,tag,render,in-scope,Rendering a stored card with its real values,render/special-fields/cards,done
 hf2f1c863cdca,rust,tag,render,in-scope,Duplicate and zero and empty pieces in number lists,render/cloze/numbers render/cloze/markers,done
-hf6db24b439e4,rust,tag,render,in-scope,U64/U246: literal angle brackets in a matching answer must be HTML-escaped rather than interpreted as markup.,,deferred
+hf6db24b439e4,rust,tag,render,in-scope,U64: literal angle brackets in a matching answer must be HTML-escaped rather than interpreted as markup.,render/type-answer/compare,done
 hf8d1651d6b66,rust,tag,render,in-scope,Non-ASCII text without clozes has no cloze numbers,render/cloze/numbers,done
 h0b343b3380e0,typescript,tag,review,out-of-scope,R563 excludes loading MathJax configuration followed by its rendering library; formula text remains visible.,,done
 h14162d344ef9,typescript,tag,review,out-of-scope,R563 excludes the conditional MathJax loader; ordinary cards require no such library.,,done

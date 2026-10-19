@@ -18,7 +18,7 @@ Each card side that Meguri shows in a card web view is encoded as one text, with
 | Browse preview (U84, U22x) | the side shown, after its type-in markers are removed (`render/type-answer#A11.2`) |
 
 - The text encoded is the side text of `render/type-answer#A1`: the `<style>` element, the side's HTML with play markers, type-in markers, and on the answer the question's HTML that `{{FrontSide}}` inserted. It is encoded once, as a whole: names written in the template (`<img src="_logo 2.png">`), names inserted from fields, names built from both (`<img src="{{File}}">`), and names repeated on the answer through `{{FrontSide}}` are all encoded, and none twice.
-- Encoding comes after rendering and before the play buttons (U62's display transform), the type-in box and comparison (`render/type-answer`), and anything the page does. None of those adds a media tag, so none of them is encoded.
+- Encoding comes after rendering and before the play buttons (U62's display transform), the type-in box and comparison (`render/type-answer`), and anything the page does. The type-in box, comparison and replay-button markup add no media tags. The TTS fallback is the exception: its original directive content can contain media tags. Encode that content separately before inserting it in place of its play marker (`render/display-transform#D5`), once only, without changing the stored AV content.
 - Stored data never changes: fields keep raw names (R978); the type-in comparison reads the field as stored (`render/type-answer#A4.2`); AV tag lists keep the names as written (U62), and the player resolves them as file names (U67).
 
 ## D2. What changes in a side

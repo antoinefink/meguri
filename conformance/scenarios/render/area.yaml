@@ -1,4 +1,4 @@
-# Stored-card pipeline and template/cloze conformance (U60, U61, U62).
+# Stored-card pipeline, templates, cloze and completed display data (U60-U64).
 area: render
 active:
   - "cloze/*"
@@ -27,3 +27,9 @@ active:
   - "image-occlusion/format/written"
   - "image-occlusion/format/fields"
   - "image-occlusion/format/cards"
+
+# U64: real pure comparison, stored-card review HTML, media and IO providers.
+  - "type-answer/*"
+  - "type-answer/corpus/*"
+  - "media-escape/*"
+  - "image-occlusion/render/*"

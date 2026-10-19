@@ -258,9 +258,9 @@ Recorded from the oracle (`render/type-answer/compare`). Rows that do not give t
 | `56` | `5` | both | Good `5`, Missed `-` \| Good `5`, Missed `6` |
 | `Madrid` | `Madird` | both | Good `Mad`, Missed `-`, Good `i`, Bad `r`, Good `d` \| Good `Mad`, Missed `r`, Good `i`, Good `d` |
 | `Hola` | `hola` | both | Bad `h`, Good `ola` \| Missed `H`, Good `ola` |
-| `qávul` | `resume` | plain | Good `r`, Bad `e`, Good `sum`, Bad `e` \| Good `r`, Missed `é`, Good `sum`, Missed `é` |
-| `qávul` | `resume` | nc | `<code id=typeans><span class=typeGood>qávul</span></code>` |
-| `Qëvax` | `qevax` | nc | Bad `e`, Good `bene` \| Missed `É`, Good `bène` |
+| `qávul` | `qavul` | plain | `<code id=typeans><span class=typeGood>q</span><span class=typeBad>a</span><span class=typeGood>vul</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>q</span><span class=typeMissed>á</span><span class=typeGood>vul</span></code>` |
+| `qávul` | `qavul` | nc | `<code id=typeans><span class=typeGood>qávul</span></code>` |
+| `Qëvax` | `qevax` | nc | `<code id=typeans><span class=typeBad>q</span><span class=typeGood>evax</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>Q</span><span class=typeGood>ëvax</span></code>` |
 | `Madrid` | ` Madrid ` | both | Bad `" "`, Good `Madrid`, Bad `" "` \| Good `Madrid` |
 | `a<b` | `a<b` | both | `<code id=typeans><span class=typeGood>a&lt;b</span></code>` (`<b` has no `>`, so it is no markup) |
 | `<br>` | `x` | both | `<code id=typeans><span class=typeBad>x</span><br><span id=typearrow>&darr;</span><br></code>` |
