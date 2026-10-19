@@ -256,3 +256,34 @@ occlusions
 image
 header
 back_extra
+
+# render/media-serving and render/audio-playback: URL routes, preset/config
+# fields, bounded bridge protocols and response header names.
+meguri-media
+_anki
+_addons
+disable_autoplay
+skip_question_when_replaying_answer
+interruptAudioWhenAnswering
+replayq
+meguriCard
+meguriVisible
+midCenter
+topLeft
+topCenter
+topRight
+midLeft
+midRight
+bottomLeft
+bottomCenter
+bottomRight
+Accept-Ranges
+Content-Range
+Content-Length
+Content-Type
+Access-Control-Allow-Origin
+Access-Control-Expose-Headers
+Content-Security-Policy
+X-Content-Type-Options
+Cache-Control
+If-Range

@@ -472,7 +472,7 @@ Never defined in the page world (R517): `AnkiDroidJS`, `showAnswer`, `buttonAnsw
 
 ### C9.3 Message handlers visible to card scripts
 
-- iOS and iPadOS: `window.webkit.messageHandlers.cb` exists. It is AnkiMobile's handler, and U67 maps its messages (R511). No other handler that Meguri registers can be reached from the page world.
+- iOS and iPadOS: exactly two public handlers exist: `window.webkit.messageHandlers.cb` accepts only the existing R511 tap protocol, and `window.webkit.messageHandlers.meguri` accepts only a string `play:q:N` or `play:a:N`, with N one or more ASCII digits, for U62's original replay button (`render/display-transform#D3`, D4). U67 validates the sending main-frame page and AV index before playback. Every other message is ignored and logged; neither handler accepts internal signals or a general native operation. No other handler that Meguri registers is page-visible.
 - Mac: the page world has no `window.webkit` at all, as on Anki desktop, which is not WebKit. So templates that look for `window.webkit` to detect iOS do not take their iOS path on Mac. `pycmd` reaches native through the internal channel (C14).
 
 ### C9.4 How the surface is checked
@@ -629,7 +629,7 @@ Meguri's tap and key handling (U180, U181) acts quickly only when no card listen
 
 ## C14. Internal channel and signals (Meguri)
 
-- Runtime, isolated script and native communicate without new page globals (C9.1). The sole permitted page-world message handler is iOS `cb` (C9.3). String-valued DOM events on the document are one possible channel between worlds; native communicates with the isolated world.
+- Runtime, isolated script and native communicate without new page globals (C9.1). Only the two narrow iOS page-world adapters `cb` and `meguri` are public (C9.3); internal/general signals remain isolated. String-valued DOM events on the document are one possible channel between worlds; native communicates with the isolated world. Native validation is `render/media-serving#M8`; forwarding a page event through an isolated observer does not make its content trusted.
 - **Validation.** Treat all page-originated signals as untrusted. R2038 permits only current-card reveal, AV playback, typed answers, `cb` tap zones, diagnostics and state. Validate card identity before acting. Card-generated signals cannot affect another card, collection data or unrelated native APIs.
 - **Signals.** The names are this spec's. U67 fixes the message format and the allowlist (`BridgeAllowlistTests`). Every signal about an update carries its identity (C6.8).
 
@@ -784,6 +784,7 @@ These 13 positive and 17 negative forms were observed by the prepared WebKit tes
 | GS6 | Mac: `pycmd("ease3")`, `pycmd("play:q:1")` | no exception; `command` signals passed to native, which ignores `ease3` |
 | GS7 | iPhone: `typeof pycmd`, `typeof bridgeCommand`, `typeof ankiPlatform`, `require("anki/bridgecommand")` | `undefined` ×3; throws |
 | GS8 | Mac: `ankiPlatform`, `typeof webkit` | `"desktop"`, `"undefined"` |
+| GS8b | iOS handler inventory, valid replay string, invalid strings/internal messages and subframe attempts; repeat on Mac | iOS exposes only `cb` and `meguri`; the valid replay selects one AV entry, other operations are refused; Mac has no `webkit`; card code cannot reach isolated handlers |
 | GS9 | `await MathJax.typesetPromise()`, `await MathJax.startup.promise`, `MathJax.typeset()` | resolve, resolve, `undefined` |
 | GS10 | side `<p>\(x^2\) and \[y\]</p>` | the paragraph's text is exactly `\(x^2\) and \[y\]` after the update |
 | GS11 | `$.fn.jquery`, `$ === jQuery` | `"3.7.1"`, `true` |
@@ -876,7 +877,7 @@ These are the traps the implementer writes into `CardRuntime/AGENTS.md`:
 - **Classic-script semantics for cards.** Never change a card script's `type`, never add `"use strict"` or a wrapper to card code, never snapshot the script list before the walk (C6.5), and never re-run scripts by `cloneNode`.
 - **No Anki assets** (R1960). The runtime, base stylesheet and tests are written from this spec. Only upstream jQuery 3.7.1 is vendored, unmodified, with its notice.
 - **Run first.** The runtime, its capture-phase IME tracking (C10.4) and its listener hooks (C13) are in place before any other page script, `reviewExtra` included.
-- **Page-world handlers.** Register no message handler in the page world except iOS `cb` (C9.3). Internal traffic goes through the isolated world (C14).
+- **Page-world handlers.** Register only iOS `cb` for the exact tap protocol and iOS `meguri` for the exact replay command strings (C9.3). Neither exposes internal/general signals. Mac has no page-world `webkit`; internal traffic stays isolated (C14).
 - **Token values are exact text** (C4.1, C4.2). Do not normalize colours.
 - **Similarity scan.** The scan's `text` channel compares runs of 8 CSS words with Anki's stylesheet sources, and the values here are fixed. The order of rows in the C4 tables means nothing. Order the declarations inside each rule and group the rules your own way, and reorder again if the scan flags a region. An allowlist entry needs Antoine's approval (`docs/process/provenance.md`).
 
@@ -886,7 +887,7 @@ Defaults this spec takes until the owner decides otherwise, and points the owner
 
 1. **`pycmd` callback value: settled, `null`** (Antoine, 2026-10-17). The earlier R507 and U66 test wording said `undefined`; their current wording follows this settled decision. Antoine chose `undefined` unless the pinned 26.09.3 tag shows that Anki passes `null`. It does. Desktop's bridge sends the command handler's return value back to the page as JSON and parses it before it calls the callback. The reviewer's handler returns no value for any command. The bridge's own paths return none either: `domDone`, `close`, and a command that arrives after the web view or the collection is gone. So the callback always receives `null` (JSON null). The only exception is an add-on that answers the command itself, and Meguri has no add-ons. C10.5 and case GS5 keep `null`, and R507's `undefined` does not apply. The source references are in the spec-side provenance under `oracle/`.
 2. **Root font size.** R486 keeps 16 px "so rem-sized templates render as in Anki", but Anki desktop's reviewer sets the root to 15 px (C15 D2). This spec follows R486's explicit 16 px. If Antoine wants desktop parity, C4.3 adds `html { font-size: var(--font-size) }` and D2 goes away.
-3. **No `window.webkit` in the Mac page world** (C9.3). U67 plans one message handler per world. Under this spec, Meguri's handler is registered only in isolated worlds, plus `cb` in the iOS page world, and page-world traffic goes through the isolated world (C14). U65's S1 record agrees: its confirmation handler is added for Meguri's isolated world only, and the page world cannot reach it.
+3. **Public adapters and isolated traffic: settled** (C9.3). Mac has no page-world `window.webkit`. iOS exposes only the existing `cb` tap adapter and U62's `meguri` replay adapter. Both remain restricted to those public protocols; runtime, confirmation and host signals stay isolated (C14). This reconciles the earlier sole-`cb` wording with the already accepted original replay-button action in `render/display-transform#D4`, D11; it grants no additional native operation.
 4. **Things a hidden page still does** (C8.2, C15 D7): Web Audio, speech synthesis, timers and dialogs (`alert`, `confirm`, `prompt`, U70) started by a pre-rendered question happen before the card is shown. A dialog requested by an unpresented page must not block its settling, or the prepare would never settle. U70 decides how such dialogs are deferred or refused. U175 may decide not to pre-render such cards.
 5. **R534 keyboard on iOS.** Settled on the simulator by U65's S1(e) (C6.4); the device check is a U256 checkpoint. If the device check fails, the fallback S1(e) names (keyboard on first tap) and its deviation replace the C6.4 sentence.
 6. **U65 decision composition.** The current S1/S2 records supply the two-page and media-origin evidence. U66's origin-root amendment is required when the prepared production history brings in its S2 update. Historical simulator and device results remain scoped to the checks actually recorded; no new device success is implied here.
