@@ -158,7 +158,8 @@ The isolated `meguriCard` channel has a string `signal`; each update receipt als
 | isolated signals `settled`, `shown`, `visible`, `updateFailed` | update/paint bookkeeping for the matching page/card/generation/side; failure reports diagnostics |
 | isolated `command` | Mac `ans` reveal on question; `play:q:N` or `play:a:N` single-entry AV playback; all other commands ignored and logged |
 | isolated `error`, `mediaError` | bounded card-scoped diagnostics; C66 C12 fields, never native execution |
-| isolated `selection`, `focus`, `composition`, `typedText`, `listeners` and pair host input/hit-map reports | current visible page's interaction state only; no grading or collection mutation |
+| isolated `selection`, `focus`, `composition`, `typedText`, `listeners` | C66 current visible page interaction state only; no grading or collection mutation |
+| isolated pair-only `meguriReviewHost` | typed input/map/probe observations under `render/host-reports`; never admitted through the generic `meguriCard` page-event relay |
 | isolated `meguriVisible` confirmation | `card`, `token` (prepare generation), `phase` of `settled` or `visible`, accepted only for the matching outstanding native token/page |
 | iOS page-world `meguri`, string `play:q:N` / `play:a:N` | original replay button's bounded single-entry playback (U62 D4) |
 | iOS page-world `cb`, JSON string with `scheme: ankitap`, `msg: zone` | R511 tap action below |
@@ -171,6 +172,8 @@ Drop input, hit-map and editable/selection/composition state from idle pages; th
 
 Diagnostics and media errors may be recorded for a preparing page if their binding matches; they do not perform an idle action. Pair host scripts may report probes/input state, but cannot expand the card's action allowlist. When a reply handler is used, complete every callback once even for an ignored command; Mac's page callback contract remains asynchronous `null` (C66 C10.5).
 
+The pair-host ABI, strict payloads, native context/revision lifecycle, probe deadlines and actual-null replies are `render/host-reports#H2`–H9. Native pair opt-in and the separate isolated handler prevent the generic page-event relay from impersonating host reports. U67 supplies admission/invalidation; real DOM/input/freshness producers remain U176/U180/U181 (H10).
+
 ## M9. Native test obligations and current interface gaps
 
 Use deterministic fake task/player cases plus real WebKit cases for storage, module imports, CSP and page presentation.
@@ -182,6 +185,7 @@ Use deterministic fake task/player cases plus real WebKit cases for storage, mod
 - `.woff2`/module MIME+CORS; root-relative fonts and dynamic import; HTML/SVG document script blocked while card scripts, inline handlers and evaluation work.
 - Missing image diagnostic, atomic arrival, in-place retry with typed value and script counter preserved; new requests see arrivals. Cover CSS/font misses without attributing them to the wrong card.
 - Shared localStorage/IndexedDB across two surfaces and a normal relaunch; fresh-page sessionStorage empty, existing-page storage retained. Never use the spike store identifier.
+- Host reports: enforce `render/host-reports#H9` with synthetic isolated hosts, including forbidden generic-relay delivery, pair opt-in, context loss, limits, request expiry and exactly-once actual JavaScript null. Missing future producer is unavailable, never fabricated ready.
 - Reject an unknown action, a bad world/frame/origin, an incorrect card/page/generation or token, idle input/state and an invalid AV index. Verify valid idle reveal/play is delivered only on matching presentation. AE18: a synthetic Mac front reveals its own card then; the iOS front stays on question because pycmd is undefined.
 - iOS loopback failure within50ms; normal permitted remote/Mac local-server routing; no real integration/sync server is contacted for a test.
 

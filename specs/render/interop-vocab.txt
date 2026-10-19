@@ -287,3 +287,25 @@ Content-Security-Policy
 X-Content-Type-Options
 Cache-Control
 If-Range
+
+# render/host-reports: fixed isolated transport names and payload fields.
+meguriReviewHost
+hostInput
+hostHitMap
+hostProbe
+viewRevision
+layoutRevision
+timeMs
+defaultPrevented
+pointer
+offsetX
+offsetY
+pageZoom
+timeoutMs
+imagesPending
+fontsPending
+stylesPending
+budgetExpired
+meguri.card
+isTrusted
+visualViewport
