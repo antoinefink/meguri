@@ -2,10 +2,10 @@
 
 Spec: render/display-transform
 Requirements: R469, R470, R526, R527, R528, R531, R559, R564, R976, R1907
-Anki: none (Meguri display contract from the requirements; no GUI assets)
+Anki: 26.09.3 (behavioral interfaces only; replay graphic is Meguri's original design)
 Scenarios: none (Meguri snapshot tests; see D12)
 
-What turns the outputs of the card render pipeline (`card-render-pipeline.md` K4) into the HTML that a card page shows in review and preview: replay buttons, TTS text, hidden play buttons, the blank-card and template-error notices, and the style block. The oracle does not produce this display HTML. These rules come from R469–R470, R526–R528, R531, R559 and R564 and are verified by Meguri's own tests (R1907 allows this normalization of replay-button markup). No Anki GUI asset is an input. Browser mode has no display transform (K5).
+What turns the outputs of the card render pipeline (`card-render-pipeline.md` K4) into the HTML that a card page shows in review and preview: replay buttons, TTS text, hidden play buttons, the blank-card and template-error notices, and the style block. The oracle does not produce this display HTML. Behavior follows R469–R470, R526–R528, R531, R559 and R564. The replay graphic is the original Meguri design specified in D4 and the revised R526; the earlier literal did not establish independent authorship and has been superseded. Meguri's own tests verify the display transform, with the original graphic taking precedence under R1960 and R1907's replay-markup normalization. Browser mode has no display transform (K5).
 
 ## D1. Inputs and output
 
@@ -34,13 +34,13 @@ A **marker** is the text `[anki:play:` + side + `:` + digits + `]`, where side i
 
 ## D4. Replay button
 
-Every marker that D5 does not claim becomes the exact compact replay markup required by R526, with ACTION in place:
+Every marker that D5 does not claim becomes this original Meguri replay button, with ACTION in place:
 
 ```html
-<a class="replay-button soundLink" href=# onclick="ACTION; return false;" draggable="false"><svg class="playImage" viewBox="0 0 64 64" version="1.1"><circle cx="32" cy="32" r="29" /><path d="M56.502,32.301l-37.502,20.101l0.329,-40.804l37.173,20.703Z" /></svg></a>
+<a class="replay-button soundLink" href=# onclick="ACTION; return false;" draggable="false"><svg class="playImage" viewBox="0 0 48 48" version="1.1"><rect x="3" y="3" width="42" height="42" rx="12" fill="none" stroke="currentColor" stroke-width="2" /><path d="M18 14L34 24L18 34Z" fill="currentColor" /></svg></a>
 ```
 
-The transform adds no leading or trailing line break and no indentation. The markup above is the Product Contract's literal string; no desktop GUI template or web asset is used.
+The transform adds no leading or trailing line break and no indentation. The rounded-square frame and filled triangle were specified for Meguri from simple geometry on 2026-10-19, without an external image, code or asset as an input. This graphic replaces the earlier graphic literal; its presence in the old Product Contract did not prove independent authorship. R1960 and R1907 require this original graphics while preserving the outer anchor attributes and classes, native actions and AV behavior.
 
 ACTION:
 

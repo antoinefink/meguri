@@ -2,10 +2,11 @@
 
 Read at tag 26.09.3 (`refs/anki-26.09.3`) to write
 `specs/render/card-render-pipeline.md`, `av-tags.md`, `display-transform.md`
-and `specs/conformance/render-ops.md` Q5-Q6. No code was copied; every rule was
-re-derived in the spec writer's words and checked by black-box probes of the
-oracle image (backend `extract_av_tags` on literal texts, and an emulation of
-Q5 over every U62 scenario, composed as below), which agree with the specs.
+and `specs/conformance/render-ops.md` Q5-Q6. The historical behavioral research
+and black-box probes are recorded below. The original replay-graphic literal
+was not supported by independent creation evidence; the 2026-10-19 asset
+correction below supersedes it. The backend probes of AV extraction and Q5
+remain behavioral evidence, not evidence about display graphics.
 
 | Spec section | Anki file | Read for |
 |---|---|---|
@@ -84,9 +85,9 @@ special-fields case successfully:
 - Linux 12/12: `build/mg/oracle/20261019T051313Z-74771/result.json`.
 - Apple 12/12, no overlays: `build/mg/oracle/20261019T051314Z-74991/result.json`.
 
-The display contract now derives its exact compact replay markup directly from
-R526; the older GUI-whitespace description in D4 is superseded, with no GUI
-asset used for implementation. Browser missing-cloze metadata remains comparable
+That intake changed the replay-markup whitespace to the then-current R526
+literal. Its claim that this established no GUI asset use is not valid: taking
+a literal through the Product Contract did not establish independent authorship. Browser missing-cloze metadata remains comparable
 to the oracle while Browse adds no notices (R976). Raw LaTeX text remains
 visible; existing image references are media, with no generated-image rewrite.
 The engine read consistency and cache obligations are Meguri design. These
@@ -117,3 +118,30 @@ Both cases replayed successfully on Linux and Apple, with no Apple overlays:
 - Apple recording: `build/mg/oracle/20261019T054244Z-97480/result.json`.
 - Apple replay: `build/mg/oracle/20261019T054318Z-98612/result.json`.
 - Freshness/schema: `build/mg/goldens-check/20261019T054316Z-98364/result.json`.
+
+## 2026-10-19 replay-graphics correction
+
+Spec-writer session `s-20261019T085518Z-87a2db02`; supplement starts at
+`269c72d1d4cf297f3a9c3f2e1f7c632b14f8592e`.
+
+The earlier read-only audit confirmed that the prior replay graphic's complete
+geometry matched an inline SVG graphic in the pinned reference. The reviewed
+records supplied no independent creation evidence for that geometry. Neither
+the old Product Contract literal nor the later whitespace-only change resolved
+that provenance gap. The earlier neutral no-GUI-asset claim was therefore too
+broad and has been corrected; the historical source-research entries above
+remain an audit record, not permission to reuse the graphic.
+
+Antoine approved an original Meguri replacement. The revised R526 and display
+D4 specify a rounded-square frame and filled triangle in a 48-by-48 view box,
+created from simple geometry in the approved task without external image,
+code or asset input. The original-graphics rule takes precedence over the old
+literal under R1960 and R1907. Compatibility classes, anchor attributes,
+platform actions, AV numbering, FrontSide replay, hidden buttons and TTS
+behavior are retained. This record states the source finding and design
+history; it gives no legal guarantee.
+
+Only the plan, neutral display spec, spec-writer trap guidance and this
+provenance record are changed by the writer. Runtime and snapshot changes and
+their validation belong to the isolated implementation workflow. No source
+audit was repeated, and no oracle, build or test was run for this spec change.

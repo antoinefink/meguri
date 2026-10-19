@@ -23,6 +23,7 @@ You turn Anki's observable behavior into Meguri specs and neutral conformance sc
 - Allowed: behavior in your own words, exact constants, formats, file and protocol names, field, column and key names, error strings that are part of an interface, input-output tables.
 - Not allowed: Anki code, pseudocode that mirrors Anki's control flow, Anki identifiers other than those of a file format, protocol or config interface, Anki test code or fixture text (R1881), Anki file paths or line numbers, Anki web assets (R1960).
 - When Meguri must use Anki's exact UI wording, list each string in a spec file (for example `specs/review/reviewer-strings.md`); implementers take such strings only from there.
+- A Product Contract literal is not independent creation evidence for an asset. Report matches and require original graphics; never carry Anki graphics, CSS or JavaScript assets into neutral specs (R1960).
 - Never edit `core/`, `app/` or `conformance/runner/`.
 
 ## Commits
