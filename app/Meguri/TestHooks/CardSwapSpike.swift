@@ -509,33 +509,74 @@ extension TestHooks {
             let closed = await restedWebContentKB(views, &burst)
             burst.webContentClosedKB = closed
             for page in [front!, back!] {
-                let counts = await page.run(Self.collectScript)
-                let parts = counts.split(separator: " ").compactMap { Int($0) }
-                if parts.count == 2 {
-                    burst.cardElementsRegistered += parts[0]
-                    burst.cardElementsFinalized += parts[1]
+                let counts = await Self.collectCardElements(page)
+                let parts = counts.split(separator: " ")
+                guard parts.count == 2, let registered = Int(parts[0]), let finalized = Int(parts[1]),
+                    registered >= 0, finalized >= 0, finalized <= registered
+                else {
+                    report.lastConfirm = "error: card-element collection: \(counts)"
+                    report.burst = burst
+                    publish()
+                    return
                 }
+                burst.cardElementsRegistered += registered
+                burst.cardElementsFinalized += finalized
             }
             report.burst = burst
             publish()
         }
 
-        /// Allocates and drops about 256 MB of arrays so the page collects
-        /// its garbage (again, up to six times, while more than two cards'
-        /// elements are still waiting), then answers `<registered>
-        /// <finalized>`.
+        /// PRIVATE TEST SPI: request collection only after all memory samples,
+        /// then let finalization callbacks run. A stuck process must report an
+        /// error rather than leave the UI waiting for the burst forever.
+        private static func collectCardElements(_ page: SpikePage) async -> String {
+            let pool = page.webView.configuration.processPool
+            let selector = NSSelectorFromString("_garbageCollectJavaScriptObjectsForTesting")
+            guard pool.responds(to: selector) else {
+                return "error: WKProcessPool lacks required test SPI _garbageCollectJavaScriptObjectsForTesting"
+            }
+            let collect = unsafeBitCast(pool.method(for: selector), to: (@convention(c) (AnyObject, Selector) -> Void).self)
+            collect(pool, selector)
+            let reply = CollectionReply()
+            let timeout = Task {
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                reply.finish("error: card-element finalizers did not drain within 5 s")
+            }
+            defer { timeout.cancel() }
+            return await withCheckedContinuation { continuation in
+                reply.continuation = continuation
+                // Ordered IPC puts this script after the pool's GC request.
+                page.webView.callAsyncJavaScript(Self.collectScript, arguments: [:], in: nil, in: .page) { result in
+                    switch result {
+                    case .success(let value): reply.finish(value as? String ?? "error: collection returned no counts")
+                    case .failure(let error): reply.finish("error: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+
+        private final class CollectionReply {
+            var continuation: CheckedContinuation<String, Never>?
+
+            func finish(_ value: String) {
+                continuation?.resume(returning: value)
+                continuation = nil
+            }
+        }
+
+        /// Bounded event-loop turns, then actual registered/finalized counts.
         static let collectScript = """
-            // Up to six rounds, until no more than two cards' elements wait.
-            for (let pass = 0; pass < 6 && window.cardsFinalized < window.cardsRegistered - 10; pass += 1) {
-              for (let round = 0; round < 256; round += 1) {
-                let junk = [];
-                for (let i = 0; i < 64; i += 1) junk.push(new Array(2048).fill(round + i));
-                junk = null;
-                // Turn the event loop (a message, which hidden pages do not throttle
-                // as they do timers): collections and finalizers run between tasks.
-                if (round % 16 == 15) await new Promise((resolve) => { const channel = new MessageChannel(); channel.port1.onmessage = resolve; channel.port2.postMessage(0); });
+            const deadline = performance.now() + 2000;
+            const channel = new MessageChannel();
+            try {
+              for (let turn = 0; turn < 64; turn += 1) {
+                await new Promise((resolve) => { channel.port1.onmessage = resolve; channel.port2.postMessage(0); });
+                if (performance.now() >= deadline) throw new Error("card-element finalizers did not drain within 2 s");
               }
-              await new Promise((resolve) => setTimeout(resolve, 500));
+            } finally {
+              channel.port1.onmessage = null;
+              channel.port1.close();
+              channel.port2.close();
             }
             return window.cardsRegistered + " " + window.cardsFinalized;
             """

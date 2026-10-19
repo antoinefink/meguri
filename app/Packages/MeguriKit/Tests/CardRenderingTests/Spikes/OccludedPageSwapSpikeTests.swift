@@ -173,10 +173,8 @@ extension RenderingSpikes {
         /// replaces the card and runs its scripts, as U66's prepare phase
         /// will. With `trackCards` set, it registers each card's elements for
         /// finalization (a weak registration keeps nothing alive), so a test
-        /// can see whether old cards are collected: `collect()` allocates and
-        /// drops about 256 MB of arrays so the page collects its garbage, up
-        /// to six times while more than two cards' elements are still
-        /// waiting, and answers the counts.
+        /// can see whether old cards are collected after an explicit test
+        /// collection and event-loop turns for the finalization callbacks.
         static let skeleton = card(
             #"<div id="qa"></div>"#,
             head: """
@@ -199,20 +197,6 @@ extension RenderingSpikes {
                   }
                   return document.getElementsByTagName("*").length;
                 };
-                window.collect = async () => {
-                  for (let pass = 0; pass < 6 && window.cardsFinalized < window.cardsRegistered - 8; pass += 1) {
-                    for (let round = 0; round < 256; round += 1) {
-                      let junk = [];
-                      for (let i = 0; i < 64; i += 1) junk.push(new Array(2048).fill(round + i));
-                      junk = null;
-                      // Turn the event loop (a message, which hidden pages do not throttle
-                      // as they do timers): collections and finalizers run between tasks.
-                      if (round % 16 == 15) await new Promise((resolve) => { const channel = new MessageChannel(); channel.port1.onmessage = resolve; channel.port2.postMessage(0); });
-                    }
-                    await new Promise((resolve) => setTimeout(resolve, 500));
-                  }
-                  return JSON.stringify({ registered: window.cardsRegistered, finalized: window.cardsFinalized });
-                };
                 </script>
                 """)
 
@@ -228,6 +212,48 @@ extension RenderingSpikes {
             let registered: Int
             let finalized: Int
         }
+
+        /// Test-only collection follows all R1853 footprint samples.
+        static func collect(_ page: SpikeWebView) async throws -> Collected {
+            let pool = page.configuration.processPool
+            let selector = NSSelectorFromString("_garbageCollectJavaScriptObjectsForTesting")
+            guard pool.responds(to: selector) else {
+                throw Spike.Failure("WKProcessPool lacks required test SPI _garbageCollectJavaScriptObjectsForTesting")
+            }
+            // The selector returns void; invoke it with its actual ABI.
+            let collect = unsafeBitCast(pool.method(for: selector), to: (@convention(c) (AnyObject, Selector) -> Void).self)
+            collect(pool, selector)
+            // The script follows the pool's collection request through ordered
+            // process IPC. FinalizationRegistry callbacks still need tasks.
+            let text: String = try await Spike.within("draining card-element finalizers", timeout: .seconds(5)) { finish in
+                page.callAsyncJavaScript(Self.finalizationCounts, arguments: [:], in: nil, in: .page) { result in
+                    finish(result.flatMap { value in
+                        guard let text = value as? String else {
+                            return .failure(Spike.Failure("card-element collection returned no counts"))
+                        }
+                        return .success(text)
+                    })
+                }
+            }
+            return try JSONDecoder().decode(Collected.self, from: Data(text.utf8))
+        }
+
+        static let finalizationCounts = """
+            const deadline = performance.now() + 2000;
+            const channel = new MessageChannel();
+            try {
+              // Messages turn even an occluded page's event loop, unlike RAF.
+              for (let turn = 0; turn < 64; turn += 1) {
+                await new Promise((resolve) => { channel.port1.onmessage = resolve; channel.port2.postMessage(0); });
+                if (performance.now() >= deadline) throw new Error("card-element finalizers did not drain within 2 s");
+              }
+            } finally {
+              channel.port1.onmessage = null;
+              channel.port1.close();
+              channel.port2.close();
+            }
+            return JSON.stringify({ registered: window.cardsRegistered, finalized: window.cardsFinalized });
+            """
 
         /// What a burst of swaps measured.
         struct Burst {
@@ -339,7 +365,7 @@ extension RenderingSpikes {
             let closed = try await Self.restedWebContent(burst.pages)
             (burst.processes, burst.closedWebContent) = (closed.processes, closed.bytes)
             for page in burst.pages {
-                let collected = try await page.json(Collected.self, "return await collect();")
+                let collected = try await Self.collect(page)
                 burst.registered += collected.registered
                 burst.finalized += collected.finalized
             }
@@ -373,6 +399,30 @@ extension RenderingSpikes {
             withKnownIssue("S1(f) failed: web content memory over 1,000 swaps (decision record S1, escalated)", isIntermittent: true) {
                 #expect(burst.webContentProblems.isEmpty, "\(burst.webContentProblems): \(burst.summary)")
             }
+        }
+
+        @Test func explicitCollectionKeepsRetainedRemovedElementsUntilReleased() async throws {
+            let handler = SpikeMediaHandler()
+            handler.add("/_anki/card.html", text: Self.skeleton, "text/html")
+            let pair = SpikePagePair(configuration: Spike.configuration(handler: handler), size: Self.size)
+            let window = SpikeWindow(pair.container)
+            defer { window.close() }
+            let page = pair.front
+            try await page.open(Spike.origin.appending(path: "_anki/card.html"))
+            try await page.run(
+                """
+                window.trackCards = true;
+                show(1, "<h1>Retained</h1><p>Removed</p><span>Card</span><div>Elements</div>");
+                window.retainedElements = [...document.getElementById("qa").children];
+                document.getElementById("qa").innerHTML = "";
+                """)
+            let retained = try await Self.collect(page)
+            #expect(retained.registered == 4)
+            #expect(retained.finalized == 0, "strongly retained removed elements must stay alive")
+            try await page.run("window.retainedElements = null;")
+            let released = try await Self.collect(page)
+            #expect(released.registered == 4)
+            #expect(released.finalized == released.registered, "released removed elements must be finalized")
         }
 
         /// The memory check sees what the pages keep: cards that each retain
