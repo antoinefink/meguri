@@ -1,0 +1,20 @@
+approval_policy = "never"
+web_search = "disabled"
+default_permissions = "meguri"
+
+[features]
+apps = false
+plugins = false
+multi_agent = false
+hooks = false
+
+[permissions.meguri]
+extends = ":workspace"
+
+[permissions.meguri.filesystem]
+"/codex-run" = "deny"
+"/proc" = "deny"
+"/git" = "read"
+
+[permissions.meguri.network]
+enabled = false

@@ -1,5 +1,7 @@
 # tools/
 
+- `cleanroom-image` builds the pinned Codex Linux runtime. `cleanroom --check` proves its boundaries without credentials; implementation/fixer runs require clean master plus a recorded session and export a patch, never write the real checkout. See `cleanroom/README.md`. Keep the command sandbox mandatory and forbidden sources/history/caches absent from its mounts.
+
 - `tools/mg <job>` is the only documented way to build, test and verify. A run writes `build/mg/<job>/<run-id>/result.json` (schema `mg-result.schema.json`, bump `schema_version` on incompatible changes), points `latest` at it (never for `--dry-run`), prints only the result path on stdout, and exits 0 for pass and warn, 1 for fail, 2 for error. Job output goes to stderr and `log.txt`.
 - Add a job by adding or extending a family in `mg.d/<family>.sh`: `mg_job <name> <host|docker:<service>> <fn> <description>`, then record results with `mg_status`, `mg_count`, `mg_failure`, `mg_artifact`, `mg_user_step`, `mg_detail`, `mg_message`. Do not echo JSON yourself. Every job must survive `--dry-run`; `tools/mg selftest` dry-runs them all.
 - Catch-up may reuse only the latest real passing result for the exact clean commit, checkout and arguments; never search past a newer failure. Resolve `latest` once to its run directory before validation. Record reuse explicitly; normal gates and direct jobs still run fresh.

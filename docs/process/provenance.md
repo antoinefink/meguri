@@ -12,6 +12,17 @@ Meguri reimplements Anki's behavior without its code (KTD1, R1954–R1960, R2021
 
 Antoine changed the build workflow on 2026-10-18: all new work happens directly on `master`, with no new branches or worktrees. Implementer and fixer sessions use `tools/mg session record`; their forbidden-source rules and commit trailers still apply. Existing role worktrees remain sources of prepared work. Their setup below describes the earlier workflow. Every completed unit requires its review log and a full `tools/mg gate --base <unit-start-commit>` receipt; `tools/mg merge` is optional.
 
+For new implementation and fixes, `tools/mg cleanroom` exports a filtered copy of
+clean master into a separate container. Forbidden trees, build output, real Git
+history, host credentials and dependency caches are absent from its source view.
+Codex's command sandbox denies networking and access to the temporary run
+credentials; web search and integrations are disabled. Synthetic boundary probes
+must pass before each run. The orchestrator applies the reviewed patch to master
+and verifies it through `tools/mg`. The integrator still has main-checkout access
+and must not read forbidden sources. Details and runtime limitations:
+`tools/cleanroom/README.md`. The earlier deny profiles below describe existing
+worktrees; they are not filesystem isolation for new main-checkout sessions.
+
 ## Session records (R1958)
 
 `docs/process/provenance/sessions.jsonl` holds one JSON line per agent session. Lines are only ever appended, and every record is committed where it is appended, in a commit that changes only that file (`Record session <id> (<role>, <name>)`, trailers `Role: infra` and `Session: <id>`). `.gitattributes` merges the file with git's union driver, so records committed on different branches never conflict, and no checkout is left with an uncommitted ledger that blocks a merge.
