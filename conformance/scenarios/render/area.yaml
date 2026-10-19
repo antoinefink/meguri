@@ -1,10 +1,4 @@
-# specs/conformance/dsl.md D9.1. Active: Meguri must pass them in T0 through
-# the testkit's `template` adapter (meguri-template, U60; cloze filters and
-# the cloze blank check, U61) and its `cloze` adapter (cloze-ops.md, U61).
-# Pending, and added here by the units that build what they need (plan
-# amendment A2, docs/process/review-log/U60.md): special-fields/cards by U62
-# (template card cases on stored notes and cards). U36 activates
-# template/legacy-req through legacy_update and legacy_json.
+# Stored-card pipeline and template/cloze conformance (U60, U61, U62).
 area: render
 active:
   - "cloze/*"
@@ -19,3 +13,7 @@ active:
   - "template/names"
   - "template/tags"
   - "template/legacy-req"
+  - "special-fields/cards"
+  - "pipeline/*"
+  - "av-tags/*"
+  - "errors/*"

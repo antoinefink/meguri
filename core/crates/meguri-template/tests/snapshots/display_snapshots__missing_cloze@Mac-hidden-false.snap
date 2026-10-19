@@ -1,0 +1,11 @@
+---
+source: crates/meguri-template/tests/display_snapshots.rs
+assertion_line: 26
+expression: text
+---
+QUESTION
+<style>.card { color: navy; }</style><div>No cloze 1 found on card.
+Please either add a cloze deletion, or use the Empty Cards tool.<br><a href='https://docs.ankiweb.net/templates/errors.html#no-cloze-filter-on-cloze-note-type'>More information</a></div>
+ANSWER
+<style>.card { color: navy; }</style><div>No cloze 1 found on card.
+Please either add a cloze deletion, or use the Empty Cards tool.<br><a href='https://docs.ankiweb.net/templates/errors.html#no-cloze-filter-on-cloze-note-type'>More information</a></div>

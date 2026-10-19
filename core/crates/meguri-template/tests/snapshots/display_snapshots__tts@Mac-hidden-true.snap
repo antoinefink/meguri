@@ -1,0 +1,9 @@
+---
+source: crates/meguri-template/tests/display_snapshots.rs
+assertion_line: 26
+expression: text
+---
+QUESTION
+<style>.card { color: navy; }</style>猫
+ANSWER
+<style>.card { color: navy; }</style>猫

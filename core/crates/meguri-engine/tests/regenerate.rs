@@ -314,6 +314,7 @@ fn cloze_regeneration_does_not_skip_equal_card_and_template_counts() {
                 name: "Gap".to_owned(),
                 front: "{{cloze:Text}}".to_owned(),
                 back: "{{cloze:Text}}".to_owned(),
+                ..Default::default()
             }],
             css: Some(String::new()),
         },

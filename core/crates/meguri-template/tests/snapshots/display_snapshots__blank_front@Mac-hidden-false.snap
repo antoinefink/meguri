@@ -1,0 +1,9 @@
+---
+source: crates/meguri-template/tests/display_snapshots.rs
+assertion_line: 26
+expression: text
+---
+QUESTION
+<style>.card { color: navy; }</style><div>The front of this card is blank.<br><a href='https://docs.ankiweb.net/templates/errors.html#front-of-card-is-blank'>More information</a></div>
+ANSWER
+<style>.card { color: navy; }</style><div>The front of this card is blank.<br><a href='https://docs.ankiweb.net/templates/errors.html#front-of-card-is-blank'>More information</a></div>

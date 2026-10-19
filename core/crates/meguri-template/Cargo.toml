@@ -20,8 +20,15 @@ meguri-text.workspace = true
 regex.workspace = true
 
 [dev-dependencies]
+gungraun.workspace = true
+insta.workspace = true
 # Reads scenarios (YAML 1.2 core schema) and their hashes for the golden-pair
 # tests of scenarios Meguri's executor cannot run yet (tests/golden_pairs.rs).
 meguri-testkit.workspace = true
 # Reads the template corpus scenarios for the source-span round trip (T12).
 serde_json.workspace = true
+
+[[bench]]
+name = "icount_render"
+path = "benches/icount/render.rs"
+harness = false

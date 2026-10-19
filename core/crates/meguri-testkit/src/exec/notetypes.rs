@@ -100,6 +100,8 @@ fn new_notetype(spec: &NotetypeSpec) -> NewNotetype {
                 name: t.name.clone(),
                 front: t.front.clone(),
                 back: t.back.clone(),
+                browser_front: t.browser_front.clone(),
+                browser_back: t.browser_back.clone(),
             })
             .collect(),
         css: Some(spec.css.clone()),

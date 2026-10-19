@@ -37,6 +37,7 @@ pub mod notetypes;
 pub mod ports;
 pub mod progress;
 pub mod readers;
+pub mod rendering;
 pub mod sched;
 pub mod schema_gate;
 pub mod suspend;

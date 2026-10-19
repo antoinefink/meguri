@@ -357,6 +357,7 @@ impl Engine {
             readers: Readers::new(opened.reader_factory()),
             derived: std::sync::OnceLock::new(),
             media: std::sync::Mutex::new(None),
+            render_cache: Default::default(),
             space: config.disk_space_provider,
         });
         let reopen = Reopen {

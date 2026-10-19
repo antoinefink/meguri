@@ -27,6 +27,7 @@ pub(crate) struct CollectionCore {
     /// Attaches the derived store to readers (`storage/derived-store` D9),
     /// once the store's open step ran.
     pub(crate) derived: OnceLock<Arc<crate::derived_host::Attachment>>,
+    pub(crate) render_cache: crate::rendering::ParseCache,
     pub(crate) media: std::sync::Mutex<Option<Arc<crate::media::MediaState>>>,
 }
 

@@ -17,6 +17,7 @@ pub mod events;
 pub mod fsrs_policy;
 pub mod jobs;
 pub mod progress;
+pub mod render;
 mod runtime;
 #[cfg(feature = "test-hooks")]
 mod test_hooks;

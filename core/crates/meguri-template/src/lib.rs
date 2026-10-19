@@ -16,7 +16,10 @@
 //! as `template-syntax.md` T9-T10 describe.
 
 pub mod analysis;
+pub mod av_tags;
+pub mod card;
 pub mod cloze;
+pub mod display;
 pub mod error;
 pub mod filters;
 pub mod parser;

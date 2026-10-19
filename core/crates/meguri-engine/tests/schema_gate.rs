@@ -43,11 +43,13 @@ fn pair(h: &Harness) -> NotetypeId {
                 name: "Forward".to_owned(),
                 front: "{{Front}}".to_owned(),
                 back: "{{Back}}".to_owned(),
+                ..Default::default()
             },
             NewTemplate {
                 name: "Reverse".to_owned(),
                 front: "{{Back}}".to_owned(),
                 back: "{{Front}}".to_owned(),
+                ..Default::default()
             },
         ],
         ..NewNotetype::default()
@@ -213,6 +215,7 @@ fn a_plain_save_cannot_move_templates_that_have_no_id() {
                 name: name.to_owned(),
                 front: "{{Front}}{{Card}}".to_owned(),
                 back: "{{Back}}".to_owned(),
+                ..Default::default()
             })
             .collect(),
         ..NewNotetype::default()

@@ -18,6 +18,7 @@ crate-type = ["staticlib", "lib"]
 meguri-engine.workspace = true
 # The change value types and ids the `Changes` event carries (KTD2).
 meguri-model.workspace = true
+meguri-template.workspace = true
 uniffi.workspace = true
 
 [features]

@@ -24,6 +24,7 @@ pub fn kind(h: &Harness, cloze: bool, fields: &[&str], fronts: &[&str]) -> Notet
                     name: format!("View {i}"),
                     front: (*front).to_owned(),
                     back: String::new(),
+                    ..Default::default()
                 })
                 .collect(),
             css: Some(String::new()),

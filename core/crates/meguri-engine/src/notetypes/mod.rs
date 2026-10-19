@@ -150,12 +150,14 @@ pub struct NewNotetype {
     pub css: Option<String>,
 }
 
-/// A new template: its name, front and back.
+/// A new template: its name, review formats and optional browser formats.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NewTemplate {
     pub name: String,
     pub front: String,
     pub back: String,
+    pub browser_front: String,
+    pub browser_back: String,
 }
 
 /// A note type an op added, or found (the Image Occlusion note type).
@@ -284,7 +286,12 @@ pub fn from_scratch(new: &NewNotetype, random: &dyn RandomSource) -> Notetype {
         templates: new
             .templates
             .iter()
-            .map(|t| new_template(&t.name, &t.front, &t.back, random))
+            .map(|t| {
+                let mut template = new_template(&t.name, &t.front, &t.back, random);
+                template.config.q_format_browser = t.browser_front.clone();
+                template.config.a_format_browser = t.browser_back.clone();
+                template
+            })
             .collect(),
     }
 }

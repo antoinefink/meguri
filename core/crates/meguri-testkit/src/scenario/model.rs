@@ -547,6 +547,10 @@ pub struct TemplateSpec {
     pub front: String,
     #[serde(default)]
     pub back: String,
+    #[serde(default)]
+    pub browser_front: String,
+    #[serde(default)]
+    pub browser_back: String,
 }
 
 /// Field values in field order, or by field name.

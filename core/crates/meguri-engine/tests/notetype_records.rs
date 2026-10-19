@@ -32,6 +32,7 @@ fn template(name: &str, front: &str, back: &str) -> NewTemplate {
         name: name.to_owned(),
         front: front.to_owned(),
         back: back.to_owned(),
+        ..Default::default()
     }
 }
 

@@ -55,7 +55,7 @@ import Testing
     @Test func bridgeCallsAreSignpostedUnderTheirExportNamesOnly() {
         #expect(BridgeCall.all.map(\.name) == [
             "core_version", "core_build_info", "set_event_listener",
-            "CancelToken.new", "CancelToken.cancel", "CancelToken.isCancelled",
+            "CancelToken.new", "CancelToken.cancel", "CancelToken.isCancelled", "render_card",
         ])
         for call in BridgeCall.all {
             #expect(call.interval.category == .bridge)
