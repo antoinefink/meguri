@@ -215,7 +215,15 @@ extension RenderingSpikes {
 
         /// Test-only collection follows all R1853 footprint samples.
         static func collect(_ page: SpikeWebView) async throws -> Collected {
-            let pool = page.configuration.processPool
+            // Runtime lookup is for this private testing interface.
+            let configuration = page.configuration
+            let poolGetter = NSSelectorFromString("processPool")
+            guard configuration.responds(to: poolGetter) else {
+                throw Spike.Failure("WKWebViewConfiguration lacks required processPool getter for test SPI")
+            }
+            guard let pool = configuration.perform(poolGetter)?.takeUnretainedValue() as? NSObject else {
+                throw Spike.Failure("WKWebViewConfiguration processPool getter returned no NSObject")
+            }
             let selector = NSSelectorFromString("_garbageCollectJavaScriptObjectsForTesting")
             guard pool.responds(to: selector) else {
                 throw Spike.Failure("WKProcessPool lacks required test SPI _garbageCollectJavaScriptObjectsForTesting")

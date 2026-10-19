@@ -530,7 +530,15 @@ extension TestHooks {
         /// then let finalization callbacks run. A stuck process must report an
         /// error rather than leave the UI waiting for the burst forever.
         private static func collectCardElements(_ page: SpikePage) async -> String {
-            let pool = page.webView.configuration.processPool
+            // Runtime lookup is for this private testing interface.
+            let configuration = page.webView.configuration
+            let poolGetter = NSSelectorFromString("processPool")
+            guard configuration.responds(to: poolGetter) else {
+                return "error: WKWebViewConfiguration lacks required processPool getter for test SPI"
+            }
+            guard let pool = configuration.perform(poolGetter)?.takeUnretainedValue() as? NSObject else {
+                return "error: WKWebViewConfiguration processPool getter returned no NSObject"
+            }
             let selector = NSSelectorFromString("_garbageCollectJavaScriptObjectsForTesting")
             guard pool.responds(to: selector) else {
                 return "error: WKProcessPool lacks required test SPI _garbageCollectJavaScriptObjectsForTesting"
