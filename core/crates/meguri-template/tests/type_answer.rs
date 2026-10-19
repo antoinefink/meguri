@@ -54,6 +54,41 @@ fn normalization_case_folding_and_unicode_versions_stay_separate() {
     }
 }
 #[test]
+fn unicode10_marks_are_isolated_only_at_token_starts_on_both_comparison_lines() {
+    // Mn, Me, Mc, variation selectors and Unicode 10 boundary marks.
+    for mark in [
+        '\u{335}',
+        '\u{488}',
+        '\u{903}',
+        '\u{fe0f}',
+        '\u{e0100}',
+        '\u{e01ef}',
+        '\u{8d4}',
+        '\u{1abe}',
+    ] {
+        let text = format!("x{mark}y");
+        let typed = ta::compare("xy", &text, Mode::Plain, false);
+        assert!(typed.contains(&format!("class=typeBad>\u{a0}{mark}</span>")), "{typed}");
+        let expected = ta::compare(&text, "xy", Mode::Plain, false);
+        assert!(
+            expected.contains(&format!("class=typeMissed>\u{a0}{mark}</span>")),
+            "{expected}"
+        );
+        let internal = ta::compare(&text, &format!("x{mark}z"), Mode::Plain, false);
+        assert!(!internal.contains('\u{a0}'), "{internal}");
+    }
+    // These are marks in newer Unicode releases, but were unassigned in 10.
+    for mark in ['\u{8d3}', '\u{1ac1}'] {
+        let text = format!("x{mark}y");
+        for result in [
+            ta::compare("xy", &text, Mode::Plain, false),
+            ta::compare(&text, "xy", Mode::Plain, false),
+        ] {
+            assert!(!result.contains('\u{a0}'), "{result}");
+        }
+    }
+}
+#[test]
 fn repeated_long_inputs_use_the_pinned_matcher() {
     let expected = format!("{}abc{}", "x".repeat(100), "y".repeat(100));
     // A6.7 explicitly fixes the whole response here, unlike Python difflib.

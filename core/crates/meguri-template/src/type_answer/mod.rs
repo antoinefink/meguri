@@ -1,6 +1,7 @@
 //! Review type-in substitution, independent of storage (render/type-answer A2–A10).
 mod compare;
 mod replacement;
+mod unicode10_marks;
 use crate::{NodeKind, ParsedTemplate};
 pub use compare::{compare, compare_typed_answer, expected_text};
 use regex::Regex;

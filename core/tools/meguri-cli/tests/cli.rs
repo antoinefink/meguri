@@ -122,6 +122,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "notetype_structure",
             "render",
             "render_status",
+            "review_html",
             "schema_objects",
             "search",
             "tag_tree",
@@ -129,6 +130,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "template.card",
             "text",
             "timing",
+            "type_answer",
             "undo_status",
         ])
     );
@@ -205,6 +207,16 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     // observations.md O4: these kinds belong to the language; U36 runs
     // blob_decode, while package_col remains owned by package export.
     for kind in ["blob_decode", "package_col", "ignored_before_count"] {
+        assert!(
+            json["language"]["observations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|k| k == kind),
+            "{kind}"
+        );
+    }
+    for kind in ["review_html", "type_answer"] {
         assert!(
             json["language"]["observations"]
                 .as_array()

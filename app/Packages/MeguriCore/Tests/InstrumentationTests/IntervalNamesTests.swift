@@ -56,6 +56,7 @@ import Testing
         #expect(BridgeCall.all.map(\.name) == [
             "core_version", "core_build_info", "set_event_listener",
             "CancelToken.new", "CancelToken.cancel", "CancelToken.isCancelled", "render_card",
+            "compare_typed_answer",
         ])
         for call in BridgeCall.all {
             #expect(call.interval.category == .bridge)

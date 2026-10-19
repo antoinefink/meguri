@@ -1,5 +1,5 @@
 //! A6: normalization and token coordinates stay separate from display text.
-use super::{Descriptor, Mode};
+use super::{Descriptor, Mode, unicode10_marks::is_mark};
 use difflib::sequencematcher::SequenceMatcher;
 use regex::Regex;
 use std::sync::LazyLock;
@@ -81,14 +81,8 @@ pub fn compare(expected: &str, typed: &str, mode: Mode, ci: bool) -> String {
     format!("<code id=typeans>{top}<br><span id=typearrow>&darr;</span><br>{bottom}</code>")
 }
 fn isolated(chars: &[char]) -> String {
-    use unic_ucd_category::GeneralCategory;
     let mut out = String::new();
-    if chars.first().is_some_and(|c| {
-        matches!(
-            GeneralCategory::of(*c),
-            GeneralCategory::NonspacingMark | GeneralCategory::SpacingMark | GeneralCategory::EnclosingMark
-        )
-    }) {
+    if chars.first().is_some_and(|c| is_mark(*c)) {
         out.push('\u{a0}');
     }
     out.extend(chars);
