@@ -215,6 +215,25 @@ mkdir -p "$bundle"
 jq -n --argjson f "$([ "$rc" = 0 ] && echo 0 || echo 1)" \
   "{result: (if \$f == 0 then \"Passed\" else \"Failed\" end), passedTests: 11, failedTests: \$f, skippedTests: 1}" >"$bundle/summary.json"
 [ "$rc" = 0 ] || [ -z "${FAKE_VM_RESULTS:-}" ] || cp "$FAKE_VM_RESULTS/tests.json" "$FAKE_VM_RESULTS/activities.json" "$bundle/"
+if [ -n "${TEST_RUNNER_MEGURI_RECIPE_FIXTURES:-}" ]; then
+  lease="$(dirname "$MEGURI_HOST_LEASE_DIR")/mac-vm.${FAKE_VM##*/}.lock/holder.json"
+  echo "vm-recipe-lease $(jq -r .job "$lease")" >>"$STUB_LOG"
+  cases="[]"
+  old_ifs="$IFS"
+  IFS=:
+  for d in $TEST_RUNNER_MEGURI_RECIPE_FIXTURES; do
+    [ -f "$d/collection.anki2" ] && [ -f "$d/manifest.json" ] && [ -f "$d/collection.media/asset.txt" ] || exit 65
+    echo "vm-recipe $(unmap "$d") $(cat "$d/collection.media/asset.txt")" >>"$STUB_LOG"
+    cases="$(jq -c --arg r "$([ "$rc" = 0 ] && echo Passed || echo Failed)" ". + [{nodeType: \"Arguments\", result: \$r}]" <<<"$cases")"
+  done
+  IFS="$old_ifs"
+  jq -n --argjson c "$cases" "{testNodes: [{nodeType: \"Test Case\", result: \"Passed\", children: \$c}]}" >"$bundle/tests.json"
+  jq -n --argjson c "$cases" "{result: (if all(\$c[]; .result == \"Passed\") then \"Passed\" else \"Failed\" end), passedTests: 1, failedTests: 0, skippedTests: 0}" >"$bundle/summary.json"
+  case "${FAKE_VM_RECIPE_RESULT:-}" in
+    invalid) echo invalid >"$bundle/summary.json" ;;
+    empty) echo "{\"testNodes\": []}" >"$bundle/tests.json" ;;
+  esac
+fi
 if [ -n "${TEST_RUNNER_MEGURI_DRIVE_SCRIPT:-}" ]; then
   [ -f "$TEST_RUNNER_MEGURI_DRIVE_SCRIPT" ] || { echo "AgentDriverTests: no drive script at $(unmap "$TEST_RUNNER_MEGURI_DRIVE_SCRIPT")"; exit 65; }
   att="$bundle/attachments"
@@ -249,6 +268,7 @@ add_fakes() {
   cat >"$1/tools/mg.d/zz-vm-fakes.sh" <<'EOF'
 mg_app_build() {
   echo "fake build $*" >>"$STUB_LOG"
+  [ "${3:-}" != Snapshot ] || mg_on_exit recipe_env_after
   local p="$MG_ROOT/build/app/DerivedData/Build/Products"
   mkdir -p "$p/$2/Meguri.app/Contents" "$p/$2/MeguriUITests-Runner.app"
   printf 'built from %s\n' "$MG_ROOT" >"$p/$2/Meguri.app/Contents/Info.plist"
@@ -320,6 +340,155 @@ vm_fs() { printf '%s/%s/fs%s\n' "$FAKE_VM_DIR" "$1" "$2"; }
 
 # vm_tests_running <vm>: whether a test run is still alive in that fake VM.
 vm_tests_running() { FAKE_VM="$FAKE_VM_DIR/$1" "$FAKE_VM_BIN/pgrep" -f 'xcodebuild[ ]test-without-building' >/dev/null; }
+
+# Stub only generation and collection validation; run the real recipe launch
+# path against the same fake VM as the Mac suites. Include spaces and both
+# relative and absolute summary paths, outside app/Fixtures.
+recipe_launch_fakes() {
+  export MG_CONTAINER=dev
+  mkdir -p "$SB/core/crates/meguri-testkit/profiles"
+  echo '{"totals": {"span_days": 120}}' >"$SB/core/crates/meguri-testkit/profiles/user-shape.json"
+  cat >>"$SB/tools/mg.d/zz-vm-fakes.sh" <<'EOF'
+recipe_env_after() {
+  echo "recipe-env-after ${TEST_RUNNER_MEGURI_RECIPE_FIXTURES-unset}" >>"$STUB_LOG"
+}
+mg_fixtures() {
+  local name dir summaries="$MG_RUN_DIR/recipes.jsonl"
+  : >"$summaries"
+  for name in tiny 'with space'; do
+    dir="build/fixtures/recipes/$name-1"
+    mkdir -p "$MG_ROOT/$dir/collection.media"
+    echo "$name collection" >"$MG_ROOT/$dir/collection.anki2"
+    echo "$name media" >"$MG_ROOT/$dir/collection.media/asset.txt"
+    echo '{"counts": {"notes": 1, "cards": 1, "revlog": 0, "notetypes": 1, "decks": 1, "presets": 1, "tags": 0}}' >"$MG_ROOT/$dir/manifest.json"
+    [ "$name" != 'with space' ] || dir="$MG_ROOT/$dir"
+    jq -nc --arg t "$name" --arg d "$dir" --argjson m "$(cat "$MG_ROOT/build/fixtures/recipes/$name-1/manifest.json")" \
+      '{target: $t, kind: "recipe", dir: $d, manifest: $m}' >>"$summaries"
+  done
+  mg_detail fixtures "$(jq -sc . "$summaries")"
+  mg_status pass
+}
+mg_oracle() {
+  mg_detail check "$(jq -nc --argjson m "$(cat "$2/manifest.json")" --argjson bad "${FAKE_COLLECTION_PROBLEM:-0}" \
+    '$m + {counts: ($m.counts + {graves: 0}), changed_tables: ["col", "config"], check_db: {card_properties: $bad}, timing: {days_elapsed: 120}}')"
+  mg_status pass
+}
+EOF
+  stub "$FAKE_VM_BIN/tar" '
+case "$*" in
+  *build/fixtures/recipes*"-xf -"*) [ "${FAKE_VM_RECIPE_COPY_FAIL:-}" != 1 ] || exit 42 ;;
+esac
+exec '"$(command -v tar)"' "$@"'
+}
+
+# bats test_tags=gate
+@test "recipe launch on a locked host uses the VM lease, copies generated directories and returns Argument counts" {
+  recipe_launch_fakes
+  stub "$BIN/ioreg" 'echo "+-o Root  <class IORegistryEntry>"; echo "  \"IOConsoleUsers\" = ({\"kCGSSessionOnConsoleKey\"=Yes,\"CGSSessionScreenIsLocked\"=Yes})"'
+  TEST_RUNNER_MEGURI_RECIPE_FIXTURES=caller-value mg fixtures-check recipes
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed)"')" = '3 3 0' ]
+  [ "$(field .details.mac_runner)" = vm ]
+  [ "$(field .details.mac_vm.lease.job)" = fixtures-check ]
+  [ -z "$(field '.user_steps[] | select(.id == "host-session") | .id')" ]
+  called '^fake build mac Debug Snapshot$'
+  called '^vm-xcodebuild test-without-building .*Meguri_Snapshot_macosx.* -only-testing:MeguriSnapshotTests/RecipeFixtureTests$'
+  called "^vm-env TEST_RUNNER_MEGURI_RECIPE_FIXTURES=$SB/build/fixtures/recipes/tiny-1:$SB/build/fixtures/recipes/with space-1\$"
+  called '^vm-host-lease free$'
+  called '^vm-recipe-lease fixtures-check$'
+  called '^recipe-env-after caller-value$'
+  local name f dir
+  dir="$(dirname "$result")"
+  [ "$(jq -c . "$dir/launch.json")" = '{"result":"Passed","passed":2,"failed":0,"skipped":0,"messages":[]}' ]
+  for name in tiny 'with space'; do
+    for f in collection.anki2 manifest.json collection.media/asset.txt; do
+      cmp "$SB/build/fixtures/recipes/$name-1/$f" "$(vm_fs meguri-mac "$SB/build/fixtures/recipes/$name-1/$f")"
+    done
+    called "^vm-recipe $SB/build/fixtures/recipes/$name-1 $name media\$"
+  done
+  [ -f "$dir/launch.xcresult/tests.json" ]
+  [ ! -e "$(vm_fs meguri-mac "$dir/launch.xcresult")" ]
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  not_called '^host-xcodebuild'
+  validate "$result"
+}
+
+# bats test_tags=gate
+@test "recipe launch without a VM queues only launch, retaining collection validation even with host opt-in" {
+  recipe_launch_fakes
+  rm "$MEGURI_MAC_VM_CONFIG"
+  MEGURI_MAC_UI_ALLOW_HOST=1 mg fixtures-check recipes
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed)"')" = '2 2 0' ]
+  [ "$(field '.details.queued_parts | length')" = 1 ]
+  [ "$(field '.details.queued_parts[0] | "\(.user_step) \(.part)"')" = "mac-vm the recipes' launch check" ]
+  [ "$(field '.user_steps[] | select(.id == "mac-vm") | .state')" = missing ]
+  [ "$(field '.failures | length')" = 0 ]
+  not_called '^host-xcodebuild|^vm-xcodebuild'
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+  validate "$result"
+}
+
+# bats test_tags=gate
+@test "recipe launch distinguishes unreachable VM stages from actual copy, result and test failures" {
+  recipe_launch_fakes
+  local mode
+  for mode in boot copy test result; do
+    case "$mode" in
+      boot) touch "$FAKE_VM_DIR/ssh-down"; MEGURI_MAC_VM_BOOT_SECONDS=1 mg fixtures-check recipes; rm "$FAKE_VM_DIR/ssh-down" ;;
+      copy) FAKE_VM_SSH_REFUSE='^rm -rf .*build/fixtures/recipes/' mg fixtures-check recipes ;;
+      test) FAKE_VM_SSH_REFUSE='xcodebuild test-without-building' mg fixtures-check recipes ;;
+      result) FAKE_VM_SSH_FAIL='^test -d ' mg fixtures-check recipes ;;
+    esac
+    [ "$status" -eq 0 ]
+    [ "$(field .status)" = warn ]
+    [ "$(field '.summary | "\(.passed) \(.failed)"')" = '2 0' ]
+    [ "$(field '.failures | length')" = 0 ]
+    [ "$(field '.details.queued_parts | length')" = 1 ]
+    [ "$(field '.details.queued_parts[0] | "\(.user_step) \(.part)"')" = "mac-vm the recipes' launch check" ]
+    [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  done
+  FAKE_VM_RECIPE_COPY_FAIL=1 mg fixtures-check recipes
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = mac-vm-copy ]
+  FAKE_VM_NO_BUNDLE=1 mg fixtures-check recipes
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  FAKE_VM_RECIPE_RESULT=invalid mg fixtures-check recipes
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  FAKE_VM_RECIPE_RESULT=empty mg fixtures-check recipes
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  FAKE_VM_XCODEBUILD_RC=65 mg fixtures-check recipes
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(jq .failed "$(dirname "$result")/launch.json")" = 2 ]
+  echo invalid >"$MEGURI_MAC_VM_CONFIG"
+  mg fixtures-check recipes
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = mac-vm-config ]
+  not_called '^host-xcodebuild'
+}
+
+@test "recipe launch queuing preserves independent collection failures and restores an unset runner environment" {
+  recipe_launch_fakes
+  rm "$MEGURI_MAC_VM_CONFIG"
+  FAKE_COLLECTION_PROBLEM=1 mg fixtures-check recipes
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field .details.queued)" = false ]
+  [ "$(field '.summary | "\(.passed) \(.failed)"')" = '0 2' ]
+  write_config meguri-mac
+  mg fixtures-check recipes
+  [ "$(field .status)" = pass ]
+  called '^recipe-env-after unset$'
+  not_called '^host-xcodebuild'
+}
 
 # --- runs in the VM ---------------------------------------------------------------
 

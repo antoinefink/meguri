@@ -16,14 +16,14 @@
 # fixtures-check (host) is F11's T1: it runs fixtures, then
 # `tools/mg oracle check` on each collection, and checks what F11 asks.
 # When recipes are among its targets it also launches them through
-# -MeguriFixture in the app process on this Mac (MeguriSnapshotTests'
+# -MeguriFixture in the app process in the test VM (MeguriSnapshotTests'
 # RecipeFixtureTests, as tools/mg snapshots runs its suites): U11's "UI
 # recipes load through the launch option".
 
 mg_job fixtures docker:dev mg_fixtures \
   "Synthetic collections into build/fixtures: <size> (10k 100k 150k 500k 1m, or a card count) | <worst case> | <recipe> | worst-cases | recipes ... [--seed N] [--media files] [--cards N (worst cases)]"
 mg_job fixtures-check host mg_fixtures_check \
-  "Oracle checks of generated collections (F11 T1): [target...] (default 10k 100k worst-cases recipes) [--seed N]; runs tools/mg fixtures, then tools/mg oracle check on each: no Check Database problem, nothing changed but col and config, counts equal the manifest's, the pinned day; the due worst case's deck count and the large-field worst case's render; recipes also launched through -MeguriFixture in the app on this Mac (RecipeFixtureTests)"
+  "Oracle checks of generated collections (F11 T1): [target...] (default 10k 100k worst-cases recipes) [--seed N]; runs tools/mg fixtures, then tools/mg oracle check on each: no Check Database problem, nothing changed but col and config, counts equal the manifest's, the pinned day; the due worst case's deck count and the large-field worst case's render; recipes also launched through -MeguriFixture in the app in the test VM (RecipeFixtureTests)"
 
 MG_FIXTURES_BUDGET_MS=600000
 MG_FIXTURES_BUDGET_KB=2097152
@@ -283,53 +283,99 @@ mg__fixtures_check_one() {
 MG_FIXTURES_LAUNCH_SUITE=MeguriSnapshotTests/RecipeFixtureTests
 
 # mg__fixtures_launch_run <dirs, ':'-separated> <out prefix>: builds the
-# Snapshot plan for the Mac and runs the launch suite on the recipes in the
-# app process (off-screen windows only, as tools/mg snapshots runs it);
+# Snapshot plan for the Mac on the host and runs the launch suite on the
+# recipes in the VM's app process;
 # writes <prefix>.json {result, passed, failed, skipped, messages}: the
 # suite's result, its passed and failed cases (one per recipe directory,
 # the Swift Testing arguments), skipped tests and failure messages.
-# Returns 1, with the failure recorded, when the suite could not run, and 2
-# when a locked Mac queued it (host-session, mg_host_lease).
+# Returns 1 for a failed build/run, 2 when the VM queued it (mac-vm), and 3
+# for a tooling error. Lease and cancellation cleanup belong to mac-vm.sh.
 mg__fixtures_launch_run() {
-  local dirs="$1" prefix="$2" rc tests
-  mg_app_build mac Debug Snapshot || return 1
-  mg_host_lease --part "the recipes' launch check"
+  local dirs="$1" prefix="$2" rc tests dir recipe_dirs=()
+  local MG_VM_PART="the recipes' launch check"
+  # This suite always uses the VM, including when the generic Mac UI host
+  # override is set. Probe directly rather than opting into that fallback.
+  mg_mac_vm_probe
   rc=$?
-  [ "$rc" -eq 0 ] || return "$rc"
-  mg_app_mac_guard || return 1
-  rm -rf "$prefix.xcresult"
-  TEST_RUNNER_MEGURI_RECIPE_FIXTURES="$dirs" xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme Meguri \
-    -testPlan Snapshot -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath "$MG_APP_DD" \
-    -resultBundlePath "$prefix.xcresult" -collect-test-diagnostics never "-only-testing:$MG_FIXTURES_LAUNCH_SUITE" >"$prefix.log" 2>&1
+  case "$rc" in
+    0) MG_MAC_RUNNER=vm; mg_detail mac_runner '"vm"' ;;
+    2) mg__mac_vm_config_error; return 3 ;;
+    *) mg__mac_vm_queued "the recipes' launch check runs only in the test VM" "$MG_VM_PART"; return 2 ;;
+  esac
+  mg_app_build mac Debug Snapshot || return 1
+  mg_mac_vm_take
+  rc=$?
+  case "$rc" in 0) ;; 2) return 2 ;; *) return 3 ;; esac
+  # The generated directories are not app/Fixtures. Keep their checkout
+  # paths (and spaces) so the launch arguments name the copies in the VM.
+  while IFS= read -r dir; do
+    if [ ! -d "$dir" ]; then
+      mg_failure fixtures-check/launch "the generated recipe directory $dir is missing; nothing was launched"
+      return 3
+    fi
+    recipe_dirs[${#recipe_dirs[@]}]="$dir"
+  done <<<"${dirs//:/$'\n'}"
+  mg_mac_vm_copy_in "${recipe_dirs[@]}"
+  rc=$?
+  case "$rc" in 0) ;; 2) return 2 ;; *) return 3 ;; esac
+  # The VM wrapper forwards exported TEST_RUNNER_ variables. A local keeps
+  # the caller's value/export state intact after every return path.
+  local TEST_RUNNER_MEGURI_RECIPE_FIXTURES="$dirs"
+  export TEST_RUNNER_MEGURI_RECIPE_FIXTURES
+  mg_vm_xcodebuild_test "$prefix" Snapshot macosx "platform=macOS,arch=arm64" Debug \
+    "-only-testing:$MG_FIXTURES_LAUNCH_SUITE"
   rc=$?
   mg_artifact log "$prefix.log" "xcodebuild test $MG_FIXTURES_LAUNCH_SUITE"
+  [ -z "$MG_MAC_VM_RUN_QUEUED" ] || return 2
+  [ -z "$MG_MAC_VM_RUN_ERROR" ] || return 3
   tests="$(xcrun xcresulttool get test-results tests --path "$prefix.xcresult" 2>/dev/null)" || tests=null
   if ! xcrun xcresulttool get test-results summary --path "$prefix.xcresult" 2>/dev/null |
-    jq -ce --argjson tests "${tests:-null}" '[$tests | .. | objects | select(.nodeType? == "Arguments") | .result] as $cases
+    jq -ce --argjson tests "${tests:-null}" '
+      if (.result | type) != "string" or (.skippedTests | type) != "number" or ($tests | type) != "object"
+      then error("invalid launch results") else . end
+      | [$tests | .. | objects | select(.nodeType? == "Arguments") | .result] as $cases
       | {result, passed: ($cases | map(select(. == "Passed")) | length), failed: ($cases | map(select(. == "Failed")) | length),
         skipped: .skippedTests, messages: [$tests | .. | objects | select(.nodeType? == "Failure Message") | .name | .[0:600]]}' >"$prefix.json"; then
     mg_failure fixtures-check/launch "xcodebuild test-without-building could not run $MG_FIXTURES_LAUNCH_SUITE (exit $rc); see $(basename "$prefix").log" \
       "tools/mg fixtures-check recipes"
+    return 3
+  fi
+  # A nonzero test exit cannot pass even if a bundle reports Passed.
+  if [ "$rc" -ne 0 ] && [ "$(jq -r .result "$prefix.json")" = Passed ]; then
+    mg_failure fixtures-check/launch "xcodebuild test-without-building exited $rc despite a Passed result; see $(basename "$prefix").log"
     return 1
   fi
 }
 
 # mg__fixtures_check_launch <summaries>: the launch suite on every recipe
 # of the run; each recipe is one passing case, and a skip is a failure.
-# Sets MG_FIXTURES_LAUNCH to pass, fail or queued (a locked Mac). Not run in a
-# subshell: the host lease it takes lasts until the job ends.
+# Sets MG_FIXTURES_LAUNCH to pass, fail, error or queued. Not run in a
+# subshell: the VM lease it takes lasts until the job ends.
 mg__fixtures_check_launch() {
-  local summaries="$1" dirs n prefix="$MG_RUN_DIR/launch" problems line repro="tools/mg fixtures-check recipes"
+  local summaries="$1" dirs n prefix="$MG_RUN_DIR/launch" problems line queued_before repro="tools/mg fixtures-check recipes"
   MG_FIXTURES_LAUNCH=fail
   dirs="$(jq -r --arg root "$MG_ROOT" 'select(.kind == "recipe") | .dir | if startswith("/") then . else "\($root)/\(.)" end' "$summaries")"
   n="$(printf '%s\n' "$dirs" | grep -c .)"
   dirs="$(printf '%s\n' "$dirs" | paste -sd: -)"
   echo "fixtures-check: $n recipes -> $MG_FIXTURES_LAUNCH_SUITE" >&2
+  queued_before="$(jq length <<<"$MG_QUEUED_PARTS")"
   mg__fixtures_launch_run "$dirs" "$prefix"
   case $? in
     0) ;;
-    2) MG_FIXTURES_LAUNCH=queued && return 0 ;;
-    *) return 0 ;;
+    2)
+      # Setup/copy helpers queue generic Mac suites; this job queues only
+      # its launch check, preserving the completed collection checks.
+      MG_QUEUED_PARTS="$(jq -c --argjson n "$queued_before" '.[:$n]' <<<"$MG_QUEUED_PARTS")"
+      mg_queued_part mac-vm "the recipes' launch check" "$MG_MAC_VM_REASON"
+      mg__mac_vm_release_queued 2
+      MG_FIXTURES_LAUNCH=queued
+      return 0
+      ;;
+    3) MG_FIXTURES_LAUNCH=error; return 0 ;;
+    *)
+      [ "$(cat "$MG_STATE/status" 2>/dev/null)" != error ] || MG_FIXTURES_LAUNCH=error
+      return 0
+      ;;
   esac
   mg_artifact launch "$prefix.json" "$MG_FIXTURES_LAUNCH_SUITE results"
   if ! problems="$(jq -r --argjson n "$n" '
@@ -352,7 +398,7 @@ mg__fixtures_check_launch() {
 
 # tools/mg fixtures-check [target...] [--seed N]
 mg_fixtures_check() {
-  local seed=1 targets=() gen status summaries outcome passed=0 failed=0 span profile_today what
+  local seed=1 targets=() gen status summaries outcome passed=0 failed=0 errors=0 span profile_today what
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --) shift ;;
@@ -408,13 +454,18 @@ mg_fixtures_check() {
     case "$MG_FIXTURES_LAUNCH" in
       pass) passed=$((passed + 1)) ;;
       queued) ;;
+      error) errors=$((errors + 1)) ;;
       *) failed=$((failed + 1)) ;;
     esac
   fi
-  mg_count total $((passed + failed))
+  mg_count total $((passed + failed + errors))
   mg_count passed "$passed"
   mg_count failed "$failed"
-  if [ "$failed" -eq 0 ]; then
+  if [ "$errors" -gt 0 ]; then
+    mg_count errors "$errors"
+    mg_message "fixtures-check: $passed checks pass, $failed fail; the recipes' launch check could not run; see log.txt"
+    mg_status error
+  elif [ "$failed" -eq 0 ]; then
     mg_message "fixtures-check: $passed checks pass ($what)$([ "$MG_QUEUED_PARTS" = '[]' ] || echo "; queued: $(mg_queued_parts_text)")"
     mg_status pass
   else
