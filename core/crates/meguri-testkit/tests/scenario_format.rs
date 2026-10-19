@@ -373,6 +373,81 @@ fn model_accepts(step: Value) -> Result<(), String> {
 }
 
 #[test]
+fn observation_text_rejects_empty_list_entries_at_the_format_boundary() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("x.yaml");
+    for request in [
+        "card(#c1,,#c2)",
+        "card(#c1,)",
+        "card(,#c1)",
+        "card(,)",
+        "card(#c1, ,#c2)",
+        "card(#c1, \t)",
+        "card( \t,#c1)",
+        "card( , \t )",
+        "ids(#n1,,#c2)",
+        "timing(,)",
+        "queue(,)",
+    ] {
+        assert!(model_accepts(json!({"observe": [request]})).is_err(), "accepted {request:?}");
+        let quoted = serde_json::to_string(request).unwrap();
+        let text = format!(
+            "id: area/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{{observe: [{quoted}]}}]\n"
+        );
+        fs::write(&path, text).unwrap();
+        // D10: loading fails before a golden or an executor is consulted.
+        assert!(scenario::load(&path).is_err(), "loaded {request:?}");
+    }
+}
+
+#[test]
+fn observation_text_preserves_empty_arguments_refs_and_structured_syntax() {
+    use meguri_testkit::scenario::{ObservationArgs, ObservationKind};
+
+    let refs = ObservationArgs::Refs(vec!["#c2".parse().unwrap(), "#c1".parse().unwrap()]);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("x.json");
+    for (request, kind, args) in [
+        (json!("card"), ObservationKind::Card, ObservationArgs::None),
+        (json!("card()"), ObservationKind::Card, ObservationArgs::None),
+        (json!("card( \t )"), ObservationKind::Card, ObservationArgs::None),
+        (json!("ids( )"), ObservationKind::Ids, ObservationArgs::None),
+        (json!("timing()"), ObservationKind::Timing, ObservationArgs::None),
+        (json!("queue( \t)"), ObservationKind::Queue, ObservationArgs::None),
+        (json!(" \tcard( #c2 ,\t#c1 ) \t"), ObservationKind::Card, refs.clone()),
+        (json!({"card": ["#c2", "#c1"]}), ObservationKind::Card, refs),
+        (
+            json!({"queue": {"deck": "A"}}),
+            ObservationKind::Queue,
+            ObservationArgs::Mapping(json!({"deck": "A"}).as_object().unwrap().clone()),
+        ),
+        (
+            json!({"search": [{"query": "deck:A"}]}),
+            ObservationKind::Search,
+            ObservationArgs::List(vec![json!({"query": "deck:A"})]),
+        ),
+    ] {
+        let value = json!({"id": "area/x", "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"}, "steps": [{"observe": [request.clone()]}]});
+        let parsed = scenario::Scenario::from_value(&value).unwrap_or_else(|e| panic!("{request}: {e}"));
+        let Step::Observe(requests) = &parsed.steps[0] else {
+            panic!("not an observe step")
+        };
+        assert_eq!(requests[0].kind, kind, "{request}");
+        assert_eq!(requests[0].args, args, "{request}");
+        fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
+        let loaded = scenario::load(&path).unwrap_or_else(|e| panic!("{request}: {e}"));
+        let Step::Observe(loaded_requests) = &loaded.scenario.steps[0] else {
+            panic!("not an observe step")
+        };
+        assert_eq!(loaded_requests, requests, "{request}");
+    }
+    // Required mapping/list arguments still go through checked-kind validation.
+    for request in ["text()", "text( \t )", "search()", "search( \t )"] {
+        assert!(model_accepts(json!({"observe": [request]})).is_err(), "accepted {request:?}");
+    }
+}
+
+#[test]
 fn the_model_requires_what_the_schema_requires_of_draft_ops() {
     let from_schema = schema_draft_requirements();
     // Nine draft ops: `sync` left them when sync-ops.md fixed its shape,
