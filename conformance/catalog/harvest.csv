@@ -58,7 +58,7 @@ h1e72f458212b,typescript,tag,deckconfig,in-scope,"U234/U246: whole-minute learni
 h35f01eb07a7f,typescript,tag,deckconfig,in-scope,U234/U246: fractional-minute learning steps must round-trip through second and minute labels without dropping precision.,,deferred
 h413f1956a499,typescript,tag,deckconfig,preservation-only,"U232/U246: saving multiple preset drafts must retain opaque auxiliary maps, including maps on a preset that is no longer selected (R762).",,deferred
 h83f55b823be2,typescript,tag,deckconfig,in-scope,"U232/U246: draft saves must include changed presets, preserve the selected assignment and distinguish discarded new presets from deleted persisted ones.",,deferred
-h90b32cd0020c,typescript,tag,deckconfig,in-scope,U234/U246: cover blank steps and mixed valid/invalid input explicitly; assert Meguri's defined validation rather than silently copying permissive parsing.,,deferred
+h90b32cd0020c,typescript,tag,deckconfig,in-scope,U234/U246: exercise empty step text and mixed numeric/nonnumeric tokens; prove the approved error policy.,,deferred
 haa85eb491ea1,typescript,tag,deckconfig,in-scope,the preset menu appends the current time to a duplicate name; the menu is the deck options screen,,deferred
 hfb585bb34348,typescript,tag,deckconfig,in-scope,"U232/U246: verify sorted preset choices, usage counts, rename/create/select/remove behavior and refusal to remove the default preset.",,deferred
 h544ca5b02509,python,tag,decks,in-scope,removing a deck removes its subdecks and their cards,decks/delete/subtree,done
@@ -281,7 +281,7 @@ h7e4c18df6974,python,tag,engine,in-scope,"U167/U246: verify English rendering-er
 h89de56ad40bd,python,tag,engine,not-applicable,Removing a failing Python extension callback is not an on-disk compatibility behavior (R1879).,,done
 h91d384fa40f0,python,tag,engine,in-scope,Many note types created at one instant get distinct ids,storage/ids/all-tables,done
 h938b8896f278,python,tag,engine,not-applicable,A Python extension callback transforming a return value is not a Meguri product interface (R1879).,,done
-hbcd13325e1bf,python,tag,engine,in-scope,U246: add an explicit first-field edit proving the stored checksum changes; current add and normalization cases do not change that field's semantic content (R774).,,deferred
+hbcd13325e1bf,python,tag,engine,in-scope,"U246: edit the first field, then assert its stored digest changes; add a real save-path case (R774).",,deferred
 hec0725d1a35e,python,tag,engine,not-applicable,Rewriting named SQL arguments for the Python database wrapper is not a file-format or native-engine interface (R1879).,,done
 hf6c2f3eacd8d,python,tag,engine,not-applicable,Passing an original Python callable into an extension wrapper has no shipped native runtime (R1879).,,done
 h025050fe6ac6,rust,tag,engine,not-applicable,"Online Python-extension metadata lookup belongs to the desktop extension manager, which Meguri does not ship (R1879).",,done
@@ -307,7 +307,7 @@ hea8cbd8d6720,rust,tag,engine,in-scope,U106/U246: a generic network failure with
 hfa50e8665fce,rust,tag,engine,in-scope,"U126/U246: verify a full year's backups thin into the configured daily/weekly/monthly buckets, including default retention (R2009).",,deferred
 h19a3e91fc826,rust,tag,maintenance,in-scope,"U129/U246: Check Database must join excess note fields into the last field and pad missing fields, with accurate repair counts.",,deferred
 h45394f1a8123,rust,tag,maintenance,in-scope,"U129/U246: Check Database must remove duplicate card ordinals and cards whose template no longer exists, without removing valid siblings.",,deferred
-h5b5bc3629af2,rust,tag,maintenance,in-scope,U128/U246: repair nonintegral revlog interval values; the existing unrated-row scenario lacks this conversion.,,deferred
+h5b5bc3629af2,rust,tag,maintenance,in-scope,"U128/U246: Check Database must turn fractional revlog ivl/lastIvl values into integers, with accurate repair totals.",,deferred
 h8bba9c90dc5d,rust,tag,maintenance,in-scope,"U128/U129/U246: malformed scheduling columns need numeric repair; recover missing decks, delete orphans and verify repair idempotence.",,deferred
 h984772533897,rust,tag,maintenance,in-scope,U129/U246: rebuilding tags during Check Database must preserve the user's expanded and collapsed tag states.,,deferred
 hec5bf5d4f824,rust,tag,maintenance,in-scope,U129/U246: Check Database must recreate every missing ancestor of a nested deck and count the repair correctly.,,deferred
@@ -538,7 +538,7 @@ h4b3ba12ee1a3,rust,tag,package,out-of-scope,CSV/text export is excluded; this ca
 h4b7cb8d2e4a8,rust,tag,package,out-of-scope,CSV/text export is excluded; this case exposes the exported note count through its foreign service reply.,,done
 h4cebf655a477,rust,tag,package,in-scope,U122/U246: exporting an empty collection as a note package must create a valid package rather than fail or omit the file.,,deferred
 h4d39d9345011,rust,tag,package,out-of-scope,CSV/text import is excluded; this case permits a Unicode BOM before separator or tag metadata.,,done
-h4d841a7c9c8d,rust,tag,package,out-of-scope,Foreign/text note import is excluded; this case changes duplicate matching according to the note-text normalization setting.,,done
+h4d841a7c9c8d,rust,tag,package,out-of-scope,CSV/text import is excluded; this case matches canonically equivalent input only while NFC folding is enabled.,,done
 h4ece49a2de4b,rust,tag,package,out-of-scope,CSV/text import is excluded; this case ignores a leading BOM and metadata-only lines when reading note rows.,,done
 h514ddcb4bec7,rust,tag,package,in-scope,U122/U246: exporting without scheduling must remove FSRS parameter lists from the gathered preset data instead of leaking scheduling state.,,deferred
 h522f5887f377,rust,tag,package,in-scope,U120/U246: a successful package import response must include both its operation changes and its import summary.,,deferred
@@ -748,7 +748,7 @@ head34b2562fb,python,tag,sched,in-scope,U41/U246: the deck-count tree must conta
 hee69ed088c05,python,tag,sched,in-scope,U49/U44/U246: a pending learning card accepts another Hard answer after its configured step list shrinks.,,deferred
 hf03d0a912671,python,tag,sched,preservation-only,Reviewing early in a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
 hf248f368b2b9,python,tag,sched,not-applicable,"Rejecting execution of an unfrozen test near midnight is a test-harness guard, not a product rollover behavior (R1879).",,done
-hf44d25b35e71,python,tag,sched,in-scope,"U44/U246: verify answer counters, due/interval consistency and leech tagging/suspension; SM-2 ease-factor changes and multipliers are excluded (R752).",,deferred
+hf44d25b35e71,python,tag,sched,in-scope,"U44/U246: verify answer counters, due/interval consistency, leech handling and required Hard/Good/Easy factor writes (R587); only SM-2 interval multipliers are excluded (R752).",,deferred
 hf76a58bb5a76,python,tag,sched,in-scope,U49/U44/U246: removing lapse steps during relearning must allow the next Again answer to complete safely.,,deferred
 h00a233a3c403,rust,tag,sched,in-scope,Hard repeats the current learning step,sched/steps/learning-progress sched/steps/hard-delays,done
 h010d3289404d,rust,tag,sched,in-scope,Good on a relearning step stays in relearning,sched/steps/relearning,done
@@ -841,7 +841,7 @@ habaf407e202f,rust,tag,sched,in-scope,U44/U246: applying Again to a new card mus
 habc95d948b8b,rust,tag,sched,in-scope,U43/U44/U246: consecutive Good answers must advance a real card through learning and into review after the final step.,,deferred
 had8092d884ac,rust,tag,sched,in-scope,U41/U43/U155/U246: completion data must report review work due today after Set Due Date and remove that card from new work.,,deferred
 hb4123149e0de,rust,tag,sched,in-scope,Legacy day count of collections without a creation offset; the v1 count it also checks is out of scope because v1 collections are refused.,sched/day/legacy-timing,done
-hb46e7a2d004c,rust,tag,sched,in-scope,"U44/U246: persisted card state must agree with previewed learning, graduation and relearning transitions; SM-2 interval/ease constants are excluded (R752).",,deferred
+hb46e7a2d004c,rust,tag,sched,in-scope,"U44/U246: persist previewed learning/relearning transitions and compatible ease-factor deltas, floor and home-preset starting value (R587); SM-2 interval formulas remain excluded.",,deferred
 hb643b497ade7,rust,tag,sched,in-scope,U44/U246: applying Easy to a new card must persist review type/queue and a positive FSRS interval.,,deferred
 hb7be1ced7f3a,rust,tag,sched,in-scope,"U41/U246: queue mixing must distribute shorter and longer streams evenly, retain per-stream order and handle an empty stream.",,deferred
 hb8dcf303d0e0,rust,tag,sched,in-scope,"U44/U246: first-step Hard and Again both enter learning, but Hard must use the longer averaged delay when two steps exist.",,deferred
@@ -853,7 +853,7 @@ hc67d7d3b1875,rust,tag,sched,in-scope,Easy leaving relearning uses the FSRS inte
 hc96dda7dd94f,rust,tag,sched,in-scope,Again in learning returns to the first step,sched/steps/learning-progress,done
 hcbe165cda562,rust,tag,sched,out-of-scope,Direct out-of-session grading by arbitrary card id is not a supported product operation; managed review answers remain required under U44.,,done
 hccc87afa9021,rust,tag,sched,in-scope,Training items are sorted by review time with their card ids aligned; checked with the optimizer (U47),,deferred
-hceea58e626d5,rust,tag,sched,out-of-scope,"Mutating scheduler-v1 cards into later scheduler states, including filtered variants, is excluded; Meguri refuses v1 collections through its compatibility policy.",,done
+hceea58e626d5,rust,tag,sched,in-scope,"U120/U246: package inspection converts v1 learning/relearning and filtered-card states, caps steps and restores reviews (R1614); direct collection open still refuses v1.",,deferred
 hcf4081192234,rust,tag,sched,in-scope,Good on a learning step moves to the next step,sched/steps/learning-progress,done
 hd5745d5de78c,rust,tag,sched,in-scope,A card without a memory state gets one from its history when its states are computed,sched/memory/on-the-fly,done
 hd79744504c35,rust,tag,sched,in-scope,Offsets stored as minutes west of UTC in the timing config keys.,sched/day/creation-after-rollover-tokyo sched/day/config-values,done
