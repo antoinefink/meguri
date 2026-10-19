@@ -961,6 +961,7 @@ dependencies = [
  "meguri-storage",
  "meguri-template",
  "meguri-text",
+ "rand 0.9.4",
  "regex",
  "tracing",
 ]
@@ -993,6 +994,7 @@ version = "0.0.0"
 dependencies = [
  "fsrs",
  "meguri-model",
+ "meguri-storage",
  "rand 0.9.4",
 ]
 
@@ -1009,12 +1011,14 @@ dependencies = [
 name = "meguri-storage"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "meguri-model",
  "meguri-text",
  "rusqlite",
  "ryu",
  "serde",
  "serde_json",
+ "sha1",
  "sha2",
  "tempfile",
 ]
