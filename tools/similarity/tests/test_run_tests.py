@@ -1,9 +1,60 @@
 """Filtered TAP runner regressions without corpus test execution."""
 
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 import subprocess
 import sys
 import unittest
+
+from run_tests import TapResult
+
+
+class TapResultBookkeeping(unittest.TestCase):
+    def test_assertion_failure_is_unsuccessful(self):
+        class Case(unittest.TestCase):
+            def test_failure(self):
+                self.fail("synthetic assertion failure")
+
+        result = TapResult()
+        with redirect_stdout(StringIO()) as output:
+            unittest.TestSuite([Case("test_failure")]).run(result)
+
+        self.assertFalse(result.wasSuccessful())
+        self.assertEqual(result.testsRun, 1)
+        self.assertEqual(len(result.failures), 1)
+        self.assertEqual(output.getvalue().splitlines()[0], f"not ok 1 {__name__}.Case.test_failure")
+
+    def test_raised_error_is_unsuccessful(self):
+        class Case(unittest.TestCase):
+            def test_error(self):
+                raise RuntimeError("synthetic error")
+
+        result = TapResult()
+        with redirect_stdout(StringIO()) as output:
+            unittest.TestSuite([Case("test_error")]).run(result)
+
+        self.assertFalse(result.wasSuccessful())
+        self.assertEqual(result.testsRun, 1)
+        self.assertEqual(len(result.errors), 1)
+        self.assertEqual(output.getvalue().splitlines()[0], f"not ok 1 {__name__}.Case.test_error")
+
+    def test_unexpected_success_is_unsuccessful(self):
+        class Case(unittest.TestCase):
+            @unittest.expectedFailure
+            def test_unexpected_success(self):
+                pass
+
+        result = TapResult()
+        with redirect_stdout(StringIO()) as output:
+            unittest.TestSuite([Case("test_unexpected_success")]).run(result)
+
+        self.assertFalse(result.wasSuccessful())
+        self.assertEqual(result.testsRun, 1)
+        self.assertEqual(len(result.unexpectedSuccesses), 1)
+        self.assertEqual(
+            output.getvalue(), f"not ok 1 {__name__}.Case.test_unexpected_success\n"
+        )
 
 
 class FilteredRunner(unittest.TestCase):
