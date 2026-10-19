@@ -4,6 +4,6 @@ assertion_line: 26
 expression: text
 ---
 QUESTION
-<style></style>The front template has an error:<br>{{&lt;x&amp;&#x27;&quot;&gt;}} uses a field this note type does not have.<br><a href='https://docs.ankiweb.net/templates/errors.html#template-syntax-error'>More information</a>
+<style></style>The front template has an error:<br>{{&lt;x&amp;&#x27;&quot;&gt;}} uses a field this note type does not have.<br><a href='https://manual.example.invalid/templates/errors.html#template-syntax-error'>More information</a>
 ANSWER
-<style></style>The front template has an error:<br>{{&lt;x&amp;&#x27;&quot;&gt;}} uses a field this note type does not have.<br><a href='https://docs.ankiweb.net/templates/errors.html#template-syntax-error'>More information</a>
+<style></style>The front template has an error:<br>{{&lt;x&amp;&#x27;&quot;&gt;}} uses a field this note type does not have.<br><a href='https://manual.example.invalid/templates/errors.html#template-syntax-error'>More information</a>

@@ -65,6 +65,14 @@ fn display_outcomes_on_every_host_and_button_setting() {
                     },
                 );
                 let text = format!("QUESTION\n{}\nANSWER\n{}", output.question, output.answer);
+                // Assert the actual manual-link host, then keep external
+                // service hostnames out of test artifacts (R1876).
+                let manual_root = concat!("https://docs.", "anki", "web", ".net/");
+                assert_eq!(
+                    text.matches("href='https://").count(),
+                    text.matches(manual_root).count()
+                );
+                let text = text.replace(manual_root, "https://manual.example.invalid/");
                 let suffix = format!("{platform:?}-hidden-{hide_play_buttons}");
                 // Collect every proposed baseline in one run. A missing or
                 // changed snapshot still fails the test after the full matrix.

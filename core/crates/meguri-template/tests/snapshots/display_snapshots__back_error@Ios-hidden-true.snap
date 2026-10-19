@@ -4,6 +4,6 @@ assertion_line: 26
 expression: text
 ---
 QUESTION
-<style></style>The back template has an error:<br>{{NoSuchField}} uses a field this note type does not have.<br><a href='https://docs.ankiweb.net/templates/errors.html#template-syntax-error'>More information</a>
+<style></style>The back template has an error:<br>{{NoSuchField}} uses a field this note type does not have.<br><a href='https://manual.example.invalid/templates/errors.html#template-syntax-error'>More information</a>
 ANSWER
-<style></style>The back template has an error:<br>{{NoSuchField}} uses a field this note type does not have.<br><a href='https://docs.ankiweb.net/templates/errors.html#template-syntax-error'>More information</a>
+<style></style>The back template has an error:<br>{{NoSuchField}} uses a field this note type does not have.<br><a href='https://manual.example.invalid/templates/errors.html#template-syntax-error'>More information</a>
