@@ -105,11 +105,19 @@ pub fn test_start_job(
                 message: "duration too long".into(),
             }
         })?;
+    // Batch high-rate test reports to avoid per-report sub-ms sleep rounding in the VM.
+    // Keep nominal pacing (including the final sleep); production throttling is unchanged.
+    let batch_size = (Duration::from_millis(5).as_nanos() / step.as_nanos().max(1)).clamp(1, 64) as u32;
     jobs::start("test", 0, move |ctx| {
-        for done in 0..steps {
-            ctx.cancel.check()?;
-            ctx.progress.report(done, Some(steps));
-            thread::sleep(step);
+        let mut done = 0;
+        while done < steps {
+            let batch_len = (steps - done).min(u64::from(batch_size)) as u32;
+            for _ in 0..batch_len {
+                ctx.cancel.check()?;
+                ctx.progress.report(done, Some(steps));
+                done += 1;
+            }
+            thread::sleep(step * batch_len);
         }
         fail_with.map_or(Ok(()), Err)
     })
