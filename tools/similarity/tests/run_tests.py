@@ -80,8 +80,11 @@ def main():
         os.environ["MG_TEST_OUT"] = args.out
     suite = unittest.defaultTestLoader.discover(HERE, pattern="test_*.py", top_level_dir=HERE)
     tests = list(flatten(suite))
-    if args.k:
+    if args.k is not None:
         tests = [t for t in tests if re.search(args.k, name_of(t))]
+        if not tests:
+            print("Bail out! explicit test filter matched no discovered tests", flush=True)
+            return 2
     print(f"1..{len(tests)}", flush=True)
     result = TapResult()
     t0 = time.monotonic()
