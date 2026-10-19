@@ -466,6 +466,9 @@ t_similarity_scans_changed_files_and_commits() {
 }
 
 t_similarity_nightly_runs_jplag() {
+  # This synthetic corpus has one release; every selected reference is required.
+  sed -i '' 's/^  tags: \[.*/  tags: [latest]/' "$SB/tools/similarity/config.yaml" || return 1
+  grep -q '^  tags: \[latest\]$' "$SB/tools/similarity/config.yaml" || return 1
   cp "$SB/refs/anki/rslib/src/queue.rs" "$SB/core/copied.rs"
   mg similarity-nightly
   rm -f "$SB/core/copied.rs"

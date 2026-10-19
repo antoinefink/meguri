@@ -15,6 +15,9 @@ import unittest
 
 from support import PKG_ROOT, make_corpus, synthetic_config, tmpdir, write_tree
 
+from meguri_similarity.config import load_config
+from meguri_similarity.corpus import plan_corpus
+
 FILES = 400
 
 
@@ -45,6 +48,42 @@ def scan_command(refs, cache, root, out, config, vocab):
         sys.executable, "-m", "meguri_similarity", "scan", "--refs", refs, "--cache", cache, "--root", root,
         "--out", out, "--config", config, "--vocab-root", vocab, "core/own.rs",
     ]
+
+
+class DirectorySourceIdentity(unittest.TestCase):
+    def setUp(self):
+        self.base = tmpdir()
+        self.refs = make_corpus(os.path.join(self.base, "refs"), [("1.0", {})])
+        self.cfg = load_config(synthetic_config(self.base, "1.0", "1.0", 1))
+        self.cfg["corpus"]["extra_sources"] = [{"name": "synthetic", "path": "extra"}]
+        write_tree(self.refs, {"extra/nested/deeper/source.rs": "pub fn left() {}\n"})
+        self.path = os.path.join(self.refs, "extra/nested/deeper/source.rs")
+
+    def tearDown(self):
+        shutil.rmtree(self.base, ignore_errors=True)
+
+    def key(self):
+        return plan_corpus(self.refs, self.cfg, "synthetic-vocab", []).key
+
+    def test_nested_same_size_edit_with_restored_timestamps_changes_key(self):
+        before = os.stat(self.path)
+        original = self.key()
+        self.assertEqual(original, self.key())
+        write_tree(self.refs, {"extra/nested/deeper/source.rs": "pub fn rite() {}\n"})
+        os.utime(self.path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        after = os.stat(self.path)
+        self.assertEqual((after.st_size, after.st_mtime_ns), (before.st_size, before.st_mtime_ns))
+        changed = self.key()
+        self.assertNotEqual(original, changed)
+        self.assertEqual(changed, self.key())
+        write_tree(self.refs, {"extra/nested/deeper/source.rs": "pub fn left() {}\n"})
+        self.assertEqual(original, self.key())
+
+    def test_unchanged_content_with_changed_timestamps_keeps_key(self):
+        original = self.key()
+        before = os.stat(self.path)
+        os.utime(self.path, ns=(before.st_atime_ns, before.st_mtime_ns + 10_000_000_000))
+        self.assertEqual(original, self.key())
 
 
 class IndexCache(unittest.TestCase):

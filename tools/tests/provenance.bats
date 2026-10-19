@@ -415,26 +415,100 @@ commit_with() {
   [ "$(field '.failures[0].id')" = hook-exists ]
 }
 
+@test "parallel hooks installs publish complete executable shims without temporary leftovers" {
+  local stubs="$BATS_TEST_TMPDIR/stubs" outputs="$BATS_TEST_TMPDIR/installs"
+  mkdir -p "$stubs" "$outputs"
+  export HOOK_BARRIER="$BATS_TEST_TMPDIR/hook-barrier" HOOK_INSTALLERS=4
+  export REAL_HOOK_MV="$(command -v mv)"
+  mkdir -p "$HOOK_BARRIER"
+  # Hold every installer just before its first rename, after all writes and
+  # chmods. A shared temporary path can then be renamed successfully only once.
+  cat >"$stubs/mv" <<'STUB'
+#!/usr/bin/env bash
+for last; do :; done
+case "$last" in
+  */hooks/commit-msg)
+    : >"$HOOK_BARRIER/$$"
+    hook_deadline=$((SECONDS + 10))
+    while [ "$(find "$HOOK_BARRIER" -type f | wc -l)" -lt "$HOOK_INSTALLERS" ]; do
+      [ "$SECONDS" -lt "$hook_deadline" ] || exit 98
+      sleep 0.02
+    done
+    ;;
+esac
+exec "$REAL_HOOK_MV" "$@"
+STUB
+  chmod +x "$stubs/mv"
+  local i pid failed=0 pids=() name
+  for ((i = 0; i < HOOK_INSTALLERS; i++)); do
+    PATH="$stubs:$PATH" "$SB/tools/mg" hooks install >"$outputs/$i.out" 2>"$outputs/$i.err" &
+    pids+=("$!")
+  done
+  for pid in "${pids[@]}"; do
+    wait "$pid" || failed=1
+  done
+  [ "$failed" -eq 0 ] || { cat "$outputs/"*.err; return 1; }
+  for ((i = 0; i < HOOK_INSTALLERS; i++)); do
+    result="$(cat "$outputs/$i.out")"
+    [ "$(field .status)" = pass ]
+    [ "$(field '.failures | length')" -eq 0 ]
+    validate "$result"
+  done
+  for name in commit-msg pre-commit pre-merge-commit; do
+    [ -x "$SB/.git/hooks/$name" ]
+    grep -qF "# meguri: $name shim installed by tools/mg hooks install" "$SB/.git/hooks/$name"
+    grep -qF "tools/hooks/$name" "$SB/.git/hooks/$name"
+    [ "$(tail -n 1 "$SB/.git/hooks/$name")" = 'exec "$hook" "$@"' ]
+  done
+  [ -z "$(find "$SB/.git/hooks" -name '*.tmp*' -print)" ]
+}
+
 @test "hooks install reports an error when the hook cannot be written or renamed" {
-  local hook="$SB/.git/hooks/commit-msg"
-  mkdir -p "$hook.tmp"
-  mg hooks install
+  local hook="$SB/.git/hooks/commit-msg" stubs="$BATS_TEST_TMPDIR/stubs"
+  mkdir -p "$stubs"
+  # Temporary-file creation fails for this hook only.
+  export REAL_HOOK_MKTEMP="$(command -v mktemp)"
+  cat >"$stubs/mktemp" <<'STUB'
+#!/bin/sh
+for last; do :; done
+case "$last" in */hooks/commit-msg.tmp.*) exit 1 ;; esac
+exec "$REAL_HOOK_MKTEMP" "$@"
+STUB
+  chmod +x "$stubs/mktemp"
+  PATH="$stubs:$PATH" mg hooks install
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = hook-write ]
   validate "$result"
   [ ! -e "$hook" ]
-  rmdir "$hook.tmp"
+  rm "$stubs/mktemp"
+
+  # chmod fails after the temporary file was written; it must be cleaned up.
+  export REAL_HOOK_CHMOD="$(command -v chmod)"
+  cat >"$stubs/chmod" <<'STUB'
+#!/bin/sh
+for last; do :; done
+case "$last" in */hooks/commit-msg.tmp.*) exit 1 ;; esac
+exec "$REAL_HOOK_CHMOD" "$@"
+STUB
+  chmod +x "$stubs/chmod"
+  PATH="$stubs:$PATH" mg hooks install
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = hook-write ]
+  validate "$result"
+  [ ! -e "$hook" ]
+  [ -z "$(find "$SB/.git/hooks" -name '*.tmp*' -print)" ]
+  rm "$stubs/chmod"
 
   # mv fails for the hook only.
-  local stubs="$BATS_TEST_TMPDIR/stubs"
-  mkdir -p "$stubs"
   printf '#!/bin/sh\nfor last; do :; done\ncase "$last" in */hooks/commit-msg) echo "mv: injected failure" >&2; exit 1 ;; esac\nexec %s "$@"\n' \
     "$(command -v mv)" >"$stubs/mv"
   chmod +x "$stubs/mv"
   PATH="$stubs:$PATH" mg hooks install
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = hook-write ]
+  validate "$result"
   [ ! -e "$hook" ]
+  [ -z "$(find "$SB/.git/hooks" -name '*.tmp*' -print)" ]
 
   # worktree new still creates the worktree, but warns.
   PATH="$stubs:$PATH" mg worktree new --role implementer w8
@@ -443,6 +517,7 @@ commit_with() {
   [ "$(field '.failures[0].id')" = hook-write ]
   validate "$result"
   [ -d "$BATS_TEST_TMPDIR/repo-wt/w8" ]
+  [ -z "$(find "$SB/.git/hooks" -name '*.tmp*' -print)" ]
 }
 
 @test "worktree new installs the hook: a fresh implementer worktree rejects a core/ commit without Spec" {
@@ -816,7 +891,7 @@ EOF
 # records what the job hands the scanner (the NUL-separated file list, whether
 # --null was passed, the files under --root while the scan runs) in $STUB_OUT
 # and writes the summary a scan with $STUB_STATUS and $STUB_MISSING would, or
-# the error summary for $STUB_ERROR.
+# the scan/nightly error summary for $STUB_ERROR.
 make_docker_stub() {
   local stubs="$BATS_TEST_TMPDIR/docker-stubs"
   mkdir -p "$stubs"
@@ -829,7 +904,7 @@ case "$1 $*" in
   compose*" run "*) ;;
   *) exit 97 ;;
 esac
-args=("$@") root="" files="" out="" null="" compose="" i=0
+args=("$@") root="" files="" out="" null="" compose="" mode=scan i=0
 while [ "$i" -lt "${#args[@]}" ]; do
   case "${args[$i]}" in
     -f) compose="${args[$((i + 1))]}" ;;
@@ -837,6 +912,7 @@ while [ "$i" -lt "${#args[@]}" ]; do
     --files-from) files="${args[$((i + 1))]}" ;;
     --out) out="${args[$((i + 1))]}" ;;
     --null) null=yes ;;
+    jplag) mode=jplag ;;
   esac
   i=$((i + 1))
 done
@@ -844,6 +920,11 @@ host="$(dirname "$(dirname "$compose")")"
 root="$host${root#/work}" files="$host${files#/work}" out="$host${out#/work}"
 rm -rf "$STUB_OUT"
 mkdir -p "$STUB_OUT" "$out"
+if [ "$mode" = jplag ]; then
+  jq -n --arg e "$STUB_ERROR" '{status: "error", error: $e,
+    tags: ["synthetic-selected"], missing_tags: ["synthetic-missing"], languages: {}}' >"$out/jplag-summary.json"
+  exit 2
+fi
 cp "$files" "$STUB_OUT/files.lst"
 echo "$null" >"$STUB_OUT/null"
 (cd "$root" && find . -type f -print0 | sed -z 's|^\./||') >"$STUB_OUT/tree.lst"
@@ -976,5 +1057,20 @@ commit_awkward_names() {
   [ "$(field '.failures[0].id')" = similarity:error ]
   [[ "$(field '.failures[0].message')" == *"53 of the 54"* ]]
   [[ "$(field .message)" == *"53 of the 54"* ]]
+  validate "$result"
+}
+
+@test "a nightly root summary error reaches failures without reference names" {
+  make_docker_stub
+  mkdir -p "$SB/refs/anki"
+  local error="required JPlag references are incomplete: 1 configured tag(s) missing; 1 tag(s) selected"
+  STUB_ERROR="$error" mg similarity-nightly
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures | length')" -eq 1 ]
+  [ "$(field '.failures[0].id')" = jplag:error ]
+  [ "$(field '.failures[0].message')" = "$error" ]
+  [ "$(field '.failures[0].repro')" = 'tools/mg similarity-nightly' ]
+  [ "$(field .message)" = "similarity-nightly: $error" ]
   validate "$result"
 }
