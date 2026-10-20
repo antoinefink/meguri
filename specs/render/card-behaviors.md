@@ -35,11 +35,11 @@ For each native action, require all checks below:
 |---|---|
 | Page | Same live web view and its bound root document. |
 | Frame | Current main frame, confirmed by native frame data. |
-| Origin | Security origin matches the trusted native origin. |
+| Origin | An explicit, nonopaque security origin must match the trusted native origin. A verified opaque origin requires the owned-document proof below. |
 | Binding | Current card, generation and side. |
 | Request URL | sourceFrame.request.url may differ from the root URL for a valid fragment action. Exact URL equality is not required and cannot replace the checks above. |
 
-Keep all existing main-frame, origin and identity checks on the native bridge.
+For a verified opaque origin on the custom-scheme main document, require native proof of the current owned root commit, the same live web view and current document, and the current card/generation/side binding. All top-level navigation away from that root must be cancelled. Opacity alone grants no authority; foreign documents and subframes remain refused. Failed scheme/host comparisons do not establish opacity: an explicit mismatch is refused. This rule concerns native document callbacks only; keep all existing main-frame, origin and identity checks on the native message bridge.
 
 For a same-document fragment, keep the root document URL unchanged and scroll to the fragment target through a fixed native-owned operation. An empty fragment scrolls to the top; an absent target leaves the scroll position unchanged. Pass fragment data as arguments, never as executable source. This preserves in-page movement without navigating or replacing the review document. javascript: links retain actual page-context execution through normal WebKit handling; do not replace them with an external-open request or a new native evaluator. Other same-document activity stays in the page. A top-level document navigation away from the bound root is refused and routed only when R568/R569 permit an external open.
 
