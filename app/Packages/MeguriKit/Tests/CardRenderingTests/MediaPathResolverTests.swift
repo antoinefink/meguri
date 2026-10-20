@@ -20,6 +20,11 @@ import Testing
         fixture.add("/cafe\u{301}.png", Data("nfd".utf8), "image/png")
         fixture.add("/photo.jpg", Data("photo".utf8), "image/jpeg")
         fixture.add("/MIXED.png", Data("winner".utf8), "image/png")
+        // Replace the case alias only on volumes where it already resolves.
+        let mixedURL = fixture.root.appending(path: "Mixed.png")
+        if FileManager.default.fileExists(atPath: mixedURL.path) {
+            try FileManager.default.removeItem(at: mixedURL)
+        }
         fixture.add("/Mixed.png", Data("other".utf8), "image/png")
         fixture.add("/x%20y.mp3", Data("percent".utf8), "audio/mpeg")
         let resolver = try await fixture.resolved()
