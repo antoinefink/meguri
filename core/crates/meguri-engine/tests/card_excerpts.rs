@@ -131,7 +131,29 @@ fn cloze_numbers_and_missing_cloze_are_typed_without_a_notice() {
             card_id: id,
             question: Question::MissingCloze {
                 kind: meguri_template::card::BlankKind::MissingCloze,
-                text: "犬 と 猫 🔉neko.mp3🔉".into()
+                text: "".into()
+            },
+            deck: "Default".into()
+        }]
+    );
+}
+#[test]
+fn missing_cloze_retains_browser_text_and_media_outside_the_filter_without_a_notice() {
+    let (h, id) = fixture(
+        true,
+        "{{cloze:Front}}",
+        "C16 {{cloze:Front}} <b>AV</b> [sound:excerpt-c16.mp3]",
+        "",
+        &["{{c1::犬}} と {{c2::猫::ねこ}}", ""],
+    );
+    raw(&h, "UPDATE cards SET ord = 8");
+    assert_eq!(
+        card_excerpts(&h.collection, &[id]).unwrap(),
+        vec![CardExcerpt::Found {
+            card_id: id,
+            question: Question::MissingCloze {
+                kind: meguri_template::card::BlankKind::MissingCloze,
+                text: "C16  AV 🔉excerpt-c16.mp3🔉".into()
             },
             deck: "Default".into()
         }]

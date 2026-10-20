@@ -46,7 +46,8 @@ import MeguriCoreBindings
     }
     @Test func cancellationBeforeQuerySkipsProvider() async {
         let calls = Counter()
-        let task = Task { () throws(BridgeError) -> [CoreBridge.CardExcerpt] in
+        // Erase the closure's error type to avoid Swift 6.4's typed-throws Task IRGen crash.
+        let task = Task { () throws -> [CoreBridge.CardExcerpt] in
             withUnsafeCurrentTask { $0?.cancel() }
             return try await Core.cardExcerpts([1], using: { _ in
                 calls.add(1); return []
