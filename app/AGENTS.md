@@ -57,6 +57,7 @@
 
 ## Tests
 
+- Use snapshots for diagnostic hierarchy dumps; reserve `isHittable` for specific action targets, since enumerating menus serializes AX queries.
 - Accessibility identifiers: `area.screen.element[.id]`, element names lowerCamel (R1964).
 - System alerts drop the identifiers of their buttons, on iOS and on the Mac. Tests reach them through the alert (`app.alerts` on iOS, `app.sheets` on the Mac) and the button's label; identifier audits must accept them.
 - Run any UI test class with `tools/mg ui-test --platform iphone|ipad|mac --suite <Class>` (in the test VM).

@@ -335,7 +335,9 @@ if builds_phase; then
   check "test plan Performance: no coverage, checkers, sanitizers or screenshots, not parallel" jq -e '
     .defaultOptions as $o
     | ($o.codeCoverage == false) and ($o.addressSanitizer.enabled == false) and ($o.threadSanitizerEnabled == false)
-      and ($o.mainThreadCheckerEnabled == false) and ($o.performanceAntipatternCheckerEnabled == false)
+      and ($o.mainThreadCheckerDetectionPolicy == {"enabled": false})
+      and ($o.runtimeIssueDetection == {"enabled": false})
+      and ($o.threadPerformanceCheckerRuntimeIssueDetection == {"enabled": false})
       and ($o.undefinedBehaviorSanitizerEnabled == false) and ($o.uiTestingScreenshotsLifetime == "keepNever")
       and (.testTargets | all(.parallelizable == false))' "$REPO/app/TestPlans/Performance.xctestplan"
   # XCTest's own failure attachments include a recording of the whole screen:

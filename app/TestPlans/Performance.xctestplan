@@ -11,14 +11,21 @@
       "enabled" : false
     },
     "codeCoverage" : false,
-    "mainThreadCheckerEnabled" : false,
-    "performanceAntipatternCheckerEnabled" : false,
+    "mainThreadCheckerDetectionPolicy" : {
+      "enabled" : false
+    },
+    "runtimeIssueDetection" : {
+      "enabled" : false
+    },
     "targetForVariableExpansion" : {
       "containerPath" : "container:Meguri.xcodeproj",
       "identifier" : "4D4547555249000000000100",
       "name" : "Meguri"
     },
     "testRepetitionMode" : "none",
+    "threadPerformanceCheckerRuntimeIssueDetection" : {
+      "enabled" : false
+    },
     "threadSanitizerEnabled" : false,
     "uiTestingScreenshotsLifetime" : "keepNever",
     "undefinedBehaviorSanitizerEnabled" : false,
