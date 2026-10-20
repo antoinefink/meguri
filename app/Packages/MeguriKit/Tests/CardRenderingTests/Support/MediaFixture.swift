@@ -33,9 +33,12 @@ final class MediaFixture {
         try? FileManager.default.removeItem(at: root)
     }
     func add(_ path: String, _ data: Data, _ mime: String) {
+        try! addThrowing(path, data, mime)
+    }
+    func addThrowing(_ path: String, _ data: Data, _ mime: String) throws {
         let name = String(path.dropFirst())
         precondition(!name.contains("/"))
-        try! data.write(to: root.appending(path: name))
+        try data.write(to: root.appending(path: name), options: .atomic)
         names.insert(name)
     }
     func add(_ path: String, text: String, _ mime: String) { add(path, Data(text.utf8), mime) }
