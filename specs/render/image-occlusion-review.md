@@ -274,6 +274,8 @@ The `fill`, `stroke` and `strokeWidth` arguments do not affect a label. With the
 | an ellipse with a negative radius | the shapes drawn before it | `IndexSizeError` |
 | a toggle (click or key) while there is no canvas | nothing changes | `TypeError` |
 
+**Media arrival (R498, `render/media-serving` M5).** The failed-load state above is temporary. When the existing media-arrival path retries that image and it loads, restore its aspect ratio and redraw the current masks in place. Keep the DOM, inputs, script state, hidden-mask state and current options. Do not rerun setup or the side, add a retry loop, or extend settling.
+
 **`#err`.** The template owns this element. The IO runtime never writes it. An external `#err` keeps its text; replacing the container content removes its children, including a nested `#err`. A synchronous template catch does not catch the later failures in M9.
 
 **UI string.** `No image to show.` is Anki's English wording and Meguri uses it exactly (R195: English only).
@@ -305,9 +307,10 @@ Toggling does not recompute the aspect ratio or backing size, adds no listener a
 
 Anki desktop sizes the canvas once per side and lets the browser stretch it (M13 D1). Meguri redraws instead, so the masks stay sharp and labels keep the size rules of M8.4 after rotation, Split View, Stage Manager, folding, a Mac window resize and card zoom.
 
+- **Image recovery**: a later successful load of the current image also refreshes its natural aspect ratio and backing size, then draws with the current state and options (M9). Stop observing the old image when its side is removed or replaced.
 - **Triggers**, after a setup step got past its image check: a change of the container's size (a `ResizeObserver` on it), a `resize` event on `window`, and a change of the DPR (for example a Mac window moving to a display with another scale, or a zoom that changes it).
 - **Redraw**: at the next animation frame after one or more triggers, when the container watched is still in the document and the canvas's client size or the DPR differs from the values used at the side's last backing-size assignment: the backing size is recomputed (M6) and assigned, which clears the canvas, then a draw pass runs (M7) with the current hidden state and the `options` of the latest setup call. Triggers within one frame give one redraw; triggers that change nothing give none. So the observer's first report and a hook that changes nothing about the size cause no extra pass.
-- A redraw does not call `setup`, does not set the aspect ratio again, adds no listener, does not wire the button again and keeps the hidden state.
+- A size-change redraw does not set the aspect ratio again. Neither size-change redraw nor image recovery calls `setup`, adds a listener, wires the button again or resets the hidden state.
 - There is one watch per page. Each setup step that gets past its image check moves it to its own container. When the side is replaced, the watched container leaves the document and size changes draw nothing until the next IO side.
 - An appearance change (light or dark, R490) is not a trigger: as in Anki, the masks keep the colours of their last pass until the next pass.
 
