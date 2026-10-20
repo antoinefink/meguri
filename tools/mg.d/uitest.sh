@@ -3,7 +3,7 @@
 # as a11y runs its suites. Sourced by tools/mg; a host job.
 
 mg_job ui-test host mg_ui_test \
-  "XCUITest suites of MeguriUITests: --suite <class>[/<test>]... [--platform iphone|ipad|mac] [--device <leased udid>] [--config Debug|Profile]; optional --allocations for the Profile Mac thousand-swap method or --native-memory for Profile Mac NativeMemoryProbeTests/testCaptureStacks; functional assertions only, no performance receipt"
+  "XCUITest suites of MeguriUITests: --suite <class>[/<test>]... [--platform iphone|ipad|mac] [--device <leased udid>] [--config Debug|Profile]; functional assertions only, no performance receipt"
 
 mg_ui_test__usage() {
   mg_failure usage "ui-test: $1" "tools/mg --list"
@@ -12,7 +12,7 @@ mg_ui_test__usage() {
 }
 
 mg_ui_test() {
-  local platform=iphone device="" config=Debug suites="" only=() build_args=() s result since udid allocations=0 native_memory=0
+  local platform=iphone device="" config=Debug suites="" only=() build_args=() s result since udid
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --platform)
@@ -32,33 +32,10 @@ mg_ui_test() {
           { mg_ui_test__usage "--suite takes a test class of MeguriUITests, or Class/testMethod, e.g. NavigationLayoutTests"; return 0; }
         suites="$suites $2" && shift 2
         ;;
-      --allocations) allocations=1; shift ;;
-      --native-memory) native_memory=1; shift ;;
       *) mg_ui_test__usage "unknown argument '$1'"; return 0 ;;
     esac
   done
   [ -n "$suites" ] || { mg_ui_test__usage "name at least one --suite"; return 0; }
-  [ "$allocations" -eq 0 ] || [ "$native_memory" -eq 0 ] ||
-    { mg_ui_test__usage "--allocations and --native-memory are mutually exclusive"; return 0; }
-  if [ "$allocations" -eq 1 ]; then
-    [ "$platform" = mac ] && [ "$config" = Profile ] && [ -z "$device" ] &&
-      [ "$suites" = ' CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory' ] ||
-      { mg_ui_test__usage "--allocations requires Profile, mac and exactly --suite CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory"; return 0; }
-    mg_detail diagnostic_mode '"allocations"'
-    mg_detail diagnostic_signing '"task-access-development"'
-    mg_detail ordinary_performance_receipt false
-    mg_detail allocations_coverage '"uncertified/partial"'
-  fi
-  if [ "$native_memory" -eq 1 ]; then
-    [ "$platform" = mac ] && [ "$config" = Profile ] && [ -z "$device" ] &&
-      [ "$suites" = ' NativeMemoryProbeTests/testCaptureStacks' ] ||
-      { mg_ui_test__usage "--native-memory requires Profile, mac and exactly --suite NativeMemoryProbeTests/testCaptureStacks"; return 0; }
-    mg_detail diagnostic_mode '"native-memory"'
-    mg_detail diagnostic_signing '"task-access-development"'
-    mg_detail ordinary_performance_receipt false
-    local TEST_RUNNER_MEGURI_NATIVE_MEMORY_PROBE=1
-    export TEST_RUNNER_MEGURI_NATIVE_MEMORY_PROBE
-  fi
   for s in $suites; do only[${#only[@]}]="-only-testing:MeguriUITests/$s"; done
   mg_detail suites "$(printf '%s\n' $suites | jq -R . | jq -sc .)"
   mg_detail platform "$(jq -n --arg p "$platform" '$p')"
@@ -69,20 +46,9 @@ mg_ui_test() {
   fi
   if [ "$platform" = mac ]; then
     [ -z "$device" ] || { mg_ui_test__usage "--device is for simulators"; return 0; }
-    if [ "$allocations" -eq 1 ] || [ "$native_memory" -eq 1 ]; then
-      # A diagnostic must never take the explicit ordinary UI host fallback.
-      MEGURI_MAC_UI_ALLOW_HOST=0 mg_mac_ui_begin || return 0
-      [ "$MG_MAC_RUNNER" = vm ] || { mg_ui_test__usage "diagnostic mode requires the VM runner"; return 0; }
-      # Development task access is only for this opt-in VM diagnostic.
-      build_args[${#build_args[@]}]=CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES
-    else
-      mg_mac_ui_begin || return 0
-    fi
+    mg_mac_ui_begin || return 0
     mg_app_build mac "$config" ${build_args[0]+"${build_args[@]}"} || return 0
     mg_mac_ui_take || return 0
-    if [ "$allocations" -eq 1 ]; then
-      mg_ui_test__allocations_start || return 0
-    fi
     since="$(mg_app_log_now)"
     mg_app_xcodebuild_test "$MG_RUN_DIR/mac" mac "platform=macOS,arch=arm64" "$config" "${only[@]}"
     result=$?
@@ -91,7 +57,6 @@ mg_ui_test() {
       result=$?
     fi
     mg_ui_test__report "$MG_RUN_DIR/mac" "$result"
-    [ "$allocations" -eq 0 ] || mg_ui_test__allocations_finish
     return 0
   fi
   mg_sim_begin || return 0
@@ -112,94 +77,6 @@ mg_ui_test() {
   mg_app_xcodebuild_test "$MG_RUN_DIR/$platform" "$platform" "id=$udid" "$config" "${only[@]}"
   result=$?
   mg_ui_test__report "$MG_RUN_DIR/$platform" "$result"
-}
-
-# This cleanup is registered AFTER the VM lease, so stop/fetch runs while
-# still holding it, on normal exit and TERM/HUP alike. Never kill local SSH
-# as a substitute for stopping the VM's observer/profiler.
-mg_ui_test__allocations_start() {
-  [ "$MG_MAC_RUNNER" = vm ] || return 1
-  local rc=0
-  MG_UI_ALLOCATIONS_DIR="$MG_RUN_DIR/allocations"
-  MG_UI_ALLOCATIONS_PENDING=1
-  MG_UI_ALLOCATIONS_REMOTE=""
-  mg_on_exit mg_ui_test__allocations_finish
-  if ! mkdir -p "$MG_UI_ALLOCATIONS_DIR" || ! cp "$MG_ROOT/tools/scripts/mac-allocations.py" "$MG_UI_ALLOCATIONS_DIR/mac-allocations.py"; then
-    mg_ui_test__allocations_error "could not prepare owned helper"
-    MG_UI_ALLOCATIONS_PENDING=""
-    return 1
-  fi
-  mg_mac_vm_copy_in "$MG_UI_ALLOCATIONS_DIR" || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    if [ "$rc" -eq 2 ]; then
-      mg_detail allocations_incomplete true
-      mg_detail allocations_remote_evidence "$(jq -n --arg p "$MG_UI_ALLOCATIONS_DIR" '$p')"
-      mg_queued_settle
-    else
-      mg_ui_test__allocations_error "helper copy into VM failed"
-    fi
-    MG_UI_ALLOCATIONS_PENDING=""
-    return 1
-  fi
-  MG_UI_ALLOCATIONS_REMOTE=1
-  if ! mg_mac_vm_ssh "$(mg_mac_vm_q python3 "$MG_UI_ALLOCATIONS_DIR/mac-allocations.py" --start "$MG_UI_ALLOCATIONS_DIR" "$MG_ROOT/$MG_APP_DD/Build/Products/Profile/Meguri.app/Contents/MacOS/Meguri" "$MG_RUN_ID")" >>"$MG_RUN_DIR/allocations-control.log" 2>&1; then
-    mg_ui_test__allocations_error "observer start unknown or failed; see allocations-control.log"
-    mg_ui_test__allocations_finish
-    return 1
-  fi
-}
-
-mg_ui_test__allocations_error() {
-  mg_detail allocations_diagnostic_failed true
-  mg_failure allocations-diagnostic "$1"
-  # An XCTest failure and its counts remain the primary functional result.
-  case "$(cat "$MG_STATE/status" 2>/dev/null)" in
-    fail) ;;
-    *) mg_status error; mg_message "ui-test: allocation diagnostic failed: $1" ;;
-  esac
-}
-
-mg_ui_test__allocations_finish() {
-  [ -n "${MG_UI_ALLOCATIONS_PENDING:-}" ] || return 0
-  MG_UI_ALLOCATIONS_PENDING=""
-  local rc=0 copy_rc=0 copied=0 out trace_file
-  if [ -n "$MG_UI_ALLOCATIONS_REMOTE" ]; then
-    out="$MG_UI_ALLOCATIONS_DIR/metadata.json"
-    # Always ask the remote helper to stop, including after a lost start SSH.
-    mg_mac_vm_ssh "$(mg_mac_vm_q python3 "$MG_UI_ALLOCATIONS_DIR/mac-allocations.py" --stop "$MG_UI_ALLOCATIONS_DIR")" >>"$MG_RUN_DIR/allocations-control.log" 2>&1 || rc=$?
-    [ "$rc" -eq 0 ] || mg_ui_test__allocations_error "remote cleanup/trace finalization failed or unknown; see allocations-control.log"
-    # Copy even on diagnostic failure, before releasing the lease. Fetching
-    # the whole owned directory preserves metadata and partial trace/logs.
-    mg_mac_vm_copy_out "$MG_UI_ALLOCATIONS_DIR" || copy_rc=$?
-    if [ "$copy_rc" -eq 0 ]; then
-      copied=1
-      trace_file="$(find "$MG_UI_ALLOCATIONS_DIR/allocations.trace" -type f -size +0c -print -quit 2>/dev/null)"
-      if [ -z "$trace_file" ] || [ ! -f "$out" ] || ! jq -e '.status == "pass" and .cleanup_confirmed == true and .start_seen == true and (.tracing_started_notification_at | type == "string") and .finalized == true and .trace_exit == 0 and .coverage == "uncertified/partial" and .ordinary_performance_receipt == false' "$out" >/dev/null; then
-        mg_ui_test__allocations_error "requested trace evidence is incomplete; inspect allocations/metadata.json"
-      fi
-    elif [ "$copy_rc" -eq 2 ]; then
-      mg_detail allocations_incomplete true
-    else
-      mg_ui_test__allocations_error "trace/metadata/log copy from VM failed"
-    fi
-    # A queued/failed tar can still have delivered useful partial evidence.
-    if [ -d "$MG_UI_ALLOCATIONS_DIR" ]; then
-      if [ -f "$out" ] && jq -e 'type == "object"' "$out" >/dev/null 2>&1; then
-        mg_detail allocations "$(cat "$out")"
-      fi
-      mg_artifact allocations "$MG_UI_ALLOCATIONS_DIR" "diagnostic Allocations evidence (may be incomplete); coverage uncertified/partial"
-    fi
-    # Unknown cleanup or failed copy retains remote evidence for inspection
-    # and the next lease's narrow orphan recognizer. Remove only our files.
-    if [ "$rc" -le 1 ] && [ "$copied" -eq 1 ] && jq -e '.cleanup_confirmed == true' "$MG_UI_ALLOCATIONS_DIR/metadata.json" >/dev/null 2>&1; then
-      mg_mac_vm_ssh "rm -rf $(mg_mac_vm_q "$MG_UI_ALLOCATIONS_DIR")" >>"$MG_RUN_DIR/allocations-control.log" 2>&1 ||
-        mg_ui_test__allocations_error "owned VM files could not be removed"
-    else
-      mg_detail allocations_remote_evidence "$(jq -n --arg p "$MG_UI_ALLOCATIONS_DIR" '$p')"
-    fi
-  fi
-  [ ! -f "$MG_RUN_DIR/allocations-control.log" ] || mg_artifact log "$MG_RUN_DIR/allocations-control.log" "Allocations VM control log"
-  mg_queued_settle
 }
 
 # mg_ui_test__report <prefix> <test result 0|1|2|3|4>: counts and failing tests
