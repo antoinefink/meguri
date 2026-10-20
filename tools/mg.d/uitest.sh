@@ -42,6 +42,7 @@ mg_ui_test() {
       [ "$suites" = ' CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory' ] ||
       { mg_ui_test__usage "--allocations requires Profile, mac and exactly --suite CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory"; return 0; }
     mg_detail diagnostic_mode '"allocations"'
+    mg_detail diagnostic_signing '"task-access-development"'
     mg_detail ordinary_performance_receipt false
     mg_detail allocations_coverage '"uncertified/partial"'
   fi
@@ -59,6 +60,8 @@ mg_ui_test() {
       # A diagnostic must never take the explicit ordinary UI host fallback.
       MEGURI_MAC_UI_ALLOW_HOST=0 mg_mac_ui_begin || return 0
       [ "$MG_MAC_RUNNER" = vm ] || { mg_ui_test__usage "--allocations requires the VM runner"; return 0; }
+      # Development task access is only for this opt-in VM diagnostic.
+      build_args[${#build_args[@]}]=CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES
     else
       mg_mac_ui_begin || return 0
     fi

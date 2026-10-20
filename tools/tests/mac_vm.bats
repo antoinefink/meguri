@@ -541,6 +541,8 @@ exec '"$(command -v tar)"' "$@"'
   [ "$(field .details.platform)" = mac ]
   [ "$(field .details.config)" = Debug ]
   called '^fake build mac Debug$'
+  not_called '^fake build .*CODE_SIGN_INJECT_BASE_ENTITLEMENTS='
+  [ "$(field .details.diagnostic_signing)" = null ]
   called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri_UI_macosx27.0-arm64.xctestrun -destination platform=macOS,arch=arm64 -resultBundlePath $SB/build/mg/ui-test/[^ ]+/mac.xcresult -collect-test-diagnostics never -only-testing:MeguriUITests/NavigationLayoutTests\$"
   not_called "^host-xcodebuild"
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
@@ -556,6 +558,8 @@ exec '"$(command -v tar)"' "$@"'
   [ "$(field '.details.suites | join(",")')" = CardSwapTimingSpikeTests/testDiagnostic ]
   [ "$(field '.summary | "\(.passed) \(.failed)"')" = "11 0" ]
   called '^fake build mac Profile Performance Meguri-Profile$'
+  not_called '^fake build .*CODE_SIGN_INJECT_BASE_ENTITLEMENTS='
+  [ "$(field .details.diagnostic_signing)" = null ]
   called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri-Profile_Performance_macosx27.0-arm64.xctestrun -destination platform=macOS,arch=arm64 -resultBundlePath $SB/build/mg/ui-test/[^ ]+/mac.xcresult -collect-test-diagnostics never -only-testing:MeguriUITests/CardSwapTimingSpikeTests/testDiagnostic\$"
   [ "$(grep -c '^vm-xcodebuild ' "$STUB_LOG")" = 1 ]
   [ -f "$(vm_fs meguri-mac "$SB/build/app/DerivedData/Build/Products/Profile/Meguri.app/Contents/Info.plist")" ]
@@ -674,8 +678,13 @@ allocation_run() {
   [ "$status" -eq 0 ]
   [ "$(field .status)" = pass ]
   [ "$(field .details.diagnostic_mode)" = allocations ]
+  [ "$(field .details.diagnostic_signing)" = task-access-development ]
+  [ "$(field .details.mac_runner)" = vm ]
   [ "$(field .details.ordinary_performance_receipt)" = false ]
+  [ "$(field .details.allocations_coverage)" = uncertified/partial ]
   [ "$(field .details.allocations.coverage)" = uncertified/partial ]
+  [ "$(field .details.allocations.ordinary_performance_receipt)" = false ]
+  called '^fake build mac Profile Performance Meguri-Profile CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES$'
   [ "$(field '.summary | "\(.passed) \(.failed)"')" = '11 0' ]
   [ "$(grep -c '^vm-allocations --start lease-held$' "$STUB_LOG")" -eq 1 ]
   [ "$(grep -c '^vm-allocations --stop lease-held$' "$STUB_LOG")" -eq 1 ]
