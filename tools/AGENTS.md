@@ -4,6 +4,8 @@
 
 - Run host Apple jobs one at a time, including Swift package tests. Their core XCFramework and bindings are shared across configurations; another build can replace them after Xcode's pre-action releases its lock. Rust and image jobs may run alongside Apple work. Run `selftest-xcframework` alone on a quiet machine: its unchanged-input check has a strict timing budget.
 
+- Profile Performance builds must pass `scripts/performance-test-policy.py` on the selected generated xctestrun before products reach the VM. Source checker options alone are insufficient; never sanitize generated policy to pass the guard.
+
 - `tools/mg <job>` is the only documented way to build, test and verify. A run writes `build/mg/<job>/<run-id>/result.json` (schema `mg-result.schema.json`, bump `schema_version` on incompatible changes), points `latest` at it (never for `--dry-run`), prints only the result path on stdout, and exits 0 for pass and warn, 1 for fail, 2 for error. Job output goes to stderr and `log.txt`.
 - Add a job by adding or extending a family in `mg.d/<family>.sh`: `mg_job <name> <host|docker:<service>> <fn> <description>`, then record results with `mg_status`, `mg_count`, `mg_failure`, `mg_artifact`, `mg_user_step`, `mg_detail`, `mg_message`. Do not echo JSON yourself. Every job must survive `--dry-run`; `tools/mg selftest` dry-runs them all.
 - Catch-up may reuse only the latest real passing result for the exact clean commit, checkout and arguments; never search past a newer failure. Resolve `latest` once to its run directory before validation. Record reuse explicitly; normal gates and direct jobs still run fresh.

@@ -332,19 +332,22 @@ if builds_phase; then
         ((.testRepetitionMode // "none") == "none") and (has("maximumTestRepetitions") | not))' \
       "$REPO/app/TestPlans/$plan.xctestplan"
   done
-  check "test plan Performance: no coverage, no sanitizers, no screenshots, not parallel" jq -e '
+  check "test plan Performance: no coverage, checkers, sanitizers or screenshots, not parallel" jq -e '
     .defaultOptions as $o
     | ($o.codeCoverage == false) and ($o.addressSanitizer.enabled == false) and ($o.threadSanitizerEnabled == false)
+      and ($o.mainThreadCheckerEnabled == false) and ($o.performanceAntipatternCheckerEnabled == false)
       and ($o.undefinedBehaviorSanitizerEnabled == false) and ($o.uiTestingScreenshotsLifetime == "keepNever")
       and (.testTargets | all(.parallelizable == false))' "$REPO/app/TestPlans/Performance.xctestplan"
   # XCTest's own failure attachments include a recording of the whole screen:
   # on the Mac, the user's desktop. UI tests attach what they need themselves.
   check "test plan UI keeps no system attachments" jq -e '.defaultOptions.uiTestingScreenshotsLifetime == "keepNever"' \
     "$REPO/app/TestPlans/UI.xctestplan"
-  check "scheme Meguri-Profile tests in Profile without a debugger" bash -c '
+  check "scheme Meguri-Profile tests in Profile without a debugger or Main Thread Checker" bash -c '
     f="$1/app/Meguri.xcodeproj/xcshareddata/xcschemes/Meguri-Profile.xcscheme"
     [ "$(xmllint --xpath "string(//TestAction/@buildConfiguration)" "$f")" = Profile ] &&
     [ -z "$(xmllint --xpath "string(//TestAction/@selectedDebuggerIdentifier)" "$f")" ] &&
+    [ "$(xmllint --xpath "string(//TestAction/@disableMainThreadChecker)" "$f")" = YES ] &&
+    [ "$(xmllint --xpath "string(//LaunchAction/@disableMainThreadChecker)" "$f")" = YES ] &&
     [ "$(xmllint --xpath "string(//BuildActionEntry/@buildForArchiving)" "$f")" = NO ]' _ "$REPO"
 fi
 

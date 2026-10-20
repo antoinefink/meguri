@@ -35,7 +35,7 @@ mg_app_products() {
 # test products do not take the app's arm64-only setting). On failure
 # records it and returns 1.
 mg_app_build() {
-  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" dest result log rc counts settings=()
+  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" dest result log rc counts sdk xctestrun policy settings=()
   [ "$#" -le 4 ] || settings=("${@:5}")
   if [ "$platform" = mac ] && ! mg_word_in "$config" "Debug Profile"; then
     mg_failure usage "the Mac builds only Debug and Profile here: $config carries the daily-driver ids (tools/mg xcode-check builds and unregisters it)"
@@ -71,6 +71,21 @@ mg_app_build() {
     mg_message "$MG_JOB: the $platform $config build failed; see $log"
     mg_status fail
     return 1
+  fi
+  if [ "$config" = Profile ] && [ "$plan" = Performance ]; then
+    sdk=iphonesimulator
+    [ "$platform" != mac ] || sdk=macosx
+    # Select exactly as the VM consumer does, without copying or launching.
+    xctestrun="$(MG_APP_TEST_SCHEME="$scheme" mg__vm_xctestrun "$plan" "$sdk" "$config")"
+    policy="$(python3 "$MG_TOOLS/scripts/performance-test-policy.py" "$xctestrun")"
+    rc=$?
+    [ -z "$policy" ] || mg_detail performance_test_policy "$policy"
+    if [ "$rc" -ne 0 ]; then
+      mg_failure performance-test-policy "generated Profile Performance UI policy is unavailable or instrumented; require both UI-app checker flags explicitly false and no MainThreadChecker/libRPAC environment injection; fix the Performance plan/Profile scheme and regenerate (do not edit the xctestrun)"
+      mg_message "$MG_JOB: generated performance test policy failed; no UI execution is allowed"
+      mg_status fail
+      return 1
+    fi
   fi
   return 0
 }
