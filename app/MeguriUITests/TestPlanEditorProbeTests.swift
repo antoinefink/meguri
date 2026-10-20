@@ -40,7 +40,11 @@ final class TestPlanEditorProbeTests: XCTestCase {
             XCTAssertTrue(xcode.staticTexts["iOS 27.0"].exists)
             XCTAssertEqual(xcode.switches.count, 4)
             let firstSwitch = xcode.switches.firstMatch
-            XCTAssertEqual(firstSwitch.value as? String, "1")
+            let switchValue = firstSwitch.value
+            XCTAssertTrue(
+                (switchValue as? String) == "1"
+                    || (switchValue as? NSNumber) == NSNumber(value: 1)
+            )
             try xcode.bringToFront(bundleIdentifier: "com.apple.dt.Xcode")
             firstSwitch.click()
             dumpTree()
