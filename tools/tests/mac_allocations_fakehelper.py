@@ -35,6 +35,7 @@ class Allocations(unittest.TestCase):
         self.lookups = 0
         self.events = []
         self.processes = {}
+        self.argv_refusals = []
         self.mode = "normal"
         self.args = [self.binary, "-MeguriRoute", "spike/card-swap", "a space's value"]
         self.own = self.record(os.getpid(), sys.executable)
@@ -51,9 +52,17 @@ class Allocations(unittest.TestCase):
         proc = self.processes.get(pid)
         if proc is None or proc.rc is not None:
             return None
+        if self.mode == "argv-transient" and proc.role == "trace" and len(self.argv_refusals) < 3:
+            self.assertFalse((self.root / "trace.json").exists())
+            self.assertFalse(any(isinstance(e, tuple) and len(e) == 2 for e in self.events))
+            error = "cannot read candidate argv (KERN_PROCARGS2 errno 13)"
+            self.argv_refusals.append(error)
+            raise RuntimeError(error)
         if getattr(proc, "role", None) and self.mode.startswith(proc.role + "-verify-"):
             self.assertEqual(self.m.read(self.root / (proc.role + ".launch.json"))["pid"], pid)
-            raise RuntimeError(proc.role + " procargs access failure after Popen")
+            error = proc.role + " procargs access failure after Popen; observation " + str(len(self.argv_refusals) + 1)
+            self.argv_refusals.append(error)
+            raise RuntimeError(error)
         if self.mode == "xcrun-exec" and proc.role == "trace" and self.now < 0.1:
             return dict(proc.record, executable="/usr/bin/xcrun"), ["xcrun"] + proc.argv
         record = dict(proc.record)
@@ -266,7 +275,7 @@ class Allocations(unittest.TestCase):
                 if role == "waiter":
                     self.assertNotIn("notification-thread", self.events)
                     self.assertNotIn(201, self.processes)
-                self.assertLess(self.now, 3)
+                self.assertLess(self.now, 5)  # 2s verification plus bounded cleanup.
                 import shutil
                 shutil.rmtree(self.root / "allocations.trace", ignore_errors=True)
 
@@ -330,12 +339,84 @@ class Allocations(unittest.TestCase):
              patch.object(self.m, "target", return_value=None), \
              patch.object(self.m, "identity", self.identity), \
              patch.object(self.m.subprocess, "Popen", self.popen), \
+             patch.object(self.m.time, "monotonic", lambda: self.now), \
+             patch.object(self.m.time, "sleep", self.sleep), \
              patch.object(self.m.os, "kill", self.kill):
             self.assertRaisesRegex(RuntimeError, "after Popen", self.m.main)
         self.assertIn((202, signal.SIGTERM), self.events)
         self.assertIn((202, "wait", 2), self.events)
         self.assertIsNotNone(self.processes[202].rc)
         self.assertTrue(self.m.read(self.root / "observer.launch.json")["cleanup_confirmed"])
+        self.assertGreaterEqual(self.now, 2)
+        self.assertLessEqual(self.now, 2.1)
+
+    def test_transient_procargs_refusal_verifies_before_capture_passes(self):
+        self.mode = "argv-transient"
+        original = self.identity
+        verified = []
+
+        def identity(pid):
+            current = original(pid)
+            if pid == 201 and current is not None:
+                self.assertFalse((self.root / "trace.json").exists())
+                verified.append(current)
+            return current
+
+        with patch.object(self, "identity", identity):
+            meta = self.observe()
+        self.assertEqual(len(self.argv_refusals), 3)
+        expected = self.record(201, "/Xcode space's/usr/bin/xctrace")
+        expected_argv = [expected["executable"], "record", "--template", "Allocations", "--attach", "123",
+                         "--time-limit", "90s", "--output", str(self.root / "allocations.trace"),
+                         "--no-prompt", "--notify-tracing-started", self.cfg["notification"]]
+        self.assertEqual(verified, [(expected, expected_argv)])
+        self.assertEqual(self.m.read(self.root / "trace.json"), expected)
+        self.assertEqual(meta["status"], "pass")
+        self.assertTrue(meta["start_seen"])
+        self.assertTrue(meta["finalized"])
+        self.assertFalse(any(isinstance(e, tuple) and len(e) == 2 for e in self.events))
+
+    def test_persistent_procargs_refusal_retains_last_reason_and_reaps_child(self):
+        self.mode = "trace-verify-error"
+        meta = self.observe()
+        self.assertEqual(meta["status"], "error")
+        self.assertGreater(len(self.argv_refusals), 1)
+        self.assertIn("trace executable and arguments could not be verified: " + self.argv_refusals[-1], meta["errors"])
+        self.assertFalse((self.root / "trace.json").exists())
+        self.assertGreaterEqual(self.now, 2)
+        self.assertLessEqual(self.now, 2.1)
+        self.assertEqual([e for e in self.events if isinstance(e, tuple) and len(e) == 2], [(201, signal.SIGINT)])
+        self.assertEqual(self.processes[201].rc, 0)
+        self.assertIn((201, "wait", 2), self.events)
+        self.assertTrue(meta["launches"]["trace"]["cleanup_confirmed"])
+        self.assertEqual(meta["trace_exit"], self.processes[201].rc)
+
+    def test_child_exit_during_unknown_identity_fails_promptly(self):
+        self.mode = "argv-transient"
+        original = self.identity
+
+        def identity(pid):
+            try:
+                return original(pid)
+            except RuntimeError:
+                if pid == 201:
+                    self.processes[pid].rc = 64
+                raise
+
+        with patch.object(self, "identity", identity):
+            meta = self.observe()
+        self.assertIn("trace exited before its identity was recorded", meta["errors"])
+        self.assertEqual(meta["status"], "error")
+        self.assertEqual(meta["trace_exit"], 64)
+        self.assertTrue(meta["launches"]["trace"]["cleanup_confirmed"])
+        self.assertFalse((self.root / "trace.json").exists())
+        self.assertLess(self.now, 0.1)
+        self.assertFalse(any(isinstance(e, tuple) and len(e) == 2 for e in self.events))
+
+    def test_procargs_refusal_reports_numeric_errno(self):
+        with patch.object(self.m.ctypes, "CDLL", return_value=types.SimpleNamespace(sysctl=lambda *_args: -1)), \
+             patch.object(self.m.ctypes, "get_errno", return_value=13):
+            self.assertRaisesRegex(RuntimeError, r"^cannot read candidate argv \(KERN_PROCARGS2 errno 13\)$", self.m.argv_for, 123)
 
     def test_transient_xcrun_exec_is_verified(self):
         self.mode = "xcrun-exec"
@@ -438,7 +519,7 @@ class Allocations(unittest.TestCase):
         self.assertIn((201, signal.SIGINT), self.events)
         self.assertIn((201, signal.SIGKILL), self.events)
         self.assertEqual(self.events.count((201, "wait", 2)), 2)
-        self.assertLessEqual(self.now, 4.1)
+        self.assertLessEqual(self.now, 6.1)  # 2s verification and two 2s cleanup waits.
         # The observer has since exited. Its child still lacks saved identity;
         # a later stop must neither signal the PID nor certify cleanup.
         self.m.write(self.root / "observer.json", self.record(301, sys.executable))

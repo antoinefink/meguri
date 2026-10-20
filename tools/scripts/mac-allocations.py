@@ -47,7 +47,7 @@ def argv_for(pid):
     size = ctypes.c_size_t(1024 * 1024)
     buf = ctypes.create_string_buffer(size.value)
     if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0):
-        raise RuntimeError("cannot read candidate argv")
+        raise RuntimeError("cannot read candidate argv (KERN_PROCARGS2 errno " + str(ctypes.get_errno()) + ")")
     raw = buf.raw[:size.value]
     argc = ctypes.c_int.from_buffer_copy(raw[:4]).value
     executable, rest = raw[4:].split(b"\0", 1)
@@ -130,15 +130,23 @@ def child_args(role, cfg, root):
 def remember(proc, role, executable, cfg, root):
     # xcrun execs xctrace in place. Do not save the transient xcrun identity.
     end = time.monotonic() + 2
+    last_error = None
     while time.monotonic() < end:
         if proc.poll() is not None:
             raise RuntimeError(role + " exited before its identity was recorded")
-        current = identity(proc.pid)
+        try:
+            current = identity(proc.pid)
+        except RuntimeError as exc:
+            # UNKNOWN can be transient during exec. Only this still-owned
+            # child gets another check; no identity is saved or signal sent.
+            last_error = str(exc)
+            current = None
         if current and current[0]["executable"] == executable and current[1][1:] == child_args(role, cfg, root):
             write(root / (role + ".json"), current[0])
             return current[0]
         time.sleep(0.02)
-    raise RuntimeError(role + " executable and arguments could not be verified")
+    raise RuntimeError(role + " executable and arguments could not be verified" +
+                       (": " + last_error if last_error is not None else ""))
 
 
 def launch(role, command, executable, cfg, root, **kwargs):
