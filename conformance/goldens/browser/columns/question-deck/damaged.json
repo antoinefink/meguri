@@ -1,0 +1,50 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "card_excerpts": [
+          {
+            "error": "damaged"
+          },
+          {
+            "deck": "ExcerptFixtureDeck",
+            "question": "Q 101"
+          },
+          {
+            "error": "damaged"
+          },
+          {
+            "error": "damaged"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "5a78bd034e0fa787b3ccbbffe750899439c1a551b368da1c68355becd7bd0867",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/columns/question-deck/damaged",
+  "scenario_sha256": "2a488b80cdb8dc68e01ce51748cae837e6cb9e51829c8ab3ddbdb60588befde5",
+  "tz": "UTC"
+}
