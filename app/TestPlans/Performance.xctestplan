@@ -7,6 +7,8 @@
     }
   ],
   "defaultOptions" : {
+    "UITestingTargetAppMainThreadCheckerEnabled" : false,
+    "UITestingTargetAppPerformanceAntipatternCheckerEnabled" : false,
     "addressSanitizer" : {
       "enabled" : false
     },
