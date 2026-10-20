@@ -35,7 +35,7 @@ extension WebKitSuites {
             let contentRange: String?
             let body: String
         }
-        static let cases = [
+        nonisolated static let cases = [
             Case(range: nil, status: 200, contentRange: nil, body: "0123456789"),
             Case(range: "bytes=2-5", status: 206, contentRange: "bytes 2-5/10", body: "2345"),
             Case(range: "bytes=0-0", status: 206, contentRange: "bytes 0-0/10", body: "0"),
