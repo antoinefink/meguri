@@ -8,6 +8,7 @@ public final class CardWebConfiguration {
     public let configuration: WKWebViewConfiguration
     public let media: MediaSchemeHandler
     public let bridge: CardBridge
+    public let hostBridge: CardHostBridge
     private var rules: Task<Void, any Error>?
 
     /// A store may be injected for tests; callers remove its fresh identifier
@@ -16,6 +17,7 @@ public final class CardWebConfiguration {
         configuration = WKWebViewConfiguration()
         self.media = media
         bridge = CardBridge()
+        hostBridge = CardHostBridge()
         configuration.websiteDataStore = store
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.setURLSchemeHandler(media, forURLScheme: MediaOrigin.scheme)
@@ -30,9 +32,18 @@ public final class CardWebConfiguration {
         for name in [CardRuntime.signalHandlerName, CardRuntime.confirmationHandlerName] {
             controller.addScriptMessageHandler(bridge, contentWorld: world, name: name)
         }
+        controller.addScriptMessageHandler(hostBridge, contentWorld: world, name: CardHostBridge.name)
         #if !os(macOS)
         for name in ["cb", "meguri"] { controller.addScriptMessageHandler(bridge, contentWorld: .page, name: name) }
         #endif
+    }
+
+    /// A reviewer document with no collection/media access. The root and
+    /// bundled runtime use the production loader; all collection paths fail.
+    public func makeWarmupPage(size: CGSize = CGSize(width: 320, height: 480)) -> CardPage {
+        CardPage(configuration: self, resolver: nil, platform: PlatformClasses.current, appearance: .light,
+                 reviewExtra: "<p>Meguri</p>", identifier: "testhooks.reviewWarmup", size: size,
+                 diagnostics: CardDiagnostics(), makeWebView: { CardNativeWebView(frame: $0, configuration: $1) })
     }
 
     /// Must finish before either page navigates, including reviewExtra.

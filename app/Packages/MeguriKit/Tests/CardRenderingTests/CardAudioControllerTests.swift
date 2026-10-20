@@ -258,6 +258,68 @@ import Testing
 }
 
 enum NativeCardAudioChecks {
+    /// Invoked only by the existing confirmed-hardware S2 audio lane. Real
+    /// controller + backend + timeline, with a missing original AV index 1.
+    static func controllerQueueAdvancesAcrossMissingMiddleWithinBudget() async throws {
+        let fixture = MediaFixture()
+        let silent = SpikeAssets.silentMP3(minimumBytes: 8 * 1024)
+        fixture.add("/first.mp3", silent.data, "audio/mpeg")
+        fixture.add("/third.mp3", silent.data, "audio/mpeg")
+        let diagnostics = CardDiagnostics()
+        let controller = CardAudioController(resolver: try await fixture.resolved(), diagnostics: diagnostics)
+        defer { controller.close() }
+        struct Advancement {
+            let position: TimeInterval
+            let duration: TimeInterval
+            let observedAt: TimeInterval
+            var start: TimeInterval { observedAt - position }
+        }
+        var advances: [Int: [Advancement]] = [:]
+        var completions: [Int: TimeInterval] = [:]
+        controller.onPlaybackObservation = { entry, observation in
+            switch observation {
+            case .advanced(let position, let duration, let time):
+                guard let duration else { Issue.record("Native duration must be available"); return }
+                // Keep two independent advancing samples plus the latest one.
+                let sample = Advancement(position: position, duration: duration, observedAt: time)
+                if advances[entry.index, default: []].count < 3 { advances[entry.index, default: []].append(sample) }
+                else { advances[entry.index]?[2] = sample }
+            case .completed(let success, let time):
+                #expect(success)
+                #expect(completions[entry.index] == nil)
+                completions[entry.index] = time
+            }
+        }
+        let payload = CardPayload(cardID: 1, question: "", answer: "",
+                                  questionAudio: [.sound(name: "first.mp3"), .sound(name: "absent.mp3"), .sound(name: "third.mp3")])
+        let update = CardUpdate(card: 1, generation: 1, side: .question)
+        await controller.prepare(payload: payload, update: update)?.value
+        #expect(advances.isEmpty && completions.isEmpty)
+        let presentedAt = ProcessInfo.processInfo.systemUptime
+        controller.present(payload: payload, update: update)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while completions[2] == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(completions[2] != nil, "native controller silent queue must complete")
+        let first = try #require(advances[0]), third = try #require(advances[2])
+        #expect(first.count >= 2 && third.count >= 2)
+        #expect(first[1].position > first[0].position && third[1].position > third[0].position)
+        #expect(advances[1] == nil && completions[1] == nil)
+        let firstStart = try #require(first.first).start
+        #expect(firstStart >= presentedAt - 0.020)
+        #expect(firstStart - presentedAt <= 0.050)
+        // Infer actual end/start from advancing native timelines and a
+        // monotonic sample clock. Delegate delivery alone cannot prove timing.
+        let lastFirst = try #require(first.last)
+        let firstEnd = lastFirst.start + lastFirst.duration
+        let thirdStart = try #require(third.first).start
+        #expect(thirdStart >= firstEnd - 0.020)
+        #expect(thirdStart - firstEnd <= 0.100)
+        #expect(try #require(completions[0]) >= firstEnd - 0.020)
+        #expect(diagnostics.entries.contains { $0.kind == "missingAudio" && $0.index == 1 && $0.update == update })
+        #expect(controller.current == nil)
+        #expect(MPNowPlayingInfoCenter.default().nowPlayingInfo == nil)
+    }
+
     static func securelyOpenedSilentFileActuallyAdvancesAndSeeks() async throws {
             let fixture = MediaFixture()
             let audio = SpikeAssets.silentMP3(minimumBytes: 64 * 1024)

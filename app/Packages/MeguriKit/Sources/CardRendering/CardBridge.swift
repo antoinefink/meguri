@@ -96,6 +96,11 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
                   ["line", "column"].allSatisfy({ dictionary[$0] == nil || dictionary[$0] is NSNull || (Self.integer(dictionary[$0]) ?? -1) >= 0 }),
                   (phase == "script" ? (Self.integer(dictionary["index"]) ?? 0) > 0 : dictionary["index"] == nil || dictionary["index"] is NSNull)
             else { reject(); return }
+            page.diagnostics.captureTemplateError(update: update, payload: payload, kind: kind, phase: phase,
+                                                  message: dictionary["message"] as? String ?? "",
+                                                  line: Self.integer(dictionary["line"]).map(Int.init),
+                                                  column: Self.integer(dictionary["column"]).map(Int.init),
+                                                  index: Self.integer(dictionary["index"]).map(Int.init))
             let location = page.diagnostics.scriptLocation(message: dictionary["message"] as? String ?? "", line: Self.integer(dictionary["line"]).map(Int.init),
                                                            column: Self.integer(dictionary["column"]).map(Int.init), source: dictionary["source"] as? String)
             page.diagnostics.record("script.\(kind).\(phase)", update: update, index: Self.integer(dictionary["index"]).map(Int.init), script: location)

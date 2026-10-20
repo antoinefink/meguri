@@ -168,7 +168,7 @@ extension RenderingSpikes {
             }).observe(document.getElementById('qa'), {childList: true});
             """
 
-        static func makePair(_ media: MediaFixture, onSample: @escaping (VisibleSample) -> Void = { _ in }) async throws -> CardPagePair {
+        static func makePair(_ media: MediaFixture, onSample: @escaping @MainActor (VisibleSample) -> Void = { _ in }) async throws -> CardPagePair {
             let configuration = CardWebConfiguration(store: .nonPersistent())
             let pair = CardPagePair(configuration: configuration, resolver: try await media.resolved(), size: Self.size, onSample: onSample,
                                     makeWebView: { SpikeWebView(frame: $0, configuration: $1) })

@@ -17,6 +17,29 @@ public final class CardDiagnostics {
         public var repeats: Int
     }
 
+    /// Private user content, in memory only. Deliberately not Codable and
+    /// separate from sanitized technical receipts. Never log/export this state.
+    public nonisolated struct TemplateError: Sendable, Equatable {
+        public let update: CardUpdate
+        public let templateOrdinal: Int
+        public let templateDescriptor: String?
+        public let kind: String
+        public let phase: String
+        public let message: String
+        public let line: Int?
+        public let column: Int?
+        public let scriptIndex: Int?
+    }
+    public private(set) var templateErrors: [TemplateError] = []
+    func captureTemplateError(update: CardUpdate, payload: CardPayload, kind: String, phase: String,
+                              message: String, line: Int?, column: Int?, index: Int?) {
+        let error = TemplateError(update: update, templateOrdinal: payload.ordinal, templateDescriptor: payload.templateDescriptor,
+                                  kind: kind, phase: phase, message: String(message.prefix(2_000)), line: line, column: column, scriptIndex: index)
+        guard !templateErrors.contains(error) else { return }
+        if templateErrors.count == 64 { templateErrors.removeFirst() }
+        templateErrors.append(error)
+    }
+
     public private(set) var entries: [Entry] = []
     public init() {}
 

@@ -13,6 +13,13 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     public internal(set) var visibleToken: UInt64?
     public private(set) var closed = false
     public private(set) var terminations = 0
+    public private(set) lazy var hostReports = CardHostReporting(page: self)
+    private var hostInstalledDOM = false
+    private var hostMutations = 0
+    private var hostSuspended = false
+    private var hostPresentationPending = false
+    var hostDOMKnown: Bool { hostInstalledDOM && hostMutations == 0 && !processTerminated && !hostSuspended && !hostPresentationPending }
+    public var onTermination: ((CardPage) -> Void)?
     var onSignal: ((CardPage, String, [String: Any]) -> Void)?
     var onAction: ((CardPage, CardBridgeAction) -> Void)?
     var onConfirmation: ((CardPage, [String: Any]) -> Void)?
@@ -20,6 +27,7 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     private var appearance: CardRuntime.Appearance
     private var questionAppearance: CardRuntime.Appearance?
     private var runtimeSettled = false
+    private var processTerminated = false
     private var appearancePaints = 0
     private var loaded = false
     private var navigation: CheckedContinuation<Void, any Error>?
@@ -34,12 +42,13 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     private var pending: [(CardUpdate, CardBridgeAction)] = []
     private var visibleReceipt: CardUpdate?
     private var scripts: [UUID: CheckedContinuation<Void, any Error>] = [:]
+    private var acknowledgements: [UUID: CheckedContinuation<Bool, any Error>] = [:]
     private var stringReads: [UUID: CheckedContinuation<String, any Error>] = [:]
 
     public nonisolated enum Failure: Error { case closed, superseded, updateFailed, notPrepared }
     static let world = WKContentWorld.world(name: CardRuntime.interactionWorldName)
 
-    init(configuration: CardWebConfiguration, resolver: MediaPathResolver, platform: CardRuntime.Platform,
+    init(configuration: CardWebConfiguration, resolver: MediaPathResolver?, platform: CardRuntime.Platform,
          appearance: CardRuntime.Appearance, reviewExtra: String, identifier: String, size: CGSize,
          diagnostics: CardDiagnostics, makeWebView: (CGRect, WKWebViewConfiguration) -> CardNativeWebView) {
         self.configuration = configuration
@@ -62,10 +71,12 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         let document = CardRuntime.pageDocument(platform: platform, appearance: appearance, mediaRoot: MediaOrigin.url, reviewExtra: reviewExtra)
         configuration.media.bind(webView, to: .init(resolver: resolver, document: document, diagnostics: diagnostics))
         configuration.bridge.register(self)
+        configuration.hostBridge.register(self)
+        webView.onHostGeometryChange = { [weak self] in self?.hostReports.geometryChanged() }
     }
 
     public func load() async throws {
-        guard !closed else { throw Failure.closed }
+        guard !closed, !processTerminated else { throw Failure.closed }
         if let loadResult { return try loadResult.get() }
         if loading == nil {
             loading = Task { [weak self] in
@@ -106,6 +117,8 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     }
 
     func begin(_ payload: CardPayload, update: CardUpdate) {
+        hostInstalledDOM = false
+        hostReports.invalidate()
         updateOperation?.cancel()
         updateOperation = nil
         failWaiters(Failure.superseded)
@@ -127,6 +140,8 @@ public final class CardPage: NSObject, WKNavigationDelegate {
             guard let self, !self.closed, self.update == update else { throw Failure.superseded }
             try await self.load()
             guard self.update == update else { throw Failure.superseded }
+            self.hostSuspended = false
+            self.hostPresentationPending = false
             try await self.run("meguriCard.identity(card, generation);", arguments: ["card": update.card, "generation": update.generation], world: Self.world)
             // No other native operation can interleave identity and entry.
             if update.side == .question {
@@ -166,12 +181,16 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     }
 
     func signal(_ signal: String, body: [String: Any]) {
+        guard update != nil, !closed, !processTerminated, !readyPhases.contains("failed") else { return }
         if signal == "settled" || signal == "shown" {
+            hostInstalledDOM = true
             if signal == "settled" { runtimeSettled = true }
+            if signal == "shown" { Task { [weak self] in await self?.hostReports.publish() } }
             reach(signal)
         } else if signal == "visible" {
             visibleReceipt = update
         } else if signal == "updateFailed" {
+            hostInstalledDOM = false; hostReports.invalidate()
             readyPhases.insert("failed")
             runtimeSettled = false; visibleToken = nil
             diagnostics.record("updateFailed", update: update)
@@ -184,10 +203,11 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         for id in waiters.keys.filter({ waiters[$0]?.1 == phase }) { waiters.removeValue(forKey: id)?.2.resume() }
     }
     func confirm(_ body: [String: Any]) {
+        guard !readyPhases.contains("failed") else { return }
         if body["phase"] as? String == "visible", visibleReceipt != update { return }
         onConfirmation?(self, body)
     }
-    func acceptsVisibleConfirmation() -> Bool { presented && update != nil && visibleReceipt == update }
+    func acceptsVisibleConfirmation() -> Bool { !readyPhases.contains("failed") && presented && update != nil && visibleReceipt == update }
 
     func admit(_ action: CardBridgeAction) {
         guard let update, !readyPhases.contains("failed") else { return }
@@ -198,7 +218,17 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     }
     private static func isPlay(_ action: CardBridgeAction) -> Bool { if case .play = action { return true }; return false }
 
-    func leavePresentation() { presented = false; pending.removeAll() }
+    func leavePresentation() {
+        presented = false; pending.removeAll()
+        suspendHost()
+    }
+    func beginPresentation() {
+        // Native swap has already happened. Preserve only this slot's matched
+        // preparation observations, never input or maps.
+        hostSuspended = false
+        hostPresentationPending = true
+        hostReports.invalidate(keepSlot: true)
+    }
 
     /// Ordered before the next native update even if its owner prepares the
     /// old page again in the same turn as the swap.
@@ -213,10 +243,12 @@ public final class CardPage: NSObject, WKNavigationDelegate {
 
     /// Called only after native z-order and the enclosing commit.
     func present(token: UInt64) async throws {
-        guard !closed, let update, visibleToken == token else { return }
+        guard !closed, !readyPhases.contains("failed"), let update, visibleToken == token else { return }
         presented = true
         try await run("meguriCard.present(token);", arguments: ["token": token], world: Self.world)
         guard self.update == update, presented else { return }
+        hostPresentationPending = false
+        Task { [weak self] in await self?.hostReports.publish() }
         let actions = pending
         pending.removeAll()
         var revealed = false
@@ -229,7 +261,13 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         }
     }
 
+    func suspendHost() {
+        hostSuspended = true
+        hostReports.invalidate()
+    }
+
     func unpresent() async throws {
+        suspendHost()
         presented = false
         pending.removeAll()
         try await run("meguriCard.unpresent();", world: Self.world)
@@ -238,15 +276,21 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         try await run("for (const media of document.querySelectorAll('audio,video')) media.pause();", world: Self.world)
     }
     func resumePresentation() async throws {
-        guard !closed, let token = visibleToken else { return }
+        guard !closed, !readyPhases.contains("failed"), let token = visibleToken else { return }
         presented = true
         try await run("meguriCard.resume(token);", arguments: ["token": token], world: Self.world)
+        hostSuspended = false
+        hostPresentationPending = false
+        Task { [weak self] in await self?.hostReports.publish() }
     }
 
     public func setAppearance(_ value: CardRuntime.Appearance) async throws {
         try await applyAppearance(value, forcePaint: false)
     }
     private func applyAppearance(_ value: CardRuntime.Appearance, forcePaint: Bool) async throws {
+        let changed = appearance != value || forcePaint
+        if changed { beginHostMutation() }
+        defer { if changed { endHostMutation() } }
         let paint = loaded && update != nil && !presented && (appearance != value || forcePaint)
         if paint { appearancePaints += 1; readyPhases.remove("appearance") }
         defer {
@@ -261,6 +305,8 @@ public final class CardPage: NSObject, WKNavigationDelegate {
             if loaded { try await run("meguriCard.setAppearance(dark, mac);", arguments: ["dark": value == .dark, "mac": platform == .mac], world: Self.world) }
             if paint { try await run("await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));", world: Self.world) }
         } catch {
+            hostInstalledDOM = false
+            hostReports.invalidate()
             if !presented { runtimeSettled = false }
             diagnostics.record("appearanceFailed", update: update)
             throw error
@@ -274,12 +320,24 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     }
 
     func setState(flag: UInt8, marked: Bool) async throws {
+        beginHostMutation()
+        defer { endHostMutation() }
         payload?.flag = flag; payload?.marked = marked
         if loaded { try await run("_drawFlag(flag); _drawMark(mark);", arguments: ["flag": flag, "mark": marked]) }
     }
     func setAudioPolicy(_ policy: CardAudioPolicy) { payload?.audioPolicy = policy }
 
+    func beginHostMutation() {
+        hostMutations += 1
+        hostReports.invalidate()
+    }
+    func endHostMutation() {
+        hostMutations -= 1
+        Task { [weak self] in await self?.hostReports.publish() }
+    }
+
     func invalidate() {
+        hostInstalledDOM = false; hostReports.invalidate()
         update = nil; payload = nil; visibleToken = nil; runtimeSettled = false
         readyPhases.removeAll()
         visibleReceipt = nil
@@ -305,20 +363,26 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         }
         closed = true
         invalidate()
+        hostReports.close()
+        webView.onHostGeometryChange = nil
+        configuration.hostBridge.unregister(self)
         configuration.bridge.unregister(self)
         configuration.media.unbind(webView)
         finishLoad(.failure(Failure.closed))
         loading?.cancel(); loading = nil
         operations?.cancel(); operations = nil
         updateOperation?.cancel(); updateOperation = nil
-        let pendingScripts = scripts, pendingReads = stringReads
+        let pendingScripts = scripts, pendingReads = stringReads, pendingAcks = acknowledgements
+        acknowledgements.removeAll()
         self.scripts.removeAll(); stringReads.removeAll()
         for continuation in pendingScripts.values { continuation.resume(throwing: Failure.closed) }
         for continuation in pendingReads.values { continuation.resume(throwing: Failure.closed) }
+        for continuation in pendingAcks.values { continuation.resume(throwing: Failure.closed) }
         navigation?.resume(throwing: Failure.closed); navigation = nil
         navigationTarget = nil
         webView.stopLoading()
         webView.navigationDelegate = nil
+        onTermination = nil
         onSignal = nil; onAction = nil; onConfirmation = nil
     }
 
@@ -354,6 +418,43 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         }
     }
 
+    /// A real document/runtime round trip for collection-free performance
+    /// warm-up. Shared storage/configuration does not guarantee process reuse.
+    public func answersWarmup() async -> Bool {
+        guard !closed, !processTerminated else { return false }
+        do {
+            let answer = try await string("""
+                return document.readyState === 'complete' &&
+                    document.getElementById('qa') !== null && document.body.offsetHeight > 0 &&
+                    typeof _showQuestion === 'function' && typeof getTypedAnswer === 'function'
+                    ? 'review-runtime-ready' : '';
+                """)
+            let isolated = try await string("return typeof meguriCard === 'object' ? 'isolated-ready' : '';", world: Self.world)
+            return !closed && !processTerminated && answer == "review-runtime-ready" && isolated == "isolated-ready"
+        } catch { return false }
+    }
+
+    func hostAcknowledgement(_ message: [String: Any]) async throws -> Bool {
+        guard !closed else { throw Failure.closed }
+        let id = UUID()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                acknowledgements[id] = continuation
+                webView.callAsyncJavaScript("""
+                    const host = window.meguriReviewHost;
+                    if (!host || typeof host.receive !== 'function') return false;
+                    const acknowledgement = host.receive(message);
+                    return typeof acknowledgement === 'boolean' && acknowledgement;
+                    """, arguments: ["message": message], in: nil, in: Self.world) { [weak self] result in
+                    self?.acknowledgements.removeValue(forKey: id)?.resume(with: result.map { CardBridge.bool($0) == true })
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.acknowledgements.removeValue(forKey: id)?.resume(throwing: CancellationError()) }
+        }
+    }
+
     func typedText() async -> String {
         do { return try await string("return getTypedAnswer();") }
         catch { diagnostics.record("typedAnswerRead", update: update); return "" }
@@ -371,10 +472,17 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     }
     public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         terminations += 1
+        processTerminated = true
+        hostInstalledDOM = false
+        hostReports.invalidate()
+        runtimeSettled = false; visibleToken = nil; visibleReceipt = nil
+        pending.removeAll()
+        updateOperation?.cancel()
         readyPhases.insert("failed")
         navigationFailed(); failWaiters(Failure.updateFailed)
         diagnostics.record("processTerminated", update: update)
         onSignal?(self, "updateFailed", ["error": "processTerminated"])
+        onTermination?(self)
     }
     private func navigationFailed() { navigation?.resume(throwing: Failure.updateFailed); navigation = nil; navigationTarget = nil }
 }

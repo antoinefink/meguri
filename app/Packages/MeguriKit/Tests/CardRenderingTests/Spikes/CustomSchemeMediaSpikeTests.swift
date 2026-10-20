@@ -126,6 +126,7 @@ extension RenderingSpikes {
             #expect(!late.isEmpty, "no ranged request near 90 %: \(handler.requests(for: "/_long.mp3"))")
             print("S2(a) mp3: duration \(result.duration) s, seeked to \(result.seekedTo), played to \(result.playedTo); requests: \(handler.requests(for: "/_long.mp3"))")
             try await NativeCardAudioChecks.securelyOpenedSilentFileActuallyAdvancesAndSeeks()
+            try await NativeCardAudioChecks.controllerQueueAdvancesAcrossMissingMiddleWithinBudget()
         }
 
         @Test func aVideoSeeksToNinetyPercentAndPlaysThroughRangeRequests() async throws {

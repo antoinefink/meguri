@@ -21,6 +21,79 @@ public enum PlatformClasses {
 open class CardNativeWebView: WKWebView {
     public internal(set) var idle = true
     var reviewOwnsFocus = false
+    var onHostGeometryChange: (() -> Void)?
+    /// Native owners can supply an inset content rectangle. nil uses the
+    /// current WebKit viewport. Both changes invalidate the host epoch.
+    public var contentRectangle: CGRect? {
+        didSet { if oldValue != contentRectangle { onHostGeometryChange?() } }
+    }
+    var hostContentRect: CGRect {
+        if let contentRectangle { return contentRectangle }
+        #if os(macOS)
+        return bounds
+        #else
+        return bounds.inset(by: scrollView.adjustedContentInset)
+        #endif
+    }
+    open override var pageZoom: CGFloat {
+        didSet { if oldValue != pageZoom { onHostGeometryChange?() } }
+    }
+    #if os(macOS)
+    public override init(frame: CGRect, configuration: WKWebViewConfiguration) {
+        super.init(frame: frame, configuration: configuration)
+        NotificationCenter.default.addObserver(self, selector: #selector(hostScrollChanged(_:)),
+                                               name: NSView.boundsDidChangeNotification, object: nil)
+    }
+    public required init?(coder: NSCoder) { super.init(coder: coder) }
+    open override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        func observeClips(_ view: NSView) {
+            if let clip = view as? NSClipView { clip.postsBoundsChangedNotifications = true }
+            for child in view.subviews { observeClips(child) }
+        }
+        observeClips(self)
+        onHostGeometryChange?()
+    }
+    @objc private func hostScrollChanged(_ notification: Notification) {
+        guard let view = notification.object as? NSView, view !== self, view.isDescendant(of: self) else { return }
+        onHostGeometryChange?()
+    }
+    open override func setFrameSize(_ newSize: NSSize) {
+        let changed = frame.size != newSize
+        super.setFrameSize(newSize)
+        if changed { onHostGeometryChange?() }
+    }
+    open override func setBoundsSize(_ newSize: NSSize) {
+        let changed = bounds.size != newSize
+        super.setBoundsSize(newSize)
+        if changed { onHostGeometryChange?() }
+    }
+    open override func scrollWheel(with event: NSEvent) {
+        onHostGeometryChange?()
+        super.scrollWheel(with: event)
+    }
+    #else
+    private var lastHostGeometry: [CGFloat] = []
+    open override var frame: CGRect {
+        didSet { if oldValue != frame { onHostGeometryChange?() } }
+    }
+    open override var bounds: CGRect {
+        didSet { if oldValue != bounds { onHostGeometryChange?() } }
+    }
+    open override func layoutSubviews() {
+        super.layoutSubviews()
+        checkHostScrollGeometry()
+    }
+    func checkHostScrollGeometry() {
+        let inset = scrollView.adjustedContentInset
+        let geometry = [scrollView.contentOffset.x, scrollView.contentOffset.y,
+                        scrollView.zoomScale, inset.top, inset.left, inset.bottom, inset.right]
+        if geometry != lastHostGeometry {
+            lastHostGeometry = geometry
+            onHostGeometryChange?()
+        }
+    }
+    #endif
     #if os(macOS)
     open override var isOpaque: Bool { true }
     open override var acceptsFirstResponder: Bool { !idle && reviewOwnsFocus && super.acceptsFirstResponder }

@@ -36,6 +36,14 @@ public final class CardAudioController {
         public let index: Int
         public let name: String
     }
+    /// Narrow native timing observation seam. No observer means no polling.
+    /// Advancement comes from the backend timeline, not the play request.
+    enum PlaybackObservation {
+        case advanced(position: TimeInterval, duration: TimeInterval?, observedAt: TimeInterval)
+        case completed(success: Bool, observedAt: TimeInterval)
+    }
+    var onPlaybackObservation: ((Entry, PlaybackObservation) -> Void)?
+    private var playbackObservation: Task<Void, Never>?
     public private(set) var current: Entry?
     public private(set) var paused = false
     private let resolver: MediaPathResolver
@@ -201,8 +209,28 @@ public final class CardAudioController {
                 return
             }
             guard let self, self.sessionOwner == lease, self.generation == serial, !self.paused, !self.closed, !Task.isCancelled else { session.release(lease); return }
-            do { try clip.play() }
+            do {
+                try clip.play()
+                self.observePlayback(clip, entry: entry, serial: serial)
+            }
             catch { self.complete(serial, success: false) }
+        }
+    }
+    private func observePlayback(_ clip: any CardAudioClip, entry: Entry, serial: UInt64) {
+        playbackObservation?.cancel()
+        guard onPlaybackObservation != nil else { return }
+        playbackObservation = Task { [weak self, weak clip] in
+            var previous: TimeInterval = 0
+            while !Task.isCancelled {
+                guard let self, let clip, self.generation == serial, self.clip === clip, !self.paused else { return }
+                let position = clip.time
+                if position.isFinite, position > previous {
+                    previous = position
+                    self.onPlaybackObservation?(entry, .advanced(position: position, duration: clip.duration,
+                                                                 observedAt: ProcessInfo.processInfo.systemUptime))
+                }
+                do { try await Task.sleep(for: .milliseconds(5)) } catch { return }
+            }
         }
     }
     private func releaseSession() {
@@ -212,6 +240,8 @@ public final class CardAudioController {
     }
     private func complete(_ serial: UInt64, success: Bool, reportFailure: Bool = true) {
         guard generation == serial, let entry = current else { return }
+        playbackObservation?.cancel(); playbackObservation = nil
+        if clip != nil { onPlaybackObservation?(entry, .completed(success: success, observedAt: ProcessInfo.processInfo.systemUptime)) }
         generation += 1; seekGeneration += 1
         if !success && reportFailure { diagnostics.record("audioDecode", update: diagnosticUpdate(entry), name: entry.name, index: entry.index) }
         clip?.onEnd = nil; clip?.stop(); clip = nil
@@ -230,6 +260,7 @@ public final class CardAudioController {
     public func pause() {
         guard current != nil else { return }
         paused = true
+        playbackObservation?.cancel(); playbackObservation = nil
         clip?.pause()
         releaseSession()
     }
@@ -268,6 +299,7 @@ public final class CardAudioController {
     }
 
     private func replace(keepPreload: Bool = false) {
+        playbackObservation?.cancel(); playbackObservation = nil
         if !keepPreload { cancelPreload() }
         generation += 1; seekGeneration += 1
         seeking?.cancel(); seeking = nil
@@ -283,6 +315,7 @@ public final class CardAudioController {
     public func close() {
         guard !closed else { return }
         closed = true; stop()
+        onPlaybackObservation = nil
         sessionEvents?.cancel(); sessionEvents = nil
     }
 }

@@ -1,4 +1,5 @@
 #if MEGURI_TEST_HOOKS
+import CardRendering
 import Foundation
 import WebKit
 #if !os(macOS)
@@ -16,27 +17,21 @@ extension TestHooks {
     /// a ready process the app posts nothing, and `PerfTestCase` fails before
     /// measuring.
     ///
-    /// Until CardRendering keeps the review page pair (U67), this page is the
-    /// app's only web content. U67 makes the warm-up load its pages through
-    /// the pair's shared configuration, so that the process warmed is the
-    /// one the reviewer renders in.
-    final class WebContentWarmup: NSObject, WKNavigationDelegate {
+    /// Uses the production reviewer document, origin and shared configuration.
+    /// A real round trip proves this page is warm; WebKit does not guarantee
+    /// that a later reviewer page will share its process.
+    final class WebContentWarmup: NSObject {
         static let shared = WebContentWarmup()
 
         static var requestName: String { "\(Bundle.main.bundleIdentifier ?? "").testhooks.warmWebContent" }
         static var readyName: String { "\(Bundle.main.bundleIdentifier ?? "").testhooks.webContentReady" }
 
-        /// A page with script, layout and text: the process parses, lays out
-        /// and runs JavaScript before it answers.
-        static let page = """
-            <!doctype html><html><head><meta charset="utf-8">
-            <meta name="viewport" content="width=device-width"></head>
-            <body><p id="warm">Meguri</p><script>document.body.dataset.warm = "1";</script></body></html>
-            """
-
-        private var webView: WKWebView?
-        private var loading: CheckedContinuation<Bool, Never>?
+        private(set) var page: CardPage?
         private var current: Task<Bool, Never>?
+        private var flight = UUID()
+        private let configuration: CardWebConfiguration
+        init(configuration: CardWebConfiguration = .shared) { self.configuration = configuration; super.init() }
+
         private var listening = false
         #if os(macOS)
         private var observer: NSObjectProtocol?
@@ -52,11 +47,11 @@ extension TestHooks {
             observer = DistributedNotificationCenter.default().addObserver(
                 forName: Notification.Name(Self.requestName), object: nil, queue: .main
             ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.requested() }
+                Task { @MainActor [weak self] in self?.requested() }
             }
             #else
             notify_register_dispatch(Self.requestName, &token, .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.requested() }
+                Task { @MainActor [weak self] in self?.requested() }
             }
             #endif
         }
@@ -80,60 +75,49 @@ extension TestHooks {
             if let current {
                 return await current.value
             }
-            let task = Task { await warmOnce() }
+            let flight = UUID()
+            self.flight = flight
+            let task = Task { await warmOnce(flight) }
             current = task
             let ready = await task.value
-            current = nil
+            if self.flight == flight { current = nil }
             return ready
         }
 
-        private func warmOnce() async -> Bool {
-            if let webView, await answers(webView) {
-                return true
+        private func warmOnce(_ flight: UUID) async -> Bool {
+            guard self.flight == flight, !Task.isCancelled else { return false }
+            if let page, await page.answersWarmup(), self.page === page, self.flight == flight, !Task.isCancelled { return true }
+            guard self.flight == flight, !Task.isCancelled else { return false }
+            discardPage()
+            let page = configuration.makeWarmupPage()
+            self.page = page
+            page.onTermination = { [weak self] page in
+                guard let self, self.page === page else { return }
+                self.discardPage()
             }
-            let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 480), configuration: WKWebViewConfiguration())
-            webView.navigationDelegate = self
-            self.webView = webView
-            let loaded = await withCheckedContinuation { continuation in
-                loading = continuation
-                webView.loadHTMLString(Self.page, baseURL: nil)
+            do { try await page.load() } catch {
+                if self.page === page { discardPage() }
+                return false
             }
-            guard loaded, await answers(webView) else {
-                if self.webView === webView { self.webView = nil }
+            guard self.flight == flight, !Task.isCancelled, await page.answersWarmup(), self.page === page else {
+                if self.page === page { discardPage() }
                 return false
             }
             return true
         }
 
-        /// A round trip through the page's web content process.
-        private func answers(_ webView: WKWebView) async -> Bool {
-            let warm = try? await webView.evaluateJavaScript("document.readyState + ':' + document.body.dataset.warm")
-            return warm as? String == "complete:1"
+        private func discardPage() {
+            let old = page
+            page = nil
+            old?.close()
         }
 
-        private func finishLoading(_ loaded: Bool) {
-            loading?.resume(returning: loaded)
-            loading = nil
+        func close() {
+            flight = UUID()
+            current?.cancel(); current = nil
+            discardPage()
         }
 
-        // MARK: WKNavigationDelegate
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            finishLoading(true)
-        }
-
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
-            finishLoading(false)
-        }
-
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
-            finishLoading(false)
-        }
-
-        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            if self.webView === webView { self.webView = nil }
-            finishLoading(false)
-        }
     }
 }
 #endif

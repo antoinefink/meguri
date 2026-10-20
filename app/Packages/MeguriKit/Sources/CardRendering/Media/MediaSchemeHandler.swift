@@ -5,11 +5,11 @@ import WebKit
 /// WebKit's main executor; each awaited read supplies at most one 64KiB chunk.
 public final class MediaSchemeHandler: NSObject, WKURLSchemeHandler {
     public struct Binding {
-        public let resolver: MediaPathResolver
+        public let resolver: MediaPathResolver?
         public var document: String
         public var update: CardUpdate?
         public let diagnostics: CardDiagnostics
-        public init(resolver: MediaPathResolver, document: String, update: CardUpdate? = nil, diagnostics: CardDiagnostics) {
+        public init(resolver: MediaPathResolver?, document: String, update: CardUpdate? = nil, diagnostics: CardDiagnostics) {
             self.resolver = resolver; self.document = document; self.update = update; self.diagnostics = diagnostics
         }
     }
@@ -114,7 +114,7 @@ private nonisolated struct MediaResponse: Sendable {
              bodyCount: 0, offset: 0, file: nil, data: nil)
     }
 
-    @concurrent static func open(_ request: URLRequest, binding: (MediaPathResolver, String)?) async throws -> Self {
+    @concurrent static func open(_ request: URLRequest, binding: (MediaPathResolver?, String)?) async throws -> Self {
         guard let url = request.url, let path = MediaOrigin.path(url), let binding else { return failure(404) }
         let method = request.httpMethod ?? "GET"
         guard method == "GET" || method == "HEAD" else {
@@ -136,7 +136,8 @@ private nonisolated struct MediaResponse: Sendable {
             media = false
         } else if first == "_addons" { return failure(404) }
         else {
-            let opened = try await binding.0.openURLPath(path)
+            guard let resolver = binding.0 else { return failure(404) }
+            let opened = try await resolver.openURLPath(path)
             file = opened; data = nil; mime = MediaMIMETypes.type(for: opened.name); media = true
         }
         let total = file?.length ?? UInt64(data?.count ?? 0)

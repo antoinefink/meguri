@@ -22,6 +22,7 @@ public final class CardPagePair {
     public var onAction: ((CardBridgeAction) -> Void)?
     public var onSignal: ((String, CardUpdate) -> Void)?
     public var onInteraction: ((String, [String: Any]) -> Void)?
+    public var onHostEvent: ((CardPage, CardHostEvent) -> Void)?
     public var onCommitted: ((CardUpdate, SwapToken) -> Void)?
     /// Frame probes end intervals independently of the double-rAF receipt.
     public let swaps: SwapRecorder
@@ -33,6 +34,7 @@ public final class CardPagePair {
     private var preparedAnswer: (question: CardUpdate, answer: CardUpdate)?
     private var closed = false
     private var commitSerial: UInt64 = 0
+    private var hostInstallation = UUID()
     private var htmlAudioOwner: UUID?
     private var lifecycle: Task<Void, Never>?
     private let compare: (TypeAnswerDescriptor, String) async throws -> String
@@ -42,7 +44,7 @@ public final class CardPagePair {
                 reviewExtra: String = "", size: CGSize = CGSize(width: 400, height: 600),
                 audio: CardAudioController? = nil,
                 compare: @escaping (TypeAnswerDescriptor, String) async throws -> String = { try await Core.compareTypedAnswer($0, typed: $1) },
-                onSample: @escaping (VisibleSample) -> Void = { _ in },
+                onSample: @escaping @MainActor (VisibleSample) -> Void = { _ in },
                 makeWebView: (CGRect, WKWebViewConfiguration) -> CardNativeWebView = { CardNativeWebView(frame: $0, configuration: $1) }) {
         let diagnostics = CardDiagnostics()
         self.diagnostics = diagnostics
@@ -59,6 +61,10 @@ public final class CardPagePair {
         container.addSubview(b.webView)
         container.addSubview(a.webView)
         for page in pages {
+            page.hostReports.onEvent = { [weak self, weak page] event in
+                guard let self, let page else { return }
+                self.onHostEvent?(page, event)
+            }
             page.onAction = { [weak self] page, action in
                 guard let self, page === self.current, !self.suspended, !self.lifecycleSuspended else { return }
                 if case .play(let side, let index) = action, let payload = page.payload, let update = page.update {
@@ -143,6 +149,7 @@ public final class CardPagePair {
                     if target?.update == update { target?.cancelUpdate() }
                 }
             }
+            Task { [weak target] in await target?.hostReports.publish() }
             return update
         } catch {
             if target.update == update { target.invalidate(); audio.cancelPreparation(update) }
@@ -158,6 +165,7 @@ public final class CardPagePair {
         let old = current
         let next = idle
         Self.raise(next.webView, in: container)
+        next.beginPresentation()
         (current, idle) = (next, old)
         next.webView.setIdle(false)
         old.webView.setIdle(true)
@@ -221,8 +229,21 @@ public final class CardPagePair {
     /// Executes in these two documents only. Adding to the shared user-content
     /// controller would leak the review host into previews/other sessions.
     public func installHostScript(_ source: String) async throws {
-        try await load()
-        for page in pages { try await page.run(source, world: CardPage.world) }
+        let installation = UUID()
+        hostInstallation = installation
+        for page in pages { page.hostReports.disable() }
+        do {
+            try await load()
+            for page in pages {
+                try Task.checkCancellation()
+                guard hostInstallation == installation, !closed else { throw CardPage.Failure.superseded }
+                try await page.hostReports.install(source)
+            }
+            guard hostInstallation == installation, !closed else { throw CardPage.Failure.superseded }
+        } catch {
+            if hostInstallation == installation { for page in pages { page.hostReports.disable() } }
+            throw error
+        }
     }
     public func setAppearance(_ value: CardRuntime.Appearance) async throws {
         for page in pages { try await page.setAppearance(value) }
@@ -241,7 +262,10 @@ public final class CardPagePair {
     /// Returns names with no retryable element/stylesheet on the visible side.
     @discardableResult public func mediaArrived(_ names: [String]) async throws -> [String] {
         guard current.presented else { return names }
-        let result = try await current.string("return JSON.stringify(meguriCard.mediaArrived(names));", arguments: ["names": names], world: CardPage.world)
+        let page = current
+        page.beginHostMutation()
+        defer { page.endHostMutation() }
+        let result = try await page.string("return JSON.stringify(meguriCard.mediaArrived(names));", arguments: ["names": names], world: CardPage.world)
         return (try? JSONDecoder().decode([String].self, from: Data(result.utf8))) ?? names
     }
     public func suspend() async {
@@ -254,6 +278,7 @@ public final class CardPagePair {
         audio.stop()
         releaseHTMLAudio()
         idle.invalidate()
+        for page in pages { page.suspendHost() }
         for page in pages { try? await page.unpresent() }
     }
     public func resume() async {
@@ -263,12 +288,13 @@ public final class CardPagePair {
 
     public func close() {
         guard !closed else { return }
-        closed = true; commitSerial += 1
+        closed = true; commitSerial += 1; hostInstallation = UUID()
         audio.close()
         lifecycle?.cancel(); lifecycle = nil
         releaseHTMLAudio()
         for page in pages { page.close() }
         swaps.finish(); reveals.finish()
+        onHostEvent = nil
         onAction = nil; onSignal = nil; onInteraction = nil; onCommitted = nil
     }
 
