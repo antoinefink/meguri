@@ -61,6 +61,45 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         return true
     }
 
+    #if os(macOS)
+    private func startMacVoiceOverInSettings() throws {
+        let settings = XCUIApplication(bundleIdentifier: "com.apple.systempreferences")
+        settings.launch()
+        defer { settings.terminate() }
+        settings.activate()
+        func setupError(_ message: String) -> NSError {
+            NSError(domain: "CardWebViewBehaviorUITests.VoiceOverSetup", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        let switches = settings.switches.matching(identifier: "AX_VOICEOVER_ENABLED")
+        if switches.count == 0 {
+            for identifier in ["com.apple.settings.accessibility", "AX_FEATURE_VOICEOVER"] {
+                let buttons = settings.buttons.matching(identifier: identifier)
+                guard buttons.firstMatch.waitForExistence(timeout: 10), buttons.count == 1 else {
+                    throw setupError("Expected one Settings button: \(identifier)")
+                }
+                buttons.element.click()
+            }
+        }
+        guard switches.firstMatch.waitForExistence(timeout: 10), switches.count == 1 else {
+            throw setupError("Expected one Settings VoiceOver switch")
+        }
+        let enabled: Bool
+        switch switches.element.value {
+        case let value as NSNumber where value == 0 || value == 1:
+            enabled = value == 1
+        case let value as String where value == "0" || value == "1":
+            enabled = value == "1"
+        default:
+            throw setupError("Settings VoiceOver switch has an unknown value")
+        }
+        if !enabled { switches.element.click() }
+        guard wait({ NSWorkspace.shared.isVoiceOverEnabled }) else {
+            throw setupError("Settings did not enable OS VoiceOver within 10 seconds")
+        }
+    }
+    #endif
+
     func testNativeConfirmAndAcceptedEmptyPrompt() throws {
         let app = try launch()
         try control("confirm", in: app)
@@ -200,21 +239,8 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         let voiceOver = XCUIDevice.shared.voiceOverService
         defer { try? voiceOver.disable() }
         #if os(macOS)
-        if !voiceOver.isEnabled {
-            // Start VoiceOver normally in the VM before attaching automation.
-            try app.bringToFront(bundleIdentifier: bundleIdentifier)
-            app.typeKey(XCUIKeyboardKey.F5.rawValue, modifierFlags: .command)
-            let voiceOverApp = XCUIApplication(bundleIdentifier: "com.apple.VoiceOver")
-            let useVoiceOver = voiceOverApp.buttons["Use VoiceOver"]
-            if useVoiceOver.waitForExistence(timeout: 3) {
-                try voiceOverApp.bringToFront(bundleIdentifier: "com.apple.VoiceOver")
-                useVoiceOver.click()
-            }
-            guard wait({ voiceOver.isEnabled }) else {
-                throw NSError(domain: "CardWebViewBehaviorUITests.VoiceOverSetup", code: 1,
-                              userInfo: [NSLocalizedDescriptionKey: "Mac VoiceOver setup failed: Command-F5 and any observed Use VoiceOver button did not enable the public service within 10 seconds"])
-            }
-        }
+        try startMacVoiceOverInSettings()
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
         #endif
         try voiceOver.enable()
         @MainActor func activateWithVoiceOver(_ element: XCUIElement) throws {

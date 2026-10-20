@@ -70,6 +70,25 @@ extension WebKitSuites {
             }
         }
 
+        @Test func presentationalWrappersPreserveReadableAndSemanticChildren() async throws {
+            let fixture = try await CardBehaviorFixture()
+            defer { fixture.close() }
+            for role in ["none", "presentation"] {
+                for labelledChild in [false, true] {
+                    let child = labelledChild
+                        ? "<div role=img aria-label='Graphic answer' style='width:160px;height:80px'></div>"
+                        : "<span>Readable answer</span>"
+                    try await fixture.present(.init(cardID: 1, question: "q",
+                                                    answer: "<div id=answer role='\(role)' aria-label='Wrapper label'>\(child)</div>"))
+                    _ = try await fixture.pair.showAnswer()
+                    let page = fixture.pair.current
+                    let target = try #require(page.accessibilityTarget)
+                    #expect(target.elementID == "answer" && target.update == page.update)
+                    #expect(target.text == (labelledChild ? "Graphic answer" : "Readable answer"))
+                }
+            }
+        }
+
         @Test func emptyHiddenAndPresentationalGraphicsHaveNoTargetPoint() async throws {
             let fixture = try await CardBehaviorFixture()
             defer { fixture.close() }

@@ -71,7 +71,6 @@ extension CardPage {
                 for (let node = element; node; node = node.parentElement) {
                     const style = getComputedStyle(node);
                     if (node.hidden || node.getAttribute('aria-hidden') === 'true' || node.matches('script,style') ||
-                        ['presentation', 'none'].includes((node.getAttribute('role') || '').trim().toLowerCase()) ||
                         style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)) return true;
                 }
                 return false;
@@ -79,6 +78,7 @@ extension CardPage {
             const semanticLabel = element => {
                 if (excluded(element)) return '';
                 const role = (element.getAttribute('role') || '').trim().toLowerCase();
+                if (['presentation', 'none'].includes(role)) return '';
                 if (!element.matches('img,svg,input,textarea,button,select,a[href]') &&
                     !['img', 'button', 'link', 'checkbox', 'radio', 'switch', 'textbox', 'combobox',
                       'listbox', 'slider', 'spinbutton', 'menuitem', 'tab'].includes(role)) return '';
@@ -148,12 +148,15 @@ extension CardPage {
         guard let element = webView.accessibilityHitTest(local, event: nil) as? NSObject,
               element !== webView, !(element is WKWebView), !(element is UIScrollView),
               !(element is UIWindow) else { return (metadata, nil) }
-        if let view = element as? UIView {
-            guard view.isAccessibilityElement else { return (metadata, nil) }
-        } else {
+        if !element.isAccessibilityElement {
             // WebKit's remote leaf can report false through the in-process
             // element getter while remaining the system's real AX target.
-            guard element.isAccessibilityElement || element.accessibilityElementCount() == NSNotFound else { return (metadata, nil) }
+            // Only opaque objects without public container metadata qualify.
+            guard !(element is UIView), !(element is UIAccessibilityElement),
+                  element.accessibilityElementCount() == NSNotFound,
+                  element.accessibilityElements?.isEmpty != false,
+                  element.accessibilityContainerType == .none,
+                  !element.shouldGroupAccessibilityChildren else { return (metadata, nil) }
         }
         #endif
         return (metadata, element)
