@@ -26,9 +26,33 @@ extension WebKitSuites.CardRuntimeSuites {
         static func prepare(_ harness: WebTestHarness, _ page: TestPage) async throws {
             harness.media.add("/_io.png", TestMedia.png(width: 400, height: 300, color: CGColor(red: 128.0/255, green: 128.0/255, blue: 128.0/255, alpha: 1)), "image/png")
             try await page.run("""
-                window.__ioPasses = 0; window.__ioResolved = []; window.__ioData = null;
+                window.__ioPasses = 0; window.__ioResolved = []; window.__ioData = null; window.__ioDraws = 0; window.__ioDrawnSide = 0;
                 window.__ioOptions = {onWillDrawShapes: function(d,c) { window.__ioData = d; window.__ioPasses++; }};
                 """)
+        }
+
+        /// `shown` and setup fulfilment both precede IO's detached draw. This
+        /// test-only adapter observes the end of a successful pass, including
+        /// hooks that return replacement data without incrementing __ioPasses.
+        /// Read the live did hook once, preserving its receiver and exceptions.
+        static func showDrawn(_ page: TestPage, _ html: String, answer: Bool = false) async throws {
+            let before = try #require(try await page.run("return __ioDraws;") as? Int)
+            let observed = html.replacingOccurrences(of: "anki.imageOcclusion.setup(window.__ioOptions)", with: """
+                anki.imageOcclusion.setup(new Proxy(window.__ioOptions, {get:function(options,key){
+                  const value=Reflect.get(options,key);
+                  if(key!=='onDidDrawShapes' || (value!=null && typeof value!=='function')) return value;
+                  return function(data,context){
+                    if(value!=null) Reflect.apply(value,undefined,[data,context]);
+                    window.__ioDraws++;
+                    window.__ioDrawnSide=\(before + 1);
+                  };
+                }}))
+                """)
+            if answer { try await page.showPresentedAnswer(observed) }
+            else { try await page.showPresentedQuestion(observed) }
+            try await page.harness.until("completed IO draw for this side") {
+                try await page.bool("__ioDraws > \(before) && __ioDrawnSide === \(before + 1)")
+            }
         }
 
         static func passes(_ page: TestPage, _ count: Int) async throws {
@@ -59,7 +83,7 @@ extension WebKitSuites.CardRuntimeSuites {
                 // Define every test-owned global before taking the globals baseline.
                 let names = try await page.json([String].self, GlobalsSurfaceTests.windowNames)
                 for number in [1, 2] {
-                    try await page.showPresentedQuestion(Self.side(number))
+                    try await Self.showDrawn(page, Self.side(number))
                     try await Self.expectCurrentSize(page)
                     #expect(try await page.bool("document.getElementById('image-occlusion-container').clientHeight===300"))
                     #expect(try await Self.pixel(page, ".5*W", ".175*H") == Self.red)
@@ -71,7 +95,7 @@ extension WebKitSuites.CardRuntimeSuites {
                     try await page.run("window.dispatchEvent(new KeyboardEvent('keydown', {key:'M'}));")
                     #expect(try await page.string("__ioPasses") == beforeKey)
                     if number == 1 { try await Self.snapshot(page, "\(platform.rawValue)-\(appearance.rawValue)-question") }
-                    try await page.showPresentedAnswer(Self.side(number, answer: true))
+                    try await Self.showDrawn(page, Self.side(number, answer: true), answer: true)
                     #expect(try await Self.pixel(page, ".5*W", ".175*H") == Self.clear)
                     let edge = try await Self.pixel(page, "Math.round(.4*W)", ".175*H")
                     #expect(edge[3] > 0 && edge[1] > edge[0] && edge[1] > edge[2])
@@ -115,42 +139,42 @@ extension WebKitSuites.CardRuntimeSuites {
         @Test func colorsGeometryAndShapeSelection() async throws {
             try await WebTestHarness.withPage { harness, page async throws in
                 try await Self.prepare(harness, page)
-                try await page.showPresentedQuestion(Self.side(3))
+                try await Self.showDrawn(page, Self.side(3))
                 for (x, y, color) in [(".125*W", ".125*H", Self.red), (".375*W", ".125*H", [0,255,0,255]),
                                       (".625*W", ".125*H", Self.blue), (".875*W", ".125*H", [255,235,162,255]),
                                       (".15*W", ".6*H", Self.blue), (".5*W", ".55*H", [255,0,255,255])] {
                     #expect(try await Self.pixel(page, x, y) == color)
                 }
-                try await page.showPresentedQuestion(Self.side(5))
+                try await Self.showDrawn(page, Self.side(5))
                 #expect(try await Self.pixel(page, "Math.round(.25*W)-Math.round(.125*H)/2", "Math.round(.25*H)+Math.round(.25*W)/2") == Self.red)
                 #expect(try await Self.pixel(page, "Math.round(.25*W)+Math.round(.25*W)/2", "Math.round(.25*H)+Math.round(.125*H)/2") == Self.clear)
                 #expect(try await Self.pixel(page, "Math.round(.6*W)-Math.round(.05*H)", "Math.round(.2*H)+Math.round(.1*W)") == Self.red)
                 #expect(try await Self.pixel(page, "Math.round(.6*W)+Math.round(.1*W)", "Math.round(.2*H)+Math.round(.05*H)") == Self.clear)
                 #expect(try await page.bool("__ioData.activeShapes[0].angle === 90 && __ioData.activeShapes[2].angle === 90"))
                 #expect(try await Self.pixel(page, ".65*W", ".65*H") == Self.clear)
-                try await page.showPresentedQuestion(Self.side(6))
+                try await Self.showDrawn(page, Self.side(6))
                 #expect(try await Self.pixel(page, ".6*W", ".5667*H") == Self.red)
                 #expect(try await Self.pixel(page, ".2*W", ".1667*H") == Self.clear)
                 for (x,y) in [(".2*W", ".7*H"), ("Math.round(.1*W)+2", "Math.round(.6*H)+2"), ("Math.round(.3*W)-2", "Math.round(.8*H)-2")] {
                     #expect(try await Self.pixel(page, x, y) == Self.red)
                 }
                 #expect(try await page.bool("__ioData.activeShapes[0].points[0].x === '.1' && __ioData.activeShapes[0].points[0].y === '.1'"))
-                try await page.showPresentedQuestion(Self.side(7))
+                try await Self.showDrawn(page, Self.side(7))
                 #expect(try await Self.pixel(page, ".2*W", ".2*H") == Self.red)
                 #expect(try await Self.pixel(page, ".6*W", ".6*H") == Self.blue)
                 #expect(try await page.bool("__ioData.activeShapes[0].ordinal === 1"))
-                try await page.showPresentedQuestion(Self.side(9))
+                try await Self.showDrawn(page, Self.side(9))
                 #expect(try await page.bool("__ioData.activeShapes.length === 3"))
                 for (x,y) in [(".2*W", ".2*H"), (".5*W", ".2*H"), (".2*W", ".6*H")] {
                     #expect(try await Self.pixel(page, x, y) == Self.clear)
                 }
                 #expect(try await Self.pixel(page, ".7*W", ".7*H") == Self.red)
-                try await page.showPresentedQuestion(Self.side(10))
+                try await Self.showDrawn(page, Self.side(10))
                 #expect(try await page.bool("__ioData.activeShapes.length === 1 && __ioData.inactiveShapes.length === 1"))
                 #expect(try await Self.pixel(page, ".25*W", ".25*H") == Self.red)
                 #expect(try await Self.pixel(page, ".65*W", ".65*H") == Self.blue)
                 let noColors = try Self.side().replacingOccurrences(of: "--", with: "--unused-")
-                try await page.showPresentedQuestion(noColors)
+                try await Self.showDrawn(page, noColors)
                 #expect(try await Self.pixel(page, ".5*W", ".175*H") == [255,142,142,255])
                 #expect(try await Self.pixel(page, ".15*W", ".175*H") == [255,235,162,255])
                 let edge = try await Self.pixel(page, "Math.round(.4*W)", ".175*H")
@@ -212,6 +236,80 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        /// M4.2/4.3: conversion copies explicit values, rather than applying
+        /// construction defaults a second time. All expected geometry is literal.
+        @Test func conversionsPreserveExplicitValues() async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                let failures = try await page.json([String].self, """
+                    const a=anki.imageOcclusion, failures=[], size={width:200,height:100};
+                    for(const C of [a.Shape,a.Rectangle,a.Ellipse,a.Polygon,a.Text]) {
+                      for(const method of ['toAbsolute','toNormal']) {
+                        for(const value of [undefined,null,NaN]) {
+                          const absolute=method==='toAbsolute';
+                          const source=new C(absolute ?
+                            {left:.25,top:.5,width:.125,height:.25,rx:.125,ry:.25,points:[{x:'.25',y:'.5'}],fontSize:.125} :
+                            {left:50,top:50,width:25,height:25,rx:25,ry:25,points:[{x:50,y:50}],fontSize:12.5});
+                          const keys=['angle','fill','occludeInactive','ordinal'];
+                          if(C===a.Text) keys.push('scaleX','scaleY','text');
+                          for(const key of keys) source[key]=value;
+                          // A custom source id proves conversion generates its
+                          // own id even if both constructors share a millisecond.
+                          source.id='original-'+C.name;
+                          const original=Object.entries(source), result=source[method](size);
+                          const tag=C.name+'.'+method+'.'+String(value);
+                          for(const key of keys) if(!Object.is(result[key],value)) failures.push(tag+': '+key);
+                          if(result===source || result.constructor!==C ||
+                            (C===a.Shape ? result.id!==undefined : !/^(rect|ellipse|polygon|text)-[0-9]+$/.test(result.id)) ||
+                            result.id===source.id) failures.push(tag+': new instance/id');
+                          if(original.some(([key,v])=>!Object.is(source[key],v))) failures.push(tag+': original mutated');
+                          if(result.left!==(absolute?50:.25) || result.top!==(absolute?50:.5)) failures.push(tag+': position');
+                          if(C===a.Rectangle && (result.width!==(absolute?25:.125) || result.height!==(absolute?25:.25))) failures.push(tag+': rectangle');
+                          if(C===a.Ellipse && (result.rx!==(absolute?25:.125) || result.ry!==(absolute?25:.25))) failures.push(tag+': ellipse');
+                          if(C===a.Polygon && (result.points===source.points || result.points[0]===source.points[0] ||
+                            result.points[0].x!==(absolute?50:.25) || result.points[0].y!==(absolute?50:.5))) failures.push(tag+': polygon');
+                          if(C===a.Polygon && (source.points[0].x!==(absolute?'.25':50) || source.points[0].y!==(absolute?'.5':50))) failures.push(tag+': original points mutated');
+                          if(C===a.Text && result.fontSize!==(absolute?12.5:.125)) failures.push(tag+': font');
+                        }
+                      }
+                    }
+                    // Unchanged properties still have one live getter read per
+                    // conversion, and a throwing getter must propagate its error.
+                    for(const method of ['toAbsolute','toNormal']) {
+                      const s=new a.Text(), counts={}, keys=['angle','fill','occludeInactive','ordinal','scaleX','scaleY','text'];
+                      for(const key of keys) {
+                        Object.defineProperty(s,key,{get(){counts[key]=(counts[key]||0)+1;return undefined;},configurable:true});
+                      }
+                      s[method](size);
+                      if(keys.some(key=>counts[key]!==1)) failures.push(method+': getter count');
+                      const error=new Error('conversion sentinel');
+                      Object.defineProperty(s,'fill',{get(){throw error;}});
+                      try {s[method](size);failures.push(method+': missing throw');}
+                      catch(e) {if(e!==error) failures.push(method+': wrong throw');}
+                    }
+                    return JSON.stringify(failures);
+                    """)
+                #expect(failures.isEmpty, "\(failures)")
+                try await Self.prepare(harness, page)
+                try await page.run("""
+                    __ioOptions.onWillDrawShapes=function(d){
+                      const a=anki.imageOcclusion;
+                      d.activeShapes=[undefined,null,NaN].map(function(scale){
+                        const label=new a.Text({left:.2,top:.2,text:'invalid scale',fontSize:.1});
+                        label.scaleX=scale;return label;
+                      });
+                      d.inactiveShapes=[];d.highlightShapes=[];__ioData=d;return d;
+                    };
+                    """)
+                try await Self.showDrawn(page, Self.side())
+                #expect(try await page.bool("__ioData.activeShapes[0].scaleX===undefined && __ioData.activeShapes[1].scaleX===null && Number.isNaN(__ioData.activeShapes[2].scaleX)"))
+                #expect(try await page.bool("""
+                    (()=>{const c=document.getElementById('image-occlusion-canvas');
+                      return c.width>0 && c.height>0 && c.getContext('2d').getImageData(0,0,c.width,c.height).data.every((v,i)=>i%4!==3 || v===0);})()
+                    """))
+                #expect(harness.diagnostics.isEmpty)
+            }
+        }
+
         /// Captured numeric and DOM built-ins, but live hook and shape semantics.
         @Test func markupNumericConversions() async throws {
             try await WebTestHarness.withPage { harness, page async throws in
@@ -238,7 +336,7 @@ extension WebKitSuites.CardRuntimeSuites {
                     Math.round=function(){throw Error('late round');}; Document.prototype.querySelectorAll=function(){throw Error('late query');};
                     CanvasRenderingContext2D.prototype.fillRect=function(){throw Error('late canvas');};
                     """)
-                try await page.showPresentedQuestion(side)
+                try await Self.showDrawn(page, side)
                 #expect(try await page.bool("""
                     (() => {const c=document.createElement('canvas').getContext('2d');
                       anki.imageOcclusion.drawShape({context:c,size:{width:100,height:100},shape:new anki.imageOcclusion.Rectangle({width:.5,height:.5}),fill:'#ff0000',stroke:'#000000',strokeWidth:0});
@@ -271,7 +369,7 @@ extension WebKitSuites.CardRuntimeSuites {
                       onDidDrawShapes: function(d,c) { 'use strict'; log('did:'+(__ioData.activeShapes===d.activeShapes)+':'+(this===undefined)); }
                     };
                     """)
-                try await page.showPresentedQuestion(Self.side())
+                try await Self.showDrawn(page, Self.side())
                 #expect(try await page.log() == ["will,2,2,0,#ff0000,0,true,true", "did:true:true"])
                 #expect(try await page.string("__ioResolved.join(',')") == "0")
                 #expect(try await page.bool("__ioData.activeShapes[0] instanceof anki.imageOcclusion.Rectangle && __ioData.activeShapes[1] instanceof anki.imageOcclusion.Text && __ioData.inactiveShapes[0].left===.05"))
@@ -283,7 +381,7 @@ extension WebKitSuites.CardRuntimeSuites {
                     };
                     __ioOptions.onDidDrawShapes = function(d,c) { log('returned:'+d.activeShapes.length+':'+d.properties.inActiveShapeColor); };
                     """)
-                try await page.showPresentedAnswer(Self.side(answer: true))
+                try await Self.showDrawn(page, Self.side(answer: true), answer: true)
                 #expect(try await Self.pixel(page, ".15*W", ".175*H") == [0,255,255,255])
                 #expect(try await Self.pixel(page, ".5*W", ".175*H") == Self.clear)
                 #expect(try await Self.pixel(page, "Math.round(.05*W)+2", "Math.round(.6*H)+2") == Self.clear)
@@ -304,7 +402,7 @@ extension WebKitSuites.CardRuntimeSuites {
                       return {get activeShapes(){reads++;return active;},inactiveShapes:d.inactiveShapes,highlightShapes:d.highlightShapes,properties:d.properties};
                     };
                     """)
-                try await page.showPresentedQuestion(Self.side())
+                try await Self.showDrawn(page, Self.side())
                 #expect(try await page.log() == ["reads:1:same:true"])
                 // A present setup promise is just scheduling, including null/non-object options.
                 for value in ["5", "null", "undefined"] {
@@ -326,6 +424,9 @@ extension WebKitSuites.CardRuntimeSuites {
                     .replacingOccurrences(of: "<div id=\"err\"></div>", with: "<div id=\"err\">template sentinel</div>")
                 try await page.announce(card: 680, generation: 1)
                 try await page.showPresentedQuestion(missing)
+                try await harness.until("final missing-image DOM") {
+                    try await page.bool("document.getElementById('image-occlusion-container').innerText==='No image to show.' && document.querySelector('canvas')===null")
+                }
                 #expect(try await page.string("document.getElementById('image-occlusion-container').innerText") == "No image to show.")
                 #expect(try await page.bool("document.querySelector('canvas')===null"))
                 #expect(try await page.string("document.getElementById('err').textContent") == "template sentinel")
@@ -333,7 +434,7 @@ extension WebKitSuites.CardRuntimeSuites {
                 let broken = try Self.side().replacingOccurrences(of: "_io.png", with: "_missing.png")
                     .replacingOccurrences(of: "<div id=\"err\"></div>", with: "<div id=\"err\">template sentinel</div>")
                 try await page.announce(card: 680, generation: 2)
-                try await page.showPresentedQuestion(broken)
+                try await Self.showDrawn(page, broken)
                 #expect(try await page.bool("document.getElementById('image-occlusion-canvas').width===0 && document.getElementById('image-occlusion-canvas').height===0"))
                 #expect(try await page.string("document.getElementById('image-occlusion-container').style.aspectRatio") == "")
                 #expect(try await page.string("document.getElementById('err').textContent") == "template sentinel")
@@ -362,7 +463,10 @@ extension WebKitSuites.CardRuntimeSuites {
                     let resolutions = try #require(try await page.run("return __ioResolved.length;") as? Int)
                     try await page.announce(card: 681, generation: Int64(index + 3))
                     try await page.showPresentedQuestion(test.0)
-                    try await harness.until("IO rejection \(index)") { harness.diagnostics.count == before + 1 }
+                    try await harness.until("IO rejection \(index)") {
+                        harness.diagnostics.count == before + 1 && harness.diagnostics.last?.card == 681 &&
+                            harness.diagnostics.last?.generation == Int64(index + 3) && harness.diagnostics.last?.side == "question"
+                    }
                     let error = try #require(harness.diagnostics.last)
                     #expect(error["kind"] as? String == "rejection")
                     if index == 0 { #expect(try await page.string("__ioPasses") == beforePasses) }
@@ -373,7 +477,7 @@ extension WebKitSuites.CardRuntimeSuites {
                     #expect(try await Self.pixel(page, ".5*W", ".175*H") == (test.2 ? Self.red : Self.clear))
                 }
                 try await page.run("__ioOptions={onWillDrawShapes: function(){__ioPasses++;}};")
-                try await page.showPresentedAnswer(Self.side(answer: true))
+                try await Self.showDrawn(page, Self.side(answer: true), answer: true)
                 try await page.run("__ioOptions.onWillDrawShapes=function(){throw Error('click');}; document.getElementById('toggle').click();")
                 try await harness.until("click exception") { harness.diagnostics.contains { ($0["message"] as? String) == "Error: click" } }
                 #expect(harness.diagnostics.last?["kind"] as? String == "exception")
@@ -388,6 +492,86 @@ extension WebKitSuites.CardRuntimeSuites {
                 try await page.showPresentedQuestion("<canvas id='image-occlusion-canvas'></canvas><script>anki.imageOcclusion.setup()</script>")
                 try await harness.until("no container rejection") { harness.diagnostics.count > before }
                 #expect((harness.diagnostics.last?["message"] as? String)?.hasPrefix("TypeError") == true)
+            }
+        }
+
+        /// M9/M11 and media-serving M5/R498: retry the real failed image via
+        /// the isolated native seam, preserving the side and its current state.
+        @Test func failedImageRecoversAfterMediaArrival() async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                try await Self.prepare(harness, page)
+                let broken = try Self.side(answer: true)
+                    .replacingOccurrences(of: "_io.png", with: "_arrival.png")
+                    .replacingOccurrences(of: "<div id=\"err\"></div>", with: "<div id=\"err\">template sentinel</div><input id=\"retained\">")
+                    + "<script>window.__ioScriptRuns=(window.__ioScriptRuns||0)+1;</script>"
+                try await page.announce(card: 682, generation: 1)
+                try await Self.showDrawn(page, broken)
+                try await harness.until("initial IO image 404") {
+                    harness.signals("mediaError").contains { ($0["url"] as? String)?.contains("_arrival.png") == true }
+                }
+                #expect(try await page.bool("""
+                    (()=>{const i=document.querySelector('#image-occlusion-container img'),c=document.getElementById('image-occlusion-canvas');
+                      return i.complete && i.naturalWidth===0 && c.width===0 && c.height===0 &&
+                        document.getElementById('image-occlusion-container').style.aspectRatio==='' && __ioResolved.length===1;})()
+                    """))
+                #expect(harness.diagnostics.isEmpty)
+                try await page.run("""
+                    document.getElementById('retained').value='keep my answer';
+                    window.__ioRetained={nodes:Array.from(document.querySelectorAll('#qa *')),image:document.querySelector('#image-occlusion-container img'),
+                      canvas:document.getElementById('image-occlusion-canvas'),container:document.getElementById('image-occlusion-container'),options:__ioOptions};
+                    document.getElementById('toggle').click();
+                    // Mutate the current options after setup and the hidden-state
+                    // toggle. Recovery must read this hook without calling setup.
+                    __ioOptions.onWillDrawShapes=function(d){
+                      __ioPasses++;__ioData=d;log('arrival latest');
+                      for(const s of d.activeShapes) if(s instanceof anki.imageOcclusion.Text) s.text='latest';
+                      return d;
+                    };
+                    __log=[];
+                    """)
+                let draws = try #require(try await page.run("return __ioDraws;") as? Int)
+                let passes = try #require(try await page.run("return __ioPasses;") as? Int)
+                harness.media.add("/_arrival.png", TestMedia.png(width: 640, height: 320), "image/png")
+                try await page.runIsolated("meguriCard.mediaArrived(['_arrival.png']);")
+                try await harness.until("retried IO image has natural size") {
+                    try await page.bool("__ioRetained.image.naturalWidth===640 && __ioRetained.image.naturalHeight===320")
+                }
+                try await harness.until("IO recovery draw after media arrival") { try await page.bool("__ioDraws > \(draws)") }
+                try await Self.frames(page)
+                #expect(try await page.bool("""
+                    parseFloat(__ioRetained.container.style.aspectRatio)===2 && __ioRetained.container.clientWidth===400 &&
+                    __ioRetained.container.clientHeight===200 && __ioRetained.canvas.clientWidth===400 && __ioRetained.canvas.clientHeight===200
+                    """))
+                try await Self.expectCurrentSize(page)
+                #expect(try await Self.pixel(page, ".15*W", ".175*H") == Self.clear)
+                #expect(try await Self.pixel(page, ".5*W", ".175*H") == Self.clear)
+                #expect(try await Self.pixel(page, "Math.round(.05*W)+2", "Math.round(.6*H)+2") == Self.white)
+                #expect(try await page.bool("""
+                    __ioData.activeShapes.length===1 && __ioData.activeShapes[0].text==='latest' &&
+                    __ioData.inactiveShapes.length===0 && __ioData.highlightShapes.length===0 &&
+                    __ioOptions===__ioRetained.options && __ioResolved.length===1 && __ioScriptRuns===1 &&
+                    document.getElementById('retained').value==='keep my answer' && document.getElementById('err').textContent==='template sentinel' &&
+                    document.querySelector('#image-occlusion-container img')===__ioRetained.image &&
+                    document.getElementById('image-occlusion-canvas')===__ioRetained.canvas &&
+                    document.getElementById('image-occlusion-container')===__ioRetained.container &&
+                    Array.from(document.querySelectorAll('#qa *')).every((node,index)=>node===__ioRetained.nodes[index]) &&
+                    document.querySelectorAll('#qa *').length===__ioRetained.nodes.length
+                    """))
+                #expect(try await page.log() == ["arrival latest"])
+                #expect(try await page.run("return __ioPasses;") as? Int == passes + 1)
+                #expect(try await page.run("return __ioDraws;") as? Int == draws + 1)
+                #expect(harness.diagnostics.isEmpty)
+                // An unchanged successful load is a no-op; an obsolete image
+                // cannot redraw a later side or produce an IO error.
+                try await page.run("__ioRetained.image.dispatchEvent(new Event('load'));")
+                try await Self.frames(page)
+                #expect(try await page.run("return __ioDraws;") as? Int == draws + 1)
+                try await page.showPresentedQuestion("<p>next side</p>")
+                try await page.run("__ioRetained.image.dispatchEvent(new Event('load')); window.dispatchEvent(new Event('resize'));")
+                try await Self.frames(page)
+                #expect(try await page.run("return __ioDraws;") as? Int == draws + 1)
+                #expect(try await page.string("document.getElementById('qa').textContent") == "next side")
+                #expect(harness.diagnostics.isEmpty)
             }
         }
 
@@ -408,14 +592,14 @@ extension WebKitSuites.CardRuntimeSuites {
             try await Self.prepare(harness, page)
             let keysBefore = try #require(try await page.run("return __ioKeyAdds;") as? Int)
             try await page.announce(card: 1, generation: 1)
-            try await page.showPresentedQuestion(Self.side())
-            try await page.showPresentedAnswer(Self.side(answer: true))
+            try await Self.showDrawn(page, Self.side())
+            try await Self.showDrawn(page, Self.side(answer: true), answer: true)
             try await page.run("document.getElementById('toggle').click(); window.__ioOldButton=document.getElementById('toggle');")
             #expect(try await Self.pixel(page, ".15*W", ".175*H") == Self.clear)
             try await page.run("__ioOptions={onWillDrawShapes: function(){__ioPasses++; log('B');}};")
             try await page.announce(card: 2, generation: 2)
-            try await page.showPresentedQuestion(Self.side())
-            try await page.showPresentedAnswer(Self.side(answer: true))
+            try await Self.showDrawn(page, Self.side())
+            try await Self.showDrawn(page, Self.side(answer: true), answer: true)
             #expect(try await Self.pixel(page, ".15*W", ".175*H") == Self.blue)
             try await page.run("document.getElementById('toggle').click();")
             #expect(try await Self.pixel(page, ".15*W", ".175*H") == Self.clear)
@@ -467,7 +651,7 @@ extension WebKitSuites.CardRuntimeSuites {
                 harness.media.add("/_size\(index).png", TestMedia.png(width: nw, height: nh), "image/png")
                 try await page.run("__ioDPR=d;", ["d": dpr])
                 let side = try Self.side().replacingOccurrences(of: "width: 400px", with: "width: \(width)px").replacingOccurrences(of: "_io.png", with: "_size\(index).png")
-                try await page.showPresentedQuestion(side)
+                try await Self.showDrawn(page, side)
                 #expect(try await page.bool("document.getElementById('image-occlusion-canvas').width===\(w) && document.getElementById('image-occlusion-canvas').height===\(h)"))
                 #expect(try await page.bool("parseFloat(document.getElementById('image-occlusion-container').style.aspectRatio)===\(Double(nw)/Double(nh))"))
                 #expect(try await page.bool("document.getElementById('image-occlusion-container').clientHeight===\(Int(Double(width)*Double(nh)/Double(nw)))"))
@@ -477,7 +661,7 @@ extension WebKitSuites.CardRuntimeSuites {
             for (dpr,w,h) in [(2,698,524),(3,1048,786)] {
                 try await page.run("__ioDPR=d;", ["d": dpr])
                 let side = try Self.side().replacingOccurrences(of: "width: 400px", with: "width:350px; height:262px").replacingOccurrences(of: "_io.png", with: "_limit.png")
-                try await page.showPresentedQuestion(side)
+                try await Self.showDrawn(page, side)
                 #expect(try await page.bool("document.getElementById('image-occlusion-canvas').width===\(w) && document.getElementById('image-occlusion-canvas').height===\(h)"))
             }
             #expect(harness.diagnostics.isEmpty)
@@ -499,7 +683,7 @@ extension WebKitSuites.CardRuntimeSuites {
             let page = try await harness.openPage(size: CGSize(width: 390, height: 600))
             try await Self.prepare(harness, page)
             let auto = try Self.side().replacingOccurrences(of: "width: 400px", with: "width: auto")
-            try await page.showPresentedQuestion(auto)
+            try await Self.showDrawn(page, auto)
             #expect(try await page.string("__ioPasses") == "1")
             page.webView.frame.size.width = 700
             try await Self.passes(page, 2)
@@ -530,7 +714,7 @@ extension WebKitSuites.CardRuntimeSuites {
             try await Self.frames(page)
             #expect(try await page.string("__ioPasses") == "5")
             let answer = try Self.side(answer: true).replacingOccurrences(of: "width: 400px", with: "width: auto")
-            try await page.showPresentedAnswer(answer)
+            try await Self.showDrawn(page, answer, answer: true)
             try await page.run("document.getElementById('toggle').click();")
             #expect(try await Self.pixel(page, ".15*W", ".175*H") == Self.clear)
             for width in [650,600,550] {
@@ -593,7 +777,7 @@ extension WebKitSuites.CardRuntimeSuites {
                 let side = try Self.side(answer: true)
                     .replacingOccurrences(of: "0px #000000", with: "2px #00ff00")
                     .replacingOccurrences(of: "1px #00ff00", with: "1px solid red")
-                try await page.showPresentedQuestion(side)
+                try await Self.showDrawn(page, side)
                 #expect(try await page.log() == ["1,2,0.5,2,#00ff00"])
                 #expect(try await page.bool("__ioData.properties.highlightShapeBorder.width===1 && __ioData.properties.highlightShapeBorder.color==='solid'"))
                 try await page.run("document.getElementById('toggle').click();")
@@ -602,7 +786,7 @@ extension WebKitSuites.CardRuntimeSuites {
                 let borders = try Self.side()
                     .replacingOccurrences(of: "--active-shape-border: 0px #000000", with: "--active-shape-border: #212121 1px")
                     .replacingOccurrences(of: "--inactive-shape-border: 0px #000000", with: "--inactive-shape-border: 2px")
-                try await page.showPresentedQuestion(borders)
+                try await Self.showDrawn(page, borders)
                 #expect(try await page.bool("__ioData.properties.activeBorder.width===1 && __ioData.properties.activeBorder.color==='1px' && __ioData.properties.inActiveBorder.width===2 && __ioData.properties.inActiveBorder.color==='#212121'"))
                 #expect(harness.diagnostics.isEmpty)
             }
@@ -646,7 +830,7 @@ extension WebKitSuites.CardRuntimeSuites {
                 """)
             let page = try await harness.openPage()
             try await Self.prepare(harness, page)
-            try await page.showPresentedQuestion(Self.side(4))
+            try await Self.showDrawn(page, Self.side(4))
             #expect(try await page.bool("""
                 (() => {
                   const canvas=document.getElementById('image-occlusion-canvas'),W=canvas.width,H=canvas.height;

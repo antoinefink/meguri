@@ -128,12 +128,31 @@
     }
   }
   function convert(shape, size, absolute) {
+    // Read constructor inputs once, in constructor order. Construction still
+    // supplies defaults; conversion restores the unchanged inputs verbatim.
+    const options = {
+      left: shape.left, top: shape.top, angle: shape.angle, fill: shape.fill,
+      occludeInactive: shape.occludeInactive, ordinal: shape.ordinal,
+    };
     let result;
-    if (shape instanceof Rectangle) result = new Rectangle(shape);
-    else if (shape instanceof Ellipse) result = new Ellipse(shape);
-    else if (shape instanceof Polygon) result = new Polygon(shape);
-    else if (shape instanceof Text) result = new Text(shape);
-    else result = new Shape(shape);
+    if (shape instanceof Rectangle) {
+      options.width = shape.width; options.height = shape.height;
+      result = new Rectangle(options);
+    } else if (shape instanceof Ellipse) {
+      options.rx = shape.rx; options.ry = shape.ry;
+      result = new Ellipse(options);
+    } else if (shape instanceof Polygon) {
+      options.points = shape.points;
+      result = new Polygon(options);
+    } else if (shape instanceof Text) {
+      options.text = shape.text; options.scaleX = shape.scaleX; options.scaleY = shape.scaleY; options.fontSize = shape.fontSize;
+      result = new Text(options);
+      result.text = options.text; result.scaleX = options.scaleX; result.scaleY = options.scaleY;
+    } else result = new Shape(options);
+    result.angle = options.angle;
+    result.fill = options.fill;
+    result.occludeInactive = options.occludeInactive;
+    result.ordinal = options.ordinal;
     function dimension(value, extent) { return absolute ? round(value * extent) : value / extent; }
     result.left = dimension(shape.left, size.width);
     result.top = dimension(shape.top, size.height);
@@ -223,6 +242,10 @@
   let latestOptions;
   let keyInstalled = false;
   let watched = null;
+  let watchedImage = null;
+  let imageSize = null;
+  let imageChanged = false;
+  let waitingImages = [];
   let lastSize;
   let pending = false;
   let dprQuery = null;
@@ -360,9 +383,25 @@
   function dropWatch() {
     call(disconnectSize, resizeObserver);
     call(disconnectDOM, removalObserver);
+    if (watchedImage) call(remove, watchedImage, "load", imageLoaded);
     if (dprQuery) call(remove, dprQuery, "change", dprListener);
     dprQuery = dprListener = null;
+    watchedImage = imageSize = null;
+    imageChanged = false;
     watched = lastSize = null;
+    if (waitingImages.length) call(observeDOM, removalObserver, doc, { childList: true, subtree: true });
+  }
+  function imageLoaded() {
+    if (!watchedImage || !call(connected, watchedImage) || watchedImage !== image()) return;
+    const nw = call(naturalWidth, watchedImage);
+    const nh = call(naturalHeight, watchedImage);
+    if (!nw || !nh || (imageSize && nw === imageSize[0] && nh === imageSize[1])) return;
+    imageSize = [nw, nh];
+    // A failed image has no height: restore the aspect before measuring the
+    // backing, even when ResizeObserver has seen no client-size change yet.
+    call(cssSet, call(style, watched), "aspect-ratio", StringFn(nw / nh));
+    imageChanged = true;
+    requestRedraw();
   }
   function armDPR() {
     if (dprQuery) call(remove, dprQuery, "change", dprListener);
@@ -381,16 +420,49 @@
       const img = image();
       if (!canvas || !img) return;
       const extent = dimensions(canvas);
-      if (lastSize && extent[0] === lastSize[0] && extent[1] === lastSize[1] && extent[2] === lastSize[2]) return;
+      if (!imageChanged && lastSize && extent[0] === lastSize[0] && extent[1] === lastSize[1] && extent[2] === lastSize[2]) return;
+      imageChanged = false;
       // The detached promise intentionally lets C12 report redraw failures.
       call(then, call(resolve, PromiseCtor), function () { sizeCanvas(canvas, img); draw(latestOptions); });
     });
   }
   const resizeObserver = new ResizeCtor(requestRedraw);
-  const removalObserver = new MutationCtor(function () { if (watched && !call(connected, watched)) dropWatch(); });
-  function watch(container) {
-    call(disconnectSize, resizeObserver);
+  function forgetWaiting(entry) {
+    call(remove, entry.img, "load", entry.ready);
+    call(remove, entry.img, "error", entry.ready);
+    const remaining = [];
+    for (let i = 0; i < waitingImages.length; i += 1) {
+      if (waitingImages[i] !== entry) remaining[remaining.length] = waitingImages[i];
+    }
+    waitingImages = remaining;
+  }
+  function pruneWaiting() {
+    // Repeated calls for the same current image remain independent. Only
+    // obsolete sides lose their initial load/error listeners and pending work.
+    const entries = waitingImages;
+    for (let i = 0; i < entries.length; i += 1) {
+      const entry = entries[i];
+      if (!call(connected, entry.img) || entry.img !== image()) {
+        forgetWaiting(entry);
+        entry.finish(undefined);
+      }
+    }
+  }
+  const removalObserver = new MutationCtor(function () {
+    pruneWaiting();
+    if (watched && (!call(connected, watched) || watchedImage !== image())) dropWatch();
+    if (!watched && !waitingImages.length) call(disconnectDOM, removalObserver);
+  });
+  function watch(container, img) {
+    // Keep this setup's measurement across cleanup: the observer's initial
+    // notification must not add another draw for an already-loaded image.
+    const extent = lastSize;
+    dropWatch();
+    lastSize = extent;
     watched = container;
+    watchedImage = img;
+    imageSize = [call(naturalWidth, img), call(naturalHeight, img)];
+    call(add, img, "load", imageLoaded);
     call(observeSize, resizeObserver, container);
     call(observeDOM, removalObserver, doc, { childList: true, subtree: true });
     armDPR();
@@ -415,13 +487,14 @@
     }
     labelsOnly = false;
     draw(options);
-    watch(container);
+    watch(container, img);
   }
   function setup(options) {
     latestOptions = options;
     // This outer promise only schedules work. Its completion is not a draw
     // barrier; setup/draw failures belong to the detached promise in the rAF.
     return new PromiseCtor(function (finish) {
+      pruneWaiting();
       const img = image();
       function schedule() {
         call(frame, win, function () {
@@ -430,13 +503,16 @@
         finish(undefined);
       }
       if (img && !call(complete, img)) {
+        const entry = { img, finish, ready: null };
         const ready = function () {
-          call(remove, img, "load", ready);
-          call(remove, img, "error", ready);
+          forgetWaiting(entry);
           schedule();
         };
+        entry.ready = ready;
+        waitingImages[waitingImages.length] = entry;
         call(add, img, "load", ready);
         call(add, img, "error", ready);
+        call(observeDOM, removalObserver, doc, { childList: true, subtree: true });
       } else call(then, call(resolve, PromiseCtor), schedule);
     });
   }
