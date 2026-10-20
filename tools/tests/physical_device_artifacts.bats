@@ -271,10 +271,10 @@ phase = block("4D4547555249000000000305")
 assert "isa = PBXShellScriptBuildPhase;" in phase and "alwaysOutOfDate = 1;" in phase
 inputs = re.search(r"inputPaths = \((.*?)\);", phase, re.S)[1]
 assert re.findall(r'"([^"\n]+)"', inputs) == [
-    "$(SRCROOT)/../tools/scripts/prepare-ui-device-artifacts.sh", "$(BUILT_PRODUCTS_DIR)/Meguri.app"]
+    "$(SRCROOT)/../tools/scripts/prepare-ui-device-artifacts.sh", "$(BUILT_PRODUCTS_DIR)/Meguri.app/"]
 outputs = re.search(r"outputPaths = \((.*?)\);", phase, re.S)[1]
 assert re.findall(r'"([^"\n]+)"', outputs) == [
-    "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/MeguriBuildUnderTest"]
+    "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/MeguriBuildUnderTest/"]
 assert 'shellPath = /bin/bash;' in phase
 assert 'prepare-ui-device-artifacts.sh' in re.search(r"shellScript = ([^\n]+)", phase)[1]
 assert "ENABLE_USER_SCRIPT_SANDBOXING = YES" in (root / "app/Config/Base.xcconfig").read_text()

@@ -398,11 +398,11 @@
 			);
 			inputPaths = (
 				"$(SRCROOT)/../tools/scripts/prepare-ui-device-artifacts.sh",
-				"$(BUILT_PRODUCTS_DIR)/Meguri.app",
+				"$(BUILT_PRODUCTS_DIR)/Meguri.app/",
 			);
 			name = "Prepare UI device artifacts";
 			outputPaths = (
-				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/MeguriBuildUnderTest",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/MeguriBuildUnderTest/",
 			);
 			shellPath = /bin/bash;
 			shellScript = "/bin/bash \"${SRCROOT}/../tools/scripts/prepare-ui-device-artifacts.sh\"\n";
