@@ -1,0 +1,24 @@
+# A card whose template or note type is missing is reported damaged
+# (specs/browser/columns.md C3.1, C16.1), in its place, and the other card is
+# unaffected. With db_exec, which changes no note type row
+# (specs/conformance/card-excerpt-ops.md E5): the second card's ord is set
+# past its standard note type's one template, and the third card's note gets
+# a note type id no note type has. Observation: card_excerpts.
+id: browser/columns/question-deck/damaged-notetype
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [ExcerptFixtureDeck]
+  notetypes:
+    - name: ExcerptFixture
+      fields: [Prompt, Response]
+      templates:
+        - {name: Excerpt, front: "{{Prompt}}", back: "{{Response}}"}
+  notes:
+    - {notetype: ExcerptFixture, deck: ExcerptFixtureDeck, fields: ["Q 101", "A 101"]}
+    - {notetype: ExcerptFixture, deck: ExcerptFixtureDeck, fields: ["Q 102", "A 102"]}
+    - {notetype: ExcerptFixture, deck: ExcerptFixtureDeck, fields: ["Q 103", "A 103"]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET ord = 3 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE notes SET mid = 9999 WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - observe:
+      - card_excerpts: ["#c2", "#c3", "#c1"]

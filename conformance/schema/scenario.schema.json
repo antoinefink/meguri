@@ -342,6 +342,10 @@
             "media_pending": { "description": "media-ops.md F11.", "type": "null" },
             "tag_tree": { "description": "tag-ops.md G9.", "type": "null" },
             "browser_config": { "description": "browser-config-ops.md B2.", "type": "null" },
+            "card_excerpts": {
+              "description": "card-excerpt-ops.md E1: the cards' Question and Deck cells, one entry per reference in request order; repeats allowed; at most one request per step.",
+              "$ref": "#/$defs/card_refs"
+            },
             "search": {
               "description": "search-ops.md S1: searches run in order, each in cards mode (default) or notes mode.",
               "type": "array",

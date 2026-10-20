@@ -1,0 +1,19 @@
+# The Question cell is one line of text (specs/browser/columns.md C10 steps 2
+# and 3): sound tags shown by name between U+1F509, a TTS directive's content
+# between U+1F4AC, <br> and <div> as spaces, markup removed, image names
+# kept, entities decoded. Observation: card_excerpts.
+id: browser/columns/question-deck/media-line
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+  notes:
+    - {notetype: Pair, fields: ["<b>猫</b><br>[sound:neko.mp3]", cat]}
+    - {notetype: Pair, fields: ["<div>犬</div><img src=\"inu.jpg\">", dog]}
+    - {notetype: Pair, fields: ["ねこ [anki:tts lang=ja_JP]猫[/anki:tts] &amp; 犬", both]}
+steps:
+  - observe:
+      - card_excerpts: ["#c1", "#c2", "#c3"]

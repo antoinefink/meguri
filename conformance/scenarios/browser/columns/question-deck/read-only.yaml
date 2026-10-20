@@ -1,0 +1,33 @@
+# The call writes nothing (specs/browser/columns.md C16.3): after the clock
+# moves one hour, no row of col, notes, cards, decks, notetypes, templates,
+# deck_config or config carries a stamp at or after the new instant
+# (2030-01-15T11:00:00Z: 1894705200 s). It observes timing before the clock
+# moves, so that both sides have run their day query and its writes at the
+# start instant (specs/sched/day-clock.md D14.2). The cards cover a browser
+# format, a filtered card, a sound tag and a repeated reference. Observation:
+# card_excerpts.
+id: browser/columns/question-deck/read-only
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["Japanese::Mining", "Filtered 1"]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+  notes:
+    - {notetype: Pair, deck: "Japanese::Mining", fields: ["猫 [sound:neko.mp3]", cat]}
+    - {notetype: Pair, deck: "Japanese::Mining", fields: [犬, dog]}
+steps:
+  - update_notetype:
+      notetype: Pair
+      edits:
+        - template: {name: Card 1, browser_front: "{{Front}} / {{Back}}"}
+  - db_exec:
+      sql: "UPDATE cards SET odid = did, odue = due, did = (SELECT id FROM decks WHERE name = 'Filtered 1') WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"
+  - observe: [timing]
+  - advance: 1h
+  - observe:
+      - card_excerpts: ["#c1", "#c2", "#c1"]
+  - db_exec:
+      sql: "SELECT (SELECT count(*) FROM col WHERE mod >= 1894705200000 OR scm >= 1894705200000), (SELECT count(*) FROM notes WHERE mod >= 1894705200), (SELECT count(*) FROM cards WHERE mod >= 1894705200), (SELECT count(*) FROM decks WHERE mtime_secs >= 1894705200), (SELECT count(*) FROM notetypes WHERE mtime_secs >= 1894705200), (SELECT count(*) FROM templates WHERE mtime_secs >= 1894705200), (SELECT count(*) FROM deck_config WHERE mtime_secs >= 1894705200), (SELECT count(*) FROM config WHERE mtime_secs >= 1894705200)"

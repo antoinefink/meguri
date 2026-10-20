@@ -200,3 +200,5 @@ estTimes
 card_extractors
 text_hex
 blob_hex
+# U85a: batched Question and Deck cell observation.
+card_excerpts

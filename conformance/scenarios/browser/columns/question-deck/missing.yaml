@@ -1,0 +1,19 @@
+# One entry per requested card, in request order (specs/browser/columns.md
+# C16.1): the card of a deleted note is reported missing in its place, the
+# others are unaffected. Observation: card_excerpts.
+id: browser/columns/question-deck/missing
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: ExcerptFixture
+      fields: [Prompt, Response]
+      templates:
+        - {name: Excerpt, front: "{{Prompt}}", back: "{{Response}}"}
+  notes:
+    - {notetype: ExcerptFixture, fields: ["Q 101", "A 101"]}
+    - {notetype: ExcerptFixture, fields: ["Q 102", "A 102"]}
+    - {notetype: ExcerptFixture, fields: ["Q 103", "A 103"]}
+steps:
+  - delete_notes: {notes: ["#n3"]}
+  - observe:
+      - card_excerpts: ["#c2", "#c1", "#c3"]

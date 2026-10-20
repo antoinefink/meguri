@@ -1,0 +1,39 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "card_excerpts": [
+          {
+            "deck": "Japanese::Mining",
+            "question": "採掘"
+          },
+          {
+            "deck": "Filtered 1 (Japanese::Mining)",
+            "question": "二"
+          },
+          {
+            "deck": "Default",
+            "question": "三"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "7740221575ecb84b182c75a879176185a21cdffa5913d8990e274b6c29ed7baa",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/columns/question-deck/deck",
+  "scenario_sha256": "3557249e1a77b2d3468346ef04f64f0cd1aab21f2a88fc39a69ead01b28a4ac5",
+  "tz": "UTC"
+}

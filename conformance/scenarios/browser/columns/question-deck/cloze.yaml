@@ -1,0 +1,17 @@
+# Cloze cards (specs/browser/columns.md C10): each card's question hides its
+# own cloze and shows the other, and the line keeps the sound tag's name.
+# Observation: card_excerpts, the second cloze first.
+id: browser/columns/question-deck/cloze
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Cloze Probe
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+  notes:
+    - {notetype: Cloze Probe, fields: ["{{c1::犬}} と {{c2::猫::ねこ}}<br>[sound:neko.mp3]", ""]}
+steps:
+  - observe:
+      - card_excerpts: ["#c2", "#c1"]

@@ -713,6 +713,29 @@
             "redo": { "anyOf": [{ "$ref": "#/$defs/undo_step" }, { "type": "null" }] }
           }
         },
+        "card_excerpts": {
+          "description": "specs/conformance/card-excerpt-ops.md E2: one entry per requested reference, in request order: the Question and Deck cells of a found card, or missing or damaged.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["question", "deck"],
+                "additionalProperties": false,
+                "properties": {
+                  "question": { "type": "string" },
+                  "deck": { "type": "string" }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["error"],
+                "additionalProperties": false,
+                "properties": { "error": { "enum": ["missing", "damaged"] } }
+              }
+            ]
+          }
+        },
         "search": {
           "description": "specs/conformance/search-ops.md S1: one output per request, in request order.",
           "type": "array",

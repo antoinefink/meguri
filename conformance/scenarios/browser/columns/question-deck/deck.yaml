@@ -1,0 +1,24 @@
+# The Deck cell in cards mode (specs/browser/columns.md C7.4, R1122, R1268):
+# a nested deck's full name, the default deck, and for a filtered card the
+# deck it is in followed by its home deck in parentheses. The filtered card
+# is the second note's card moved with db_exec into the ordinary deck
+# "Filtered 1", its home deck and due kept in odid and odue
+# (specs/conformance/card-excerpt-ops.md E5). Observation: card_excerpts.
+id: browser/columns/question-deck/deck
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["Japanese::Mining", "Filtered 1"]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+  notes:
+    - {notetype: Pair, deck: "Japanese::Mining", fields: [採掘, mining]}
+    - {notetype: Pair, deck: "Japanese::Mining", fields: [二, two]}
+    - {notetype: Pair, fields: [三, three]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET odid = did, odue = due, did = (SELECT id FROM decks WHERE name = 'Filtered 1') WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"
+  - observe:
+      - card_excerpts: ["#c1", "#c2", "#c3"]

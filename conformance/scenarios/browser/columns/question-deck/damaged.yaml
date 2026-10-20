@@ -1,0 +1,26 @@
+# A card whose deck, home deck or note is missing is reported damaged
+# (specs/browser/columns.md C3.1, C16.1), in its place, and the other cards
+# are unaffected. The records are broken with db_exec: the second card's did
+# and the third card's odid name no deck, and the fourth card's note row is
+# removed (specs/conformance/card-excerpt-ops.md E5). Observation:
+# card_excerpts.
+id: browser/columns/question-deck/damaged
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [ExcerptFixtureDeck]
+  notetypes:
+    - name: ExcerptFixture
+      fields: [Prompt, Response]
+      templates:
+        - {name: Excerpt, front: "{{Prompt}}", back: "{{Response}}"}
+  notes:
+    - {notetype: ExcerptFixture, deck: ExcerptFixtureDeck, fields: ["Q 101", "A 101"]}
+    - {notetype: ExcerptFixture, deck: ExcerptFixtureDeck, fields: ["Q 102", "A 102"]}
+    - {notetype: ExcerptFixture, deck: ExcerptFixtureDeck, fields: ["Q 103", "A 103"]}
+    - {notetype: ExcerptFixture, deck: ExcerptFixtureDeck, fields: ["Q 104", "A 104"]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET did = 9999 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET odid = 9999, odue = due WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "DELETE FROM notes WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)"}
+  - observe:
+      - card_excerpts: ["#c4", "#c1", "#c2", "#c3"]

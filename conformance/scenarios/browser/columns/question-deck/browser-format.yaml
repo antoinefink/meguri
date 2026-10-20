@@ -1,0 +1,29 @@
+# The Question cell renders the template's browser question format when it is
+# not empty, otherwise its question format (specs/browser/columns.md C10 step
+# 1, R935). A browser format that renders nothing gives the empty text: a card
+# of a standard note type is never blank in browser mode (R976). A format of
+# only spaces is not empty, so it is used and its line is the empty text. The
+# browser formats are set with an update_notetype plain save after the setup
+# (specs/conformance/card-excerpt-ops.md E5). Observation: card_excerpts.
+id: browser/columns/question-deck/browser-format
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Formats
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Browser Front, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Review Front, front: "<div>{{Front}}</div>{{Extra}}", back: "{{Back}}"}
+        - {name: Browser Blank, front: "{{Front}}?", back: "{{Back}}"}
+        - {name: Spaces, front: "{{Front}}!", back: "{{Back}}"}
+  notes:
+    - {notetype: Formats, fields: [Baum, tree, ""]}
+steps:
+  - update_notetype:
+      notetype: Formats
+      edits:
+        - template: {name: Browser Front, browser_front: "{{Back}} ({{Front}})"}
+        - template: {name: Browser Blank, browser_front: "{{Extra}}"}
+        - template: {name: Spaces, browser_front: "  "}
+  - observe:
+      - card_excerpts: ["#c1", "#c2", "#c3", "#c4"]
