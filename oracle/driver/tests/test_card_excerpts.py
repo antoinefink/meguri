@@ -202,9 +202,9 @@ class CardExcerpts(unittest.TestCase):
         with WorkerProcess("UTC") as w:
             out = run_ok(self, w, excerpts_scenario(steps, notes))
         self.assertEqual(out[-2], {"card_excerpts": [
-            found("猫 🔉excerpt301.mp3🔉 / cat", "ExcerptDeck::Nested"),
-            found("犬 / dog", "ExcerptDeckStage (ExcerptDeck::Nested)"),
-            found("猫 🔉excerpt301.mp3🔉 / cat", "ExcerptDeck::Nested"),
+            found("猫 🔉excerpt301.mp3🔉 / A 501", "ExcerptDeck::Nested"),
+            found("犬 / A 502", "ExcerptDeckStage (ExcerptDeck::Nested)"),
+            found("猫 🔉excerpt301.mp3🔉 / A 501", "ExcerptDeck::Nested"),
         ]})
         self.assertEqual(out[-1], out[-3])
 
