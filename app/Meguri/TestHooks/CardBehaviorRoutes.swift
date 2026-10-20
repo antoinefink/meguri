@@ -135,11 +135,21 @@ extension TestHooks {
             guard let pair, let update = pair.current.update else { return }
             let page = pair.current
             let result = try? await page.webView.callAsyncJavaScript("""
+                const rect = element => {
+                  if (!element) return null;
+                  const r = element.getBoundingClientRect();
+                  return [r.x,r.y,r.width,r.height].every(Number.isFinite)
+                    ? {x:r.x,y:r.y,width:r.width,height:r.height} : null;
+                };
+                const visual = window.visualViewport;
                 return JSON.stringify({text:document.getElementById('typeans')?.value||'', marker:window.domMarker,
                   resizes:window.resizeEvents||0, height:innerHeight, layoutHeight:document.documentElement.clientHeight,
                   viewport:document.getElementById('viewport')?.offsetHeight,
                   scroll:scrollY, bottom:document.getElementById('bottom')?.getBoundingClientRect().bottom,
+                  answerRect:rect(document.getElementById('answer')), firstHeadingRect:rect(document.querySelector('#qa h1')),
                   root:location.href, scriptRan:window.cardScriptRan===true,
+                  ...([visual?.offsetLeft,visual?.offsetTop,visual?.scale].every(Number.isFinite)
+                    ? {visualViewport:{offsetLeft:visual.offsetLeft,offsetTop:visual.offsetTop,scale:visual.scale}} : {}),
                   ...(Number.isFinite(window.visualViewport?.scale) ? {visualScale:window.visualViewport.scale} : {})});
                 """, arguments: [:], in: nil, contentWorld: .page)
             guard pair.current === page, page.update == update, !page.closed else { return }
@@ -157,6 +167,14 @@ extension TestHooks {
             #endif
             #if os(iOS)
             observations["voiceFocus"] = nativeVoiceFocus
+            if let focused = UIAccessibility.focusedElement(using: .notificationVoiceOver) as? NSObject {
+                let frame = focused.accessibilityFrame
+                if frame.minX.isFinite, frame.minY.isFinite, frame.width.isFinite, frame.height.isFinite {
+                    observations["voiceFocusGeometry"] = ["x": frame.minX, "y": frame.minY,
+                                                           "width": frame.width, "height": frame.height]
+                    observations["voiceFocusTraits"] = focused.accessibilityTraits.rawValue
+                }
+            }
             let nativeZoom = page.webView.scrollView.zoomScale
             if nativeZoom.isFinite { observations["nativeZoom"] = nativeZoom }
             if let window = page.webView.window {

@@ -243,7 +243,68 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         #endif
         try voiceOver.enable()
-        @MainActor func activateWithVoiceOver(_ element: XCUIElement) throws {
+        @MainActor func attachSpeech(_ utterance: String, name: String) {
+            print("\(name): \(utterance)")
+            let attachment = XCTAttachment(string: utterance)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        @MainActor func attachRevealedScreen(_ layoutIndex: Int) {
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            screenshot.name = "layout-\(layoutIndex)-revealed-screen"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "layout-\(layoutIndex)-revealed-hierarchy"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+        #if os(iOS)
+        @MainActor func activateMenuItemWithVoiceOver(label: String) throws {
+            func identifiesItem(_ utterance: String) -> Bool {
+                // Speech adds traits after the localized label. Match the whole
+                // label clause, never a substring of another fixture item.
+                utterance.components(separatedBy: CharacterSet(charactersIn: ",\n"))
+                    .contains { $0.trimmingCharacters(in: .whitespacesAndNewlines) == label }
+            }
+            var utterance = try voiceOver.currentSpeech().utterance
+            var visited: Set<String> = []
+            for moves in 0...16 {
+                attachSpeech(utterance, name: "menu-\(label)-move-\(moves)")
+                if identifiesItem(utterance) {
+                    let selected = try voiceOver.currentSpeech().utterance
+                    attachSpeech(selected, name: "menu-\(label)-selected")
+                    guard identifiesItem(selected) else {
+                        throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 6,
+                                      userInfo: [NSLocalizedDescriptionKey: "VoiceOver selection changed before activating \(label): \(selected)"])
+                    }
+                    let window = app.windows.firstMatch
+                    let frame = window.frame
+                    let coordinate = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                    let point = coordinate.screenPoint
+                    guard window.exists, frame.minX.isFinite, frame.minY.isFinite,
+                          frame.width.isFinite, frame.height.isFinite, frame.width > 0, frame.height > 0,
+                          point.x.isFinite, point.y.isFinite,
+                          point.x > frame.minX, point.x < frame.maxX,
+                          point.y > frame.minY, point.y < frame.maxY else {
+                        throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 7,
+                                      userInfo: [NSLocalizedDescriptionKey: "No finite interior app-window point for VoiceOver menu activation"])
+                    }
+                    // A VoiceOver double tap activates the selected item,
+                    // independently of the gesture's position in the window.
+                    coordinate.doubleTap()
+                    return
+                }
+                guard visited.insert(utterance).inserted, moves < 16 else {
+                    throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 8,
+                                  userInfo: [NSLocalizedDescriptionKey: "VoiceOver menu traversal cycled or exhausted 16 moves before \(label): \(utterance)"])
+                }
+                utterance = try voiceOver.moveForward().utterance
+            }
+        }
+        #endif
+        @MainActor func activateWithVoiceOver(_ element: XCUIElement, nativeMenuItem: Bool = false) throws {
             guard element.waitForExistence(timeout: 3) else {
                 throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 2,
                               userInfo: [NSLocalizedDescriptionKey: "missing native VO control: \(element)"])
@@ -256,6 +317,10 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             #if os(macOS)
             try click(element, in: app)
             #else
+            if nativeMenuItem {
+                try activateMenuItemWithVoiceOver(label: label)
+                return
+            }
             // With VoiceOverTouch, one tap selects. Verify the actual native
             // focused element and service speech before the activation gesture.
             element.tap()
@@ -275,9 +340,10 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             if !button.exists || !button.isHittable {
                 try activateWithVoiceOver(app.descendants(matching: .any).matching(identifier: "card.behavior.actions").firstMatch)
             }
-            try activateWithVoiceOver(button)
+            try activateWithVoiceOver(button, nativeMenuItem: true)
         }
         for layoutIndex in 0...3 {
+            let failuresBeforeLayout = testRun?.failureCount ?? 0
             if layoutIndex > 0 {
                 try voiceOverControl(["separator", "fallback", "graphic"][layoutIndex - 1])
                 try voiceOverControl("next")
@@ -293,9 +359,11 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             try activateWithVoiceOver(nativeEditor)
             nativeEditor.typeText("v\(layoutIndex)")
             let retainedText = try XCTUnwrap(nativeEditor.value as? String)
+            attachSpeech(try voiceOver.currentSpeech().utterance, name: "layout-\(layoutIndex)-before-reveal")
             // This unique visible control avoids transient Menu ownership.
             try activateWithVoiceOver(app.buttons["card.behavior.reveal"])
             XCTAssert(wait { self.state(app).contains("side=answer") }, state(app))
+            attachSpeech(try voiceOver.currentSpeech().utterance, name: "layout-\(layoutIndex)-on-revealed")
             let answerReport = try report(app)
             XCTAssertEqual(try XCTUnwrap(answerReport["pageZoom"] as? Double), savedZoom)
             #if os(iOS)
@@ -306,11 +374,18 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             #endif
             XCTAssert(wait { (try? voiceOver.currentSpeech().utterance.contains("Behavior answer")) == true },
                       "The current native VoiceOver cursor must identify the answer")
+            attachSpeech(try voiceOver.currentSpeech().utterance, name: "layout-\(layoutIndex)-answer-cursor")
+            attachRevealedScreen(layoutIndex)
             // Verify automatic reveal ownership BEFORE deliberate VO traversal
             // to the card's input could change keyboard focus.
             app.typeText("x")
             XCTAssertEqual(nativeEditor.value as? String, retainedText + "x")
-            XCTAssertTrue(try voiceOver.moveForward().utterance.contains("Typed answer"), "The next VO element must follow the answer destination")
+            let nextSpeech = try voiceOver.moveForward().utterance
+            attachSpeech(nextSpeech, name: "layout-\(layoutIndex)-next1")
+            XCTAssertTrue(nextSpeech.contains("Typed answer"), "The next VO element must follow the answer destination")
+            if layoutIndex == 1 && !nextSpeech.contains("Typed answer") {
+                attachSpeech(try voiceOver.moveForward().utterance, name: "layout-\(layoutIndex)-next2")
+            }
             XCTAssertNotEqual(app.webViews.matching(identifier: "review.card.page.a").firstMatch.exists,
                               app.webViews.matching(identifier: "review.card.page.b").firstMatch.exists,
                               "exactly one named page root must be exported; the idle root must be absent")
@@ -319,6 +394,10 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             XCTAssertEqual(answerReport["currentHidden"] as? Bool, false)
             XCTAssertEqual(answerReport["idleHidden"] as? Bool, true)
             XCTAssertFalse(app.staticTexts["Behavior question"].exists, "idle question content must stay excluded")
+            if (testRun?.failureCount ?? 0) > failuresBeforeLayout {
+                throw NSError(domain: "CardWebViewBehaviorUITests.Diagnostic", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "Stopped after capturing failed layout \(layoutIndex); recorded assertions remain failures"])
+            }
         }
     }
     #endif

@@ -156,7 +156,9 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         if update.side == .question && !preservingVisit {
             retainedTypedText = nil
             #if !os(macOS)
-            webView.scrollView.setZoomScale(webView.scrollView.minimumZoomScale, animated: false)
+            // Saved pageZoom can change the scroll view's minimum; gesture
+            // zoom returns to its neutral scale independently of that setting.
+            webView.scrollView.setZoomScale(1, animated: false)
             #endif
         }
         typedValue = nil
