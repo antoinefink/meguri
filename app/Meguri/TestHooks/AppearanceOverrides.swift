@@ -29,25 +29,40 @@ extension TestHooks {
         }
 
         func body(content: Content) -> some View {
-            content
-                .transformEnvironment(\._accessibilityReduceMotion) { value in
-                    if let reduceMotion = options.reduceMotion { value = reduceMotion }
-                }
-                .transformEnvironment(\._accessibilityReduceTransparency) { value in
-                    if let reduceTransparency = options.reduceTransparency { value = reduceTransparency }
-                }
-                .transaction { transaction in
-                    if options.animationsEnabled == false {
-                        transaction.disablesAnimations = true
-                        transaction.animation = nil
-                    }
-                }
+            let reduceMotion: Bool? = options.reduceMotion
+            let reduceTransparency: Bool? = options.reduceTransparency
+            let animationsEnabled: Bool? = options.animationsEnabled
+
+            return content
+                .transformEnvironment(
+                    \._accessibilityReduceMotion, transform: Self.environmentOverride(reduceMotion)
+                )
+                .transformEnvironment(
+                    \._accessibilityReduceTransparency, transform: Self.environmentOverride(reduceTransparency)
+                )
+                .transaction(Self.animationOverride(animationsEnabled))
                 #if os(macOS)
                 .background(WindowConfigurator(
                     size: options.windowSize ?? (options == LaunchOptions() ? nil : .standard),
                     animationsEnabled: options.animationsEnabled
                 ))
                 #endif
+        }
+
+        // SwiftUI's transform callbacks carry no actor guarantee.
+        private nonisolated static func environmentOverride(_ replacement: Bool?) -> @Sendable (inout Bool) -> Void {
+            { [replacement] value in
+                if let replacement { value = replacement }
+            }
+        }
+
+        private nonisolated static func animationOverride(_ enabled: Bool?) -> @Sendable (inout Transaction) -> Void {
+            { [enabled] transaction in
+                if enabled == false {
+                    transaction.disablesAnimations = true
+                    transaction.animation = nil
+                }
+            }
         }
     }
 
