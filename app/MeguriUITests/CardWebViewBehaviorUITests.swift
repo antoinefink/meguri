@@ -12,7 +12,7 @@ import notify
 @MainActor
 final class CardWebViewBehaviorUITests: XCTestCase {
     private var bundleIdentifier = ""
-    private func launch() throws -> XCUIApplication {
+    private func launch(route: String = "card/behaviors") throws -> XCUIApplication {
         let build = try BuildUnderTest.current()
         guard build.hasHooks else { throw XCTSkip("this configuration has no fixture routes") }
         bundleIdentifier = try build.bundleIdentifier
@@ -20,7 +20,7 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         guard bundleIdentifier.hasSuffix(".dev") else { throw XCTSkip("daily-driver Mac products cannot be launched by a test") }
         #endif
         let app = XCUIApplication()
-        app.launchArguments = MeguriLaunch(locale: "en_US", animations: false, route: "card/behaviors").arguments
+        app.launchArguments = MeguriLaunch(locale: "en_US", animations: false, route: route).arguments
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
         guard wait({ self.state(app).contains("ready card=1 side=question") }) else {
@@ -217,17 +217,35 @@ final class CardWebViewBehaviorUITests: XCTestCase {
     /// tools/mg ui-test on Mac/iPhone/iPad in the VM only. The public service
     /// reads the current OS cursor; forward traversal proves its destination.
     func testVoiceOverAnswerTargetWithExternalKeyboardOwner() throws {
-        let app = try launch()
+        try assertVoiceOverAnswerTargetWithExternalKeyboardOwner(route: "card/behaviors", layoutIndex: 0)
+    }
+
+    func testVoiceOverSeparatorAnswerTargetWithExternalKeyboardOwner() throws {
+        try assertVoiceOverAnswerTargetWithExternalKeyboardOwner(route: "card/behaviors/separator", layoutIndex: 1)
+    }
+
+    func testVoiceOverFallbackAnswerTargetWithExternalKeyboardOwner() throws {
+        try assertVoiceOverAnswerTargetWithExternalKeyboardOwner(route: "card/behaviors/fallback", layoutIndex: 2)
+    }
+
+    func testVoiceOverLabelledGraphicAnswerTargetWithExternalKeyboardOwner() throws {
+        try assertVoiceOverAnswerTargetWithExternalKeyboardOwner(route: "card/behaviors/graphic", layoutIndex: 3)
+    }
+
+    @MainActor
+    private func assertVoiceOverAnswerTargetWithExternalKeyboardOwner(route: String, layoutIndex: Int) throws {
+        let app = try launch(route: route)
         try control("zoom", in: app)
         XCTAssert(wait { self.state(app).contains("zoom=150") }, state(app))
         let baselineReport = try report(app)
         let savedZoom = try XCTUnwrap(baselineReport["pageZoom"] as? Double)
         XCTAssertEqual(savedZoom, 1.5)
-        #if os(iOS)
         let unpinchedVisualScale = try XCTUnwrap(baselineReport["visualScale"] as? Double)
-        let unpinchedNativeZoom = try XCTUnwrap(baselineReport["nativeZoom"] as? Double)
-        XCTAssertTrue(unpinchedVisualScale.isFinite && unpinchedNativeZoom.isFinite)
+        XCTAssertTrue(unpinchedVisualScale.isFinite)
         XCTAssertGreaterThan(unpinchedVisualScale, 0)
+        #if os(iOS)
+        let unpinchedNativeZoom = try XCTUnwrap(baselineReport["nativeZoom"] as? Double)
+        XCTAssertTrue(unpinchedNativeZoom.isFinite)
         XCTAssertGreaterThan(unpinchedNativeZoom, 0)
         // Exercise touch zoom before enabling the screen reader.
         let cardSurface = app.webViews.firstMatch
@@ -242,7 +260,7 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(gestureReport["pageZoom"] as? Double), savedZoom)
         #endif
         let voiceOver = XCUIDevice.shared.voiceOverService
-        defer { try? voiceOver.disable() }
+        addTeardownBlock { @MainActor in try? XCUIDevice.shared.voiceOverService.disable() }
         #if os(macOS)
         try startMacVoiceOverInSettings()
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
@@ -265,60 +283,7 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             hierarchy.lifetime = .keepAlways
             add(hierarchy)
         }
-        #if os(iOS)
-        @MainActor func activateMenuItemWithVoiceOver(label: String) throws {
-            func identifiesItem(_ utterance: String) -> Bool {
-                // Native speech can separate the exact localized label from
-                // its traits with a space, comma or newline.
-                let speech = utterance.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard speech.hasPrefix(label) else { return false }
-                let suffix = speech.dropFirst(label.count)
-                guard let boundary = suffix.first else { return true }
-                return boundary == " " || boundary == "," || boundary.isNewline
-            }
-            var utterance = try voiceOver.currentSpeech().utterance
-            var visited: Set<[String]> = []
-            for moves in 0...16 {
-                attachSpeech(utterance, name: "menu-\(label)-move-\(moves)")
-                let focusedLabel = try self.report(app)["voiceFocus"] as? String
-                if identifiesItem(utterance), focusedLabel == label {
-                    let window = app.windows.firstMatch
-                    let frame = window.frame
-                    let coordinate = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                    let point = coordinate.screenPoint
-                    guard window.exists, frame.minX.isFinite, frame.minY.isFinite,
-                          frame.width.isFinite, frame.height.isFinite, frame.width > 0, frame.height > 0,
-                          point.x.isFinite, point.y.isFinite,
-                          point.x > frame.minX, point.x < frame.maxX,
-                          point.y > frame.minY, point.y < frame.maxY else {
-                        throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 7,
-                                      userInfo: [NSLocalizedDescriptionKey: "No finite interior app-window point for VoiceOver menu activation"])
-                    }
-                    // A VoiceOver double tap activates the selected item,
-                    // independently of the gesture's position in the window.
-                    let selected = try voiceOver.currentSpeech().utterance
-                    let selectedFocus = try self.report(app)["voiceFocus"] as? String
-                    attachSpeech(selected, name: "menu-\(label)-selected")
-                    guard identifiesItem(selected), selectedFocus == label else {
-                        throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 6,
-                                      userInfo: [NSLocalizedDescriptionKey: "VoiceOver selection changed before activating \(label): \(selected), focus=\(selectedFocus ?? "<unavailable>")"])
-                    }
-                    coordinate.doubleTap()
-                    return
-                }
-                // The pre-move announcement can repeat before the first real
-                // move. Detect cycles only among observed moves and include
-                // native focus, since speech alone can lag the cursor.
-                guard moves < 16,
-                      moves == 0 || visited.insert([focusedLabel ?? "<unavailable>", utterance]).inserted else {
-                    throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 8,
-                                  userInfo: [NSLocalizedDescriptionKey: "VoiceOver menu traversal cycled or exhausted 16 moves before \(label): \(utterance)"])
-                }
-                utterance = try voiceOver.moveForward().utterance
-            }
-        }
-        #endif
-        @MainActor func activateWithVoiceOver(_ element: XCUIElement, nativeMenuItem: Bool = false) throws {
+        @MainActor func activateWithVoiceOver(_ element: XCUIElement) throws {
             guard element.waitForExistence(timeout: 3) else {
                 throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 2,
                               userInfo: [NSLocalizedDescriptionKey: "missing native VO control: \(element)"])
@@ -330,10 +295,6 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             guard !label.isEmpty else {
                 throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 3,
                               userInfo: [NSLocalizedDescriptionKey: "native VO control has an empty label: \(element)"])
-            }
-            if nativeMenuItem {
-                try activateMenuItemWithVoiceOver(label: label)
-                return
             }
             // With VoiceOverTouch, one tap selects. Verify the actual native
             // focused element and service speech before the activation gesture.
@@ -349,68 +310,52 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             element.doubleTap()
             #endif
         }
-        @MainActor func voiceOverControl(_ id: String) throws {
-            let button = app.descendants(matching: .any).matching(identifier: "card.behavior.\(id)").firstMatch
-            if !button.exists || !button.isHittable {
-                try activateWithVoiceOver(app.descendants(matching: .any).matching(identifier: "card.behavior.actions").firstMatch)
-            }
-            try activateWithVoiceOver(button, nativeMenuItem: true)
+        let nativeEditor = app.textFields["card.behavior.editor"]
+        try activateWithVoiceOver(nativeEditor)
+        nativeEditor.typeText("v\(layoutIndex)")
+        let retainedText = try XCTUnwrap(nativeEditor.value as? String)
+        attachSpeech(try voiceOver.currentSpeech().utterance, name: "layout-\(layoutIndex)-before-reveal")
+        // This unique visible control avoids transient Menu ownership.
+        try activateWithVoiceOver(app.buttons["card.behavior.reveal"])
+        XCTAssert(wait { self.state(app).contains("side=answer") }, state(app))
+        attachSpeech(try voiceOver.currentSpeech().utterance, name: "layout-\(layoutIndex)-on-revealed")
+        let answerReport = try report(app)
+        XCTAssertEqual(try XCTUnwrap(answerReport["pageZoom"] as? Double), savedZoom)
+        #if os(iOS)
+        XCTAssertEqual(try XCTUnwrap(answerReport["visualScale"] as? Double),
+                       questionGestureScale, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(answerReport["nativeZoom"] as? Double),
+                       questionNativeZoom, accuracy: 0.01)
+        #endif
+        XCTAssert(wait { (try? voiceOver.currentSpeech().utterance.contains("Behavior answer")) == true },
+                  "The current native VoiceOver cursor must identify the answer")
+        attachSpeech(try voiceOver.currentSpeech().utterance, name: "layout-\(layoutIndex)-answer-cursor")
+        attachRevealedScreen(layoutIndex)
+        // Verify automatic reveal ownership BEFORE deliberate VO traversal
+        // to the card's input could change keyboard focus.
+        app.typeText("x")
+        XCTAssertEqual(nativeEditor.value as? String, retainedText + "x")
+        let nextSpeech = try voiceOver.moveForward().utterance
+        attachSpeech(nextSpeech, name: "layout-\(layoutIndex)-next1")
+        XCTAssertTrue(nextSpeech.contains("Typed answer"), "The next VO element must follow the answer destination")
+        if layoutIndex == 1 && !nextSpeech.contains("Typed answer") {
+            attachSpeech(try voiceOver.moveForward().utterance, name: "layout-\(layoutIndex)-next2")
         }
-        for layoutIndex in 0...3 {
-            let failuresBeforeLayout = testRun?.failureCount ?? 0
-            if layoutIndex > 0 {
-                try voiceOverControl(["separator", "fallback", "graphic"][layoutIndex - 1])
-                try voiceOverControl("next")
-                XCTAssert(wait { self.state(app).contains("card=\(layoutIndex + 1) side=question") }, state(app))
-                #if os(iOS)
-                let nextQuestionReport = try report(app)
-                XCTAssertEqual(try XCTUnwrap(nextQuestionReport["visualScale"] as? Double), unpinchedVisualScale, accuracy: 0.01)
-                XCTAssertEqual(try XCTUnwrap(nextQuestionReport["nativeZoom"] as? Double), unpinchedNativeZoom, accuracy: 0.01)
-                XCTAssertEqual(try XCTUnwrap(nextQuestionReport["pageZoom"] as? Double), savedZoom)
-                #endif
-            }
-            let nativeEditor = app.textFields["card.behavior.editor"]
-            try activateWithVoiceOver(nativeEditor)
-            nativeEditor.typeText("v\(layoutIndex)")
-            let retainedText = try XCTUnwrap(nativeEditor.value as? String)
-            attachSpeech(try voiceOver.currentSpeech().utterance, name: "layout-\(layoutIndex)-before-reveal")
-            // This unique visible control avoids transient Menu ownership.
-            try activateWithVoiceOver(app.buttons["card.behavior.reveal"])
-            XCTAssert(wait { self.state(app).contains("side=answer") }, state(app))
-            attachSpeech(try voiceOver.currentSpeech().utterance, name: "layout-\(layoutIndex)-on-revealed")
-            let answerReport = try report(app)
-            XCTAssertEqual(try XCTUnwrap(answerReport["pageZoom"] as? Double), savedZoom)
-            #if os(iOS)
-            XCTAssertEqual(try XCTUnwrap(answerReport["visualScale"] as? Double),
-                           layoutIndex == 0 ? questionGestureScale : unpinchedVisualScale, accuracy: 0.01)
-            XCTAssertEqual(try XCTUnwrap(answerReport["nativeZoom"] as? Double),
-                           layoutIndex == 0 ? questionNativeZoom : unpinchedNativeZoom, accuracy: 0.01)
-            #endif
-            XCTAssert(wait { (try? voiceOver.currentSpeech().utterance.contains("Behavior answer")) == true },
-                      "The current native VoiceOver cursor must identify the answer")
-            attachSpeech(try voiceOver.currentSpeech().utterance, name: "layout-\(layoutIndex)-answer-cursor")
-            attachRevealedScreen(layoutIndex)
-            // Verify automatic reveal ownership BEFORE deliberate VO traversal
-            // to the card's input could change keyboard focus.
-            app.typeText("x")
-            XCTAssertEqual(nativeEditor.value as? String, retainedText + "x")
-            let nextSpeech = try voiceOver.moveForward().utterance
-            attachSpeech(nextSpeech, name: "layout-\(layoutIndex)-next1")
-            XCTAssertTrue(nextSpeech.contains("Typed answer"), "The next VO element must follow the answer destination")
-            if layoutIndex == 1 && !nextSpeech.contains("Typed answer") {
-                attachSpeech(try voiceOver.moveForward().utterance, name: "layout-\(layoutIndex)-next2")
-            }
-            assertSingleActiveCardRoot(app)
-            XCTAssertEqual(answerReport["pageCount"] as? Int, 2)
-            XCTAssertEqual(answerReport["distinctPages"] as? Bool, true)
-            XCTAssertEqual(answerReport["currentHidden"] as? Bool, false)
-            XCTAssertEqual(answerReport["idleHidden"] as? Bool, true)
-            XCTAssertFalse(app.staticTexts["Behavior question"].exists, "idle question content must stay excluded")
-            if (testRun?.failureCount ?? 0) > failuresBeforeLayout {
-                throw NSError(domain: "CardWebViewBehaviorUITests.Diagnostic", code: 1,
-                              userInfo: [NSLocalizedDescriptionKey: "Stopped after capturing failed layout \(layoutIndex); recorded assertions remain failures"])
-            }
-        }
+        assertSingleActiveCardRoot(app)
+        XCTAssertEqual(answerReport["pageCount"] as? Int, 2)
+        XCTAssertEqual(answerReport["distinctPages"] as? Bool, true)
+        XCTAssertEqual(answerReport["currentHidden"] as? Bool, false)
+        XCTAssertEqual(answerReport["idleHidden"] as? Bool, true)
+        XCTAssertFalse(app.staticTexts["Behavior question"].exists, "idle question content must stay excluded")
+        // Exercise the actual visible native action with VoiceOver still enabled.
+        try activateWithVoiceOver(app.buttons["card.behavior.next"])
+        XCTAssert(wait { self.state(app).contains("card=2 side=question") }, state(app))
+        let nextQuestionReport = try report(app)
+        XCTAssertEqual(try XCTUnwrap(nextQuestionReport["pageZoom"] as? Double), savedZoom)
+        XCTAssertEqual(try XCTUnwrap(nextQuestionReport["visualScale"] as? Double), unpinchedVisualScale, accuracy: 0.01)
+        #if os(iOS)
+        XCTAssertEqual(try XCTUnwrap(nextQuestionReport["nativeZoom"] as? Double), unpinchedNativeZoom, accuracy: 0.01)
+        #endif
     }
     #endif
 

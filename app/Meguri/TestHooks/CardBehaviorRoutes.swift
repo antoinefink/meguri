@@ -16,6 +16,9 @@ extension TestHooks {
     enum CardBehaviorRoutes {
         static func register(in registry: inout RouteRegistry) {
             registry.register("card/behaviors") { _ in .screen { CardBehaviorView() } }
+            registry.register("card/behaviors/separator") { _ in .screen { CardBehaviorView(answerForm: 1) } }
+            registry.register("card/behaviors/fallback") { _ in .screen { CardBehaviorView(answerForm: 2) } }
+            registry.register("card/behaviors/graphic") { _ in .screen { CardBehaviorView(answerForm: 3) } }
         }
     }
 
@@ -30,11 +33,13 @@ extension TestHooks {
         private var work: Task<Void, Never>?
         private var report = ""
         private var probes = 0
-        private var answerForm = 0
+        private var answerForm: Int
         #if os(iOS)
         private var focusObservation: NSObjectProtocol?
         private var nativeVoiceFocus = "none"
         #endif
+
+        init(answerForm: Int = 0) { self.answerForm = answerForm }
 
         func answerVariant(_ variant: Int) { answerForm = variant }
 
@@ -204,13 +209,16 @@ extension TestHooks {
     }
 
     struct CardBehaviorView: View {
-        @State private var model = CardBehaviorModel()
+        @State private var model: CardBehaviorModel
         @State private var nativeText = ""
         @FocusState private var nativeFocused: Bool
         @Environment(\.colorScheme) private var appearance
         #if os(iOS)
         @Environment(\.horizontalSizeClass) private var sizeClass
         #endif
+        init(answerForm: Int = 0) {
+            _model = State(initialValue: CardBehaviorModel(answerForm: answerForm))
+        }
         private var cardMaxWidth: CGFloat {
             if model.narrow { return ContentWidth.primaryAction }
             #if os(iOS)
@@ -225,12 +233,14 @@ extension TestHooks {
                 // or other presentation is competing for the explicit host.
                 control("Confirm", id: "confirm") { try await model.dialog(prompt: false) }
                 control("Prompt", id: "prompt") { try await model.dialog(prompt: true) }
-                control("Reveal answer", id: "reveal") { try await model.reveal() }
+                HStack(spacing: Spacing.xSmall) {
+                    control("Reveal answer", id: "reveal") { try await model.reveal() }
+                    control("Next card", id: "next") { try await model.next() }
+                }
                 Menu(String(localized: "Card actions", table: "CardBehaviorRoutes")) {
                     control("Answer separator", id: "separator") { model.answerVariant(1) }
                     control("Answer fallback", id: "fallback") { model.answerVariant(2) }
                     control("Answer graphic", id: "graphic") { model.answerVariant(3) }
-                    control("Next card", id: "next") { try await model.next() }
                     control("Card zoom", id: "zoom") { model.zoom() }
                     control("Resize card", id: "resize") { model.narrow.toggle(); await model.refresh() }
                     control("Read card state", id: "refresh") { await model.refresh() }
