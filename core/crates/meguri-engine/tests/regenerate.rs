@@ -12,6 +12,7 @@ use meguri_model::{
     notetype::NotetypeTemplate,
 };
 use meguri_storage::{ReadRows, ReaderRole};
+use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -26,13 +27,22 @@ struct Recorder {
     times: Mutex<Vec<Duration>>,
     cancel: Option<Arc<CancelToken>>,
 }
+thread_local! {
+    static PLANNING_MS: Cell<u64> = const { Cell::new(0) };
+}
 fn planning_ticks() -> Duration {
-    static TICKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    Duration::from_millis(TICKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    let now = PLANNING_MS.get() + 1;
+    PLANNING_MS.set(now);
+    Duration::from_millis(now)
 }
 impl ProgressListener for Recorder {
     fn on_progress(&self, progress: &Progress) {
-        self.times.lock().unwrap().push(meguri_engine::monotonic::now());
+        // Planning delivers synchronously: record the sink's latest sample,
+        // without advancing the clock or measuring OS scheduling delays.
+        self.times
+            .lock()
+            .unwrap()
+            .push(Duration::from_millis(PLANNING_MS.get()));
         if let Some(cancel) = &self.cancel
             && progress.completed >= 500
         {
@@ -81,7 +91,7 @@ fn twenty_thousand_notes_plan_cancel_commit_and_repeat() {
         Err(EngineError::Cancelled)
     ));
     assert_eq!(reader.cards_after(None, 40_001).unwrap().len(), 20_000);
-    let sink = ProgressSink::new();
+    let sink = ProgressSink::with_clock(planning_ticks);
     let recorder = Arc::new(Recorder {
         times: Mutex::new(vec![]),
         cancel: None,
@@ -90,7 +100,10 @@ fn twenty_thousand_notes_plan_cancel_commit_and_repeat() {
     let planned = regenerate::plan(&*reader, &draft, &CancelToken::new(), &sink).unwrap();
     assert_eq!(planned.notes.iter().map(|n| n.cards.len()).sum::<usize>(), 10_000);
     let times = recorder.times.lock().unwrap();
-    assert!(!times.is_empty());
+    assert!(
+        times.len() >= 3,
+        "planning must emit several progress updates: {times:?}"
+    );
     assert!(
         times
             .windows(2)
