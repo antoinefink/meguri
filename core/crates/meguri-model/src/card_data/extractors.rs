@@ -56,7 +56,9 @@ impl Fields {
         }
         // JSON -0 has float syntax for the integer readers of X3, without
         // changing the ordinary model's integer conversion behavior.
-        let integer = |value: Option<&RawValue>| value.filter(|v| v.get() != "-0");
+        fn integer(value: Option<&RawValue>) -> Option<&RawValue> {
+            value.filter(|v| v.get() != "-0")
+        }
         Some(Self {
             position: integer(values[0]).and_then(json::u32_value),
             stability: values[1].and_then(json::f32_value),
