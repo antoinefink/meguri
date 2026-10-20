@@ -245,7 +245,6 @@
   let watchedImage = null;
   let imageSize = null;
   let imageChanged = false;
-  let waitingImages = [];
   let lastSize;
   let pending = false;
   let dprQuery = null;
@@ -389,7 +388,6 @@
     watchedImage = imageSize = null;
     imageChanged = false;
     watched = lastSize = null;
-    if (waitingImages.length) call(observeDOM, removalObserver, doc, { childList: true, subtree: true });
   }
   function imageLoaded() {
     if (!watchedImage || !call(connected, watchedImage) || watchedImage !== image()) return;
@@ -427,31 +425,8 @@
     });
   }
   const resizeObserver = new ResizeCtor(requestRedraw);
-  function forgetWaiting(entry) {
-    call(remove, entry.img, "load", entry.ready);
-    call(remove, entry.img, "error", entry.ready);
-    const remaining = [];
-    for (let i = 0; i < waitingImages.length; i += 1) {
-      if (waitingImages[i] !== entry) remaining[remaining.length] = waitingImages[i];
-    }
-    waitingImages = remaining;
-  }
-  function pruneWaiting() {
-    // Repeated calls for the same current image remain independent. Only
-    // obsolete sides lose their initial load/error listeners and pending work.
-    const entries = waitingImages;
-    for (let i = 0; i < entries.length; i += 1) {
-      const entry = entries[i];
-      if (!call(connected, entry.img) || entry.img !== image()) {
-        forgetWaiting(entry);
-        entry.finish(undefined);
-      }
-    }
-  }
   const removalObserver = new MutationCtor(function () {
-    pruneWaiting();
     if (watched && (!call(connected, watched) || watchedImage !== image())) dropWatch();
-    if (!watched && !waitingImages.length) call(disconnectDOM, removalObserver);
   });
   function watch(container, img) {
     // Keep this setup's measurement across cleanup: the observer's initial
@@ -494,7 +469,6 @@
     // This outer promise only schedules work. Its completion is not a draw
     // barrier; setup/draw failures belong to the detached promise in the rAF.
     return new PromiseCtor(function (finish) {
-      pruneWaiting();
       const img = image();
       function schedule() {
         call(frame, win, function () {
@@ -503,16 +477,13 @@
         finish(undefined);
       }
       if (img && !call(complete, img)) {
-        const entry = { img, finish, ready: null };
         const ready = function () {
-          forgetWaiting(entry);
+          call(remove, img, "load", ready);
+          call(remove, img, "error", ready);
           schedule();
         };
-        entry.ready = ready;
-        waitingImages[waitingImages.length] = entry;
         call(add, img, "load", ready);
         call(add, img, "error", ready);
-        call(observeDOM, removalObserver, doc, { childList: true, subtree: true });
       } else call(then, call(resolve, PromiseCtor), schedule);
     });
   }
