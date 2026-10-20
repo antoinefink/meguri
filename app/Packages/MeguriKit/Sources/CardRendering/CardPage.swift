@@ -578,8 +578,10 @@ public final class CardPage: NSObject, WKNavigationDelegate {
               update != nil, !readyPhases.contains("failed"),
               committedRootDocument == documentID, frame.isMainFrame else { return false }
         let security = frame.securityOrigin
-        return security.protocol == MediaOrigin.scheme
-            && security.host == MediaOrigin.host && security.port == 0
+        let trustedOrigin = security.protocol == MediaOrigin.scheme && security.host == MediaOrigin.host
+        // WebKit can expose the verified custom-scheme root as an opaque origin.
+        let opaqueOrigin = security.protocol.isEmpty && security.host.isEmpty
+        return security.port == 0 && (trustedOrigin || opaqueOrigin)
     }
 
     public func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
