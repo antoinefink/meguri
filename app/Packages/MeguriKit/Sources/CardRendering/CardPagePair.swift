@@ -23,6 +23,20 @@ public final class CardPagePair {
     public var onSignal: ((String, CardUpdate) -> Void)?
     public var onInteraction: ((String, [String: Any]) -> Void)?
     public var onHostEvent: ((CardPage, CardHostEvent) -> Void)?
+    public var onTypedText: ((CardTypedValue) -> Void)?
+    public var onOpenRequest: ((CardOpenRequest) -> Void)?
+    public var onRecovery: ((CardUpdate, CardUpdate) -> Void)?
+    public var typedValue: CardTypedValue? { current.typedValue }
+    public var behaviorPresenter: (any CardBehaviorPresenting)? {
+        get { current.behavior.presenter }
+        set { for page in pages { page.behavior.presenter = newValue } }
+    }
+    public var cardZoom = CardZoom() {
+        didSet { for page in pages { page.webView.pageZoom = cardZoom.scale } }
+    }
+    public var inspectorPolicy = WebInspectorPolicy() {
+        didSet { for page in pages { page.webView.isInspectable = inspectorPolicy.isInspectable } }
+    }
     /// After presentation and its host-context acknowledgement attempt. A
     /// missing/failing host remains unavailable; acknowledgement is not paint.
     public var onCommitted: ((CardUpdate, SwapToken) -> Void)?
@@ -37,8 +51,13 @@ public final class CardPagePair {
     private var closed = false
     private var commitSerial: UInt64 = 0
     private var hostInstallation = UUID()
+    private var hostSource: String?
+    private var recovery: Task<Void, Never>?
+    private var recoveryID = UUID()
     private var htmlAudioOwner: UUID?
     private var lifecycle: Task<Void, Never>?
+    private var presentationWork: Task<Void, Never>?
+    private var presentationEpoch = UUID()
     private let compare: (TypeAnswerDescriptor, String) async throws -> String
 
     public init(configuration: CardWebConfiguration = .shared, resolver: MediaPathResolver,
@@ -63,6 +82,14 @@ public final class CardPagePair {
         container.addSubview(b.webView)
         container.addSubview(a.webView)
         for page in pages {
+            page.webView.isInspectable = inspectorPolicy.isInspectable
+            page.onTypedText = { [weak self, weak page] value in
+                guard let self, let page, page === self.current, page.behaviorAvailable,
+                      !self.closed, !self.suspended, !self.lifecycleSuspended else { return }
+                self.onTypedText?(value)
+            }
+            page.onProcessTermination = { [weak self] page in self?.processTerminated(page) }
+            page.behavior.onOpenRequest = { [weak self] request in self?.onOpenRequest?(request) }
             page.hostReports.onEvent = { [weak self, weak page] event in
                 guard let self, let page else { return }
                 self.onHostEvent?(page, event)
@@ -76,7 +103,7 @@ public final class CardPagePair {
             }
             page.onSignal = { [weak self] page, signal, body in
                 guard let self, let update = page.update else { return }
-                if signal == "mediaPlayback", page === self.current, page.presented {
+                if signal == "mediaPlayback", page === self.current, page.behaviorAvailable, !self.suspended, !self.lifecycleSuspended {
                     if body["playing"] as? Bool == true {
                         if self.htmlAudioOwner == nil {
                             let lease = UUID()
@@ -96,7 +123,7 @@ public final class CardPagePair {
                     } else { self.releaseHTMLAudio() }
                 }
                 self.onSignal?(signal, update)
-                if page === self.current, page.presented { self.onInteraction?(signal, body) }
+                if page === self.current, page.behaviorAvailable, !self.suspended, !self.lifecycleSuspended { self.onInteraction?(signal, body) }
             }
             page.onConfirmation = { [weak self] page, body in
                 guard let self, page === self.current, page.presented else { return }
@@ -108,16 +135,23 @@ public final class CardPagePair {
         lifecycle = Task { [weak self] in
             for await event in events {
                 guard let self else { return }
+                // Record lifecycle changes synchronously here. A pending
+                // WebKit operation must leave this event loop free to advance.
+                guard !self.closed else { return }
                 switch event {
                 case .stop:
                     self.lifecycleSuspended = true
-                    await self.pauseAll()
+                    let stopEpoch = self.beginSuspension()
+                    self.presentationWork = Task { [weak self] in
+                        guard let self else { return }
+                        await self.unpresentSuspendedPages(stopEpoch)
+                    }
                 case .pause:
-                    for page in self.pages { try? await page.pauseMedia() }
+                    for page in self.pages { page.pauseMediaWithoutWaiting() }
                     self.releaseHTMLAudio()
                 case .available:
                     self.lifecycleSuspended = false
-                    if !self.suspended { try? await self.current.resumePresentation() }
+                    _ = self.beginResumption()
                 }
             }
         }
@@ -126,7 +160,12 @@ public final class CardPagePair {
     isolated deinit { close() }
 
     public func load() async throws {
-        for page in pages { try await page.load() }
+        for page in pages {
+            let reconstruct = page === idle && page.needsReconstruction
+            if reconstruct { try page.prepareReplacementDocument() }
+            try await page.load()
+            if reconstruct, let hostSource { try await page.hostReports.install(hostSource) }
+        }
     }
 
     /// Settles runtime/appearance, then awaits host-context publication.
@@ -137,12 +176,19 @@ public final class CardPagePair {
         generation += 1
         let update = CardUpdate(card: payload.cardID, generation: generation, side: .question)
         let target = idle
+        let reconstruct = target.needsReconstruction
+        if reconstruct { try target.prepareReplacementDocument() }
         if let previous = target.update { audio.cancelPreparation(previous) }
         target.begin(payload, update: update)
         audio.prepare(payload: payload, update: update)
         do {
             try await withTaskCancellationHandler {
                 try Task.checkCancellation()
+                if reconstruct {
+                    try await target.load()
+                    guard target.update == update, !closed else { throw CardPage.Failure.superseded }
+                    if let hostSource { try await target.hostReports.install(hostSource) }
+                }
                 try await target.start(html: payload.question, answer: payload.answer, update: update)
                 try await target.waitForSettled(update)
                 try await target.refreshAppearance()
@@ -170,6 +216,8 @@ public final class CardPagePair {
         guard !closed, !suspended, !lifecycleSuspended, idle.update == update, idle.settled else { throw CardPage.Failure.notPrepared }
         let old = current
         let next = idle
+        cancelPresentationWork()
+        cancelRecovery()
         Self.raise(next.webView, in: container)
         next.beginPresentation()
         (current, idle) = (next, old)
@@ -210,10 +258,15 @@ public final class CardPagePair {
     @discardableResult
     public func showAnswer(inputTime: TimeInterval = ProcessInfo.processInfo.systemUptime) async throws -> SwapToken {
         let page = current
-        guard !closed, !suspended, !lifecycleSuspended, page.presented, let previous = page.update, previous.side == .question, let payload = page.payload else { throw CardPage.Failure.notPrepared }
+        guard !closed, !suspended, !lifecycleSuspended, !page.needsReconstruction, page.presented, let previous = page.update, previous.side == .question, let payload = page.payload else { throw CardPage.Failure.notPrepared }
         try await page.waitForShown(previous)
         let typed = await page.typedText()
         try Task.checkCancellation()
+        guard page.update == previous, current === page, !closed, !suspended, !lifecycleSuspended else { throw CardPage.Failure.superseded }
+        page.captureTypedText(typed)
+        #if !os(macOS)
+        let pinch = page.webView.scrollView.zoomScale
+        #endif
         var answer = payload.answer
         if let descriptor = payload.typeIn {
             let comparison = try await compare(descriptor, typed)
@@ -226,12 +279,18 @@ public final class CardPagePair {
         else { generation += 1; update = CardUpdate(card: previous.card, generation: generation, side: .answer) }
         preparedAnswer = nil
         let token = reveals.beginSwap(to: update.card, inputTime: inputTime)
+        cancelPresentationWork()
         page.begin(payload, update: update)
         page.visibleToken = token.sequence
         audio.present(payload: payload, update: update)
         try await page.run("meguriCard.present(token);", arguments: ["token": token.sequence], world: CardPage.world)
         try await page.start(html: answer, update: update)
         try await page.waitForShown(update)
+        guard current === page, page.update == update, !closed, !suspended, !lifecycleSuspended else { throw CardPage.Failure.superseded }
+        #if !os(macOS)
+        page.webView.scrollView.setZoomScale(pinch, animated: false)
+        #endif
+        await page.announceAnswer()
         await page.hostReports.publish()
         try Task.checkCancellation()
         guard !closed, !suspended, !lifecycleSuspended, current === page, page.update == update, page.presented else { throw CardPage.Failure.superseded }
@@ -243,6 +302,7 @@ public final class CardPagePair {
     public func installHostScript(_ source: String) async throws {
         let installation = UUID()
         hostInstallation = installation
+        hostSource = source
         for page in pages { page.hostReports.disable() }
         do {
             try await load()
@@ -263,8 +323,15 @@ public final class CardPagePair {
     public func setCardState(flag: UInt8, marked: Bool) async throws { try await current.setState(flag: flag, marked: marked) }
     public func setAudioPolicy(_ policy: CardAudioPolicy) { current.setAudioPolicy(policy) }
 
+    public func configureLinks(preferExternalBrowser: Bool, approvals: CardSchemeApprovals) {
+        for page in pages {
+            page.behavior.preferExternalBrowser = preferExternalBrowser
+            page.behavior.approvals = approvals
+        }
+    }
+
     public func replay() {
-        guard !closed, !suspended, !lifecycleSuspended, current.presented, let update = current.update, let payload = current.payload else { return }
+        guard !closed, !suspended, !lifecycleSuspended, current.behaviorAvailable, let update = current.update, let payload = current.payload else { return }
         audio.replay(payload: payload, update: update)
     }
     public func pauseAudio() { audio.pause() }
@@ -273,7 +340,7 @@ public final class CardPagePair {
 
     /// Returns names with no retryable element/stylesheet on the visible side.
     @discardableResult public func mediaArrived(_ names: [String]) async throws -> [String] {
-        guard current.presented else { return names }
+        guard current.behaviorAvailable else { return names }
         let page = current
         page.beginHostMutation()
         let update = page.update
@@ -292,37 +359,193 @@ public final class CardPagePair {
     }
     public func suspend() async {
         suspended = true
-        await pauseAll()
+        let stopEpoch = beginSuspension()
+        await unpresentSuspendedPages(stopEpoch)
     }
-    private func pauseAll() async {
+
+    private func cancelPresentationWork() {
+        presentationEpoch = UUID()
+        presentationWork?.cancel()
+        presentationWork = nil
+    }
+
+    /// Close page admission synchronously before starting asynchronous cleanup.
+    private func beginSuspension() -> UUID {
+        cancelPresentationWork()
+        cancelRecovery()
         commitSerial += 1
         preparedAnswer = nil
         audio.stop()
         releaseHTMLAudio()
         idle.invalidate()
-        for page in pages { page.suspendHost() }
-        for page in pages { try? await page.unpresent() }
+        for page in pages { page.suspendPresentation() }
+        return presentationEpoch
     }
+
+    private func unpresentSuspendedPages(_ stopEpoch: UUID) async {
+        for suspendedPage in pages {
+            guard !closed, presentationEpoch == stopEpoch, !Task.isCancelled else { return }
+            try? await suspendedPage.unpresent()
+        }
+    }
+
     public func resume() async {
+        guard !closed else { return }
         suspended = false
-        if !lifecycleSuspended { try? await current.resumePresentation() }
+        let previousEpoch = presentationEpoch
+        let pendingResume = beginResumption()
+        let activeEpoch = presentationEpoch
+        await withTaskCancellationHandler {
+            await pendingResume?.value
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                guard let self, self.presentationEpoch == activeEpoch, activeEpoch != previousEpoch else { return }
+                self.cancelPresentationWork()
+            }
+        }
+    }
+
+    /// Replace the pending presentation task. Recheck the captured epoch and
+    /// both document bindings after each await; cancellation releases probes.
+    private func beginResumption() -> Task<Void, Never>? {
+        cancelPresentationWork()
+        guard !closed, !suspended, !lifecycleSuspended else { return nil }
+        let resumeEpoch = presentationEpoch, boundPage = current
+        let updateBindings = pages.map { $0.update }, documentBindings = pages.map { $0.documentID }
+        let pendingResume = Task { [weak self, weak boundPage] in
+            guard let self, let boundPage else { return }
+            defer { if self.presentationEpoch == resumeEpoch { self.presentationWork = nil } }
+            func canContinue() -> Bool {
+                !Task.isCancelled && self.presentationEpoch == resumeEpoch && !self.closed && !self.suspended
+                    && !self.lifecycleSuspended && self.current === boundPage
+                    && self.pages.map({ $0.update }) == updateBindings && self.pages.map({ $0.documentID }) == documentBindings
+            }
+            for probedPage in self.pages {
+                guard canContinue() else { return }
+                _ = await probedPage.probeLiveness()
+                guard canContinue() else { return }
+            }
+            if boundPage.needsReconstruction { self.scheduleRecovery() }
+            else if self.recovery == nil {
+                guard canContinue() else { return }
+                try? await boundPage.resumePresentation()
+                guard canContinue() else { return }
+            }
+        }
+        presentationWork = pendingResume
+        return pendingResume
     }
 
     public func close() {
         guard !closed else { return }
         closed = true; commitSerial += 1; hostInstallation = UUID()
+        cancelPresentationWork()
+        cancelRecovery()
         audio.close()
         lifecycle?.cancel(); lifecycle = nil
         releaseHTMLAudio()
         for page in pages { page.close() }
         swaps.finish(); reveals.finish()
         onHostEvent = nil
+        onTypedText = nil; onRecovery = nil; onOpenRequest = nil
         onAction = nil; onSignal = nil; onInteraction = nil; onCommitted = nil
     }
 
     private func releaseHTMLAudio() {
         if let htmlAudioOwner { AudioSessionCoordinator.shared.release(htmlAudioOwner) }
         htmlAudioOwner = nil
+    }
+
+    /// Check both documents when U187 enters the foreground. Keep healthy DOM;
+    /// an unavailable probe supplies no evidence of process termination.
+    @discardableResult public func probeForegroundLiveness(timeoutMs: Int = 1000) async -> [CardPageLiveness] {
+        guard !closed else { return [.cancelled, .cancelled] }
+        let probeEpoch = presentationEpoch, visiblePage = current
+        let updateBindings = pages.map { $0.update }, documentBindings = pages.map { $0.documentID }
+        var observations: [CardPageLiveness] = []
+        for checkedPage in pages {
+            observations.append(await checkedPage.probeLiveness(timeoutMs: timeoutMs))
+            guard !closed, !Task.isCancelled, presentationEpoch == probeEpoch, current === visiblePage,
+                  pages.map({ $0.update }) == updateBindings, pages.map({ $0.documentID }) == documentBindings else { return observations }
+        }
+        if visiblePage.needsReconstruction && !suspended && !lifecycleSuspended { scheduleRecovery() }
+        return observations
+    }
+
+    private func processTerminated(_ page: CardPage) {
+        guard !closed else { return }
+        if page !== current { page.invalidate(); return }
+        cancelPresentationWork()
+        commitSerial += 1; preparedAnswer = nil
+        audio.stop(); releaseHTMLAudio()
+        cancelRecovery()
+        if !suspended && !lifecycleSuspended { scheduleRecovery() }
+    }
+    private func cancelRecovery() {
+        recoveryID = UUID()
+        recovery?.cancel(); recovery = nil
+    }
+    private func scheduleRecovery() {
+        guard !closed, !suspended, !lifecycleSuspended, recovery == nil,
+              current.needsReconstruction, let priorBinding = current.update,
+              let cardContent = current.payload, let sideHTML = current.renderedHTML else { return }
+        let surface = current
+        let savedInput = surface.retainedTypedText
+        let job = UUID()
+        let scriptInstallation = hostInstallation
+        #if !os(macOS)
+        let savedScale = surface.webView.scrollView.zoomScale
+        #endif
+        recoveryID = job
+        generation += 1
+        let replacement = CardUpdate(card: priorBinding.card, generation: generation, side: priorBinding.side)
+        recovery = Task { [weak self, weak surface] in
+            guard let self, let surface else { return }
+            defer { if self.recoveryID == job { self.recovery = nil } }
+            func validateVisit() throws {
+                try Task.checkCancellation()
+                guard !self.closed, !self.suspended, !self.lifecycleSuspended, self.recoveryID == job,
+                      self.current === surface, surface.update == replacement else { throw CardPage.Failure.superseded }
+            }
+            do {
+                guard !self.closed, self.recoveryID == job, self.current === surface, surface.update == priorBinding else { return }
+                try surface.prepareReplacementDocument(restoreValue: true)
+                surface.begin(cardContent, update: replacement, preservingVisit: true)
+                surface.renderedHTML = sideHTML
+                try await surface.load()
+                try validateVisit()
+                if let hostCode = self.hostSource {
+                    guard scriptInstallation == self.hostInstallation else { throw CardPage.Failure.superseded }
+                    try await surface.hostReports.install(hostCode)
+                    try validateVisit()
+                }
+                try await surface.start(html: sideHTML, answer: cardContent.answer, update: replacement, reconstruction: true)
+                try await surface.waitForSettled(replacement)
+                try validateVisit()
+                try await surface.restoreTypedText(savedInput, for: replacement)
+                try validateVisit()
+                let measurements = replacement.side == .answer ? self.reveals : self.swaps
+                let receipt = measurements.beginSwap(to: replacement.card, inputTime: ProcessInfo.processInfo.systemUptime)
+                try await surface.presentRecovered(token: receipt.sequence, update: replacement, text: savedInput)
+                try validateVisit()
+                try await surface.pauseMedia()
+                try validateVisit()
+                #if !os(macOS)
+                surface.webView.scrollView.setZoomScale(savedScale, animated: false)
+                #endif
+                surface.finishRecovery()
+                if replacement.side == .answer { await surface.announceAnswer(allowFocus: false) }
+                try validateVisit()
+                self.onRecovery?(priorBinding, replacement)
+                try validateVisit()
+                self.onCommitted?(replacement, receipt)
+            } catch {
+                if !self.closed, self.recoveryID == job, surface.update == replacement {
+                    surface.suspendHost()
+                    self.diagnostics.record("recoveryUnavailable", update: replacement)
+                }
+            }
+        }
     }
 
     private func focus(_ page: CardPage) {

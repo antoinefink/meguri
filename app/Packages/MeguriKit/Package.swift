@@ -29,7 +29,6 @@ let package = Package(
         // Xcode project needs no edit.
         .library(
             name: "MeguriKit",
-    defaultLocalization: "en",
             targets: ["DesignSystem", "AppModel", "CardRendering", "HeatmapKit"] + features
         ),
         // The widget's only module: core-free (KTD16).
