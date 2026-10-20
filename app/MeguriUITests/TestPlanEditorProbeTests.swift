@@ -25,7 +25,8 @@ final class TestPlanEditorProbeTests: XCTestCase {
             return
         }
         xcode.activate()
-        print("MEGURI_PLAN_EDITOR_TREE\n\(xcode.windows.debugDescription.prefix(60_000))")
+        print("MEGURI_PLAN_EDITOR_WINDOW_COUNT \(xcode.windows.count)")
+        print("MEGURI_PLAN_EDITOR_TREE\n\(xcode.debugDescription.prefix(60_000))")
 
         if let label = ProcessInfo.processInfo.environment["MEGURI_PLAN_EDITOR_CLICK"] {
             let predicate = NSPredicate(format: "label == %@", label)
@@ -34,9 +35,10 @@ final class TestPlanEditorProbeTests: XCTestCase {
             XCTAssertEqual(matches.count, 1, "Expected exactly one matching Xcode control")
             let control = try XCTUnwrap(matches.first)
             XCTAssertTrue(control.exists)
-            xcode.activate()
+            try xcode.bringToFront(bundleIdentifier: "com.apple.dt.Xcode")
             control.click()
-            print("MEGURI_PLAN_EDITOR_TREE\n\(xcode.windows.debugDescription.prefix(60_000))")
+            print("MEGURI_PLAN_EDITOR_WINDOW_COUNT \(xcode.windows.count)")
+            print("MEGURI_PLAN_EDITOR_TREE\n\(xcode.debugDescription.prefix(60_000))")
         }
         #else
         throw XCTSkip("Test plan editor probe requires macOS")
