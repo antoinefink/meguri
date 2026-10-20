@@ -230,6 +230,98 @@ extension WebKitSuites.CardPagePairTests {
         #expect(messages.contains("\"op\":\"clear\"") && messages.contains("\"op\":\"context\""))
     }
 
+    @Test func immediatePreparedHostProbesHaveAcknowledgedContext() async throws {
+        let fixture = MediaFixture()
+        let configuration = CardWebConfiguration(store: .nonPersistent())
+        let pair = CardPagePair(configuration: configuration, resolver: try await fixture.resolved())
+        let window = SpikeWindow(pair.container)
+        defer { pair.close(); window.close() }
+        // Transport fixture only: accept the fixed ABI synchronously and echo
+        // bounded observations using the immutable native context at start.
+        try await pair.installHostScript("""
+            window.immediateProbeHost = {context:null, messages:[], replies:[]};
+            window.meguriReviewHost = { receive(message) {
+              const host = immediateProbeHost;
+              host.messages.push(message);
+              if(message.op==='clear') { host.context=null; return true; }
+              if(message.op==='context') { host.context=Object.freeze({...message}); return true; }
+              const start = host.context;
+              if(message.op!=='probe' || !start || message.viewRevision!==start.viewRevision) return false;
+              let payload;
+              if(message.kind==='background') {
+                payload = {kind:'background',request:message.request,rgba:[0,0.5,1,0]};
+              } else if(message.kind==='resources' && message.purpose==='preload') {
+                payload = {kind:'resources',request:message.request,purpose:'preload',state:'ready',
+                           imagesPending:0,fontsPending:0,stylesPending:0};
+              } else { return false; }
+              host.replies.push(webkit.messageHandlers.meguriReviewHost.postMessage({
+                signal:'hostProbe',version:1,card:start.card,generation:start.generation,side:start.side,
+                viewRevision:start.viewRevision,payload
+              }));
+              return true;
+            }};
+            """)
+        let page = pair.idle
+        let otherPage = pair.current
+        typealias Completion = (kind: CardHostProbeKind, context: CardHostContext?, outcome: CardHostProbeOutcome)
+        let callbacks = AsyncStream<Completion>.makeStream(bufferingPolicy: .bufferingOldest(2))
+        defer { callbacks.continuation.finish() }
+
+        let prepared = try await pair.prepare(CardPayload(cardID: 73, question: "<p>synthetic prepared host</p>", answer: "answer"))
+        // No suspension, publication call or readiness polling between prepare
+        // and either request: this is the public owner's first opportunity.
+        let backgroundRequest = page.hostReports.probe(.background, timeoutMs: 2000) { context, outcome in
+            callbacks.continuation.yield((.background, context, outcome))
+        }
+        let resourceRequest = page.hostReports.probe(.resources, purpose: .preload, timeoutMs: 2000) { context, outcome in
+            callbacks.continuation.yield((.resources, context, outcome))
+        }
+        let contextAtRequest = page.hostReports.context
+        #expect(backgroundRequest != nil, "prepare must return with an acknowledged host context for immediate background probes")
+        #expect(resourceRequest != nil, "prepare must return with an acknowledged host context for immediate resource probes")
+
+        let completions = try await Spike.deadline("immediate prepared host probe callbacks", timeout: .seconds(3)) {
+            var results: [Completion] = []
+            for await result in callbacks.stream {
+                results.append(result)
+                if results.count == 2 { return results }
+            }
+            throw Spike.Failure("the prepared host did not complete both probes")
+        }
+        let backgrounds = completions.filter { $0.kind == .background }
+        let resources = completions.filter { $0.kind == .resources }
+        #expect(backgrounds.map { $0.outcome } == [.observed(.background(red: 0, green: 0.5, blue: 1, alpha: 0))])
+        #expect(resources.map { $0.outcome } == [.observed(.resources(purpose: .preload, state: .ready, imagesPending: 0, fontsPending: 0, stylesPending: 0))])
+        let context = try #require(contextAtRequest)
+        #expect(context.update == prepared && context.visibility == .preparing)
+        #expect(completions.allSatisfy { $0.context == context })
+        #expect(page.hostReports.context == context && page.update == prepared && pair.idle === page)
+        #expect(page.hostReports.slotBackground == .background(red: 0, green: 0.5, blue: 1, alpha: 0))
+        #expect(page.hostReports.slotResources == .resources(purpose: .preload, state: .ready, imagesPending: 0, fontsPending: 0, stylesPending: 0))
+        let backgroundID = try #require(backgroundRequest)
+        let resourceID = try #require(resourceRequest)
+        #expect(backgroundID != resourceID)
+        // Inspect only after the immediate requests and callbacks. The real
+        // isolated handler must have received both reports and replied JS null.
+        let delivered = try await Spike.deadline("prepared host transport replies", timeout: .seconds(3)) {
+            try await page.string("""
+                const host = immediateProbeHost, context = host.context;
+                const probes = host.messages.filter(message=>message.op==='probe');
+                const replies = await Promise.all(host.replies);
+                return String(context.card===card && context.generation===generation && context.side==='question' &&
+                  context.viewRevision===revision && context.visibility==='preparing' &&
+                  probes.length===2 && probes.every(message=>message.viewRevision===revision) &&
+                  probes.some(message=>message.kind==='background' && message.request===background) &&
+                  probes.some(message=>message.kind==='resources' && message.request===resources && message.purpose==='preload') &&
+                  replies.length===2 && replies.every(reply=>reply===null));
+                """, arguments: ["card": prepared.card, "generation": prepared.generation, "revision": context.viewRevision,
+                                  "background": backgroundID, "resources": resourceID], world: CardPage.world)
+        }
+        #expect(delivered == "true")
+        #expect(try await otherPage.string("return String(immediateProbeHost.messages.filter(message=>message.op==='probe').length);", world: CardPage.world) == "0")
+        #expect(otherPage.hostReports.slotBackground == nil && otherPage.hostReports.slotResources == nil)
+    }
+
     @Test func hostProbesMatchImmutableIdleSlotDeadlineCancellationAndPurpose() async throws {
         let (pair, _, _, window) = try await hostPair()
         defer { pair.close(); window.close() }
