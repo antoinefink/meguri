@@ -85,6 +85,8 @@ public final class CardPagePair {
         container.addSubview(b.webView)
         container.addSubview(a.webView)
         #if os(macOS)
+        container.setAccessibilityElement(true)
+        container.setAccessibilityRole(.group)
         container.setAccessibilityChildren([current.webView])
         container.setAccessibilityChildrenInNavigationOrder([current.webView])
         #endif

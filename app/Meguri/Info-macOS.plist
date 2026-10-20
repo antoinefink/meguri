@@ -17,6 +17,8 @@
 	</array>
 	<key>MeguriAppGroupIdentifier</key>
 	<string>$(MEGURI_APP_GROUP)</string>
+	<key>MeguriCardInspectionBuild</key>
+	<string>$(MEGURI_CARD_INSPECTION_BUILD)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>

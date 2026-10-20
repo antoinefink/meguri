@@ -140,19 +140,40 @@ extension TestHooks {
             guard let pair, let update = pair.current.update else { return }
             let page = pair.current
             let result = try? await page.webView.callAsyncJavaScript("""
-                const rect = element => {
-                  if (!element) return null;
-                  const r = element.getBoundingClientRect();
+                const scalarRect = r => {
                   return [r.x,r.y,r.width,r.height].every(Number.isFinite)
                     ? {x:r.x,y:r.y,width:r.width,height:r.height} : null;
                 };
+                const rect = element => element ? scalarRect(element.getBoundingClientRect()) : null;
                 const visual = window.visualViewport;
+                const links = [['footer', '#qa a[href="#bottom"]'], ['script', '#qa a[href^="javascript:"]']].map(([id, selector]) => {
+                  const element = document.querySelector(selector);
+                  if (!element) return {id, exists:false};
+                  const style = getComputedStyle(element), bounds = element.getBoundingClientRect();
+                  const range = document.createRange();
+                  range.selectNodeContents(element);
+                  const left = Math.max(bounds.left, visual?.offsetLeft ?? 0);
+                  const top = Math.max(bounds.top, visual?.offsetTop ?? 0);
+                  const right = Math.min(bounds.right, (visual?.offsetLeft ?? 0) + (visual?.width ?? innerWidth));
+                  const bottom = Math.min(bounds.bottom, (visual?.offsetTop ?? 0) + (visual?.height ?? innerHeight));
+                  const center = right > left && bottom > top ? {x:(left+right)/2,y:(top+bottom)/2} : null;
+                  const hit = center ? document.elementFromPoint(center.x, center.y) : null;
+                  return {id, exists:true,
+                    style:{display:style.display,paddingTop:style.paddingTop,paddingRight:style.paddingRight,
+                      paddingBottom:style.paddingBottom,paddingLeft:style.paddingLeft,minHeight:style.minHeight,
+                      lineHeight:style.lineHeight,pointerEvents:style.pointerEvents},
+                    rect:scalarRect(bounds),clientRects:Array.from(element.getClientRects(), scalarRect),
+                    textRects:Array.from(range.getClientRects(), scalarRect),visibleCenter:center,
+                    hitIsAnchor:center ? hit === element : null,
+                    hitIsDescendant:center ? hit !== element && element.contains(hit) : null};
+                });
                 return JSON.stringify({text:document.getElementById('typeans')?.value||'', marker:window.domMarker,
                   resizes:window.resizeEvents||0, height:innerHeight, layoutHeight:document.documentElement.clientHeight,
                   viewport:document.getElementById('viewport')?.offsetHeight,
                   scroll:scrollY, bottom:document.getElementById('bottom')?.getBoundingClientRect().bottom,
                   answerRect:rect(document.getElementById('answer')), firstHeadingRect:rect(document.querySelector('#qa h1')),
                   root:location.href, scriptRan:window.cardScriptRan===true,
+                  links, linkViewport:{width:innerWidth,height:innerHeight},
                   ...([visual?.offsetLeft,visual?.offsetTop,visual?.scale].every(Number.isFinite)
                     ? {visualViewport:{offsetLeft:visual.offsetLeft,offsetTop:visual.offsetTop,scale:visual.scale}} : {}),
                   ...(Number.isFinite(window.visualViewport?.scale) ? {visualScale:window.visualViewport.scale} : {})});
@@ -189,6 +210,42 @@ extension TestHooks {
                                           "safeLeft": window.safeAreaInsets.left, "safeRight": window.safeAreaInsets.right,
                                           "windowHeight": window.bounds.height, "windowWidth": window.bounds.width]
             }
+            if var links = observations["links"] as? [[String: Any]] {
+                let webView = page.webView
+                let viewport = observations["linkViewport"] as? [String: Double]
+                let visual = observations["visualViewport"] as? [String: Double]
+                // Only map a verified 1:1 CSS viewport to WebView points. A DOM
+                // client rect already accounts for document scroll. Zoomed or
+                // inset viewports remain unknown rather than guessing a scale.
+                let mapsDirectly = webView.pageZoom == 1 && nativeZoom == 1 && visual?["scale"] == 1
+                    && visual?["offsetLeft"] == 0 && visual?["offsetTop"] == 0
+                    && abs((viewport?["width"] ?? -1) - webView.bounds.width) < 1
+                    && abs((viewport?["height"] ?? -1) - webView.bounds.height) < 1
+                    && webView.scrollView.frame == webView.bounds
+                    && webView.scrollView.adjustedContentInset == .zero
+                func hitReport(_ hit: UIView?) -> [String: Any] {
+                    var classes: [String] = []
+                    var ancestor = hit
+                    while let view = ancestor, classes.count < 16 {
+                        classes.append(NSStringFromClass(type(of: view)))
+                        ancestor = view.superview
+                    }
+                    return ["classes": classes, "belongsToWebView": hit.map { $0 === webView || $0.isDescendant(of: webView) } ?? false]
+                }
+                for index in links.indices {
+                    guard mapsDirectly, let window = webView.window,
+                          let center = links[index]["visibleCenter"] as? [String: Double],
+                          let x = center["x"], let y = center["y"], x.isFinite, y.isFinite else {
+                        links[index]["nativeHitTest"] = ["status": "unknown"]
+                        continue
+                    }
+                    let point = CGPoint(x: webView.bounds.minX + x, y: webView.bounds.minY + y)
+                    links[index]["nativeHitTest"] = ["status": "unzoomedViewport",
+                        "webView": hitReport(webView.hitTest(point, with: nil)),
+                        "window": hitReport(window.hitTest(webView.convert(point, to: window), with: nil))]
+                }
+                observations["links"] = links
+            }
             #endif
             report = (try? JSONSerialization.data(withJSONObject: observations)).flatMap { String(data: $0, encoding: .utf8) } ?? "unavailable"
             state = "ready card=\(update.card) side=\(update.sideName) generation=\(update.generation) zoom=\(Int(pair.cardZoom.percent)) dialog=\(dialogResult) target=\(page.accessibilityTarget?.elementID ?? "none") probe=\(probes) \(report)"
@@ -212,7 +269,11 @@ extension TestHooks {
         @State private var model: CardBehaviorModel
         @State private var nativeText = ""
         @FocusState private var nativeFocused: Bool
+        #if os(macOS)
+        @State private var actionsPresented = false
+        #endif
         @Environment(\.colorScheme) private var appearance
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
         #if os(iOS)
         @Environment(\.horizontalSizeClass) private var sizeClass
         #endif
@@ -228,42 +289,19 @@ extension TestHooks {
             #endif
         }
         var body: some View {
-            VStack(spacing: Spacing.xSmall) {
-                // Native dialogs start from visible controls, after no menu
-                // or other presentation is competing for the explicit host.
-                control("Confirm", id: "confirm") { try await model.dialog(prompt: false) }
-                control("Prompt", id: "prompt") { try await model.dialog(prompt: true) }
-                HStack(spacing: Spacing.xSmall) {
-                    control("Reveal answer", id: "reveal") { try await model.reveal() }
-                    control("Next card", id: "next") { try await model.next() }
-                }
-                Menu(String(localized: "Card actions", table: "CardBehaviorRoutes")) {
-                    control("Answer separator", id: "separator") { model.answerVariant(1) }
-                    control("Answer fallback", id: "fallback") { model.answerVariant(2) }
-                    control("Answer graphic", id: "graphic") { model.answerVariant(3) }
-                    control("Card zoom", id: "zoom") { model.zoom() }
-                    control("Resize card", id: "resize") { model.narrow.toggle(); await model.refresh() }
-                    control("Read card state", id: "refresh") { await model.refresh() }
-                    control("Suspend card", id: "suspend") { await model.suspend() }
-                    control("Resume card", id: "resume") { await model.resume() }
-                    control("Probe pages", id: "probe") { await model.probe() }
-                    control("Simulate termination callback", id: "recover") { model.terminationCallback() }
-                    control("Focus card", id: "focus") { try await model.focusCard() }
-                }
-                .buttonStyle(.bordered).controlSize(.large).accessibilityIdentifier("card.behavior.actions")
-                TextField(String(localized: "Native editor", table: "CardBehaviorRoutes"), text: $nativeText)
-                    .textFieldStyle(.roundedBorder).controlSize(.large)
-                    .frame(minHeight: Spacing.large * 2).contentShape(Rectangle())
-                    .focused($nativeFocused)
-                    .accessibilityLabel(String(localized: "Native editor", table: "CardBehaviorRoutes"))
-                    .accessibilityIdentifier("card.behavior.editor")
-                Text(String(localized: "Card status", table: "CardBehaviorRoutes"))
-                    .font(.caption).accessibilityValue(model.state)
-                    .accessibilityIdentifier("card.behavior.state")
-                if let pair = model.pair {
-                    CardBehaviorHost(pair: pair, presenter: model.presenter)
-                        .frame(maxWidth: cardMaxWidth, maxHeight: .infinity)
-                        .accessibilityIdentifier("card.behavior.surface")
+            GeometryReader { geometry in
+                VStack(spacing: Spacing.xSmall) {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        ScrollView { controls }
+                            .frame(maxHeight: geometry.size.height / 2)
+                    } else {
+                        controls
+                    }
+                    if let pair = model.pair {
+                        CardBehaviorHost(pair: pair, presenter: model.presenter)
+                            .frame(maxWidth: cardMaxWidth, maxHeight: .infinity)
+                            .accessibilityIdentifier("card.behavior.surface")
+                    }
                 }
             }
             .padding(.horizontal, Spacing.small)
@@ -275,9 +313,84 @@ extension TestHooks {
                 model.perform { try await model.pair?.setAppearance(value == .dark ? .dark : .light) }
             }
         }
+        private var controls: some View {
+            VStack(spacing: Spacing.xSmall) {
+                // Native dialogs start from visible controls, after no menu
+                // or other presentation is competing for the explicit host.
+                control("Confirm", id: "confirm") { try await model.dialog(prompt: false) }
+                control("Prompt", id: "prompt") { try await model.dialog(prompt: true) }
+                let answerLayout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(spacing: Spacing.xSmall))
+                    : AnyLayout(HStackLayout(spacing: Spacing.xSmall))
+                answerLayout {
+                    control("Reveal answer", id: "reveal") { try await model.reveal() }
+                    control("Next card", id: "next") { try await model.next() }
+                }
+                Group {
+                    #if os(macOS)
+                    Button { actionsPresented = true } label: { actionsLabel }
+                        .popover(isPresented: $actionsPresented) {
+                            ScrollView {
+                                VStack(spacing: Spacing.xSmall) { nativeActions }
+                                    .padding(Spacing.small)
+                            }
+                            .frame(width: ContentWidth.primaryAction)
+                            .frame(maxHeight: ContentWidth.readable)
+                        }
+                    #else
+                    Menu { nativeActions } label: { actionsLabel }
+                    #endif
+                }
+                .buttonStyle(.bordered).controlSize(.large).tint(ColorToken.textPrimary.color)
+                .accessibilityIdentifier("card.behavior.actions")
+                TextField(String(localized: "Native editor", table: "CardBehaviorRoutes"), text: $nativeText)
+                    .textFieldStyle(.roundedBorder)
+                    #if os(macOS)
+                    .controlSize(.extraLarge)
+                    #else
+                    .controlSize(.large)
+                    #endif
+                    .frame(minHeight: Spacing.large * 2).contentShape(Rectangle())
+                    .focused($nativeFocused)
+                    .accessibilityLabel(String(localized: "Native editor", table: "CardBehaviorRoutes"))
+                    .accessibilityIdentifier("card.behavior.editor")
+                Text(String(localized: "Card status", table: "CardBehaviorRoutes"))
+                    .font(.caption).accessibilityValue(model.state)
+                    .accessibilityIdentifier("card.behavior.state")
+            }
+        }
+        private var actionsLabel: some View {
+            Text(String(localized: "Card actions", table: "CardBehaviorRoutes"))
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        @ViewBuilder private var nativeActions: some View {
+            control("Answer separator", id: "separator") { model.answerVariant(1) }
+            control("Answer fallback", id: "fallback") { model.answerVariant(2) }
+            control("Answer graphic", id: "graphic") { model.answerVariant(3) }
+            control("Card zoom", id: "zoom") { model.zoom() }
+            control("Resize card", id: "resize") { model.narrow.toggle(); await model.refresh() }
+            control("Read card state", id: "refresh") { await model.refresh() }
+            control("Suspend card", id: "suspend") { await model.suspend() }
+            control("Resume card", id: "resume") { await model.resume() }
+            control("Probe pages", id: "probe") { await model.probe() }
+            control("Simulate termination callback", id: "recover") { model.terminationCallback() }
+            control("Focus card", id: "focus") { try await model.focusCard() }
+        }
         private func control(_ key: String.LocalizationValue, id: String, action: @escaping @MainActor () async throws -> Void) -> some View {
-            Button(String(localized: key, table: "CardBehaviorRoutes")) { model.perform(action) }
-                .buttonStyle(.bordered).controlSize(.large).accessibilityIdentifier("card.behavior.\(id)")
+            Button {
+                #if os(macOS)
+                actionsPresented = false
+                #endif
+                model.perform(action)
+            } label: {
+                Text(String(localized: key, table: "CardBehaviorRoutes"))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .buttonStyle(.bordered).controlSize(.large).tint(ColorToken.textPrimary.color)
+            .accessibilityIdentifier("card.behavior.\(id)")
         }
     }
 

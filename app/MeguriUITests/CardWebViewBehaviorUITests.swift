@@ -12,6 +12,10 @@ import notify
 @MainActor
 final class CardWebViewBehaviorUITests: XCTestCase {
     private var bundleIdentifier = ""
+    override func setUp() {
+        super.setUp()
+        continueAfterFailure = false
+    }
     private func launch(route: String = "card/behaviors") throws -> XCUIApplication {
         let build = try BuildUnderTest.current()
         guard build.hasHooks else { throw XCTSkip("this configuration has no fixture routes") }
@@ -110,17 +114,35 @@ final class CardWebViewBehaviorUITests: XCTestCase {
     func testNativeConfirmAndAcceptedEmptyPrompt() throws {
         let app = try launch()
         try control("confirm", in: app)
+        #if os(macOS)
+        let confirmSheet = app.sheets.firstMatch
+        XCTAssert(confirmSheet.waitForExistence(timeout: 5))
+        let confirm = confirmSheet.buttons["OK"]
+        #else
         let confirm = app.buttons["OK"]
+        #endif
         XCTAssert(confirm.waitForExistence(timeout: 5))
         try click(confirm, in: app)
         XCTAssert(wait { self.state(app).contains("dialog=true") }, state(app))
         try control("prompt", in: app)
+        #if os(macOS)
+        let promptSheet = app.sheets.firstMatch
+        XCTAssert(promptSheet.waitForExistence(timeout: 5))
+        let prompt = promptSheet.buttons["OK"]
+        #else
         let prompt = app.buttons["OK"]
+        #endif
         XCTAssert(prompt.waitForExistence(timeout: 5))
         try click(prompt, in: app)
         XCTAssert(wait { self.state(app).contains("dialog=empty") }, state(app))
         try control("prompt", in: app)
+        #if os(macOS)
+        let cancelSheet = app.sheets.firstMatch
+        XCTAssert(cancelSheet.waitForExistence(timeout: 5))
+        let cancel = cancelSheet.buttons["Cancel"]
+        #else
         let cancel = app.buttons["Cancel"]
+        #endif
         XCTAssert(cancel.waitForExistence(timeout: 5))
         try click(cancel, in: app)
         XCTAssert(wait { self.state(app).contains("dialog=cancelled") }, state(app))
@@ -169,6 +191,9 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             return current["text"] as? String == "ka" && current["marker"] as? Double != initial["marker"] as? Double
         }, state(app))
         XCTAssertEqual(editor.value as? String, "native")
+        try click(editor, in: app)
+        app.typeText("-before")
+        XCTAssertEqual(editor.value as? String, "native-before")
         try control("reveal", in: app)
         XCTAssert(wait { self.state(app).contains("side=answer") && self.state(app).contains("target=answer") }, state(app))
         XCTAssert(app.staticTexts["Behavior answer"].waitForExistence(timeout: 5))
@@ -178,6 +203,8 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         XCTAssertEqual(pageReport["distinctPages"] as? Bool, true)
         XCTAssertEqual(pageReport["currentHidden"] as? Bool, false)
         XCTAssertEqual(pageReport["idleHidden"] as? Bool, true)
+        app.typeText("-after")
+        XCTAssertEqual(editor.value as? String, "native-before-after")
     }
 
     func testNativeZoomFrameAndSameDocumentLinks() throws {
@@ -202,6 +229,23 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         XCTAssertEqual(nativeHeight, height, accuracy: 1)
         #endif
         let script = web.links["Run card script"]
+        let scriptExists = script.exists
+        var scriptDiagnostic: [String: Any] = ["exists": scriptExists, "isHittable": script.isHittable, "frame": NSNull()]
+        if scriptExists {
+            let frame = script.frame
+            if [frame.minX, frame.minY, frame.width, frame.height].allSatisfy(\.isFinite) {
+                scriptDiagnostic["frame"] = ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height]
+            } else {
+                scriptDiagnostic["status"] = "invalidFrame"
+            }
+        }
+        let linkDiagnostic: [String: Any] = ["state": state(app), "report": (try? report(app)) ?? [:],
+                                           "script": scriptDiagnostic]
+        let diagnosticData = try JSONSerialization.data(withJSONObject: linkDiagnostic, options: [.sortedKeys])
+        let attachment = XCTAttachment(data: diagnosticData, uniformTypeIdentifier: "public.json")
+        attachment.name = "same-document-link-before-native-click"
+        attachment.lifetime = .keepAlways
+        add(attachment)
         try click(script, in: app)
         try control("refresh", in: app)
         XCTAssertEqual(try report(app)["scriptRan"] as? Bool, true)

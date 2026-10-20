@@ -1,16 +1,17 @@
 import Foundation
 import XCTest
 
-/// What VoiceOver reads on a screen, in order (R1978), from the Xcode 27
-/// VoiceOver service, or from the accessibility hierarchy when the service
-/// cannot run. Screen scripts (U253: review, deck list, browser, editor) use
-/// it; AE88's order is asserted with `assertOrder`.
+/// Screen reading order (R1978), from the accessibility hierarchy by default.
+/// Optional post-goal speech diagnostics explicitly opt into the Xcode 27
+/// VoiceOver service; `Reading.source` identifies hierarchy or actual speech.
+/// Screen scripts (U253: review, deck list, browser, editor) use it;
+/// AE88's order is asserted with `assertOrder`.
 enum VoiceOver {
     enum Source: Equatable, CustomStringConvertible {
         /// `XCUIDevice.shared.voiceOverService`: VoiceOver's own utterances.
         case voiceOverService
         /// Accessibility elements in hierarchy order, read as
-        /// "label, value, trait" (the reason the service was not used).
+        /// "label, value, trait", with the reason the service was not used.
         case hierarchy(reason: String)
 
         var description: String {
@@ -35,12 +36,17 @@ enum VoiceOver {
         let complete: Bool
     }
 
-    /// Reads the current screen from its first element forward, until
-    /// VoiceOver stops moving or after `limit` steps (`traverse`). On the Mac
-    /// VoiceOver is never turned on: it would speak on the user's machine and
-    /// take over its screen; the hierarchy is used.
+    /// Reads the current accessibility hierarchy by default. Explicit speech
+    /// opt-in reads until VoiceOver stops moving or after `limit` steps
+    /// (`traverse`), falling back to the hierarchy if speech is unavailable.
+    /// The source always identifies which was used. On the Mac VoiceOver is
+    /// never turned on: it would speak on the user's machine and take over
+    /// its screen; the hierarchy is used even with speech opt-in.
     @MainActor
-    static func read(_ app: XCUIApplication, limit: Int = 60) throws -> Reading {
+    static func read(_ app: XCUIApplication, limit: Int = 60, useSpeechService: Bool = false) throws -> Reading {
+        guard useSpeechService else {
+            return Reading(source: .hierarchy(reason: "speech diagnostics are optional post-goal work and require explicit opt-in"), utterances: try hierarchyOrder(app))
+        }
         #if os(macOS)
         return Reading(source: .hierarchy(reason: "VoiceOver is never turned on on the Mac running the tests"), utterances: try hierarchyOrder(app))
         #else

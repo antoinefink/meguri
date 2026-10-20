@@ -84,21 +84,43 @@ extension WebKitSuites {
 
         #if !os(macOS)
         @Test func temporaryPinchSurvivesRevealAndResetsOnNextVisit() async throws {
+            func scales(_ web: WKWebView) async throws -> (raw: CGFloat, visual: Double) {
+                let visual = try await web.callAsyncJavaScript("""
+                    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+                    return visualViewport.scale;
+                    """, contentWorld: .page) as? Double
+                return (web.scrollView.zoomScale, try #require(visual))
+            }
+            func settledScales(_ web: WKWebView) async throws -> (raw: CGFloat, visual: Double) {
+                var previous = try await scales(web)
+                try await CardBehaviorFixture.until("pinch scales did not settle") {
+                    let current = try await scales(web)
+                    let settled = abs(current.raw - previous.raw) < 0.01 && abs(current.visual - previous.visual) < 0.01
+                    previous = current
+                    return settled
+                }
+                return previous
+            }
             let fixture = try await CardBehaviorFixture()
             defer { fixture.close() }
             let payload = CardPayload(cardID: 1, question: "<p>pinch question</p>", answer: "<p id=answer>answer</p>")
             fixture.pair.cardZoom = CardZoom(percent: 150)
             try await fixture.present(payload)
             let web = fixture.pair.current.webView
-            web.scrollView.setZoomScale(2, animated: false)
-            #expect(web.scrollView.zoomScale > 1)
-            let pinch = web.scrollView.zoomScale
+            let baseline = try await settledScales(web)
+            web.scrollView.setZoomScale(baseline.raw * 2, animated: false)
+            let pinch = try await settledScales(web)
+            #expect(pinch.raw > baseline.raw && pinch.visual > baseline.visual)
             _ = try await fixture.pair.showAnswer()
-            #expect(abs(web.scrollView.zoomScale - pinch) < 0.01 && web.pageZoom == 1.5)
+            let revealed = try await settledScales(web)
+            #expect(abs(revealed.raw - pinch.raw) < 0.01 && abs(revealed.visual - pinch.visual) < 0.01)
+            #expect(web.pageZoom == 1.5 && fixture.pair.cardZoom.percent == 150)
             // The same card ID on a new visit also resets temporary zoom.
             try await fixture.present(payload)
-            #expect(fixture.pair.current.webView.scrollView.zoomScale == fixture.pair.current.webView.scrollView.minimumZoomScale)
-            #expect(fixture.pair.cardZoom.percent == 150)
+            let nextWeb = fixture.pair.current.webView
+            let reset = try await settledScales(nextWeb)
+            #expect(abs(reset.raw - baseline.raw) < 0.01 && abs(reset.visual - baseline.visual) < 0.01)
+            #expect(fixture.pair.cardZoom.percent == 150 && nextWeb.pageZoom == 1.5)
         }
         #endif
     }

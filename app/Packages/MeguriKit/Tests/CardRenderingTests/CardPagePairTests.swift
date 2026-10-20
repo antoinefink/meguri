@@ -22,6 +22,9 @@ extension WebKitSuites {
             defer { pair.close(); window.close() }
             let views = pair.pages.map(\.webView)
             func expectCurrentChildren() throws {
+                #expect(pair.container.isAccessibilityElement())
+                #expect(pair.container.accessibilityRole() == .group)
+                #expect(pair.current.webView.accessibilityParent() as? NSView === pair.container)
                 let children = try #require(pair.container.accessibilityChildren())
                 let navigation = try #require(pair.container.accessibilityChildrenInNavigationOrder())
                 #expect(children.count == 1)
