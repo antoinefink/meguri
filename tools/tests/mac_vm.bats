@@ -560,6 +560,8 @@ exec '"$(command -v tar)"' "$@"'
   called '^fake build mac Profile Performance Meguri-Profile$'
   not_called '^fake build .*CODE_SIGN_INJECT_BASE_ENTITLEMENTS='
   [ "$(field .details.diagnostic_signing)" = null ]
+  [ "$(field .details.diagnostic_mode)" = null ]
+  not_called '^vm-env TEST_RUNNER_MEGURI_NATIVE_MEMORY_PROBE='
   called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri-Profile_Performance_macosx27.0-arm64.xctestrun -destination platform=macOS,arch=arm64 -resultBundlePath $SB/build/mg/ui-test/[^ ]+/mac.xcresult -collect-test-diagnostics never -only-testing:MeguriUITests/CardSwapTimingSpikeTests/testDiagnostic\$"
   [ "$(grep -c '^vm-xcodebuild ' "$STUB_LOG")" = 1 ]
   [ -f "$(vm_fs meguri-mac "$SB/build/app/DerivedData/Build/Products/Profile/Meguri.app/Contents/Info.plist")" ]
@@ -638,6 +640,72 @@ EOF
 
 allocation_run() {
   mg ui-test --platform mac --config Profile --allocations --suite CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory
+}
+
+@test "native-memory runs only the Profile probe in the VM with diagnostic signing and no allocations observer" {
+  allocation_control_fake
+  MEGURI_MAC_UI_ALLOW_HOST=1 mg ui-test --platform mac --config Profile --native-memory --suite NativeMemoryProbeTests/testCaptureStacks
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.config)" = Profile ]
+  [ "$(field .details.platform)" = mac ]
+  [ "$(field .details.mac_runner)" = vm ]
+  [ "$(field .details.diagnostic_mode)" = native-memory ]
+  [ "$(field .details.diagnostic_signing)" = task-access-development ]
+  [ "$(field .details.ordinary_performance_receipt)" = false ]
+  [ "$(field '.details.suites | join(",")')" = NativeMemoryProbeTests/testCaptureStacks ]
+  called '^fake build mac Profile Performance Meguri-Profile CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES$'
+  called '^vm-env TEST_RUNNER_MEGURI_NATIVE_MEMORY_PROBE=1$'
+  called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri-Profile_Performance_macosx27.0-arm64.xctestrun -destination platform=macOS,arch=arm64 -resultBundlePath $SB/build/mg/ui-test/[^ ]+/mac.xcresult -collect-test-diagnostics never -only-testing:MeguriUITests/NativeMemoryProbeTests/testCaptureStacks\$"
+  [ "$(grep -c '^vm-xcodebuild ' "$STUB_LOG")" = 1 ]
+  not_called 'host-xcodebuild|vm-allocations|mac-allocations\.py|xctrace'
+  [ ! -d "$(dirname "$result")/allocations" ]
+  [ "$(field '[.artifacts[] | select(.kind == "perf-result" or .kind == "metrics" or .kind == "allocations")] | length')" = 0 ]
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  validate "$result"
+}
+
+@test "native-memory rejects incompatible flags and selectors before building or probing a VM" {
+  local platform config selector
+  for platform in mac iphone ipad; do
+    for config in Debug Profile Release AppStore; do
+      [ "$platform/$config" != mac/Profile ] || continue
+      mg ui-test --platform "$platform" --config "$config" --native-memory --suite NativeMemoryProbeTests/testCaptureStacks
+      [ "$status" -eq 2 ]
+      [ "$(field '.failures[0].id')" = usage ]
+    done
+  done
+  for selector in NativeMemoryProbeTests NativeMemoryProbeTests/testOther NavigationLayoutTests CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory; do
+    mg ui-test --platform mac --config Profile --native-memory --suite "$selector"
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+  done
+  mg ui-test --platform mac --config Profile --native-memory
+  [ "$status" -eq 2 ]
+  for selector in NativeMemoryProbeTests/testCaptureStacks NavigationLayoutTests; do
+    mg ui-test --platform mac --config Profile --native-memory --suite NativeMemoryProbeTests/testCaptureStacks --suite "$selector"
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+  done
+  mg ui-test --platform mac --config Profile --native-memory --device some-device --suite NativeMemoryProbeTests/testCaptureStacks
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = usage ]
+  for selector in NativeMemoryProbeTests/testCaptureStacks CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory; do
+    mg ui-test --platform mac --config Profile --native-memory --allocations --suite "$selector"
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+    [ "$(field .message)" = 'ui-test: --allocations and --native-memory are mutually exclusive' ]
+  done
+  not_called '^(fake build|ssh |tart |vm-|host-xcodebuild)'
+}
+
+@test "native-memory never falls back to the host when the VM is unavailable" {
+  rm -f "$MEGURI_MAC_VM_CONFIG"
+  MEGURI_MAC_UI_ALLOW_HOST=1 mg ui-test --platform mac --config Profile --native-memory --suite NativeMemoryProbeTests/testCaptureStacks
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  not_called '^(fake build|host-xcodebuild|vm-xcodebuild|vm-allocations)'
 }
 
 @test "allocations rejects incompatible flags/selectors before building or probing a VM" {

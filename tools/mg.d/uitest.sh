@@ -3,7 +3,7 @@
 # as a11y runs its suites. Sourced by tools/mg; a host job.
 
 mg_job ui-test host mg_ui_test \
-  "XCUITest suites of MeguriUITests: --suite <class>[/<test>]... [--platform iphone|ipad|mac] [--device <leased udid>] [--config Debug|Profile]; optional --allocations only for the Profile Mac thousand-swap method; functional assertions only, no performance receipt"
+  "XCUITest suites of MeguriUITests: --suite <class>[/<test>]... [--platform iphone|ipad|mac] [--device <leased udid>] [--config Debug|Profile]; optional --allocations for the Profile Mac thousand-swap method or --native-memory for Profile Mac NativeMemoryProbeTests/testCaptureStacks; functional assertions only, no performance receipt"
 
 mg_ui_test__usage() {
   mg_failure usage "ui-test: $1" "tools/mg --list"
@@ -12,7 +12,7 @@ mg_ui_test__usage() {
 }
 
 mg_ui_test() {
-  local platform=iphone device="" config=Debug suites="" only=() build_args=() s result since udid allocations=0
+  local platform=iphone device="" config=Debug suites="" only=() build_args=() s result since udid allocations=0 native_memory=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --platform)
@@ -33,10 +33,13 @@ mg_ui_test() {
         suites="$suites $2" && shift 2
         ;;
       --allocations) allocations=1; shift ;;
+      --native-memory) native_memory=1; shift ;;
       *) mg_ui_test__usage "unknown argument '$1'"; return 0 ;;
     esac
   done
   [ -n "$suites" ] || { mg_ui_test__usage "name at least one --suite"; return 0; }
+  [ "$allocations" -eq 0 ] || [ "$native_memory" -eq 0 ] ||
+    { mg_ui_test__usage "--allocations and --native-memory are mutually exclusive"; return 0; }
   if [ "$allocations" -eq 1 ]; then
     [ "$platform" = mac ] && [ "$config" = Profile ] && [ -z "$device" ] &&
       [ "$suites" = ' CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory' ] ||
@@ -45,6 +48,16 @@ mg_ui_test() {
     mg_detail diagnostic_signing '"task-access-development"'
     mg_detail ordinary_performance_receipt false
     mg_detail allocations_coverage '"uncertified/partial"'
+  fi
+  if [ "$native_memory" -eq 1 ]; then
+    [ "$platform" = mac ] && [ "$config" = Profile ] && [ -z "$device" ] &&
+      [ "$suites" = ' NativeMemoryProbeTests/testCaptureStacks' ] ||
+      { mg_ui_test__usage "--native-memory requires Profile, mac and exactly --suite NativeMemoryProbeTests/testCaptureStacks"; return 0; }
+    mg_detail diagnostic_mode '"native-memory"'
+    mg_detail diagnostic_signing '"task-access-development"'
+    mg_detail ordinary_performance_receipt false
+    local TEST_RUNNER_MEGURI_NATIVE_MEMORY_PROBE=1
+    export TEST_RUNNER_MEGURI_NATIVE_MEMORY_PROBE
   fi
   for s in $suites; do only[${#only[@]}]="-only-testing:MeguriUITests/$s"; done
   mg_detail suites "$(printf '%s\n' $suites | jq -R . | jq -sc .)"
@@ -56,10 +69,10 @@ mg_ui_test() {
   fi
   if [ "$platform" = mac ]; then
     [ -z "$device" ] || { mg_ui_test__usage "--device is for simulators"; return 0; }
-    if [ "$allocations" -eq 1 ]; then
+    if [ "$allocations" -eq 1 ] || [ "$native_memory" -eq 1 ]; then
       # A diagnostic must never take the explicit ordinary UI host fallback.
       MEGURI_MAC_UI_ALLOW_HOST=0 mg_mac_ui_begin || return 0
-      [ "$MG_MAC_RUNNER" = vm ] || { mg_ui_test__usage "--allocations requires the VM runner"; return 0; }
+      [ "$MG_MAC_RUNNER" = vm ] || { mg_ui_test__usage "diagnostic mode requires the VM runner"; return 0; }
       # Development task access is only for this opt-in VM diagnostic.
       build_args[${#build_args[@]}]=CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES
     else

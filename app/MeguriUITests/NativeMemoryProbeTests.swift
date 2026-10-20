@@ -5,7 +5,7 @@ import AppKit
 import Darwin
 #endif
 
-/// Temporary, instrumented Debug diagnosis on synthetic spike fixtures; no performance receipt or acceptance.
+/// Temporary, instrumented Profile/full-stack diagnosis on synthetic spike fixtures; no performance receipt or acceptance.
 @MainActor
 final class NativeMemoryProbeTests: XCTestCase {
     func testCaptureStacks() throws {
@@ -19,18 +19,29 @@ final class NativeMemoryProbeTests: XCTestCase {
             throw XCTSkip("native memory probe runs only in the test VM")
         }
         let build = try BuildUnderTest.current()
-        guard build.configuration == .debug else { throw XCTSkip("native memory probe requires Debug") }
+        guard build.configuration == .profile else { throw XCTSkip("native memory probe requires Profile") }
         guard try build.bundleIdentifier == build.expectedBundleIdentifier else { throw Failure.invalid("build bundle ID") }
         guard NSRunningApplication.runningApplications(withBundleIdentifier: build.expectedBundleIdentifier).isEmpty else {
             throw Failure.invalid("refusing to replace an existing app")
         }
+        guard let passwd = getpwuid(getuid()), let homePointer = passwd.pointee.pw_dir,
+              let home = String(validatingCString: homePointer), home.hasPrefix("/Users/"),
+              (home as NSString).pathComponents.count == 3,
+              (home as NSString).standardizingPath == home else {
+            throw Failure.invalid("passwd home must be an absolute /Users/<user> path")
+        }
+        // The orchestrator precreates this directory in the VM. The runner
+        // only supplies the path; it never reads or writes the app container.
+        let stackLogDirectory = URL(fileURLWithPath: home, isDirectory: true)
+            .appendingPathComponent("Library/Containers/\(build.expectedBundleIdentifier)/Data/tmp/NativeMemoryProbeFullStackLogs", isDirectory: true)
         let checkpointDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("NativeMemoryProbe-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: checkpointDirectory, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: checkpointDirectory) }
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(animations: false, route: "spike/card-swap").arguments
-        app.launchEnvironment["MallocStackLogging"] = "lite"
+        app.launchEnvironment["MallocStackLogging"] = "full"
+        app.launchEnvironment["MallocStackLoggingDirectory"] = stackLogDirectory.path
         defer { app.terminate() }
         app.launch()
         let running = try identify(app, build: build)
@@ -64,7 +75,7 @@ final class NativeMemoryProbeTests: XCTestCase {
             } while Date() < deadline
             throw Failure.invalid("\(phase.rawValue) checkpoint did not receive continuation within 180s")
         }
-        keep(Data("Instrumented Debug diagnostic; synthetic spike fixtures; MallocStackLogging=lite; no performance receipt or acceptance. PID=\(pid)".utf8), name: "diagnostic.txt")
+        keep(Data("Instrumented Profile diagnostic; synthetic spike fixtures; MallocStackLogging=full; MallocStackLoggingDirectory=\(stackLogDirectory.path); no performance receipt or acceptance. PID=\(pid)".utf8), name: "diagnostic.txt")
         _ = try waitForReport(app, timeout: 30, phase: "baseline")
         try checkpoint(.baseline)
         try validate()
@@ -120,7 +131,7 @@ final class NativeMemoryProbeTests: XCTestCase {
 
     private func keep(_ data: Data, name: String) {
         let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.plain-text")
-        attachment.name = "instrumented-Debug-diagnostic-\(name)"
+        attachment.name = "instrumented-Profile-full-diagnostic-\(name)"
         attachment.lifetime = .keepAlways
         add(attachment)
     }
