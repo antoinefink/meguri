@@ -79,7 +79,7 @@ class Allocations(unittest.TestCase):
         test = self
         role = "observer" if "--observe" in args else "trace" if args[:2] == ["xcrun", "xctrace"] else "waiter"
         pid = {"trace": 201, "waiter": 200, "observer": 202}[role]
-        executable = {"trace": "/Xcode space's/usr/bin/xctrace", "waiter": "/usr/bin/notifyutil", "observer": sys.executable}[role]
+        executable = {"trace": "/Xcode space's/usr/bin/xctrace", "waiter": "/usr/bin/notifyutil", "observer": self.own["executable"]}[role]
         argv = [executable] + (args[2:] if role == "trace" else args[1:])
         intent = self.m.read(self.root / (role + ".launch.json"))
         self.assertNotIn("pid", intent)  # Intent is durable before any spawn.
@@ -269,6 +269,58 @@ class Allocations(unittest.TestCase):
                 self.assertLess(self.now, 3)
                 import shutil
                 shutil.rmtree(self.root / "allocations.trace", ignore_errors=True)
+
+    def test_observer_launcher_uses_current_interpreter_identity(self):
+        xcode = Path(self.tmp.name).resolve() / "Xcode space's.app/Contents/Developer"
+        launcher = xcode / "usr/bin/python3"
+        interpreter = xcode / "Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python"
+        for path in (launcher, interpreter):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        self.assertEqual(os.path.realpath(launcher), str(launcher))
+        self.assertNotEqual(os.path.realpath(launcher), str(interpreter))
+        self.own = self.record(os.getpid(), str(interpreter))
+        (self.root / "config.json").unlink()
+
+        def popen(args, **kwargs):
+            proc = self.popen(args, **kwargs)
+            (self.root / "ready").touch()
+            return proc
+
+        with patch.object(self.m, "__file__", str(self.root / "mac-allocations.py")), \
+             patch.object(sys, "argv", ["helper", "--start", str(self.root), self.binary, "run-test"]), \
+             patch.object(sys, "executable", str(launcher)), \
+             patch.object(self.m, "target", return_value=None), \
+             patch.object(self.m, "identity", side_effect=self.identity) as identity, \
+             patch.object(self.m.subprocess, "Popen", side_effect=popen) as spawn, \
+             patch.object(self.m.time, "monotonic", lambda: self.now), \
+             patch.object(self.m.time, "sleep", self.sleep):
+            self.assertEqual(self.m.main(), 0)
+        args = self.m.child_args("observer", self.cfg, self.root)
+        self.assertEqual(spawn.call_args.args[0], [str(launcher)] + args)
+        self.assertEqual([call.args[0] for call in identity.call_args_list], [os.getpid(), 202])
+        self.assertEqual(self.processes[202].argv, [str(interpreter)] + args)
+        self.assertEqual(self.m.read(self.root / "observer.json"), self.record(202, str(interpreter)))
+        self.assertEqual(self.m.read(self.root / "observer.launch.json"), {
+            "run": "run-test", "uid": os.getuid(), "executable": str(interpreter),
+            "args": args, "cleanup_confirmed": False, "pid": 202,
+        })
+
+    def test_unknown_parent_identity_refuses_observer_spawn(self):
+        (self.root / "config.json").unlink()
+        for own in (None, RuntimeError("parent procargs unknown")):
+            with self.subTest(own=own), \
+                 patch.object(self.m, "__file__", str(self.root / "mac-allocations.py")), \
+                 patch.object(sys, "argv", ["helper", "--start", str(self.root), self.binary, "run-test"]), \
+                 patch.object(self.m, "target", return_value=None), \
+                 patch.object(self.m, "identity", side_effect=[own]) as identity, \
+                 patch.object(self.m.subprocess, "Popen") as popen:
+                self.assertRaisesRegex(RuntimeError, "unknown", self.m.main)
+                identity.assert_called_once_with(os.getpid())
+                popen.assert_not_called()
+            for name in ("config.json", "observer.json", "observer.launch.json"):
+                self.assertFalse((self.root / name).exists())
+            self.assertFalse(self.m.registration(self.root).exists())
 
     def test_failed_observer_remember_reaps_child(self):
         self.mode = "observer-verify-error"

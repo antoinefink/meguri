@@ -30,6 +30,10 @@ bats_require_minimum_version 1.5.0
   python3 "$BATS_TEST_DIRNAME/mac_allocations_fakehelper.py" Allocations.test_failed_remember_reaps_owned_children Allocations.test_failed_observer_remember_reaps_child Allocations.test_transient_xcrun_exec_is_verified Allocations.test_failed_direct_cleanup_retains_unknown_state
 }
 
+@test "allocations: observer verifies current interpreter behind launcher and refuses unknown parent" {
+  python3 "$BATS_TEST_DIRNAME/mac_allocations_fakehelper.py" Allocations.test_observer_launcher_uses_current_interpreter_identity Allocations.test_unknown_parent_identity_refuses_observer_spawn
+}
+
 @test "allocations: interrupted launch intent blocks recovery without verified ownership" {
   python3 "$BATS_TEST_DIRNAME/mac_allocations_fakehelper.py" Allocations.test_interrupted_launch_stages_block_until_certified
 }

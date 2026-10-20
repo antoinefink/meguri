@@ -409,13 +409,18 @@ def main():
         raise RuntimeError("one observer per run; refusing restart")
     if target(binary) is not None:
         raise RuntimeError("target already running before observation; refusing stale attach")
+    own = identity(os.getpid())
+    if own is None:
+        raise RuntimeError("current interpreter identity unknown")
+    # sys.executable may be a launcher that execs this observed interpreter.
+    interpreter = own[0]["executable"]
     cfg = {"binary": binary, "notification": "com.antoinefink.meguri.mg.allocations." + runid}
     write(root / "config.json", cfg)
     registered = registration(root)
     registered.parent.mkdir(parents=True, exist_ok=True)
     write(registered, {"root": str(root)})
     with open(root / "observer.log", "wb") as log:
-        launch("observer", [sys.executable] + child_args("observer", cfg, root), sys.executable, cfg, root,
+        launch("observer", [sys.executable] + child_args("observer", cfg, root), interpreter, cfg, root,
                          stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
