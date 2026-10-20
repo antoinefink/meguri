@@ -13,10 +13,87 @@ use serde_json::{Map, Value, json};
 use super::{ExecError, Registry, Session};
 use crate::scenario::{ObservationArgs, ObservationRequest, SearchKind, SearchRequest, canonical_search_texts};
 
-/// Registers `search` and `canonical_search`.
+/// Registers search, canonical text and the pure card-data observations.
 pub(super) fn register(registry: &mut Registry) {
     registry.observation("search", search);
     registry.observation("canonical_search", canonical_search);
+    registry.observation("card_extractors", card_extractors);
+}
+
+/// E5: a scratch connection only; never consult the scenario collection,
+/// clock, fixture or golden. All six results come from the real SQL functions.
+fn card_extractors(_session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
+    use crate::scenario::{CardExtractorsRequest, ExtractorValue};
+    use rusqlite::{
+        ToSql,
+        types::{ToSqlOutput, Value as SqlResult, ValueRef},
+    };
+
+    struct Bound<'a>(&'a ExtractorValue);
+    impl ToSql for Bound<'_> {
+        fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+            Ok(ToSqlOutput::Borrowed(match self.0 {
+                ExtractorValue::Null => ValueRef::Null,
+                ExtractorValue::Integer(v) => ValueRef::Integer(*v),
+                ExtractorValue::Real(v) => ValueRef::Real(*v),
+                ExtractorValue::Text(v) => ValueRef::Text(v),
+                ExtractorValue::Blob(v) => ValueRef::Blob(v),
+            }))
+        }
+    }
+    let ObservationArgs::Mapping(map) = &request.args else {
+        return Err(invalid("card_extractors takes a mapping"));
+    };
+    let inputs = CardExtractorsRequest::from_mapping(map).map_err(|e| invalid(e.to_string()))?;
+    let core = |e: rusqlite::Error| ExecError::new("core_error", e.to_string());
+    let conn = rusqlite::Connection::open_in_memory().map_err(core)?;
+    meguri_search::sqlfns::register(&conn).map_err(core)?;
+    let mut statement = conn.prepare("SELECT meguri_card_f32(?1,'s'),meguri_card_f32(?1,'d'),meguri_card_f32(?1,'dr'),meguri_retrievability(?1,?2,?3,?4,?5),meguri_relative_retrievability(?1,?2,?3,?4,?5),meguri_original_position(?1)").map_err(core)?;
+    let mut rows = Vec::with_capacity(inputs.inputs.len());
+    for input in inputs.inputs {
+        let values = statement
+            .query_row(rusqlite::params_from_iter(input.arguments.iter().map(Bound)), |row| {
+                Ok([
+                    row.get::<_, SqlResult>(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ])
+            })
+            .map_err(core)?;
+        let mut output = Map::new();
+        output.insert("id".into(), json!(input.id));
+        for (key, value) in ["s", "d", "dr", "r", "rr", "pos"].into_iter().zip(values) {
+            let value = match value {
+                SqlResult::Null => Value::Null,
+                SqlResult::Integer(v) if key == "pos" => json!(v),
+                SqlResult::Real(v) if key != "pos" => {
+                    if v.is_nan() {
+                        Value::Null
+                    } else if v == f64::INFINITY {
+                        json!("inf")
+                    } else if v == f64::NEG_INFINITY {
+                        json!("-inf")
+                    } else if f64::from(v as f32) == v {
+                        crate::observe::f32_value(v as f32).map_err(|e| ExecError::new("core_error", e.to_string()))?
+                    } else {
+                        return Err(ExecError::new("core_error", "extractor REAL is not a widened f32"));
+                    }
+                }
+                _ => {
+                    return Err(ExecError::new(
+                        "core_error",
+                        "unexpected extractor result storage class",
+                    ));
+                }
+            };
+            output.insert(key.into(), value);
+        }
+        rows.push(Value::Object(output));
+    }
+    Ok(json!({"rows": rows}))
 }
 
 fn invalid(detail: impl Into<String>) -> ExecError {

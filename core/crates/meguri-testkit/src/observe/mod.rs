@@ -326,6 +326,11 @@ pub fn tolerance(segments: &[String]) -> Option<f64> {
                 .then_some(MEMORY_STATE_TOLERANCE)
         }
         "stats" => Some(STATS_TOLERANCE),
+        // extractor-ops E4: only R/RR, at the declared 1e-5 tolerance.
+        "card_extractors" => match segments {
+            [_, _, _, rows, _, field] if rows == "rows" && (field == "r" || field == "rr") => Some(1e-5),
+            _ => None,
+        },
         // The stability and difficulty columns of an fsrs_next row
         // (float-determinism.md F3.3, F5.6).
         "fsrs_next" => match segments {

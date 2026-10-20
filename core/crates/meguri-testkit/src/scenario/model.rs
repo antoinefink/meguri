@@ -1821,6 +1821,8 @@ pub enum ObservationKind {
     Search,
     /// search-ops.md S2.
     CanonicalSearch,
+    /// conformance/extractor-ops E1-E5.
+    CardExtractors,
     DbDump,
     /// storage-ops.md P3.
     SchemaObjects,
@@ -1866,7 +1868,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 38] = [
+    pub const ALL: [ObservationKind; 39] = [
         ObservationKind::TypeAnswer,
         ObservationKind::ReviewHtml,
         ObservationKind::MediaDir,
@@ -1889,6 +1891,7 @@ impl ObservationKind {
         ObservationKind::FieldsCheck,
         ObservationKind::Search,
         ObservationKind::CanonicalSearch,
+        ObservationKind::CardExtractors,
         ObservationKind::DbDump,
         ObservationKind::SchemaObjects,
         ObservationKind::Stats,
@@ -1931,6 +1934,7 @@ impl ObservationKind {
             ObservationKind::FieldsCheck => "fields_check",
             ObservationKind::Search => "search",
             ObservationKind::CanonicalSearch => "canonical_search",
+            ObservationKind::CardExtractors => "card_extractors",
             ObservationKind::DbDump => "db_dump",
             ObservationKind::SchemaObjects => "schema_objects",
             ObservationKind::Stats => "stats",
@@ -1987,6 +1991,7 @@ impl ObservationKind {
             | ObservationKind::ImageOcclusion
             | ObservationKind::FsrsNext
             | ObservationKind::IgnoredBeforeCount => ArgShape::Mapping,
+            ObservationKind::CardExtractors => ArgShape::Mapping,
             ObservationKind::Queue
             | ObservationKind::DbDump
             | ObservationKind::Stats
@@ -2016,7 +2021,7 @@ pub struct ObservationRequest {
 
 impl ObservationRequest {
     /// D8: the kinds that never read a collection, `type_answer`, `text`, `cloze`,
-    /// `fsrs_next` and `canonical_search`, and `template` when every case is
+    /// `fsrs_next`, `canonical_search` and `card_extractors`, and `template` when every case is
     /// a new-note case.
     pub fn reads_no_collection(&self) -> bool {
         match self.kind {
@@ -2025,7 +2030,8 @@ impl ObservationRequest {
             | ObservationKind::Cloze
             | ObservationKind::ImageOcclusion
             | ObservationKind::FsrsNext
-            | ObservationKind::CanonicalSearch => true,
+            | ObservationKind::CanonicalSearch
+            | ObservationKind::CardExtractors => true,
             ObservationKind::Template => match &self.args {
                 ObservationArgs::Mapping(map) => TemplateRequest::from_mapping(map)
                     .is_ok_and(|request| request.cases.iter().all(|c| matches!(c, TemplateCase::NewNote(_)))),

@@ -1688,6 +1688,7 @@ dependencies = [
  "meguri-text",
  "rand 0.9.4",
  "regex",
+ "rusqlite",
  "serde_json",
  "tempfile",
  "tracing",
@@ -1750,6 +1751,7 @@ dependencies = [
 name = "meguri-search"
 version = "0.0.0"
 dependencies = [
+ "fsrs",
  "meguri-model",
  "meguri-storage",
  "meguri-testkit",
@@ -1847,6 +1849,7 @@ dependencies = [
  "rand 0.9.4",
  "rcgen",
  "regex",
+ "rusqlite",
  "rustls",
  "ryu",
  "serde",

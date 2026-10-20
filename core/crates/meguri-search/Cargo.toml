@@ -13,6 +13,7 @@ publish.workspace = true
 test-hooks = []
 
 [dependencies]
+fsrs.workspace = true
 meguri-model.workspace = true
 # The browser and search config keys (U83, `src/config.rs`) read config
 # values per `storage/config-table` C3.
@@ -20,14 +21,12 @@ meguri-storage.workspace = true
 # Unicode decimal digits (category Nd) in id lists (search/grammar G8), with
 # the pinned regex-syntax tables.
 regex.workspace = true
+# Connection-local pure scalar functions; no collection SQL is issued here.
+rusqlite.workspace = true
 
 [dev-dependencies]
 # Turns test-hooks on for the tests (testkit depends on this crate with it):
 # tests/canonical_roundtrip.rs runs plans through Plan::build_with.
 meguri-testkit.workspace = true
-# The plan's tests (src/plan, tests/canonical_roundtrip.rs) run statements on
-# in-memory card and note tables; collections are only ever read through
-# meguri-storage.
-rusqlite.workspace = true
 # tests/config_keys.rs reads the config keys of a fixture copy.
 tempfile.workspace = true

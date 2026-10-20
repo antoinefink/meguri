@@ -4,6 +4,8 @@ use serde_json::value::RawValue;
 
 use crate::json::{self, Kind, ObjectWriter};
 
+pub mod extractors;
+
 /// The seven keys Anki knows, in the order they are written (C2, C4).
 const KNOWN_KEYS: [&str; 7] = ["pos", "s", "d", "dr", "decay", "lrt", "cd"];
 

@@ -19,6 +19,7 @@ pub mod error;
 mod lexer;
 mod parser;
 pub mod plan;
+pub mod sqlfns;
 
 pub use ast::{Node, NodeId, NodeKind, Query, Scope, Term};
 pub use canonical::canonical_text;

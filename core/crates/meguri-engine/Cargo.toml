@@ -35,6 +35,7 @@ tracing.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+rusqlite.workspace = true
 criterion.workspace = true
 # Turns on this crate's, storage's and model's test hooks for the tests (raw
 # reads, the steppable clock, WAL-flush observations) and gives them fixture

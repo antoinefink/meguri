@@ -273,7 +273,10 @@ impl Engine {
     /// Opens the collection at `path` (`engine/lifecycle` L2). The engine's
     /// raw open entry point: only meguri-host calls it (`CoreHost::open`
     /// wires the ports), so layering-check refuses the name elsewhere.
-    pub fn open_raw(&self, path: &Path, config: OpenConfig) -> Result<Collection, EngineError> {
+    pub fn open_raw(&self, path: &Path, mut config: OpenConfig) -> Result<Collection, EngineError> {
+        // Compose here rather than in OpenConfig::new: callers can replace
+        // its public initializer list. Reopen/resume keep this complete set.
+        config.initializers.register(meguri_search::sqlfns::register);
         {
             let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
             let mut guard = self.lock_state();

@@ -147,6 +147,32 @@ fn string_token_end(bytes: &[u8], start: usize) -> (usize, bool) {
     }
 }
 
+/// Whether valid JSON stays within a caller's container nesting limit.
+/// Raw capture and this walk both use bounded stack space.
+pub(crate) fn within_depth(raw: &RawValue, limit: usize) -> bool {
+    let bytes = raw.get().as_bytes();
+    let mut depth = 0usize;
+    let mut at = 0;
+    while let Some(byte) = bytes.get(at) {
+        match byte {
+            b'"' => {
+                at = string_token_end(bytes, at).0;
+                continue;
+            }
+            b'[' | b'{' => {
+                depth += 1;
+                if depth > limit {
+                    return false;
+                }
+            }
+            b']' | b'}' => depth -= 1,
+            _ => {}
+        }
+        at += 1;
+    }
+    true
+}
+
 /// N10, a number literal of valid JSON: Anki's fast decimal conversion, which
 /// is not always exact near the largest 64-bit float, decides the range.
 fn number_in_range(literal: &str) -> bool {

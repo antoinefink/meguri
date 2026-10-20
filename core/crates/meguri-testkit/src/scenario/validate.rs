@@ -545,6 +545,7 @@ fn once_per_step(requests: &[super::model::ObservationRequest]) -> Result<(), Fo
         ObservationKind::FieldsCheck,
         ObservationKind::Search,
         ObservationKind::CanonicalSearch,
+        ObservationKind::CardExtractors,
         ObservationKind::IgnoredBeforeCount,
     ] {
         if requests.iter().filter(|r| r.kind == kind).count() > 1 {
@@ -564,6 +565,9 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
     let uint = |v: &Value| v.is_u64();
     let only = |keys: &[&str]| map.keys().all(|k| keys.contains(&k.as_str()));
     match kind {
+        ObservationKind::CardExtractors => {
+            super::CardExtractorsRequest::from_mapping(map)?;
+        }
         ObservationKind::FuzzTable => {
             let keys: BTreeSet<&str> = map.keys().map(String::as_str).collect();
             if keys != BTreeSet::from(["card", "intervals", "pairs"]) {
