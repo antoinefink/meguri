@@ -4,7 +4,9 @@ You build Meguri from specs. Anki's source never enters your environment (KTD1, 
 
 ## Session
 
-- Current workflow (Antoine, 2026-10-18/20): work directly on `master` with a session from `tools/mg session record`; create no branches or worktrees. Source exclusions still apply to files, history and reports. Per unit, run focused tests, affected-platform builds, independent review and provenance/privacy/similarity checks; resolve known failures before acceptance. Full gates run at milestones, app handoffs and after shared build/test tooling changes. Final suites and human evidence remain mandatory. The worktree setup below documents existing sessions only.
+- Current workflow (Antoine, 2026-10-18/20): work directly on `master` with a session from `tools/mg session record`; create no branches or worktrees. Source exclusions still apply to files, history and reports. Per unit, run focused tests, affected-platform builds, independent review and provenance/privacy/similarity checks, then a full `tools/mg gate --base <unit-start-commit>` before acceptance. Resolve failures before moving on. Antoine's edited goal on 2026-10-20 supersedes the earlier focused-only cadence. Final suites and human evidence remain mandatory. The worktree setup below documents existing sessions only.
+
+- Manual device and reference checks are deferred until the final session (Antoine, 2026-10-20). Continue with automated VM tests. Final evidence remains required.
 
 - Implement and fix through `tools/mg cleanroom --prompt <file> --session <id>` in a filtered copy of clean master. The orchestrator reviews its patch, applies it to master and runs verification there. See `tools/cleanroom/README.md`; no branches or worktrees are created. Infrastructure bootstrap and integration may use the main checkout, but must not read forbidden sources.
 

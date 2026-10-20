@@ -6,7 +6,9 @@ Antoine changed the workflow on 2026-10-18. Work directly on `master` in the mai
 
 Record the unit's starting commit before bringing in its work. Keep the spec, implementation, independent review and fix steps, clean-room restrictions and review log. Commit WIP freely with co-author attribution. Before accepting a unit, commit its `Unit:` trailer and record passing focused tests, affected-platform builds, and provenance/privacy/similarity checks. Resolve known failures before acceptance. Only push `master`, without force. `tools/mg merge` is not required.
 
-Antoine approved the WIP verification cadence on 2026-10-20: full gates run at milestones, app handoffs and after shared build/test tooling changes. Keep every final suite and human-evidence requirement. Record focused receipts and any full gate in the unit log; this cadence never waives a known failure. A unit changing shared tooling still needs its full `tools/mg gate --base <unit-start-commit>`.
+Antoine's updated goal on 2026-10-20 explicitly requires a full `tools/mg gate --base <unit-start-commit>` before accepting each unit, superseding the earlier focused-only WIP cadence. Keep focused checks during implementation and record the full passing receipt in the review log. Resolve failures before moving to the next unit. Final suites and human evidence remain required.
+
+Manual device and reference checks are deferred until the final session (Antoine, 2026-10-20). Continue with automated VM tests. Final evidence remains required.
 
 The branch-merge procedure below remains available for historical receipts and existing tooling. Queued runs remain incomplete verification: run `tools/mg catch-up` between units and require passing results at milestone gates.
 

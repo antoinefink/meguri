@@ -279,7 +279,7 @@ milestones:
     name: Reviews first
     plan:
       gate: "U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on the Mac host and simulators, gated by U241 against the review-loop budgets (R1807–R1817). U248 CloudKit convergence soak with signed development-container evidence (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210). U36 preservation suite (R2017). U250 fault classes: review, sync, full download, backup (AE86). U251's M1R legs: kill during review, during a sync and during the first full download (AE86), background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names. U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check), and U176's snapshot-swap fallback exists behind its flag."
-      user_steps: "Before U68: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure). U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks). The first real sync with CloudKit, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, U248 CloudKit lane, U250 cloud sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, existing imported cards)"
+      user_steps: "Final hands-on batch: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure). U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks). The first real sync with CloudKit, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, U248 CloudKit lane, U250 cloud sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, existing imported cards)"
     units: [U8d, U19b, U240r, U14, U15, U24, U25, U26, U27, U28, U29, U30, U31, U32, U36, U37, U38, U40, U41,
       U42, U43, U44, U45, U46, U48, U49, U50, U51, U60, U61, U62, U63, U64, U65, U66, U67, U68, U70, U80,
       U82a, U85a, U105, U106, U107, U109, U110, U111, U113, U114, U117, U118, U124a, U126, U127, U132,
@@ -340,10 +340,10 @@ milestones:
       review: [R1807, R1808, R1809, R1810, R1811, R1812, R1813, R1814, R1815, R1816, R1817]
     user_steps:
       - id: r1913-capture
-        description: Before U68, hand-capture the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure)
+        description: In the final hands-on batch, hand-capture the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure)
         evidence: conformance/references/render/
         validator: {type: capture, index: conformance/references/render/index.json, cases_file: conformance/references/render/cases.json}
-        plan: ["Before U68: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure)"]
+        plan: ["Final hands-on batch: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure)"]
       - id: device-run-iphone
         description: U256 device run on the iPhone (AE81); it awaits Antoine's Apple account in Xcode
         evidence: docs/process/milestone-records/device-runs/M1R/iphone.json

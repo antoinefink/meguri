@@ -2,11 +2,11 @@
 
 Every verification job belongs to a tier (R1950). `tools/gate/tiers.yaml` is the one list: each run is a `tools/mg` job with its arguments, tier, the paths that trigger it, where its work happens (R1952) and a time budget. The gate refuses that file when a registered job has neither a run nor a line under `utilities`, so a new job must be placed in a tier in the change that adds it.
 
-## Current WIP cadence
+## Current verification cadence
 
-Antoine approved focused verification per unit on 2026-10-20. Each unit needs tests for its changed behavior, affected-platform builds, independent review and provenance/privacy/similarity checks. Record the selected checks and receipts in its review log. Resolve known failures before accepting it; focused verification cannot bypass a failed full gate.
+Antoine's updated goal on 2026-10-20 explicitly requires a full gate before accepting each unit, superseding the earlier focused-only WIP cadence. Each unit also needs tests for its changed behavior, affected-platform builds, independent review and provenance/privacy/similarity checks. Record the selected checks and receipts in its review log. Resolve failures before moving to the next unit.
 
-Run full gates at milestones, app handoffs and after changes to shared build/test tooling. Keep all final acceptance suites and required human evidence. The tier table and trigger definitions below still describe what a full gate runs; this WIP cadence changes how often it runs. Gate arguments, result validity, quarantine, catch-up and milestone evaluation stay as defined below.
+Run `tools/mg gate --base <unit-start-commit>` after committing the completed unit and its review log. Milestone and final acceptance suites remain required. Gate arguments, path triggers, result validity, quarantine, catch-up and milestone evaluation stay as defined below.
 
 | Tier | When | What | Command |
 |---|---|---|---|
@@ -70,6 +70,8 @@ An entry without the approval or the evidence makes the gate fail. A test of a c
 There is no git remote, so nights run on this Mac. `tools/mg nightly --print-schedule` writes two launchd entries (nightly at 02:30, weekly on Sundays at 04:00). Installing them is Antoine's step `nightly-scheduler` (docs/process/one-time-setup.md); agents never install them. A future cloud runner may run only Docker jobs without private data (R1939).
 
 ## Milestones and release
+
+Manual device and reference checks are deferred until the final session (Antoine, 2026-10-20). Continue with automated VM tests. Final evidence remains required.
 
 Milestone and release similarity scans cover the full committed tree with `--rev <tip>` and no `--base`. Ordinary unit gates scan their change with the T0 similarity run's `--base <base>`.
 
