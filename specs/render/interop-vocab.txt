@@ -309,3 +309,54 @@ budgetExpired
 meguri.card
 isTrusted
 visualViewport
+# render/image-occlusion-review: the card-visible image occlusion API (the
+# `anki` members, the hook names and their data members, the shape class
+# methods), the element ids, data attributes and canvas custom properties the
+# runtime reads. Class names that are ordinary words (Shape, Text, Rectangle)
+# are left out on purpose.
+imageOcclusion
+setupImageCloze
+drawShape
+onWillDrawShapes
+onDidDrawShapes
+activeShapes
+inactiveShapes
+highlightShapes
+activeShapeColor
+inActiveShapeColor
+highlightShapeColor
+activeBorder
+inActiveBorder
+highlightShapeBorder
+occludeInactive
+scaleX
+scaleY
+fontSize
+absolutePosition
+normalPosition
+toAbsolute
+toNormal
+toDataForCloze
+toFabric
+image-occlusion-container
+image-occlusion-canvas
+data-shape
+data-left
+data-top
+data-width
+data-height
+data-rx
+data-ry
+data-points
+data-text
+data-scale
+data-font-size
+data-angle
+data-fill
+data-occludeinactive
+active-shape-color
+inactive-shape-color
+highlight-shape-color
+active-shape-border
+inactive-shape-border
+highlight-shape-border

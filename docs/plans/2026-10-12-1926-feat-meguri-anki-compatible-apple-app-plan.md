@@ -761,11 +761,11 @@ flowchart TB
 
 **Image occlusion review**
 - R539. `anki.imageOcclusion.setup()` draws masks identically to Anki: active shapes in `--active-shape-color` with its border, inactive shapes only when `oi=1` (custom fill or `--inactive-shape-color`), the answer-side active shape as an outline highlight, and text shapes (c0) on every card and side.
-- R540. Drawing matches Anki's geometry: rect/ellipse rotation about their top-left, polygon point offsets, text size from `fs` (40 px fallback), container aspect ratio from the image's natural size, and canvas backing sized by device pixel ratio up to 4096 × 4096.
+- R540. Drawing matches Anki's geometry: rect/ellipse rotation about their top-left, polygon point offsets, text size from `fs` (40 px fallback), container aspect ratio from the image's natural size, and canvas backing fitted to the canvas's CSS client extent at device pixel ratio and the image's natural aspect ratio, proportionally bounded at 4096 per dimension. The per-dimension bound is a declared Meguri difference from the prepared reference's area-only cap.
 - R541. On the answer side, `#toggle` (Toggle Masks) shows only when some shape has `oi=1`, and a tap/click or Shift+M toggles between all shapes and text shapes only.
 - R542. Masks redraw on every size change: rotation, Split View, Stage Manager, folding and unfolding, Mac window resize, and card zoom.
 - R543. `setup()` accepts `onWillDrawShapes` and `onDidDrawShapes` hooks, and its one-time module state persists across cards in the long-lived page.
-- R544. Setup failures show the template's own `#err` text, as in Anki.
+- R544. Follow the IO spec's M9 failure rules. The template owns `#err`; the runtime leaves an external `#err` unchanged. Without an image element, the container shows `No image to show.`. Failed image resources and later drawing errors use the existing native diagnostics. A synchronous template catch does not handle later drawing errors.
 - R545. For occlusion notetypes with hidden per-mask audio fields (`{{cloze:A01}}`…), the front extracts no audio, and the back autoplays only the active mask's sounds in order, which R replays.
 - R546. A tap on the occlusion image or canvas is an ordinary tap-zone tap.
 
@@ -7179,7 +7179,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 
 ### U68. Image occlusion review runtime
 
-**Goal:** A Meguri-authored `anki.imageOcclusion` implementation that draws masks exactly as Anki does, from the shape divs U64 produces, with no Anki assets.
+**Goal:** A Meguri-authored `anki.imageOcclusion` implementation that draws U64's shape divs according to the neutral geometry and color contract, with the recorded Meguri sizing and lifecycle choices and no Anki assets.
 
 **Requirements:** R512 (`anki.imageOcclusion`, `setupImageCloze` alias, shape classes), R539–R544, R546 (tap passes through as an ordinary tap), R1960.
 
@@ -7195,7 +7195,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 - The spec writer describes the drawing behavior in their own words: colors from canvas CSS variables, `oi` handling, highlight outline, rotation origin, polygon offsets, text sizing and line layout, aspect ratio, backing scale with the 4096 cap, toggle visibility, Shift+M, hooks, one-time state and error text. The implementer builds from the neutral spec. During WIP, hand-captured reference screenshots from Anki desktop and AnkiMobile are deferred to the final hands-on batch; the R1913 comparison and any resulting fixes remain mandatory before final acceptance (tooling in U10; Antoine, 2026-10-20).
 - Redraw is driven by `ResizeObserver` on the container plus window `resize`, so rotation, Split View, Stage Manager, folding, Mac resize and page zoom all redraw (R542).
 - One-time setup state lives in a closure in the long-lived page, so it persists across cards (R543).
-- Failures write the template's own `#err` content, as the template expects (R544).
+- Preserve template ownership of `#err` and the distinct missing-element, failed-resource and asynchronous drawing diagnostics of R544. Reset hidden masks per setup and use latest options for later key/redraw passes, while retaining one module and page-level key listener per page; these are the spec's explicit D2/D3 product choices.
 - The canvas and image are not tap-exempt (R546; zone semantics in U175).
 
 **Execution note:** Spec writer first (KTD1). The implementer never reads Anki's image-occlusion TypeScript; the similarity scan covers the file.
@@ -7206,13 +7206,13 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 - Hide All, card 2 front: the active rect pixel equals `--active-shape-color` and inactive masks show `--inactive-shape-color`. Hide One: inactive areas show the image (R539).
 - Back side: the active shape shows only a 1-px outline in the highlight color; a c0 text shape draws on every side (R539).
 - A rect with `angle=2500` rotates 90° about its top-left; a polygon is offset by left/top minus its min point; a text shape without `fs` uses 40 px (R540).
-- At devicePixelRatio 3 the canvas backing is natural size × 3 capped at 4096 per side, and the container aspect ratio equals the image's natural ratio (R540).
+- At devicePixelRatio 3 the canvas backing fits CSS client extent × 3 at the image's natural aspect ratio, with one proportional reduction so neither backing dimension exceeds 4096; the container aspect ratio equals the image's natural ratio (R540).
 - `#toggle` is visible on the back only when a shape has `oi=1`; a click and then Shift+M alternate between all shapes and text-only (R541).
 - Resizing the web view from 390 to 700 pt wide and changing page zoom to 150% both trigger a redraw at the new size (R542).
 - `setup({onWillDrawShapes, onDidDrawShapes})` calls both in order; a second card in the same page reuses the one-time state (R543).
-- A missing image puts the template's error text into `#err` (R544).
+- With a canvas but no image element, the container shows `No image to show.` and an external template-owned `#err` sentinel stays unchanged. A failed image resource has no masks and a resource diagnostic; a later malformed-shape rejection reaches native template diagnostics without being caught by the template's synchronous setup try/catch (R544).
 - `anki.setupImageCloze === anki.imageOcclusion.setup` behavior-wise (R512).
-- U8/U9 corpus cases render with no `#err` text and a non-transparent canvas on iPhone, iPad and Mac, light and dark (R1912 case, suite owned by U240+).
+- U7 (generic image occlusion) and U8 (Tobira-style image occlusion) corpus cases render with no `#err` text and a non-transparent canvas on iPhone, iPad and Mac, light and dark (R1912 case, suite owned by U240+).
 
 **Verification:** ImageOcclusionReviewTests pass on host and simulator; screenshots of the IO and Tobira corpus cases fall within the perceptual tolerance of the hand-captured references.
 
