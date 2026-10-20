@@ -209,14 +209,34 @@ final class CardWebViewBehaviorUITests: XCTestCase {
 
     func testNativeZoomFrameAndSameDocumentLinks() throws {
         let app = try launch()
-        let web = app.webViews.firstMatch
         let before = try report(app)
+        let beforeData = try JSONSerialization.data(withJSONObject: ["report": before], options: [.sortedKeys])
+        let beforeAttachment = XCTAttachment(data: beforeData, uniformTypeIdentifier: "public.json")
+        beforeAttachment.name = "same-document-link-before-ax-query"
+        beforeAttachment.lifetime = .keepAlways
+        add(beforeAttachment)
+        let web = app.webViews.firstMatch
         let height = try XCTUnwrap(before["height"] as? Double)
         XCTAssertEqual(try XCTUnwrap(before["viewport"] as? Double), height, accuracy: 1)
         XCTAssertEqual(try XCTUnwrap(before["bottom"] as? Double), try XCTUnwrap(before["layoutHeight"] as? Double), accuracy: 1)
+        #if os(macOS)
+        let native = try XCTUnwrap(before["native"] as? [String: Any])
+        func rect(_ key: String) throws -> CGRect {
+            let values = try XCTUnwrap(native[key] as? [String: Double])
+            return CGRect(x: try XCTUnwrap(values["x"]), y: try XCTUnwrap(values["y"]),
+                          width: try XCTUnwrap(values["width"]), height: try XCTUnwrap(values["height"]))
+        }
+        let nativeFrame = try rect("frame")
+        for bounds in [try rect("contentBounds"), try rect("safeContentLayoutRect")] {
+            XCTAssertGreaterThanOrEqual(nativeFrame.minX, bounds.minX)
+            XCTAssertGreaterThanOrEqual(nativeFrame.minY, bounds.minY)
+            XCTAssertLessThanOrEqual(nativeFrame.maxX, bounds.maxX)
+            XCTAssertLessThanOrEqual(nativeFrame.maxY, bounds.maxY)
+        }
+        XCTAssertEqual(Double(nativeFrame.height), height, accuracy: 1)
+        #else
         XCTAssertGreaterThan(web.frame.minY, app.windows.firstMatch.frame.minY)
         XCTAssertLessThanOrEqual(web.frame.maxY, app.windows.firstMatch.frame.maxY)
-        #if !os(macOS)
         let native = try XCTUnwrap(before["native"] as? [String: Double])
         let top = try XCTUnwrap(native["y"]), nativeHeight = try XCTUnwrap(native["height"])
         let left = try XCTUnwrap(native["x"]), nativeWidth = try XCTUnwrap(native["width"])

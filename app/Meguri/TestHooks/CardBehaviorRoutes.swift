@@ -89,7 +89,7 @@ extension TestHooks {
             let html = """
                 <style>body{margin:0}input{font:inherit;min-height:44px;max-width:100%;box-sizing:border-box}
                 a{display:inline-block;padding:16px}#viewport{height:100vh}#space{height:200vh}#bottom{position:fixed;bottom:0;margin:0}</style>
-                <h1>\(title)</h1><input id=typeans aria-label="\(inputLabel)">
+                <h1>\(title)</h1><input id=typeans aria-label="\(inputLabel)" autocapitalize=off autocorrect=off spellcheck=false>
                 <p><a href="#bottom">\(jump)</a> <a href="javascript:window.cardScriptRan=true;void(0)">\(scriptLink)</a></p>
                 <div id=viewport></div><div id=space></div><p id=bottom>\(bottom)</p>
                 <script>window.resizeEvents=0;window.addEventListener('resize',()=>resizeEvents++);window.domMarker=Math.random();</script>
@@ -104,7 +104,7 @@ extension TestHooks {
             #if os(iOS)
             nativeVoiceFocus = "none"
             #endif
-            let payload = CardPayload(cardID: card, question: html, answer: heading + "<input id=typeans aria-label=\"\(inputLabel)\">")
+            let payload = CardPayload(cardID: card, question: html, answer: heading + "<input id=typeans aria-label=\"\(inputLabel)\" autocapitalize=off autocorrect=off spellcheck=false>")
             let update = try await pair.prepare(payload)
             CATransaction.begin()
             _ = try pair.present(update)
@@ -187,6 +187,28 @@ extension TestHooks {
             #if os(macOS)
             observations["currentHidden"] = page.webView.isAccessibilityHidden()
             observations["idleHidden"] = pair.idle.webView.isAccessibilityHidden()
+            let webView = page.webView
+            let unignoredChildren = NSAccessibilityUnignoredChildren([webView]) as [Any]
+            observations["macAccessibility"] = [
+                "currentIsElement": webView.isAccessibilityElement(),
+                "currentRole": webView.accessibilityRole()?.rawValue ?? "none",
+                "currentParentIsContainer": (webView.accessibilityParent() as AnyObject?) === pair.container,
+                "containerIsElement": pair.container.isAccessibilityElement(),
+                "containerRole": pair.container.accessibilityRole()?.rawValue ?? "none",
+                "currentRawChildrenCount": webView.accessibilityChildren()?.count ?? 0,
+                "unignoredChildrenCount": unignoredChildren.count,
+                "unignoredChildrenAreRawWK": unignoredChildren.map { ($0 as AnyObject) === webView }
+            ]
+            if let window = webView.window, let contentView = window.contentView {
+                func rectReport(_ rect: CGRect) -> [String: CGFloat] {
+                    ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height]
+                }
+                observations["native"] = [
+                    "frame": rectReport(webView.convert(webView.bounds, to: contentView)),
+                    "contentBounds": rectReport(contentView.bounds),
+                    "safeContentLayoutRect": rectReport(contentView.convert(window.contentLayoutRect, from: nil))
+                ]
+            }
             #else
             observations["currentHidden"] = page.webView.accessibilityElementsHidden
             observations["idleHidden"] = pair.idle.webView.accessibilityElementsHidden
@@ -345,8 +367,10 @@ extension TestHooks {
                 .accessibilityIdentifier("card.behavior.actions")
                 TextField(String(localized: "Native editor", table: "CardBehaviorRoutes"), text: $nativeText)
                     .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
                     #if os(macOS)
                     .controlSize(.extraLarge)
+                    .font(.title2)
                     #else
                     .controlSize(.large)
                     #endif
