@@ -20,7 +20,7 @@ extension XCUIApplication {
     func bringToFront(bundleIdentifier: String, timeout: TimeInterval = 10) throws {
         #if os(macOS)
         let deadline = Date().addingTimeInterval(timeout)
-        let frame = windows.firstMatch.frame
+        let frame = windows.firstMatch.exists ? windows.firstMatch.frame : dialogs.firstMatch.frame
         var activated = Date.distantPast
         while true {
             // Again every 2 s, in case another app took the front meanwhile.
