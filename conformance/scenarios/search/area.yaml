@@ -7,6 +7,7 @@
 area: search
 active:
   - "canonical/*"
+  - "extractors/*"
   - "errors/arguments"
   - "errors/escapes"
   - "errors/kinds"
