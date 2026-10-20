@@ -431,7 +431,20 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         #endif
         let result = try AccessibilityAudit.runAllVariants(
             state: "question", launch: MeguriLaunch(locale: "en_US", animations: false, route: "card/behaviors"),
-            waitFor: "card.behavior.state", suppressions: AuditSuppressions.bundled())
+            waitFor: "card.behavior.state", suppressions: AuditSuppressions.bundled(), ready: { app in
+                var currentState = ""
+                var questionExists = false
+                let completed = self.wait {
+                    currentState = self.state(app)
+                    if currentState.hasPrefix("failed") { return true }
+                    questionExists = app.staticTexts["Behavior question"].exists
+                    return currentState.hasPrefix("ready card=1 side=question") && questionExists
+                }
+                guard completed, currentState.hasPrefix("ready card=1 side=question"), questionExists else {
+                    let reason = currentState.hasPrefix("failed") ? "failed" : "did not become ready within 10 seconds"
+                    throw AuditError(description: "Card audit precondition \(reason): state=\(currentState), Behavior question present=\(questionExists)")
+                }
+            })
         add(AccessibilityAudit.screenReport("card.behavior.surface", states: [result]))
         AccessibilityAudit.assertClean(result.findings)
         TouchTargets.assertMet(result.touchTargets)

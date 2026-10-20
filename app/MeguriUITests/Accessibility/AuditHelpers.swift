@@ -233,10 +233,13 @@ enum AccessibilityAudit {
 
     /// Launches `launch` once per variant, checks that the variant's
     /// appearance is the one the app shows, and audits the screen it opens
-    /// and its touch targets. The device appearance is restored afterwards.
+    /// and its touch targets. Optional readiness runs once after the anchor
+    /// appears, before any screenshot or audit. The device appearance is
+    /// restored afterwards.
     @MainActor
     static func runAllVariants(
-        state: String, launch: MeguriLaunch, waitFor identifier: String, suppressions: [AuditSuppression]
+        state: String, launch: MeguriLaunch, waitFor identifier: String, suppressions: [AuditSuppression],
+        ready: (@MainActor (XCUIApplication) throws -> Void)? = nil
     ) throws -> StateResult {
         #if !os(macOS)
         let appearance = XCUIDevice.shared.appearance
@@ -256,6 +259,7 @@ enum AccessibilityAudit {
             guard anchor.waitForExistence(timeout: 15) else {
                 throw AuditError(description: "\(identifier) did not appear (\(state), \(variant))")
             }
+            try ready?(app)
             let shown = try Appearance.shown(by: app)
             guard shown.dark == variant.dark else {
                 throw AuditError(description: "\(state), \(variant): the app shows a \(shown.dark ? "dark" : "light") screen (median luminance \(String(format: "%.2f", shown.luminance))); the variant's appearance did not apply")
