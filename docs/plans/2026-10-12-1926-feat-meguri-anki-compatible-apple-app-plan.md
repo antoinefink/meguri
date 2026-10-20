@@ -4925,7 +4925,7 @@ Amended 2026-10-16 after U14's review (`docs/process/review-log/U14.md`, A2). Th
   - Privacy (R2034, R2035): both privacy manifests exist; a symbol scan of the app, widget and embedded frameworks maps required-reason APIs (file timestamps, system boot time — Rust's monotonic clock uses it — disk space, user defaults) through `required-reason-map.yaml` and fails on any used API without a declared reason.
   - No tracking (R2036, R2037): no analytics/tracking SDKs in the dependency inventory; tracking flag false; URL/host strings found in binaries limited to an allow-list (user-configured server placeholder, AnkiWeb hosts only in personal builds).
   - No executable downloads or add-ons (R2039): no dynamic loading of non-embedded code, no script evaluation outside the card web view; card bridge message names limited to the allow-list published by the rendering units (R2038).
-  - Web inspection (R2040): the inspectable flag is set only in Debug builds (string/symbol check plus source lint).
+  - Web inspection (R523, R2040): App Store builds always disable inspection; non-AppStore Debug, Profile and personal Release builds follow the device setting (configuration checks plus native policy tests).
   - Mac (R2041, KTD22): arm64-only slices; entitlements include the existing sandbox/network/files/App Group set plus the approved CloudKit containers/services and remote-notification capability, isolated by configuration (R2041, R2065).
   - SDK and submission (R2042): products built with the 27 SDKs (build-version load commands); export compliance answer present in Info.plist and consistent with the TLS stack (rustls with aws-lc-rs used only for HTTPS).
   - Hooks and oracle absent (R1967, R1869): no test-hook symbols or launch-option strings in Release/AppStore; no oracle files, Python or AGPL material in any bundle; the license gate (U5/U16) shows no GPL/AGPL/LGPL-only code in shipped targets (R2021).
@@ -14744,7 +14744,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   - No test-hook symbols or launch-argument handlers in either Release config (R1967).
   - No "Anki" in product name, display name, bundle ids or icon asset names (R2028).
   - The sync client identifier string starts with "Meguri" (R2030).
-  - Web inspection is disabled in Release (R2040).
+  - Web inspection is disabled in AppStore regardless of setting; personal Release follows the R523 device setting (R2040).
   - The Mac binary is arm64 only, with the KTD22 entitlement set: sandbox + network.server + network.client + files.user-selected.read-write + files.bookmarks.app-scope, plus App Group, CloudKit container/services and remote notifications when signed (U7, R2041, R2065). CloudKit test/production isolation is checked; unexpected additional capabilities still fail.
   - The widget does not link the core.
 - Required-reason APIs (R2034, R2035): the symbol scan of the app, extension and the static core lists used APIs. Each must have a matching declaration in the privacy manifests (file timestamps C617.1, boot time 35F9.1, disk space E174.1, user defaults CA92.1 or the app-group reason).
