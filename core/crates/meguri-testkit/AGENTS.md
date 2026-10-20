@@ -40,3 +40,5 @@
 
 - The default executor keeps CoreHost's real or unavailable backup provider. Only explicit `fixture_harness` / `Registry::fixture_backup_witness` uses a counted witness on isolated fixture copies; it never proves backup safety or satisfies U127. `Registry::record_changes` records exact events and pre-delete checks without enabling the witness. Normal runs retain no event trace. U127 must revisit the harness override.
 - After a hosted sync replaces the generation, refresh with `Session::engine_collection` before observations (U117); it rebinds the cached reader handle and backup witness.
+
+- New observation kinds also change the CLI capability contract in `core/tools/meguri-cli/tests/cli.rs`. Include that test in focused verification; provider-only tests do not cover this separate consumer.

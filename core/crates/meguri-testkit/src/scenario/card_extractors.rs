@@ -46,7 +46,12 @@ impl ExtractorValue {
                                 b.to_ascii_lowercase() - b'a' + 10
                             }
                         };
-                        let decoded = bytes.chunks_exact(2).map(|p| digit(p[0]) * 16 + digit(p[1])).collect();
+                        let decoded = bytes
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
+                            .map(|p| digit(p[0]) * 16 + digit(p[1]))
+                            .collect();
                         return Ok(if blob { Self::Blob(decoded) } else { Self::Text(decoded) });
                     }
                 }
