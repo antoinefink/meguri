@@ -3,7 +3,7 @@
 # as a11y runs its suites. Sourced by tools/mg; a host job.
 
 mg_job ui-test host mg_ui_test \
-  "XCUITest suites of MeguriUITests: --suite <class>[/<test>]... [--platform iphone|ipad|mac] [--device <leased udid>]; Debug build, simulator and Mac runs in the macOS test VM (queued without it); counts and failing tests from the result bundle"
+  "XCUITest suites of MeguriUITests: --suite <class>[/<test>]... [--platform iphone|ipad|mac] [--device <leased udid>] [--config Debug|Profile]; Debug by default, simulator and Mac runs in the macOS test VM (queued without it); functional assertions only, no performance receipt"
 
 mg_ui_test__usage() {
   mg_failure usage "ui-test: $1" "tools/mg --list"
@@ -12,7 +12,7 @@ mg_ui_test__usage() {
 }
 
 mg_ui_test() {
-  local platform=iphone device="" suites="" only=() s result since udid
+  local platform=iphone device="" config=Debug suites="" only=() build_args=() s result since udid
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --platform)
@@ -22,6 +22,10 @@ mg_ui_test() {
       --device)
         [ "$#" -ge 2 ] && [ -n "$2" ] || { mg_ui_test__usage "--device needs a UDID (tools/mg sim acquire <kind>)"; return 0; }
         device="$2" && shift 2
+        ;;
+      --config)
+        [ "$#" -ge 2 ] && mg_word_in "$2" "Debug Profile" || { mg_ui_test__usage "--config takes Debug or Profile"; return 0; }
+        config="$2" && shift 2
         ;;
       --suite)
         [ "$#" -ge 2 ] && printf '%s' "$2" | grep -Eq '^[A-Z][A-Za-z0-9]*(/[A-Za-z0-9_]+)?$' ||
@@ -35,13 +39,18 @@ mg_ui_test() {
   for s in $suites; do only[${#only[@]}]="-only-testing:MeguriUITests/$s"; done
   mg_detail suites "$(printf '%s\n' $suites | jq -R . | jq -sc .)"
   mg_detail platform "$(jq -n --arg p "$platform" '$p')"
+  mg_detail config "$(jq -n --arg c "$config" '$c')"
+  if [ "$config" = Profile ]; then
+    export MG_APP_TEST_SCHEME=Meguri-Profile MG_APP_TEST_PLAN=Performance
+    build_args=(Performance Meguri-Profile)
+  fi
   if [ "$platform" = mac ]; then
     [ -z "$device" ] || { mg_ui_test__usage "--device is for simulators"; return 0; }
     mg_mac_ui_begin || return 0
-    mg_app_build mac Debug || return 0
+    mg_app_build mac "$config" ${build_args[0]+"${build_args[@]}"} || return 0
     mg_mac_ui_take || return 0
     since="$(mg_app_log_now)"
-    mg_app_xcodebuild_test "$MG_RUN_DIR/mac" mac "platform=macOS,arch=arm64" Debug "${only[@]}"
+    mg_app_xcodebuild_test "$MG_RUN_DIR/mac" mac "platform=macOS,arch=arm64" "$config" "${only[@]}"
     result=$?
     if [ "$result" -le 1 ] && mg_app_mac_input_refused "$since" "$(printf '%s' "${suites# }" | tr ' ' ',')"; then
       mg_app_mac_input_result "$MG_RUN_DIR/mac.xcresult" "$result" test
@@ -54,7 +63,7 @@ mg_ui_test() {
   if [ -n "$device" ]; then
     mg_sim_check_given "$device" || return 0
   fi
-  mg_app_build ios-sim Debug || return 0
+  mg_app_build ios-sim "$config" ${build_args[0]+"${build_args[@]}"} || return 0
   mg_sim_take || return 0
   if [ -n "$device" ]; then
     mg_sim_check_given "$device" || return 0
@@ -65,7 +74,7 @@ mg_ui_test() {
     mg_sim_check_runtime "$udid" || return 0
   fi
   mg_sim_prepare "$udid" || return 0
-  mg_app_xcodebuild_test "$MG_RUN_DIR/$platform" "$platform" "id=$udid" Debug "${only[@]}"
+  mg_app_xcodebuild_test "$MG_RUN_DIR/$platform" "$platform" "id=$udid" "$config" "${only[@]}"
   result=$?
   mg_ui_test__report "$MG_RUN_DIR/$platform" "$result"
 }

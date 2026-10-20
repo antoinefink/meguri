@@ -215,9 +215,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 products="$(dirname "$run")"
+case "$run" in */Meguri-Profile_Performance_*) config=Profile ;; *) config=Debug ;; esac
 case "$dest" in
-  platform=macOS*) app="$products/Debug/Meguri.app/Info.plist" ;;
-  *) app="$products/Debug-iphonesimulator/Meguri.app/Info.plist" ;;
+  platform=macOS*) app="$products/$config/Meguri.app/Info.plist" ;;
+  *) app="$products/$config-iphonesimulator/Meguri.app/Info.plist" ;;
 esac
 [ -f "$run" ] && [ -f "$app" ] || { echo "xcodebuild: error: no test products at $(unmap "$products")"; exit 70; }
 echo "vm-products $(unmap "$products") $(cat "$app")" >>"$STUB_LOG"
@@ -322,7 +323,7 @@ mg_app_build() {
     return 0
   fi
   printf '<plist><string>__TESTROOT__/%s/MeguriUITests-Runner.app</string></plist>\n' "$root" \
-    >"$p/Meguri_${plan}_${sdk}27.0-arm64.xctestrun"
+    >"$p/${4:-Meguri}_${plan}_${sdk}27.0-arm64.xctestrun"
 }
 fx_host() { case "$1" in /work/*) printf '%s\n' "$MG_ROOT/${1#/work/}" ;; *) printf '%s\n' "$1" ;; esac; }
 mg_image_tools() {
@@ -642,8 +643,10 @@ assert_host_untouched() {
   [ "$(field .status)" = pass ]
   [ "$(field .details.sim_runner)" = vm ]
   [ "$(field .details.host_lease)" = null ]
+  [ "$(field .details.config)" = Debug ]
   [ "$(field '.details.suites | join(",")')" = NavigationLayoutTests,TestHooksTests/testSampleScreenRoute ]
   [ "$(field '.summary | "\(.passed) \(.failed)"')" = "12 0" ]
+  called '^fake build ios-sim Debug$'
   local u dir
   u="$(field .details.device.udid)"
   called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri_UI_iphonesimulator27.0-arm64.xctestrun -destination id=$u -resultBundlePath $SB/build/mg/ui-test/[^ ]+/iphone.xcresult -collect-test-diagnostics never -only-testing:MeguriUITests/NavigationLayoutTests -only-testing:MeguriUITests/TestHooksTests/testSampleScreenRoute\$"
@@ -658,6 +661,47 @@ assert_host_untouched() {
   [ "$(field '.failures[0].id')" = usage ]
   mg ui-test --platform iphone --suite 'Bad Suite'
   [ "$(field .status)" = error ]
+}
+
+@test "ui-test Profile on iPhone uses Performance products and the caller's owned pool device on the pinned runtime" {
+  local u
+  u="$(lease_in_sandbox iphone)"
+  [ -n "$u" ]
+  cp "$(vm_lease "$u")" "$BATS_TEST_TMPDIR/caller-lease.json"
+  : >"$STUB_LOG"
+  mg ui-test --config Profile --platform iphone --device "$u" --suite CardSwapTimingSpikeTests/testDiagnostic
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.sim_runner)" = vm ]
+  [ "$(field .details.config)" = Profile ]
+  [ "$(field .details.device.udid)" = "$u" ]
+  [ "$(field .details.runtime.device)" = "$u" ]
+  [ "$(field '.details.runtime.actual == .details.runtime.expected')" = true ]
+  called '^fake build ios-sim Profile Performance Meguri-Profile$'
+  called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri-Profile_Performance_iphonesimulator27.0-arm64.xctestrun -destination id=$u -resultBundlePath $SB/build/mg/ui-test/[^ ]+/iphone.xcresult -collect-test-diagnostics never -only-testing:MeguriUITests/CardSwapTimingSpikeTests/testDiagnostic\$"
+  called "^xcrun simctl status_bar $u override "
+  [ "$(grep -c '^vm-xcodebuild ' "$STUB_LOG")" = 1 ]
+  [ -f "$(vm_fs meguri-mac "$SB/build/app/DerivedData/Build/Products/Profile-iphonesimulator/Meguri.app/Info.plist")" ]
+  [ "$(field '.summary | "\(.passed) \(.failed)"')" = "12 0" ]
+  [ -f "$(dirname "$result")/iphone.xcresult/summary.json" ]
+  [ "$(field '[.artifacts[] | select(.kind == "perf-result" or .kind == "metrics")] | length')" = 0 ]
+  cmp "$BATS_TEST_TMPDIR/caller-lease.json" "$(vm_lease "$u")"
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  assert_host_untouched
+  validate "$result"
+
+  : >"$STUB_LOG"
+  FAKE_SIM_RT27_BUILD=24A999 mg ui-test --config Profile --platform iphone --device "$u" --suite CardSwapTimingSpikeTests/testDiagnostic
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = runtime-mismatch ]
+  not_called '^(fake build|vm-xcodebuild)'
+  mg sim release "$u"
+  : >"$STUB_LOG"
+  mg ui-test --config Profile --platform iphone --device "$u" --suite CardSwapTimingSpikeTests/testDiagnostic
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = device ]
+  not_called '^(fake build|vm-xcodebuild)'
+  assert_host_untouched
 }
 
 @test "a locked Mac with its display asleep does not hold up simulator jobs in the VM" {

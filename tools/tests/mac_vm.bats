@@ -539,9 +539,49 @@ exec '"$(command -v tar)"' "$@"'
   [ "$(field .status)" = pass ]
   [ "$(field .details.mac_runner)" = vm ]
   [ "$(field .details.platform)" = mac ]
-  called "^vm-xcodebuild test-without-building .* -only-testing:MeguriUITests/NavigationLayoutTests\$"
+  [ "$(field .details.config)" = Debug ]
+  called '^fake build mac Debug$'
+  called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri_UI_macosx27.0-arm64.xctestrun -destination platform=macOS,arch=arm64 -resultBundlePath $SB/build/mg/ui-test/[^ ]+/mac.xcresult -collect-test-diagnostics never -only-testing:MeguriUITests/NavigationLayoutTests\$"
   not_called "^host-xcodebuild"
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+}
+
+@test "ui-test Profile on the Mac runs only the requested method with Meguri-Profile's Performance products in the VM" {
+  mg ui-test --config Profile --platform mac --suite CardSwapTimingSpikeTests/testDiagnostic
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.mac_runner)" = vm ]
+  [ "$(field .details.config)" = Profile ]
+  [ "$(field '.details.suites | join(",")')" = CardSwapTimingSpikeTests/testDiagnostic ]
+  [ "$(field '.summary | "\(.passed) \(.failed)"')" = "11 0" ]
+  called '^fake build mac Profile Performance Meguri-Profile$'
+  called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri-Profile_Performance_macosx27.0-arm64.xctestrun -destination platform=macOS,arch=arm64 -resultBundlePath $SB/build/mg/ui-test/[^ ]+/mac.xcresult -collect-test-diagnostics never -only-testing:MeguriUITests/CardSwapTimingSpikeTests/testDiagnostic\$"
+  [ "$(grep -c '^vm-xcodebuild ' "$STUB_LOG")" = 1 ]
+  [ -f "$(vm_fs meguri-mac "$SB/build/app/DerivedData/Build/Products/Profile/Meguri.app/Contents/Info.plist")" ]
+  [ -f "$(dirname "$result")/mac.xcresult/summary.json" ]
+  [ ! -e "$(vm_fs meguri-mac "$(dirname "$result")/mac.xcresult")" ]
+  [ "$(field '[.artifacts[] | select(.kind == "perf-result" or .kind == "metrics")] | length')" = 0 ]
+  not_called '^host-xcodebuild'
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  validate "$result"
+}
+
+@test "ui-test refuses unsupported, invalid and missing configurations before any build or VM work" {
+  local platform config
+  for platform in mac iphone; do
+    for config in Release AppStore invalid 'Debug Profile' ''; do
+      mg ui-test --platform "$platform" --suite NavigationLayoutTests --config "$config"
+      [ "$status" -eq 2 ]
+      [ "$(field .status)" = error ]
+      [ "$(field '.failures[0].id')" = usage ]
+      [ "$(field .message)" = 'ui-test: --config takes Debug or Profile' ]
+    done
+    mg ui-test --platform "$platform" --suite NavigationLayoutTests --config
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+  done
+  not_called '^(fake build|ssh |tart |vm-|host-xcodebuild)'
 }
 
 @test "a locked Mac with its display asleep does not hold up a VM run" {
