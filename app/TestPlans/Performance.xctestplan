@@ -7,12 +7,13 @@
     }
   ],
   "defaultOptions" : {
-    "UITestingTargetAppMainThreadCheckerEnabled" : false,
-    "UITestingTargetAppPerformanceAntipatternCheckerEnabled" : false,
     "addressSanitizer" : {
       "enabled" : false
     },
     "codeCoverage" : false,
+    "mainThreadCheckerDetectionPolicy" : {
+      "disabled" : {}
+    },
     "mainThreadCheckerEnabled" : false,
     "performanceAntipatternCheckerEnabled" : false,
     "targetForVariableExpansion" : {
