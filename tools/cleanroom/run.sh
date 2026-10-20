@@ -11,6 +11,9 @@ git config user.name Codex
 git add -f -A
 git commit -qm 'Permitted source baseline; no upstream history'
 baseline="$(git rev-parse HEAD)"
+if [ -f /codex-run/seed.patch ]; then
+  python3 /runner/source_view.py seed /work /codex-run/seed.patch
+fi
 codex exec --strict-config -m gpt-6.1-sol -c "model_reasoning_effort=\"$2\"" \
   --skip-git-repo-check -C /work -o /codex-run/codex.out - \
   </codex-run/prompt.md >/codex-run/codex.log 2>&1

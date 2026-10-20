@@ -1,6 +1,6 @@
 # Master-only source isolation for Codex implementers/fixers (U2).
 mg_job cleanroom host mg_cleanroom \
-  "Isolated Codex runner: --check probes its boundaries without authentication; --prompt <file> --session <id> [--effort high|xhigh]; exports changes.patch for review, never edits master"
+  "Isolated Codex runner: --check probes boundaries; --prompt <file> --session <id> [--effort high|xhigh] [--seed-patch <own-code patch>]; exports changes.patch, never edits master"
 mg_job cleanroom-image host mg_cleanroom_image \
   "Build the version-pinned isolated Codex runtime from a digest-pinned Linux base"
 
@@ -25,21 +25,22 @@ mg_cleanroom_cleanup() {
 }
 
 mg_cleanroom() {
-  local check=false prompt="" session="" effort=high role rc image before
+  local check=false prompt="" session="" seed="" effort=high role rc image before
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --check) check=true; shift ;;
-      --prompt|--session|--effort)
+      --prompt|--session|--effort|--seed-patch)
         [ "$#" -ge 2 ] || break
-        case "$1" in --prompt) prompt="$2" ;; --session) session="$2" ;; --effort) effort="$2" ;; esac
+        case "$1" in --prompt) prompt="$2" ;; --session) session="$2" ;; --effort) effort="$2" ;; --seed-patch) seed="$2" ;; esac
         shift 2 ;;
       *) break ;;
     esac
   done
   if [ "$#" -ne 0 ] || ! mg_word_in "$effort" "high xhigh" ||
-    { [ "$check" = true ] && { [ -n "$prompt" ] || [ -n "$session" ]; }; } ||
+    { [ "$check" = true ] && { [ -n "$prompt" ] || [ -n "$session" ] || [ -n "$seed" ]; }; } ||
+    { [ -n "$seed" ] && [ ! -f "$seed" ]; } ||
     { [ "$check" = false ] && { [ ! -f "$prompt" ] || [ -z "$session" ]; }; }; then
-    mg_failure usage "usage: tools/mg cleanroom --check | --prompt <file> --session <id> [--effort high|xhigh]"
+    mg_failure usage "usage: tools/mg cleanroom --check | --prompt <file> --session <id> [--effort high|xhigh] [--seed-patch <own-code patch>]"
     mg_status error; return 0
   fi
   image="$(mg_compose_project)-cleanroom"
@@ -71,6 +72,10 @@ mg_cleanroom() {
       mg_status error; return 0
     fi
     cp "$prompt" "$MG_RUN_DIR/prompt.md"
+    if [ -n "$seed" ]; then
+      cp "$seed" "$MG_RUN_DIR/seed.patch"
+      mg_artifact patch "$MG_RUN_DIR/seed.patch" "reviewed own-code input, validated before Codex starts"
+    fi
     mg_detail source_commit "\"$before\""
   fi
   mg_on_exit mg_cleanroom_cleanup

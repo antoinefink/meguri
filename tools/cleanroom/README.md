@@ -10,6 +10,13 @@ on master, and run:
 tools/mg cleanroom --prompt <file> --session <session-id>
 ```
 
+To resume reviewed Meguri work that could not yet be committed, add
+`--seed-patch <own-code patch>`. Never supply reference or private content.
+The runner applies it after recording the clean baseline, then validates all
+paths and file types before Codex starts. The export includes the input patch
+and any further fixes. This avoids recreating code from a large prompt.
+Write temporary handoffs outside `/work`; its root accepts only source paths.
+
 The runner copies tracked, permitted regular files from clean master. It excludes
 `refs/`, `oracle/`, `local-data/`, `.git`, all build output and agent configuration,
 including nested copies of those names. It refuses symbolic links, hard links

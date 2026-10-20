@@ -3,8 +3,9 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from source_view import permitted, prepare, validate
+from source_view import permitted, prepare, seed, validate
 
 
 class SourceViewTests(unittest.TestCase):
@@ -98,6 +99,36 @@ class SourceViewTests(unittest.TestCase):
         (self.target / ".aws/nested/credentials").write_text("synthetic")
         with self.assertRaises(ValueError):
             validate(self.target)
+
+    def apply_seed(self, name, mode="100644", value="own code"):
+        self.target.mkdir()
+        env = dict(os.environ, GIT_DIR=str(self.root.parent / "seed-git"), GIT_WORK_TREE=str(self.target))
+        subprocess.run(["git", "init", "-q"], env=env, cwd=self.target, check=True)
+        source_patch = self.root.parent / "seed.patch"
+        source_patch.write_text(
+            f"diff --git a/{name} b/{name}\nnew file mode {mode}\n"
+            f"--- /dev/null\n+++ b/{name}\n@@ -0,0 +1 @@\n+{value}\n"
+        )
+        with patch.dict(os.environ, env, clear=True):
+            seed(self.target, source_patch)
+
+    def test_own_patch_is_available_without_real_history(self):
+        self.apply_seed("app/example.swift")
+        self.assertEqual((self.target / "app/example.swift").read_text(), "own code\n")
+        self.assertFalse((self.target / ".git").exists())
+
+    def test_seed_refuses_forbidden_output_before_model_access(self):
+        with self.assertRaises(ValueError):
+            self.apply_seed("app/refs/example.txt")
+
+    def test_seed_refuses_links_before_model_access(self):
+        with self.assertRaises(ValueError):
+            self.apply_seed("app/link", mode="120000", value="/outside/synthetic")
+
+    def test_seed_refuses_path_traversal(self):
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.apply_seed("../outside.txt")
+        self.assertFalse((self.root.parent / "outside.txt").exists())
 
 
 if __name__ == "__main__":

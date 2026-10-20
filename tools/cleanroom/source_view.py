@@ -80,9 +80,17 @@ def validate(root: Path) -> None:
                 regular_file(root, name)
 
 
+def seed(root: Path, patch: Path) -> None:
+    """Apply reviewed Meguri work, refusing unsafe output before model access."""
+    command = ["git", "-C", str(root), "apply"]
+    subprocess.run(command + ["--check", str(patch)], check=True)
+    subprocess.run(command + [str(patch)], check=True)
+    validate(root)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["prepare", "validate"])
+    parser.add_argument("action", choices=["prepare", "validate", "seed"])
     parser.add_argument("root", type=Path)
     parser.add_argument("target", type=Path, nargs="?")
     args = parser.parse_args()
@@ -90,5 +98,9 @@ if __name__ == "__main__":
         if args.target is None:
             parser.error("prepare needs a destination")
         print(json.dumps(prepare(args.root, args.target)))
+    elif args.action == "seed":
+        if args.target is None:
+            parser.error("seed needs a patch")
+        seed(args.root, args.target)
     else:
         validate(args.root)
