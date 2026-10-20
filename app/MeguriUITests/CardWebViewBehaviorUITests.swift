@@ -176,8 +176,25 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         XCTAssertGreaterThan(questionGestureScale, 1)
         #endif
         let voiceOver = XCUIDevice.shared.voiceOverService
-        try voiceOver.enable()
         defer { try? voiceOver.disable() }
+        #if os(macOS)
+        if !voiceOver.isEnabled {
+            // Start VoiceOver normally in the VM before attaching automation.
+            try app.bringToFront(bundleIdentifier: bundleIdentifier)
+            app.typeKey(XCUIKeyboardKey.F5.rawValue, modifierFlags: .command)
+            let voiceOverApp = XCUIApplication(bundleIdentifier: "com.apple.VoiceOver")
+            let useVoiceOver = voiceOverApp.buttons["Use VoiceOver"]
+            if useVoiceOver.waitForExistence(timeout: 3) {
+                try voiceOverApp.bringToFront(bundleIdentifier: "com.apple.VoiceOver")
+                useVoiceOver.click()
+            }
+            guard wait({ voiceOver.isEnabled }) else {
+                throw NSError(domain: "CardWebViewBehaviorUITests.VoiceOverSetup", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "Mac VoiceOver setup failed: Command-F5 and any observed Use VoiceOver button did not enable the public service within 10 seconds"])
+            }
+        }
+        #endif
+        try voiceOver.enable()
         @MainActor func activateWithVoiceOver(_ element: XCUIElement) throws {
             XCTAssert(element.waitForExistence(timeout: 3), "missing native VO control")
             #if os(macOS)
