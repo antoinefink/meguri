@@ -349,26 +349,51 @@ extension TestHooks {
             .background(ColorToken.backgroundPrimary.color)
             #if os(iOS)
             .sheet(isPresented: $actionsPresented, onDismiss: performPendingAction) {
-                NavigationStack {
+                VStack(spacing: 0) {
+                    let headerLayout = dynamicTypeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.xSmall))
+                        : AnyLayout(HStackLayout(spacing: Spacing.small))
+                    headerLayout {
+                        Text(String(localized: "Card actions", table: "CardBehaviorRoutes"))
+                            .font(.headline)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button {
+                            pendingAction = nil
+                            actionsPresented = false
+                        } label: {
+                            Text(String(localized: "Close", table: "CardBehaviorRoutes"))
+                                .font(.body)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, Spacing.small)
+                                .padding(.vertical, Spacing.xSmall)
+                                .frame(minWidth: Spacing.large * 2, minHeight: Spacing.large * 2)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("card.behavior.actions.close")
+                    }
+                    .foregroundStyle(ColorToken.textPrimary.color)
+                    .padding(Spacing.small)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .background(ColorToken.backgroundPrimary.color)
                     List {
-                        control("Confirm", id: "confirm", sheetAction: true) { try await model.dialog(prompt: false) }
-                        control("Prompt", id: "prompt", sheetAction: true) { try await model.dialog(prompt: true) }
-                        nativeActions
+                        Group {
+                            control("Confirm", id: "confirm", sheetAction: true) { try await model.dialog(prompt: false) }
+                            control("Prompt", id: "prompt", sheetAction: true) { try await model.dialog(prompt: true) }
+                            nativeActions
+                        }
+                        .listRowBackground(ColorToken.backgroundPrimary.color)
                     }
                     .accessibilityIdentifier("card.behavior.actions.list")
-                    .navigationTitle(String(localized: "Card actions", table: "CardBehaviorRoutes"))
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "Close", table: "CardBehaviorRoutes")) {
-                                pendingAction = nil
-                                actionsPresented = false
-                            }
-                            .accessibilityIdentifier("card.behavior.actions.close")
-                        }
-                    }
+                    .foregroundStyle(ColorToken.textPrimary.color)
+                    .scrollContentBackground(.hidden)
+                    .background(ColorToken.backgroundPrimary.color)
                     .tint(ColorToken.textPrimary.color)
                 }
+                .background(ColorToken.backgroundPrimary.color)
             }
             #endif
             .onAppear {
