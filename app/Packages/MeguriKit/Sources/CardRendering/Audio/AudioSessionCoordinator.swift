@@ -8,7 +8,7 @@ import UIKit
 /// isolated adapter and participates in the same owner set.
 public final class AudioSessionCoordinator: CardAudioSession {
     public static let shared = AudioSessionCoordinator()
-    public nonisolated enum Event: Sendable { case stop, pause, available }
+    public nonisolated enum Event: Sendable, Equatable { case stop, pause, available }
     private var owners: Set<UUID> = []
     private var subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
     private var observers: [NSObjectProtocol] = []
@@ -17,12 +17,16 @@ public final class AudioSessionCoordinator: CardAudioSession {
     public init() {
         #if !os(macOS)
         let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: nil) { [weak self] notification in
-            guard let raw = (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? NSNumber)?.uintValue,
-                  let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        observers.append(center.addObserver(forName: AVAudioSession.didBecomeInactiveNotification, object: nil, queue: nil) { [weak self] notification in
+            guard let event = Self.deactivationEvent(notification) else { return }
+            Task { @MainActor [weak self] in self?.emit(event) }
+        })
+        observers.append(center.addObserver(forName: AVAudioSession.resumptionRecommendationNotification, object: nil, queue: nil) { [weak self] notification in
+            guard let context = notification.userInfo?[AVAudioSession.resumptionContextKey] as? AVAudioSession.ResumptionContext else { return }
             Task { @MainActor [weak self] in
-                if type == .began { self?.emit(.stop) }
-                else if UIApplication.shared.applicationState == .active { self?.emit(.available) }
+                if let event = Self.resumptionEvent(recommendation: context.recommendation, isActive: UIApplication.shared.applicationState == .active) {
+                    self?.emit(event)
+                }
             }
         })
         observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) { [weak self] notification in
@@ -39,6 +43,37 @@ public final class AudioSessionCoordinator: CardAudioSession {
     }
     isolated deinit { for observer in observers { NotificationCenter.default.removeObserver(observer) } }
 
+    #if !os(macOS)
+    nonisolated static func deactivationEvent(_ notification: Notification) -> Event? {
+        guard let context = notification.userInfo?[AVAudioSession.deactivationContextKey] as? AVAudioSession.DeactivationContext else { return nil }
+        return deactivationEvent(source: context.source, hasInterruption: context.interruptionContext != nil,
+                                 reason: context.interruptionContext?.reason)
+    }
+
+    // Typed facts keep policy testable without constructing system-only contexts.
+    nonisolated static func deactivationEvent(source: AVAudioSession.DeactivationSource, hasInterruption: Bool,
+                                              reason: AVAudioSession.InterruptionReason?) -> Event? {
+        switch source {
+        case .app: return nil // Releasing our last lease must not clear waiting playback.
+        case .system:
+            // System inactivity can occur without a subsequent recommendation.
+            // Pause preserves position and explicit review eligibility.
+            guard hasInterruption else { return .pause }
+            return reason == .routeDisconnected ? .pause : .stop
+        @unknown default: return .stop
+        }
+    }
+
+    nonisolated static func resumptionEvent(recommendation: AVAudioSession.ResumptionRecommendation, isActive: Bool) -> Event? {
+        guard isActive else { return nil }
+        switch recommendation {
+        // Availability restores presentation/manual actions, never playback.
+        case .shouldResume, .shouldNotResume: return .available
+        @unknown default: return nil
+        }
+    }
+    #endif
+
     public func events() -> AsyncStream<Event> {
         let id = UUID()
         return AsyncStream(bufferingPolicy: .bufferingNewest(16)) { continuation in
@@ -46,7 +81,7 @@ public final class AudioSessionCoordinator: CardAudioSession {
             continuation.onTermination = { [weak self] _ in Task { @MainActor in self?.subscribers[id] = nil } }
         }
     }
-    private func emit(_ event: Event) { for continuation in subscribers.values { continuation.yield(event) } }
+    func emit(_ event: Event) { for continuation in subscribers.values { continuation.yield(event) } }
     public func activate(_ owner: UUID) async throws {
         guard !owners.contains(owner) else { return }
         owners.insert(owner)

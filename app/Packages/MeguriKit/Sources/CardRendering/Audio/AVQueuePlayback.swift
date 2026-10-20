@@ -36,7 +36,10 @@ public final class AVQueuePlayback: CardAudioBackend {
         var duration: TimeInterval? { player.duration }
         var seekable: Bool { player.duration.isFinite }
         init(player: AVAudioPlayer, file: MediaFile) { self.player = player; self.file = file; super.init(); player.delegate = self }
-        func play() throws { guard player.play() else { throw Failure.unsupported } }
+        func play() throws {
+            // Bound the scheduling lead; starting hardware can still block this call.
+            guard player.play(atTime: player.deviceCurrentTime + 0.005) else { throw Failure.unsupported }
+        }
         func pause() { player.pause() }
         func stop() { player.stop(); player.delegate = nil; onEnd = nil; let file = self.file; Task { await file.close() } }
         func seek(to time: TimeInterval) async throws { player.currentTime = time }

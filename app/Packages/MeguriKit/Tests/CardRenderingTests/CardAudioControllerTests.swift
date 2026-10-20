@@ -3,6 +3,9 @@ import CoreBridge
 import Foundation
 import MediaPlayer
 import Testing
+#if !os(macOS)
+import AVFoundation
+#endif
 
 @Suite struct CardAudioControllerTests {
     final class Session: CardAudioSession {
@@ -11,11 +14,14 @@ import Testing
         var hold = false
         var held: CheckedContinuation<Void, Never>?
         var onHold: (() -> Void)?
+        var onRelease: (() -> Void)?
         func activate(_ owner: UUID) async {
             owners.insert(owner); activations += 1
             if hold { await withCheckedContinuation { held = $0; onHold?() } }
         }
-        func release(_ owner: UUID) { owners.remove(owner) }
+        func release(_ owner: UUID) {
+            if owners.remove(owner) != nil { onRelease?() }
+        }
     }
     final class Clip: CardAudioClip {
         let name: String
@@ -145,6 +151,7 @@ import Testing
         rig.controller.present(payload: payload(), update: question)
         #expect(await rig.backend.nextPlay() == "q1.mp3")
         let clip = try #require(rig.backend.clips.last(where: { $0.onEnd != nil }))
+        let completion = try #require(clip.onEnd)
         clip.time = 1
         rig.controller.sessionEvent(.pause)
         rig.controller.sessionEvent(.available)
@@ -153,12 +160,76 @@ import Testing
         rig.controller.resume()
         #expect(await rig.backend.nextPlay() == "q1.mp3")
         rig.controller.sessionEvent(.stop)
+        rig.controller.sessionEvent(.pause) // Later route/inactivity cannot undo a stop.
         rig.controller.sessionEvent(.available)
+        completion(true) // Neither a recommendation nor an old completion revives the queue.
         #expect(clip.stopped && rig.controller.current == nil && rig.session.owners.isEmpty)
         #expect(rig.backend.events == ["q1.mp3", "q1.mp3"])
         rig.controller.replay(payload: payload(), update: question)
         #expect(await rig.backend.nextPlay() == "q1.mp3")
     }
+
+    #if !os(macOS)
+    @Test func typedDeactivationPolicyDistinguishesReleaseInactivityAndInterruption() {
+        #expect(AudioSessionCoordinator.deactivationEvent(source: .app, hasInterruption: false, reason: nil) == nil)
+        #expect(AudioSessionCoordinator.deactivationEvent(source: .app, hasInterruption: true, reason: nil) == nil)
+        #expect(AudioSessionCoordinator.deactivationEvent(source: .app, hasInterruption: true, reason: .routeDisconnected) == nil)
+        #expect(AudioSessionCoordinator.deactivationEvent(source: .system, hasInterruption: false, reason: nil) == .pause)
+        #expect(AudioSessionCoordinator.deactivationEvent(source: .system, hasInterruption: true, reason: nil) == .stop)
+        #expect(AudioSessionCoordinator.deactivationEvent(source: .system, hasInterruption: true, reason: .routeDisconnected) == .pause)
+        #expect(AudioSessionCoordinator.deactivationEvent(Notification(name: AVAudioSession.didBecomeInactiveNotification)) == nil)
+        #expect(AudioSessionCoordinator.deactivationEvent(Notification(name: AVAudioSession.didBecomeInactiveNotification,
+            userInfo: [AVAudioSession.deactivationContextKey: "invalid context"])) == nil)
+    }
+
+    @Test(arguments: [AVAudioSession.ResumptionRecommendation.shouldResume, .shouldNotResume])
+    func foregroundRecommendationRestoresEligibilityWithoutNativePlayback(_ recommendation: AVAudioSession.ResumptionRecommendation) async throws {
+        #expect(AudioSessionCoordinator.resumptionEvent(recommendation: recommendation, isActive: false) == nil)
+        let available = try #require(AudioSessionCoordinator.resumptionEvent(recommendation: recommendation, isActive: true))
+        #expect(available == .available)
+        let rig = try await self.rig()
+        defer { rig.controller.close() }
+        rig.controller.present(payload: payload(), update: question)
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        let clip = try #require(rig.backend.clips.last(where: { $0.onEnd != nil }))
+        clip.time = 1
+        let pause = try #require(AudioSessionCoordinator.deactivationEvent(source: .system, hasInterruption: false, reason: nil))
+        rig.controller.sessionEvent(pause)
+        rig.controller.sessionEvent(available)
+        #expect(rig.controller.paused && clip.time == 1 && rig.session.owners.isEmpty)
+        #expect(rig.backend.events == ["q1.mp3"])
+        rig.controller.resume()
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        let stop = try #require(AudioSessionCoordinator.deactivationEvent(source: .system, hasInterruption: true, reason: nil))
+        rig.controller.sessionEvent(stop)
+        rig.controller.sessionEvent(available)
+        #expect(clip.stopped && rig.controller.current == nil && rig.session.owners.isEmpty)
+        #expect(rig.backend.events == ["q1.mp3", "q1.mp3"])
+        rig.controller.replay(payload: payload(), update: question)
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+    }
+
+    @Test func ownDeactivationDuringPauseDoesNotClearCurrentOrWaitingPlayback() async throws {
+        let rig = try await self.rig()
+        defer { rig.session.onRelease = nil; rig.controller.close() }
+        rig.session.onRelease = {
+            if let event = AudioSessionCoordinator.deactivationEvent(source: .app, hasInterruption: false, reason: nil) {
+                rig.controller.sessionEvent(event)
+            }
+        }
+        rig.controller.present(payload: payload(), update: question)
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        let clip = try #require(rig.backend.clips.last(where: { $0.onEnd != nil }))
+        clip.time = 1
+        rig.controller.pause()
+        try #require(rig.controller.current?.name == "q1.mp3" && rig.controller.paused)
+        #expect(clip.time == 1 && !clip.stopped && rig.session.owners.isEmpty)
+        rig.controller.resume()
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        clip.onEnd?(true)
+        #expect(await rig.backend.nextPlay() == "q2.mp3")
+    }
+    #endif
 
     @Test func missingTTSIndicesRawPercentAndSeek() async throws {
         let rig = try await self.rig()
@@ -374,6 +445,7 @@ enum NativeCardAudioChecks {
         let lastFirst = try #require(first.last)
         let firstEnd = lastFirst.start + lastFirst.duration
         let thirdStart = try #require(third.first).start
+        print("nativeAudioQueue presentedAt=\(presentedAt) firstStart=\(firstStart) firstEnd=\(firstEnd) thirdStart=\(thirdStart) thirdEnd=\(thirdStart + third[0].duration) startup=\(firstStart - presentedAt) gap=\(thirdStart - firstEnd)")
         #expect(thirdStart >= firstEnd - 0.020)
         #expect(thirdStart - firstEnd <= 0.100)
         #expect(try #require(completions[0]) >= firstEnd - 0.020)
@@ -398,12 +470,18 @@ enum NativeCardAudioChecks {
             let owner = UUID()
             defer { clip.stop(); AudioSessionCoordinator.shared.release(owner) }
             try await AudioSessionCoordinator.shared.activate(owner)
+            let beforePlayPosition = clip.time
             let requested = ProcessInfo.processInfo.systemUptime
             try clip.play()
+            let returnedAt = ProcessInfo.processInfo.systemUptime
+            let afterPlayPosition = clip.time
             try await Task.sleep(for: .milliseconds(150))
             #expect(clip.time > 0.05)
             let observedStartup = ProcessInfo.processInfo.systemUptime - requested - clip.time
             #expect(observedStartup <= 0.05)
+            let observedAt = ProcessInfo.processInfo.systemUptime
+            let observedPosition = clip.time
+            print("nativeAudioPlay requestedAt=\(requested) beforePosition=\(beforePlayPosition) returnedAt=\(returnedAt) afterPosition=\(afterPlayPosition) observedAt=\(observedAt) observedPosition=\(observedPosition) callDuration=\(returnedAt - requested) inferredStartup=\(observedStartup)")
             #expect(MPNowPlayingInfoCenter.default().nowPlayingInfo == nil)
             clip.pause()
             let paused = clip.time

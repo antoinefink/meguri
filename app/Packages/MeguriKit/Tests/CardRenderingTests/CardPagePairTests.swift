@@ -150,6 +150,60 @@ extension WebKitSuites {
             #expect(try await page.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == false)
         }
 
+        @Test func sessionPausePreservesReviewEligibilityAndAvailabilityDoesNotRestartHTML() async throws {
+            let fixture = MediaFixture()
+            fixture.add("/clip.mp4", try await TestMedia.mp4(), "video/mp4")
+            let pair = try await make(fixture)
+            let window = SpikeWindow(pair.container)
+            defer { pair.close(); window.close() }
+            try await pair.load()
+            let prepared = try await pair.prepare(CardPayload(cardID: 1,
+                question: "<video id=media src=clip.mp4 muted playsinline></video>", answer: "answer"))
+            _ = try pair.present(prepared)
+            try await pair.current.waitForShown(prepared)
+            let page = pair.current.webView
+            _ = try await page.callAsyncJavaScript("await document.getElementById('media').play();", contentWorld: .page)
+            AudioSessionCoordinator.shared.emit(.pause)
+            for _ in 0..<100 {
+                if try await page.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == true { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(try await page.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == true)
+            #expect(pair.current.presented && pair.current.update == prepared)
+            let next = CardPayload(cardID: 2, question: "next", answer: "answer")
+            _ = try await pair.prepare(next) // A pause leaves explicit review actions eligible.
+
+            _ = try await page.callAsyncJavaScript("await document.getElementById('media').play();", contentWorld: .page)
+            AudioSessionCoordinator.shared.emit(.stop)
+            AudioSessionCoordinator.shared.emit(.pause) // Inactivity cannot clear a background stop.
+            for _ in 0..<100 {
+                if !pair.current.presented { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            try await Task.sleep(for: .milliseconds(40))
+            #expect(!pair.current.presented)
+            do {
+                _ = try await pair.prepare(next)
+                Issue.record("A pause after a lifecycle stop must leave preparation blocked")
+            } catch CardPage.Failure.closed {
+                // The lifecycle stop still blocks explicit review actions.
+            } catch {
+                Issue.record("Expected lifecycle closure, received \(error)")
+            }
+
+            AudioSessionCoordinator.shared.emit(.available)
+            for _ in 0..<100 {
+                if pair.current.presented { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(pair.current.presented && pair.current.update == prepared)
+            #expect(try await page.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == true)
+            _ = try await page.callAsyncJavaScript("await document.getElementById('media').play();", contentWorld: .page)
+            #expect(try await page.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == false)
+            _ = try await pair.showAnswer()
+            #expect(pair.current.update?.side == .answer)
+        }
+
         @Test func explicitCloseReleasesPairAndHandlersDoNotOwnIt() async throws {
             let fixture = MediaFixture()
             let configuration = CardWebConfiguration(store: .nonPersistent())
