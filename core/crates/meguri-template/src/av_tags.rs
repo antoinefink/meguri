@@ -197,16 +197,28 @@ fn marker(out: &mut ExtractedSide, side: AvSide, tag: AvTag) {
 }
 
 pub fn extract(text: &str, side: AvSide) -> ExtractedSide {
-    transform(text, side, false)
+    transform(text, side, Transform::Extract)
 }
 
 /// Type-answer A6.1.1: same grammar, dropping sound and tts without
 /// decoding filenames or requiring a tts language.
 pub fn remove(text: &str) -> String {
-    transform(text, AvSide::Question, true).text
+    transform(text, AvSide::Question, Transform::Remove).text
 }
 
-fn transform(text: &str, side: AvSide, remove: bool) -> ExtractedSide {
+/// Browser columns C10: preserve raw sound names until the one-line text step.
+/// TTS display includes directives without a language, including empty ones.
+pub fn browser_display(text: &str) -> String {
+    transform(text, AvSide::Question, Transform::Browser).text
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Transform {
+    Extract,
+    Remove,
+    Browser,
+}
+
+fn transform(text: &str, side: AvSide, mode: Transform) -> ExtractedSide {
     let index = Index::new(text);
     let mut out = ExtractedSide {
         text: String::with_capacity(text.len()),
@@ -221,7 +233,11 @@ fn transform(text: &str, side: AvSide, remove: bool) -> ExtractedSide {
             if let Some(end) = Index::next(&index.brackets, name_start)
                 && end > name_start
             {
-                if !remove {
+                if mode == Transform::Browser {
+                    out.text.push('🔉');
+                    out.text.push_str(&text[name_start..end]);
+                    out.text.push('🔉');
+                } else if mode == Transform::Extract {
                     marker(
                         &mut out,
                         side,
@@ -237,7 +253,11 @@ fn transform(text: &str, side: AvSide, remove: bool) -> ExtractedSide {
         if text[start..].starts_with("[anki:")
             && let Some(tag) = directive(text, start, &index)
         {
-            if remove && tag.name == "tts" {
+            if mode == Transform::Browser && tag.name == "tts" {
+                out.text.push('💬');
+                out.text.push_str(tag.content);
+                out.text.push('💬');
+            } else if mode == Transform::Remove && tag.name == "tts" {
                 // Omit the entire directive, including its opaque content.
             } else if tag.name == "tts" {
                 let language = tag

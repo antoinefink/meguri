@@ -59,7 +59,7 @@ public struct RenderedCard: Sendable, Hashable {
         marked = value.marked
         typeIn = value.typeIn.map(TypeAnswerDescriptor.init)
     }
-    private static func error(_ kind: MeguriCoreBindings.RenderErrorKind) -> CardTemplateError {
+    static func error(_ kind: MeguriCoreBindings.RenderErrorKind) -> CardTemplateError {
         switch kind {
         case .unclosedConditional: .unclosedConditional
         case .unopenedConditional: .unopenedConditional

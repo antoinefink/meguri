@@ -546,6 +546,7 @@ fn once_per_step(requests: &[super::model::ObservationRequest]) -> Result<(), Fo
         ObservationKind::Search,
         ObservationKind::CanonicalSearch,
         ObservationKind::CardExtractors,
+        ObservationKind::CardExcerpts,
         ObservationKind::IgnoredBeforeCount,
     ] {
         if requests.iter().filter(|r| r.kind == kind).count() > 1 {

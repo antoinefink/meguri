@@ -19,6 +19,7 @@ use crate::scenario::{ObservationRequest, Step};
 pub(super) fn register(registry: &mut Registry) {
     registry.op("browser_config_set", browser_config_set);
     registry.observation("browser_config", browser_config);
+    registry.observation("card_excerpts", card_excerpts);
 }
 
 fn core(error: impl std::fmt::Display) -> ExecError {
@@ -122,4 +123,43 @@ fn browser_config(session: &mut Session<'_>, _request: &ObservationRequest) -> R
             .map(|key| (key.name().to_owned(), reported(&config, key)))
             .collect(),
     ))
+}
+
+/// E4: the product entry point, once for the entire reference list.
+fn card_excerpts(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
+    use crate::scenario::ObservationArgs;
+    use meguri_engine::browse::{self, CardExcerpt, Question};
+    let ObservationArgs::Refs(refs) = &request.args else {
+        return Err(invalid("card_excerpts needs a card list"));
+    };
+    let ids = refs
+        .iter()
+        .map(|reference| {
+            session
+                .cards
+                .get(reference.index())
+                .copied()
+                .map(meguri_model::ids::CardId)
+                .ok_or_else(|| ExecError::new("unknown_ref", reference.to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let collection = session.engine_collection()?;
+    let entries = browse::card_excerpts(&collection, &ids)
+        .map_err(core)?
+        .into_iter()
+        .map(|entry| match entry {
+            CardExcerpt::Found {
+                question: Question::Text(question),
+                deck,
+                ..
+            } => Ok(serde_json::json!({"question":question,"deck":deck})),
+            CardExcerpt::Missing { .. } => Ok(serde_json::json!({"error":"missing"})),
+            CardExcerpt::Damaged { .. } => Ok(serde_json::json!({"error":"damaged"})),
+            CardExcerpt::Found { question, .. } => Err(ExecError::new(
+                "unsupported_observation",
+                format!("card_excerpts has a non-text question outcome: {question:?}"),
+            )),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Value::Array(entries))
 }

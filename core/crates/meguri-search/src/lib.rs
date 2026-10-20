@@ -12,6 +12,7 @@
 //! search config keys and computes what each user action writes.
 
 pub mod ast;
+pub mod browser;
 pub mod canonical;
 pub mod config;
 pub mod context;

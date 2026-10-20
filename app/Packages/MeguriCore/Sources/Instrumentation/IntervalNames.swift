@@ -161,6 +161,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     public static let compareTypedAnswer = BridgeCall("compare_typed_answer")
     public static let renderCard = BridgeCall("render_card")
+    public static let cardExcerpts = BridgeCall("card_excerpts")
     public static let coreVersion = BridgeCall("core_version")
     public static let coreBuildInfo = BridgeCall("core_build_info")
     public static let setEventListener = BridgeCall("set_event_listener")
@@ -170,6 +171,6 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
-        coreVersion, coreBuildInfo, setEventListener, cancelTokenNew, cancelTokenCancel, cancelTokenIsCancelled, renderCard, compareTypedAnswer,
+        coreVersion, coreBuildInfo, setEventListener, cancelTokenNew, cancelTokenCancel, cancelTokenIsCancelled, renderCard, compareTypedAnswer, cardExcerpts,
     ]
 }

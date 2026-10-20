@@ -15,6 +15,8 @@ test-hooks = []
 [dependencies]
 fsrs.workspace = true
 meguri-model.workspace = true
+meguri-template.workspace = true
+meguri-text.workspace = true
 # The browser and search config keys (U83, `src/config.rs`) read config
 # values per `storage/config-table` C3.
 meguri-storage.workspace = true

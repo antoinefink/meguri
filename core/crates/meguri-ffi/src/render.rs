@@ -86,18 +86,8 @@ impl From<engine::RenderedCard> for RenderedCard {
                 },
             },
             engine::Outcome::Error { side, error } => {
-                use meguri_template::ErrorKind as E;
-                let kind = match error.kind {
-                    E::UnclosedConditional => RenderErrorKind::UnclosedConditional,
-                    E::UnopenedConditional => RenderErrorKind::UnopenedConditional,
-                    E::MismatchedConditional => RenderErrorKind::MismatchedConditional,
-                    E::UnknownField => RenderErrorKind::UnknownField,
-                    E::UnknownConditional => RenderErrorKind::UnknownConditional,
-                };
-                let side = match side {
-                    meguri_template::av_tags::AvSide::Question => RenderSide::Question,
-                    meguri_template::av_tags::AvSide::Answer => RenderSide::Answer,
-                };
+                let kind = error.kind.into();
+                let side = side.into();
                 RenderOutcome::TemplateError { kind, side }
             }
         };
@@ -223,5 +213,26 @@ mod tests {
             meguri_engine::EngineError::from(error),
             meguri_engine::EngineError::InvalidTypeAnswerReplacement
         );
+    }
+}
+
+impl From<meguri_template::ErrorKind> for RenderErrorKind {
+    fn from(value: meguri_template::ErrorKind) -> Self {
+        use meguri_template::ErrorKind as E;
+        match value {
+            E::UnclosedConditional => Self::UnclosedConditional,
+            E::UnopenedConditional => Self::UnopenedConditional,
+            E::MismatchedConditional => Self::MismatchedConditional,
+            E::UnknownField => Self::UnknownField,
+            E::UnknownConditional => Self::UnknownConditional,
+        }
+    }
+}
+impl From<meguri_template::av_tags::AvSide> for RenderSide {
+    fn from(value: meguri_template::av_tags::AvSide) -> Self {
+        match value {
+            meguri_template::av_tags::AvSide::Question => Self::Question,
+            meguri_template::av_tags::AvSide::Answer => Self::Answer,
+        }
     }
 }

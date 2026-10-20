@@ -89,19 +89,7 @@ fn render_card_inner(
         kind.templates.iter().find(|t| t.ord == u32::from(card.ord))
     }
     .ok_or_else(|| missing(Table::Templates, format!("{}:{}", kind.id.0, card.ord)))?;
-    let fields = special_fields::build(&*snapshot, &card, &note, &kind, template)?;
-    let q = if mode == RenderMode::Browser && !template.config.q_format_browser.is_empty() {
-        &template.config.q_format_browser
-    } else {
-        &template.config.q_format
-    };
-    let a = if mode == RenderMode::Browser && !template.config.a_format_browser.is_empty() {
-        &template.config.a_format_browser
-    } else {
-        &template.config.a_format
-    };
-    let (question, answer) = collection.core.render_cache.get(kind.id, template.ord, mode, q, a);
-    let comparable = card::render(&question, &answer, &fields, cloze, mode);
+    let (comparable, question) = render_stored_in(collection, &*snapshot, &card, &note, &kind, template, mode)?;
     let hide_play_buttons = matches!(
         snapshot.config_value("hideAudioPlayButtons")?,
         Some(ConfigValue::Bool(true))
@@ -188,4 +176,31 @@ pub fn render_template(
         &fields,
         cloze,
     ))
+}
+
+/// The K4/K5 composition shared by stored-card rendering and browser excerpts.
+/// All rows belong to the caller's snapshot; no lease, config or display work.
+pub(crate) fn render_stored_in<R: ReadRows + ?Sized>(
+    collection: &Collection,
+    rows: &R,
+    card: &meguri_model::card::Card,
+    note: &meguri_model::note::Note,
+    kind: &meguri_model::notetype::Notetype,
+    template: &meguri_model::notetype::NotetypeTemplate,
+    mode: RenderMode,
+) -> Result<(CardRender, std::sync::Arc<meguri_template::ParsedTemplate>), EngineError> {
+    let fields = special_fields::build(rows, card, note, kind, template)?;
+    let q = if mode == RenderMode::Browser && !template.config.q_format_browser.is_empty() {
+        &template.config.q_format_browser
+    } else {
+        &template.config.q_format
+    };
+    let a = if mode == RenderMode::Browser && !template.config.a_format_browser.is_empty() {
+        &template.config.a_format_browser
+    } else {
+        &template.config.a_format
+    };
+    let (question, answer) = collection.core.render_cache.get(kind.id, template.ord, mode, q, a);
+    let comparable = card::render(&question, &answer, &fields, kind.config.kind == 1, mode);
+    Ok((comparable, question))
 }

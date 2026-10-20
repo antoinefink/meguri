@@ -105,6 +105,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "canonical_search",
             "card",
             "card_extractors",
+            "card_excerpts",
             "cloze",
             "db_dump",
             "deck_tree",

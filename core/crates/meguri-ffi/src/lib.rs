@@ -14,6 +14,7 @@ pub mod changes;
 pub mod day_clock;
 pub mod error;
 pub mod events;
+pub mod excerpts;
 pub mod fsrs_policy;
 pub mod image_occlusion;
 pub mod jobs;

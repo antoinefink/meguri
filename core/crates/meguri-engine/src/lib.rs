@@ -14,6 +14,7 @@
 //! `specs/sched/day-clock.md`, `specs/notetypes/`.
 
 pub mod bootstrap;
+pub mod browse;
 pub mod browser_config;
 pub mod cancel;
 pub mod cardgen;

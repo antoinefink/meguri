@@ -1823,6 +1823,8 @@ pub enum ObservationKind {
     CanonicalSearch,
     /// conformance/extractor-ops E1-E5.
     CardExtractors,
+    /// conformance/card-excerpt-ops E1-E6.
+    CardExcerpts,
     DbDump,
     /// storage-ops.md P3.
     SchemaObjects,
@@ -1868,7 +1870,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 39] = [
+    pub const ALL: [ObservationKind; 40] = [
         ObservationKind::TypeAnswer,
         ObservationKind::ReviewHtml,
         ObservationKind::MediaDir,
@@ -1892,6 +1894,7 @@ impl ObservationKind {
         ObservationKind::Search,
         ObservationKind::CanonicalSearch,
         ObservationKind::CardExtractors,
+        ObservationKind::CardExcerpts,
         ObservationKind::DbDump,
         ObservationKind::SchemaObjects,
         ObservationKind::Stats,
@@ -1935,6 +1938,7 @@ impl ObservationKind {
             ObservationKind::Search => "search",
             ObservationKind::CanonicalSearch => "canonical_search",
             ObservationKind::CardExtractors => "card_extractors",
+            ObservationKind::CardExcerpts => "card_excerpts",
             ObservationKind::DbDump => "db_dump",
             ObservationKind::SchemaObjects => "schema_objects",
             ObservationKind::Stats => "stats",
@@ -1961,6 +1965,7 @@ impl ObservationKind {
     pub(super) fn shape(self) -> ArgShape {
         match self {
             ObservationKind::Ids => ArgShape::AnyRefs,
+            ObservationKind::CardExcerpts => ArgShape::CardRefs,
             ObservationKind::MediaDir
             | ObservationKind::MediaTrash
             | ObservationKind::MediaPending
@@ -2052,6 +2057,11 @@ impl ObservationRequest {
             None => (trimmed, None),
         };
         let kind = ObservationKind::from_name(name).ok_or_else(|| unknown_kind(name))?;
+        if kind == ObservationKind::CardExcerpts {
+            return Err(FormatError::new(
+                "card_excerpts needs a mapping with a non-empty card list",
+            ));
+        }
         let args = match inner {
             None => ObservationArgs::None,
             Some(inner) if inner.trim().is_empty() => ObservationArgs::None,
@@ -2101,6 +2111,9 @@ impl ObservationRequest {
 
     fn checked(kind: ObservationKind, args: ObservationArgs) -> Result<ObservationRequest, FormatError> {
         let name = kind.name();
+        if kind == ObservationKind::CardExcerpts && !matches!(&args, ObservationArgs::Refs(refs) if !refs.is_empty()) {
+            return Err(FormatError::new("card_excerpts needs a non-empty card list"));
+        }
         let ok = match (kind.shape(), &args) {
             (_, ObservationArgs::None) => !matches!(kind.shape(), ArgShape::Mapping | ArgShape::List),
             (ArgShape::AnyRefs, ObservationArgs::Refs(_)) => true,
