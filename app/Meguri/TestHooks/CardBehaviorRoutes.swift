@@ -379,17 +379,18 @@ extension TestHooks {
                     .padding(Spacing.small)
                     .fixedSize(horizontal: false, vertical: true)
                     .background(ColorToken.backgroundPrimary.color)
-                    List {
-                        Group {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: Spacing.small) {
                             control("Confirm", id: "confirm", sheetAction: true) { try await model.dialog(prompt: false) }
                             control("Prompt", id: "prompt", sheetAction: true) { try await model.dialog(prompt: true) }
                             nativeActions
                         }
-                        .listRowBackground(ColorToken.backgroundPrimary.color)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Spacing.small)
                     }
+                    .frame(maxHeight: .infinity)
                     .accessibilityIdentifier("card.behavior.actions.list")
                     .foregroundStyle(ColorToken.textPrimary.color)
-                    .scrollContentBackground(.hidden)
                     .background(ColorToken.backgroundPrimary.color)
                     .tint(ColorToken.textPrimary.color)
                 }
