@@ -148,6 +148,7 @@ enum WebViewSnapshot {
 
     #if os(macOS)
     /// An off-screen borderless window, never ordered in.
+    @MainActor
     private final class Host {
         private let window: NSWindow
 
@@ -169,6 +170,7 @@ enum WebViewSnapshot {
     }
     #else
     /// A window of its own on the app's scene, as image snapshots use.
+    @MainActor
     private final class Host {
         private let window: UIWindow
         private let previousKeyWindow: UIWindow?
