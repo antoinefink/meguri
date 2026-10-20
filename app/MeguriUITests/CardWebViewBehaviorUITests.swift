@@ -135,9 +135,9 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         guard !bounds.isEmpty else { return }
         let origin = list.coordinate(withNormalizedOffset: .zero)
         let start = origin.withOffset(CGVector(dx: bounds.midX - list.frame.minX,
-                                               dy: bounds.minY - list.frame.minY + bounds.height * 0.7))
+                                               dy: bounds.midY - list.frame.minY))
         let end = start.withOffset(CGVector(dx: 0, dy: -bounds.height * 0.3))
-        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .default, thenHoldForDuration: 0)
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
     }
 
     private func auditActions(in app: XCUIApplication, variant: String, suppressions: [AuditSuppression]) throws -> AccessibilityAudit.StateResult {
