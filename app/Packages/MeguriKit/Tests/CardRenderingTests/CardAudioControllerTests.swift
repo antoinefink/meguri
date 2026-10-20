@@ -3,7 +3,9 @@ import CoreBridge
 import Foundation
 import MediaPlayer
 import Testing
-#if !os(macOS)
+#if os(macOS)
+import CoreAudio
+#else
 import AVFoundation
 #endif
 
@@ -853,6 +855,44 @@ enum NativeCardAudioChecks {
         await controller.transportSettled()
         let nativeCompletion = try #require(nativeCompletions.first)
         print("nativeAudioQueueDelivery nativeArrival=\(nativeCompletion.arrival) mainEntry=\(nativeCompletion.mainEntry) arrivalLagRelativeToFirstEnd=\(nativeCompletion.arrival - firstEnd) mainHopLatency=\(nativeCompletion.mainEntry - nativeCompletion.arrival)")
+        logOutputConfiguration()
+    }
+
+    // Post-cleanup diagnostic only; never subtracted from measured latency.
+    private static func logOutputConfiguration() {
+        #if os(macOS)
+        func readUInt32(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector,
+                        _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> (value: UInt32, status: OSStatus) {
+            var address = AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+            var value: UInt32 = 0, size = UInt32(MemoryLayout<UInt32>.size)
+            let status = AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value)
+            return (value, status)
+        }
+        func numeric(_ result: (value: UInt32, status: OSStatus)) -> String {
+            result.status == noErr ? String(result.value) : "unavailable(status=\(result.status))"
+        }
+        let output = readUInt32(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice)
+        guard output.status == noErr, output.value != kAudioObjectUnknown else {
+            print("nativeAudioOutputConfiguration defaultOutput=unavailable status=\(output.status)")
+            return
+        }
+        let device: AudioDeviceID = output.value
+        func readFloat64(_ selector: AudioObjectPropertySelector) -> String {
+            var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            var value: Float64 = 0, size = UInt32(MemoryLayout<Float64>.size)
+            let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value)
+            return status == noErr ? String(value) : "unavailable(status=\(status))"
+        }
+        let transport = numeric(readUInt32(device, kAudioDevicePropertyTransportType))
+        let latency = numeric(readUInt32(device, kAudioDevicePropertyLatency, kAudioDevicePropertyScopeOutput))
+        let safety = numeric(readUInt32(device, kAudioDevicePropertySafetyOffset, kAudioDevicePropertyScopeOutput))
+        let buffer = numeric(readUInt32(device, kAudioDevicePropertyBufferFrameSize))
+        let running = numeric(readUInt32(device, kAudioDevicePropertyDeviceIsRunningSomewhere))
+        print("nativeAudioOutputConfiguration transportType=\(transport) deviceLatencyFrames=\(latency) safetyOffsetFrames=\(safety) bufferFrames=\(buffer) nominalSampleRate=\(readFloat64(kAudioDevicePropertyNominalSampleRate)) runningSomewhere=\(running)")
+        #else
+        let session = AVAudioSession.sharedInstance()
+        print("nativeAudioOutputConfiguration outputLatency=\(session.outputLatency) IOBufferDuration=\(session.ioBufferDuration) sampleRate=\(session.sampleRate)")
+        #endif
     }
 
     static func securelyOpenedSilentFileActuallyAdvancesAndSeeks() async throws {
