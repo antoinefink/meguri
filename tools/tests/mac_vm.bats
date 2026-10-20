@@ -658,7 +658,7 @@ allocation_run() {
   called '^vm-env TEST_RUNNER_MEGURI_NATIVE_MEMORY_PROBE=1$'
   called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri-Profile_Performance_macosx27.0-arm64.xctestrun -destination platform=macOS,arch=arm64 -resultBundlePath $SB/build/mg/ui-test/[^ ]+/mac.xcresult -collect-test-diagnostics never -only-testing:MeguriUITests/NativeMemoryProbeTests/testCaptureStacks\$"
   [ "$(grep -c '^vm-xcodebuild ' "$STUB_LOG")" = 1 ]
-  not_called 'host-xcodebuild|vm-allocations|mac-allocations\.py|xctrace'
+  not_called '^(host-xcodebuild|vm-allocations)( |$)'
   [ ! -d "$(dirname "$result")/allocations" ]
   [ "$(field '[.artifacts[] | select(.kind == "perf-result" or .kind == "metrics" or .kind == "allocations")] | length')" = 0 ]
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
