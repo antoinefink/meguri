@@ -272,6 +272,7 @@
 				4D4547555249000000000302 /* Sources */,
 				4D4547555249000000000303 /* Frameworks */,
 				4D4547555249000000000304 /* Resources */,
+				4D4547555249000000000305 /* Prepare UI device artifacts */,
 			);
 			buildRules = (
 			);
@@ -390,6 +391,23 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		4D4547555249000000000305 /* Prepare UI device artifacts */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../tools/scripts/prepare-ui-device-artifacts.sh",
+				"$(BUILT_PRODUCTS_DIR)/Meguri.app",
+			);
+			name = "Prepare UI device artifacts";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/MeguriBuildUnderTest",
+			);
+			shellPath = /bin/bash;
+			shellScript = "/bin/bash \"${SRCROOT}/../tools/scripts/prepare-ui-device-artifacts.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
 		4D4547555249000000000101 /* Check core configuration */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;

@@ -3,7 +3,7 @@
 ## Project
 
 - Build settings live only in `Config/*.xcconfig`, never in `project.pbxproj`: target settings in `<Target>.xcconfig`, configuration differences in `Debug`, `Profile`, `Release`, `AppStore` (Profile and AppStore include Release and override a few lines).
-- Folders are synchronized groups: add, move or delete files under `Meguri/`, `MeguriWidget/`, `MeguriUITests/`, `MeguriSnapshotTests/` without touching the pbxproj. A plist or entitlements file there is copied as a resource unless the folder's exception set in the pbxproj lists it. The pbxproj changes only for a new target, package product or capability.
+- Folders are synchronized groups: add, move or delete files under `Meguri/`, `MeguriWidget/`, `MeguriUITests/`, `MeguriSnapshotTests/` without touching the pbxproj. A plist or entitlements file there is copied as a resource unless the folder's exception set in the pbxproj lists it. The pbxproj changes only for a new target, package product, capability or required build phase.
 - A fresh checkout needs `tools/mg core-xcframework` before any `xcodebuild`: package resolution fails without the binary target. After that the Meguri schemes' pre-action rebuilds the core for the configuration and platform (log: `build/xcode/core-pre-action.log`; it unsets `SDKROOT`, which is `auto` here and breaks xcrun tools). A build without the pre-action (another scheme, `-target`) is caught by the Meguri target's "Check core configuration" phase, which fails when the core stamp's configuration, features (`MEGURI_CORE_FEATURES`) or slice do not match.
 - Local packages are both `XCLocalSwiftPackageReference`s and folder references in the Packages group; without the folder references test plans cannot see package test targets ("There are no test bundles available to test").
 - Pass `-derivedDataPath` under `build/`; `xcodebuild -target` without it writes `app/build/`.
@@ -58,6 +58,7 @@
 
 ## Tests
 
+- Physical iOS UI runners cannot read host build paths. The UI-test target's device-only artifact phase stages app Info.plist, executable and adjacent dylibs as plain `MeguriBuildUnderTest` resources before signing; keep its app dependency, sandbox inputs and always-run setting. Mac/simulator tests read the built app directly.
 - Use snapshots for diagnostic hierarchy dumps; reserve `isHittable` for specific action targets, since enumerating menus serializes AX queries.
 - Accessibility identifiers: `area.screen.element[.id]`, element names lowerCamel (R1964).
 - System alerts drop the identifiers of their buttons, on iOS and on the Mac. Tests reach them through the alert (`app.alerts` on iOS, `app.sheets` on the Mac) and the button's label; identifier audits must accept them.

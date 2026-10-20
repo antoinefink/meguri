@@ -2,7 +2,8 @@ import Foundation
 import XCTest
 
 /// The app build these tests run against, read from this bundle's Info.plist
-/// (MeguriUITests/Info.plist) and from the built app on disk.
+/// (MeguriUITests/Info.plist) and from the built app bytes. Physical iOS
+/// runners carry those bytes as test resources; the build Mac is unreachable.
 struct BuildUnderTest {
     enum Configuration: String, CaseIterable {
         case debug = "Debug", profile = "Profile", release = "Release", appStore = "AppStore"
@@ -13,16 +14,36 @@ struct BuildUnderTest {
     let repositoryRoot: URL
 
     static func current() throws -> BuildUnderTest {
-        let info = Bundle(for: Marker.self).infoDictionary ?? [:]
+        let bundle = Bundle(for: Marker.self)
+        let info = bundle.infoDictionary ?? [:]
         let name = try XCTUnwrap(info["MeguriBuildConfiguration"] as? String, "MeguriBuildConfiguration missing")
         let configuration = try XCTUnwrap(Configuration(rawValue: name), "unknown configuration \(name)")
+        #if os(iOS) && !targetEnvironment(simulator)
+        let appBundle = try XCTUnwrap(bundle.resourceURL, "UI-test resources missing")
+            .appending(path: "MeguriBuildUnderTest", directoryHint: .isDirectory)
+        #else
         let app = try XCTUnwrap(info["MeguriAppBundlePath"] as? String, "MeguriAppBundlePath missing")
+        let appBundle = URL(filePath: app, directoryHint: .isDirectory)
+        #endif
         let root = try XCTUnwrap(info["MeguriRepositoryRoot"] as? String, "MeguriRepositoryRoot missing")
-        return BuildUnderTest(
+        let build = BuildUnderTest(
             configuration: configuration,
-            appBundle: URL(filePath: app, directoryHint: .isDirectory),
+            appBundle: appBundle,
             repositoryRoot: URL(filePath: root, directoryHint: .isDirectory)
         )
+        #if os(iOS) && !targetEnvironment(simulator)
+        let metadata = try build.appInfo
+        let executable = try XCTUnwrap(metadata["CFBundleExecutable"] as? String, "staged executable identifier missing")
+        let validMetadata = build.hasHooks
+            && (metadata["CFBundleIdentifier"] as? String) == build.expectedBundleIdentifier
+            && !executable.isEmpty && !executable.hasPrefix(".") && !executable.contains("/")
+            && executable != "Info.plist"
+        _ = try XCTUnwrap(validMetadata ? metadata : nil, "invalid staged development app metadata")
+        // Fail closed even if a dylib exists but the executable was lost. The
+        // unchanged machOFiles scan below still checks all copied code bytes.
+        _ = try Data(contentsOf: appBundle.appending(path: executable), options: .alwaysMapped)
+        #endif
+        return build
     }
 
     // MARK: What each configuration must be (U7, Assumptions)
