@@ -1,4 +1,5 @@
 import CardRendering
+import Darwin
 import Foundation
 import WebKit
 
@@ -38,7 +39,24 @@ final class MediaFixture {
     func addThrowing(_ path: String, _ data: Data, _ mime: String) throws {
         let name = String(path.dropFirst())
         precondition(!name.contains("/"))
-        try data.write(to: root.appending(path: name), options: .atomic)
+        let descriptor = root.appending(path: name).path.withCString {
+            Darwin.open($0, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, mode_t(0o600))
+        }
+        guard descriptor >= 0 else {
+            let code = errno
+            let entries = (try? FileManager.default.contentsOfDirectory(atPath: root.path))?
+                .sorted().prefix(8).map { String($0.prefix(80)) }
+            let caseSensitive = (try? root.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]))?
+                .volumeSupportsCaseSensitiveNames
+            let detail = "Fixture open failed: name=\(String(name.prefix(80)).debugDescription), "
+                + "names=\(entries.map { String(describing: $0) } ?? "unavailable"), "
+                + "caseSensitive=\(caseSensitive.map { $0 ? "true" : "false" } ?? "unavailable"), errno=\(code)"
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSLocalizedDescriptionKey: detail])
+        }
+        // FileHandle owns the descriptor and cleans it up if writing throws.
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        try handle.write(contentsOf: data)
+        try handle.close()
         names.insert(name)
     }
     func add(_ path: String, text: String, _ mime: String) { add(path, Data(text.utf8), mime) }
