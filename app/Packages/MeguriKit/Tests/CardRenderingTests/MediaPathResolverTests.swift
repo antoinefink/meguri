@@ -18,11 +18,12 @@ import Testing
     @Test func unicodeCaseFreshArrivalAndNoSymlinks() async throws {
         let fixture = MediaFixture()
         let volume = try fixture.root.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey])
-        let caseSensitive = try #require(volume.volumeSupportsCaseSensitiveNames)
+        let caseSensitive = volume.volumeSupportsCaseSensitiveNames
+        try #require(caseSensitive != nil)
         fixture.add("/cafe\u{301}.png", Data("nfd".utf8), "image/png")
         fixture.add("/photo.jpg", Data("photo".utf8), "image/jpeg")
         fixture.add("/MIXED.png", Data("winner".utf8), "image/png")
-        if caseSensitive {
+        if caseSensitive == true {
             fixture.add("/Mixed.png", Data("other".utf8), "image/png")
             let upper = try #require(try FileManager.default.attributesOfItem(atPath: fixture.root.appending(path: "MIXED.png").path)[.systemFileNumber] as? NSNumber)
             let mixed = try #require(try FileManager.default.attributesOfItem(atPath: fixture.root.appending(path: "Mixed.png").path)[.systemFileNumber] as? NSNumber)
