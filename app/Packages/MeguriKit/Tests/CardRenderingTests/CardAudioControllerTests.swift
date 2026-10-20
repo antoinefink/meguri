@@ -147,6 +147,66 @@ import AVFoundation
         catch { return true }
     }
 
+    @Test(arguments: [true, false])
+    func nativeDelegateQueuedBeforePauseCannotUseResumedCompletion(_ success: Bool) async {
+        let completion = AVQueuePlayback.Completion()
+        var oldResults: [Bool] = [], resumedResults: [Bool] = []
+        completion.onEnd = { oldResults.append($0) }
+        let old = completion.makeDelegate()
+        // enqueue is the actual nonisolated AVAudioPlayerDelegate -> MainActor
+        // hop, shared by finish and decode-error, with no player/hardware needed.
+        let queued = old.enqueue(success: success)
+        completion.onEnd = nil // Logical pause, before the physical barrier.
+        completion.onEnd = { resumedResults.append($0) } // Immediate resume.
+        await queued.value
+        #expect(oldResults.isEmpty && resumedResults.isEmpty)
+
+        completion.invalidate() // Physical pause still precedes the resumed play.
+        let resumed = completion.makeDelegate()
+        await resumed.enqueue(success: success).value
+        await resumed.enqueue(success: !success).value
+        #expect(oldResults.isEmpty && resumedResults == [success])
+    }
+
+    @Test(arguments: [true, false])
+    func nativeDelegateQueuedBeforeSeekCannotCompleteNewPosition(_ success: Bool) async {
+        let completion = AVQueuePlayback.Completion()
+        var results: [Bool] = []
+        completion.onEnd = { results.append($0) }
+        let playing = completion.makeDelegate()
+        let old = playing.enqueue(success: success)
+        // NativeClip.seek installs a new immutable delegate on the same player
+        // Each seek changes the epoch; onEnd stays installed.
+        let firstSeek = completion.makeDelegate()
+        let intermediate = firstSeek.enqueue(success: success)
+        let latestSeek = completion.makeDelegate()
+        await old.value; await intermediate.value
+        #expect(results.isEmpty)
+        await latestSeek.enqueue(success: success).value
+        await latestSeek.enqueue(success: !success).value
+        #expect(results == [success])
+    }
+
+    @Test func nativeDelegateQueuedBeforeReplacementOrCloseIsInvalidated() async {
+        let oldCompletion = AVQueuePlayback.Completion()
+        var oldResults: [Bool] = [], newResults: [Bool] = []
+        oldCompletion.onEnd = { oldResults.append($0) }
+        let old = oldCompletion.makeDelegate()
+        let replaced = old.enqueue(success: true)
+        oldCompletion.onEnd = nil
+
+        let newCompletion = AVQueuePlayback.Completion()
+        newCompletion.onEnd = { newResults.append($0) }
+        let current = newCompletion.makeDelegate()
+        await replaced.value
+        #expect(oldResults.isEmpty && newResults.isEmpty)
+        let closing = current.enqueue(success: false)
+        newCompletion.onEnd = nil
+        await closing.value
+        await old.enqueue(success: false).value
+        #expect(oldResults.isEmpty && newResults.isEmpty)
+    }
+
     @Test func heldPlayKeepsUIResponsiveAndBurstPauseResumeCoalesces() async throws {
         let rig = try await self.rig()
         defer { rig.controller.close() }

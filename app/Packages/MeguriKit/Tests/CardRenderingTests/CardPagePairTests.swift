@@ -69,14 +69,29 @@ extension WebKitSuites {
             try await pair.load()
             var actions: [CardBridgeAction] = []
             pair.onAction = { actions.append($0) }
-            let old = Task { try await pair.prepare(CardPayload(cardID: 1, question: "<script>onUpdateHook.push(()=>new Promise(r=>setTimeout(r,60)));pycmd('ans')</script>", answer: "a")) }
+            let old = Task { try await pair.prepare(CardPayload(cardID: 1, question: "<script>onUpdateHook.push(()=>new Promise(r=>setTimeout(r,60)));if(typeof pycmd==='function')pycmd('ans')</script>", answer: "a")) }
             try await Task.sleep(for: .milliseconds(20))
-            let fresh = try await pair.prepare(CardPayload(cardID: 2, question: "<script>pycmd('ans')</script>", answer: "a"))
+            let fresh = try await pair.prepare(CardPayload(cardID: 2, question: "<p id=question>fresh question</p><script>if(typeof pycmd==='function')pycmd('ans')</script>", answer: "a"))
             await #expect(throws: (any Error).self) { try await old.value }
             #expect(actions.isEmpty)
+            let committed = AsyncStream<CardUpdate>.makeStream(bufferingPolicy: .bufferingOldest(1))
+            defer { committed.continuation.finish() }
+            pair.onCommitted = { update, _ in
+                #expect(update == fresh)
+                if update == fresh { committed.continuation.yield(update) }
+            }
             _ = try pair.present(fresh)
-            try await Task.sleep(for: .milliseconds(100))
+            let presented = try await Spike.deadline("matching overlapping prepare commit", timeout: .seconds(3)) {
+                for await update in committed.stream { return update }
+                throw Spike.Failure("missing fresh commit callback")
+            }
+            #expect(presented == fresh && pair.current.update == fresh)
+            #if os(macOS)
             #expect(actions == [.reveal])
+            #else
+            #expect(actions.isEmpty && pair.current.update?.side == .question)
+            #expect(try await pair.current.webView.callAsyncJavaScript("return typeof pycmd==='undefined' && document.getElementById('question').textContent==='fresh question';", contentWorld: .page) as? Bool == true)
+            #endif
             let cancelled = Task { try await pair.prepare(CardPayload(cardID: 3, question: "<p>cancelled</p>", answer: "a")) }
             cancelled.cancel()
             await #expect(throws: (any Error).self) { try await cancelled.value }

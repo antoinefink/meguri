@@ -15,7 +15,6 @@ public final class AVQueuePlayback: CardAudioBackend {
         let owner = PlayerOwner(player: try await Self.makePlayer(at: url), file: file)
         let metadata = await owner.metadata()
         let clip = NativeClip(owner: owner, duration: metadata.duration, seekable: metadata.seekable, onPlay: onNativePlayInterval)
-        await owner.setDelegate(clip)
         return clip
     }
 
@@ -36,27 +35,39 @@ public final class AVQueuePlayback: CardAudioBackend {
         }
         private let player: AVAudioPlayer
         private let file: MediaFile
+        private var delegate: CompletionDelegate?
         private var stopped = false
         init(player: sending AVAudioPlayer, file: MediaFile) { self.player = player; self.file = file }
         func metadata() -> Metadata { Metadata(duration: player.duration, seekable: player.duration.isFinite) }
-        func setDelegate(_ delegate: NativeClip) { player.delegate = delegate }
-        func play() throws -> (TimeInterval, TimeInterval) {
+        private func setDelegate(_ delegate: CompletionDelegate?) {
+            self.delegate = delegate
+            player.delegate = delegate
+        }
+        func play(delegate: CompletionDelegate) throws -> (TimeInterval, TimeInterval) {
+            guard !stopped else { throw Failure.unsupported }
+            setDelegate(delegate)
             let startedAt = ProcessInfo.processInfo.systemUptime
-            guard !stopped, player.play(atTime: player.deviceCurrentTime + 0.005) else { throw Failure.unsupported }
+            guard player.play(atTime: player.deviceCurrentTime + 0.005) else { throw Failure.unsupported }
             return (startedAt, ProcessInfo.processInfo.systemUptime)
         }
-        func pause() { if !stopped { player.pause() } }
+        func pause() {
+            guard !stopped else { return }
+            setDelegate(nil)
+            player.pause()
+        }
         func stop() async {
             guard !stopped else { return }
             stopped = true
             player.stop()
-            player.delegate = nil
+            setDelegate(nil)
             // Neither the descriptor nor the session may be released during stop.
             await file.close()
         }
-        func seek(to time: TimeInterval) throws {
+        func seek(to time: TimeInterval, delegate: CompletionDelegate) throws {
             guard !stopped else { throw CancellationError() }
+            setDelegate(nil)
             player.currentTime = time
+            setDelegate(delegate)
         }
         func sample() -> CardAudioSample {
             let position = player.currentTime
@@ -64,33 +75,76 @@ public final class AVQueuePlayback: CardAudioBackend {
         }
     }
 
-    private final class NativeClip: NSObject, CardAudioClip, AVAudioPlayerDelegate {
+    /// Shared by the native delegate and deterministic, hardware-free checks.
+    /// Only MainActor validates epochs or reads the mutable completion.
+    @MainActor final class Completion {
+        var onEnd: ((Bool) -> Void)? { didSet { invalidate() } }
+        private var epoch: UInt64 = 0
+
+        func invalidate() { epoch += 1 }
+        func makeDelegate() -> CompletionDelegate {
+            invalidate()
+            return CompletionDelegate(completion: self, epoch: epoch)
+        }
+        fileprivate func deliver(_ success: Bool, epoch: UInt64) {
+            guard self.epoch == epoch else { return }
+            invalidate() // Finish/decode-error duplicates complete this play only once.
+            onEnd?(success)
+        }
+    }
+
+    nonisolated final class CompletionDelegate: NSObject, AVAudioPlayerDelegate, Sendable {
+        private weak let completion: Completion?
+        private let epoch: UInt64
+        init(completion: Completion, epoch: UInt64) {
+            self.completion = completion; self.epoch = epoch
+            super.init()
+        }
+        /// The production delegate hop; the task is exposed internally so tests
+        /// can enqueue before an epoch change and await that exact delivery.
+        @discardableResult func enqueue(success: Bool) -> Task<Void, Never> {
+            let completion = self.completion, epoch = self.epoch
+            return Task { @MainActor in
+                guard let completion else { return }
+                completion.deliver(success, epoch: epoch)
+            }
+        }
+        func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+            enqueue(success: flag)
+        }
+        func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: (any Error)?) {
+            enqueue(success: false)
+        }
+    }
+
+    private final class NativeClip: NSObject, CardAudioClip {
         private let owner: PlayerOwner
+        private let completion = Completion()
         let duration: TimeInterval?
         let seekable: Bool
-        var onEnd: ((Bool) -> Void)?
+        var onEnd: ((Bool) -> Void)? {
+            get { completion.onEnd }
+            set { completion.onEnd = newValue }
+        }
         private let onPlay: ((TimeInterval, TimeInterval) -> Void)?
         init(owner: PlayerOwner, duration: TimeInterval, seekable: Bool, onPlay: ((TimeInterval, TimeInterval) -> Void)?) {
             self.owner = owner; self.duration = duration; self.seekable = seekable; self.onPlay = onPlay
             super.init()
         }
         isolated deinit {
+            completion.onEnd = nil
             let owner = self.owner
             Task { await owner.stop() }
         }
         func play() async throws {
-            let (startedAt, finishedAt) = try await owner.play()
+            let (startedAt, finishedAt) = try await owner.play(delegate: completion.makeDelegate())
             onPlay?(startedAt, finishedAt)
         }
-        func pause() async { await owner.pause() }
+        func pause() async { completion.invalidate(); await owner.pause() }
         func stop() async { onEnd = nil; await owner.stop() }
-        func seek(to time: TimeInterval) async throws { try await owner.seek(to: time) }
+        func seek(to time: TimeInterval) async throws {
+            try await owner.seek(to: time, delegate: completion.makeDelegate())
+        }
         func sample() async -> CardAudioSample { await owner.sample() }
-        nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-            Task { @MainActor [weak self] in self?.onEnd?(flag) }
-        }
-        nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: (any Error)?) {
-            Task { @MainActor [weak self] in self?.onEnd?(false) }
-        }
     }
 }
