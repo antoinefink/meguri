@@ -4,9 +4,13 @@ Every verification job belongs to a tier (R1950). `tools/gate/tiers.yaml` is the
 
 ## Current verification cadence
 
-Antoine's updated goal on 2026-10-20 explicitly requires a full gate before accepting each unit, superseding the earlier focused-only WIP cadence. Each unit also needs tests for its changed behavior, affected-platform builds, independent review and provenance/privacy/similarity checks. Record the selected checks and receipts in its review log. Resolve failures before moving to the next unit.
+Antoine’s updated goal on 2026-10-20 allows full integration gates to cover up to 20 units that change only Rust internals. Each unit still needs focused Docker/Rust tests, independent review, its own commit and review log, and provenance/privacy/similarity checks. Record actual results and resolve known failures before continuing.
 
-Run `tools/mg gate --base <unit-start-commit>` after committing the completed unit and its review log. Milestone and final acceptance suites remain required. Gate arguments, path triggers, result validity, quarantine, catch-up and milestone evaluation stay as defined below.
+Record the batch base before its first unit, its unit list and each unit’s starting commit. Mark completed units as awaiting the batch gate until that gate passes, then link its shared receipt from every covered review log. Run `tools/mg gate --base <batch-start-commit>` after at most 20 units. Close the batch at milestone boundaries and before changes to Swift/FFI, shared schemas, sync contracts, tooling or other meaningful integration risks. Resolve gate failures before starting the next batch or crossing a required boundary.
+
+Units outside that scope use a full `tools/mg gate --base <unit-start-commit>`. Focused checks diagnose changed behavior; the full gate’s native suites also provide affected-platform verification. Run separate native checks first only when a platform-specific risk or unresolved failure warrants them. Do not duplicate full gates for isolated Rust changes within an open batch.
+
+Milestone and final acceptance suites and required human evidence remain mandatory. Gate arguments, path triggers, result validity, quarantine, catch-up and milestone evaluation stay as defined below.
 
 | Tier | When | What | Command |
 |---|---|---|---|

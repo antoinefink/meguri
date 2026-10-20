@@ -6,7 +6,7 @@ Antoine changed the workflow on 2026-10-18. Work directly on `master` in the mai
 
 Record the unit's starting commit before bringing in its work. Keep the spec, implementation, independent review and fix steps, clean-room restrictions and review log. Commit WIP freely with co-author attribution. Before accepting a unit, commit its `Unit:` trailer and record passing focused tests, affected-platform builds, and provenance/privacy/similarity checks. Resolve known failures before acceptance. Only push `master`, without force. `tools/mg merge` is not required.
 
-Antoine's updated goal on 2026-10-20 explicitly requires a full `tools/mg gate --base <unit-start-commit>` before accepting each unit, superseding the earlier focused-only WIP cadence. Keep focused checks during implementation and record the full passing receipt in the review log. Resolve failures before moving to the next unit. Final suites and human evidence remain required.
+Antoine’s updated goal on 2026-10-20 allows up to 20 units changing only Rust internals per full gate. Follow `docs/process/tiers.md`: keep focused Docker/Rust tests, independent review and separate commits per unit; record the batch base, covered units and shared gate receipt. Units awaiting a batch gate are implemented but not yet accepted. Run full gates at milestone boundaries and earlier for Swift/FFI, shared schemas, sync contracts, tooling or meaningful integration risk. Resolve failures before the next batch or required boundary. Final suites and human evidence remain required.
 
 Manual device and reference checks are deferred until the final session (Antoine, 2026-10-20). Continue with automated VM tests. Final evidence remains required.
 
