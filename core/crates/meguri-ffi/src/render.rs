@@ -176,6 +176,27 @@ pub fn compare_typed_answer(descriptor: TypeAnswerDescriptor, typed: String) -> 
     ))
 }
 
+impl From<meguri_template::ErrorKind> for RenderErrorKind {
+    fn from(value: meguri_template::ErrorKind) -> Self {
+        use meguri_template::ErrorKind as E;
+        match value {
+            E::UnclosedConditional => Self::UnclosedConditional,
+            E::UnopenedConditional => Self::UnopenedConditional,
+            E::MismatchedConditional => Self::MismatchedConditional,
+            E::UnknownField => Self::UnknownField,
+            E::UnknownConditional => Self::UnknownConditional,
+        }
+    }
+}
+impl From<meguri_template::av_tags::AvSide> for RenderSide {
+    fn from(value: meguri_template::av_tags::AvSide) -> Self {
+        match value {
+            meguri_template::av_tags::AvSide::Question => Self::Question,
+            meguri_template::av_tags::AvSide::Answer => Self::Answer,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,26 +234,5 @@ mod tests {
             meguri_engine::EngineError::from(error),
             meguri_engine::EngineError::InvalidTypeAnswerReplacement
         );
-    }
-}
-
-impl From<meguri_template::ErrorKind> for RenderErrorKind {
-    fn from(value: meguri_template::ErrorKind) -> Self {
-        use meguri_template::ErrorKind as E;
-        match value {
-            E::UnclosedConditional => Self::UnclosedConditional,
-            E::UnopenedConditional => Self::UnopenedConditional,
-            E::MismatchedConditional => Self::MismatchedConditional,
-            E::UnknownField => Self::UnknownField,
-            E::UnknownConditional => Self::UnknownConditional,
-        }
-    }
-}
-impl From<meguri_template::av_tags::AvSide> for RenderSide {
-    fn from(value: meguri_template::av_tags::AvSide) -> Self {
-        match value {
-            meguri_template::av_tags::AvSide::Question => Self::Question,
-            meguri_template::av_tags::AvSide::Answer => Self::Answer,
-        }
     }
 }

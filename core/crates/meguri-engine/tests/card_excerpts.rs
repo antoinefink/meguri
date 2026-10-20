@@ -27,7 +27,12 @@ fn fixture(cloze: bool, front: &str, browser: &str, back: &str, fields: &[&str])
             templates: vec![notetypes::NewTemplate {
                 name: "Face".into(),
                 front: front.into(),
-                back: "{{Back}}".into(),
+                back: if cloze {
+                    "{{cloze:Front}}<br>{{Back}}"
+                } else {
+                    "{{Back}}"
+                }
+                .into(),
                 browser_front: browser.into(),
                 browser_back: back.into(),
             }],

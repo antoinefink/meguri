@@ -1,7 +1,7 @@
 import Dispatch
 import Foundation
 import Testing
-internal import MeguriCoreBindings
+import MeguriCoreBindings
 @testable import CoreBridge
 
 @Suite struct CardExcerptsTests {
