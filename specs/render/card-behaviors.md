@@ -78,6 +78,8 @@ Only the visible page belongs in the accessibility tree and key-view loop, as me
 
 VoiceOver movement is not permission to make the web view first responder or raise its keyboard while an external editor, panel or sheet owns keyboard focus. Preserve C6.4's native gate for stock automatic type-answer focus and its existing explicit-card-focus behavior. A resize or recovery is not a new explicit user focus request.
 
+**Delivery scope (Antoine, 2026-10-20).** Remaining actual VoiceOver cursor and script work is optional follow-up after the application goal is complete. Keyboard ownership, ordinary accessibility audits, labels, contrast and hit targets remain required. Failed VoiceOver results stay failed; this change records scope, not a passing result.
+
 Background suspension pauses in-page audio/video through the existing U67/C8 lifecycle. U175/U187 coordinate native audio stop and snapshot ordering. An ordinary foreground return does not automatically replay audio. Neither backgrounding nor accessibility changes the session's card or side.
 
 ## B7. Inspector eligibility
@@ -108,3 +110,5 @@ Keep R523's declared setting defaults unchanged: default off, on in personal bui
 | Known non-AppStore Debug, Profile and personal Release, setting off then on | inspection changes from disabled to enabled in each configuration; R523 setting defaults unchanged |
 
 These are component obligations, not recorded test or physical-device results. Native/WebKit checks run through tools/mg in the VM. Final device and reference evidence retains its existing owners and pending status.
+
+The VoiceOver-cursor part of the reveal case follows B6's optional post-goal scope. Keep its failed tests and receipts for that follow-up. Its external-keyboard protection and all remaining required accessibility checks still apply.
