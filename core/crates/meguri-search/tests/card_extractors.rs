@@ -96,7 +96,7 @@ fn scalar_fields_are_independent_and_json_rules_are_extractor_specific() {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .unwrap();
-        assert_eq!(got, (s.map(f64::from), d.map(f64::from), pos), "{text}");
+        assert_eq!(got, (s.map(f64::from), d, pos), "{text}");
     }
     // General CardData keeps its paired-memory and lenient cd behavior.
     assert!(
