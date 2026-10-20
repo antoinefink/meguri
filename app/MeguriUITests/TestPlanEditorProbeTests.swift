@@ -1,5 +1,6 @@
 import XCTest
 #if os(macOS)
+import AppKit
 import Darwin
 #endif
 
@@ -35,6 +36,7 @@ final class TestPlanEditorProbeTests: XCTestCase {
             let value: String?
         }
         let types: [String: XCUIElement.ElementType] = [
+            "any": .any, "radio": .radioButton,
             "button": .button, "popup": .popUpButton, "menuItem": .menuItem,
             "checkbox": .checkBox, "switch": .switch, "staticText": .staticText,
             "disclosure": .disclosureTriangle, "textField": .textField, "searchField": .searchField
@@ -46,8 +48,14 @@ final class TestPlanEditorProbeTests: XCTestCase {
         let actions = try JSONDecoder().decode([Action].self, from: data)
         XCTAssertLessThanOrEqual(actions.count, 12)
         for action in actions {
-            XCTAssertTrue(["click", "text", "save"].contains(action.action), "Unknown action")
-            if action.action != "save" {
+            XCTAssertTrue(["click", "text", "save", "key"].contains(action.action), "Unknown action")
+            if action.action == "key" {
+                XCTAssertFalse(notices, "Key actions are Xcode-only")
+                XCTAssertTrue(action.type == nil && action.label == nil && action.identifier == nil
+                              && action.index == nil, "Key accepts only value, scope and expectText")
+                XCTAssertTrue(action.value == "return" || action.value == "escape", "Unsupported key")
+                XCTAssertFalse(try XCTUnwrap(action.expectText).isEmpty, "Key requires nonempty expectText")
+            } else if action.action != "save" {
                 XCTAssertNotNil(action.type.flatMap { types[$0] }, "Unknown control type")
                 XCTAssertTrue(action.label != nil || action.identifier != nil || action.index != nil,
                               "An explicit selector is required")
@@ -60,7 +68,9 @@ final class TestPlanEditorProbeTests: XCTestCase {
             if action.action == "text" {
                 XCTAssertTrue(action.type == "textField" || action.type == "searchField")
                 XCTAssertLessThanOrEqual(try XCTUnwrap(action.value).count, 3_000)
-            } else { XCTAssertNil(action.value, "Only text actions accept a value") }
+            } else if action.action != "key" {
+                XCTAssertNil(action.value, "Only text and key actions accept a value")
+            }
         }
         if !notices { app.activate() }
         func roots() -> [XCUIElement] {
@@ -116,6 +126,13 @@ final class TestPlanEditorProbeTests: XCTestCase {
                 XCTAssertTrue(normalWindow(), "Save requires a normal Xcode window")
                 try app.bringToFront(bundleIdentifier: bundle)
                 app.typeKey("s", modifierFlags: .command)
+            } else if action.action == "key" {
+                if normalWindow() { try app.bringToFront(bundleIdentifier: bundle) }
+                else { app.activate() }
+                XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, "com.apple.dt.Xcode")
+                XCTAssertEqual(app.state, .runningForeground)
+                app.typeKey(action.value == "return" ? XCUIKeyboardKey.return.rawValue : XCUIKeyboardKey.escape.rawValue,
+                            modifierFlags: [])
             } else {
                 let type = try XCTUnwrap(action.type.flatMap { types[$0] })
                 var query = root.descendants(matching: type)
