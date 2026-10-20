@@ -1,10 +1,6 @@
-# specs/conformance/dsl.md D9.1. Active: Meguri must pass them (T1 for the
-# live chain). They need only the browser adapters (meguri-testkit
-# exec/browser.rs, U83), the clock and the storage area: four T0 scenarios
-# open the schema-18 storage fixture, and config/live-roundtrip's Meguri
-# segment opens the collection the oracle hands over
-# (specs/browser/config-keys.md K13). config/new-collection starts from the
-# executor's new collection (storage/new-collection B11), bootstrapped by U28.
+# Active cases use the real browser adapter. Config cases follow K13;
+# question/deck excerpts use the read-only U85a engine path (columns C16).
+# T1 runs the live chain; new-collection starts from the U28 bootstrap.
 area: browser
 active:
   - "config/absent-defaults"
@@ -13,3 +9,11 @@ active:
   - "config/other-keys-untouched"
   - "config/write-shapes"
   - "config/wrong-shapes"
+  - "columns/question-deck/browser-format"
+  - "columns/question-deck/cloze"
+  - "columns/question-deck/damaged"
+  - "columns/question-deck/damaged-notetype"
+  - "columns/question-deck/deck"
+  - "columns/question-deck/media-line"
+  - "columns/question-deck/missing"
+  - "columns/question-deck/read-only"
