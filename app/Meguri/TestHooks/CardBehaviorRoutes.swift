@@ -395,6 +395,7 @@ extension TestHooks {
                     .tint(ColorToken.textPrimary.color)
                 }
                 .background(ColorToken.backgroundPrimary.color)
+                .presentationSizing(.page)
             }
             #endif
             .onAppear {
