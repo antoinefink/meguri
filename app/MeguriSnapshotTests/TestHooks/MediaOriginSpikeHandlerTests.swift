@@ -113,6 +113,11 @@ import WebKit
         #expect(original.urlSchemeHandler(forURLScheme: scheme) === handler.engine.media)
         #expect(configuration.websiteDataStore === original.websiteDataStore)
         #expect(configuration.userContentController === original.userContentController)
+        #expect(configuration.mediaTypesRequiringUserActionForPlayback == original.mediaTypesRequiringUserActionForPlayback)
+        #if !os(macOS)
+        #expect(configuration.defaultWebpagePreferences.preferredContentMode == original.defaultWebpagePreferences.preferredContentMode)
+        #expect(configuration.allowsInlineMediaPlayback == original.allowsInlineMediaPlayback)
+        #endif
         let page = Page(configuration, handler: handler)
         try await page.open("_anki/page.html")
         let result = await page.run("""

@@ -26,10 +26,18 @@ extension TestHooks {
         static func configuration(_ handler: Handler, persistent: Bool) -> WKWebViewConfiguration {
             let engine = CardWebConfiguration(store: persistent ? storeIdentifier.map { WKWebsiteDataStore(forIdentifier: $0) } ?? .nonPersistent() : .nonPersistent())
             handler.engine = engine
+            // Share production policy and controller (including ready()'s
+            // rules), but start with an empty scheme-handler registry.
+            let source = engine.configuration
+            let configuration = WKWebViewConfiguration()
+            configuration.websiteDataStore = source.websiteDataStore
+            configuration.userContentController = source.userContentController
+            configuration.mediaTypesRequiringUserActionForPlayback = source.mediaTypesRequiringUserActionForPlayback
+            configuration.defaultWebpagePreferences = source.defaultWebpagePreferences
+            #if !os(macOS)
+            configuration.allowsInlineMediaPlayback = source.allowsInlineMediaPlayback
+            #endif
             // Measurement proxy only: all responses come from production.
-            let configuration = engine.configuration.copy() as! WKWebViewConfiguration
-            // The copy retains production's registration; replace it only here.
-            configuration.setURLSchemeHandler(nil, forURLScheme: scheme)
             configuration.setURLSchemeHandler(handler, forURLScheme: scheme)
             return configuration
         }
