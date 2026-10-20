@@ -77,11 +77,11 @@ mg_app_build() {
     [ "$platform" != mac ] || sdk=macosx
     # Select exactly as the VM consumer does, without copying or launching.
     xctestrun="$(MG_APP_TEST_SCHEME="$scheme" mg__vm_xctestrun "$plan" "$sdk" "$config")"
-    policy="$(python3 "$MG_TOOLS/scripts/performance-test-policy.py" "$xctestrun")"
+    policy="$(python3 "$MG_TOOLS/scripts/performance-test-policy.py" "$xctestrun" "$MG_ROOT/app/TestPlans/Performance.xctestplan")"
     rc=$?
     [ -z "$policy" ] || mg_detail performance_test_policy "$policy"
     if [ "$rc" -ne 0 ]; then
-      mg_failure performance-test-policy "generated Profile Performance UI policy is unavailable or instrumented; require both UI-app checker flags explicitly false and no MainThreadChecker/libRPAC environment injection; fix the Performance plan/Profile scheme and regenerate (do not edit the xctestrun)"
+      mg_failure performance-test-policy "Profile Performance checker policy is unavailable or unsafe; require disabled source checker policies, generated UI-app checker flags false or omitted, and no MainThreadChecker/libRPAC environment injection; fix the Performance plan/Profile scheme and regenerate (do not edit the xctestrun)"
       mg_message "$MG_JOB: generated performance test policy failed; no UI execution is allowed"
       mg_status fail
       return 1

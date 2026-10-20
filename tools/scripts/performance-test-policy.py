@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refuse instrumented Profile Performance xctestruns; never modify them."""
+"""Validate disabled source/generated Performance checker policies read-only."""
 import json
 import plistlib
 import sys
@@ -7,17 +7,50 @@ import sys
 
 FLAGS = ("UITargetAppMainThreadCheckerEnabled",
          "UITargetAppPerformanceAntipatternCheckerEnabled")
+SOURCE_POLICIES = ("mainThreadCheckerDetectionPolicy", "runtimeIssueDetection",
+                   "threadPerformanceCheckerRuntimeIssueDetection")
 
 
-def inspect(path):
+def inspect(path, plan_path):
     # Fixed-size aggregates only: no target names, paths or environment values.
     report = {
         "status": "fail", "reason": "unavailable", "ui_targets": 0,
+        "source_policy_disabled": False,
         "flags": {key: dict(false=0, true=0, missing=0, invalid=0) for key in FLAGS},
         "environment_dictionaries": 0,
         "main_thread_checker_injections": 0,
         "performance_antipattern_checker_injections": 0,
     }
+    try:
+        with open(plan_path, "r", encoding="utf-8") as source:
+            plan = json.load(source)
+    except OSError:
+        report["reason"] = "source-policy-unavailable"
+        return report
+    except Exception:
+        report["reason"] = "source-policy-malformed"
+        return report
+    if (not isinstance(plan, dict)
+            or not isinstance(plan.get("defaultOptions"), dict)
+            or not isinstance(plan.get("configurations"), list)
+            or not plan["configurations"]):
+        report["reason"] = "source-policy-malformed"
+        return report
+    options = [plan["defaultOptions"]]
+    for configuration in plan["configurations"]:
+        if not isinstance(configuration, dict) or not isinstance(configuration.get("options"), dict):
+            report["reason"] = "source-policy-malformed"
+            return report
+        options.append(configuration["options"])
+    for index, option in enumerate(options):
+        for key in SOURCE_POLICIES:
+            if index > 0 and key not in option:
+                continue
+            value = option.get(key)
+            if not isinstance(value, dict) or set(value) != {"enabled"} or value["enabled"] is not False:
+                report["reason"] = "source-policy-conflict"
+                return report
+    report["source_policy_disabled"] = True
     try:
         with open(path, "rb") as source:
             data = plistlib.load(source)
@@ -77,14 +110,15 @@ def inspect(path):
         return report
     report["reason"] = "policy"
     if (report["ui_targets"] > 0
-            and all(report["flags"][key]["false"] == report["ui_targets"] for key in FLAGS)
+            and all(report["flags"][key]["true"] == 0
+                    and report["flags"][key]["invalid"] == 0 for key in FLAGS)
             and report["main_thread_checker_injections"] == 0
             and report["performance_antipattern_checker_injections"] == 0):
-        report.update(status="pass", reason="uninstrumented")
+        report.update(status="pass", reason="checker-policy-disabled")
     return report
 
 
 if __name__ == "__main__":
-    result = inspect(sys.argv[1] if len(sys.argv) == 2 else "")
+    result = inspect(*sys.argv[1:]) if len(sys.argv) == 3 else inspect("", "")
     print(json.dumps(result, sort_keys=True))
     sys.exit(0 if result["status"] == "pass" else 1)

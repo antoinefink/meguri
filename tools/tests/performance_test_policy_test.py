@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake generated plists and build commands, exercised by mg selftest."""
+"""Fake source plans, generated plists and build commands for mg selftest."""
 import copy
 import json
 import os
@@ -14,6 +14,13 @@ TOOLS = Path(__file__).resolve().parents[1]
 VALIDATOR = TOOLS / "scripts/performance-test-policy.py"
 FLAGS = ("UITargetAppMainThreadCheckerEnabled",
          "UITargetAppPerformanceAntipatternCheckerEnabled")
+SOURCE_POLICIES = ("mainThreadCheckerDetectionPolicy", "runtimeIssueDetection",
+                   "threadPerformanceCheckerRuntimeIssueDetection")
+
+
+def source_plan():
+    return {"defaultOptions": {key: {"enabled": False} for key in SOURCE_POLICIES},
+            "configurations": [{"options": {}}]}
 
 
 def target():
@@ -30,23 +37,40 @@ class Policy(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="policy quote's space ")
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / "generated.xctestrun"
+        self.plan = Path(self.tmp.name) / "Performance.xctestplan"
+        self.plan.write_text(json.dumps(source_plan()))
 
     def check(self, data, passes=False, fmt=plistlib.FMT_XML):
         if data is not None:
             self.path.write_bytes(plistlib.dumps(data, fmt=fmt))
         before = self.path.read_bytes() if self.path.exists() else None
-        result = subprocess.run([sys.executable, str(VALIDATOR), str(self.path)],
+        plan_before = self.plan.read_bytes() if self.plan.exists() else None
+        result = subprocess.run([sys.executable, str(VALIDATOR), str(self.path), str(self.plan)],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0 if passes else 1, result.stderr)
         self.assertEqual(result.stderr, "")
         self.assertLess(len(result.stdout), 1200)
         self.assertEqual(before, self.path.read_bytes() if self.path.exists() else None)
+        self.assertEqual(plan_before, self.plan.read_bytes() if self.plan.exists() else None)
         return json.loads(result.stdout)
 
     def test_valid(self):
         for fmt in (plistlib.FMT_XML, plistlib.FMT_BINARY):
             report = self.check(document([target(), target()]), True, fmt)
             self.assertEqual(report["ui_targets"], 2)
+            self.assertIs(report["source_policy_disabled"], True)
+            self.assertEqual(report["reason"], "checker-policy-disabled")
+            report = self.check(document([{"IsUITestBundle": True}]), True, fmt)
+            for key in FLAGS:
+                self.assertEqual(report["flags"][key]["missing"], 1)
+        for key in FLAGS:
+            ui = target()
+            del ui[key]
+            self.check(document([ui]), True)
+        plan = source_plan()
+        plan["configurations"].append({"options": copy.deepcopy(plan["defaultOptions"])})
+        self.plan.write_text(json.dumps(plan))
+        self.check(document([target()]), True)
         self.check({"MeguriUITests": target(), "__xctestrun_metadata__": {"FormatVersion": 1}}, True)
         ui = target()
         del ui["IsUITestBundle"]
@@ -59,20 +83,65 @@ class Policy(unittest.TestCase):
 
     def test_flags(self):
         for key in FLAGS:
-            for value in ("missing", True, 0, "NO"):
+            for value in (True, 0, "NO", [], {}):
                 with self.subTest(key=key, value=value):
                     ui = target()
-                    if value == "missing":
-                        del ui[key]
-                    else:
-                        ui[key] = value
+                    ui[key] = value
                     self.check(document([ui]))
+
+    def test_source_policy(self):
+        data = document([{"IsUITestBundle": True}])
+        self.plan.unlink()
+        report = self.check(data)
+        self.assertEqual(report["reason"], "source-policy-unavailable")
+        self.assertIs(report["source_policy_disabled"], False)
+        for content in ("not JSON", '{"secret":', "[]"):
+            self.plan.write_text(content)
+            self.assertEqual(self.check(data)["reason"], "source-policy-malformed")
+        for key in SOURCE_POLICIES:
+            for value in (None, {}, True, {"enabled": True}, {"enabled": 0},
+                          {"enabled": "false"}, {"enabled": False, "extra": False}):
+                for overridden in (False, True):
+                    with self.subTest(key=key, value=value, overridden=overridden):
+                        plan = source_plan()
+                        options = plan["configurations"][0]["options"] if overridden else plan["defaultOptions"]
+                        options[key] = value
+                        self.plan.write_text(json.dumps(plan))
+                        self.assertIs(self.check(data)["source_policy_disabled"], False)
+            plan = source_plan()
+            del plan["defaultOptions"][key]
+            self.plan.write_text(json.dumps(plan))
+            self.check(data)
+        for configurations in (None, {}, [], [None], [{}], [{"options": []}],
+                               [{"options": {}}, {"options": {SOURCE_POLICIES[0]: {"enabled": True}}}]):
+            plan = source_plan()
+            plan["configurations"] = configurations
+            self.plan.write_text(json.dumps(plan))
+            self.check(data)
+        for key in ("defaultOptions", "configurations"):
+            plan = source_plan()
+            del plan[key]
+            self.plan.write_text(json.dumps(plan))
+            self.check(data)
+        for defaults in (None, [], False):
+            plan = source_plan()
+            plan["defaultOptions"] = defaults
+            self.plan.write_text(json.dumps(plan))
+            self.check(data)
+
+    def test_wrong_argc(self):
+        self.path.write_bytes(plistlib.dumps(document([target()])))
+        for args in ([], [str(self.path)], [str(self.path), str(self.plan), "extra"]):
+            result = subprocess.run([sys.executable, str(VALIDATOR), *args], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stderr, "")
+            self.assertEqual(json.loads(result.stdout)["status"], "fail")
 
     def test_injection(self):
         for environment in ("EnvironmentVariables", "TestingEnvironmentVariables", "UITargetAppEnvironmentVariables"):
             for library, count in (("__DEVELOPERUSRLIB__/libMainThreadChecker.dylib", "main_thread_checker_injections"),
                                    ("/usr/lib/libRPAC.dylib", "performance_antipattern_checker_injections")):
-                ui = dict(target(), **{environment: {"DYLD_INSERT_LIBRARIES": library}})
+                ui = dict(IsUITestBundle=True, **{environment: {"DYLD_INSERT_LIBRARIES": library}})
                 self.assertEqual(self.check(document([ui]))[count], 1)
         # Also reject injection on a non-UI target in the selected file.
         self.check(document([target(), {"TestingEnvironmentVariables": {"DYLD_INSERT_LIBRARIES": "libRPAC.dylib"}}]))
@@ -93,6 +162,9 @@ class Policy(unittest.TestCase):
     def test_bounded_metadata(self):
         ui = dict(target(), EnvironmentVariables={"SECRET_TOKEN": "secret-never-report-me" * 10000})
         data = document([copy.deepcopy(ui) for _ in range(100)])
+        plan = source_plan()
+        plan["private"] = "secret-never-report-me" * 10000
+        self.plan.write_text(json.dumps(plan))
         report = self.check(data, True)
         self.assertNotIn("secret", json.dumps(report).lower())
         self.assertNotIn("TOKEN", json.dumps(report))
@@ -105,10 +177,13 @@ class BuildGuard(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="build policy quote's space ") as scratch:
             root = Path(scratch)
             fixture = root / "fixture.plist"
-            ui = target()
+            plan_path = root / "app/TestPlans/Performance.xctestplan"
+            plan_path.parent.mkdir(parents=True)
+            plan_path.write_text(json.dumps(source_plan()))
+            ui = {"IsUITestBundle": True}
             ui["TestBundlePath"] = "__TESTROOT__/" + config + ("-iphonesimulator" if platform != "mac" else "") + "/MeguriUITests.xctest"
             if not valid:
-                del ui[FLAGS[0]]
+                ui[FLAGS[0]] = True
             fixture.write_bytes(plistlib.dumps(document([ui])))
             # Exercise the existing selector without sourcing VM setup.
             source = (TOOLS / "mg.d/mac-vm.sh").read_text()

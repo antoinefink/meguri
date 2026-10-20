@@ -40,6 +40,7 @@ final class CardSwapTimingGateTests: XCTestCase {
         XCTAssertEqual(CardSwapTimingGate.mode(simulator: false, virtualMachine: nil), .strict)
     }
 
+    @MainActor
     func testThisRunnersModeMatchesItsEnvironment() {
         #if targetEnvironment(simulator)
         XCTAssertEqual(CardSwapTimingGate.current, .functionOnly("the iOS simulator"))
