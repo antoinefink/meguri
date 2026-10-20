@@ -88,7 +88,7 @@ extension TestHooks {
             let scriptLink = String(localized: "Run card script", table: "CardBehaviorRoutes")
             let html = """
                 <style>body{margin:0}input{font:inherit;min-height:44px;max-width:100%;box-sizing:border-box}
-                a{display:inline-block;padding:16px}#viewport{height:100vh}#space{height:200vh}#bottom{position:fixed;bottom:0;margin:0}</style>
+                a{display:block;min-height:44px;box-sizing:border-box;padding:16px}#viewport{height:100vh}#space{height:200vh}#bottom{position:fixed;bottom:0;margin:0}</style>
                 <h1>\(title)</h1><input id=typeans aria-label="\(inputLabel)" autocapitalize=off autocorrect=off spellcheck=false>
                 <p><a href="#bottom">\(jump)</a> <a href="javascript:window.cardScriptRan=true;void(0)">\(scriptLink)</a></p>
                 <div id=viewport></div><div id=space></div><p id=bottom>\(bottom)</p>
