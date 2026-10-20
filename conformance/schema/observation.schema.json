@@ -878,6 +878,80 @@
           "type": "array",
           "items": { "$ref": "#/$defs/deck_tree_node" }
         },
+        "queue": {
+          "description": "specs/conformance/queue-ops.md Q2: the current deck's study queue in presentation order, each card's kind, and the queue's counts.",
+          "type": "object",
+          "required": [
+            "cards",
+            "kinds",
+            "counts"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "cards": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^(#c[1-9][0-9]*|[0-9]+)$"
+              }
+            },
+            "kinds": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "new",
+                  "learning",
+                  "review"
+                ]
+              }
+            },
+            "counts": {
+              "$ref": "#/$defs/queue_counts"
+            }
+          }
+        },
+        "deck_counts": {
+          "description": "queue-ops.md Q3: the deck list's top-level nodes in order, with the counts it shows.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/deck_counts_node"
+          }
+        },
+        "congrats": {
+          "description": "queue-ops.md Q4: a finished deck's facts for the current deck (specs/sched/counts.md C7).",
+          "type": "object",
+          "required": [
+            "learn_remaining",
+            "secs_until_next_learn",
+            "review_remaining",
+            "new_remaining",
+            "have_sched_buried",
+            "have_user_buried"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "learn_remaining": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "secs_until_next_learn": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "review_remaining": {
+              "type": "boolean"
+            },
+            "new_remaining": {
+              "type": "boolean"
+            },
+            "have_sched_buried": {
+              "type": "boolean"
+            },
+            "have_user_buried": {
+              "type": "boolean"
+            }
+          }
+        },
         "converge": {
           "description": "sync-ops.md S7.5.",
           "type": "object",
@@ -894,6 +968,63 @@
               }
             },
             "dump": { "$ref": "#/$defs/db_dump" }
+          }
+        }
+      }
+    },
+    "queue_counts": {
+      "type": "object",
+      "required": [
+        "new",
+        "learning",
+        "review"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "new": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "learning": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "review": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "deck_counts_node": {
+      "type": "object",
+      "required": [
+        "name",
+        "new",
+        "learning",
+        "review",
+        "children"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "new": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "learning": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "review": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/deck_counts_node"
           }
         }
       }

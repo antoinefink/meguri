@@ -1,0 +1,42 @@
+# Interday learning mixed with reviews, then new cards mixed with both
+# (R619; specs/sched/orders.md O5). Lang holds 5 reviews due on days -4 to 0
+# (#c1 to #c5), 2 interday learning cards due on days -1 and 0 (#c6, #c7) and
+# 2 new cards (#c8, #c9). With new cards after the reviews, the interday
+# learning/review order 0 spreads, 1 appends and 2 prepends the interday
+# learning cards; then both mixes at 0.
+id: sched/queue/mix/interday-review
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [Lang]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Lang, fields: [r1, a]}
+    - {notetype: Card, deck: Lang, fields: [r2, a]}
+    - {notetype: Card, deck: Lang, fields: [r3, a]}
+    - {notetype: Card, deck: Lang, fields: [r4, a]}
+    - {notetype: Card, deck: Lang, fields: [r5, a]}
+    - {notetype: Card, deck: Lang, fields: [d1, a]}
+    - {notetype: Card, deck: Lang, fields: [d2, a]}
+    - {notetype: Card, deck: Lang, fields: [n1, a]}
+    - {notetype: Card, deck: Lang, fields: [n2, a]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column2, due = v.column3, ivl = v.column4, reps = 3, left = v.column5
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 2, -4, 5, 0), (2, 2, -3, 5, 0), (3, 2, -2, 5, 0), (4, 2, -1, 5, 0), (5, 2, 0, 5, 0),
+                     (6, 3, -1, 0, 1), (7, 3, 0, 0, 1)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - legacy_update: {preset: Default, patch: {newMix: 1, interdayLearningMix: 0}}
+  - set_current_deck: {deck: Lang}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {interdayLearningMix: 1}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {interdayLearningMix: 2}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {newMix: 0, interdayLearningMix: 0}}
+  - observe: [queue]

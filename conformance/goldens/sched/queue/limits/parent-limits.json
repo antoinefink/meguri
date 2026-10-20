@@ -1,0 +1,134 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "queue": {
+          "cards": ["#c3", "#c4", "#c9", "#c5", "#c6", "#c10", "#c7", "#c8"],
+          "counts": {
+            "learning": 0,
+            "new": 2,
+            "review": 6
+          },
+          "kinds": ["review", "review", "new", "review", "review", "new", "review", "review"]
+        }
+      },
+      {},
+      {
+        "deck_counts": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "learning": 0,
+                    "name": "Leaf",
+                    "new": 2,
+                    "review": 6
+                  }
+                ],
+                "learning": 0,
+                "name": "Mid",
+                "new": 0,
+                "review": 3
+              }
+            ],
+            "learning": 0,
+            "name": "Top",
+            "new": 0,
+            "review": 2
+          }
+        ],
+        "queue": {
+          "cards": ["#c1", "#c2", "#c3"],
+          "counts": {
+            "learning": 0,
+            "new": 0,
+            "review": 3
+          },
+          "kinds": ["review", "review", "review"]
+        }
+      },
+      {},
+      {},
+      {
+        "congrats": {
+          "have_sched_buried": false,
+          "have_user_buried": false,
+          "learn_remaining": 0,
+          "new_remaining": true,
+          "review_remaining": true,
+          "secs_until_next_learn": 86400
+        },
+        "queue": {
+          "cards": ["#c3", "#c4"],
+          "counts": {
+            "learning": 0,
+            "new": 0,
+            "review": 2
+          },
+          "kinds": ["review", "review"]
+        }
+      },
+      {},
+      {
+        "deck_counts": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "learning": 0,
+                    "name": "Leaf",
+                    "new": 0,
+                    "review": 2
+                  }
+                ],
+                "learning": 0,
+                "name": "Mid",
+                "new": 0,
+                "review": 2
+              }
+            ],
+            "learning": 0,
+            "name": "Top",
+            "new": 0,
+            "review": 2
+          }
+        ],
+        "queue": {
+          "cards": ["#c1", "#c2"],
+          "counts": {
+            "learning": 0,
+            "new": 0,
+            "review": 2
+          },
+          "kinds": ["review", "review"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/queue/limits/parent-limits",
+  "scenario_sha256": "b71fdb018e8e6bb9d45dbe1c157143fdf510ff615977dfc75e42a996a0929f56",
+  "tz": "UTC"
+}

@@ -151,3 +151,24 @@ InvalidParameters
 InvalidInput
 SeedableRng
 answer_labels
+# U41 queue/count interface vocabulary.
+newGatherPriority
+newSortOrder
+reviewOrder
+newMix
+interdayLearningMix
+newLimit
+reviewLimit
+newLimitToday
+reviewLimitToday
+curDeck
+fnvhash
+bury_new
+bury_reviews
+bury_interday_learning
+odue
+flags
+ord
+meguri_card_f32
+meguri_retrievability
+meguri_relative_retrievability

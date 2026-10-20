@@ -1,0 +1,61 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "deck_counts": [
+          {
+            "children": [
+              {
+                "children": [],
+                "learning": 0,
+                "name": "Kid",
+                "new": 1,
+                "review": 0
+              }
+            ],
+            "learning": 0,
+            "name": "Orphan",
+            "new": 7,
+            "review": 0
+          }
+        ],
+        "queue": {
+          "cards": ["#c1", "#c2", "#c3", "#c4", "#c5", "#c6", "#c7"],
+          "counts": {
+            "learning": 0,
+            "new": 7,
+            "review": 0
+          },
+          "kinds": ["new", "new", "new", "new", "new", "new", "new"]
+        }
+      },
+      {},
+      {},
+      {
+        "queue": {
+          "cards": ["#c7", "#c9", "#c8", "#c10"],
+          "counts": {
+            "learning": 0,
+            "new": 4,
+            "review": 0
+          },
+          "kinds": ["new", "new", "new", "new"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/queue/gather/missing-preset",
+  "scenario_sha256": "6dfdd3174c3443e86a07e993565a5642725630ae7afc906517ea69ec53ea2271",
+  "tz": "UTC"
+}

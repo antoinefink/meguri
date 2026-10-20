@@ -1,0 +1,29 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "deck_counts": [
+          {
+            "children": [],
+            "learning": 0,
+            "name": "Default",
+            "new": 0,
+            "review": 0
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/counts/default-only",
+  "scenario_sha256": "46f5a5e60f251b6c34816d1292261e6e445ae63e0f592aa18857f4936cb636c6",
+  "tz": "UTC"
+}

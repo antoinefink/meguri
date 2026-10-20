@@ -202,3 +202,23 @@ text_hex
 blob_hex
 # U85a: batched Question and Deck cell observation.
 card_excerpts
+# U41 queue/count interface vocabulary.
+deck_counts
+congrats
+learn_remaining
+secs_until_next_learn
+review_remaining
+new_remaining
+have_sched_buried
+have_user_buried
+newGatherPriority
+newSortOrder
+reviewOrder
+newMix
+interdayLearningMix
+newLimit
+reviewLimit
+newLimitToday
+reviewLimitToday
+newToday
+revToday

@@ -1,0 +1,57 @@
+# The limit in force each day and signed studied counters (R605, R740;
+# specs/sched/limits.md L2, specs/sched/presets.md D2). Default allows 10 new
+# cards and 200 reviews. Words has a This-deck new limit of 5 and a Today-only
+# new limit of 2 set on day 0; Reviews has a This-deck review limit of 3 and a
+# Today-only review limit of 5 set for day 1. On day 0 Words offers 2 new
+# cards and Reviews 3 reviews; on day 1, 5 and 5. A new-card counter of -3
+# (another client's custom study) then raises Words' remaining new limit to 8.
+id: sched/queue/limits/today-only
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets:
+    - {name: Default, new_per_day: 10, reviews_per_day: 200}
+  decks: [Words, Reviews]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Words, fields: [w1, a]}
+    - {notetype: Card, deck: Words, fields: [w2, a]}
+    - {notetype: Card, deck: Words, fields: [w3, a]}
+    - {notetype: Card, deck: Words, fields: [w4, a]}
+    - {notetype: Card, deck: Words, fields: [w5, a]}
+    - {notetype: Card, deck: Words, fields: [w6, a]}
+    - {notetype: Card, deck: Words, fields: [w7, a]}
+    - {notetype: Card, deck: Words, fields: [w8, a]}
+    - {notetype: Card, deck: Words, fields: [w9, a]}
+    - {notetype: Card, deck: Reviews, fields: [r1, a]}
+    - {notetype: Card, deck: Reviews, fields: [r2, a]}
+    - {notetype: Card, deck: Reviews, fields: [r3, a]}
+    - {notetype: Card, deck: Reviews, fields: [r4, a]}
+    - {notetype: Card, deck: Reviews, fields: [r5, a]}
+    - {notetype: Card, deck: Reviews, fields: [r6, a]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 2, queue = 2, due = 0, ivl = v.column2, reps = 3
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (10, 3), (11, 4), (12, 5), (13, 6), (14, 7), (15, 8)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - legacy_update: {preset: Default, patch: {reviewOrder: 3}}
+  - legacy_update: {deck: Words, patch: {newLimit: 5, newLimitToday: {limit: 2, today: 0}}}
+  - legacy_update: {deck: Reviews, patch: {reviewLimit: 3, reviewLimitToday: {limit: 5, today: 1}}}
+  - set_current_deck: {deck: Words}
+  - observe: [queue]
+  - set_current_deck: {deck: Reviews}
+  - observe: [queue, deck_counts]
+  - advance: 1d
+  - observe: [timing]
+  - set_current_deck: {deck: Words}
+  - observe: [queue]
+  - set_current_deck: {deck: Reviews}
+  - observe: [queue, deck_counts]
+  - legacy_update: {deck: Words, patch: {newToday: [1, -3], revToday: [1, 0], lrnToday: [1, 0], timeToday: [1, 0]}}
+  - set_current_deck: {deck: Words}
+  - observe: [queue, deck_counts]

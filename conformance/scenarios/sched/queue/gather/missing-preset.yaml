@@ -1,0 +1,33 @@
+# A deck whose preset does not exist (specs/sched/queue-building.md B3,
+# specs/sched/limits.md L2). Default allows 1 new card a day. Orphan's preset
+# id is 999, which no preset has: Orphan has no daily limits, and studying it
+# uses the built-in display options with new cards left in gather order, so
+# each note's two cards stay together. Its child Orphan::Kid uses Default and
+# keeps its own limit of 1. Studying Kid, whose preset sorts by card type,
+# shows the sort.
+id: sched/queue/gather/missing-preset
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets:
+    - {name: Default, new_per_day: 1, reviews_per_day: 200}
+  decks: [Orphan, "Orphan::Kid"]
+  notetypes:
+    - name: Duo
+      fields: [A, B]
+      templates:
+        - {name: One, front: "{{A}}", back: "{{A}}"}
+        - {name: Two, front: "{{B}}", back: "{{B}}"}
+  notes:
+    - {notetype: Duo, deck: Orphan, fields: [o1, o1]}
+    - {notetype: Duo, deck: Orphan, fields: [o2, o2]}
+    - {notetype: Duo, deck: Orphan, fields: [o3, o3]}
+    - {notetype: Duo, deck: "Orphan::Kid", fields: [k1, k1]}
+    - {notetype: Duo, deck: "Orphan::Kid", fields: [k2, k2]}
+steps:
+  - legacy_update: {deck: Orphan, patch: {conf: 999}}
+  - set_current_deck: {deck: Orphan}
+  - observe: [queue, deck_counts]
+  - legacy_update: {preset: Default, patch: {new: {perDay: 4}}}
+  - set_current_deck: {deck: "Orphan::Kid"}
+  - observe: [queue]

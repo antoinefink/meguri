@@ -165,7 +165,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `reparent_decks` | `{decks: [...], parent}`: `parent` empty for the top level | `{count}`; rejection `filtered_parent` | stable (`deck-ops.md` K4) |
 | `delete_decks` | `{decks: [...]}` | `{count}`: cards removed | stable (`deck-ops.md` K5) |
 | `set_deck_collapsed` | `{decks: [...], scope: study \| browser, collapsed}` | none | stable (`deck-ops.md` K6) |
-| `set_current_deck` | `{deck}` | none | stable (`deck-ops.md` K7) |
+| `set_current_deck` | `{deck}` | none | stable (`deck-ops.md` K7; queue scenarios: `queue-ops.md` Q1) |
 | `add_preset`, `clone_preset`, `rename_preset` | `{name}`, `{preset, name}`, `{preset, name}` | none | stable (`deck-ops.md` K8) |
 | `remove_preset` | `{preset, fallback}` | none; rejection `default_preset` | stable (`deck-ops.md` K9) |
 | `set_deck_preset` | `{deck, preset, subtree?}` | none; rejection `filtered_deck` | stable (`deck-ops.md` K10) |

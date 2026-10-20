@@ -1,0 +1,56 @@
+# Limits of the studied subtree and of the decks above it (R606, R607;
+# specs/sched/limits.md L3, L4). Top and Top::Mid use the preset Small (10
+# reviews a day) and have studied 8 and 7 reviews today, so 2 and 3 remain;
+# Top::Mid::Leaf uses Default (200 reviews, 20 new). Mid holds 2 reviews due
+# yesterday, Leaf 6 reviews due today and 2 new cards. With "Limits start
+# from top" off, Leaf alone is limited by its own preset and Mid caps its
+# subtree at 3; with it on, Top's 2 cap both.
+id: sched/queue/limits/parent-limits
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, applyAllParentLimits: false}
+  presets:
+    - {name: Default, new_per_day: 20, reviews_per_day: 200}
+    - {name: Small, new_per_day: 20, reviews_per_day: 10}
+  decks:
+    - {name: Top, preset: Small}
+    - {name: "Top::Mid", preset: Small}
+    - "Top::Mid::Leaf"
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: "Top::Mid", fields: [m1, a]}
+    - {notetype: Card, deck: "Top::Mid", fields: [m2, a]}
+    - {notetype: Card, deck: "Top::Mid::Leaf", fields: [l1, a]}
+    - {notetype: Card, deck: "Top::Mid::Leaf", fields: [l2, a]}
+    - {notetype: Card, deck: "Top::Mid::Leaf", fields: [l3, a]}
+    - {notetype: Card, deck: "Top::Mid::Leaf", fields: [l4, a]}
+    - {notetype: Card, deck: "Top::Mid::Leaf", fields: [l5, a]}
+    - {notetype: Card, deck: "Top::Mid::Leaf", fields: [l6, a]}
+    - {notetype: Card, deck: "Top::Mid::Leaf", fields: [l7, a]}
+    - {notetype: Card, deck: "Top::Mid::Leaf", fields: [l8, a]}
+steps:
+  # #c1, #c2: reviews due yesterday; #c3 to #c8: reviews due today, each
+  # interval its own so the order is fixed; #c9, #c10 stay new.
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 2, queue = 2, due = v.column2, ivl = v.column3, reps = 3
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, -1, 4), (2, -1, 5), (3, 0, 6), (4, 0, 7), (5, 0, 8), (6, 0, 9), (7, 0, 10), (8, 0, 11)) AS v
+          ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - legacy_update: {deck: Top, patch: {revToday: [0, 8]}}
+  - legacy_update: {deck: "Top::Mid", patch: {revToday: [0, 7]}}
+  - legacy_update: {preset: Default, patch: {reviewOrder: 3}}
+  - legacy_update: {preset: Small, patch: {reviewOrder: 3}}
+  - set_current_deck: {deck: "Top::Mid::Leaf"}
+  - observe: [queue]
+  - set_current_deck: {deck: "Top::Mid"}
+  - observe: [queue, deck_counts]
+  - set_config: {key: applyAllParentLimits, value: true}
+  - set_current_deck: {deck: "Top::Mid::Leaf"}
+  - observe: [queue, congrats]
+  - set_current_deck: {deck: "Top::Mid"}
+  - observe: [queue, deck_counts]

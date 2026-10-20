@@ -1,0 +1,20 @@
+# Deck order case: text digits, mixed case, accents and a symbol.
+id: sched/counts/tree-order
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: ["4. D040", "10. D100", "9. D090", "🧪 D700", "Â D600", u004, V005, "w006::unit", "w006::Unit 2", "w006::u004", "w006::Â"]
+  notetypes:
+    - name: QueueTreeInput
+      fields: [Input, Output]
+      templates: [{name: OutputCard, front: "{{Input}}", back: "{{Output}}"}]
+  notes:
+    - {notetype: QueueTreeInput, deck: "4. D040", fields: ["input 001", "output 001"]}
+    - {notetype: QueueTreeInput, deck: "10. D100", fields: ["input 002", "output 002"]}
+    - {notetype: QueueTreeInput, deck: "9. D090", fields: ["input 003", "output 003"]}
+    - {notetype: QueueTreeInput, deck: "🧪 D700", fields: ["input 004", "output 004"]}
+    - {notetype: QueueTreeInput, deck: "Â D600", fields: ["input 005", "output 005"]}
+    - {notetype: QueueTreeInput, deck: u004, fields: ["input 006", "output 006"]}
+    - {notetype: QueueTreeInput, deck: "w006::unit", fields: ["input 007", "output 007"]}
+steps:
+  - observe: [deck_counts]

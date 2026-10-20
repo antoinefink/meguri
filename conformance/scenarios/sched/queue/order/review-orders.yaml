@@ -1,0 +1,135 @@
+# The thirteen review sort orders with FSRS on (R611, R616, R617, R618, R1896;
+# specs/sched/orders.md O4). Lang, Lang::b and Lang::A (created in that order,
+# so deck ids and names disagree) hold, on day 200: 22 reviews with memory
+# states (stability, difficulty, desired retention, decay 0.1542, 0.5 or
+# missing, last review time or missing), two reviews tied on due date,
+# interval and difficulty (one with another modification time), four reviews
+# with no memory state (one whose interval is longer than its due day), four
+# interday learning or relearning cards and two reviews due tomorrow. New
+# cards are off (0 a day), so the queue is the reviews and interday learning
+# mixed. Each order in turn: 0 due date then random, 1 due date then deck, 2
+# deck then due date, 3 ascending intervals, 4 descending intervals, 5
+# ascending ease (descending difficulty), 6 descending ease (ascending
+# difficulty), 7 ascending retrievability, 11 descending retrievability, 12
+# relative overdueness, 9 order added, 10 reverse order added, 8 random. Then
+# the next day: the random order of the cards already due stays.
+id: sched/queue/order/review-orders
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Default, new_per_day: 0, reviews_per_day: 200}
+  decks: ["Lang::b", "Lang::A", Lang]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: "Lang", fields: [r1, a]}
+    - {notetype: Card, deck: "Lang::b", fields: [r2, a]}
+    - {notetype: Card, deck: "Lang::A", fields: [r3, a]}
+    - {notetype: Card, deck: "Lang", fields: [r4, a]}
+    - {notetype: Card, deck: "Lang::b", fields: [r5, a]}
+    - {notetype: Card, deck: "Lang::A", fields: [r6, a]}
+    - {notetype: Card, deck: "Lang", fields: [r7, a]}
+    - {notetype: Card, deck: "Lang::b", fields: [r8, a]}
+    - {notetype: Card, deck: "Lang::A", fields: [r9, a]}
+    - {notetype: Card, deck: "Lang", fields: [r10, a]}
+    - {notetype: Card, deck: "Lang::b", fields: [r11, a]}
+    - {notetype: Card, deck: "Lang::A", fields: [r12, a]}
+    - {notetype: Card, deck: "Lang", fields: [r13, a]}
+    - {notetype: Card, deck: "Lang::b", fields: [r14, a]}
+    - {notetype: Card, deck: "Lang::A", fields: [r15, a]}
+    - {notetype: Card, deck: "Lang", fields: [r16, a]}
+    - {notetype: Card, deck: "Lang::b", fields: [r17, a]}
+    - {notetype: Card, deck: "Lang::A", fields: [r18, a]}
+    - {notetype: Card, deck: "Lang", fields: [r19, a]}
+    - {notetype: Card, deck: "Lang::b", fields: [r20, a]}
+    - {notetype: Card, deck: "Lang::A", fields: [r21, a]}
+    - {notetype: Card, deck: "Lang", fields: [r22, a]}
+    - {notetype: Card, deck: "Lang::A", fields: [r23, a]}
+    - {notetype: Card, deck: "Lang::b", fields: [r24, a]}
+    - {notetype: Card, deck: "Lang", fields: [r25, a]}
+    - {notetype: Card, deck: "Lang::A", fields: [r26, a]}
+    - {notetype: Card, deck: "Lang::b", fields: [r27, a]}
+    - {notetype: Card, deck: "Lang", fields: [r28, a]}
+    - {notetype: Card, deck: "Lang", fields: [r29, a]}
+    - {notetype: Card, deck: "Lang::A", fields: [r30, a]}
+    - {notetype: Card, deck: "Lang::b", fields: [r31, a]}
+    - {notetype: Card, deck: "Lang", fields: [r32, a]}
+    - {notetype: Card, deck: "Lang::A", fields: [r33, a]}
+    - {notetype: Card, deck: "Lang", fields: [r34, a]}
+steps:
+  # Columns: card, type, queue, due, ivl, data, mod (NULL keeps the creation
+  # second).
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, reps = 4,
+          data = v.column6, mod = coalesce(v.column7, mod)
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 2, 2, 192, 13, '{"s":32.7623,"d":2.4943,"dr":0.95,"decay":0.1542,"lrt":1910149078}', NULL),
+          (2, 2, 2, 190, 21, '{"s":119.3637,"d":7.8693,"dr":0.9,"decay":0.5,"lrt":1909302600}', NULL),
+          (3, 2, 2, 193, 3, '{"s":138.1411,"d":9.8197,"dr":0.85,"decay":0.1542,"lrt":1911098471}', NULL),
+          (4, 2, 2, 186, 2, '{"s":109.9334,"d":1.2971,"dr":0.85,"lrt":1910587397}', NULL),
+          (5, 2, 2, 197, 34, '{"s":18.0255,"d":7.0296,"dr":0.9,"decay":0.1542,"lrt":1908778976}', NULL),
+          (6, 2, 2, 186, 8, '{"s":44.9014,"d":6.5791,"dr":0.9,"decay":0.1542,"lrt":1910078920}', NULL),
+          (7, 2, 2, 190, 21, '{"s":20.9395,"d":7.0089,"dr":0.95,"decay":0.1542,"lrt":1909290263}', NULL),
+          (8, 2, 2, 189, 1, '{"s":12.5713,"d":1.7008,"dr":0.95,"decay":0.1542,"lrt":1910927113}', NULL),
+          (9, 2, 2, 186, 1, '{"s":91.9235,"d":3.8968,"dr":0.9,"lrt":1910682018}', NULL),
+          (10, 2, 2, 196, 3, '{"s":125.3385,"d":4.7193,"dr":0.9,"decay":0.5,"lrt":1911373541}', NULL),
+          (11, 2, 2, 189, 5, '{"s":61.5719,"d":7.6008,"dr":0.95,"decay":0.5,"lrt":1910590158}', NULL),
+          (12, 2, 2, 194, 5, '{"s":130.1108,"d":3.2396,"dr":0.95,"lrt":1911018755}', NULL),
+          (13, 2, 2, 198, 8, '{"s":105.3066,"d":7.5882,"dr":0.9,"decay":0.1542,"lrt":1911110210}', NULL),
+          (14, 2, 2, 188, 34, '{"s":93.5176,"d":1.5793,"dr":0.9,"decay":0.1542,"lrt":1907991053}', NULL),
+          (15, 2, 2, 191, 2, '{"s":32.4353,"d":7.0848,"dr":0.9,"lrt":1911024875}', NULL),
+          (16, 2, 2, 194, 34, '{"s":55.3495,"d":4.2093,"dr":0.85,"lrt":1908506283}', NULL),
+          (17, 2, 2, 197, 3, '{"s":89.5799,"d":5.6169,"dr":0.9,"decay":0.1542}', NULL),
+          (18, 2, 2, 187, 1, '{"s":71.6653,"d":6.3571,"dr":0.85,"decay":0.1542,"lrt":1910761916}', NULL),
+          (19, 2, 2, 190, 3, '{"s":36.7026,"d":4.4174,"dr":0.9}', NULL),
+          (20, 2, 2, 190, 89, '{"s":82.4821,"d":3.729,"dr":0.95,"decay":0.5,"lrt":1903411612}', NULL),
+          (21, 2, 2, 193, 89, '{"s":62.1052,"d":5.3543,"dr":0.95,"decay":0.1542,"lrt":1903671748}', NULL),
+          (22, 2, 2, 195, 21, '{"s":8.1718,"d":8.4318,"dr":0.9,"decay":0.5,"lrt":1909721682}', NULL),
+          (23, 2, 2, 195, 10, '{"s":10.0,"d":5.0,"dr":0.9,"decay":0.1542,"lrt":1910685600}', NULL),
+          (24, 2, 2, 195, 10, '{"s":10.0,"d":5.0,"dr":0.9,"decay":0.1542,"lrt":1910685600}', 1911722400),
+          (25, 2, 2, 190, 20, '', NULL),
+          (26, 2, 2, 199, 4, '', NULL),
+          (27, 2, 2, 190, 250, '', NULL),
+          (28, 2, 2, 200, 1, '', 1911895200),
+          (29, 1, 3, 198, 0, '{"s":1.2,"d":6.1,"dr":0.9,"decay":0.1542,"lrt":1911808500}', NULL),
+          (30, 3, 3, 200, 7, '{"s":2.5,"d":8.3,"dr":0.9,"decay":0.1542,"lrt":1911894300}', NULL),
+          (31, 1, 3, 199, 0, '', NULL),
+          (32, 3, 3, 196, 15, '{"s":4.0,"d":7.7,"dr":0.85,"decay":0.5,"lrt":1911636000}', NULL),
+          (33, 2, 2, 201, 6, '{"s":6.0,"d":3.3,"dr":0.9,"decay":0.1542,"lrt":1911549600}', NULL),
+          (34, 2, 2, 201, 30, '{"s":35.0,"d":4.4,"dr":0.9,"decay":0.1542,"lrt":1909476000}', NULL)
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_clock: "2030-08-03T10:00:00"
+  - set_current_deck: {deck: Lang}
+  - observe: [timing, queue]
+  - legacy_update: {preset: Default, patch: {reviewOrder: 1}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {reviewOrder: 2}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {reviewOrder: 3}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {reviewOrder: 4}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {reviewOrder: 5}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {reviewOrder: 6}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {reviewOrder: 7}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {reviewOrder: 11}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {reviewOrder: 12}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {reviewOrder: 9}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {reviewOrder: 10}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {reviewOrder: 8}}
+  - observe: [queue]
+  - advance: 1d
+  - observe: [queue]

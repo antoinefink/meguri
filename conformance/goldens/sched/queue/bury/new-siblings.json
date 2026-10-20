@@ -1,0 +1,106 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c2": {
+            "data": {},
+            "did": "Lang",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {},
+            "did": "Lang",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c6": {
+            "data": {},
+            "did": "Lang",
+            "due": 3,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        },
+        "deck_counts": [
+          {
+            "children": [],
+            "learning": 1,
+            "name": "Lang",
+            "new": 3,
+            "review": 1
+          }
+        ],
+        "queue": {
+          "cards": ["#c5", "#c3", "#c1", "#c7", "#c9"],
+          "counts": {
+            "learning": 1,
+            "new": 3,
+            "review": 1
+          },
+          "kinds": ["learning", "new", "review", "new", "new"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/queue/bury/new-siblings",
+  "scenario_sha256": "b063d55b0c33333abfa9b7c973b0b41739a5f20c7b569411a5f8487641c4df2f",
+  "tz": "UTC"
+}

@@ -1,0 +1,42 @@
+# Preview-repeat cards (queue 4) left in a normal deck (R610, R620, R626,
+# R1894; specs/sched/queue-building.md B4, B6, B9; specs/sched/counts.md C3,
+# C7). Such cards normally sit only in filtered decks; another client can
+# leave one in a normal deck. The queue gathers them with the intraday
+# learning cards and orders both together; the deck list counts queue 4 up to
+# and including now + 1,200 s, queue 1 strictly before it; the congratulations
+# information counts queue 1 only. collapseTime is 1,200 s (the default).
+#   #c1 queue 4, due 1 minute ago          #c4 review due today
+#   #c2 queue 4, due in 15 minutes         #c5 queue 1, due in 10 minutes
+#   #c3 queue 4, due in 25 minutes         #c6 queue 4, due in exactly 20 minutes
+id: sched/queue/gather/preview-in-normal-deck
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [Lang]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Lang, fields: [p1, a]}
+    - {notetype: Card, deck: Lang, fields: [p2, a]}
+    - {notetype: Card, deck: Lang, fields: [p3, a]}
+    - {notetype: Card, deck: Lang, fields: [r4, a]}
+    - {notetype: Card, deck: Lang, fields: [l5, a]}
+    - {notetype: Card, deck: Lang, fields: [p6, a]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, reps = v.column6, left = v.column7
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 1, 4, 1894701540, 0, 1, 1),
+          (2, 1, 4, 1894702500, 0, 1, 1),
+          (3, 1, 4, 1894703100, 0, 1, 1),
+          (4, 2, 2, 0, 4, 3, 0),
+          (5, 1, 1, 1894702200, 0, 1, 1),
+          (6, 1, 4, 1894702800, 0, 1, 1)
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: Lang}
+  - observe: [queue, deck_counts, congrats]

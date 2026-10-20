@@ -1,0 +1,62 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "deck_counts": [
+          {
+            "children": [
+              {
+                "children": [],
+                "learning": 2,
+                "name": "Cram",
+                "new": 1,
+                "review": 1
+              }
+            ],
+            "learning": 2,
+            "name": "Lang",
+            "new": 2,
+            "review": 3
+          }
+        ],
+        "queue": {
+          "cards": ["#c6", "#c1", "#c7", "#c2", "#c5", "#c4", "#c3"],
+          "counts": {
+            "learning": 2,
+            "new": 2,
+            "review": 3
+          },
+          "kinds": ["learning", "review", "new", "review", "learning", "new", "review"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/queue/gather/nested-filtered",
+  "scenario_sha256": "fc3c5091a77a3d997d8c51f8607d65d5528888b559e86c5b48d4b5e1fbc4e4cb",
+  "tz": "UTC"
+}

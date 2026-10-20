@@ -1,0 +1,38 @@
+# Burying new siblings while gathering (R630, R631; specs/sched/queue-building.md
+# B5). Default has "Bury new siblings" on. Notes of the note type Duo:
+#   n1: #c1 review due today, #c2 new        -> #c1 only
+#   n2: #c3 new, #c4 new                     -> #c3 only
+#   n3: #c5 intraday learning due now, #c6 new -> #c5 only
+#   n4: #c7 new, #c8 suspended               -> #c7
+#   n5: #c9 new (one card)                   -> #c9
+# Skipped cards take none of the new-card limit (3 a day: #c3, #c7 and #c9 fit)
+# and stay new in the collection, unwritten. (The deck list counts new cards
+# up to the limit without skipping siblings: sched/counts/deck-page-difference.)
+id: sched/queue/bury/new-siblings
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets:
+    - {name: Default, new_per_day: 3, reviews_per_day: 200, bury_new: true}
+  decks: [Lang]
+  notetypes:
+    - name: Duo
+      fields: [A, B]
+      templates:
+        - {name: One, front: "{{A}}", back: "{{A}}"}
+        - {name: Two, front: "{{B}}", back: "{{B}}"}
+  notes:
+    - {notetype: Duo, deck: Lang, fields: [n1a, n1b]}
+    - {notetype: Duo, deck: Lang, fields: [n2a, n2b]}
+    - {notetype: Duo, deck: Lang, fields: [n3a, n3b]}
+    - {notetype: Duo, deck: Lang, fields: [n4a, n4b]}
+    - {notetype: Duo, deck: Lang, fields: [n5a, ""]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, reps = v.column6, left = v.column7
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 2, 2, 0, 5, 3, 0), (5, 1, 1, 1894701600, 0, 1, 1), (8, 0, -1, 4, 0, 0, 0)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: Lang}
+  - observe: [queue, deck_counts, "card(#c2, #c4, #c6)"]

@@ -285,7 +285,7 @@
       "anyOf": [
         {
           "type": "string",
-          "pattern": "^\\s*(ids|timing|card|revlog|next_states|answer_labels|queue|deck_tree|decks|render|render_status|db_dump|schema_objects|stats|digest|undo_status|tag_tree|browser_config|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
+          "pattern": "^\\s*(ids|timing|card|revlog|next_states|answer_labels|queue|deck_counts|congrats|deck_tree|decks|render|render_status|db_dump|schema_objects|stats|digest|undo_status|tag_tree|browser_config|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
         },
         {
           "description": "media-ops.md F9-F11: media kinds take no references.",
@@ -331,11 +331,18 @@
               }
             },
             "queue": {
-              "description": "Draft.",
-              "type": ["object", "null"],
-              "properties": { "deck": { "type": "string" } }
+              "description": "queue-ops.md Q2: the current deck's study queue.",
+              "type": "null"
             },
-            "deck_tree": { "description": "deck-ops.md K12: the deck tree's structure (decks/decks.md D12); the queue area adds counts.", "type": "null" },
+            "deck_counts": {
+              "description": "queue-ops.md Q3: the deck list's nodes with their counts.",
+              "type": "null"
+            },
+            "congrats": {
+              "description": "queue-ops.md Q4: a finished deck's facts for the current deck.",
+              "type": "null"
+            },
+            "deck_tree": { "description": "deck-ops.md K12: the deck tree's structure (decks/decks.md D12); deck_counts reports counts separately.", "type": "null" },
             "decks": { "description": "deck-ops.md K11: every deck by its stored human name.", "type": "null" },
             "media_dir": { "description": "media-ops.md F9.", "type": "null" },
             "media_trash": { "description": "media-ops.md F10.", "type": "null" },

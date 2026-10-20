@@ -1,0 +1,198 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "queue": {
+          "cards": ["#c4", "#c9", "#c6", "#c18", "#c14", "#c32", "#c11", "#c8", "#c7", "#c25", "#c2", "#c27", "#c29", "#c19", "#c20", "#c15", "#c1", "#c21", "#c3", "#c31", "#c12", "#c16", "#c23", "#c24", "#c22", "#c10", "#c30", "#c17", "#c5", "#c13", "#c26", "#c28"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 28
+          },
+          "kinds": ["review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review"]
+        },
+        "timing": {
+          "days_elapsed": 200,
+          "next_day_at": 1912046400,
+          "now": 1911981600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c4", "#c9", "#c6", "#c18", "#c14", "#c32", "#c11", "#c8", "#c7", "#c25", "#c19", "#c2", "#c29", "#c27", "#c20", "#c15", "#c1", "#c21", "#c3", "#c31", "#c16", "#c12", "#c22", "#c23", "#c24", "#c10", "#c30", "#c17", "#c5", "#c13", "#c26", "#c28"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 28
+          },
+          "kinds": ["review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c4", "#c7", "#c25", "#c19", "#c1", "#c32", "#c16", "#c22", "#c10", "#c13", "#c28", "#c9", "#c29", "#c6", "#c18", "#c15", "#c21", "#c3", "#c12", "#c30", "#c23", "#c26", "#c14", "#c11", "#c8", "#c2", "#c31", "#c27", "#c20", "#c24", "#c17", "#c5"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 28
+          },
+          "kinds": ["review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c18", "#c8", "#c28", "#c9", "#c4", "#c29", "#c15", "#c17", "#c3", "#c19", "#c10", "#c26", "#c31", "#c12", "#c11", "#c13", "#c6", "#c23", "#c24", "#c30", "#c1", "#c25", "#c7", "#c2", "#c22", "#c14", "#c32", "#c5", "#c16", "#c21", "#c20", "#c27"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 28
+          },
+          "kinds": ["review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c27", "#c21", "#c20", "#c14", "#c5", "#c32", "#c16", "#c7", "#c2", "#c22", "#c25", "#c1", "#c30", "#c23", "#c24", "#c13", "#c6", "#c12", "#c11", "#c29", "#c26", "#c17", "#c3", "#c19", "#c10", "#c4", "#c31", "#c15", "#c18", "#c8", "#c28", "#c9"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 28
+          },
+          "kinds": ["review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c3", "#c22", "#c2", "#c11", "#c13", "#c30", "#c15", "#c5", "#c7", "#c6", "#c18", "#c17", "#c32", "#c21", "#c23", "#c24", "#c10", "#c19", "#c16", "#c29", "#c9", "#c20", "#c12", "#c1", "#c8", "#c14", "#c31", "#c4", "#c25", "#c27", "#c28", "#c26"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 28
+          },
+          "kinds": ["review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c25", "#c27", "#c28", "#c26", "#c4", "#c31", "#c14", "#c8", "#c1", "#c12", "#c20", "#c9", "#c29", "#c16", "#c19", "#c10", "#c23", "#c24", "#c21", "#c32", "#c17", "#c18", "#c6", "#c7", "#c5", "#c15", "#c30", "#c13", "#c11", "#c2", "#c22", "#c3"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 28
+          },
+          "kinds": ["review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c25", "#c27", "#c28", "#c26", "#c22", "#c31", "#c5", "#c21", "#c23", "#c24", "#c7", "#c20", "#c29", "#c8", "#c16", "#c1", "#c14", "#c6", "#c19", "#c32", "#c15", "#c11", "#c2", "#c18", "#c9", "#c4", "#c30", "#c13", "#c3", "#c12", "#c17", "#c10"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 28
+          },
+          "kinds": ["review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c10", "#c17", "#c12", "#c3", "#c13", "#c30", "#c4", "#c9", "#c18", "#c2", "#c11", "#c15", "#c32", "#c19", "#c6", "#c14", "#c1", "#c16", "#c8", "#c29", "#c20", "#c7", "#c23", "#c24", "#c21", "#c5", "#c31", "#c22", "#c25", "#c27", "#c28", "#c26"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 28
+          },
+          "kinds": ["review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c21", "#c7", "#c22", "#c20", "#c8", "#c29", "#c5", "#c1", "#c25", "#c23", "#c24", "#c26", "#c31", "#c28", "#c11", "#c14", "#c6", "#c16", "#c19", "#c32", "#c15", "#c2", "#c12", "#c9", "#c18", "#c13", "#c30", "#c4", "#c17", "#c10", "#c3", "#c27"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 28
+          },
+          "kinds": ["review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c1", "#c2", "#c3", "#c4", "#c5", "#c29", "#c6", "#c7", "#c8", "#c9", "#c10", "#c11", "#c30", "#c12", "#c13", "#c14", "#c15", "#c16", "#c17", "#c31", "#c18", "#c19", "#c20", "#c21", "#c22", "#c23", "#c32", "#c24", "#c25", "#c26", "#c27", "#c28"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 28
+          },
+          "kinds": ["review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c28", "#c27", "#c26", "#c25", "#c24", "#c32", "#c23", "#c22", "#c21", "#c20", "#c19", "#c18", "#c31", "#c17", "#c16", "#c15", "#c14", "#c13", "#c12", "#c30", "#c11", "#c10", "#c9", "#c8", "#c7", "#c6", "#c29", "#c5", "#c4", "#c3", "#c2", "#c1"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 28
+          },
+          "kinds": ["review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c7", "#c25", "#c23", "#c12", "#c24", "#c32", "#c18", "#c21", "#c2", "#c22", "#c27", "#c17", "#c29", "#c3", "#c14", "#c11", "#c19", "#c20", "#c4", "#c31", "#c13", "#c5", "#c8", "#c15", "#c28", "#c1", "#c30", "#c26", "#c9", "#c16", "#c10", "#c6"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 28
+          },
+          "kinds": ["review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c7", "#c25", "#c23", "#c12", "#c24", "#c18", "#c32", "#c21", "#c2", "#c22", "#c27", "#c17", "#c3", "#c29", "#c34", "#c14", "#c11", "#c19", "#c20", "#c4", "#c31", "#c33", "#c13", "#c5", "#c8", "#c15", "#c28", "#c30", "#c1", "#c26", "#c9", "#c16", "#c10", "#c6"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 30
+          },
+          "kinds": ["review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review", "learning", "review", "review", "review", "review", "review", "review"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/queue/order/review-orders",
+  "scenario_sha256": "a94284230dfbd67187704ab2cd4b32df4b48e7c91507d863794c2e9bfc7a8280",
+  "tz": "UTC"
+}

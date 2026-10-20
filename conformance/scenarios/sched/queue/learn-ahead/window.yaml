@@ -1,0 +1,42 @@
+# The learn-ahead window (R602, R620, R626; specs/sched/queue-building.md B6,
+# B8, B9). collapseTime is 1,200 s (the default). Lang holds intraday learning
+# cards due 5 minutes ago with 3 reviews (#c1), 2 minutes ago never answered
+# (#c2, reps 0), in 15 minutes (#c3), in exactly 20 minutes (#c4) and in 25
+# minutes (#c5), and two reviews due today. Attempted cards come first, then
+# by due time: #c1, #c2, then the reviews, then #c3 and #c4 once nothing else
+# is left; #c5 is not in the queue. The learning count is 4. The deck list
+# counts learning cards due strictly before now + 1,200 s, so 3.
+id: sched/queue/learn-ahead/window
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [Lang]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Lang, fields: [l1, a]}
+    - {notetype: Card, deck: Lang, fields: [l2, a]}
+    - {notetype: Card, deck: Lang, fields: [l3, a]}
+    - {notetype: Card, deck: Lang, fields: [l4, a]}
+    - {notetype: Card, deck: Lang, fields: [l5, a]}
+    - {notetype: Card, deck: Lang, fields: [r1, a]}
+    - {notetype: Card, deck: Lang, fields: [r2, a]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, reps = v.column6, left = v.column7
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 1, 1, 1894701300, 0, 3, 1),
+          (2, 1, 1, 1894701480, 0, 0, 2),
+          (3, 1, 1, 1894702500, 0, 1, 1),
+          (4, 1, 1, 1894702800, 0, 1, 1),
+          (5, 1, 1, 1894703100, 0, 2, 1),
+          (6, 2, 2, -1, 4, 3, 0),
+          (7, 2, 2, 0, 5, 3, 0)
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: Lang}
+  - observe: [queue, deck_counts, congrats]

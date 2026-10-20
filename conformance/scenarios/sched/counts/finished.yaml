@@ -1,0 +1,44 @@
+# The facts of a finished deck (R78, R80, R93, R434, R628;
+# specs/sched/counts.md C7, C8). Done allows 2 reviews and 1 new card a day
+# and both were used today. It still holds 3 reviews due today, 2 new cards, a
+# review buried by a sibling, a new card buried by the user, a learning card
+# due in 30 minutes and one due in 2 hours. Its queue is empty; the next
+# learning card is ready in 600 s (due minus the 1,200 s learn-ahead limit).
+# Empty holds no card. At the next day's rollover (04:00) the deck list shows
+# what Done's finished state announces for tomorrow.
+id: sched/counts/finished
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets:
+    - {name: Default, new_per_day: 1, reviews_per_day: 2}
+  decks: [Done, Empty]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Done, fields: [r1, a]}
+    - {notetype: Card, deck: Done, fields: [r2, a]}
+    - {notetype: Card, deck: Done, fields: [r3, a]}
+    - {notetype: Card, deck: Done, fields: [n1, a]}
+    - {notetype: Card, deck: Done, fields: [n2, a]}
+    - {notetype: Card, deck: Done, fields: [b1, a]}
+    - {notetype: Card, deck: Done, fields: [b2, a]}
+    - {notetype: Card, deck: Done, fields: [l1, a]}
+    - {notetype: Card, deck: Done, fields: [l2, a]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, reps = v.column6, left = v.column7
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 2, 2, 0, 5, 3, 0), (2, 2, 2, -1, 6, 3, 0), (3, 2, 2, 0, 7, 3, 0), (6, 2, -2, 0, 4, 3, 0),
+                     (7, 0, -3, 7, 0, 0, 0), (8, 1, 1, 1894703400, 0, 1, 1), (9, 1, 1, 1894708800, 0, 2, 1)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - legacy_update: {deck: Done, patch: {newToday: [0, 1], revToday: [0, 2]}}
+  - set_current_deck: {deck: Done}
+  - observe: [queue, congrats, deck_counts]
+  - set_current_deck: {deck: Empty}
+  - observe: [queue, congrats]
+  - set_clock: "2030-01-16T04:00:00"
+  - observe: [timing, deck_counts]

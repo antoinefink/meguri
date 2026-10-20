@@ -1,0 +1,65 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "queue": {
+          "cards": ["#c2", "#c4", "#c1", "#c3"],
+          "counts": {
+            "learning": 0,
+            "new": 4,
+            "review": 0
+          },
+          "kinds": ["new", "new", "new", "new"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c2", "#c4", "#c1", "#c3"],
+          "counts": {
+            "learning": 0,
+            "new": 4,
+            "review": 0
+          },
+          "kinds": ["new", "new", "new", "new"]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c2", "#c4", "#c1", "#c3"],
+          "counts": {
+            "learning": 4,
+            "new": 0,
+            "review": 0
+          },
+          "kinds": ["learning", "learning", "learning", "learning"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/queue/order/ties",
+  "scenario_sha256": "cae3c8aba47a17db525d6b3968a8e1d76ee1facd73329bddbcd49aa68af0abed",
+  "tz": "UTC"
+}

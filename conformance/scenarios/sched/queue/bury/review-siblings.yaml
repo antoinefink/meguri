@@ -1,0 +1,36 @@
+# Burying review siblings while gathering (R630; specs/sched/queue-building.md
+# B5). Default has "Bury review siblings" on and the others off.
+#   n1: #c1 review due day -2, #c2 review due today -> #c1 (first in review order)
+#   n2: #c3 interday learning due today, #c4 review -> #c3 (interday learning is
+#       gathered first and buries the review)
+#   n3: #c5 review, #c6 new                     -> both (new siblings not buried)
+#   n4: #c7 intraday learning, #c8 review       -> #c7: intraday learning is
+#       gathered first, is never skipped itself, and skips the review
+id: sched/queue/bury/review-siblings
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets:
+    - {name: Default, new_per_day: 20, reviews_per_day: 200, bury_reviews: true}
+  decks: [Lang]
+  notetypes:
+    - name: Duo
+      fields: [A, B]
+      templates:
+        - {name: One, front: "{{A}}", back: "{{A}}"}
+        - {name: Two, front: "{{B}}", back: "{{B}}"}
+  notes:
+    - {notetype: Duo, deck: Lang, fields: [n1a, n1b]}
+    - {notetype: Duo, deck: Lang, fields: [n2a, n2b]}
+    - {notetype: Duo, deck: Lang, fields: [n3a, n3b]}
+    - {notetype: Duo, deck: Lang, fields: [n4a, n4b]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, reps = v.column6, left = v.column7
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 2, 2, -2, 5, 3, 0), (2, 2, 2, 0, 6, 3, 0), (3, 1, 3, 0, 0, 1, 1), (4, 2, 2, 0, 7, 3, 0),
+                     (5, 2, 2, 0, 8, 3, 0), (7, 1, 1, 1894701600, 0, 1, 1), (8, 2, 2, 0, 9, 3, 0)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: Lang}
+  - observe: [queue, deck_counts]

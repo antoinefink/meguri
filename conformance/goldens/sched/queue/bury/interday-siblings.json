@@ -1,0 +1,45 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "deck_counts": [
+          {
+            "children": [],
+            "learning": 5,
+            "name": "Lang",
+            "new": 1,
+            "review": 2
+          }
+        ],
+        "queue": {
+          "cards": ["#c1", "#c6", "#c3", "#c8", "#c7", "#c5"],
+          "counts": {
+            "learning": 3,
+            "new": 1,
+            "review": 2
+          },
+          "kinds": ["learning", "review", "learning", "new", "review", "learning"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/queue/bury/interday-siblings",
+  "scenario_sha256": "e5ba2d911d568f2abba8b588a7ad9c641a6c3bc7eb7959b18a747143bb66724b",
+  "tz": "UTC"
+}

@@ -1,0 +1,42 @@
+# Whose preset buries (R630; specs/sched/queue-building.md B5). P::A uses the
+# preset Bury (all three bury options on), P::B uses Quiet (all off). Each note
+# of the note type Trio has three cards; db_exec moves some of them to the
+# other deck. Studying P gathers P::A before P::B (deck order). A card is
+# skipped when a sibling gathered before it has a home preset that buries the
+# card's kind; its own preset does not matter.
+#   n1: #c1 new in P::B, #c2 new in P::A, #c3 new in P::B
+#       -> #c2 (gathered first, Bury) skips #c1 and #c3
+#   n2: #c4 review in P::B, #c5 new in P::A, #c6 new in P::A
+#       -> #c4 (Quiet) skips nothing; #c5 then skips #c6
+#   n3: #c7 new in P::B, #c8 new in P::B, #c9 new in P::A
+#       -> #c9 skips #c7 and #c8
+id: sched/queue/bury/mixed-presets
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets:
+    - {name: Bury, new_per_day: 20, reviews_per_day: 200, bury_new: true, bury_reviews: true, bury_interday_learning: true}
+    - {name: Quiet, new_per_day: 20, reviews_per_day: 200}
+  decks:
+    - P
+    - {name: "P::A", preset: Bury}
+    - {name: "P::B", preset: Quiet}
+  notetypes:
+    - name: Trio
+      fields: [X, Y, Z]
+      templates:
+        - {name: One, front: "{{X}}", back: "{{X}}"}
+        - {name: Two, front: "{{Y}}", back: "{{Y}}"}
+        - {name: Three, front: "{{Z}}", back: "{{Z}}"}
+  notes:
+    - {notetype: Trio, deck: "P::B", fields: [n1x, n1y, n1z]}
+    - {notetype: Trio, deck: "P::B", fields: [n2x, n2y, n2z]}
+    - {notetype: Trio, deck: "P::B", fields: [n3x, n3y, n3z]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'P' || char(31) || 'A')
+        WHERE id IN (SELECT id FROM (SELECT id, row_number() OVER (ORDER BY id) AS n FROM cards) WHERE n IN (2, 5, 6, 9))
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 5, reps = 3 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}
+  - set_current_deck: {deck: P}
+  - observe: [queue]

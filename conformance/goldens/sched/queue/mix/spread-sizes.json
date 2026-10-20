@@ -1,0 +1,119 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c1", "#c4", "#c2", "#c5", "#c3", "#c6"],
+          "counts": {
+            "learning": 0,
+            "new": 3,
+            "review": 3
+          },
+          "kinds": ["review", "new", "review", "new", "review", "new"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c7", "#c10", "#c8", "#c11", "#c9"],
+          "counts": {
+            "learning": 0,
+            "new": 2,
+            "review": 3
+          },
+          "kinds": ["review", "new", "review", "new", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c15", "#c12", "#c16", "#c17", "#c13", "#c18", "#c19", "#c14", "#c20"],
+          "counts": {
+            "learning": 0,
+            "new": 6,
+            "review": 3
+          },
+          "kinds": ["new", "review", "new", "new", "review", "new", "new", "review", "new"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c24", "#c25", "#c21", "#c26", "#c27", "#c22", "#c28", "#c29", "#c23", "#c30", "#c31"],
+          "counts": {
+            "learning": 0,
+            "new": 8,
+            "review": 3
+          },
+          "kinds": ["new", "new", "review", "new", "new", "review", "new", "new", "review", "new", "new"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c32", "#c33", "#c34", "#c35", "#c36", "#c42", "#c37", "#c38", "#c39", "#c40", "#c41"],
+          "counts": {
+            "learning": 0,
+            "new": 1,
+            "review": 10
+          },
+          "kinds": ["review", "review", "review", "review", "review", "new", "review", "review", "review", "review", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c44", "#c45", "#c46", "#c47", "#c48", "#c43", "#c49", "#c50", "#c51", "#c52", "#c53"],
+          "counts": {
+            "learning": 0,
+            "new": 10,
+            "review": 1
+          },
+          "kinds": ["new", "new", "new", "new", "new", "review", "new", "new", "new", "new", "new"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c54", "#c55", "#c56", "#c57"],
+          "counts": {
+            "learning": 0,
+            "new": 4,
+            "review": 0
+          },
+          "kinds": ["new", "new", "new", "new"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c58", "#c59", "#c60", "#c61"],
+          "counts": {
+            "learning": 0,
+            "new": 0,
+            "review": 4
+          },
+          "kinds": ["review", "review", "review", "review"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/queue/mix/spread-sizes",
+  "scenario_sha256": "3e2d58a689926d259a36b7a14672c0bc55c61dc64c569678d6ab7ff67aebc967",
+  "tz": "UTC"
+}

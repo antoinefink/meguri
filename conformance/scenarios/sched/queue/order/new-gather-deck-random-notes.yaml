@@ -1,0 +1,66 @@
+# New-card gather order 5, Deck, then random notes: decks in name order, notes hashed with the day (R613, R614, R615, R1896;
+# specs/sched/orders.md O2, O3), followed by each of the five new-card sort
+# orders. Shared fixture of the order/new-gather-* scenarios: 16 notes of the
+# note type Duo (two cards when B is filled) in Lang and its subdecks, created
+# in an order that differs from both the deck names and the positions; the
+# positions are set note by note (siblings share one). Lang::Kanji has a
+# This-deck new limit of 3, which also caps Lang::Kanji::N5. Default allows 30
+# new cards a day. Then a later hour of the same day (same order) and the next
+# day (random orders change), with sort order 1.
+id: sched/queue/order/new-gather-deck-random-notes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets:
+    - {name: Default, new_per_day: 30, reviews_per_day: 200}
+  decks: ["Lang::Words", "Lang::kana", "Lang::Kanji::N5", "Lang::Kanji", Lang]
+  notetypes:
+    - name: Duo
+      fields: [A, B]
+      templates:
+        - {name: One, front: "{{A}}", back: "{{A}}"}
+        - {name: Two, front: "{{B}}", back: "{{B}}"}
+  notes:
+    - {notetype: Duo, deck: "Lang", fields: [n1a, "n1b"]}
+    - {notetype: Duo, deck: "Lang::Words", fields: [n2a, ""]}
+    - {notetype: Duo, deck: "Lang::kana", fields: [n3a, "n3b"]}
+    - {notetype: Duo, deck: "Lang::Kanji", fields: [n4a, ""]}
+    - {notetype: Duo, deck: "Lang::Kanji::N5", fields: [n5a, "n5b"]}
+    - {notetype: Duo, deck: "Lang", fields: [n6a, ""]}
+    - {notetype: Duo, deck: "Lang::Words", fields: [n7a, "n7b"]}
+    - {notetype: Duo, deck: "Lang::kana", fields: [n8a, ""]}
+    - {notetype: Duo, deck: "Lang::Kanji", fields: [n9a, "n9b"]}
+    - {notetype: Duo, deck: "Lang::Kanji::N5", fields: [n10a, ""]}
+    - {notetype: Duo, deck: "Lang", fields: [n11a, "n11b"]}
+    - {notetype: Duo, deck: "Lang::Words", fields: [n12a, ""]}
+    - {notetype: Duo, deck: "Lang::kana", fields: [n13a, "n13b"]}
+    - {notetype: Duo, deck: "Lang::Kanji", fields: [n14a, ""]}
+    - {notetype: Duo, deck: "Lang::Kanji::N5", fields: [n15a, "n15b"]}
+    - {notetype: Duo, deck: "Lang::Words", fields: [n16a, "n16b"]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET due = v.column2
+        FROM (SELECT id AS note, row_number() OVER (ORDER BY id) AS k FROM notes) AS n
+        JOIN (VALUES (1, 9), (2, 3), (3, 14), (4, 1), (5, 7), (6, 12), (7, 5), (8, 16), (9, 2), (10, 11), (11, 6), (12, 15), (13, 4), (14, 10), (15, 8), (16, 13)) AS v ON v.column1 = n.k
+        WHERE cards.nid = n.note
+  - legacy_update: {deck: "Lang::Kanji", patch: {newLimit: 3}}
+  - legacy_update: {preset: Default, patch: {newGatherPriority: 5, newSortOrder: 0}}
+  - set_current_deck: {deck: Lang}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {newSortOrder: 1}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {newSortOrder: 2}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {newSortOrder: 3}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {newSortOrder: 4}}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {newSortOrder: 1}}
+  - observe: [queue]
+  - advance: 2h
+  - set_current_deck: {deck: Default}
+  - set_current_deck: {deck: Lang}
+  - observe: [queue]
+  - advance: 1d
+  - observe: [queue]

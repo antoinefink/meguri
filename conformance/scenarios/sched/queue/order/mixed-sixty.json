@@ -1,0 +1,1615 @@
+{
+  "id": "sched/queue/order/mixed-sixty",
+  "clock": {
+    "tz": "UTC",
+    "start": "2031-01-10T10:00:00"
+  },
+  "setup": {
+    "config": {
+      "fsrs": true,
+      "collapseTime": 1200
+    },
+    "presets": [
+      {
+        "name": "Default",
+        "new_per_day": 100,
+        "reviews_per_day": 200,
+        "bury_new": false,
+        "bury_reviews": false,
+        "bury_interday_learning": false
+      }
+    ],
+    "decks": [
+      "Prism::Willow",
+      "Prism::Amber::Inner",
+      "Prism",
+      "Prism::Amber",
+      "Prism::Birch"
+    ],
+    "notetypes": [
+      {
+        "name": "Facet",
+        "fields": [
+          "Face",
+          "Echo"
+        ],
+        "templates": [
+          {
+            "name": "Face",
+            "front": "{{Face}}",
+            "back": "{{Echo}}"
+          },
+          {
+            "name": "Echo",
+            "front": "{{Echo}}",
+            "back": "{{Face}}"
+          }
+        ],
+        "css": ""
+      }
+    ],
+    "notes": [
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Willow",
+        "fields": [
+          "facet 1 front",
+          "facet 1 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Amber::Inner",
+        "fields": [
+          "facet 2 front",
+          "facet 2 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism",
+        "fields": [
+          "facet 3 front",
+          "facet 3 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Amber",
+        "fields": [
+          "facet 4 front",
+          "facet 4 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Birch",
+        "fields": [
+          "facet 5 front",
+          "facet 5 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Willow",
+        "fields": [
+          "facet 6 front",
+          "facet 6 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Amber::Inner",
+        "fields": [
+          "facet 7 front",
+          "facet 7 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism",
+        "fields": [
+          "facet 8 front",
+          "facet 8 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Amber",
+        "fields": [
+          "facet 9 front",
+          "facet 9 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Birch",
+        "fields": [
+          "facet 10 front",
+          "facet 10 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Willow",
+        "fields": [
+          "facet 11 front",
+          "facet 11 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Amber::Inner",
+        "fields": [
+          "facet 12 front",
+          "facet 12 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism",
+        "fields": [
+          "facet 13 front",
+          "facet 13 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Amber",
+        "fields": [
+          "facet 14 front",
+          "facet 14 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Birch",
+        "fields": [
+          "facet 15 front",
+          "facet 15 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Willow",
+        "fields": [
+          "facet 16 front",
+          "facet 16 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Amber::Inner",
+        "fields": [
+          "facet 17 front",
+          "facet 17 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism",
+        "fields": [
+          "facet 18 front",
+          "facet 18 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Amber",
+        "fields": [
+          "facet 19 front",
+          "facet 19 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Birch",
+        "fields": [
+          "facet 20 front",
+          "facet 20 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Willow",
+        "fields": [
+          "facet 21 front",
+          "facet 21 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Amber::Inner",
+        "fields": [
+          "facet 22 front",
+          "facet 22 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism",
+        "fields": [
+          "facet 23 front",
+          "facet 23 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Amber",
+        "fields": [
+          "facet 24 front",
+          "facet 24 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Birch",
+        "fields": [
+          "facet 25 front",
+          "facet 25 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Willow",
+        "fields": [
+          "facet 26 front",
+          "facet 26 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Amber::Inner",
+        "fields": [
+          "facet 27 front",
+          "facet 27 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism",
+        "fields": [
+          "facet 28 front",
+          "facet 28 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Amber",
+        "fields": [
+          "facet 29 front",
+          "facet 29 back"
+        ]
+      },
+      {
+        "notetype": "Facet",
+        "deck": "Prism::Birch",
+        "fields": [
+          "facet 30 front",
+          "facet 30 back"
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "db_exec": {
+        "sql": "UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, reps = v.column6, data = v.column7, mod = v.column8\nFROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c\nJOIN (VALUES\n  (1, 0, 0, 8, 0, 0, '{}', 1925805599),\n  (2, 0, 0, 8, 0, 0, '{}', 1925805598),\n  (3, 0, 0, 3, 0, 0, '{}', 1925805597),\n  (4, 0, 0, 3, 0, 0, '{}', 1925805596),\n  (5, 0, 0, 10, 0, 0, '{}', 1925805600),\n  (6, 0, 0, 10, 0, 0, '{}', 1925805599),\n  (7, 0, 0, 5, 0, 0, '{}', 1925805598),\n  (8, 0, 0, 5, 0, 0, '{}', 1925805597),\n  (9, 0, 0, 12, 0, 0, '{}', 1925805596),\n  (10, 0, 0, 12, 0, 0, '{}', 1925805600),\n  (11, 0, 0, 7, 0, 0, '{}', 1925805599),\n  (12, 0, 0, 7, 0, 0, '{}', 1925805598),\n  (13, 0, 0, 2, 0, 0, '{}', 1925805597),\n  (14, 0, 0, 2, 0, 0, '{}', 1925805596),\n  (15, 0, 0, 9, 0, 0, '{}', 1925805600),\n  (16, 0, 0, 9, 0, 0, '{}', 1925805599),\n  (17, 0, 0, 4, 0, 0, '{}', 1925805598),\n  (18, 0, 0, 4, 0, 0, '{}', 1925805597),\n  (19, 0, 0, 11, 0, 0, '{}', 1925805596),\n  (20, 0, 0, 11, 0, 0, '{}', 1925805600),\n  (21, 0, 0, 6, 0, 0, '{}', 1925805599),\n  (22, 0, 0, 6, 0, 0, '{}', 1925805598),\n  (23, 0, 0, 1, 0, 0, '{}', 1925805597),\n  (24, 0, 0, 1, 0, 0, '{}', 1925805596),\n  (25, 2, 2, 200, 3, 5, '{}', 1925805600),\n  (26, 2, 2, 199, 5, 6, '{\"d\":2.5}', 1925805599),\n  (27, 2, 2, 198, 9, 7, '{\"s\":15.5,\"d\":3.5}', 1925805598),\n  (28, 2, 2, 197, 16, 8, '{\"s\":17.25,\"d\":4.5,\"dr\":0.82,\"lrt\":1941530400}', 1925805597),\n  (29, 2, 2, 196, 27, 5, '{\"s\":19.0,\"d\":5.5,\"dr\":0.85,\"lrt\":1940493600,\"decay\":0.5}', 1925805596),\n  (30, 2, 2, 195, 43, 6, '{\"s\":20.75,\"d\":6.5,\"dr\":0.8799999999999999,\"decay\":0.5}', 1925805600),\n  (31, 2, 2, 194, 71, 7, '{\"s\":22.5,\"d\":7.5,\"dr\":0.82,\"lrt\":1936778400}', 1925805599),\n  (32, 2, 2, 193, 3, 8, '{}', 1925805598),\n  (33, 2, 2, 200, 5, 5, '{\"d\":2.5}', 1925805597),\n  (34, 2, 2, 199, 9, 6, '{\"s\":27.75,\"d\":2.5}', 1925805596),\n  (35, 2, 2, 198, 16, 7, '{\"s\":29.5,\"d\":3.5,\"dr\":0.85,\"lrt\":1941444000}', 1925805600),\n  (36, 2, 2, 197, 27, 8, '{\"s\":31.25,\"d\":4.5,\"dr\":0.8799999999999999,\"lrt\":1940407200,\"decay\":0.5}', 1925805599),\n  (37, 2, 2, 196, 43, 5, '{\"s\":33.0,\"d\":5.5,\"dr\":0.82,\"decay\":0.5}', 1925805598),\n  (38, 2, 2, 195, 71, 6, '{\"s\":34.75,\"d\":6.5,\"dr\":0.85,\"lrt\":1936692000}', 1925805597),\n  (39, 2, 2, 194, 3, 7, '{}', 1925805596),\n  (40, 2, 2, 193, 5, 8, '{\"d\":2.5}', 1925805600),\n  (41, 2, 2, 200, 9, 5, '{\"s\":40.0,\"d\":1.5}', 1925805599),\n  (42, 2, 2, 199, 16, 6, '{\"s\":41.75,\"d\":2.5,\"dr\":0.8799999999999999,\"lrt\":1941357600}', 1925805598),\n  (43, 2, 2, 198, 27, 7, '{\"s\":43.5,\"d\":3.5,\"dr\":0.82,\"lrt\":1940580000,\"decay\":0.5}', 1925805597),\n  (44, 2, 2, 197, 43, 8, '{\"s\":45.25,\"d\":4.5,\"dr\":0.85,\"decay\":0.5}', 1925805596),\n  (45, 2, 2, 196, 71, 5, '{\"s\":47.0,\"d\":5.5,\"dr\":0.8799999999999999,\"lrt\":1936605600}', 1925805600),\n  (46, 2, 2, 195, 3, 6, '{}', 1925805599),\n  (47, 2, 2, 194, 5, 7, '{\"d\":2.5}', 1925805598),\n  (48, 2, 2, 193, 9, 8, '{\"s\":52.25,\"d\":8.5}', 1925805597),\n  (49, 2, 2, 200, 16, 5, '{\"s\":54.0,\"d\":1.5,\"dr\":0.82,\"lrt\":1941530400}', 1925805596),\n  (50, 2, 2, 199, 27, 6, '{\"s\":55.75,\"d\":2.5,\"dr\":0.85,\"lrt\":1940493600,\"decay\":0.5}', 1925805600),\n  (51, 2, 2, 198, 43, 7, '{\"s\":57.5,\"d\":3.5,\"dr\":0.8799999999999999,\"decay\":0.5}', 1925805599),\n  (52, 2, 2, 197, 71, 8, '{\"s\":59.25,\"d\":4.5,\"dr\":0.82,\"lrt\":1936778400}', 1925805598),\n  (53, 3, 3, 200, 4, 3, '{}', 1925805597),\n  (54, 3, 3, 199, 11, 3, '{\"s\":12.0,\"d\":4.0,\"dr\":0.88,\"lrt\":1942826400}', 1925805596),\n  (55, 3, 3, 198, 18, 3, '{\"s\":16.0,\"d\":5.0,\"dr\":0.88,\"lrt\":1942740000}', 1925805600),\n  (56, 3, 3, 197, 29, 3, '{\"s\":20.0,\"d\":6.0,\"dr\":0.88,\"lrt\":1942653600}', 1925805599),\n  (57, 1, 1, 1943085480, 0, 2, '{}', 1925805598),\n  (58, 1, 1, 1943086500, 0, 0, '{}', 1925805597),\n  (59, 2, 2, 201, 6, 5, '{\"s\":18.0,\"d\":4.0,\"dr\":0.88,\"lrt\":1942653600}', 1925805596),\n  (60, 2, 2, 201, 24, 5, '{\"s\":18.0,\"d\":4.0,\"dr\":0.88,\"lrt\":1942653600}', 1925805600)\n) AS v ON v.column1 = c.n\nWHERE cards.id = c.cid"
+      }
+    },
+    {
+      "set_clock": "2031-07-29T10:00:00"
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "card"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 0,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 2,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 3,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 4,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 1,
+          "newSortOrder": 0,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 1,
+          "newSortOrder": 1,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 1,
+          "newSortOrder": 2,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 1,
+          "newSortOrder": 3,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 1,
+          "newSortOrder": 4,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 2,
+          "newSortOrder": 0,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 2,
+          "newSortOrder": 1,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 2,
+          "newSortOrder": 2,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 2,
+          "newSortOrder": 3,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 2,
+          "newSortOrder": 4,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 3,
+          "newSortOrder": 0,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 3,
+          "newSortOrder": 1,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 3,
+          "newSortOrder": 2,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 3,
+          "newSortOrder": 3,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 3,
+          "newSortOrder": 4,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 4,
+          "newSortOrder": 0,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 4,
+          "newSortOrder": 1,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 4,
+          "newSortOrder": 2,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 4,
+          "newSortOrder": 3,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 4,
+          "newSortOrder": 4,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 5,
+          "newSortOrder": 0,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 5,
+          "newSortOrder": 1,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 5,
+          "newSortOrder": 2,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 5,
+          "newSortOrder": 3,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 5,
+          "newSortOrder": 4,
+          "reviewOrder": 0,
+          "newMix": 1,
+          "interdayLearningMix": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 1
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 2
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 3
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 4
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 5
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 6
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 7
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 8
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 9
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 10
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 11
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 12
+        }
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 3,
+          "newSortOrder": 1,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 4,
+          "newSortOrder": 1,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 5,
+          "newSortOrder": 1,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 2,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 3,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 4,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 8
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "advance": "2h"
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 3,
+          "newSortOrder": 1,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 4,
+          "newSortOrder": 1,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 5,
+          "newSortOrder": 1,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 2,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 3,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 4,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 8
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "advance": "1d"
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 3,
+          "newSortOrder": 1,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 4,
+          "newSortOrder": 1,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 5,
+          "newSortOrder": 1,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 2,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 3,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 4,
+          "reviewOrder": 0
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    },
+    {
+      "legacy_update": {
+        "preset": "Default",
+        "patch": {
+          "newGatherPriority": 0,
+          "newSortOrder": 1,
+          "reviewOrder": 8
+        }
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Default"
+      }
+    },
+    {
+      "set_current_deck": {
+        "deck": "Prism"
+      }
+    },
+    {
+      "observe": [
+        "timing",
+        "queue"
+      ]
+    }
+  ]
+}

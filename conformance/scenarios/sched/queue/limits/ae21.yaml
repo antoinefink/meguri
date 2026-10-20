@@ -1,0 +1,32 @@
+# AE21 (R605, R606, R608; specs/sched/limits.md L2, L4, L7). Preset 20 new and
+# 200 reviews a day. Japanese has a This-deck new limit of 0, its child Mining
+# one of 5, both have 198 reviews studied today, and new cards do not ignore
+# the review limit. Studying Mining offers 2 new cards (the 2 reviews left cap
+# them); studying Japanese offers none, from Mining either.
+id: sched/queue/limits/ae21
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets:
+    - {name: Default, new_per_day: 20, reviews_per_day: 200}
+  decks: [Japanese, "Japanese::Mining"]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Japanese, fields: [j1, a]}
+    - {notetype: Card, deck: Japanese, fields: [j2, a]}
+    - {notetype: Card, deck: "Japanese::Mining", fields: [m1, a]}
+    - {notetype: Card, deck: "Japanese::Mining", fields: [m2, a]}
+    - {notetype: Card, deck: "Japanese::Mining", fields: [m3, a]}
+    - {notetype: Card, deck: "Japanese::Mining", fields: [m4, a]}
+    - {notetype: Card, deck: "Japanese::Mining", fields: [m5, a]}
+    - {notetype: Card, deck: "Japanese::Mining", fields: [m6, a]}
+steps:
+  - legacy_update: {deck: Japanese, patch: {newLimit: 0, revToday: [0, 198]}}
+  - legacy_update: {deck: "Japanese::Mining", patch: {newLimit: 5, revToday: [0, 198]}}
+  - set_current_deck: {deck: "Japanese::Mining"}
+  - observe: [queue, congrats]
+  - set_current_deck: {deck: Japanese}
+  - observe: [queue, congrats, deck_counts]

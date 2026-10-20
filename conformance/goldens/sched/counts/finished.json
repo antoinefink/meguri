@@ -1,0 +1,105 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "congrats": {
+          "have_sched_buried": true,
+          "have_user_buried": true,
+          "learn_remaining": 2,
+          "new_remaining": true,
+          "review_remaining": true,
+          "secs_until_next_learn": 600
+        },
+        "deck_counts": [
+          {
+            "children": [],
+            "learning": 0,
+            "name": "Done",
+            "new": 0,
+            "review": 0
+          },
+          {
+            "children": [],
+            "learning": 0,
+            "name": "Empty",
+            "new": 0,
+            "review": 0
+          }
+        ],
+        "queue": {
+          "cards": [],
+          "counts": {
+            "learning": 0,
+            "new": 0,
+            "review": 0
+          },
+          "kinds": []
+        }
+      },
+      {},
+      {
+        "congrats": {
+          "have_sched_buried": false,
+          "have_user_buried": false,
+          "learn_remaining": 0,
+          "new_remaining": false,
+          "review_remaining": false,
+          "secs_until_next_learn": 86400
+        },
+        "queue": {
+          "cards": [],
+          "counts": {
+            "learning": 0,
+            "new": 0,
+            "review": 0
+          },
+          "kinds": []
+        }
+      },
+      {},
+      {
+        "deck_counts": [
+          {
+            "children": [],
+            "learning": 2,
+            "name": "Done",
+            "new": 0,
+            "review": 2
+          },
+          {
+            "children": [],
+            "learning": 0,
+            "name": "Empty",
+            "new": 0,
+            "review": 0
+          }
+        ],
+        "timing": {
+          "days_elapsed": 1,
+          "next_day_at": 1894852800,
+          "now": 1894766400,
+          "utc_offset_secs": 0
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/counts/finished",
+  "scenario_sha256": "66f41c312f11b2b30b1f6c89543ff1bd0700a091430cd75de26547075b0e119a",
+  "tz": "UTC"
+}

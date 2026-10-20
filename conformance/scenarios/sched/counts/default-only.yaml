@@ -1,0 +1,8 @@
+# The Default deck is shown when it is the only deck, even with no card (R39;
+# specs/sched/counts.md C2).
+id: sched/counts/default-only
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+steps:
+  - observe: [deck_counts]

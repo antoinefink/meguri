@@ -1,0 +1,34 @@
+# AE84 (R1897, R1898, R1899; specs/sched/counts.md C3): Asia/Kathmandu (UTC
+# +05:45) with the rollover at 4 AM. The deck list counts one second before, at
+# and one second after 04:00 local: Words holds a review due today, a review
+# due tomorrow and a review buried by a sibling, and Default allows 200
+# reviews of which 199 were studied today.
+id: sched/counts/ae84-kathmandu
+clock: {tz: Asia/Kathmandu, start: "2030-01-15T10:00:00", mode: step}
+setup:
+  config: {fsrs: true}
+  decks: [Words]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Words, fields: [w1, a]}
+    - {notetype: Card, deck: Words, fields: [w2, a]}
+    - {notetype: Card, deck: Words, fields: [w3, a]}
+    - {notetype: Card, deck: Words, fields: [w4, a]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 2, queue = v.column2, due = v.column3, ivl = 5, reps = 3
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 2, 0), (2, 2, 1), (3, -2, 0), (4, 2, -1)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - legacy_update: {deck: Words, patch: {revToday: [0, 199]}}
+  - observe: [timing, deck_counts]
+  - set_clock: "2030-01-16T03:59:59"
+  - observe: [timing, deck_counts]
+  - advance: 1s
+  - observe: [timing, deck_counts]
+  - advance: 1s
+  - observe: [timing, deck_counts]

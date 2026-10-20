@@ -1,0 +1,64 @@
+# Which cards a deck's queue gathers (R603, R610, R612; specs/sched/queue-building.md
+# B2, B4). Studying Lang gathers its subdeck Lang::Sub; it skips the sibling
+# deck Other and a top-level filtered deck Cram, even for a card whose home
+# deck is Lang. Of Lang's own cards it skips suspended and buried cards,
+# reviews and interday learning due tomorrow, and keeps a flagged card.
+#   #c1 new                      #c8  interday learning due tomorrow
+#   #c2 new, suspended           #c9  interday learning due today
+#   #c3 new, buried by the user  #c10 intraday learning due a minute ago
+#   #c4 review, buried by a sibling answer  #c11 new, red flag
+#   #c5 review due today         #c12 new in Lang::Sub
+#   #c6 review due tomorrow      #c13 review due today in Other
+#   #c7 review due 5 days ago    #c14 review due today, moved to Cram
+id: sched/queue/gather/card-states
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [Lang, "Lang::Sub", Other]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Lang, fields: [c1, a]}
+    - {notetype: Card, deck: Lang, fields: [c2, a]}
+    - {notetype: Card, deck: Lang, fields: [c3, a]}
+    - {notetype: Card, deck: Lang, fields: [c4, a]}
+    - {notetype: Card, deck: Lang, fields: [c5, a]}
+    - {notetype: Card, deck: Lang, fields: [c6, a]}
+    - {notetype: Card, deck: Lang, fields: [c7, a]}
+    - {notetype: Card, deck: Lang, fields: [c8, a]}
+    - {notetype: Card, deck: Lang, fields: [c9, a]}
+    - {notetype: Card, deck: Lang, fields: [c10, a]}
+    - {notetype: Card, deck: Lang, fields: [c11, a]}
+    - {notetype: Card, deck: "Lang::Sub", fields: [c12, a]}
+    - {notetype: Card, deck: Other, fields: [c13, a]}
+    - {notetype: Card, deck: Lang, fields: [c14, a]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, reps = v.column6, left = v.column7, flags = v.column8
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (2, 0, -1, 2, 0, 0, 0, 0),
+          (3, 0, -3, 3, 0, 0, 0, 0),
+          (4, 2, -2, 0, 4, 3, 0, 0),
+          (5, 2, 2, 0, 5, 3, 0, 0),
+          (6, 2, 2, 1, 6, 3, 0, 0),
+          (7, 2, 2, -5, 7, 3, 0, 0),
+          (8, 1, 3, 1, 0, 1, 1, 0),
+          (9, 1, 3, 0, 0, 1, 1, 0),
+          (10, 1, 1, 1894701540, 0, 1, 1, 0),
+          (11, 0, 0, 11, 0, 0, 0, 1),
+          (13, 2, 2, 0, 8, 3, 0, 0),
+          (14, 2, 2, 0, 9, 3, 0, 0)
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  # A filtered deck holding #c14, as building one leaves a review card: home
+  # deck in odid, due date kept in odue.
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  - db_exec:
+      sql: "UPDATE cards SET odid = did, did = 900, odue = due WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 13)"
+  - set_current_deck: {deck: Lang}
+  - observe: [queue, congrats, deck_counts]

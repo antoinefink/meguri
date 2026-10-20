@@ -1,0 +1,101 @@
+# The even spreading of new cards among reviews for several sizes (R619;
+# specs/sched/orders.md O5, O8). Each deck holds reviews due on consecutive
+# past days (shown oldest first) followed by new cards: A 3 and 3, B 3 and 2,
+# C 3 and 6, D 3 and 8, E 10 and 1, F 1 and 10, G none and 4, H 4 and none.
+# The same rule spreads interday learning among reviews.
+id: sched/queue/mix/spread-sizes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets:
+    - {name: Default, new_per_day: 20, reviews_per_day: 200}
+  decks: [A, B, C, D, E, F, G, H]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: A, fields: [ar1, a]}
+    - {notetype: Card, deck: A, fields: [ar2, a]}
+    - {notetype: Card, deck: A, fields: [ar3, a]}
+    - {notetype: Card, deck: A, fields: [an1, a]}
+    - {notetype: Card, deck: A, fields: [an2, a]}
+    - {notetype: Card, deck: A, fields: [an3, a]}
+    - {notetype: Card, deck: B, fields: [br1, a]}
+    - {notetype: Card, deck: B, fields: [br2, a]}
+    - {notetype: Card, deck: B, fields: [br3, a]}
+    - {notetype: Card, deck: B, fields: [bn1, a]}
+    - {notetype: Card, deck: B, fields: [bn2, a]}
+    - {notetype: Card, deck: C, fields: [cr1, a]}
+    - {notetype: Card, deck: C, fields: [cr2, a]}
+    - {notetype: Card, deck: C, fields: [cr3, a]}
+    - {notetype: Card, deck: C, fields: [cn1, a]}
+    - {notetype: Card, deck: C, fields: [cn2, a]}
+    - {notetype: Card, deck: C, fields: [cn3, a]}
+    - {notetype: Card, deck: C, fields: [cn4, a]}
+    - {notetype: Card, deck: C, fields: [cn5, a]}
+    - {notetype: Card, deck: C, fields: [cn6, a]}
+    - {notetype: Card, deck: D, fields: [dr1, a]}
+    - {notetype: Card, deck: D, fields: [dr2, a]}
+    - {notetype: Card, deck: D, fields: [dr3, a]}
+    - {notetype: Card, deck: D, fields: [dn1, a]}
+    - {notetype: Card, deck: D, fields: [dn2, a]}
+    - {notetype: Card, deck: D, fields: [dn3, a]}
+    - {notetype: Card, deck: D, fields: [dn4, a]}
+    - {notetype: Card, deck: D, fields: [dn5, a]}
+    - {notetype: Card, deck: D, fields: [dn6, a]}
+    - {notetype: Card, deck: D, fields: [dn7, a]}
+    - {notetype: Card, deck: D, fields: [dn8, a]}
+    - {notetype: Card, deck: E, fields: [er1, a]}
+    - {notetype: Card, deck: E, fields: [er2, a]}
+    - {notetype: Card, deck: E, fields: [er3, a]}
+    - {notetype: Card, deck: E, fields: [er4, a]}
+    - {notetype: Card, deck: E, fields: [er5, a]}
+    - {notetype: Card, deck: E, fields: [er6, a]}
+    - {notetype: Card, deck: E, fields: [er7, a]}
+    - {notetype: Card, deck: E, fields: [er8, a]}
+    - {notetype: Card, deck: E, fields: [er9, a]}
+    - {notetype: Card, deck: E, fields: [er10, a]}
+    - {notetype: Card, deck: E, fields: [en1, a]}
+    - {notetype: Card, deck: F, fields: [fr1, a]}
+    - {notetype: Card, deck: F, fields: [fn1, a]}
+    - {notetype: Card, deck: F, fields: [fn2, a]}
+    - {notetype: Card, deck: F, fields: [fn3, a]}
+    - {notetype: Card, deck: F, fields: [fn4, a]}
+    - {notetype: Card, deck: F, fields: [fn5, a]}
+    - {notetype: Card, deck: F, fields: [fn6, a]}
+    - {notetype: Card, deck: F, fields: [fn7, a]}
+    - {notetype: Card, deck: F, fields: [fn8, a]}
+    - {notetype: Card, deck: F, fields: [fn9, a]}
+    - {notetype: Card, deck: F, fields: [fn10, a]}
+    - {notetype: Card, deck: G, fields: [gn1, a]}
+    - {notetype: Card, deck: G, fields: [gn2, a]}
+    - {notetype: Card, deck: G, fields: [gn3, a]}
+    - {notetype: Card, deck: G, fields: [gn4, a]}
+    - {notetype: Card, deck: H, fields: [hr1, a]}
+    - {notetype: Card, deck: H, fields: [hr2, a]}
+    - {notetype: Card, deck: H, fields: [hr3, a]}
+    - {notetype: Card, deck: H, fields: [hr4, a]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 2, queue = 2, due = v.column2, ivl = 5, reps = 3
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, -3), (2, -2), (3, -1), (7, -3), (8, -2), (9, -1), (12, -3), (13, -2), (14, -1), (21, -3), (22, -2), (23, -1), (32, -10), (33, -9), (34, -8), (35, -7), (36, -6), (37, -5), (38, -4), (39, -3), (40, -2), (41, -1), (43, -1), (58, -4), (59, -3), (60, -2), (61, -1)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: A}
+  - observe: [queue]
+  - set_current_deck: {deck: B}
+  - observe: [queue]
+  - set_current_deck: {deck: C}
+  - observe: [queue]
+  - set_current_deck: {deck: D}
+  - observe: [queue]
+  - set_current_deck: {deck: E}
+  - observe: [queue]
+  - set_current_deck: {deck: F}
+  - observe: [queue]
+  - set_current_deck: {deck: G}
+  - observe: [queue]
+  - set_current_deck: {deck: H}
+  - observe: [queue]

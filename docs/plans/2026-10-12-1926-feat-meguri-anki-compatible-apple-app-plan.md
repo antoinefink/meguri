@@ -6078,26 +6078,27 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
   - six new-card gather orders (R613);
   - five new-card sort orders (R614);
   - thirteen review orders, each with the (card id, mtime) hash tiebreak (R616–R618);
-  - FNV-1a 64 with the day salt for every random order (R615).
+  - FNV-1a 64: gather orders 3/4/5 use the gather day salt; new sort orders 2/3/4 use today. Review random order and final review ties hash card id with mtime, without a day salt (`sched/orders#O1`, `#O7`).
 - Mixing uses the deterministic even-spreading rule for new/review and interday/review (R619). The learning queue is ordered with attempted cards first, then by due (R620).
 - SQL scalar functions: `fnvhash` lives in `meguri-sched/src/sqlfns.rs`. The FSRS extractors (variable, retrievability, relative retrievability, original position) have one definition, U82a's `meguri-search/src/sqlfns.rs`, used by queue ordering (R618) and, once U82 lands, by `prop:` searches alike. Both register on every connection through U22's connection-init hook, so storage never depends on them. Retrievability uses fsrs 6.6.2's own retrievability function with the card's decay (R618).
 - The queue result is a value: ordered main queue entries, intraday-learning entries with the learning cutoff, the learn-ahead tail (R602), counts (R626) and the remaining-limits snapshot. U43 owns the mutable session state built from it.
-- `rebuild_rules` maps a C2 `ChangeSet` (the meguri-model value type, KTD2) to "rebuild needed / patch / none" per R623. Flag-only card changes need nothing.
+- `rebuild_rules` uses C2 `ChangeSet`, observer before/after card payloads, seq/generation and session ownership context to classify rebuild / patch / none (`sched/queue-building#B10`). `ChangeSet` alone cannot establish flag-only or session-owned answers. Whole-collection/generation invalidation wins; stored memory changes rebuild. Registry-only tag changes need nothing; a rename changing notes patches unless a rebuild rule wins.
 - Deck tree counts (R624):
   - one grouped query per refresh, then bottom-up sums capped by the limits tree;
   - no sibling-burying subtraction (R625);
-  - a count cache keyed by `(day, col mod)` may live in the U26 derived store, and a count from another day is never served (R1819);
+  - a count cache keyed by `(day, col mod)` may live in U26; it expires at the next count change and invalidates on collection generation or whole-collection changes. A count from another day is never served (R1819);
+  - production reads complete D8 automatic maintenance before the read-only snapshot; the conformance count observation separately retains its explicit compatibility prelude (`conformance/queue-ops#Q3`);
   - siblings sorted by full name with the unicase comparison (R34); the Default deck omitted when it has no cards and no children, unless it is the only deck (R39);
   - the record carries the next instant at which any count changes (the next intraday learning card's ready instant), so Home arms one timer on it.
 - Deck page counts (R767) come from a real queue build. The "+N" difference is computed here.
 - `finished.rs` returns one `DeckStudyState` record (R628, R78, R80, R93, R434), the single source for U155, U157, U186 and U43's `Finished`:
   - the next learning card's due instant today, if any, and its ready instant (due − `collapseTime`, when it enters the learn-ahead window): the one "ready in" instant every screen uses;
-  - learning cards due later today, and the remaining learning count;
+  - native today counts and next instants use queue 1 and normal-deck queue 4 with due at or before `next_day_at`, matching the gather boundary; later-today means due after now. Imported timestamps beyond that boundary supply no today instant. The separate congrats-compatible queue-1 total and seconds retain their all-due scope (`sched/counts#C7`);
   - which limit was reached while cards remain;
   - buried counts by kind, used for the R635 menu;
   - tomorrow's due count for the deck tree, and an empty-subtree flag.
 
-**Execution note:** Spec writer first. Then the implementer works test-first against oracle queue goldens (full ordered ids, not sets, R1896).
+**Execution note:** Spec writer first. Then the implementer works test-first against oracle queue goldens (full ordered ids, not sets, R1896). The bounded corrections in `sched/queue-building#B13` reconcile the pinned observations above; they do not reduce 60-card coverage or either-lane verification. Exact final ordering of distinct review-hash collisions remains an evidence gap (`sched/orders#O6`); no extra tie key is claimed.
 
 **Patterns to follow:** KTD2 layering (SQL only in meguri-storage); KTD3 read-only connections for count and queue reads.
 
@@ -6106,16 +6107,16 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
 - `applyAllParentLimits` on: a parent's remaining review limit 3 caps a child studied directly; off: it does not.
 - Interday learning due today consumes the review limit before reviews.
 - Intraday learning is never capped, even with both limits at 0.
-- Each of the 6 gather × 5 sort orders and 13 review orders over a 60-card fixture with mixed decks, positions, intervals and FSRS states gives exactly the oracle's ordered ids. Random orders change on the next day number and stay stable within a day.
-- Retrievability ascending with some cards lacking a memory state uses the SM-2 relative-overdueness fallback for them (R617).
+- Ordering tests follow `sched/orders#O8.1`: sixty cards, every gather/sort combination and every review order. Require exact ordered ids from the oracle. Keep the previously recorded inputs as well. Random order follows `sched/orders#O7`.
+- Retrievability orders 7/11 place missing-memory values first/last. Only relative-overdueness order 12 uses the SM-2 fallback (`sched/orders#O4`, `search/card-extractors#X5`, `#X6`). The current exact calls take `(data, due, ivl, today, now)`; no `next_day_at` argument. These contracts also settle the earlier U82a explanatory slips without changing its accepted implementation.
 - New/review Mix with 7 reviews and 3 new interleaves exactly as the oracle; Show after / Show before produce the concatenations.
 - Bury new siblings on: a note with a review due and a new card gathers only the review; the new sibling is neither counted nor written as buried.
 - Learn-ahead: a learning card due in 15 min with `collapseTime` 1,200 s appears only after the main queue is empty; one due in 25 min is not in the queue.
 - Deck tree counts for a three-level tree with mixed limits equal the oracle in the morning, at 03:59:59 and at 04:00:01 (R1897).
-- The deck page "+N" equals deck-list due minus queue due when siblings are skipped.
+- Deck-page differences are signed, separately for New/Learn/Due: deck-list count minus queue count. Learn can be negative at its strict queue-1 boundary (`sched/counts#C5`).
 - Siblings `4. x`, `10. y`, `9. z`, an emoji name, `a` and `B` order exactly as in the oracle's deck tree (R34); an empty childless Default is absent, and present when it is the only deck (R39).
-- `DeckStudyState` with one learning card due in 30 min under `collapseTime` 1,200 s → ready instant at +10 min; its learning counts equal the oracle's congrats info; an empty subtree sets the empty flag.
-- Filtered-deck cards and queue 4 preview cards never appear in the home deck's queue or counts.
+- `DeckStudyState` with one learning card due in 30 min under `collapseTime` 1,200 s → ready instant at +10 min. Its six compatibility facts equal recorded congrats info; own tests separately prove today-only native counts/absence, queue-4 handling, exact/beyond-rollover boundaries, limit flags, exact buried counts, tomorrow projection and the empty flag.
+- Cards held in filtered decks never appear in the home deck's queue. The deck list still counts filtered descendants under their parent. A queue-4 card left in a normal deck is gathered and counted as intraday learning (`sched/queue-building#B4`, `sched/counts#C3`).
 - `rebuild_rules`: a flag-only ChangeSet → none; a deck-config change → rebuild; a note-field-only change → patch (re-render only).
 - Perf (U12 bench): queue build plus head states for the user-scale synthetic collection (14.4k cards) leaves room in the R1813 150 ms budget (target ≤ 40 ms release on M3 Max, measured on iPhone in U240+); deck tree counts at 150k cards fit the R1818 launch budget.
 

@@ -1,0 +1,123 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "queue": {
+          "cards": ["#c15", "#c16", "#c19", "#c1", "#c24", "#c9", "#c4", "#c10", "#c12", "#c18", "#c3", "#c23", "#c5", "#c8", "#c17", "#c2", "#c25", "#c20", "#c11"],
+          "counts": {
+            "learning": 0,
+            "new": 19,
+            "review": 0
+          },
+          "kinds": ["new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c23", "#c5", "#c15", "#c8", "#c16", "#c19", "#c1", "#c24", "#c9", "#c4", "#c17", "#c2", "#c25", "#c20", "#c10", "#c12", "#c18", "#c3", "#c11"],
+          "counts": {
+            "learning": 0,
+            "new": 19,
+            "review": 0
+          },
+          "kinds": ["new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c10", "#c12", "#c18", "#c3", "#c15", "#c16", "#c19", "#c1", "#c24", "#c9", "#c4", "#c2", "#c25", "#c20", "#c11", "#c23", "#c5", "#c8", "#c17"],
+          "counts": {
+            "learning": 0,
+            "new": 19,
+            "review": 0
+          },
+          "kinds": ["new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c3", "#c15", "#c10", "#c11", "#c18", "#c4", "#c5", "#c16", "#c17", "#c8", "#c23", "#c12", "#c24", "#c25", "#c1", "#c2", "#c9", "#c19", "#c20"],
+          "counts": {
+            "learning": 0,
+            "new": 19,
+            "review": 0
+          },
+          "kinds": ["new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c2", "#c25", "#c20", "#c10", "#c12", "#c18", "#c3", "#c11", "#c23", "#c5", "#c15", "#c8", "#c16", "#c19", "#c1", "#c24", "#c9", "#c4", "#c17"],
+          "counts": {
+            "learning": 0,
+            "new": 19,
+            "review": 0
+          },
+          "kinds": ["new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c23", "#c5", "#c15", "#c8", "#c16", "#c19", "#c1", "#c24", "#c9", "#c4", "#c17", "#c2", "#c25", "#c20", "#c10", "#c12", "#c18", "#c3", "#c11"],
+          "counts": {
+            "learning": 0,
+            "new": 19,
+            "review": 0
+          },
+          "kinds": ["new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new"]
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "queue": {
+          "cards": ["#c23", "#c5", "#c15", "#c8", "#c16", "#c19", "#c1", "#c24", "#c9", "#c4", "#c17", "#c2", "#c25", "#c20", "#c10", "#c12", "#c18", "#c3", "#c11"],
+          "counts": {
+            "learning": 0,
+            "new": 19,
+            "review": 0
+          },
+          "kinds": ["new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c20", "#c4", "#c15", "#c24", "#c5", "#c14", "#c3", "#c23", "#c17", "#c1", "#c19", "#c12", "#c18", "#c9", "#c11", "#c25", "#c2", "#c10", "#c16"],
+          "counts": {
+            "learning": 0,
+            "new": 19,
+            "review": 0
+          },
+          "kinds": ["new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new", "new"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/queue/order/new-gather-random-cards",
+  "scenario_sha256": "fbc9cdf492e694b50f7e5f0c3ccbd9d0def3c254ecc524b45314105586fa7817",
+  "tz": "UTC"
+}

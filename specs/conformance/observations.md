@@ -45,8 +45,10 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `answer_labels` | card references or none | `{"#cN": {again, hard, good, easy}}`: the answer button labels now, each as its parts (O10) |
 | `net_probe` | `{host, port, timeout_ms?}` | `{connected, error}` (diagnostic, oracle only: proves the worker has no route out) |
 | `schema_objects` | none | `[{type, name, tbl_name, sql}]`, every object of the collection file's `sqlite_master` with its SQL text normalized (`storage-ops.md` P3) |
-| `queue` | none or `{deck}` | draft (sched): the cards in the order the scheduler would show them, as `#cN`, and the new, learning and review counts |
-| `deck_tree` | none | `[{name, children}]`: the deck tree's top-level nodes in order, nested (`deck-ops.md` K12); the queue area (U41) adds counts |
+| `queue` | none | `{cards, kinds, counts}`: current-deck presentation in full ordered ids, each kind and `{new, learning, review}` counts (`queue-ops.md` Q2); pending current provider proof |
+| `deck_counts` | none | `[{name, new, learning, review, children}]`: ordered count tree after the explicit compatibility prelude (`queue-ops.md` Q3); production uses D8 automatic maintenance |
+| `congrats` | none | `{learn_remaining, secs_until_next_learn, review_remaining, new_remaining, have_sched_buried, have_user_buried}`: the six compatibility facts, including all queue-1 cards (`queue-ops.md` Q4) |
+| `deck_tree` | none | `[{name, children}]`: the deck tree's top-level nodes in order, nested (`deck-ops.md` K12); `deck_counts` reports counts separately |
 | `decks` | none | `{<name>: {id, filtered, config_id, study_collapsed, browser_collapsed, mtime_secs, usn}}`: every deck by its stored human name (`deck-ops.md` K11) |
 | `render` | card references or none | `{"#cN": {review, browser} \| null}`, the card render pipeline's outputs for the stored templates: question and answer text with play markers, AV entries, blank kind or template error, in review and in browser mode (`render-ops.md` Q5) |
 | `render_status` | card references or none | `{"#cN": {ord, status} \| null}`: whether the card renders for review from its stored templates, `status` `ok`, `empty` (blank question) or `template_error`, with no text or length (`render-ops.md` Q4) |

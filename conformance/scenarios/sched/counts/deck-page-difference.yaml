@@ -1,0 +1,38 @@
+# Deck list counts against the deck's own queue (R625, R767;
+# specs/sched/counts.md C5). Default buries new and review siblings and allows
+# 20 new cards a day. Lang holds 3 notes with two reviews due today each, 2
+# notes with two new cards each, and a learning card due exactly 1,200 s from
+# now. The queue skips the second card of each note; the deck list does not:
+# reviews 6 against 3, new 4 against 2. The learning card is in the queue (due
+# at most now + 1,200 s) and not yet in the deck list (strictly before): 0
+# against 1. The deck page shows the differences +3, +2 and -1.
+id: sched/counts/deck-page-difference
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets:
+    - {name: Default, new_per_day: 20, reviews_per_day: 200, bury_new: true, bury_reviews: true}
+  decks: [Lang]
+  notetypes:
+    - name: Duo
+      fields: [A, B]
+      templates:
+        - {name: One, front: "{{A}}", back: "{{A}}"}
+        - {name: Two, front: "{{B}}", back: "{{B}}"}
+  notes:
+    - {notetype: Duo, deck: Lang, fields: [r1a, r1b]}
+    - {notetype: Duo, deck: Lang, fields: [r2a, r2b]}
+    - {notetype: Duo, deck: Lang, fields: [r3a, r3b]}
+    - {notetype: Duo, deck: Lang, fields: [n1a, n1b]}
+    - {notetype: Duo, deck: Lang, fields: [n2a, n2b]}
+    - {notetype: Duo, deck: Lang, fields: [l1a, ""]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, reps = v.column6, left = v.column7
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 2, 2, 0, 5, 3, 0), (2, 2, 2, 0, 6, 3, 0), (3, 2, 2, -1, 5, 3, 0), (4, 2, 2, 0, 7, 3, 0),
+                     (5, 2, 2, 0, 8, 3, 0), (6, 2, 2, -2, 9, 3, 0), (11, 1, 1, 1894702800, 0, 1, 1)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: Lang}
+  - observe: [queue, deck_counts]

@@ -1,0 +1,84 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "congrats": {
+          "have_sched_buried": true,
+          "have_user_buried": true,
+          "learn_remaining": 1,
+          "new_remaining": true,
+          "review_remaining": true,
+          "secs_until_next_learn": 60
+        },
+        "deck_counts": [
+          {
+            "children": [],
+            "learning": 0,
+            "name": "Cram",
+            "new": 0,
+            "review": 1
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "learning": 0,
+                "name": "Sub",
+                "new": 1,
+                "review": 0
+              }
+            ],
+            "learning": 2,
+            "name": "Lang",
+            "new": 3,
+            "review": 2
+          },
+          {
+            "children": [],
+            "learning": 0,
+            "name": "Other",
+            "new": 0,
+            "review": 1
+          }
+        ],
+        "queue": {
+          "cards": ["#c10", "#c7", "#c1", "#c9", "#c11", "#c5", "#c12"],
+          "counts": {
+            "learning": 2,
+            "new": 3,
+            "review": 2
+          },
+          "kinds": ["learning", "review", "new", "learning", "new", "review", "new"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/queue/gather/card-states",
+  "scenario_sha256": "e34a1186e5befe0b013e1339713a4d49f9e350f0f31369aedbb39d97279dca52",
+  "tz": "UTC"
+}

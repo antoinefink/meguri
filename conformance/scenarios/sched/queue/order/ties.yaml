@@ -1,0 +1,30 @@
+# Cards equal on every key of their order (specs/sched/orders.md O6). The
+# decks are created as Ties::z, then Ties::a, so their ids run against their
+# names. Each holds two new cards at one shared position (7) and, later, two
+# intraday learning cards due at one shared instant. Cards tied on position
+# come in deck id order, then card id order, for ascending and descending
+# position alike; so do learning cards tied on due time and attempts.
+id: sched/queue/order/ties
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: ["Ties::z", "Ties::a"]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: "Ties::a", fields: [a1, x]}
+    - {notetype: Card, deck: "Ties::z", fields: [z1, x]}
+    - {notetype: Card, deck: "Ties::a", fields: [a2, x]}
+    - {notetype: Card, deck: "Ties::z", fields: [z2, x]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET due = 7"}
+  - legacy_update: {preset: Default, patch: {newGatherPriority: 1, newSortOrder: 1}}
+  - set_current_deck: {deck: Ties}
+  - observe: [queue]
+  - legacy_update: {preset: Default, patch: {newGatherPriority: 2}}
+  - observe: [queue]
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894701000, reps = 2, left = 1"}
+  - set_current_deck: {deck: Ties}
+  - observe: [queue]

@@ -1,0 +1,38 @@
+# One learning card left, due in 30 minutes, with the default learn-ahead
+# limit of 1,200 s (R602, R622, R628; specs/sched/queue-building.md B6,
+# specs/sched/counts.md C3, C7). At 10:00 the queue is empty and the card is ready
+# in 600 s. At 10:10:00 it enters the queue (due at most 1,200 s ahead); the
+# deck list counts it only from 10:10:01 (due strictly before now + 1,200 s).
+# With collapseTime then set to 0, nothing is presented early and the card is
+# ready in 1,199 s.
+id: sched/queue/learn-ahead/ready-in
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [Lang]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Lang, fields: [l1, a]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894703400, reps = 1, left = 1"}
+  - set_current_deck: {deck: Lang}
+  - observe: [queue, deck_counts, congrats]
+  - advance: 9m59s
+  - set_current_deck: {deck: Default}
+  - set_current_deck: {deck: Lang}
+  - observe: [queue, deck_counts, congrats]
+  - advance: 1s
+  - set_current_deck: {deck: Default}
+  - set_current_deck: {deck: Lang}
+  - observe: [queue, deck_counts, congrats]
+  - advance: 1s
+  - set_current_deck: {deck: Default}
+  - set_current_deck: {deck: Lang}
+  - observe: [queue, deck_counts, congrats]
+  - set_config: {key: collapseTime, value: 0}
+  - set_current_deck: {deck: Default}
+  - set_current_deck: {deck: Lang}
+  - observe: [queue, deck_counts, congrats]
