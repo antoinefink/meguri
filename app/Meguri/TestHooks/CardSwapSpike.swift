@@ -1,6 +1,7 @@
 #if MEGURI_TEST_HOOKS
 import DesignSystem
 import CardRendering
+import Darwin
 import Foundation
 import Instrumentation
 import Metal
@@ -121,6 +122,8 @@ extension TestHooks {
             var swaps = 0
             var footprintAt100KB = 0
             var footprintAt1000KB = 0
+            var memoryAt100: MemorySnapshot?
+            var memoryAt1000: MemorySnapshot?
             /// The pages' web content processes: after loading (warm), at
             /// swaps 100 and 1,000, and after the session closed (both pages
             /// dropped their card). -1 where the system does not tell (iOS).
@@ -139,6 +142,26 @@ extension TestHooks {
             /// old cards alive would collect none.
             var cardElementsRegistered = 0
             var cardElementsFinalized = 0
+        }
+
+        /// Native-process aggregates in bytes (except block and query counts).
+        /// VM counters overlap; they are not a replacement footprint.
+        struct MemorySnapshot: Codable {
+            var mallocBlocksInUse: UInt64
+            var mallocSizeInUse: UInt64
+            var mallocSizeAllocated: UInt64
+            var mallocMaxSizeInUse: UInt64
+            var taskVMInfoStatus: Int32
+            var taskVMInfoCount: UInt32
+            var residentSize: UInt64?
+            var internalSize: UInt64?
+            var externalSize: UInt64?
+            var reusable: UInt64?
+            var compressed: UInt64?
+            var device: UInt64?
+            var ledgerPhysFootprintPeak: Int64?
+            var ledgerTagMediaFootprint: Int64?
+            var ledgerTagGraphicsFootprint: Int64?
         }
 
         private(set) var reportJSON = "{}"
@@ -491,12 +514,15 @@ extension TestHooks {
                     let nodes = Int(await back.run("return String(document.getElementsByTagName('*').length);")) ?? -1
                     let webContent = await restedWebContentKB(views, &burst)
                     let footprint = Self.footprint() / 1024
+                    let memory = Self.memorySnapshot()
                     if cycle == 100 {
                         burst.footprintAt100KB = footprint
+                        burst.memoryAt100 = memory
                         burst.webContentAt100KB = webContent
                         burst.nodesAt100 = nodes
                     } else {
                         burst.footprintAt1000KB = footprint
+                        burst.memoryAt1000 = memory
                         burst.webContentAt1000KB = webContent
                         burst.nodesAt1000 = nodes
                     }
@@ -645,6 +671,37 @@ extension TestHooks {
             #else
             throw Unreadable(why: "iOS offers no way to read another process's footprint")
             #endif
+        }
+
+        private static func memorySnapshot() -> MemorySnapshot {
+            var stats = malloc_statistics_t()
+            malloc_zone_statistics(nil, &stats)
+            var info = task_vm_info_data_t()
+            let fullCount = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+            var count = fullCount
+            let result = withUnsafeMutablePointer(to: &info) {
+                $0.withMemoryRebound(to: integer_t.self, capacity: Int(fullCount)) {
+                    task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+                }
+            }
+            var snapshot = MemorySnapshot(
+                mallocBlocksInUse: UInt64(stats.blocks_in_use),
+                mallocSizeInUse: UInt64(stats.size_in_use),
+                mallocSizeAllocated: UInt64(stats.size_allocated),
+                mallocMaxSizeInUse: UInt64(stats.max_size_in_use),
+                taskVMInfoStatus: result,
+                taskVMInfoCount: count)
+            guard result == KERN_SUCCESS, count >= fullCount else { return snapshot }
+            snapshot.residentSize = info.resident_size
+            snapshot.internalSize = info.internal
+            snapshot.externalSize = info.external
+            snapshot.reusable = info.reusable
+            snapshot.compressed = info.compressed
+            snapshot.device = info.device
+            snapshot.ledgerPhysFootprintPeak = info.ledger_phys_footprint_peak
+            snapshot.ledgerTagMediaFootprint = info.ledger_tag_media_footprint
+            snapshot.ledgerTagGraphicsFootprint = info.ledger_tag_graphics_footprint
+            return snapshot
         }
 
         static func footprint() -> Int {
