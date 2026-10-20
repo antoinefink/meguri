@@ -98,9 +98,15 @@ open class CardNativeWebView: WKWebView {
 
     func applyAppearance(_ value: CardRuntime.Appearance) {
         #if os(macOS)
-        appearance = NSAppearance(named: value == .dark ? .darkAqua : .aqua)
+        let desired: NSAppearance.Name = value == .dark ? .darkAqua : .aqua
+        if appearance?.name != desired {
+            appearance = NSAppearance(named: desired)
+        }
         #else
-        overrideUserInterfaceStyle = value == .dark ? .dark : .light
+        let desired: UIUserInterfaceStyle = value == .dark ? .dark : .light
+        if overrideUserInterfaceStyle != desired {
+            overrideUserInterfaceStyle = desired
+        }
         #endif
     }
 }
