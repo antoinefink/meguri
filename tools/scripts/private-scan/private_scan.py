@@ -595,11 +595,99 @@ PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/vendor/jquery-3.7.1.min.js":
         "fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a",
 }
+
+
+# Published Askama derive 0.16.1 files verified against archive SHA256
+# 071ee5ebf2138e3ad180e0aacf6940c2cab5e6d8333741d9925c7bee2b153f39.
+# Keys pin exact repository-path UTF-8 bytes; values pin complete file bytes.
+PUBLIC_VENDOR_ARTIFACTS = {
+    '987ec1929a5a69b01078144679a1a93b0ae01cb133c1a3eb19b18c2094e4e400': '3cf5ea37ea7bad31fe17f2650ea6ad0a7a570724a2435458d1ed1efb2dcf4715',
+    '35a74f0278dd035158c7c188707978180be6dac754422f7bc506b0a6b16f626e': 'a3754a3582a6ab4247c2ace9f9686f8757f94691b01e86f340234c4c18073a1b',
+    '03e15d0ae33aa3bd1b02ca67981f67a15ee7aa7999f0628ebad8623a78f4c4c3': 'd0158de75a7ce3ddd72c04e974befc12dafc396a66eb4d77278bc522319416a7',
+    '24b14302683cc62b6927130bdd2453e5c2bafb292543a87aabf67a92e593147d': '87cb0d734c723c083e51c825930ff42bce28596b52dee15567f6b28f19c195e3',
+    '1aae91a6c2e145efa3fe99f5af4936606a2834a746bbdb91d95cf4cbe8e55adc': 'df20e0180764bf5bd76f74d47bc9e8c0069a666401629c390003a1d5eba99c92',
+    '91dfe793456bcef3b558dc77e4d4499346b90db193c8e68d3591eabbdf0eee78': 'd14d50477d6ebf3a404203e2afcbe130f980b3c777e5c5d607e1a061ae3cdac7',
+    'c9f1ed162ffba8af33d7b34d2c98acee092d160604691211e8a16631267891a3': '3c73a10e0f3a854d78b80e5a38bde1f052b80640ed2f47cc8d2a353d268165c2',
+    'ee55cda27f30fede9d27d9d8d66ac36e1ac9a926526549ef63b834d21cdd5086': '57b54eb53aad4d1cf2ed4bf11f2ad5aaad12ab582545308e0a3cdff950187770',
+    'a40864ae7ed6809299d0fdf094145dc7831deaf3d9cf07b8dc3acbe85f9145e4': '6c3c312bad0fbb5ec5fa8f46535ae4c73bb4fcbe559ab050382a72cb690402fe',
+    'ff12e40018abed3255321d43f7cf800f9facc982cc413e6503b23972dab471cb': 'd11998a49687dcc509cdd3c37063f74dc29d006ac05adc0b1e9a20d0a2f4904b',
+    '6769be529e7e1fae5a69c1f51e88ac1cacd5a26277e7317aa93345d2832641fa': 'b7637b42164b1bbba883c422187292cf08ad624691145b5124eaf10edf38c164',
+    '56709f2ec75043028a82d27b547510e26c0269642730285cd4cf521e0c5092e1': '272ed728e3e024cefbf16b9a004ad806781cff95f613d34c35a4e8479224d16f',
+    'dfe6eafd5206fb727ec554b773914eda98aabf129f9db5b9907e7d7ca41136b2': 'deaa7f2f768c036690989ae925528cc28482258e5cec7e8f44312dcb0b74fc63',
+    '39e2065d9831cb3e4a0abf6aaecf3b33078e25f8c2cb0d3b0c72d3fd0190e8f2': '2813180f836edfe2230d164f0dd848244e76a9f887a46a488490467abe6c41a5',
+    '3c502b291dae8821f94a64bd15fb4132a584054cdfa06541812bf06147bdbff2': '189400d3bd12a9156fcd5fa052e29bd4619ae5beb9153b0f1c92164eb41d2ca9',
+    'd28d94ef8b318cef65cfb27e385e297ccdd702f0e7197b4e8d37f6daee19a908': 'd958e621560fc395323e7a97f0eaf36352d07be3fbcb06fc604bc89f996a288e',
+    'c3eb5a7b15c8f5112f4b0a8515d4919c5ed7dc0f8ec36ed8c209f98d08941a0e': 'df47707cab5edab7d6aa1320c4f0ec9420ccf848c02eb0f846fcb27c7e761d2d',
+    '1e7c834aacd5a908f35c1c333cf9a713423f9c8e93bd64fb01ec8ce2f1634f7f': 'b4de6e933964f65b3cbfdef2468ed2635df210301282c66cc95f4077ccd9b160',
+    '800adf03a0416509de4238578e3249aa1d449575e51d6b2a88aac25a47597c0a': 'ce3ae51cf9797a5893d66b0b24a4a53d640a94d515f0567956907b8cd4078b5f',
+    '0418bf3d08afa3ab61b08a4724b1b79706ed79cc57d97489218874d472882d9b': '0177b4911ff43653e087d4d686be5dc979d25eaa9244af2b9acb9ec3b4e86852',
+    '96a7bb34eaa83758bf6bd6d631ff7c92723c94cba4926581cf1af31e4cfe1357': 'c3ec5db91375838e0bcce543e04c6f5b2f6c72d5c25ac4d0b90857e99c03cb26',
+    '92cc0fbb136f107c49ccf455bd8d2cc1929e584e62755cc68dda43fd9a67412b': '91ee580663d8ad08460373d9e5c8ed196ab0ce61eb113dc8d43ad19ca6671422',
+    '9dbea996321c954e41c1dc9d17d1a0763e102b6e4779fc6436deadc0adc8925e': '40126658a90b4041946f2caecb293797f7743c1148d481111859dfa1e3559b56',
+    'e4536042b5b0dc321953b11f8e8370c541c878dc1f425f7e4624e7f99b55c9b7': 'e53715e2ebce35103eb68b341e1f7471a88366168229ea2ec72ec4a0822323ce',
+    'ec99dc069fddb5f4b6152fae52f646514e01d8aa5231e963302e67b5ef54f649': 'a56a7829804ab90f08bc16fb1dd956ae9f43d69712466fd7aad41a195634137e',
+    '2b8ecaaebb49a6a3e2b08ced66d4fbc95f023e37582beb1dc2436fcbb0e447cd': 'fa5fe2e62b061134ea261e151dd672281007a1ca45dbca04a68581d903f3a569',
+    'f3f959f049d6942def4cdda95f2cbf35947dcbd3a0d43d2449dbd010d2773cda': 'bfc9025ab9ae61820f34ee0e595e1a46744fce436e417a3260386cd5292dd913',
+    '011b33a5342c1d1972a5b12b7bc076791195d5d32297a4b830e70c79179044d2': '5c00bb481fd48e50a8209c66b0a40bbafbdf7b2f31f65b586edb259d21542b08',
+    '7f56faf79b60d1ef6934a632a03b52c316c6287335933842ce3c8ec8a21083a1': 'b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c',
+    '7de5f4c8a58e1ec1e10acaecc0be37bd0955eecc37d6fa8fb509b5e058165c57': '7d865e959b2466918c9863afca942d0fb89d7c9ac0c99bafc3749504ded97730',
+    '07681cf880a440e24c49d3cd546d1c69d4a69583550558de4cd2edcbfcd7f4ce': '5a4304e5548d5cf618779383dcc27eba93d826feff1c41a348101c734c034ea2',
+    '437ef25afce57dcd075a9ebf739fbc76e744fbb5bc0414f2894fa201bd3e61d1': 'cd319fee61d9d0e8a00a40d55e91c338fd9e156e69773f03ba5c31db02892eb2',
+    '34f8634d8ce4be4e06eb2910d3ceb43d781b871af62a80f76e5783d46d9c9b14': '1121cfccd5913f0a63fec40a6ffd44ea64f9dc135c66634ba001d10bcf4302a2',
+    'c6cfb27a0c7c699402e185743e34307c9622ef0eb0b207f195bef2ef111911e9': '7d865e959b2466918c9863afca942d0fb89d7c9ac0c99bafc3749504ded97730',
+    '995b4e527a8a749be95ad168a1cab7282db79e262d0f61ea454db03957e0e473': 'bf07a7fbb825fc0aae7bf4a1177b2b31fcf8a3feeaf7092761e18c859ee52a9c',
+    'ac70301a7f49a5bdff0850ff180d5f63ca9c67e4b5f994d6a5396278d242311d': '86b0c5a1e2b73b08fd54c727f4458649ed9fe3ad1b6e8ac9460c070113509a1e',
+    '4571ef99325e2dc800efe86a0c0aed7bf761cdea55e9a0fe083b5556d30edba0': 'a33c21547346656aead5f46f2f07e1965f4cf0c6f2a16deb8ec06019619267aa',
+}
+
+# Two unchanged upstream lines in the locally patched manifest/config. Hash
+# complete raw UTF-8 bytes INCLUDING LF; CR, whitespace and additions differ.
+# Only exact paths qualify. Meguri changes and surrounding lines stay scanned.
+PUBLIC_SOURCE_LINES = {
+    'core/vendor/askama_derive/Cargo.toml': {'a97a68a2ebcede836802fcf90cf07a563d1d43027f264cdd12ad820dd826d681'},
+    'core/vendor/askama_derive/src/config.rs': {'e8aacfc627844473e382f3b486bd3b18803abc3ca21dbbdbf1c1aeb45e7ad8f9'},
+}
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 
 
+def public_artifact_digest(path):
+    if path in PUBLIC_ARTIFACTS:
+        return PUBLIC_ARTIFACTS[path]
+    try:
+        encoded = path.encode("utf-8")
+    except UnicodeEncodeError:
+        return None
+    return PUBLIC_VENDOR_ARTIFACTS.get(hashlib.sha256(encoded).hexdigest())
+
+
 def public_artifact(path, data):
-    return path in PUBLIC_ARTIFACTS and hashlib.sha256(data).hexdigest() == PUBLIC_ARTIFACTS[path]
+    expected = public_artifact_digest(path)
+    return expected is not None and hashlib.sha256(data).hexdigest() == expected
+
+
+def source_lines(data):
+    """Raw LF-delimited lines, retaining terminators and all other bytes."""
+    lines = data.split(b"\n")
+    for line in lines[:-1]:
+        yield line + b"\n"
+    if lines[-1]:
+        yield lines[-1]
+
+
+def public_source_line(path, raw):
+    return hashlib.sha256(raw).hexdigest() in PUBLIC_SOURCE_LINES.get(path, ())
+
+
+def source_line_hits(matcher, path, data):
+    if path not in PUBLIC_SOURCE_LINES:
+        return line_hits(matcher, data.decode("utf-8", errors="replace"))
+    hits, number = [], 1
+    for raw in source_lines(data):
+        text = raw.decode("utf-8", errors="replace")
+        if not public_source_line(path, raw):
+            hits.extend(line_hits(matcher, text, number))
+        number += len(text.splitlines())
+    return hits
 
 
 def scan_paths(matcher, paths, repo=None):
@@ -624,7 +712,7 @@ def scan_paths(matcher, paths, repo=None):
             if binary_hit(matcher, data):
                 found.append({"path": path, "binary": True})
         else:
-            hits = line_hits(matcher, data.decode("utf-8", errors="replace"))
+            hits = source_line_hits(matcher, relative, data)
             if hits:
                 found.append({"path": path, "lines": hits})
     return found, len(files)
@@ -678,10 +766,15 @@ def scan_staged(matcher, repo):
         if added == b"-":
             binary.append(os.fsdecode(path))
     public = set()
-    for path in set(PUBLIC_ARTIFACTS).intersection(staged):
+    for path in (path for path in staged if public_artifact_digest(path) is not None):
         data = git(repo, "cat-file", "blob", ":" + path)
         if public_artifact(path, data):
             public.add(path)
+    public_lines = {}
+    for path in set(PUBLIC_SOURCE_LINES).intersection(staged):
+        data = git(repo, "cat-file", "blob", ":" + path)
+        public_lines[path] = {n: raw for n, raw in enumerate(source_lines(data), 1)
+                              if public_source_line(path, raw)}
     found = {}
     if len(binary) < len(staged):
         diff = git(
@@ -712,7 +805,8 @@ def scan_staged(matcher, repo):
                 m = HUNK.match(line)
                 line_no = int(m.group(1)) if m else 0
             elif not header and line.startswith("+") and path is not None:
-                if path not in public and any(matcher.hit(v) for v in variants(line[1:])):
+                exact_public_line = public_lines.get(path, {}).get(line_no) == raw[1:] + b"\n"
+                if path not in public and not exact_public_line and any(matcher.hit(v) for v in variants(line[1:])):
                     found.setdefault(path, []).append(line_no)
                 line_no += 1
     out = [{"path": p, "lines": found[p]} for p in sorted(found)]

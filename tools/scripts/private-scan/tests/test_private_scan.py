@@ -694,7 +694,17 @@ class FixedPublicFactsTests(unittest.TestCase):
 class PublicLibraryTests(unittest.TestCase):
     def test_public_asset_mutations(self):
         root = Path(SCRIPT).resolve().parents[3]
-        for path, digest in private_scan.PUBLIC_ARTIFACTS.items():
+        facts = dict(private_scan.PUBLIC_ARTIFACTS)
+        matched = 0
+        for source in (root / "core/vendor/askama_derive").rglob("*"):
+            if source.is_file():
+                path = source.relative_to(root).as_posix()
+                digest = private_scan.PUBLIC_VENDOR_ARTIFACTS.get(hashlib.sha256(path.encode("utf-8")).hexdigest())
+                if digest is not None:
+                    facts[path] = digest
+                    matched += 1
+        self.assertEqual(matched, len(private_scan.PUBLIC_VENDOR_ARTIFACTS))
+        for path, digest in facts.items():
             if path == private_scan.PUBLIC_NOTICE_PATH:
                 continue
             data = (root / path).read_bytes()
@@ -715,6 +725,69 @@ class PublicLibraryTests(unittest.TestCase):
                 other = os.path.join(repo, "other.txt")
                 write(other, data, "wb")
                 self.assertTrue(private_scan.scan_paths(matcher, [other], repo)[0])
+
+
+class PublicSourceLineTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = self.temp.name
+        git(self.repo, "init", "-q")
+        self.path = "vendor/sample/config.rs"
+        self.public = b"copyright upstreamtoken\n"
+        self.matcher = private_scan.Matcher({("upstreamtoken",), ("sentinelprivate",)})
+        facts = {self.path: {hashlib.sha256(self.public).hexdigest()}}
+        patch = mock.patch.object(private_scan, "PUBLIC_SOURCE_LINES", facts, create=True)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def check_both(self, data, expected, path=None):
+        path = self.path if path is None else path
+        full = os.path.join(self.repo, path)
+        write(full, data, "wb")
+        git(self.repo, "add", "--", path)
+        self.assertEqual(bool(private_scan.scan_staged(self.matcher, self.repo)[0]), expected)
+        self.assertEqual(bool(private_scan.scan_paths(self.matcher, [full], self.repo)[0]), expected)
+
+    def test_only_exact_complete_public_line_qualifies(self):
+        self.check_both(self.public, False)
+        for changed in (b" " + self.public, self.public[:-1] + b" \n",
+                        self.public.replace(b"\n", b"\r\n"), self.public[:-1],
+                        self.public[:-1] + b" sentinelprivate\n"):
+            with self.subTest(changed=changed):
+                self.check_both(changed, True)
+
+    def test_surrounding_rows_and_encoded_content_get_checked(self):
+        self.check_both(self.public + b"sentinelprivate\n", True)
+        self.matcher = private_scan.Matcher({("sentinelprivate",)})
+        self.check_both(self.public[:-1] + br" sentinel\u0070rivate" + b"\n", True)
+        self.check_both(b"fine\xe2\x80\xa8sentinelprivate\n" + self.public, True)
+
+    def test_same_line_at_other_path_is_not_public(self):
+        self.check_both(self.public, True, "other.rs")
+
+    def test_staged_scan_uses_index_bytes(self):
+        full = os.path.join(self.repo, self.path)
+        self.check_both(self.public + b"sentinelprivate\n", True)
+        write(full, self.public, "wb")
+        self.assertTrue(private_scan.scan_staged(self.matcher, self.repo)[0])
+        self.assertFalse(private_scan.scan_paths(self.matcher, [full], self.repo)[0])
+        git(self.repo, "add", "--", self.path)
+        write(full, self.public + b"sentinelprivate\n", "wb")
+        self.assertFalse(private_scan.scan_staged(self.matcher, self.repo)[0])
+        self.assertTrue(private_scan.scan_paths(self.matcher, [full], self.repo)[0])
+
+    def test_binary_files_keep_full_scan(self):
+        self.check_both(b"\0" + self.public, True)
+
+
+    @unittest.skipUnless(os.name == "posix", "raw filenames require POSIX")
+    def test_raw_filename_bytes_do_not_skip_the_scan(self):
+        raw = os.path.join(os.fsencode(self.repo), b"bad-\xff.rs")
+        write(raw, b"sentinelprivate\n", "wb")
+        git(self.repo, "add", "-A")
+        self.assertTrue(private_scan.scan_staged(self.matcher, self.repo)[0])
+        self.assertTrue(private_scan.scan_paths(self.matcher, [os.fsdecode(raw)], self.repo)[0])
 
 
 class PublicNoticeTests(unittest.TestCase):
