@@ -1,9 +1,10 @@
 # UI test suites (U150): any MeguriUITests class on a pool simulator or for
 # the Mac, both in the macOS test VM (mac-vm.sh; queued, warn, without it),
-# as a11y runs its suites. Sourced by tools/mg; a host job.
+# as a11y runs its suites. An explicit physical iOS target runs through
+# host Xcode only, with no screen or simulator fallback.
 
 mg_job ui-test host mg_ui_test \
-  "XCUITest suites of MeguriUITests: --suite <class>[/<test>]... [--platform iphone|ipad|mac] [--device <leased udid>] [--config Debug|Profile]; functional assertions only, no performance receipt"
+  "XCUITest suites of MeguriUITests: --suite <class>[/<test>]... [--platform iphone|ipad|mac] [--device <leased udid> | --physical-device <explicit identifier>] [--config Debug|Profile]; --list-physical-devices inventories connected iOS devices; functional assertions only, no performance receipt"
 
 mg_ui_test__usage() {
   mg_failure usage "ui-test: $1" "tools/mg --list"
@@ -11,10 +12,70 @@ mg_ui_test__usage() {
   mg_status error
 }
 
+# xcdevice's JSON array is kept in memory; only these public destination
+# fields enter the receipt. Names, errors and non-iOS identifiers stay out.
+mg_ui_test__physical_inventory() {
+  local raw
+  raw="$(xcrun xcdevice list --timeout 20 2>/dev/null)" &&
+    MG_UI_PHYSICAL_DEVICES="$(jq -cse '
+      if length != 1 or (.[0] | type) != "array" then error("expected device array") else .[0] end
+      | if all(.[]; type == "object" and (.identifier | type) == "string"
+          and (.platform | type) == "string" and (.simulator | type) == "boolean")
+        then . else error("invalid device entry") end
+      | map(select(.platform == "com.apple.platform.iphoneos" and .simulator == false)
+          | {identifier, modelCode, operatingSystemVersion, available})
+      | if all(.[]; (.modelCode | type) == "string" and (.operatingSystemVersion | type) == "string"
+          and (.available | type) == "boolean")
+        then . else error("invalid physical device entry") end' <<<"$raw" 2>/dev/null)" || {
+      mg_failure physical-device-inventory "xcdevice did not return a readable device JSON array"
+      mg_status error
+      return 1
+    }
+  MG_UI_PHYSICAL_REJECTED="$(jq -r --arg id "${1:-}" 'any(.[];
+    .identifier == $id and (.simulator != false or .platform != "com.apple.platform.iphoneos"))' <<<"$raw")"
+  mg_detail devices "$MG_UI_PHYSICAL_DEVICES"
+}
+
+mg_ui_test__physical_check() {
+  local rec
+  mg_ui_test__physical_inventory "$1" || return 1
+  if [ "$MG_UI_PHYSICAL_REJECTED" = true ]; then
+    mg_ui_test__usage "--physical-device must identify a real iOS device, never a simulator or Mac"
+    return 1
+  fi
+  rec="$(jq -c --arg id "$1" 'first(.[] | select(.identifier == $id)) // null' <<<"$MG_UI_PHYSICAL_DEVICES")"
+  if [ "$rec" = null ] || [ "$(jq -r .available <<<"$rec")" != true ]; then
+    mg_user_step device-developer-mode missing true "Connect, unlock and pair the explicitly selected iOS device" \
+      "Connect and unlock the phone, pair it in Xcode, and enable Developer Mode on it; then rerun the same explicit --physical-device command."
+    mg_queued_part device-developer-mode ui-test "the selected physical iOS device is missing or unavailable"
+    mg_message "ui-test: queued: connect, unlock and Xcode-pair the selected phone with Developer Mode enabled"
+    mg_status warn
+    mg_queued_settle
+    return 1
+  fi
+  if ! jq -e 'try (.operatingSystemVersion | capture("^(?<major>[0-9]+)(\\.| |$)").major | tonumber >= 27)
+      catch false' <<<"$rec" >/dev/null 2>&1; then
+    mg_ui_test__usage "the physical device must run iOS 27 or later"
+    return 1
+  fi
+  MG_UI_PHYSICAL_DEVICE="$1"
+}
+
 mg_ui_test() {
   local platform=iphone device="" config=Debug suites="" only=() build_args=() s result since udid
+  local physical="" inventory="" run_args="" MG_UI_PHYSICAL_DEVICE=""
   while [ "$#" -gt 0 ]; do
+    [ "$1" = --list-physical-devices ] || run_args=1
     case "$1" in
+      --list-physical-devices)
+        [ -z "$inventory" ] || { mg_ui_test__usage "duplicate --list-physical-devices"; return 0; }
+        inventory=1 && shift
+        ;;
+      --physical-device)
+        [ "$#" -ge 2 ] && [ -z "$physical" ] && [[ "$2" =~ ^([A-Fa-f0-9]{8}-[A-Fa-f0-9]{16}|[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12})$ ]] ||
+          { mg_ui_test__usage "--physical-device needs one explicit Xcode device identifier"; return 0; }
+        physical="$2" && shift 2
+        ;;
       --platform)
         [ "$#" -ge 2 ] && mg_word_in "$2" "iphone ipad mac" || { mg_ui_test__usage "--platform takes iphone, ipad or mac"; return 0; }
         platform="$2" && shift 2
@@ -35,6 +96,16 @@ mg_ui_test() {
       *) mg_ui_test__usage "unknown argument '$1'"; return 0 ;;
     esac
   done
+  if [ -n "$inventory" ]; then
+    [ -z "$run_args" ] || { mg_ui_test__usage "--list-physical-devices cannot be combined with run arguments"; return 0; }
+    mg_ui_test__physical_inventory || return 0
+    mg_message "ui-test: physical iOS device inventory"
+    mg_status pass
+    return 0
+  fi
+  if [ -n "$physical" ]; then
+    [ -z "$device" ] && [ "$platform" != mac ] || { mg_ui_test__usage "--physical-device conflicts with --device and --platform mac"; return 0; }
+  fi
   [ -n "$suites" ] || { mg_ui_test__usage "name at least one --suite"; return 0; }
   for s in $suites; do only[${#only[@]}]="-only-testing:MeguriUITests/$s"; done
   mg_detail suites "$(printf '%s\n' $suites | jq -R . | jq -sc .)"
@@ -43,6 +114,21 @@ mg_ui_test() {
   if [ "$config" = Profile ]; then
     export MG_APP_TEST_SCHEME=Meguri-Profile MG_APP_TEST_PLAN=Performance
     build_args=(Performance Meguri-Profile)
+  fi
+  if [ -n "$physical" ]; then
+    mg_detail platform '"ios-device"'
+    mg_ui_test__physical_check "$physical" || return 0
+    mg_host_lease --no-session || return 0
+    mg_ui_test__physical_check "$physical" || return 0
+    if [ "$config" = Debug ]; then
+      export MG_APP_TEST_SCHEME=Meguri MG_APP_TEST_PLAN=UI
+    fi
+    mg_app_build ios-device "$config" ${build_args[0]+"${build_args[@]}"} || return 0
+    mg_ui_test__physical_check "$physical" || return 0
+    mg_app_xcodebuild_test "$MG_RUN_DIR/ios-device" ios-device "platform=iOS,id=$physical" "$config" "${only[@]}"
+    result=$?
+    mg_ui_test__report "$MG_RUN_DIR/ios-device" "$result" physical
+    return 0
   fi
   if [ "$platform" = mac ]; then
     [ -z "$device" ] || { mg_ui_test__usage "--device is for simulators"; return 0; }
@@ -79,19 +165,35 @@ mg_ui_test() {
   mg_ui_test__report "$MG_RUN_DIR/$platform" "$result"
 }
 
-# mg_ui_test__report <prefix> <test result 0|1|2|3|4>: counts and failing tests
+# mg_ui_test__report <prefix> <test result 0|1|2|3|4> [physical]: counts and failing tests
 # from the result bundle, then the status. 3: dropped input (queued,
 # mac-input; independent failures were already recorded). 4: the test VM
 # could not be reached (queued, mac-vm).
 mg_ui_test__report() {
   local prefix="$1" result="$2" summary f
-  if [ "$result" -eq 4 ]; then
+  if [ "$result" -eq 4 ] && [ "${3:-}" != physical ]; then
     mg_status pass
     mg_queued_settle
     return 0
   fi
-  summary="$(xcrun xcresulttool get test-results summary --path "$prefix.xcresult" 2>/dev/null |
+  summary="$(
+    if [ "${3:-}" = physical ]; then set -o pipefail; fi
+    xcrun xcresulttool get test-results summary --path "$prefix.xcresult" 2>/dev/null |
     jq -c '{passed: .passedTests, failed: .failedTests, skipped: .skippedTests}')" || summary=""
+  if [ "${3:-}" = physical ]; then
+    case "$result" in 0|1|2) ;; *) result=2 ;; esac
+    if ! jq -se 'length == 1 and (.[0] | type == "object" and all(.passed, .failed, .skipped;
+        type == "number" and . >= 0 and . == floor))' <<<"$summary" >/dev/null 2>&1; then
+      mg_failure physical-device-results "physical UI tests require a readable summary with integer test counts"
+      mg_status error
+      [ ! -d "$prefix.xcresult" ] || mg_artifact xcresult "$prefix.xcresult" "result bundle"
+      return 0
+    fi
+    if ! jq -e '.passed > 0 and .failed == 0 and .skipped == 0' <<<"$summary" >/dev/null; then
+      mg_failure physical-device-results "physical UI tests require passed tests, zero failures and zero skipped tests"
+      result=1
+    fi
+  fi
   if [ -n "$summary" ]; then
     mg_count passed "$(jq .passed <<<"$summary")"
     mg_count failed "$(jq .failed <<<"$summary")"

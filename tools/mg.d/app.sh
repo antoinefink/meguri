@@ -20,30 +20,45 @@ mg_job run host mg_run \
 MG_APP_DD=build/app/DerivedData
 MG_APP_DEV_ID=com.antoinefink.meguri.dev
 
-# mg_app_products <mac|ios-sim> <config>
+# mg_app_products <mac|ios-sim|ios-device> <config>
 mg_app_products() {
   case "$1" in
     mac) printf '%s/%s/Build/Products/%s\n' "$MG_ROOT" "$MG_APP_DD" "$2" ;;
+    ios-device) printf '%s/%s/Build/Products/%s-iphoneos\n' "$MG_ROOT" "$MG_APP_DD" "$2" ;;
     *) printf '%s/%s/Build/Products/%s-iphonesimulator\n' "$MG_ROOT" "$MG_APP_DD" "$2" ;;
   esac
 }
 
-# mg_app_build <mac|ios-sim> <config> [plan] [scheme] [build settings...]: UI
+# mg_app_build <mac|ios-sim|ios-device> <config> [plan] [scheme] [build settings...]: UI
 # lint first (AE90), core XCFramework and build-for-testing of the plan (UI
 # by default; snapshots build Snapshot; perf-ui builds Performance with the
 # Meguri-Profile scheme; unit-sim builds Unit with ARCHS=arm64, since package
 # test products do not take the app's arm64-only setting). On failure
 # records it and returns 1.
 mg_app_build() {
-  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" dest result log rc counts sdk xctestrun policy settings=()
+  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" dest result log rc counts sdk xctestrun policy settings=() core_args=()
   [ "$#" -le 4 ] || settings=("${@:5}")
+  if [ "$platform" = ios-device ]; then
+    if ! mg_word_in "$config" "Debug Profile"; then
+      mg_failure usage "physical iOS tests require Debug or Profile with the development bundle id"
+      mg_status error
+      return 1
+    fi
+    if [ "$config" = Profile ] && { [ "$plan" != Performance ] || [ "$scheme" != Meguri-Profile ]; }; then
+      mg_failure usage "physical Profile tests require the Meguri-Profile scheme and Performance plan"
+      mg_status error
+      return 1
+    fi
+    core_args=(--slices mac,sim,device)
+    settings=(${settings[0]+"${settings[@]}"} -allowProvisioningUpdates)
+  fi
   if [ "$platform" = mac ] && ! mg_word_in "$config" "Debug Profile"; then
     mg_failure usage "the Mac builds only Debug and Profile here: $config carries the daily-driver ids (tools/mg xcode-check builds and unregisters it)"
     mg_status error
     return 1
   fi
   mg_lint_ui_first || return 1
-  if ! mg__xcframework "$MG_RUN_DIR/xcframework.json" --configuration "$config"; then
+  if ! mg__xcframework "$MG_RUN_DIR/xcframework.json" --configuration "$config" ${core_args[0]+"${core_args[@]}"}; then
     mg_failure xcframework "building the core XCFramework failed; see log.txt" "tools/mg core-xcframework"
     mg_message "$MG_JOB: building the core XCFramework failed"
     mg_status fail
@@ -51,6 +66,7 @@ mg_app_build() {
   fi
   case "$platform" in
     mac) dest="platform=macOS,arch=arm64" ;;
+    ios-device) dest="generic/platform=iOS" ;;
     *) dest="generic/platform=iOS Simulator" ;;
   esac
   result="$MG_RUN_DIR/build-$platform-$config-$plan.xcresult"
@@ -75,6 +91,7 @@ mg_app_build() {
   if [ "$config" = Profile ] && [ "$plan" = Performance ]; then
     sdk=iphonesimulator
     [ "$platform" != mac ] || sdk=macosx
+    [ "$platform" != ios-device ] || sdk=iphoneos
     # Select exactly as the VM consumer does, without copying or launching.
     xctestrun="$(MG_APP_TEST_SCHEME="$scheme" mg__vm_xctestrun "$plan" "$sdk" "$config")"
     policy="$(python3 "$MG_TOOLS/scripts/performance-test-policy.py" "$xctestrun" "$MG_ROOT/app/TestPlans/Performance.xctestplan")"
@@ -111,23 +128,38 @@ mg_app_input_digest() {
   git -C "$MG_ROOT" ls-tree -r "$tree" -- app core 2>/dev/null | grep -v "$(printf '\t')app/Snapshots/" | shasum -a 256 | cut -c1-64
 }
 
-# mg_app_xcodebuild_test <out prefix> <mac|ios> <destination> <config> [xcodebuild args]:
+# mg_app_xcodebuild_test <out prefix> <mac|ios|ios-device> <destination> <config> [xcodebuild args]:
 # test-without-building of the UI plan (or MG_APP_TEST_PLAN with the scheme
 # MG_APP_TEST_SCHEME, as perf-ui sets them) into <prefix>.xcresult and <prefix>.log.
 # Mac runs go where mg_mac_ui_begin sent them (MG_MAC_RUNNER), simulator runs
 # where mg_sim_begin did (MG_SIM_RUNNER): to the test VM (mac-vm.sh) or this
-# Mac. Returns 0 pass, 1 test failures, 2 could not run (records a user step
+# Mac. ios-device runs on the host only for ui-test's verified destination.
+# Returns 0 pass, 1 test failures, 2 could not run (records a user step
 # when macOS has not allowed UI automation), 4 queued: the test VM could not
 # be reached (mg_vm_xcodebuild_test recorded the queued part, user step
 # mac-vm).
 mg_app_xcodebuild_test() {
-  local prefix="$1" platform="$2" dest="$3" config="$4" rc summary sdk=""
+  local prefix="$1" platform="$2" dest="$3" config="$4" rc summary sdk="" physical_args=() bundle
   shift 4
+  if [ "$platform" = ios-device ]; then
+    if [ -z "${MG_UI_PHYSICAL_DEVICE:-}" ] || [ "$dest" != "platform=iOS,id=$MG_UI_PHYSICAL_DEVICE" ] ||
+        ! mg_word_in "$config" "Debug Profile"; then
+      mg_failure physical-device "physical tests require the explicitly verified iOS destination and Debug or Profile"
+      return 2
+    fi
+    bundle="$(plutil -extract CFBundleIdentifier raw -o - "$(mg_app_products ios-device "$config")/Meguri.app/Info.plist" 2>/dev/null)"
+    if [ "$bundle" != com.antoinefink.meguri.dev ]; then
+      mg_failure physical-device-bundle "refusing physical tests: built app must have CFBundleIdentifier com.antoinefink.meguri.dev"
+      return 2
+    fi
+    physical_args=(-allowProvisioningUpdates -parallel-testing-enabled NO -destination-timeout 60
+      -test-timeouts-enabled YES)
+  fi
   rm -rf "$prefix.xcresult"
   mkdir -p "$(dirname "$prefix")"
   if [ "$platform" = mac ] && [ "$MG_MAC_RUNNER" = vm ]; then
     sdk=macosx
-  elif [ "$platform" != mac ] && [ "$MG_SIM_RUNNER" = vm ]; then
+  elif [ "$platform" != mac ] && [ "$platform" != ios-device ] && [ "$MG_SIM_RUNNER" = vm ]; then
     sdk=iphonesimulator
   fi
   if [ -n "$sdk" ]; then
@@ -142,14 +174,14 @@ mg_app_xcodebuild_test() {
     xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme "${MG_APP_TEST_SCHEME:-Meguri}" \
       -testPlan "${MG_APP_TEST_PLAN:-UI}" -configuration "$config" \
       -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$prefix.xcresult" -collect-test-diagnostics never \
-      "$@" >"$prefix.log" 2>&1
+      ${physical_args[0]+"${physical_args[@]}"} "$@" >"$prefix.log" 2>&1
     rc=$?
     mg_artifact log "$prefix.log" "xcodebuild test ($platform)"
   fi
   summary="$(xcrun xcresulttool get test-results summary --path "$prefix.xcresult" 2>/dev/null |
     jq -r '"\(.result) passed=\(.passedTests) failed=\(.failedTests) skipped=\(.skippedTests)"')"
   echo "$MG_JOB: xcodebuild test ($platform): exit $rc ${summary:-no result}" >&2
-  if grep -q 'failed to initialize for UI testing' "$prefix.log"; then
+  if [ "$platform" != ios-device ] && grep -q 'failed to initialize for UI testing' "$prefix.log"; then
     if [ "$platform" = mac ] && [ "$MG_MAC_RUNNER" = vm ]; then
       mg_user_step uitest-automation missing true "Let the Xcode UI-test runner control the test VM" \
         "In the test VM: sudo automationmodetool enable-automationmode-without-authentication (tools/vm/setup-guest.sh)."
