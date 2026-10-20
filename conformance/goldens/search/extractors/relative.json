@@ -1,0 +1,456 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "card_extractors": {
+          "rows": [
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-lrt",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -2.0,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-no-lrt",
+              "pos": null,
+              "r": 0.7661308,
+              "rr": -3.0,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-decay",
+              "pos": null,
+              "r": 0.8458846,
+              "rr": -1.9999998,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-decay-tenth",
+              "pos": null,
+              "r": 0.8559715,
+              "rr": -2.000001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.8,
+              "id": "fsrs-dr-0.8",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -0.83401954,
+              "s": 5.0
+            },
+            {
+              "d": 3.7,
+              "dr": 0.85,
+              "id": "fsrs-dr-0.85-decay",
+              "pos": 4,
+              "r": 0.7319633,
+              "rr": -2.544519,
+              "s": 2.3
+            },
+            {
+              "d": 3.0,
+              "dr": 4.0,
+              "id": "fsrs-array",
+              "pos": 1,
+              "r": 0.60295576,
+              "rr": 0.4397356,
+              "s": 2.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-low-retrievability",
+              "pos": null,
+              "r": 0.00923341,
+              "rr": -50000.0,
+              "s": 0.001
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-retrievability-nan",
+              "pos": null,
+              "r": null,
+              "rr": -426315650.0,
+              "s": -1.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-learning",
+              "pos": null,
+              "r": 0.7939459,
+              "rr": -0.83333373,
+              "s": 0.05
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-learning-365001",
+              "pos": null,
+              "r": 0.031143775,
+              "rr": -4391.0386,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.0,
+              "id": "fsrs-dr-zero",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -4.6913597e-09,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": -0.5,
+              "id": "fsrs-dr-negative",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -4.6913597e-09,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 1.0,
+              "id": "fsrs-dr-one",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": "-inf",
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 1.0,
+              "id": "fsrs-dr-one-at-lrt",
+              "pos": null,
+              "r": 1.0,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": "inf",
+              "id": "fsrs-dr-infinite",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": 0.469136,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-decay-zero",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.0,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-decay-negative",
+              "pos": null,
+              "r": 0.7874007,
+              "rr": -2.0,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-decay-infinite",
+              "pos": null,
+              "r": 1.0,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-lrt-future",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.0,
+              "s": 5.0
+            },
+            {
+              "d": 1.0,
+              "dr": 0.9,
+              "id": "fsrs-stability-infinite",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.0,
+              "s": "inf"
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-learning-due-later",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.0,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-due-365000",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.0,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-due-negative",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.0,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "fsrs-not-yet-due",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.0,
+              "s": 5.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-empty",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-due-5",
+              "pos": null,
+              "r": null,
+              "rr": -25.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-due-today",
+              "pos": null,
+              "r": null,
+              "rr": -0.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-due-yesterday",
+              "pos": null,
+              "r": null,
+              "rr": -1.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-ivl-zero",
+              "pos": null,
+              "r": null,
+              "rr": -0.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-ivl-negative",
+              "pos": null,
+              "r": null,
+              "rr": -0.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-ivl-above-due",
+              "pos": null,
+              "r": null,
+              "rr": -2.5000001e-05,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-ivl-huge",
+              "pos": null,
+              "r": null,
+              "rr": -1.0000001e-09,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-days-product-wraps",
+              "pos": null,
+              "r": null,
+              "rr": -10289.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-today-negative",
+              "pos": null,
+              "r": null,
+              "rr": -49705.0,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-due-i64-min",
+              "pos": null,
+              "r": null,
+              "rr": -30.001,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "sm2-i32-bounds",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -1.3504643e-08,
+              "s": 5.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-learning-due-earlier",
+              "pos": null,
+              "r": null,
+              "rr": -0.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-learning-days",
+              "pos": null,
+              "r": null,
+              "rr": -0.6002,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-learning-due-later",
+              "pos": null,
+              "r": null,
+              "rr": -0.00020000001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-learning-ivl-negative",
+              "pos": null,
+              "r": null,
+              "rr": -0.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-365001",
+              "pos": null,
+              "r": null,
+              "rr": -21955.002,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "sm2-no-dr",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "sm2-no-stability",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "sm2-dr-string",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "sm2-dr-null",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-s-only",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": 5.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "sm2-garbage",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3c22201f2a6f3a3771caad7fe8ea98c8f096c31b2a37087938084da9d5bca51e",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/extractors/relative",
+  "scenario_sha256": "b587f6f85a2c1ce33da48140259bca106b81882cd63ade190f217611105b02b5",
+  "tz": "UTC"
+}

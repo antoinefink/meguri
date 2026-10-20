@@ -1,0 +1,510 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "card_extractors": {
+          "rows": [
+            {
+              "d": 5.5,
+              "dr": null,
+              "id": "lrt-10-days",
+              "pos": null,
+              "r": 0.7182781,
+              "rr": -0.5001,
+              "s": 2.5
+            },
+            {
+              "d": 5.5,
+              "dr": null,
+              "id": "lrt-10-days-1-second-earlier",
+              "pos": null,
+              "r": 0.71827835,
+              "rr": -0.5001,
+              "s": 2.5
+            },
+            {
+              "d": 1.0,
+              "dr": null,
+              "id": "lrt-1-day",
+              "pos": null,
+              "r": 0.9944614,
+              "rr": -0.000100000005,
+              "s": 21.0
+            },
+            {
+              "d": 10.0,
+              "dr": null,
+              "id": "lrt-50-days-decay",
+              "pos": null,
+              "r": 0.9403443,
+              "rr": -0.000100000005,
+              "s": 100.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-1-second",
+              "pos": null,
+              "r": 0.9998643,
+              "rr": -0.5001,
+              "s": 0.01
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-2-seconds",
+              "pos": null,
+              "r": 0.9997286,
+              "rr": -0.5001,
+              "s": 0.01
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-now",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.5,
+              "dr": null,
+              "id": "lrt-future",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.000100000005,
+              "s": 2.5
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-zero",
+              "pos": null,
+              "r": 0.031140784,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-negative",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.75005,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-above-32-bits",
+              "pos": null,
+              "r": 0.97733754,
+              "rr": -0.75005,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-u32-max",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-i64-max",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-i64-min",
+              "pos": null,
+              "r": 0.031140784,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "now-negative",
+              "pos": null,
+              "r": 0.02769922,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "now-above-32-bits",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "no-lrt",
+              "pos": null,
+              "r": 0.7661308,
+              "rr": -0.75005,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "no-lrt-decay-half",
+              "pos": null,
+              "r": 0.7661308,
+              "rr": -0.75005,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "no-lrt-decay",
+              "pos": null,
+              "r": 0.80938804,
+              "rr": -0.75005,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "no-lrt-elapsed-equals-stability",
+              "pos": null,
+              "r": 0.9,
+              "rr": -1.0,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-null",
+              "pos": null,
+              "r": 0.7661308,
+              "rr": -0.75005,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-fraction",
+              "pos": null,
+              "r": 0.7661308,
+              "rr": -0.75005,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-float-literal",
+              "pos": null,
+              "r": 0.7661308,
+              "rr": -0.75005,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-exponent",
+              "pos": null,
+              "r": 0.9,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-string",
+              "pos": null,
+              "r": 0.7661308,
+              "rr": -0.75005,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "lrt-negative-zero",
+              "pos": null,
+              "r": 0.9,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "ivl-above-due",
+              "pos": null,
+              "r": 0.6445033,
+              "rr": -2.5000001e-05,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "ivl-negative",
+              "pos": null,
+              "r": 0.6445033,
+              "rr": -0.001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "due-negative",
+              "pos": null,
+              "r": 1.0,
+              "rr": -5.0000002e-05,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "today-negative",
+              "pos": null,
+              "r": 0.02070639,
+              "rr": -2484.7,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "days-product-wraps",
+              "pos": null,
+              "r": 0.19945656,
+              "rr": -10289.001,
+              "s": 100.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "due-365000",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "due-365001",
+              "pos": null,
+              "r": 0.031143775,
+              "rr": -21955.002,
+              "s": 5.0
+            },
+            {
+              "d": 6.0,
+              "dr": null,
+              "id": "learning-due-later",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.001,
+              "s": 4.0
+            },
+            {
+              "d": 6.0,
+              "dr": null,
+              "id": "learning-due-earlier",
+              "pos": null,
+              "r": 0.9987805,
+              "rr": -0.001,
+              "s": 4.0
+            },
+            {
+              "d": 6.0,
+              "dr": null,
+              "id": "learning-ivl-2",
+              "pos": null,
+              "r": 0.9987799,
+              "rr": -0.0005,
+              "s": 4.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "learning-ivl-86400",
+              "pos": null,
+              "r": 0.9764264,
+              "rr": -0.008333083,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "learning-ivl-negative",
+              "pos": null,
+              "r": 0.031140784,
+              "rr": -0.001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "learning-due-above-32-bits",
+              "pos": null,
+              "r": 0.9990241,
+              "rr": -0.008333083,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "decay-null",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "decay-string",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "decay-zero",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "decay-negative",
+              "pos": null,
+              "r": 0.7874007,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "decay-small",
+              "pos": null,
+              "r": 0.872073,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "decay-two",
+              "pos": null,
+              "r": 0.81428313,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "decay-above-f32",
+              "pos": null,
+              "r": 1.0,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "decay-subnormal",
+              "pos": null,
+              "r": 0.0,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "stability-zero-no-time",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": 0.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "stability-zero",
+              "pos": null,
+              "r": 0.0,
+              "rr": -0.5001,
+              "s": 0.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "stability-negative",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": -1.0
+            },
+            {
+              "d": 1.0,
+              "dr": null,
+              "id": "stability-infinite",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.5001,
+              "s": "inf"
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "no-memory-state",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "no-stability",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "decay-only",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3c22201f2a6f3a3771caad7fe8ea98c8f096c31b2a37087938084da9d5bca51e",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/extractors/retrievability",
+  "scenario_sha256": "6c49bb0fd1a8cc008874c876b68d78ac9568aa92935141b5655450d903bed443",
+  "tz": "UTC"
+}

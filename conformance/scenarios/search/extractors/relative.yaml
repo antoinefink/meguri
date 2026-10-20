@@ -1,0 +1,66 @@
+# Relative retrievability (specs/search/card-extractors.md X6): the FSRS
+# branch when the data holds a memory state and `dr`, the SM-2 branch
+# otherwise. Rows whose FSRS-branch value comes from a retrievability or a
+# desired retention close to 1 are left out: there the platforms' math
+# libraries can differ by more than the comparison tolerance
+# (specs/conformance/search-ops.md S5.6). Arguments are 2030-02-14 10:00:00 UTC
+# (1897293600) and day 30 unless a row says otherwise.
+id: search/extractors/relative
+description: Relative retrievability of the card-data SQL functions
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - card_extractors:
+          inputs:
+            # FSRS branch: memory state and dr.
+            - {id: fsrs-lrt, data: '{"s":5,"d":5,"dr":0.9,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-no-lrt, data: '{"s":5,"d":5,"dr":0.9}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: fsrs-decay, data: '{"s":5,"d":5,"dr":0.9,"decay":0.1542,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-decay-tenth, data: '{"s":5,"d":5,"dr":0.9,"decay":0.1,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-dr-0.8, data: '{"s":5,"d":5,"dr":0.8,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-dr-0.85-decay, data: '{"s":2.3,"d":3.7,"dr":0.85,"decay":0.3,"lrt":1896429600,"pos":4}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-array, data: '[1,2,3,4,5,1896429600,"{}"]', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-low-retrievability, data: '{"s":0.001,"d":5,"dr":0.9,"lrt":1892973600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-retrievability-nan, data: '{"s":-1,"d":5,"dr":0.9,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-learning, data: '{"s":0.05,"d":5,"dr":0.9}', due: 1897290000, ivl: 7200, today: 30, now: 1897293600}
+            - {id: fsrs-learning-365001, data: '{"s":5,"d":5,"dr":0.9}', due: 365001, ivl: 0, today: 30, now: 1897293600}
+            # FSRS branch: exact edges.
+            - {id: fsrs-dr-zero, data: '{"s":5,"d":5,"dr":0,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-dr-negative, data: '{"s":5,"d":5,"dr":-0.5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-dr-one, data: '{"s":5,"d":5,"dr":1,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-dr-one-at-lrt, data: '{"s":5,"d":5,"dr":1,"lrt":1897293600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-dr-infinite, data: '{"s":5,"d":5,"dr":1e40,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-decay-zero, data: '{"s":5,"d":5,"dr":0.9,"decay":0,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-decay-negative, data: '{"s":5,"d":5,"dr":0.9,"decay":-0.5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-decay-infinite, data: '{"s":5,"d":5,"decay":1e40,"dr":0.9,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-lrt-future, data: '{"s":5,"d":5,"dr":0.9,"lrt":1897293700}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-stability-infinite, data: '{"s":1e40,"d":1,"dr":0.9}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: fsrs-learning-due-later, data: '{"s":5,"d":5,"dr":0.9}', due: 1897294200, ivl: 0, today: 30, now: 1897293600}
+            - {id: fsrs-due-365000, data: '{"s":5,"d":5,"dr":0.9}', due: 365000, ivl: 0, today: 30, now: 1897293600}
+            - {id: fsrs-due-negative, data: '{"s":5,"d":5,"dr":0.9}', due: -100000, ivl: 20, today: 30, now: 1897293600}
+            - {id: fsrs-not-yet-due, data: '{"s":5,"d":5,"dr":0.9}', due: 36, ivl: 1, today: 30, now: 1897293600}
+            # SM-2 branch: no memory state or no dr.
+            - {id: sm2-empty, data: '{}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: sm2-due-5, data: '{}', due: 5, ivl: 0, today: 30, now: 1897293600}
+            - {id: sm2-due-today, data: '{}', due: 30, ivl: 0, today: 30, now: 1897293600}
+            - {id: sm2-due-yesterday, data: '{}', due: 29, ivl: 0, today: 30, now: 1897293600}
+            - {id: sm2-ivl-zero, data: '{}', due: 35, ivl: 0, today: 30, now: 1897293600}
+            - {id: sm2-ivl-negative, data: '{}', due: 35, ivl: -5, today: 30, now: 1897293600}
+            - {id: sm2-ivl-above-due, data: '{}', due: 35, ivl: 40, today: 30, now: 1897293600}
+            - {id: sm2-ivl-huge, data: '{}', due: 35, ivl: 1000000, today: 30, now: 1897293600}
+            - {id: sm2-days-product-wraps, data: '{}', due: 0, ivl: 0, today: 60000, now: 1897293600}
+            - {id: sm2-today-negative, data: '{}', due: 0, ivl: 0, today: -5, now: 1897293600}
+            - {id: sm2-due-i64-min, data: '{}', due: {int: "-9223372036854775808"}, ivl: 1, today: 30, now: 1897293600}
+            - {id: sm2-i32-bounds, data: '{"s":5,"d":5,"lrt":1896429600}', due: -2147483648, ivl: 2147483647, today: 30, now: 1897293600}
+            - {id: sm2-learning-due-earlier, data: '{}', due: 1897290000, ivl: 0, today: 30, now: 1897293600}
+            - {id: sm2-learning-days, data: '{}', due: 1897034399, ivl: 5, today: 30, now: 1897293600}
+            - {id: sm2-learning-due-later, data: '{}', due: 1897552800, ivl: 5, today: 30, now: 1897293600}
+            - {id: sm2-learning-ivl-negative, data: '{}', due: 1897290000, ivl: -86400, today: 30, now: 1897293600}
+            - {id: sm2-365001, data: '{}', due: 365001, ivl: 0, today: 30, now: 1897293600}
+            # SM-2 branch: data without both a memory state and dr.
+            - {id: sm2-no-dr, data: '{"s":5,"d":5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: sm2-no-stability, data: '{"d":5,"dr":0.9,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: sm2-dr-string, data: '{"s":5,"d":5,"dr":"0.9","lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: sm2-dr-null, data: '{"s":5,"d":5,"dr":null,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: sm2-s-only, data: '{"s":5}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: sm2-garbage, data: 'garbage', due: 35, ivl: 20, today: 30, now: 1897293600}

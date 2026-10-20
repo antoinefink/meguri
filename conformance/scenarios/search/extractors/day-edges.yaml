@@ -1,0 +1,25 @@
+# The functions take the day and the instant as arguments (specs/search/card-extractors.md X8).
+# The values here are the scheduler's in Europe/Paris for a collection created
+# on 2030-03-01 at 10:00 with the rollover hour 4 (specs/sched/day-clock.md):
+# day 28 until 2030-03-30 04:00 CET (1901070000), day 29 from then. A day
+# number only changes with `today`; elapsed seconds follow `now`, so the
+# 2030-03-31 change to summer time makes that calendar day 23 hours long.
+id: search/extractors/day-edges
+description: Card-data SQL functions across a rollover and a change of UTC offset
+clock: {tz: Europe/Paris, start: "2030-03-01T10:00:00"}
+steps:
+  - observe:
+      - card_extractors:
+          inputs:
+            # One second before and at the rollover of 2030-03-30 04:00 CET.
+            - {id: review-before-rollover, data: '{"s":5,"d":5}', due: 30, ivl: 5, today: 28, now: 1901069999}
+            - {id: review-at-rollover, data: '{"s":5,"d":5}', due: 30, ivl: 5, today: 29, now: 1901070000}
+            - {id: lrt-before-rollover, data: '{"s":5,"d":5,"lrt":1900897200}', due: 30, ivl: 5, today: 28, now: 1901069999}
+            - {id: lrt-at-rollover, data: '{"s":5,"d":5,"lrt":1900897200}', due: 30, ivl: 5, today: 29, now: 1901070000}
+            - {id: sm2-before-rollover, data: '{}', due: 30, ivl: 5, today: 28, now: 1901069999}
+            - {id: sm2-at-rollover, data: '{}', due: 30, ivl: 5, today: 29, now: 1901070000}
+            - {id: learning-before-rollover, data: '{"s":5,"d":5}', due: 1901068200, ivl: 0, today: 28, now: 1901069999}
+            - {id: learning-at-rollover, data: '{"s":5,"d":5}', due: 1901068200, ivl: 0, today: 29, now: 1901070000}
+            # From 2030-03-30 12:00 CET (1901098800): noon the next day is 23 hours later, 24 hours later is 13:00 CEST.
+            - {id: dst-noon-next-day, data: '{"s":5,"d":5,"lrt":1901098800}', due: 35, ivl: 10, today: 29, now: 1901181600}
+            - {id: dst-24-hours-later, data: '{"s":5,"d":5,"lrt":1901098800}', due: 35, ivl: 10, today: 29, now: 1901185200}

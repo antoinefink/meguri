@@ -734,6 +734,31 @@
             ]
           }
         },
+        "card_extractors": {
+          "description": "extractor-ops.md E3: one row per input, in input order: the memory-state fields s, d, dr, retrievability r, relative retrievability rr and original position pos; REAL results as f32 (O6), infinities as \"inf\" and \"-inf\", NULL as null.",
+          "type": "object",
+          "required": ["rows"],
+          "additionalProperties": false,
+          "properties": {
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "s", "d", "dr", "r", "rr", "pos"],
+                "additionalProperties": false,
+                "properties": {
+                  "id": { "type": "string", "minLength": 1 },
+                  "s": { "$ref": "#/$defs/extractor_real" },
+                  "d": { "$ref": "#/$defs/extractor_real" },
+                  "dr": { "$ref": "#/$defs/extractor_real" },
+                  "r": { "$ref": "#/$defs/extractor_real" },
+                  "rr": { "$ref": "#/$defs/extractor_real" },
+                  "pos": { "type": ["integer", "null"], "minimum": 0, "maximum": 4294967295 }
+                }
+              }
+            }
+          }
+        },
         "canonical_search": {
           "description": "specs/conformance/search-ops.md S2: one output per query text, in order; parse errors only.",
           "type": "array",
@@ -1180,6 +1205,10 @@
         "future_ids": { "type": "integer", "minimum": 0 },
         "notetypes_recovered": { "type": "integer", "minimum": 0, "maximum": 1 }
       }
+    },
+    "extractor_real": {
+      "description": "extractor-ops.md E3: a REAL result as its f32 (O6), an infinity as a string, NULL as null.",
+      "anyOf": [{ "$ref": "#/$defs/f32" }, { "enum": ["inf", "-inf", null] }]
     },
     "sql_value": {
       "description": "record-ops.md W1, by SQLite storage class: INTEGER integer, REAL number, TEXT string, NULL null, BLOB {sha256}.",

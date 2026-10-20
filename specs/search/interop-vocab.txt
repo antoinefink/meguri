@@ -60,3 +60,15 @@ queue
 type
 ord
 odid
+# U82a: card-data SQL interface and pinned FSRS API.
+odue
+dr
+decay
+lrt
+cd
+current_retrievability
+MemoryState
+meguri_card_f32
+meguri_retrievability
+meguri_relative_retrievability
+meguri_original_position

@@ -1,0 +1,45 @@
+# What each card-data SQL function does with arguments of each SQLite storage
+# class (specs/search/card-extractors.md X2.2): `data` that is not TEXT reads
+# as no keys; `due` and `now` must be INTEGER, `ivl` and `today` only when the
+# branch that runs reads them. A failed argument gives NULL, never an error.
+id: search/extractors/arguments
+description: Argument storage classes of the card-data SQL functions
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - card_extractors:
+          inputs:
+            # `data` of another storage class.
+            - {id: data-blob, data: {blob_hex: "7b2273223a352c2264223a352c226472223a302e392c22706f73223a377d"}, due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: data-empty-blob, data: {blob_hex: ""}, due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: data-null, data: null, due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: data-integer, data: 5, due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: data-real, data: 5.5, due: 35, ivl: 20, today: 30, now: 1897293600}
+            # `due`: INTEGER only, whatever the data holds.
+            - {id: due-real, data: '{"s":5,"d":5}', due: 35.5, ivl: 20, today: 30, now: 1897293600}
+            - {id: due-real-lrt, data: '{"s":5,"d":5,"lrt":1896429600}', due: 35.0, ivl: 10, today: 30, now: 1897293600}
+            - {id: due-text, data: '{"s":5,"d":5}', due: '35', ivl: 20, today: 30, now: 1897293600}
+            - {id: due-text-lrt, data: '{"s":5,"d":5,"lrt":1896429600}', due: '35', ivl: 10, today: 30, now: 1897293600}
+            - {id: due-null, data: '{"s":5,"d":5}', due: null, ivl: 20, today: 30, now: 1897293600}
+            - {id: due-null-lrt, data: '{"s":5,"d":5,"lrt":1896429600}', due: null, ivl: 10, today: 30, now: 1897293600}
+            # `ivl`: read by retrievability only without `lrt`; always by relative retrievability.
+            - {id: ivl-text-lrt, data: '{"s":5,"d":5,"lrt":1896429600}', due: 35, ivl: 'x', today: 30, now: 1897293600}
+            - {id: ivl-text, data: '{"s":5,"d":5}', due: 35, ivl: 'x', today: 30, now: 1897293600}
+            - {id: ivl-real, data: '{"s":5,"d":5}', due: 35, ivl: 20.0, today: 30, now: 1897293600}
+            - {id: ivl-null-lrt, data: '{"s":5,"d":5,"dr":0.9,"lrt":1896429600}', due: 35, ivl: null, today: 30, now: 1897293600}
+            - {id: ivl-text-sm2, data: '{}', due: 35, ivl: 'x', today: 30, now: 1897293600}
+            - {id: ivl-real-sm2, data: '{}', due: 35, ivl: 20.0, today: 30, now: 1897293600}
+            # `today`: read only for a due of 365000 or less (and by retrievability only without `lrt`).
+            - {id: today-text, data: '{"s":5,"d":5}', due: 35, ivl: 20, today: 'x', now: 1897293600}
+            - {id: today-text-lrt, data: '{"s":5,"d":5,"lrt":1896429600}', due: 35, ivl: 20, today: 'x', now: 1897293600}
+            - {id: today-real-lrt, data: '{"s":5,"d":5,"lrt":1896429600}', due: 35, ivl: 10, today: 30.0, now: 1897293600}
+            - {id: today-real, data: '{"s":5,"d":5,"dr":0.9}', due: 35, ivl: 20, today: 30.0, now: 1897293600}
+            - {id: today-text-learning, data: '{"s":5,"d":5}', due: 1897290000, ivl: 0, today: 'x', now: 1897293600}
+            - {id: today-null-learning, data: '{"s":5,"d":5}', due: 1897290000, ivl: 0, today: null, now: 1897293600}
+            - {id: today-text-sm2, data: '{}', due: 35, ivl: 20, today: 'x', now: 1897293600}
+            - {id: today-text-sm2-learning, data: '{}', due: 1897290000, ivl: 0, today: 'x', now: 1897293600}
+            # `now`: INTEGER only.
+            - {id: now-real, data: '{"s":5,"d":5}', due: 35, ivl: 20, today: 30, now: 1897293600.0}
+            - {id: now-null-lrt, data: '{"s":5,"d":5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: null}
+            - {id: now-text-lrt, data: '{"s":5,"d":5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: '1897293600'}
+            - {id: now-null-sm2, data: '{}', due: 35, ivl: 20, today: 30, now: null}

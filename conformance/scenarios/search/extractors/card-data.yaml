@@ -1,0 +1,90 @@
+# How the card-data SQL functions read `cards.data` (specs/search/card-extractors.md
+# X3, X4, X7): text that reads as no keys, each memory-state key on its own,
+# 32-bit float reading, numbers beyond the 64-bit float range, repeated keys,
+# the `cd` member, `pos`, the array form and the nesting limit. Each row also
+# gives retrievability and relative retrievability for the same arguments.
+id: search/extractors/card-data
+description: Reading cards.data in the card-data SQL functions
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - card_extractors:
+          inputs:
+            # Text that reads as no keys at all (X3 rule 1).
+            - {id: empty-object, data: '{}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: empty-text, data: "", due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: garbage, data: 'garbage', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: json-number, data: '1', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: json-string, data: '"x"', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: json-null, data: 'null', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: empty-array, data: '[]', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: trailing-text, data: '{"s":5,"d":5,"lrt":1896429600} x', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: trailing-comma, data: '{"pos":7,"s":5,"d":5,}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: byte-order-mark, data: {text_hex: "efbbbf7b2273223a352c2264223a357d"}, due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: invalid-utf8, data: {text_hex: "7b2273223a352c2264223a352c226c7274223a313839363432393630307dff"}, due: 35, ivl: 10, today: 30, now: 1897293600}
+            # The same object as the last row without its invalid final byte, and white space around the text.
+            - {id: hex-text, data: {text_hex: "7b2273223a352c2264223a352c226c7274223a313839363432393630307d"}, due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: whitespace, data: " \n\t{\"s\" : 5 , \"d\" : 5 , \"lrt\" : 1896429600}\r\n ", due: 35, ivl: 10, today: 30, now: 1897293600}
+            # Every key.
+            - {id: all-keys, data: '{"s":2.3,"d":3.7,"dr":0.85,"decay":0.3,"lrt":1896429600,"pos":4}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            # `s` and `d` are read each on its own (X3: no memory-state pairing).
+            - {id: s-only, data: '{"s":5}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: d-only, data: '{"d":5}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: s-null, data: '{"s":null,"d":5}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: s-string, data: '{"s":"5","d":5}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            # 32-bit float reading (model/json-numbers N2).
+            - {id: s-tenth, data: '{"s":0.1,"d":5}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: s-integer-rounding, data: '{"s":16777217,"d":5}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: s-big-integer, data: '{"s":123456789012345678901234567890,"d":5}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: s-exponent, data: '{"s":5e0,"d":5E0}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: s-above-f32, data: '{"s":1e40,"d":1}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: s-below-f32, data: '{"s":-1e40,"d":1}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: s-negative-zero, data: '{"s":-0,"d":5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: s-underflow, data: '{"s":1e-50,"d":5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            # Numbers beyond the 64-bit float range: no keys, except inside an unknown key's value.
+            - {id: out-of-range-known, data: '{"pos":7,"s":1e400}', due: 0, ivl: 0, today: 30, now: 1897293600}
+            - {id: out-of-range-unknown, data: '{"s":5,"d":5,"lrt":1896429600,"zz":1e400}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: out-of-range-unknown-nested, data: '{"s":5,"d":5,"zz":{"a":[1e400]}}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            # Repeated keys: a repeated known key reads as no keys.
+            - {id: repeated-s, data: '{"s":1,"s":2,"d":3}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: repeated-pos, data: '{"pos":7,"pos":8}', due: 0, ivl: 0, today: 30, now: 1897293600}
+            - {id: repeated-lrt, data: '{"s":5,"d":5,"lrt":1896429600,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: repeated-unknown, data: '{"zz":1,"zz":2,"s":5,"d":5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            # Key names: exact and case-sensitive, after JSON escapes are decoded; unknown values are skipped.
+            - {id: upper-case-keys, data: '{"S":5,"D":5,"POS":2}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: escaped-keys, data: '{"\u0070os":7,"\u0073":5,"d":5}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: unknown-nested, data: '{"s":5,"d":5,"zz":[1,{"a":2}],"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: unknown-lone-surrogate, data: '{"s":5,"d":5,"zz":"\ud800"}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: unknown-control-character, data: "{\"s\":5,\"d\":5,\"zz\":\"a\u0001b\"}", due: 35, ivl: 10, today: 30, now: 1897293600}
+            # `cd`: a JSON string, or the whole text reads as no keys.
+            - {id: cd-string, data: '{"cd":"x","s":5,"d":5,"pos":3}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: cd-object-text, data: '{"pos":7,"cd":"{}"}', due: 0, ivl: 0, today: 30, now: 1897293600}
+            - {id: cd-number, data: '{"s":5,"d":5,"cd":5}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: cd-null, data: '{"s":5,"d":5,"cd":null}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: cd-object, data: '{"cd":{},"s":5,"d":5}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: cd-true, data: '{"cd":true,"s":5,"d":5}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: cd-lone-surrogate, data: '{"s":5,"d":5,"cd":"\ud800"}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            # `pos`: an integer from 0 to 4294967295, else absent.
+            - {id: pos, data: '{"pos":7}', due: 0, ivl: 0, today: 30, now: 1897293600}
+            - {id: pos-zero, data: '{"pos":0}', due: 0, ivl: 0, today: 30, now: 1897293600}
+            - {id: pos-max, data: '{"pos":4294967295}', due: 0, ivl: 0, today: 30, now: 1897293600}
+            - {id: pos-too-large, data: '{"pos":4294967296}', due: 0, ivl: 0, today: 30, now: 1897293600}
+            - {id: pos-negative, data: '{"pos":-1,"s":5,"d":5}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: pos-negative-zero, data: '{"pos":-0}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: pos-fraction, data: '{"pos":3.0}', due: 0, ivl: 0, today: 30, now: 1897293600}
+            - {id: pos-exponent, data: '{"pos":1e2}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: pos-string, data: '{"pos":"7","s":5,"d":5}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: pos-null, data: '{"pos":null,"s":5,"d":5}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            # The array form: pos, s, d, dr, decay, lrt, cd by position.
+            - {id: array, data: '[1,2,3]', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: array-single, data: '[7]', due: 0, ivl: 0, today: 30, now: 1897293600}
+            - {id: array-null-first, data: '[null,2,3]', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: array-seven, data: '[1,2,3,4,5,1896429600,"{}"]', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: array-null-cd, data: '[1,2,3,4,5,6,null]', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: array-eight, data: '[1,2,3,4,5,6,"x",8]', due: 35, ivl: 10, today: 30, now: 1897293600}
+            # Nesting: at most 127 levels, counting the outer object or array, except inside an unknown key's value.
+            - {id: depth-127, data: '{"s":5,"d":5,"lrt":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: depth-128, data: '{"s":5,"d":5,"lrt":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: array-depth-127, data: '[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],2,3]', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: array-depth-128, data: '[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],2,3]', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: unknown-depth-130, data: '{"s":5,"d":5,"lrt":1896429600,"zz":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}', due: 35, ivl: 10, today: 30, now: 1897293600}

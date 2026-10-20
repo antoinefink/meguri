@@ -196,3 +196,7 @@ fsrsParams7
 lastFsrsOptimize
 dueCounts
 estTimes
+# U82a: pure card-data observation and typed SQL byte values.
+card_extractors
+text_hex
+blob_hex

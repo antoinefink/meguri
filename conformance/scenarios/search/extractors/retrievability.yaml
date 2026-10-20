@@ -1,0 +1,74 @@
+# Retrievability (specs/search/card-extractors.md X5) with the elapsed time
+# taken from `lrt`, or from `due` and `ivl` when `lrt` is absent (seconds for a
+# due above 365000, days otherwise), the default decay, the 32-bit wraps, and
+# the edges of stability and decay. The arguments are 2030-02-14 10:00:00 UTC
+# (1897293600) and day 30 unless a row says otherwise.
+id: search/extractors/retrievability
+description: Retrievability of the card-data SQL functions
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - card_extractors:
+          inputs:
+            # `lrt` present: seconds since `lrt` at `now`.
+            - {id: lrt-10-days, data: '{"s":2.5,"d":5.5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: lrt-10-days-1-second-earlier, data: '{"s":2.5,"d":5.5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293599}
+            - {id: lrt-1-day, data: '{"s":21.0,"d":1.0,"lrt":1897207200}', due: 40, ivl: 10, today: 30, now: 1897293600}
+            - {id: lrt-50-days-decay, data: '{"s":100,"d":10,"decay":0.1542,"lrt":1892973600}', due: 40, ivl: 10, today: 30, now: 1897293600}
+            - {id: lrt-1-second, data: '{"s":0.01,"d":5,"lrt":1897293599}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: lrt-2-seconds, data: '{"s":0.01,"d":5,"lrt":1897293598}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: lrt-now, data: '{"s":5,"d":5,"lrt":1897293600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: lrt-future, data: '{"s":2.5,"d":5.5,"lrt":1897297200}', due: 40, ivl: 10, today: 30, now: 1897293600}
+            - {id: lrt-zero, data: '{"s":5,"d":5,"lrt":0}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            # `lrt` and `now` reduced to 32 bits.
+            - {id: lrt-negative, data: '{"s":5,"d":5,"lrt":-5}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: lrt-above-32-bits, data: '{"s":5,"d":5,"lrt":6192174496}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: lrt-u32-max, data: '{"s":5,"d":5,"lrt":4294967295}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: lrt-i64-max, data: '{"s":5,"d":5,"lrt":9223372036854775807}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: lrt-i64-min, data: '{"s":5,"d":5,"lrt":-9223372036854775808}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: now-negative, data: '{"s":5,"d":5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: -1}
+            - {id: now-above-32-bits, data: '{"s":5,"d":5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 6192260896}
+            # `lrt` absent or not an integer: a review due counts days from due - ivl to today.
+            - {id: no-lrt, data: '{"s":5,"d":5}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: no-lrt-decay-half, data: '{"s":5,"d":5,"decay":0.5}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: no-lrt-decay, data: '{"s":5,"d":5,"decay":0.1542}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: no-lrt-elapsed-equals-stability, data: '{"s":5,"d":5,"decay":0.1542,"dr":0.9}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: lrt-null, data: '{"s":5,"d":5,"lrt":null}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: lrt-fraction, data: '{"s":5,"d":5,"lrt":1.5}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: lrt-float-literal, data: '{"s":5,"d":5,"lrt":1896429600.0}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: lrt-exponent, data: '{"s":5,"d":5,"lrt":1.8964296e9}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: lrt-string, data: '{"s":5,"d":5,"lrt":"1896429600"}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: lrt-negative-zero, data: '{"lrt":-0,"s":5,"d":5}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            # Review dues: wraps and saturation in 32 bits.
+            - {id: ivl-above-due, data: '{"s":5,"d":5}', due: 35, ivl: 40, today: 30, now: 1897293600}
+            - {id: ivl-negative, data: '{"s":5,"d":5}', due: 35, ivl: -5, today: 30, now: 1897293600}
+            - {id: due-negative, data: '{"s":5,"d":5}', due: -100000, ivl: 20, today: 30, now: 1897293600}
+            - {id: today-negative, data: '{"s":5,"d":5}', due: 35, ivl: 20, today: -1, now: 1897293600}
+            - {id: days-product-wraps, data: '{"s":100,"d":5}', due: 0, ivl: 0, today: 60000, now: 1897293600}
+            - {id: due-365000, data: '{"s":5,"d":5}', due: 365000, ivl: 0, today: 30, now: 1897293600}
+            # A due above 365000 is in seconds: seconds from due - ivl (ivl read as seconds) to now.
+            - {id: due-365001, data: '{"s":5,"d":5}', due: 365001, ivl: 0, today: 30, now: 1897293600}
+            - {id: learning-due-later, data: '{"s":4,"d":6}', due: 1897294200, ivl: 0, today: 30, now: 1897293600}
+            - {id: learning-due-earlier, data: '{"s":4,"d":6}', due: 1897290000, ivl: 0, today: 30, now: 1897293600}
+            - {id: learning-ivl-2, data: '{"s":4,"d":6}', due: 1897290000, ivl: 2, today: 30, now: 1897293600}
+            - {id: learning-ivl-86400, data: '{"s":5,"d":5,"dr":0.9}', due: 1897290000, ivl: 86400, today: 30, now: 1897293600}
+            - {id: learning-ivl-negative, data: '{"s":5,"d":5}', due: 1897290000, ivl: -86400, today: 30, now: 1897293600}
+            - {id: learning-due-above-32-bits, data: '{"s":5,"d":5,"dr":0.9}', due: 6192257296, ivl: 0, today: 30, now: 1897293600}
+            # Decay: absent, null or not a number means 0.5.
+            - {id: decay-null, data: '{"s":5,"d":5,"decay":null,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: decay-string, data: '{"s":5,"d":5,"decay":"0.2","lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: decay-zero, data: '{"s":5,"d":5,"decay":0,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: decay-negative, data: '{"s":5,"d":5,"decay":-0.5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: decay-small, data: '{"s":5,"d":5,"decay":0.05,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: decay-two, data: '{"s":5,"d":5,"decay":2,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: decay-above-f32, data: '{"s":5,"d":5,"decay":1e40,"dr":0.9,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: decay-subnormal, data: '{"s":5,"d":5,"dr":0.9,"decay":1e-40,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            # Stability edges: NaN results are NULL.
+            - {id: stability-zero-no-time, data: '{"s":0,"d":5,"lrt":1897293600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: stability-zero, data: '{"s":0,"d":5,"lrt":1897207200}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: stability-negative, data: '{"s":-1,"d":5,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: stability-infinite, data: '{"s":1e40,"d":1}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            # No memory state: NULL.
+            - {id: no-memory-state, data: '{}', due: 35, ivl: 20, today: 30, now: 1897293600}
+            - {id: no-stability, data: '{"d":5,"dr":0.9,"lrt":1896429600}', due: 35, ivl: 10, today: 30, now: 1897293600}
+            - {id: decay-only, data: '{"decay":0.3}', due: 35, ivl: 20, today: 30, now: 1897293600}

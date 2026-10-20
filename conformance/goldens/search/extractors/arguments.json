@@ -1,0 +1,285 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "card_extractors": {
+          "rows": [
+            {
+              "d": null,
+              "dr": null,
+              "id": "data-blob",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "data-empty-blob",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "data-null",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "data-integer",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "data-real",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "due-real",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "due-real-lrt",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "due-text",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "due-text-lrt",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "due-null",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "due-null-lrt",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "ivl-text-lrt",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "ivl-text",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "ivl-real",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "ivl-null-lrt",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "ivl-text-sm2",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "ivl-real-sm2",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "today-text",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "today-text-lrt",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "today-real-lrt",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": 0.9,
+              "id": "today-real",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "today-text-learning",
+              "pos": null,
+              "r": 0.9990241,
+              "rr": -0.001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "today-null-learning",
+              "pos": null,
+              "r": 0.9990241,
+              "rr": -0.001,
+              "s": 5.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "today-text-sm2",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "today-text-sm2-learning",
+              "pos": null,
+              "r": null,
+              "rr": -0.001,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "now-real",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "now-null-lrt",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "now-text-lrt",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": 5.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "now-null-sm2",
+              "pos": null,
+              "r": null,
+              "rr": null,
+              "s": null
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3c22201f2a6f3a3771caad7fe8ea98c8f096c31b2a37087938084da9d5bca51e",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/extractors/arguments",
+  "scenario_sha256": "7de4a7fe0ebff918eb1321ea4d6fcf57a635f87fb7a4a75c65a0c736de1a08d4",
+  "tz": "UTC"
+}

@@ -55,6 +55,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `fields_check` | `{cases: [{notetype, fields} \| {note: #nN, fields?}, ...]}`, at most one request per step | `[{state, duplicates?}, ...]`, one per case: the field check of `specs/notes/field-check.md` on unsaved drafts, `duplicates` (logical note ids) only with the state `duplicate` (`note-ops.md` N4); never changes the collection |
 | `search` | list of `{query, kind?: cards \| notes}` | `search-ops.md` S1: one output per search, `{ids: [#cN or #nN, ...]}` in logical-id order, or an error `{error: <kind>, provided?, context?}` |
 | `canonical_search` | list of search texts | `search-ops.md` S2: one output per text, `{text: <canonical text>}` or a parse error; never reads or changes the scenario's collection |
+| `card_extractors` | `{inputs: [{id, data, due, ivl, today, now}, ...]}`, at most once per observe step | `{rows: [{id, s, d, dr, r, rr, pos}, ...]}`: the card-data SQL functions of `specs/search/card-extractors.md` on given SQL values, one row per input (`extractor-ops.md` E1–E3); never reads or changes the scenario's collection |
 | `db_dump` | none or `{tables?: [...], raw?: bool}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8), or raw (`normalized-dump.md` N4) |
 | `stats` | arguments defined by the stats area | draft (stats) |
 | `digest` | none | draft: a hash over all card rows, for fuzzing |
@@ -105,6 +106,7 @@ The runner compares the golden's observations (expected) with the executor's (ac
   | `stability` and `difficulty` in any `memory_state` inside `next_states` | 1e-5 |
   | the stability and difficulty columns (1, 2, 4, 5, 7, 8, 10, 11) of `fsrs_next` rows | 1e-5 |
   | any number inside `stats` | 1e-6 |
+  | `r` and `rr` in `card_extractors` rows (`extractor-ops.md` E4) | 1e-5 |
 
   Card rows, review-log rows and every other kind are exact: a stored value that a tolerance could hide is a real difference.
 

@@ -1,0 +1,618 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "card_extractors": {
+          "rows": [
+            {
+              "d": null,
+              "dr": null,
+              "id": "empty-object",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "empty-text",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "garbage",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "json-number",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "json-string",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "json-null",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "empty-array",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "trailing-text",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "trailing-comma",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "byte-order-mark",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "invalid-utf8",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "hex-text",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "whitespace",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 3.7,
+              "dr": 0.85,
+              "id": "all-keys",
+              "pos": 4,
+              "r": 0.7319633,
+              "rr": -2.544519,
+              "s": 2.3
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "s-only",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "d-only",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "s-null",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "s-string",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "s-tenth",
+              "pos": null,
+              "r": 0.28029355,
+              "rr": -0.5001,
+              "s": 0.1
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "s-integer-rounding",
+              "pos": null,
+              "r": 0.9999999,
+              "rr": -0.75005,
+              "s": 16777216.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "s-big-integer",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.5001,
+              "s": 1.2345679e+29
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "s-exponent",
+              "pos": null,
+              "r": 0.9,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 1.0,
+              "dr": null,
+              "id": "s-above-f32",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.5001,
+              "s": "inf"
+            },
+            {
+              "d": 1.0,
+              "dr": null,
+              "id": "s-below-f32",
+              "pos": null,
+              "r": 1.0,
+              "rr": -0.5001,
+              "s": "-inf"
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "s-negative-zero",
+              "pos": null,
+              "r": 0.0,
+              "rr": -0.5001,
+              "s": -0.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "s-underflow",
+              "pos": null,
+              "r": 0.0,
+              "rr": -0.5001,
+              "s": 0.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "out-of-range-known",
+              "pos": null,
+              "r": null,
+              "rr": -30.001,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "out-of-range-unknown",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "out-of-range-unknown-nested",
+              "pos": null,
+              "r": 0.9,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "repeated-s",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "repeated-pos",
+              "pos": null,
+              "r": null,
+              "rr": -30.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "repeated-lrt",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "repeated-unknown",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "upper-case-keys",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "escaped-keys",
+              "pos": 7,
+              "r": 0.9,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "unknown-nested",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "unknown-lone-surrogate",
+              "pos": null,
+              "r": 0.9,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "unknown-control-character",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "cd-string",
+              "pos": 3,
+              "r": 0.9,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "cd-object-text",
+              "pos": 7,
+              "r": null,
+              "rr": -30.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "cd-number",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "cd-null",
+              "pos": null,
+              "r": null,
+              "rr": -0.75005,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "cd-object",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "cd-true",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "cd-lone-surrogate",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "pos",
+              "pos": 7,
+              "r": null,
+              "rr": -30.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "pos-zero",
+              "pos": 0,
+              "r": null,
+              "rr": -30.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "pos-max",
+              "pos": 4294967295,
+              "r": null,
+              "rr": -30.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "pos-too-large",
+              "pos": null,
+              "r": null,
+              "rr": -30.001,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "pos-negative",
+              "pos": null,
+              "r": 0.9,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "pos-negative-zero",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "pos-fraction",
+              "pos": null,
+              "r": null,
+              "rr": -30.001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "pos-exponent",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "pos-string",
+              "pos": null,
+              "r": 0.9,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "pos-null",
+              "pos": null,
+              "r": 0.9,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": 3.0,
+              "dr": null,
+              "id": "array",
+              "pos": 1,
+              "r": 0.60200995,
+              "rr": -0.75005,
+              "s": 2.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "array-single",
+              "pos": 7,
+              "r": null,
+              "rr": -30.001,
+              "s": null
+            },
+            {
+              "d": 3.0,
+              "dr": null,
+              "id": "array-null-first",
+              "pos": null,
+              "r": 0.7939459,
+              "rr": -0.5001,
+              "s": 2.0
+            },
+            {
+              "d": 3.0,
+              "dr": 4.0,
+              "id": "array-seven",
+              "pos": 1,
+              "r": 0.60295576,
+              "rr": 0.4397356,
+              "s": 2.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "array-null-cd",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "array-eight",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "depth-127",
+              "pos": null,
+              "r": 0.9,
+              "rr": -0.5001,
+              "s": 5.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "depth-128",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": 3.0,
+              "dr": null,
+              "id": "array-depth-127",
+              "pos": null,
+              "r": 0.7939459,
+              "rr": -0.5001,
+              "s": 2.0
+            },
+            {
+              "d": null,
+              "dr": null,
+              "id": "array-depth-128",
+              "pos": null,
+              "r": null,
+              "rr": -0.5001,
+              "s": null
+            },
+            {
+              "d": 5.0,
+              "dr": null,
+              "id": "unknown-depth-130",
+              "pos": null,
+              "r": 0.8250286,
+              "rr": -0.5001,
+              "s": 5.0
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3c22201f2a6f3a3771caad7fe8ea98c8f096c31b2a37087938084da9d5bca51e",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/extractors/card-data",
+  "scenario_sha256": "1af00934680c5291fe3faafa625659976d26ffd5da3a836b975fd4d52061934f",
+  "tz": "UTC"
+}
