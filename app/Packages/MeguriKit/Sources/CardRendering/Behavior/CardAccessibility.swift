@@ -3,6 +3,7 @@ import Foundation
 import AppKit
 #else
 import UIKit
+import WebKit
 #endif
 
 private nonisolated struct AccessibilityDOMTarget: Decodable {
@@ -58,14 +59,6 @@ extension CardPage {
         let json = try await string("""
             const anchor = document.getElementById('answer') || document.getElementById('qa');
             if (!anchor) return '';
-            let text = (anchor.innerText || anchor.textContent || '').trim();
-            let reading = anchor;
-            if (!text && anchor.id === 'answer') {
-                for (let sibling = anchor.nextElementSibling; sibling; sibling = sibling.nextElementSibling) {
-                    const content = (sibling.innerText || sibling.textContent || sibling.getAttribute('alt') || sibling.getAttribute('aria-label') || '').trim();
-                    if (content) { reading = sibling; text = content; break; }
-                }
-            }
             const viewport = window.visualViewport;
             const left = viewport?.offsetLeft ?? 0, top = viewport?.offsetTop ?? 0;
             const width = viewport?.width ?? innerWidth, height = viewport?.height ?? innerHeight;
@@ -74,11 +67,42 @@ extension CardPage {
                 const x2 = Math.min(rect.right, left + width), y2 = Math.min(rect.bottom, top + height);
                 return x2 > x1 && y2 > y1 ? {x:(x1 + x2) / 2, y:(y1 + y2) / 2} : null;
             };
-            const excluded = element => element.closest('[aria-hidden="true"],script,style') ||
-                ['hidden', 'collapse'].includes(getComputedStyle(element).visibility);
+            const excluded = element => {
+                for (let node = element; node; node = node.parentElement) {
+                    const style = getComputedStyle(node);
+                    if (node.hidden || node.getAttribute('aria-hidden') === 'true' || node.matches('script,style') ||
+                        ['presentation', 'none'].includes((node.getAttribute('role') || '').trim().toLowerCase()) ||
+                        style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)) return true;
+                }
+                return false;
+            };
+            const semanticLabel = element => {
+                if (excluded(element)) return '';
+                const role = (element.getAttribute('role') || '').trim().toLowerCase();
+                if (!element.matches('img,svg,input,textarea,button,select,a[href]') &&
+                    !['img', 'button', 'link', 'checkbox', 'radio', 'switch', 'textbox', 'combobox',
+                      'listbox', 'slider', 'spinbutton', 'menuitem', 'tab'].includes(role)) return '';
+                const label = (element.getAttribute('aria-label') || '').trim() ||
+                    (element.matches('img,input[type=image]') ? (element.getAttribute('alt') || '').trim() : '');
+                return label.slice(0,4000);
+            };
+            const content = element => excluded(element) ? '' :
+                semanticLabel(element) || (element.innerText || element.textContent || '').trim();
+            let reading = anchor, text = content(anchor);
+            if (!text && anchor.id === 'answer') {
+                for (let sibling = anchor.nextElementSibling; sibling; sibling = sibling.nextElementSibling) {
+                    const next = content(sibling);
+                    if (next) { reading = sibling; text = next; break; }
+                }
+            }
             let point = null;
+            const ownLabel = semanticLabel(reading);
+            if (ownLabel) {
+                point = visiblePoint(reading.getBoundingClientRect());
+                if (point) text = ownLabel;
+            }
             const walk = document.createTreeWalker(reading, NodeFilter.SHOW_TEXT);
-            while (walk.nextNode()) {
+            while (!point && walk.nextNode()) {
                 const node = walk.currentNode, offset = node.textContent.search(/\\S/);
                 if (offset < 0 || !node.parentElement || excluded(node.parentElement)) continue;
                 const readableRange = document.createRange();
@@ -90,16 +114,13 @@ extension CardPage {
                 if (point) break;
             }
             if (!point) {
-                const images = reading.matches('img') ? [reading] : reading.querySelectorAll('img[alt]');
-                for (const image of images) {
-                    if (!excluded(image)) point = visiblePoint(image.getBoundingClientRect());
-                    if (point) break;
+                for (const element of reading.querySelectorAll('img,svg,input,textarea,button,select,a[href],[role]')) {
+                    const label = semanticLabel(element);
+                    if (label) point = visiblePoint(element.getBoundingClientRect());
+                    if (point) { text = label; break; }
                 }
             }
-            if (!point && reading.matches('input,textarea,button,select') && !excluded(reading)) {
-                point = visiblePoint(reading.getBoundingClientRect());
-            }
-            return JSON.stringify({id:anchor.id, text:text.slice(0,4000),
+            return JSON.stringify({id:anchor.id, text:point ? text.slice(0,4000) : '',
                 x:point?.x ?? null, y:point?.y ?? null, left, top, width, height});
             """, world: Self.world)
         guard let data = json.data(using: .utf8), let value = try? JSONDecoder().decode(AccessibilityDOMTarget.self, from: data),
@@ -124,9 +145,16 @@ extension CardPage {
         #else
         guard webView.window != nil else { return (metadata, nil) }
         let local = CGPoint(x: webView.bounds.minX + horizontal, y: webView.bounds.minY + vertical)
-        let screenPoint = UIAccessibility.convertToScreenCoordinates(CGRect(origin: local, size: .zero), in: webView).origin
-        guard let element = webView.accessibilityHitTest(screenPoint, event: nil) as? NSObject,
-              element !== webView, element.isAccessibilityElement else { return (metadata, nil) }
+        guard let element = webView.accessibilityHitTest(local, event: nil) as? NSObject,
+              element !== webView, !(element is WKWebView), !(element is UIScrollView),
+              !(element is UIWindow) else { return (metadata, nil) }
+        if let view = element as? UIView {
+            guard view.isAccessibilityElement else { return (metadata, nil) }
+        } else {
+            // WebKit's remote leaf can report false through the in-process
+            // element getter while remaining the system's real AX target.
+            guard element.isAccessibilityElement || element.accessibilityElementCount() == NSNotFound else { return (metadata, nil) }
+        }
         #endif
         return (metadata, element)
     }

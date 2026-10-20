@@ -93,6 +93,7 @@ extension TestHooks {
             switch answerForm {
             case 1: heading = "<div style='height:1600px'></div><hr id=answer><h1>\(answer)</h1>"
             case 2: heading = "<h1>\(answer)</h1>"
+            case 3: heading = "<div id=answer role=img aria-label=\"\(answer)\" style='width:160px;height:80px'></div>"
             default: heading = "<h1 id=answer>\(answer)</h1>"
             }
             #if os(iOS)
@@ -138,15 +139,26 @@ extension TestHooks {
                   resizes:window.resizeEvents||0, height:innerHeight, layoutHeight:document.documentElement.clientHeight,
                   viewport:document.getElementById('viewport')?.offsetHeight,
                   scroll:scrollY, bottom:document.getElementById('bottom')?.getBoundingClientRect().bottom,
-                  root:location.href, scriptRan:window.cardScriptRan===true});
+                  root:location.href, scriptRan:window.cardScriptRan===true,
+                  ...(Number.isFinite(window.visualViewport?.scale) ? {visualScale:window.visualViewport.scale} : {})});
                 """, arguments: [:], in: nil, contentWorld: .page)
             guard pair.current === page, page.update == update, !page.closed else { return }
             var observations = (result as? String).flatMap { $0.data(using: .utf8) }
                 .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
             observations["pageZoom"] = page.webView.pageZoom
+            observations["pageCount"] = pair.pages.count
+            observations["distinctPages"] = Set(pair.pages.map { ObjectIdentifier($0.webView) }).count == pair.pages.count
+            #if os(macOS)
+            observations["currentHidden"] = page.webView.isAccessibilityHidden()
+            observations["idleHidden"] = pair.idle.webView.isAccessibilityHidden()
+            #else
+            observations["currentHidden"] = page.webView.accessibilityElementsHidden
+            observations["idleHidden"] = pair.idle.webView.accessibilityElementsHidden
+            #endif
             #if os(iOS)
             observations["voiceFocus"] = nativeVoiceFocus
-            observations["pinch"] = page.webView.scrollView.zoomScale / page.webView.scrollView.minimumZoomScale
+            let nativeZoom = page.webView.scrollView.zoomScale
+            if nativeZoom.isFinite { observations["nativeZoom"] = nativeZoom }
             if let window = page.webView.window {
                 let frame = page.webView.convert(page.webView.bounds, to: window)
                 observations["native"] = ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height,
@@ -199,6 +211,7 @@ extension TestHooks {
                 Menu(String(localized: "Card actions", table: "CardBehaviorRoutes")) {
                     control("Answer separator", id: "separator") { model.answerVariant(1) }
                     control("Answer fallback", id: "fallback") { model.answerVariant(2) }
+                    control("Answer graphic", id: "graphic") { model.answerVariant(3) }
                     control("Next card", id: "next") { try await model.next() }
                     control("Card zoom", id: "zoom") { model.zoom() }
                     control("Resize card", id: "resize") { model.narrow.toggle(); await model.refresh() }

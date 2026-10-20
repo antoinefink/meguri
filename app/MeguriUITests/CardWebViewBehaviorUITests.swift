@@ -126,7 +126,14 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         try control("reveal", in: app)
         XCTAssert(wait { self.state(app).contains("side=answer") && self.state(app).contains("target=answer") }, state(app))
         XCTAssert(app.staticTexts["Behavior answer"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.webViews.count, 1, "the idle page must be excluded from accessibility")
+        XCTAssertNotEqual(app.webViews.matching(identifier: "review.card.page.a").firstMatch.exists,
+                          app.webViews.matching(identifier: "review.card.page.b").firstMatch.exists,
+                          "exactly one named page root must be exported; the idle root must be absent")
+        let pageReport = try report(app)
+        XCTAssertEqual(pageReport["pageCount"] as? Int, 2)
+        XCTAssertEqual(pageReport["distinctPages"] as? Bool, true)
+        XCTAssertEqual(pageReport["currentHidden"] as? Bool, false)
+        XCTAssertEqual(pageReport["idleHidden"] as? Bool, true)
     }
 
     func testNativeZoomFrameAndSameDocumentLinks() throws {
@@ -169,14 +176,26 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         let app = try launch()
         try control("zoom", in: app)
         XCTAssert(wait { self.state(app).contains("zoom=150") }, state(app))
+        let baselineReport = try report(app)
+        let savedZoom = try XCTUnwrap(baselineReport["pageZoom"] as? Double)
+        XCTAssertEqual(savedZoom, 1.5)
         #if os(iOS)
+        let unpinchedVisualScale = try XCTUnwrap(baselineReport["visualScale"] as? Double)
+        let unpinchedNativeZoom = try XCTUnwrap(baselineReport["nativeZoom"] as? Double)
+        XCTAssertTrue(unpinchedVisualScale.isFinite && unpinchedNativeZoom.isFinite)
+        XCTAssertGreaterThan(unpinchedVisualScale, 0)
+        XCTAssertGreaterThan(unpinchedNativeZoom, 0)
         // Exercise touch zoom before enabling the screen reader.
         let cardSurface = app.webViews.firstMatch
         cardSurface.pinch(withScale: 2, velocity: 1)
         try control("refresh", in: app)
         let gestureReport = try report(app)
-        let questionGestureScale = try XCTUnwrap(gestureReport["pinch"] as? Double)
-        XCTAssertGreaterThan(questionGestureScale, 1)
+        let questionGestureScale = try XCTUnwrap(gestureReport["visualScale"] as? Double)
+        let questionNativeZoom = try XCTUnwrap(gestureReport["nativeZoom"] as? Double)
+        XCTAssertTrue(questionGestureScale.isFinite && questionNativeZoom.isFinite)
+        XCTAssertGreaterThan(questionGestureScale, unpinchedVisualScale)
+        XCTAssertGreaterThan(questionNativeZoom, unpinchedNativeZoom)
+        XCTAssertEqual(try XCTUnwrap(gestureReport["pageZoom"] as? Double), savedZoom)
         #endif
         let voiceOver = XCUIDevice.shared.voiceOverService
         defer { try? voiceOver.disable() }
@@ -232,13 +251,16 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             }
             try activateWithVoiceOver(button)
         }
-        for layoutIndex in 0...2 {
+        for layoutIndex in 0...3 {
             if layoutIndex > 0 {
-                try voiceOverControl(layoutIndex == 1 ? "separator" : "fallback")
+                try voiceOverControl(["separator", "fallback", "graphic"][layoutIndex - 1])
                 try voiceOverControl("next")
                 XCTAssert(wait { self.state(app).contains("card=\(layoutIndex + 1) side=question") }, state(app))
                 #if os(iOS)
-                XCTAssertEqual(try XCTUnwrap(try report(app)["pinch"] as? Double), 1, accuracy: 0.01)
+                let nextQuestionReport = try report(app)
+                XCTAssertEqual(try XCTUnwrap(nextQuestionReport["visualScale"] as? Double), unpinchedVisualScale, accuracy: 0.01)
+                XCTAssertEqual(try XCTUnwrap(nextQuestionReport["nativeZoom"] as? Double), unpinchedNativeZoom, accuracy: 0.01)
+                XCTAssertEqual(try XCTUnwrap(nextQuestionReport["pageZoom"] as? Double), savedZoom)
                 #endif
             }
             let nativeEditor = app.textFields["card.behavior.editor"]
@@ -248,12 +270,13 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             // This unique visible control avoids transient Menu ownership.
             try activateWithVoiceOver(app.buttons["card.behavior.reveal"])
             XCTAssert(wait { self.state(app).contains("side=answer") }, state(app))
-            XCTAssertEqual(try XCTUnwrap(try report(app)["pageZoom"] as? Double), 1.5)
+            let answerReport = try report(app)
+            XCTAssertEqual(try XCTUnwrap(answerReport["pageZoom"] as? Double), savedZoom)
             #if os(iOS)
-            XCTAssert(wait { (try? self.report(app)["voiceFocus"] as? String) == "Behavior answer" }, state(app))
-            if layoutIndex == 0 {
-                XCTAssertEqual(try XCTUnwrap(try report(app)["pinch"] as? Double), questionGestureScale, accuracy: 0.01)
-            }
+            XCTAssertEqual(try XCTUnwrap(answerReport["visualScale"] as? Double),
+                           layoutIndex == 0 ? questionGestureScale : unpinchedVisualScale, accuracy: 0.01)
+            XCTAssertEqual(try XCTUnwrap(answerReport["nativeZoom"] as? Double),
+                           layoutIndex == 0 ? questionNativeZoom : unpinchedNativeZoom, accuracy: 0.01)
             #endif
             XCTAssert(wait { (try? voiceOver.currentSpeech().utterance.contains("Behavior answer")) == true },
                       "The current native VoiceOver cursor must identify the answer")
@@ -262,7 +285,14 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             app.typeText("x")
             XCTAssertEqual(nativeEditor.value as? String, retainedText + "x")
             XCTAssertTrue(try voiceOver.moveForward().utterance.contains("Typed answer"), "The next VO element must follow the answer destination")
-            XCTAssertEqual(app.webViews.count, 1)
+            XCTAssertNotEqual(app.webViews.matching(identifier: "review.card.page.a").firstMatch.exists,
+                              app.webViews.matching(identifier: "review.card.page.b").firstMatch.exists,
+                              "exactly one named page root must be exported; the idle root must be absent")
+            XCTAssertEqual(answerReport["pageCount"] as? Int, 2)
+            XCTAssertEqual(answerReport["distinctPages"] as? Bool, true)
+            XCTAssertEqual(answerReport["currentHidden"] as? Bool, false)
+            XCTAssertEqual(answerReport["idleHidden"] as? Bool, true)
+            XCTAssertFalse(app.staticTexts["Behavior question"].exists, "idle question content must stay excluded")
         }
     }
     #endif

@@ -51,6 +51,49 @@ extension WebKitSuites {
             }
         }
 
+        @Test func labelledGraphicMetadataPrecedesNextSiblingText() async throws {
+            let fixture = try await CardBehaviorFixture()
+            defer { fixture.close() }
+            fixture.pair.cardZoom = CardZoom(percent: 150)
+            let graphics = ["<div id=answer role=img aria-label='Graphic answer' style='width:160px;height:80px'></div>",
+                            "<img id=answer alt='Graphic answer' style='width:160px;height:80px'>"]
+            for (index, graphic) in graphics.enumerated() {
+                try await fixture.present(.init(cardID: Int64(index + 1), question: "q",
+                                                answer: graphic + "<p>Later sibling</p>"))
+                _ = try await fixture.pair.showAnswer()
+                let page = fixture.pair.current
+                let target = try #require(page.accessibilityTarget)
+                #expect(target.elementID == "answer" && target.update == page.update)
+                #expect(target.text == "Graphic answer")
+                #expect(try await fixture.bool("const rect=document.getElementById('answer').getBoundingClientRect(); return rect.width>0 && rect.height>0;") == true)
+                // This proves DOM metadata only; native targeting needs the VM VO test.
+            }
+        }
+
+        @Test func emptyHiddenAndPresentationalGraphicsHaveNoTargetPoint() async throws {
+            let fixture = try await CardBehaviorFixture()
+            defer { fixture.close() }
+            let rejected = ["<div id=answer></div>",
+                            "<div id=answer aria-label='Arbitrary container'></div>",
+                            "<div id=answer role=img></div>",
+                            "<div id=answer role=img aria-label='   '></div>",
+                            "<div id=answer role=img aria-label='Hidden graphic' aria-hidden=true></div>",
+                            "<div id=answer role=img aria-label='Hidden graphic' hidden></div>",
+                            "<div id=answer role=img aria-label='Hidden graphic' style='display:none'></div>",
+                            "<div id=answer role=img aria-label='Hidden graphic' style='visibility:hidden'></div>",
+                            "<div id=answer role=presentation aria-label='Presentational graphic'></div>",
+                            "<img id=answer role=none alt='Presentational graphic'>",
+                            "<div aria-hidden=true><div id=answer role=img aria-label='Hidden graphic'></div></div>"]
+            for (index, html) in rejected.enumerated() {
+                try await fixture.present(.init(cardID: Int64(index + 1), question: "q",
+                                                answer: "<style>#answer{width:160px;height:80px}</style>" + html))
+                _ = try await fixture.pair.showAnswer()
+                let resolved = try #require(try await fixture.pair.current.resolveAnswerAccessibilityTarget())
+                #expect(resolved.0.elementID == "answer" && resolved.0.text.isEmpty)
+                #expect(resolved.1 == nil)
+            }
+        }
+
         @Test func lateRevealCannotInstallOrAnnounceAnOldAnswer() async throws {
             var comparison: CheckedContinuation<String, Never>?
             let fixture = try await CardBehaviorFixture(compare: { _, _ in

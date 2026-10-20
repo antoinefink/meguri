@@ -231,6 +231,16 @@
         }
       }
     },
+    "Answer graphic": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answer graphic"
+          }
+        }
+      }
+    },
     "Answer fallback": {
       "localizations": {
         "en": {
