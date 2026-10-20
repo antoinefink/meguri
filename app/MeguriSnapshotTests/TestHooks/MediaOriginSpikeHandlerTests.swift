@@ -5,11 +5,12 @@ import WebKit
 
 @testable import Meguri
 
-/// The S2 spike's in-app media handler (U65, `TestHooks.MediaOriginSpike`)
+/// The S2 spike's production media proxy (U65, `TestHooks.MediaOriginSpike`)
 /// against fixed answers (R495). The app's media checks
 /// (CardSwapTimingSpikeTests' seeks) judge each ranged answer with the
 /// handler's own range parser, so the parser is held here to answers worked
 /// out by hand, for a 10-byte file whose bytes are the digits 0 to 9.
+/// Real WebKit pages also check navigation ownership and script deadlines.
 @MainActor
 @Suite struct MediaOriginSpikeHandlerTests {
     nonisolated static let file = Data("0123456789".utf8)
@@ -89,6 +90,103 @@ import WebKit
         #expect(String(decoding: task.body, as: UTF8.self) == expected.body)
         // The answers the app's checks judge pass them.
         #expect(handler.rangeProblems("/_digits.bin") == [])
+    }
+
+    typealias Page = TestHooks.MediaOriginSpike.Page
+
+    func page() -> Page {
+        let handler = handler()
+        handler.files["/_anki/page.html"] = (Data("<!doctype html><title>original</title><body></body>".utf8), "text/html")
+        handler.files["/_anki/replacement.html"] = (Data("<!doctype html><title>replacement</title><body></body>".utf8), "text/html")
+        return Page(TestHooks.MediaOriginSpike.configuration(handler, persistent: false), handler: handler)
+    }
+
+    @Test
+    func productionRootLoadsTheDocumentAndRunsJavaScript() async throws {
+        let page = page()
+        try await page.open("_anki/page.html")
+        let result = await page.run("""
+            document.body.dataset.roundtrip = value;
+            return location.href + "|" + document.title + "|" + document.body.dataset.roundtrip;
+            """, ["value": "loaded"], within: 2)
+        #expect(result == "meguri-media://media/|original|loaded")
+        #expect(page.handler.answers.contains { $0.path == "/" && $0.status == 200 })
+    }
+
+    @Test
+    func concurrentOpenIsRejectedWithoutStealingTheFirstWaiter() async throws {
+        let page = page()
+        var competing: Task<Void, any Error>?
+        try await page.open("_anki/page.html") { stage in
+            // Queue the competing caller before the binding worker. The
+            // first attempt already owns the page, even before navigation.
+            if stage == .binding {
+                competing = Task { try await page.open("_anki/replacement.html") }
+            }
+        }
+        let competitor = try #require(competing)
+        do {
+            try await competitor.value
+            Issue.record("a concurrent open replaced the active attempt")
+        } catch Page.OpenError.alreadyOpening {
+            // The rejected caller must not rebind the production handler.
+        }
+        let title = await page.run("return document.title;", within: 2)
+        #expect(title == "original")
+    }
+
+    func cancelThenReplace(at checkpoint: Page.OpenStage) async throws {
+        let page = page()
+        var first: Task<Void, any Error>?
+        first = Task {
+            try await page.open("_anki/page.html") { stage in
+                if stage == checkpoint { first?.cancel() }
+            }
+        }
+        let cancelled = try #require(first)
+        do {
+            try await cancelled.value
+            Issue.record("the cancelled open reported success")
+        } catch is CancellationError {
+            // The waiter resolves before a replacement may acquire it.
+        }
+        try await page.open("_anki/replacement.html")
+        let title = await page.run("return document.title;", within: 2)
+        #expect(title == "replacement")
+    }
+
+    @Test
+    func cancellationDuringBindingDoesNotRebindTheReplacement() async throws {
+        try await cancelThenReplace(at: .binding)
+    }
+
+    @Test
+    func cancelledNavigationCannotResolveTheReplacementWaiter() async throws {
+        try await cancelThenReplace(at: .navigation)
+    }
+
+    @Test
+    func expiredOpenFailsAndReleasesOwnershipForTheNextNavigation() async throws {
+        let page = page()
+        do {
+            try await page.open("_anki/page.html", within: .zero)
+            Issue.record("an expired open reported success")
+        } catch Page.OpenError.timedOut(let stage) {
+            #expect(stage == .binding)
+        }
+        try await page.open("_anki/replacement.html")
+        let title = await page.run("return document.title;", within: 2)
+        #expect(title == "replacement")
+    }
+
+    @Test
+    func aStalledScriptReportsTimeoutOnARealLoadedPage() async throws {
+        let page = page()
+        try await page.open("_anki/page.html")
+        let result = await page.run("return await new Promise(() => {});", within: 1)
+        #expect(result == #"{"error":"timed out after 1 s"}"#)
+        let title = await page.run("return document.title;", within: 2)
+        #expect(title == "original")
     }
 }
 #endif

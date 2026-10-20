@@ -15,9 +15,8 @@ extension TestHooks {
     /// MP3, for a device or a Mac's own hardware: in the test VM no
     /// `<audio>` plays, from any source, and an audio element left loading
     /// there stalled the app's main thread for over a minute, so the test
-    /// skips the audio route there. The macOS host checks, and the throwaway
-    /// handler they share with this one, are CustomSchemeMediaSpikeTests'.
-    /// Throwaway: U67's media handler and configuration replace it.
+    /// skips the audio route there. This measurement proxy uses U67's
+    /// production media handler, fixed origin and website data store.
     enum MediaOriginSpike {
         static let scheme = "meguri-media"
         static let origin = URL(string: "meguri-media://media/")!
@@ -84,8 +83,8 @@ extension TestHooks {
             return try Data(contentsOf: url)
         }
 
-        /// Serves in-memory files at the origin's root, answers one `Range`
-        /// with 206, and logs what it answered.
+        /// Proxies the production handler with temporary fixture files and
+        /// a supplied root document, logging its actual responses.
         final class Handler: NSObject, WKURLSchemeHandler {
             struct Answer {
                 let path: String
@@ -115,8 +114,14 @@ extension TestHooks {
             }
             isolated deinit { engine.media.close(); try? FileManager.default.removeItem(at: root) }
             func bind(_ page: WKWebView, document: String) async throws {
-                if resolver == nil { resolver = try await MediaPathResolver.open(root: root, trackedNames: []) }
+                try Task.checkCancellation()
+                if resolver == nil {
+                    let opened = try await MediaPathResolver.open(root: root, trackedNames: [])
+                    try Task.checkCancellation()
+                    resolver = opened
+                }
                 try await engine.ready()
+                try Task.checkCancellation()
                 engine.media.bind(page, to: .init(resolver: resolver!, document: document, diagnostics: CardDiagnostics()))
             }
             func webView(_ webView: WKWebView, start task: any WKURLSchemeTask) {
@@ -167,11 +172,39 @@ extension TestHooks {
             }
         }
 
-        /// A web view that reports when its page finished loading.
+        /// Owns one bounded bind/navigation attempt at a time.
         final class Page: NSObject, WKNavigationDelegate {
             let webView: WKWebView
             let handler: Handler
-            private var loaded: CheckedContinuation<Bool, Never>?
+            enum OpenStage: String, Sendable { case binding, navigation }
+            enum OpenError: LocalizedError {
+                case alreadyOpening, navigationDidNotStart, timedOut(OpenStage), contentProcessTerminated
+
+                nonisolated var errorDescription: String? {
+                    switch self {
+                    case .alreadyOpening: "a page open is already in progress"
+                    case .navigationDidNotStart: "navigation did not start"
+                    case .timedOut(let stage): "page \(stage.rawValue) timed out"
+                    case .contentProcessTerminated: "the web content process terminated"
+                    }
+                }
+            }
+            private final class OpenAttempt {
+                let id: UUID
+                let expires: ContinuousClock.Instant
+                var stage = OpenStage.binding
+                var navigation: WKNavigation?
+                var continuation: CheckedContinuation<Void, any Error>?
+                var binding: Task<Void, Never>?
+                var deadline: Task<Void, Never>?
+
+                init(id: UUID, expires: ContinuousClock.Instant, continuation: CheckedContinuation<Void, any Error>) {
+                    self.id = id
+                    self.expires = expires
+                    self.continuation = continuation
+                }
+            }
+            private var opening: OpenAttempt?
 
             init(_ configuration: WKWebViewConfiguration, handler: Handler) {
                 self.handler = handler
@@ -180,12 +213,47 @@ extension TestHooks {
                 webView.navigationDelegate = self
             }
 
-            func open(_ path: String) async -> Bool {
-                let text = handler.files["/" + path].map { String(decoding: $0.data, as: UTF8.self) } ?? "<!doctype html>"
-                do { try await handler.bind(webView, document: text) } catch { return false }
-                return await withCheckedContinuation { continuation in
-                    loaded = continuation
-                    webView.load(URLRequest(url: MediaOriginSpike.origin))
+            func open(
+                _ path: String, within limit: Duration = .seconds(10),
+                stageChanged: @escaping (OpenStage) -> Void = { _ in }
+            ) async throws {
+                let id = UUID()
+                try await withTaskCancellationHandler {
+                    try Task.checkCancellation()
+                    guard opening == nil else { throw OpenError.alreadyOpening }
+                    let expires = ContinuousClock.now + limit
+                    let text = handler.files["/" + path].map { String(decoding: $0.data, as: UTF8.self) } ?? "<!doctype html>"
+                    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                        let attempt = OpenAttempt(id: id, expires: expires, continuation: continuation)
+                        opening = attempt
+                        stageChanged(.binding)
+                        attempt.deadline = Task {
+                            do { try await Task.sleep(until: expires, clock: .continuous) } catch { return }
+                            self.finish(attempt, with: .failure(OpenError.timedOut(attempt.stage)))
+                        }
+                        attempt.binding = Task { [handler, webView] in
+                            do {
+                                try self.check(attempt)
+                                try await handler.bind(webView, document: text)
+                                try self.check(attempt)
+                                attempt.stage = .navigation
+                                attempt.navigation = webView.load(URLRequest(url: MediaOriginSpike.origin))
+                                guard attempt.navigation != nil else {
+                                    self.finish(attempt, with: .failure(OpenError.navigationDidNotStart))
+                                    return
+                                }
+                                stageChanged(.navigation)
+                            } catch {
+                                self.finish(attempt, with: .failure(error))
+                            }
+                        }
+                    }
+                    try Task.checkCancellation()
+                } onCancel: {
+                    Task { @MainActor in
+                        guard let attempt = self.opening, attempt.id == id else { return }
+                        self.finish(attempt, with: .failure(CancellationError()))
+                    }
                 }
             }
 
@@ -201,34 +269,74 @@ extension TestHooks {
             /// stuck on media (no audio route in the test VM) never answers.
             func run(_ script: String, _ arguments: [String: Any] = [:], within seconds: Int) async -> String {
                 let once = Once()
-                return await withCheckedContinuation { continuation in
-                    once.continuation = continuation
-                    Task { once.finish(await self.run(script, arguments)) }
-                    Task {
-                        try? await Task.sleep(for: .seconds(seconds))
-                        once.finish("{\"error\":\"timed out after \(seconds) s\"}")
+                return await withTaskCancellationHandler {
+                    guard !Task.isCancelled else { return "error: script cancelled" }
+                    return await withCheckedContinuation { continuation in
+                        once.continuation = continuation
+                        once.script = Task { once.finish(await self.run(script, arguments)) }
+                        once.deadline = Task {
+                            do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+                            once.finish("{\"error\":\"timed out after \(seconds) s\"}")
+                        }
                     }
+                } onCancel: {
+                    Task { @MainActor in once.finish("error: script cancelled") }
                 }
             }
 
-            private func done(_ ok: Bool) {
-                loaded?.resume(returning: ok)
-                loaded = nil
+            private func check(_ attempt: OpenAttempt) throws {
+                try Task.checkCancellation()
+                guard opening === attempt else { throw CancellationError() }
+                guard ContinuousClock.now < attempt.expires else { throw OpenError.timedOut(attempt.stage) }
+            }
+
+            private func finish(_ attempt: OpenAttempt, with result: Result<Void, any Error>) {
+                guard opening === attempt else { return }
+                // Clear ownership before stopLoading can deliver an old callback.
+                opening = nil
+                attempt.binding?.cancel()
+                attempt.deadline?.cancel()
+                attempt.binding = nil
+                attempt.deadline = nil
+                if case .failure = result, attempt.navigation != nil { webView.stopLoading() }
+                let continuation = attempt.continuation
+                attempt.continuation = nil
+                continuation?.resume(with: result)
+            }
+
+            private func done(_ navigation: WKNavigation?, with result: Result<Void, any Error>) {
+                guard let attempt = opening, let navigation, attempt.navigation === navigation else { return }
+                if ContinuousClock.now >= attempt.expires {
+                    finish(attempt, with: .failure(OpenError.timedOut(attempt.stage)))
+                } else {
+                    finish(attempt, with: result)
+                }
             }
 
             /// Resumed by whichever answer comes first.
             private final class Once {
                 var continuation: CheckedContinuation<String, Never>?
+                var script: Task<Void, Never>?
+                var deadline: Task<Void, Never>?
 
                 func finish(_ value: String) {
-                    continuation?.resume(returning: value)
-                    continuation = nil
+                    guard let continuation else { return }
+                    self.continuation = nil
+                    script?.cancel()
+                    deadline?.cancel()
+                    script = nil
+                    deadline = nil
+                    continuation.resume(returning: value)
                 }
             }
 
-            func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { done(true) }
-            func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) { done(false) }
-            func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) { done(false) }
+            func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { done(navigation, with: .success(())) }
+            func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) { done(navigation, with: .failure(error)) }
+            func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) { done(navigation, with: .failure(error)) }
+            func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+                guard let attempt = opening else { return }
+                finish(attempt, with: .failure(OpenError.contentProcessTerminated))
+            }
         }
     }
 
@@ -255,6 +363,7 @@ extension TestHooks {
         let write: Bool
         @State private var result = "running"
         @State private var page: MediaOriginSpike.Page?
+        @State private var attempted = false
 
         static let script = """
             const open = () => new Promise((resolve, reject) => {
@@ -298,30 +407,38 @@ extension TestHooks {
             }
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onAppear {
-                if UserDefaults.standard.bool(forKey: "CardRenderingTestCleanup") { return }
-                if page == nil {
-                    handler.files["/_anki/storage.html"] = (Data("<!doctype html><title>storage</title>".utf8), "text/html")
-                    page = MediaOriginSpike.Page(MediaOriginSpike.configuration(handler, persistent: true), handler: handler)
-                }
-            }
-            .task(id: page == nil) {
-                if UserDefaults.standard.bool(forKey: "CardRenderingTestCleanup"), let identifier = MediaOriginSpike.storeIdentifier {
+            .task {
+                guard !attempted, !Task.isCancelled else { return }
+                attempted = true
+                if UserDefaults.standard.bool(forKey: "CardRenderingTestCleanup") {
+                    guard let identifier = MediaOriginSpike.storeIdentifier else {
+                        result = "error: no store to clean up"
+                        return
+                    }
                     do { try await WKWebsiteDataStore.remove(forIdentifier: identifier); result = "removed" }
                     catch { result = "error: store cleanup" }
                     return
                 }
-                guard let page else { return }
-                guard await page.open("_anki/storage.html") else {
-                    result = "error: the page did not load"
+                handler.files["/_anki/storage.html"] = (Data("<!doctype html><title>storage</title>".utf8), "text/html")
+                let page = MediaOriginSpike.Page(MediaOriginSpike.configuration(handler, persistent: true), handler: handler)
+                self.page = page
+                do {
+                    try await page.open("_anki/storage.html") { result = "running: \($0.rawValue)" }
+                } catch {
+                    result = "error: \(error.localizedDescription)"
                     return
                 }
-                let outcome = await page.run(Self.script, ["value": write ? UUID().uuidString : ""])
+                guard !Task.isCancelled else { return }
+                result = "running: storage script"
+                // Binding/navigation (10 s), script (10 s) and the flush
+                // delay (3 s) fit inside the existing 30 s UI observation.
+                let outcome = await page.run(Self.script, ["value": write ? UUID().uuidString : ""], within: 10)
                 if write {
                     // localStorage reaches disk on WebKit's own schedule:
                     // give it time before the test relaunches the app.
-                    try? await Task.sleep(for: .seconds(3))
+                    do { try await Task.sleep(for: .seconds(3)) } catch { return }
                 }
+                guard !Task.isCancelled else { return }
                 result = outcome
             }
         }
@@ -335,6 +452,7 @@ extension TestHooks {
         var audio = false
         @State private var result = "running"
         @State private var page: MediaOriginSpike.Page?
+        @State private var attempted = false
 
         /// Plays, seeks to 90 % and plays on, logging every media event,
         /// so a stall says where it stopped.
@@ -399,23 +517,25 @@ extension TestHooks {
             }
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onAppear {
-                if page == nil {
-                    handler.files["/_anki/media.html"] = (
-                        Data(#"<!doctype html><base href="meguri-media://media/"><body></body>"#.utf8), "text/html"
-                    )
-                    page = MediaOriginSpike.Page(MediaOriginSpike.configuration(handler, persistent: false), handler: handler)
-                }
-            }
-            .task(id: page == nil) {
-                guard let page else { return }
+            .task {
+                guard !attempted, !Task.isCancelled else { return }
+                attempted = true
+                handler.files["/_anki/media.html"] = (
+                    Data(#"<!doctype html><base href="meguri-media://media/"><body></body>"#.utf8), "text/html"
+                )
+                let page = MediaOriginSpike.Page(MediaOriginSpike.configuration(handler, persistent: false), handler: handler)
+                self.page = page
                 result = await run(page)
             }
         }
 
         private func run(_ page: MediaOriginSpike.Page) async -> String {
             var outcome = Outcome()
-            guard await page.open("_anki/media.html") else { return "error: the page did not load" }
+            do {
+                try await page.open("_anki/media.html") { result = "running: \($0.rawValue)" }
+            } catch {
+                return "error: \(error.localizedDescription)"
+            }
             func ranged(_ path: String, _ total: Int) -> (all: Int, late: Int) {
                 let answers = handler.answers.filter { $0.path == path && $0.status == 206 }
                 return (answers.count, answers.filter { ($0.first ?? 0) >= total * 8 / 10 }.count)
