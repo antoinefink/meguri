@@ -729,7 +729,7 @@ extension TestHooks {
             var result = MemoryRegions()
             let pageSize = sysconf(_SC_PAGESIZE)
             if pageSize > 0 { result.pageSize = UInt64(pageSize) }
-            let fullCount = mach_msg_type_number_t(VM_REGION_SUBMAP_INFO_COUNT_64)
+            let fullCount = mach_msg_type_number_t(MemoryLayout<vm_region_submap_info_data_64_t>.size / MemoryLayout<natural_t>.size)
             guard Int(fullCount) * MemoryLayout<integer_t>.size == MemoryLayout<vm_region_submap_info_data_64_t>.size else {
                 result.reason = "countMismatch"
                 return result
