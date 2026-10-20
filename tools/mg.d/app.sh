@@ -50,7 +50,7 @@ mg_app_build() {
       return 1
     fi
     core_args=(--slices mac,sim,device)
-    settings=(${settings[0]+"${settings[@]}"} MEGURI_SIGNING=team -allowProvisioningUpdates)
+    settings=(${settings[0]+"${settings[@]}"} MEGURI_SIGNING=team REGISTER_APP_GROUPS=YES -allowProvisioningUpdates)
   fi
   if [ "$platform" = mac ] && ! mg_word_in "$config" "Debug Profile"; then
     mg_failure usage "the Mac builds only Debug and Profile here: $config carries the daily-driver ids (tools/mg xcode-check builds and unregisters it)"
@@ -152,7 +152,7 @@ mg_app_xcodebuild_test() {
       mg_failure physical-device-bundle "refusing physical tests: built app must have CFBundleIdentifier com.antoinefink.meguri.dev"
       return 2
     fi
-    physical_args=(MEGURI_SIGNING=team -allowProvisioningUpdates -parallel-testing-enabled NO -destination-timeout 60
+    physical_args=(MEGURI_SIGNING=team REGISTER_APP_GROUPS=YES -allowProvisioningUpdates -parallel-testing-enabled NO -destination-timeout 60
       -test-timeouts-enabled YES)
   fi
   rm -rf "$prefix.xcresult"
