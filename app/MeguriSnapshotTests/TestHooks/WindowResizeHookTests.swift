@@ -20,7 +20,7 @@ import Testing
             backing: .buffered, defer: true
         )
         window.isReleasedWhenClosed = false
-        let hook = HookView(size: nil, animationsEnabled: false)
+        let hook = HookView(size: nil, animationsEnabled: false, isFreshLaunch: false)
         window.contentView?.addSubview(hook)
         defer { hook.removeFromSuperview() }
 
