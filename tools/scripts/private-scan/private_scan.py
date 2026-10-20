@@ -88,11 +88,14 @@ SNIFF = 8192
 # complete qualified expressions qualify, never a standalone method name.
 PUBLIC_IDENTIFIERS = ("ResizeObserver.prototype.disconnect", "MutationObserver.prototype.disconnect", "--canvas-elevated", "canvas-elevated", "dart-sass/sass", "dart-sass", "sass:color", "sass", "bubbles")
 PUBLIC_COMPILER_URL = "https://github.com/sass/dart-sass/releases/download/1.102.0/dart-sass-1.102.0-linux-arm64.tar.gz"
+# Fixed Xcode 27 public interface call. The receiver remains outside its span.
+PUBLIC_GESTURE_CALL = ".pinch(withScale: 2, velocity: 1)"
 PUBLIC_LITERAL = re.compile(
     r"(?<![^\s\"'`<>()\[\]{},;:=|])(?:" + "|".join(map(re.escape, PUBLIC_IDENTIFIERS)) +
     r")(?=$|[\s\"'`<>()\[\]{},;:=|])"
     r"|(?<![^\s\"'`<>()\[\]{},;=|])" + re.escape(PUBLIC_COMPILER_URL) +
     r"(?=$|[\s\"'`<>()\[\]{},;|])"
+    r"|(?<=\.)" + re.escape(PUBLIC_GESTURE_CALL[1:]) + r"(?=$|[\s;\"'])"
 )
 
 

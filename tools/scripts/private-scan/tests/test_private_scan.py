@@ -654,6 +654,20 @@ class PublicInterfaceTests(unittest.TestCase):
 
 
 class FixedPublicFactsTests(unittest.TestCase):
+    def test_xctest_gesture_is_a_complete_fixed_call_only(self):
+        call = private_scan.PUBLIC_GESTURE_CALL
+        matcher = private_scan.Matcher({(word,) for word in private_scan.words(call)})
+        self.assertFalse(matcher.hit("cardSurface" + call))
+        for text in (call[1:], "cardSurface" + call.upper(),
+                     "cardSurface" + call.replace(": 2", ": 3"),
+                     "cardSurface" + call + "Suffix"):
+            self.assertTrue(matcher.hit(text))
+        call_words = private_scan.words(call)
+        for token in (("sentinelprivate",), ("sentinelprivate", call_words[0]),
+                      (*call_words[-2:], "sentinelprivate")):
+            guarded = private_scan.Matcher({token})
+            self.assertTrue(guarded.hit("sentinelprivate" + call + " sentinelprivate"))
+
     def test_known_interface_spellings_and_archive_are_exact(self):
         facts = ("--canvas-elevated", "canvas-elevated", "dart-sass", "dart-sass/sass", "sass:color", "sass",
                  "bubbles", "ResizeObserver.prototype.disconnect", "MutationObserver.prototype.disconnect",
