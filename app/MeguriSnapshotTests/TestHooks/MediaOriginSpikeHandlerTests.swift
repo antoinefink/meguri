@@ -1,4 +1,5 @@
 #if MEGURI_TEST_HOOKS
+import CardRendering
 import Foundation
 import Testing
 import WebKit

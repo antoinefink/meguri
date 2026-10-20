@@ -381,7 +381,7 @@ def snapshot(pid):
     return uid, start, os.fsdecode(exe), args
 roots, waiters = set(), []
 # Intent-only and PID-only interruptions may leave nothing pgrep can find.
-# An unresolved registration must block the lease's next profiler as well.
+# An unresolved registration must also block the next profiler under the lease.
 for entry in (pathlib.Path.home() / "Library/Caches/meguri/allocations").glob("*.json"):
     root = pathlib.Path(json.loads(entry.read_text())["root"])
     if not root.is_absolute() or not re.search(r"/build/mg/ui-test/[A-Za-z0-9-]+/allocations$", str(root)):

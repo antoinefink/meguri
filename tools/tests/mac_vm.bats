@@ -765,7 +765,8 @@ allocation_run() {
         [ "$(field .summary.failed)" = 1 ]
       else
         [ "$(field .summary.total)" = 0 ]
-        [ "$(field '[.failures[] | select(.id == "xcodebuild-test")] | length')" = 1 ]
+        [ "$(field '[.failures[] | select(.id == "mac-vm-copy")] | length')" = 1 ]
+        [[ "$(field '.failures[] | select(.id == "mac-vm-copy") | .message')" == *"xcodebuild passed in the VM meguri-mac but left no result bundle"* ]]
       fi
     fi
     [ -f "$(vm_fs meguri-mac "$(dirname "$result")/allocations/metadata.json")" ]
