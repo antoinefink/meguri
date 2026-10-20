@@ -64,6 +64,36 @@ creates profiles but stops on the app and widget App Group entitlement mismatch.
 Run `ui-test/20261020T062605Z-69473` has the same result with
 `REGISTER_APP_GROUPS=YES`; that setting is defined in Xcode's macOS specifications
 and is removed from the physical iOS command. Neither attempt installs the app
-or runs a test. Pending setup: register `group.com.antoinefink.meguri.dev` in
-the developer account and assign it to both development App IDs. Keep the
-existing entitlements. The next run must refresh profiles and execute both tests.
+or runs a test. Antoine then registers `group.com.antoinefink.meguri.dev` and assigns it to both
+development App IDs. The existing entitlements stay in place.
+
+
+### Device harness correction and remaining check
+
+`d8a9f1d6` builds for the selected phone and enables Xcode provisioning device
+registration. Focused tooling run `selftest/20261020T063708Z-10614` passes 17.
+The refreshed app and runner profiles both include the phone. Physical run
+`ui-test/20261020T063745Z-11195` builds and passes the Performance-plan policy
+guard. After unlock, both methods fail in test setup because the runner tries
+to read the build Mac's app path. Neither method launches the app or tests media.
+
+`1cb8ae46` carries the actual app metadata and code bytes in test resources.
+The first build (`065117Z-17757`) reveals missing script-sandbox declarations;
+a trailing-slash candidate (`8626c2c7`, run `065445Z-20506`) does not fix them.
+`4dc62992` stages the same bytes in target-owned temporary storage and uses
+Xcode's Resources phase before signing. Recursive inputs are enabled only for
+the UI-test target; sandboxing and the original binary checks remain enabled.
+
+Run `selftest/20261020T070033Z-24061` passes all 14 focused staging checks.
+Independent infrastructure review finds no P0–P2. Physical run
+`ui-test/20261020T070057Z-24604` builds successfully, copies the folder before
+signing, and passes the Profile policy guard. The staged metadata and
+10,647,184-byte executable match the built app byte for byte. Xcode then waits
+for the phone to unlock. After more than ten minutes, the integrator cancels
+that idle session to release the build lease. Its terminal result is cancellation,
+with no playback tests run. The corrected build is retained.
+
+Both device seeks remain pending. There is no device playback pass or failure
+to add to the table yet. The next attempt needs the phone unlocked and awake
+through test launch. These S2 HTML checks do not resolve the separate native
+R554 queue timing obligation assigned to U69 before M1R.
