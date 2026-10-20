@@ -11,9 +11,7 @@
       "enabled" : false
     },
     "codeCoverage" : false,
-    "mainThreadCheckerDetectionPolicy" : {
-      "disabled" : {}
-    },
+    "mainThreadCheckerDetectionPolicy" : "disabled",
     "mainThreadCheckerEnabled" : false,
     "performanceAntipatternCheckerEnabled" : false,
     "targetForVariableExpansion" : {
