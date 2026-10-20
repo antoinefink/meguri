@@ -44,7 +44,8 @@ extension TestHooks {
                 #if os(macOS)
                 .background(WindowConfigurator(
                     size: options.windowSize ?? (options == LaunchOptions() ? nil : .standard),
-                    animationsEnabled: options.animationsEnabled
+                    animationsEnabled: options.animationsEnabled,
+                    isFreshLaunch: options != LaunchOptions()
                 ))
                 #endif
         }
@@ -71,9 +72,10 @@ extension TestHooks {
     struct WindowConfigurator: NSViewRepresentable {
         let size: LaunchOptions.WindowSize?
         let animationsEnabled: Bool?
+        let isFreshLaunch: Bool
 
         func makeNSView(context: Context) -> WindowHookView {
-            WindowHookView(size: size, animationsEnabled: animationsEnabled)
+            WindowHookView(size: size, animationsEnabled: animationsEnabled, isFreshLaunch: isFreshLaunch)
         }
 
         func updateNSView(_ view: WindowHookView, context: Context) {}
@@ -90,11 +92,13 @@ extension TestHooks {
 
         private let size: LaunchOptions.WindowSize?
         private let animationsEnabled: Bool?
+        private let isFreshLaunch: Bool
         private var applied = false
 
-        init(size: LaunchOptions.WindowSize?, animationsEnabled: Bool?) {
+        init(size: LaunchOptions.WindowSize?, animationsEnabled: Bool?, isFreshLaunch: Bool) {
             self.size = size
             self.animationsEnabled = animationsEnabled
+            self.isFreshLaunch = isFreshLaunch
             super.init(frame: .zero)
         }
 
@@ -116,6 +120,10 @@ extension TestHooks {
             )
             guard !applied else { return }
             applied = true
+            if isFreshLaunch {
+                // Fresh fixture windows must not write an automatic Resume image.
+                window.disableSnapshotRestoration()
+            }
             if animationsEnabled == false {
                 window.animationBehavior = .none
             }
