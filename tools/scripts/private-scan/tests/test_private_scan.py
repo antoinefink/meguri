@@ -656,7 +656,7 @@ class PublicInterfaceTests(unittest.TestCase):
 class FixedPublicFactsTests(unittest.TestCase):
     def test_known_interface_spellings_and_archive_are_exact(self):
         facts = ("--canvas-elevated", "canvas-elevated", "dart-sass", "dart-sass/sass", "sass:color", "sass",
-                 "bubbles",
+                 "bubbles", "ResizeObserver.prototype.disconnect", "MutationObserver.prototype.disconnect",
                  "https://github.com/sass/dart-sass/releases/download/1.102.0/dart-sass-1.102.0-linux-arm64.tar.gz")
         matcher = private_scan.Matcher({(word,) for fact in facts for word in private_scan.words(fact)})
         for fact in facts:

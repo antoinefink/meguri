@@ -83,7 +83,10 @@ SNIFF = 8192
 # case folding, including in each decoded variant the scanner already checks.
 # The DOM EventInit dictionary's public flag is also required by synthetic
 # event fixtures. Its exact name is specified by the public DOM interface.
-PUBLIC_IDENTIFIERS = ("--canvas-elevated", "canvas-elevated", "dart-sass/sass", "dart-sass", "sass:color", "sass", "bubbles")
+# Observer methods: https://www.w3.org/TR/resize-observer/#resize-observer-interface
+# and https://dom.spec.whatwg.org/#interface-mutationobserver. Only these
+# complete qualified expressions qualify, never a standalone method name.
+PUBLIC_IDENTIFIERS = ("ResizeObserver.prototype.disconnect", "MutationObserver.prototype.disconnect", "--canvas-elevated", "canvas-elevated", "dart-sass/sass", "dart-sass", "sass:color", "sass", "bubbles")
 PUBLIC_COMPILER_URL = "https://github.com/sass/dart-sass/releases/download/1.102.0/dart-sass-1.102.0-linux-arm64.tar.gz"
 PUBLIC_LITERAL = re.compile(
     r"(?<![^\s\"'`<>()\[\]{},;:=|])(?:" + "|".join(map(re.escape, PUBLIC_IDENTIFIERS)) +
