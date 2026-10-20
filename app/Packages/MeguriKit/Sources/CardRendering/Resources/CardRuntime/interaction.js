@@ -24,6 +24,7 @@
 
   function observed(signal, element) {
     const owner = element && owners.get(element) || identity;
+    if (side !== null) signal.side = side;
     if (owner) {
       signal.card = owner.card;
       signal.generation = owner.generation;
@@ -215,6 +216,10 @@
     // The identity of the next update native queues (C6.8).
     identity: function (card, generation) {
       toRuntime({ op: "identity", card: card, generation: generation });
+    },
+    // U67's native keyboard owner gates only automatic type-answer focus.
+    setFocusOwnership: function (owned) {
+      toRuntime({ op: "focusOwnership", owned: owned === true });
     },
     // The page is now the one the user sees; `token` is the swap's (U12).
     present: function (token) {

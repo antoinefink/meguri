@@ -55,6 +55,11 @@ public final class CardAudioController {
     private var queue: [Entry] = []
     private var clip: (any CardAudioClip)?
     private var loading: Task<Void, Never>?
+    // Prepare at most one waiting clip; question and answer preparation remain separate.
+    // It belongs to the current waiting queue and never starts itself early.
+    private var nextLoad: Task<Void, Never>?
+    private var nextClip: (Entry, any CardAudioClip)?
+    private var nextSerial: UInt64 = 0
     private var preloads: [CardUpdate: Task<Void, Never>] = [:]
     private var prepared: [CardUpdate: (Entry, any CardAudioClip)] = [:]
     private var preloadSerials: [CardUpdate: UInt64] = [:]
@@ -95,6 +100,7 @@ public final class CardAudioController {
     public func beginTransition(to update: CardUpdate, policy: CardAudioPolicy) {
         guard !closed, lastTransition != update else { return }
         lastTransition = update
+        cancelNext()
         queue.removeAll()
         if policy.interrupt || clip == nil { replace(keepPreload: true) }
     }
@@ -104,6 +110,7 @@ public final class CardAudioController {
         presentation = update
         queue = payload.audioPolicy.autoplay ? entries(payload, update: update, side: update.side) : []
         advance()
+        if clip != nil { prepareNext() }
     }
 
     public func replay(payload: CardPayload, update: CardUpdate) {
@@ -159,17 +166,22 @@ public final class CardAudioController {
     }
 
     private func advance() {
-        guard !closed, current == nil, !queue.isEmpty else { return }
+        guard !closed, current == nil else { return }
+        guard !queue.isEmpty else { releaseSession(); return }
+        // A lookahead already resolving/decoding this exact queue completes
+        // advance itself; never cancel it and reopen the same missing file.
+        guard nextLoad == nil else { return }
         let entry = queue.removeFirst()
         current = entry
         generation += 1
         let serial = generation
-        if let ready = prepared[entry.update], ready.0 == entry {
-            prepared[entry.update] = nil
-            preloadSerials[entry.update] = nil
-            preloads[entry.update] = nil
-            preparationOrder.removeAll { $0 == entry.update }
+        if let ready = nextClip, ready.0 == entry {
+            nextClip = nil
             start(ready.1, entry: entry, serial: serial)
+            return
+        }
+        if let ready = takePreparation(for: entry) {
+            start(ready, entry: entry, serial: serial)
             return
         }
         cancelPreparation(entry.update)
@@ -190,6 +202,56 @@ public final class CardAudioController {
         }
     }
 
+    private func takePreparation(for entry: Entry) -> (any CardAudioClip)? {
+        guard let ready = prepared[entry.update], ready.0 == entry else { return nil }
+        prepared[entry.update] = nil
+        preloadSerials[entry.update] = nil
+        preloads[entry.update] = nil
+        preparationOrder.removeAll { $0 == entry.update }
+        return ready.1
+    }
+
+    private func cancelNext() {
+        nextSerial += 1
+        nextLoad?.cancel(); nextLoad = nil
+        nextClip?.1.stop(); nextClip = nil
+    }
+
+    private func prepareNext() {
+        guard !closed, nextLoad == nil, nextClip == nil, let first = queue.first else { return }
+        if let ready = takePreparation(for: first) {
+            nextClip = (first, ready)
+            return
+        }
+        nextSerial += 1
+        let serial = nextSerial, entries = queue
+        let resolver = self.resolver, backend = self.backend
+        nextLoad = Task { [weak self] in
+            for entry in entries {
+                do {
+                    try Task.checkCancellation()
+                    let file = try await resolver.openAudioName(entry.name)
+                    try Task.checkCancellation()
+                    let clip = try await backend.prepare(file)
+                    guard let self, !Task.isCancelled, self.nextSerial == serial, !self.closed,
+                          self.queue.first == entry else { clip.stop(); return }
+                    self.nextClip = (entry, clip)
+                    self.nextLoad = nil
+                    self.advance()
+                    return
+                } catch {
+                    guard let self, !Task.isCancelled, self.nextSerial == serial, !self.closed,
+                          self.queue.first == entry else { return }
+                    self.diagnose(error, entry: entry)
+                    self.queue.removeFirst()
+                }
+            }
+            guard let self, self.nextSerial == serial, !Task.isCancelled else { return }
+            self.nextLoad = nil
+            self.advance()
+        }
+    }
+
     private func start(_ clip: any CardAudioClip, entry: Entry, serial: UInt64) {
         self.clip = clip
         clip.onEnd = { [weak self] success in self?.complete(serial, success: success) }
@@ -197,14 +259,18 @@ public final class CardAudioController {
         schedulePlay(clip, entry: entry, serial: serial)
     }
     private func schedulePlay(_ clip: any CardAudioClip, entry: Entry, serial: UInt64) {
-        releaseSession()
-        let lease = UUID(), session = self.session
+        let needsActivation = sessionOwner == nil
+        let lease = sessionOwner ?? UUID(), session = self.session
         sessionOwner = lease
         activation = Task { [weak self] in
-            do { try Task.checkCancellation(); try await session.activate(lease) }
+            do {
+                try Task.checkCancellation()
+                if needsActivation { try await session.activate(lease) }
+            }
             catch {
                 guard let self, self.sessionOwner == lease, self.generation == serial, !Task.isCancelled else { session.release(lease); return }
                 self.diagnostics.record("audioSession", update: self.diagnosticUpdate(entry), name: entry.name, index: entry.index)
+                self.releaseSession()
                 self.complete(serial, success: false, reportFailure: false)
                 return
             }
@@ -212,6 +278,7 @@ public final class CardAudioController {
             do {
                 try clip.play()
                 self.observePlayback(clip, entry: entry, serial: serial)
+                self.prepareNext()
             }
             catch { self.complete(serial, success: false) }
         }
@@ -246,7 +313,9 @@ public final class CardAudioController {
         if !success && reportFailure { diagnostics.record("audioDecode", update: diagnosticUpdate(entry), name: entry.name, index: entry.index) }
         clip?.onEnd = nil; clip?.stop(); clip = nil
         current = nil; paused = paused && !queue.isEmpty
-        releaseSession()
+        // Keep one session across a continuing queue, including a missing
+        // middle entry. Pause/stop/final exhaustion still release immediately.
+        if paused || queue.isEmpty { releaseSession() }
         advance()
     }
     private func diagnose(_ error: any Error, entry: Entry) {
@@ -300,6 +369,7 @@ public final class CardAudioController {
 
     private func replace(keepPreload: Bool = false) {
         playbackObservation?.cancel(); playbackObservation = nil
+        cancelNext()
         if !keepPreload { cancelPreload() }
         generation += 1; seekGeneration += 1
         seeking?.cancel(); seeking = nil

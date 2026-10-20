@@ -25,11 +25,12 @@ import Testing
         var seekable = true
         var onEnd: ((Bool) -> Void)?
         var stopped = false
+        var onStop: (() -> Void)?
         var isPaused = false
         init(_ name: String, backend: Backend) { self.name = name; self.backend = backend }
         func play() { isPaused = false; backend?.played(name) }
         func pause() { isPaused = true }
-        func stop() { stopped = true }
+        func stop() { stopped = true; onStop?() }
         func seek(to time: TimeInterval) async throws { self.time = time }
     }
     final class Backend: CardAudioBackend {
@@ -40,9 +41,11 @@ import Testing
         var hold = false
         var held: CheckedContinuation<Void, Never>?
         var onHold: (() -> Void)?
+        var onPrepare: ((Clip) -> Void)?
         func prepare(_ file: MediaFile) async throws -> any CardAudioClip {
             let clip = Clip(file.name, backend: self)
             clips.append(clip)
+            onPrepare?(clip)
             if hold { await withCheckedContinuation { held = $0; onHold?() } }
             return clip
         }
@@ -83,7 +86,7 @@ import Testing
         let payload = self.payload()
         rig.controller.present(payload: payload, update: question)
         #expect(await rig.backend.nextPlay() == "q1.mp3")
-        let q1 = try #require(rig.backend.clips.last)
+        let q1 = try #require(rig.backend.clips.last(where: { $0.onEnd != nil }))
         q1.time = 1
         rig.controller.pause()
         rig.controller.present(payload: payload, update: answer)
@@ -103,7 +106,7 @@ import Testing
         defer { rig.controller.close() }
         rig.controller.present(payload: payload(interrupt: true), update: question)
         #expect(await rig.backend.nextPlay() == "q1.mp3")
-        let q1 = try #require(rig.backend.clips.last)
+        let q1 = try #require(rig.backend.clips.last(where: { $0.onEnd != nil }))
         let stale = q1.onEnd
         rig.controller.present(payload: payload(interrupt: true, autoplay: false), update: answer)
         #expect(q1.stopped && rig.controller.current == nil)
@@ -113,13 +116,13 @@ import Testing
         #expect(rig.controller.current?.name == "a1.mp3")
         rig.controller.replay(payload: payload(), update: answer)
         #expect(await rig.backend.nextPlay() == "q1.mp3")
-        rig.backend.clips.last?.onEnd?(true)
+        rig.backend.clips.last(where: { $0.onEnd != nil })?.onEnd?(true)
         #expect(await rig.backend.nextPlay() == "q2.mp3")
-        rig.backend.clips.last?.onEnd?(true)
+        rig.backend.clips.last(where: { $0.onEnd != nil })?.onEnd?(true)
         #expect(await rig.backend.nextPlay() == "a1.mp3")
         rig.controller.playEntry(payload: payload(), update: answer, side: .question, index: 1)
         #expect(await rig.backend.nextPlay() == "q2.mp3")
-        rig.backend.clips.last?.onEnd?(true)
+        rig.backend.clips.last(where: { $0.onEnd != nil })?.onEnd?(true)
         #expect(rig.controller.current == nil && rig.session.owners.isEmpty)
     }
 
@@ -128,7 +131,7 @@ import Testing
         defer { rig.controller.close() }
         rig.controller.present(payload: payload(), update: question)
         #expect(await rig.backend.nextPlay() == "q1.mp3")
-        let q1 = try #require(rig.backend.clips.last)
+        let q1 = try #require(rig.backend.clips.last(where: { $0.onEnd != nil }))
         rig.controller.present(payload: payload(), update: answer)
         let next = CardPayload(cardID: 2, question: "", answer: "", audioPolicy: .init(autoplay: false, interrupt: false))
         rig.controller.present(payload: next, update: .init(card: 2, generation: 3, side: .question))
@@ -141,7 +144,7 @@ import Testing
         defer { rig.controller.close() }
         rig.controller.present(payload: payload(), update: question)
         #expect(await rig.backend.nextPlay() == "q1.mp3")
-        let clip = try #require(rig.backend.clips.last)
+        let clip = try #require(rig.backend.clips.last(where: { $0.onEnd != nil }))
         clip.time = 1
         rig.controller.sessionEvent(.pause)
         rig.controller.sessionEvent(.available)
@@ -165,7 +168,7 @@ import Testing
         rig.controller.present(payload: payload, update: question)
         #expect(await rig.backend.nextPlay() == "q1.mp3")
         #expect(rig.controller.current?.index == 1)
-        let clip = try #require(rig.backend.clips.last)
+        let clip = try #require(rig.backend.clips.last(where: { $0.onEnd != nil }))
         clip.time = 1
         rig.controller.pause()
         await rig.controller.seek(by: -5)
@@ -186,9 +189,11 @@ import Testing
         let prepared = rig.controller.prepare(payload: payload(), update: question)
         await prepared?.value
         #expect(rig.backend.clips.count == 1 && rig.backend.events.isEmpty && rig.session.activations == 0)
+        let preparedClip = try #require(rig.backend.clips.first)
         rig.controller.present(payload: payload(), update: question)
         #expect(await rig.backend.nextPlay() == "q1.mp3")
-        #expect(rig.backend.clips.count == 1)
+        #expect(rig.backend.clips.first === preparedClip && preparedClip.onEnd != nil)
+        #expect(rig.backend.clips.filter { $0.name == "q1.mp3" }.count == 1) // no second decode of the prepared entry
         rig.controller.stop()
         rig.backend.hold = true
         await withCheckedContinuation { continuation in
@@ -219,6 +224,63 @@ import Testing
         rig.controller.present(payload: payload(), update: answer)
         #expect(await rig.backend.nextPlay() == "a1.mp3")
         #expect(rig.backend.clips.count == 3)
+    }
+
+    @Test func missingMiddleIsPreparedDuringPlaybackWithoutSessionChurn() async throws {
+        let rig = try await self.rig()
+        defer { rig.controller.close() }
+        let payload = CardPayload(cardID: 1, question: "q", answer: "a", questionAudio: [
+            .sound(name: "q1.mp3"), .sound(name: "absent.mp3"), .sound(name: "q3.mp3")])
+        await rig.controller.prepare(payload: payload, update: question)?.value
+        let first = try #require(rig.backend.clips.first)
+        let waiting = AsyncStream<Clip>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        defer { waiting.continuation.finish() }
+        rig.backend.onPrepare = { clip in if clip.name == "q3.mp3" { waiting.continuation.yield(clip) } }
+        rig.controller.present(payload: payload, update: question)
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        let third = try await Spike.deadline("next playable lookahead", timeout: .seconds(3)) {
+            for await clip in waiting.stream { return clip }
+            throw Spike.Failure("missing third preparation")
+        }
+        #expect(rig.backend.events == ["q1.mp3"] && third.onEnd == nil)
+        #expect(rig.backend.clips.count == 2 && rig.session.activations == 1)
+        let owners = rig.session.owners
+        #expect(owners.count == 1)
+        first.onEnd?(true)
+        #expect(await rig.backend.nextPlay() == "q3.mp3")
+        #expect(third.onEnd != nil && rig.backend.clips.count == 2)
+        #expect(rig.session.owners == owners && rig.session.activations == 1)
+        #expect(rig.diagnostics.entries.filter { $0.kind == "missingAudio" && $0.index == 1 }.count == 1)
+        third.onEnd?(true)
+        #expect(rig.controller.current == nil && rig.session.owners.isEmpty)
+    }
+
+    @Test func replacingQueueCancelsHeldLookaheadWithoutPlayingIt() async throws {
+        let rig = try await self.rig()
+        defer { rig.controller.close() }
+        await rig.controller.prepare(payload: payload(), update: question)?.value
+        rig.backend.hold = true
+        await withCheckedContinuation { continuation in
+            rig.backend.onHold = { continuation.resume() }
+            rig.controller.present(payload: payload(), update: question)
+        }
+        let waiting = try #require(rig.backend.clips.last)
+        #expect(waiting.name == "q2.mp3" && waiting.onEnd == nil)
+        let held = try #require(rig.backend.held)
+        rig.backend.hold = false; rig.backend.onHold = nil
+        rig.controller.playEntry(payload: payload(), update: answer, side: .answer, index: 0)
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        #expect(await rig.backend.nextPlay() == "a1.mp3")
+        let disposed = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        defer { disposed.continuation.finish() }
+        waiting.onStop = { disposed.continuation.yield(()) }
+        held.resume()
+        try await Spike.deadline("stale queued clip released", timeout: .seconds(3)) {
+            for await _ in disposed.stream { return }
+            throw Spike.Failure("stale lookahead retained")
+        }
+        #expect(waiting.stopped && rig.backend.events == ["q1.mp3", "a1.mp3"])
+        #expect(rig.controller.current?.name == "a1.mp3" && rig.session.owners.count == 1)
     }
 
     @Test func delayedSessionActivationCannotRestartStoppedOrReplacementAudio() async throws {

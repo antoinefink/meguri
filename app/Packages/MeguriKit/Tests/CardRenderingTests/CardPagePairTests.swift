@@ -51,7 +51,10 @@ extension WebKitSuites {
             #expect(try await page.callAsyncJavaScript("return document.querySelector('code').textContent;", contentWorld: .page) as? String == "typed")
             #expect(try await page.callAsyncJavaScript("return window.sides;", contentWorld: .page) as? Int == 2)
             #expect(try await other.current.webView.callAsyncJavaScript("return localStorage.getItem('shared');", contentWorld: .page) as? String == "yes")
-            #expect(try await other.current.webView.callAsyncJavaScript("return sessionStorage.getItem('page');", contentWorld: .page) == nil)
+            // WebKit's null bridge is NSNull; assert the JavaScript contract
+            // directly so a shared value (or undefined) cannot pass.
+            #expect(try await other.current.webView.callAsyncJavaScript("return sessionStorage.getItem('page') === null;", contentWorld: .page) as? Bool == true)
+            #expect(try await page.callAsyncJavaScript("return sessionStorage.getItem('page');", contentWorld: .page) as? String == "yes")
             #expect(try await page.callAsyncJavaScript("return typeof pairOnly;", contentWorld: .page) as? String == "undefined")
             let replacement = CardPlatformView(frame: pair.container.frame)
             pair.container.removeFromSuperview(); replacement.addSubview(pair.container)
@@ -245,7 +248,8 @@ extension WebKitSuites {
             let editor = NSTextField(frame: .zero)
             pair.container.addSubview(editor)
             _ = pair.container.window?.makeFirstResponder(editor)
-            let before = pair.container.window?.firstResponder
+            let before = try #require(pair.container.window?.firstResponder)
+            #expect(editor.currentEditor() === before)
             pair.ownsKeyboardFocus = false
             let prepared = try await pair.prepare(CardPayload(cardID: 1, question: "<input id=typeans>", answer: "a"))
             _ = try pair.present(prepared)
@@ -253,6 +257,27 @@ extension WebKitSuites {
             #expect(pair.idle.webView.idle && !pair.idle.webView.acceptsFirstResponder)
             try await Task.sleep(for: .milliseconds(100))
             #expect(pair.container.window?.firstResponder === before)
+            #expect(try await pair.current.string("return document.activeElement.id;") != "typeans")
+            // Explicit card interaction still focuses and retains typed input.
+            try await pair.current.run("document.getElementById('typeans').focus(); document.getElementById('typeans').value='explicit';")
+            #expect(await pair.current.typedText() == "explicit")
+            #expect(try await pair.current.string("return document.activeElement.id;") == "typeans")
+        }
+
+        @Test func ownedPresentationStillAutomaticallyFocusesTypeAnswer() async throws {
+            let fixture = MediaFixture()
+            let pair = try await make(fixture)
+            let window = SpikeWindow(pair.container)
+            defer { pair.close(); window.close() }
+            pair.ownsKeyboardFocus = true
+            let update = try await pair.prepare(CardPayload(cardID: 2, question: "<input id=typeans>", answer: "a"))
+            _ = try pair.present(update)
+            try await pair.current.waitForShown(update)
+            #expect(try await pair.current.string("return document.activeElement.id;") == "typeans")
+            #expect(!pair.current.webView.idle && pair.current.webView.reviewOwnsFocus)
+            let responder = try #require(pair.container.window?.firstResponder as? NSView)
+            #expect(responder === pair.current.webView || responder.isDescendant(of: pair.current.webView))
+            #expect(!pair.idle.webView.canBecomeKeyView)
         }
         #endif
 
@@ -270,5 +295,19 @@ extension WebKitSuites {
             #expect(try await web.callAsyncJavaScript("return typeof webkit.messageHandlers.cb.postMessage==='function' && typeof webkit.messageHandlers.meguri.postMessage==='function' && !webkit.messageHandlers.meguriCard;", contentWorld: .page) as? Bool == true)
         }
         #endif
+    }
+}
+
+extension WebKitSuites.CardPagePairTests {
+    @Test func identitylessMediaObserversKeepBothSidesWithoutInventingIdentity() async throws {
+        try await WebTestHarness.withPage(log: false) { harness, page async throws in
+            try await page.showPresentedQuestion("<img src='_question-missing.png'>")
+            let question = try await harness.signal("mediaError", from: page)
+            #expect(question.side == "question" && question["card"] == nil && question["generation"] == nil)
+            try await page.showAnswer("<img src='_answer-missing.png'>")
+            let answer = try await harness.signal("mediaError", count: 2, from: page)
+            #expect(answer.side == "answer" && answer["card"] == nil && answer["generation"] == nil)
+            #expect((answer["url"] as? String)?.hasSuffix("/_answer-missing.png") == true)
+        }
     }
 }

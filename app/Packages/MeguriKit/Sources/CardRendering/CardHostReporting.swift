@@ -167,6 +167,19 @@ public final class CardHostReporting {
         await operation.value
     }
 
+    /// Await once after a synchronous native bounds/zoom/scroll change. This
+    /// acknowledges only this identity and epoch; it never proves DOM freshness.
+    /// nil means absent/failed host, cancellation, or a superseding change.
+    public func refreshContext(for update: CardUpdate) async -> CardHostContext? {
+        checkGeometry()
+        guard page?.update == update, !Task.isCancelled else { return nil }
+        let revision = viewRevision
+        await publish()
+        guard !Task.isCancelled, page?.update == update, viewRevision == revision,
+              let context, isCurrent(context) else { return nil }
+        return context
+    }
+
     func geometryChanged() {
         invalidate()
         Task { [weak self] in await self?.publish() }

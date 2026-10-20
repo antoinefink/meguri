@@ -2,6 +2,9 @@
 import Foundation
 import Testing
 import WebKit
+#if os(macOS)
+import AppKit
+#endif
 
 private enum HostReports {
     static let geometry: [String: Any] = ["width": 200, "height": 300, "offsetX": 40, "offsetY": 70, "scale": 2, "layoutRevision": 1]
@@ -680,17 +683,31 @@ extension WebKitSuites.CardPagePairTests {
         try await page.waitForShown(next)
         try await hostWait { page.hostReports.context != nil }
         let before = try #require(page.hostReports.context)
-        // The actual browser scroll changes its native viewport, without any
-        // future host producer or gesture implementation installed.
+        // This card's generation is not the fixture's default generation.
+        // Use its actual binding for a complete map before native invalidation.
+        var map = HostReports.body("hostHitMap", payload: HostReports.map, revision: before.viewRevision)
+        map["card"] = next.card; map["generation"] = next.generation
+        page.hostReports.receive(map)
+        #expect(page.hostReports.hitMap != nil)
+        // H5/H10: U67 observes native scroll input. Programmatic DOM scroll
+        // freshness belongs to the future U176/U180 producer. Never post or
+        // drive workstation input: deliver an offscreen scroll event directly.
         #if os(macOS)
-        try await page.run("window.scrollTo(0, 300);")
-        try await hostWait { page.hostReports.viewRevision > before.viewRevision }
+        let event = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -100, wheel2: 0, wheel3: 0))
+        let scroll = try #require(NSEvent(cgEvent: event))
+        page.webView.scrollWheel(with: scroll)
+        #expect(page.hostReports.context == nil)
+        #expect(page.hostReports.viewRevision > before.viewRevision)
         #else
         page.webView.scrollView.contentOffset.y += 100
         #expect(page.hostReports.context == nil)
         #expect(page.hostReports.viewRevision > before.viewRevision)
         #endif
         #expect(page.hostReports.hitMap == nil)
+        let refreshed = try #require(await page.hostReports.refreshContext(for: next))
+        #expect(refreshed.update == next && refreshed.viewRevision > before.viewRevision)
+        #expect(page.hostReports.hitMap == nil) // acknowledgement is not map freshness
+        #expect(await page.hostReports.refreshContext(for: original.update) == nil)
     }
 }
 
@@ -710,5 +727,85 @@ extension WebKitSuites.CardPagePairTests {
         #expect(first == [.cancelled] && second == [.cancelled])
         page.hostReports.receive(HostReports.body("hostProbe", payload: ["kind": "background", "request": replacement, "rgba": [0, 0, 0, 1]], revision: context.viewRevision))
         #expect(first == [.cancelled] && second == [.cancelled] && page.hostReports.slotBackground == nil)
+    }
+}
+
+extension WebKitSuites.CardPagePairTests {
+    @Test func publicMutationAndCommitBoundariesHaveAcknowledgedHostContext() async throws {
+        let (pair, _, _, window) = try await hostPair()
+        defer { pair.close(); window.close() }
+        try await pair.installHostScript(HostReports.syntheticHost)
+        let page = pair.idle
+        let update = try #require(page.update)
+        let committed = AsyncStream<CardHostContext?>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        defer { committed.continuation.finish() }
+        pair.onCommitted = { identity, _ in
+            #expect(identity == update)
+            committed.continuation.yield(page.hostReports.context)
+        }
+        _ = try pair.present(update)
+        let presented = try await Spike.deadline("acknowledged post-commit context", timeout: .seconds(3)) {
+            for await context in committed.stream { return context }
+            throw Spike.Failure("missing commit callback")
+        }
+        let context = try #require(presented)
+        #expect(context.update == update && context.visibility == .presented)
+        try await pair.setAppearance(.dark)
+        var previous = try #require(page.hostReports.context)
+        #expect(previous.viewRevision > context.viewRevision)
+        try await pair.setCardState(flag: 1, marked: true)
+        var next = try #require(page.hostReports.context)
+        #expect(next.viewRevision > previous.viewRevision)
+        previous = next
+        _ = try await pair.mediaArrived(["absent.png"])
+        next = try #require(page.hostReports.context)
+        #expect(next.viewRevision > previous.viewRevision)
+        _ = try await pair.showAnswer()
+        let answer = try #require(page.hostReports.context)
+        #expect(answer.update.side == .answer && answer.visibility == .presented && answer.viewRevision > next.viewRevision)
+    }
+
+    @Test func cancellationDuringPreparedContextAcknowledgementCannotReturnReadiness() async throws {
+        let fixture = MediaFixture()
+        let pair = try await make(fixture)
+        let window = SpikeWindow(pair.container)
+        defer { pair.close(); window.close() }
+        var preparation: Task<CardUpdate, any Error>?
+        // Reject the actual context request and cancel its owner synchronously
+        // during publication, before the awaiting prepare can return readiness.
+        pair.onHostEvent = { _, event in
+            if case .unavailable = event { preparation?.cancel() }
+        }
+        try await pair.installHostScript("""
+            window.meguriReviewHost={receive(message){
+              if(message.op==='context') return false;
+              return true;
+            }};
+            """)
+        let task = Task { try await pair.prepare(CardPayload(cardID: 80, question: "q", answer: "a")) }
+        preparation = task
+        await #expect(throws: (any Error).self) { try await task.value }
+        #expect(pair.idle.hostReports.context == nil)
+    }
+}
+
+extension WebKitSuites.CardPagePairTests {
+    @Test func unavailableHostDuringPrepareNeverStopsCardRendering() async throws {
+        for result in ["false", "1", "undefined", "throw new Error('synthetic')"] {
+            let fixture = MediaFixture()
+            let pair = try await make(fixture)
+            let window = SpikeWindow(pair.container)
+            defer { pair.close(); window.close() }
+            // Clear succeeds at installation; the real context call fails.
+            let body = result.hasPrefix("throw") ? result : "return " + result
+            try await pair.installHostScript("window.meguriReviewHost={receive(message){if(message.op==='clear')return true;" + body + ";}};")
+            let update = try await pair.prepare(CardPayload(cardID: 90, question: "<p>still rendered</p>", answer: "a"))
+            #expect(pair.idle.update == update && pair.idle.settled)
+            #expect(pair.idle.hostReports.context == nil)
+            #expect(try await pair.idle.string("return document.getElementById('qa').textContent;") == "still rendered")
+            var results: [CardHostProbeOutcome] = []
+            #expect(pair.idle.hostReports.probe(.background) { _, result in results.append(result) } == nil)
+            #expect(results == [.unavailable])
+        }
     }
 }

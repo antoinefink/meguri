@@ -39,23 +39,8 @@ open class CardNativeWebView: WKWebView {
         didSet { if oldValue != pageZoom { onHostGeometryChange?() } }
     }
     #if os(macOS)
-    public override init(frame: CGRect, configuration: WKWebViewConfiguration) {
-        super.init(frame: frame, configuration: configuration)
-        NotificationCenter.default.addObserver(self, selector: #selector(hostScrollChanged(_:)),
-                                               name: NSView.boundsDidChangeNotification, object: nil)
-    }
-    public required init?(coder: NSCoder) { super.init(coder: coder) }
     open override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        func observeClips(_ view: NSView) {
-            if let clip = view as? NSClipView { clip.postsBoundsChangedNotifications = true }
-            for child in view.subviews { observeClips(child) }
-        }
-        observeClips(self)
-        onHostGeometryChange?()
-    }
-    @objc private func hostScrollChanged(_ notification: Notification) {
-        guard let view = notification.object as? NSView, view !== self, view.isDescendant(of: self) else { return }
         onHostGeometryChange?()
     }
     open override func setFrameSize(_ newSize: NSSize) {

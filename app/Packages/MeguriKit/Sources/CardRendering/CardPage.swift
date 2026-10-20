@@ -89,7 +89,7 @@ public final class CardPage: NSObject, WKNavigationDelegate {
                         self.navigationTarget = self.webView.load(URLRequest(url: MediaOrigin.url))
                     }
                     self.loaded = true
-                    try await self.setAppearance(self.appearance)
+                    try await self.applyAppearance(self.appearance, forcePaint: false)
                     self.finishLoad(.success(()))
                 } catch {
                     self.finishLoad(.failure(error))
@@ -142,7 +142,8 @@ public final class CardPage: NSObject, WKNavigationDelegate {
             guard self.update == update else { throw Failure.superseded }
             self.hostSuspended = false
             self.hostPresentationPending = false
-            try await self.run("meguriCard.identity(card, generation);", arguments: ["card": update.card, "generation": update.generation], world: Self.world)
+            try await self.run("meguriCard.setFocusOwnership(ownsFocus); meguriCard.identity(card, generation);",
+                               arguments: ["ownsFocus": self.webView.reviewOwnsFocus, "card": update.card, "generation": update.generation], world: Self.world)
             // No other native operation can interleave identity and entry.
             if update.side == .question {
                 self.questionAppearance = self.appearance
@@ -185,7 +186,6 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         if signal == "settled" || signal == "shown" {
             hostInstalledDOM = true
             if signal == "settled" { runtimeSettled = true }
-            if signal == "shown" { Task { [weak self] in await self?.hostReports.publish() } }
             reach(signal)
         } else if signal == "visible" {
             visibleReceipt = update
@@ -245,10 +245,13 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     func present(token: UInt64) async throws {
         guard !closed, !readyPhases.contains("failed"), let update, visibleToken == token else { return }
         presented = true
-        try await run("meguriCard.present(token);", arguments: ["token": token], world: Self.world)
-        guard self.update == update, presented else { return }
+        try await run("meguriCard.setFocusOwnership(ownsFocus); meguriCard.present(token);",
+                      arguments: ["ownsFocus": webView.reviewOwnsFocus, "token": token], world: Self.world)
+        guard self.update == update, presented, visibleToken == token, !closed else { return }
         hostPresentationPending = false
-        Task { [weak self] in await self?.hostReports.publish() }
+        await hostReports.publish()
+        try Task.checkCancellation()
+        guard self.update == update, presented, visibleToken == token, !closed, !readyPhases.contains("failed") else { return }
         let actions = pending
         pending.removeAll()
         var revealed = false
@@ -276,16 +279,26 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         try await run("for (const media of document.querySelectorAll('audio,video')) media.pause();", world: Self.world)
     }
     func resumePresentation() async throws {
-        guard !closed, !readyPhases.contains("failed"), let token = visibleToken else { return }
+        guard !closed, !readyPhases.contains("failed"), let update, let token = visibleToken else { return }
         presented = true
-        try await run("meguriCard.resume(token);", arguments: ["token": token], world: Self.world)
+        try await run("meguriCard.setFocusOwnership(ownsFocus); meguriCard.resume(token);",
+                      arguments: ["ownsFocus": webView.reviewOwnsFocus, "token": token], world: Self.world)
+        try Task.checkCancellation()
+        guard self.update == update, presented, visibleToken == token, !closed, !readyPhases.contains("failed") else { return }
         hostSuspended = false
         hostPresentationPending = false
-        Task { [weak self] in await self?.hostReports.publish() }
+        await hostReports.publish()
+        try Task.checkCancellation()
+        guard self.update == update, presented, visibleToken == token, !closed, !hostSuspended,
+              !readyPhases.contains("failed") else { throw Failure.superseded }
     }
 
     public func setAppearance(_ value: CardRuntime.Appearance) async throws {
+        let update = self.update
         try await applyAppearance(value, forcePaint: false)
+        await hostReports.publish()
+        try Task.checkCancellation()
+        guard self.update == update, !closed else { throw Failure.superseded }
     }
     private func applyAppearance(_ value: CardRuntime.Appearance, forcePaint: Bool) async throws {
         let changed = appearance != value || forcePaint
@@ -321,9 +334,18 @@ public final class CardPage: NSObject, WKNavigationDelegate {
 
     func setState(flag: UInt8, marked: Bool) async throws {
         beginHostMutation()
-        defer { endHostMutation() }
+        let update = self.update
         payload?.flag = flag; payload?.marked = marked
-        if loaded { try await run("_drawFlag(flag); _drawMark(mark);", arguments: ["flag": flag, "mark": marked]) }
+        do {
+            if loaded { try await run("_drawFlag(flag); _drawMark(mark);", arguments: ["flag": flag, "mark": marked]) }
+        } catch {
+            endHostMutation()
+            throw error
+        }
+        endHostMutation()
+        await hostReports.publish()
+        try Task.checkCancellation()
+        guard self.update == update, !closed else { throw Failure.superseded }
     }
     func setAudioPolicy(_ policy: CardAudioPolicy) { payload?.audioPolicy = policy }
 
@@ -333,7 +355,15 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     }
     func endHostMutation() {
         hostMutations -= 1
-        Task { [weak self] in await self?.hostReports.publish() }
+    }
+
+    func setFocusOwnership(_ ownsFocus: Bool) {
+        webView.reviewOwnsFocus = ownsFocus
+        guard loaded, !closed else { return }
+        // The native keyboard owner permits automatic answer-field
+        // focus. Explicit DOM focus and ordinary card interaction stay intact.
+        webView.callAsyncJavaScript("meguriCard.setFocusOwnership(ownsFocus);", arguments: ["ownsFocus": ownsFocus],
+                                    in: nil, in: Self.world) { _ in }
     }
 
     func invalidate() {

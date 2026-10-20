@@ -241,6 +241,9 @@
   const shownHooks = [];
 
   let presented = false;
+  // Standalone C66 pages retain their normal automatic focus. U67 supplies
+  // native ownership before entry/presentation when a panel can own keys.
+  let automaticTypeAnswerFocus = true;
   // The identity native announced for the next queued update (C6.8).
   let announced = null;
   // The side and identity of the update that started most recently.
@@ -1142,7 +1145,7 @@
       },
       onShown: function () {
         typedElement = call(getElementById, doc, "typeans");
-        if (typedElement) focus(typedElement);
+        if (typedElement && automaticTypeAnswerFocus) focus(typedElement);
         afterImages(function () {
           startPreload(a, true);
         });
@@ -1270,6 +1273,9 @@
     }
     if (message === null || typeof message !== "object") return;
     switch (message.op) {
+      case "focusOwnership":
+        automaticTypeAnswerFocus = message.owned === true;
+        break;
       case "identity":
         announced = { card: message.card, generation: message.generation };
         break;

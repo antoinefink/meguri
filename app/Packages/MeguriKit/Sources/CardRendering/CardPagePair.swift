@@ -13,7 +13,7 @@ public final class CardPagePair {
     public let diagnostics: CardDiagnostics
     public var ownsKeyboardFocus = false {
         didSet {
-            for page in pages { page.webView.reviewOwnsFocus = ownsKeyboardFocus }
+            for page in pages { page.setFocusOwnership(ownsKeyboardFocus) }
             #if os(macOS)
             container.window?.recalculateKeyViewLoop()
             #endif
@@ -23,6 +23,8 @@ public final class CardPagePair {
     public var onSignal: ((String, CardUpdate) -> Void)?
     public var onInteraction: ((String, [String: Any]) -> Void)?
     public var onHostEvent: ((CardPage, CardHostEvent) -> Void)?
+    /// After presentation and its host-context acknowledgement attempt. A
+    /// missing/failing host remains unavailable; acknowledgement is not paint.
     public var onCommitted: ((CardUpdate, SwapToken) -> Void)?
     /// Frame probes end intervals independently of the double-rAF receipt.
     public let swaps: SwapRecorder
@@ -127,6 +129,8 @@ public final class CardPagePair {
         for page in pages { try await page.load() }
     }
 
+    /// Settles runtime/appearance, then awaits host-context publication.
+    /// An absent/failing host leaves probes unavailable without failing render.
     @discardableResult
     public func prepare(_ payload: CardPayload) async throws -> CardUpdate {
         guard !closed, !suspended, !lifecycleSuspended else { throw CardPage.Failure.closed }
@@ -144,12 +148,14 @@ public final class CardPagePair {
                 try await target.refreshAppearance()
                 try Task.checkCancellation()
                 guard target.update == update, target.settled else { throw CardPage.Failure.superseded }
+                await target.hostReports.publish()
+                try Task.checkCancellation()
+                guard !closed, !suspended, !lifecycleSuspended, target.update == update, target.settled else { throw CardPage.Failure.superseded }
             } onCancel: {
                 Task { @MainActor [weak target] in
                     if target?.update == update { target?.cancelUpdate() }
                 }
             }
-            Task { [weak target] in await target?.hostReports.publish() }
             return update
         } catch {
             if target.update == update { target.invalidate(); audio.cancelPreparation(update) }
@@ -192,13 +198,15 @@ public final class CardPagePair {
                 if let payload = next.payload { self.audio.present(payload: payload, update: update) }
                 do { try await next.present(token: token.sequence) }
                 catch { next.diagnostics.record("presentFailed", update: update) }
-                guard next.update == update, self.current === next, !self.closed else { return }
+                guard next.update == update, self.current === next, !self.closed, !self.suspended,
+                      !self.lifecycleSuspended, self.commitSerial == serial else { return }
                 self.onCommitted?(update, token)
             }
         }
         return token
     }
 
+    /// Returns after matching shown hooks and host-context publication.
     @discardableResult
     public func showAnswer(inputTime: TimeInterval = ProcessInfo.processInfo.systemUptime) async throws -> SwapToken {
         let page = current
@@ -223,6 +231,10 @@ public final class CardPagePair {
         audio.present(payload: payload, update: update)
         try await page.run("meguriCard.present(token);", arguments: ["token": token.sequence], world: CardPage.world)
         try await page.start(html: answer, update: update)
+        try await page.waitForShown(update)
+        await page.hostReports.publish()
+        try Task.checkCancellation()
+        guard !closed, !suspended, !lifecycleSuspended, current === page, page.update == update, page.presented else { throw CardPage.Failure.superseded }
         return token
     }
 
@@ -264,8 +276,18 @@ public final class CardPagePair {
         guard current.presented else { return names }
         let page = current
         page.beginHostMutation()
-        defer { page.endHostMutation() }
-        let result = try await page.string("return JSON.stringify(meguriCard.mediaArrived(names));", arguments: ["names": names], world: CardPage.world)
+        let update = page.update
+        let result: String
+        do {
+            result = try await page.string("return JSON.stringify(meguriCard.mediaArrived(names));", arguments: ["names": names], world: CardPage.world)
+        } catch {
+            page.endHostMutation()
+            throw error
+        }
+        page.endHostMutation()
+        await page.hostReports.publish()
+        try Task.checkCancellation()
+        guard current === page, page.update == update, page.presented, !closed, !suspended, !lifecycleSuspended else { throw CardPage.Failure.superseded }
         return (try? JSONDecoder().decode([String].self, from: Data(result.utf8))) ?? names
     }
     public func suspend() async {
