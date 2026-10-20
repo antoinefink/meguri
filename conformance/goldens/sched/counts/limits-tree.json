@@ -1,0 +1,211 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "deck_counts": [
+          {
+            "children": [],
+            "learning": 0,
+            "name": "Bravo",
+            "new": 0,
+            "review": 5
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "learning": 0,
+                "name": "Alpha",
+                "new": 4,
+                "review": 3
+              },
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "learning": 0,
+                    "name": "Inner",
+                    "new": 1,
+                    "review": 2
+                  }
+                ],
+                "learning": 0,
+                "name": "Beta",
+                "new": 0,
+                "review": 3
+              }
+            ],
+            "learning": 0,
+            "name": "Delta",
+            "new": 1,
+            "review": 7
+          }
+        ],
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "deck_counts": [
+          {
+            "children": [],
+            "learning": 0,
+            "name": "Bravo",
+            "new": 0,
+            "review": 5
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "learning": 0,
+                "name": "Alpha",
+                "new": 4,
+                "review": 3
+              },
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "learning": 1,
+                    "name": "Inner",
+                    "new": 1,
+                    "review": 2
+                  }
+                ],
+                "learning": 1,
+                "name": "Beta",
+                "new": 0,
+                "review": 3
+              }
+            ],
+            "learning": 1,
+            "name": "Delta",
+            "new": 1,
+            "review": 7
+          }
+        ],
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894766399,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "deck_counts": [
+          {
+            "children": [],
+            "learning": 0,
+            "name": "Bravo",
+            "new": 2,
+            "review": 6
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "learning": 0,
+                "name": "Alpha",
+                "new": 5,
+                "review": 3
+              },
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "learning": 2,
+                    "name": "Inner",
+                    "new": 3,
+                    "review": 3
+                  }
+                ],
+                "learning": 2,
+                "name": "Beta",
+                "new": 0,
+                "review": 2
+              }
+            ],
+            "learning": 2,
+            "name": "Delta",
+            "new": 1,
+            "review": 6
+          }
+        ],
+        "timing": {
+          "days_elapsed": 1,
+          "next_day_at": 1894852800,
+          "now": 1894766401,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "deck_counts": [
+          {
+            "children": [],
+            "learning": 0,
+            "name": "Bravo",
+            "new": 2,
+            "review": 6
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "learning": 0,
+                "name": "Alpha",
+                "new": 5,
+                "review": 3
+              },
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "learning": 2,
+                    "name": "Inner",
+                    "new": 0,
+                    "review": 2
+                  }
+                ],
+                "learning": 2,
+                "name": "Beta",
+                "new": 0,
+                "review": 2
+              }
+            ],
+            "learning": 2,
+            "name": "Delta",
+            "new": 1,
+            "review": 6
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "9b5b72a872e653e261f80ba56ab4c80cb0ed388624fe2d866307a497a123e9af",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/counts/limits-tree",
+  "scenario_sha256": "3aa08850c74b7f2901bdb4af71f91b4edadd6dadc9ccbb4a950c605c3e103e28",
+  "tz": "UTC"
+}

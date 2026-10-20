@@ -1,0 +1,107 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "deck_counts": [
+          {
+            "children": [],
+            "learning": 0,
+            "name": "10. D100",
+            "new": 1,
+            "review": 0
+          },
+          {
+            "children": [],
+            "learning": 0,
+            "name": "4. D040",
+            "new": 1,
+            "review": 0
+          },
+          {
+            "children": [],
+            "learning": 0,
+            "name": "9. D090",
+            "new": 1,
+            "review": 0
+          },
+          {
+            "children": [],
+            "learning": 0,
+            "name": "u004",
+            "new": 1,
+            "review": 0
+          },
+          {
+            "children": [],
+            "learning": 0,
+            "name": "V005",
+            "new": 0,
+            "review": 0
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "learning": 0,
+                "name": "u004",
+                "new": 0,
+                "review": 0
+              },
+              {
+                "children": [],
+                "learning": 0,
+                "name": "unit",
+                "new": 1,
+                "review": 0
+              },
+              {
+                "children": [],
+                "learning": 0,
+                "name": "Unit 2",
+                "new": 0,
+                "review": 0
+              },
+              {
+                "children": [],
+                "learning": 0,
+                "name": "Â",
+                "new": 0,
+                "review": 0
+              }
+            ],
+            "learning": 0,
+            "name": "w006",
+            "new": 1,
+            "review": 0
+          },
+          {
+            "children": [],
+            "learning": 0,
+            "name": "Â D600",
+            "new": 1,
+            "review": 0
+          },
+          {
+            "children": [],
+            "learning": 0,
+            "name": "🧪 D700",
+            "new": 1,
+            "review": 0
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "9b5b72a872e653e261f80ba56ab4c80cb0ed388624fe2d866307a497a123e9af",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/counts/tree-order",
+  "scenario_sha256": "403f124778847e80af7664af0476752b2237de122857507a90350aec50132683",
+  "tz": "UTC"
+}
