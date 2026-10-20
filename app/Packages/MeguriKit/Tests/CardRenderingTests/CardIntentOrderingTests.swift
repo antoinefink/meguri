@@ -4,9 +4,47 @@ import Testing
 import WebKit
 
 extension WebKitSuites {
-    /// All APIs used here existed in the supplied U70 baseline. These are
-    /// suitable for tests-only RED after fixing the SDK delegate signatures.
+    /// Intent ordering uses real pages and independently held native probes.
     @Suite(.timeLimit(.minutes(2))) struct CardIntentOrderingTests {
+        @Test func bufferedStopAndAvailabilityPausePlayingVideoBeforeResumeWithoutReplay() async throws {
+            let fixture = try await CardBehaviorFixture(video: true)
+            defer { fixture.close() }
+            try await fixture.present(.init(cardID: 1,
+                question: "<video id=media src=clip.mp4 muted playsinline loop></video>", answer: "a"))
+            let page = fixture.pair.current, binding = page.update, document = page.documentID
+            try await fixture.script("""
+                window.video = document.getElementById('media');
+                window.playEvents = 0;
+                video.addEventListener('play', () => playEvents++);
+                await video.play();
+                window.playingTime = video.currentTime;
+                """)
+            try await CardBehaviorFixture.until("synthetic video must actually be playing before the burst") {
+                try await fixture.bool("return !video.paused && !video.ended && video.loop && video.currentTime > playingTime && playEvents === 1;") == true
+            }
+
+            var held: (@MainActor (Result<Bool, any Error>) -> Void)?
+            let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
+            defer { entered.continuation.finish() }
+            page.livenessEvaluation = { held = $0; entered.continuation.yield(()) }
+            // Deliberately no await between intents: availability is buffered
+            // before the event reader can start asynchronous stop cleanup.
+            AudioSessionCoordinator.shared.emit(.stop)
+            AudioSessionCoordinator.shared.emit(.available)
+            try await Spike.deadline("burst availability must reach the held native probe", timeout: .seconds(3)) {
+                for await _ in entered.stream { return }
+                throw Spike.Failure("missing burst probe")
+            }
+            #expect(held != nil && !page.presented && !page.behaviorAvailable)
+            #expect(try await fixture.bool("return video.paused && !video.ended && playEvents === 1;") == true,
+                    "physical pause must complete before foreground is allowed past its probe")
+            held?(.success(true))
+            try await CardBehaviorFixture.until("burst resume did not finish") { page.behaviorAvailable }
+            try await fixture.script("await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); ")
+            #expect(try await fixture.bool("return video === document.getElementById('media') && video.paused && !video.ended && playEvents === 1;") == true)
+            #expect(fixture.pair.pages.count == 2 && fixture.pair.current === page && page.update == binding && page.documentID == document)
+        }
+
         @Test func publicResumeHeldInsideNativeProbeCannotUndoNewerSuspend() async throws {
             let fixture = try await CardBehaviorFixture()
             defer { fixture.close() }

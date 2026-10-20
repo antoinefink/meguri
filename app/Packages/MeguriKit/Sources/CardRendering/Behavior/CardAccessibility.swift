@@ -91,21 +91,23 @@ extension CardPage {
               update == binding, behaviorAvailable, hostReports.viewRevision == geometry else { return nil }
         let metadata = CardAccessibilityTarget(update: binding, elementID: value.id, text: value.text)
         guard let x = value.x, let y = value.y, value.width > 0, value.height > 0,
-              x >= value.left, y >= value.top, x < value.left + value.width, y < value.top + value.height,
-              let window = webView.window else { return (metadata, nil) }
+              x >= value.left, y >= value.top, x < value.left + value.width, y < value.top + value.height else { return (metadata, nil) }
         // Visual viewport coordinates include both saved page zoom and pinch;
         // DOM rects already include scrolling. No device-pixel-ratio scaling.
         let horizontal = CGFloat((x - value.left) / value.width) * webView.bounds.width
         let vertical = CGFloat((y - value.top) / value.height) * webView.bounds.height
         #if os(macOS)
+        guard let window = webView.window else { return (metadata, nil) }
         let local = CGPoint(x: webView.bounds.minX + horizontal,
                             y: webView.isFlipped ? webView.bounds.minY + vertical : webView.bounds.maxY - vertical)
         let screenPoint = window.convertPoint(toScreen: webView.convert(local, to: nil))
         guard let element = webView.accessibilityHitTest(screenPoint) as? NSObject,
               element !== webView,
-              let role = element.accessibilityAttributeValue(.role) as? String,
-              role != "AXWebArea", role != "AXScrollArea", role != "AXGroup" else { return (metadata, nil) }
+              let accessible = element as? any NSAccessibilityProtocol,
+              let role = accessible.accessibilityRole(),
+              role.rawValue != "AXWebArea", role.rawValue != "AXScrollArea", role.rawValue != "AXGroup" else { return (metadata, nil) }
         #else
+        guard webView.window != nil else { return (metadata, nil) }
         let local = CGPoint(x: webView.bounds.minX + horizontal, y: webView.bounds.minY + vertical)
         let screenPoint = UIAccessibility.convertToScreenCoordinates(CGRect(origin: local, size: .zero), in: webView).origin
         guard let element = webView.accessibilityHitTest(screenPoint, event: nil) as? NSObject,

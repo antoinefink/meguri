@@ -50,8 +50,9 @@ extension WebKitSuites {
                 #expect(page.accessibilityTarget?.elementID == (index == 2 ? "qa" : "answer"))
                 let element = try #require(posted as? NSObject, "native hit testing must resolve a concrete answer element")
                 #if os(macOS)
-                let nativeText = (element.accessibilityAttributeValue(.value) as? String)
-                    ?? (element.accessibilityAttributeValue(.title) as? String) ?? ""
+                let accessible = try #require(element as? any NSAccessibilityProtocol)
+                let nativeText = (accessible.accessibilityValue() as? String)
+                    ?? accessible.accessibilityTitle() ?? ""
                 #else
                 let nativeText = element.accessibilityLabel ?? element.accessibilityValue ?? ""
                 #endif
