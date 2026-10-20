@@ -103,6 +103,7 @@ mg_ui_test() {
 # as a substitute for stopping the VM's observer/profiler.
 mg_ui_test__allocations_start() {
   [ "$MG_MAC_RUNNER" = vm ] || return 1
+  local rc=0
   MG_UI_ALLOCATIONS_DIR="$MG_RUN_DIR/allocations"
   MG_UI_ALLOCATIONS_PENDING=1
   MG_UI_ALLOCATIONS_REMOTE=""
@@ -112,8 +113,15 @@ mg_ui_test__allocations_start() {
     MG_UI_ALLOCATIONS_PENDING=""
     return 1
   fi
-  if ! mg_mac_vm_copy_in "$MG_UI_ALLOCATIONS_DIR"; then
-    mg_ui_test__allocations_error "helper copy into VM failed (or VM queued)"
+  mg_mac_vm_copy_in "$MG_UI_ALLOCATIONS_DIR" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -eq 2 ]; then
+      mg_detail allocations_incomplete true
+      mg_detail allocations_remote_evidence "$(jq -n --arg p "$MG_UI_ALLOCATIONS_DIR" '$p')"
+      mg_queued_settle
+    else
+      mg_ui_test__allocations_error "helper copy into VM failed"
+    fi
     MG_UI_ALLOCATIONS_PENDING=""
     return 1
   fi
@@ -138,33 +146,44 @@ mg_ui_test__allocations_error() {
 mg_ui_test__allocations_finish() {
   [ -n "${MG_UI_ALLOCATIONS_PENDING:-}" ] || return 0
   MG_UI_ALLOCATIONS_PENDING=""
-  local rc=0 copied=0 out trace_file
+  local rc=0 copy_rc=0 copied=0 out trace_file
   if [ -n "$MG_UI_ALLOCATIONS_REMOTE" ]; then
+    out="$MG_UI_ALLOCATIONS_DIR/metadata.json"
     # Always ask the remote helper to stop, including after a lost start SSH.
     mg_mac_vm_ssh "$(mg_mac_vm_q python3 "$MG_UI_ALLOCATIONS_DIR/mac-allocations.py" --stop "$MG_UI_ALLOCATIONS_DIR")" >>"$MG_RUN_DIR/allocations-control.log" 2>&1 || rc=$?
     [ "$rc" -eq 0 ] || mg_ui_test__allocations_error "remote cleanup/trace finalization failed or unknown; see allocations-control.log"
     # Copy even on diagnostic failure, before releasing the lease. Fetching
     # the whole owned directory preserves metadata and partial trace/logs.
-    if mg_mac_vm_copy_out "$MG_UI_ALLOCATIONS_DIR"; then
+    mg_mac_vm_copy_out "$MG_UI_ALLOCATIONS_DIR" || copy_rc=$?
+    if [ "$copy_rc" -eq 0 ]; then
       copied=1
-      out="$MG_UI_ALLOCATIONS_DIR/metadata.json"
       trace_file="$(find "$MG_UI_ALLOCATIONS_DIR/allocations.trace" -type f -size +0c -print -quit 2>/dev/null)"
       if [ -z "$trace_file" ] || [ ! -f "$out" ] || ! jq -e '.status == "pass" and .cleanup_confirmed == true and .start_seen == true and (.tracing_started_notification_at | type == "string") and .finalized == true and .trace_exit == 0 and .coverage == "uncertified/partial" and .ordinary_performance_receipt == false' "$out" >/dev/null; then
         mg_ui_test__allocations_error "requested trace evidence is incomplete; inspect allocations/metadata.json"
       fi
-      [ ! -f "$out" ] || mg_detail allocations "$(cat "$out")"
-      mg_artifact allocations "$MG_UI_ALLOCATIONS_DIR" "diagnostic Allocations trace, metadata and logs; coverage uncertified/partial"
+    elif [ "$copy_rc" -eq 2 ]; then
+      mg_detail allocations_incomplete true
     else
-      mg_ui_test__allocations_error "trace/metadata/log copy from VM failed (or VM queued)"
+      mg_ui_test__allocations_error "trace/metadata/log copy from VM failed"
+    fi
+    # A queued/failed tar can still have delivered useful partial evidence.
+    if [ -d "$MG_UI_ALLOCATIONS_DIR" ]; then
+      if [ -f "$out" ] && jq -e 'type == "object"' "$out" >/dev/null 2>&1; then
+        mg_detail allocations "$(cat "$out")"
+      fi
+      mg_artifact allocations "$MG_UI_ALLOCATIONS_DIR" "diagnostic Allocations evidence (may be incomplete); coverage uncertified/partial"
     fi
     # Unknown cleanup or failed copy retains remote evidence for inspection
     # and the next lease's narrow orphan recognizer. Remove only our files.
     if [ "$rc" -le 1 ] && [ "$copied" -eq 1 ] && jq -e '.cleanup_confirmed == true' "$MG_UI_ALLOCATIONS_DIR/metadata.json" >/dev/null 2>&1; then
       mg_mac_vm_ssh "rm -rf $(mg_mac_vm_q "$MG_UI_ALLOCATIONS_DIR")" >>"$MG_RUN_DIR/allocations-control.log" 2>&1 ||
         mg_ui_test__allocations_error "owned VM files could not be removed"
+    else
+      mg_detail allocations_remote_evidence "$(jq -n --arg p "$MG_UI_ALLOCATIONS_DIR" '$p')"
     fi
   fi
   [ ! -f "$MG_RUN_DIR/allocations-control.log" ] || mg_artifact log "$MG_RUN_DIR/allocations-control.log" "Allocations VM control log"
+  mg_queued_settle
 }
 
 # mg_ui_test__report <prefix> <test result 0|1|2|3|4>: counts and failing tests

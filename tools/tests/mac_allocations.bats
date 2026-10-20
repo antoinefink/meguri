@@ -25,3 +25,15 @@ bats_require_minimum_version 1.5.0
 @test "allocations: orphan recovery targets only our run paths and notification prefix" {
   python3 "$BATS_TEST_DIRNAME/mac_allocations_fakehelper.py" Allocations.test_orphan_scope_and_identity
 }
+
+@test "allocations: failed launch verification reaps direct children with bounded escalation" {
+  python3 "$BATS_TEST_DIRNAME/mac_allocations_fakehelper.py" Allocations.test_failed_remember_reaps_owned_children Allocations.test_failed_observer_remember_reaps_child Allocations.test_transient_xcrun_exec_is_verified Allocations.test_failed_direct_cleanup_retains_unknown_state
+}
+
+@test "allocations: interrupted launch intent blocks recovery without verified ownership" {
+  python3 "$BATS_TEST_DIRNAME/mac_allocations_fakehelper.py" Allocations.test_interrupted_launch_stages_block_until_certified
+}
+
+@test "allocations: defunct and terminated status differ from live procargs access failures" {
+  python3 "$BATS_TEST_DIRNAME/mac_allocations_fakehelper.py" Allocations.test_defunct_and_live_procargs_failure Allocations.test_orphan_defunct_and_access_failure
+}

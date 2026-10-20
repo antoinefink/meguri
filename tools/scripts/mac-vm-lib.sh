@@ -342,7 +342,7 @@ mvl_stop_tests() {
   # and exact run arguments. Other Instruments sessions never enter this path.
   local allocations
   allocations="$(cat <<'PYALLOC'
-import ctypes, os, pathlib, re, shutil, signal, subprocess, sys, time
+import ctypes, json, os, pathlib, re, shutil, signal, subprocess, sys, time
 prefix = "com.antoinefink.meguri.mg.allocations."
 owned = r"/build/mg/ui-test/[A-Za-z0-9-]+/allocations/"
 notice = r"com[.]antoinefink[.]meguri[.]mg[.]allocations[.][A-Za-z0-9-]+( |$)"
@@ -351,12 +351,14 @@ p = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
 if p.returncode not in (0, 1) or p.stderr.strip():
     sys.exit(1)
 def snapshot(pid):
-    p = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "uid=", "-o", "lstart="], capture_output=True, text=True)
+    p = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "uid=", "-o", "stat=", "-o", "lstart="], capture_output=True, text=True)
     if p.returncode == 1 and not p.stdout.strip() and not p.stderr.strip():
         return None
     if p.returncode or not p.stdout.strip():
         raise RuntimeError("allocation orphan identity/exit unknown")
-    uid, start = p.stdout.strip().split(None, 1)
+    uid, status, start = p.stdout.strip().split(None, 2)
+    if status[0] in "ZX":
+        return None
     if int(uid) != os.getuid():
         raise RuntimeError("allocation orphan uid mismatch")
     libc = ctypes.CDLL(None, use_errno=True)
@@ -364,6 +366,11 @@ def snapshot(pid):
     size = ctypes.c_size_t(1024 * 1024)
     buf = ctypes.create_string_buffer(size.value)
     if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0):
+        gone = subprocess.run(["ps", "-p", str(pid), "-o", "stat="], capture_output=True, text=True)
+        if gone.returncode == 1 and not gone.stdout.strip() and not gone.stderr.strip():
+            return None
+        if gone.returncode == 0 and gone.stdout.strip() and gone.stdout.strip()[0] in "ZX" and not gone.stderr.strip():
+            return None
         raise RuntimeError("allocation orphan argv unknown")
     raw = buf.raw[:size.value]
     argc = ctypes.c_int.from_buffer_copy(raw[:4]).value
@@ -373,6 +380,13 @@ def snapshot(pid):
         raise RuntimeError("allocation orphan argv incomplete")
     return uid, start, os.fsdecode(exe), args
 roots, waiters = set(), []
+# Intent-only and PID-only interruptions may leave nothing pgrep can find.
+# An unresolved registration must block the lease's next profiler as well.
+for entry in (pathlib.Path.home() / "Library/Caches/meguri/allocations").glob("*.json"):
+    root = pathlib.Path(json.loads(entry.read_text())["root"])
+    if not root.is_absolute() or not re.search(r"/build/mg/ui-test/[A-Za-z0-9-]+/allocations$", str(root)):
+        raise RuntimeError("allocation registration outside owned run")
+    roots.add(root)
 for value in p.stdout.split():
     pid = int(value)
     if pid <= 1:
@@ -416,15 +430,11 @@ for pid, saved in waiters:
     if snapshot(pid) is not None:
         raise RuntimeError("allocation waiter exit unconfirmed")
 left = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
-if left.returncode != 1 or left.stderr.strip():
+if left.returncode not in (0, 1) or left.stderr.strip() or any(snapshot(int(pid)) is not None for pid in left.stdout.split()):
     raise RuntimeError("allocation orphan exit unconfirmed")
 PYALLOC
 )"
-  out="$("$1" "if pgrep -f $(mvl_q '/build/mg/ui-test/[A-Za-z0-9-]+/allocations/[m]ac-allocations[.]py --observe |--notify-tracing-started com[.]antoinefink[.]meguri[.]mg[.]allocations[.][A-Za-z0-9-]+( |$)|/[n]otifyutil -1 com[.]antoinefink[.]meguri[.]mg[.]allocations[.][A-Za-z0-9-]+( |$)') >/dev/null; then
-  $(mvl_q python3 -c "$allocations") || exit \$?
-else
-  a=\$?; [ \"\$a\" -eq 1 ] || exit \"\$a\"
-fi
+  out="$("$1" "$(mvl_q python3 -c "$allocations") || exit \$?
 p=$(mvl_q 'xcodebuild[ ]test-without-building|UITests-Runner[.]app/Contents/MacOS/|UITests-Runner[.]app/[^/]*UITests-Runner|/[x]ctest( |$)|[m]ac-hidden-launch[.]sh|/Build/Products/Debug/Meguri[.]app/Contents/MacOS/[M]eguri')
 if pgrep -f \"\$p\" >/dev/null; then
   echo 'mg-mac-vm: stopping'

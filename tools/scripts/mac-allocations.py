@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """One VM-only Allocations observation for ui-test's thousand-swap diagnosis.
 
-No launch or test coordination. All state lives beside this copied helper.
+No app launch or test coordination. Capture state lives beside this helper;
+a VM cache registration keeps interrupted launches discoverable.
 KERN_PROCARGS2 supplies real argv boundaries (ps flattens spaces/quotes).
 """
 import ctypes
 import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -23,13 +25,19 @@ def stamp():
 
 
 def write(path, data):
-    tmp = path.with_suffix(".tmp")
+    tmp = path.with_suffix("." + str(os.getpid()) + ".tmp")
     tmp.write_text(json.dumps(data, indent=2) + "\n")
     tmp.replace(path)
 
 
 def read(path):
     return json.loads(path.read_text())
+
+
+def registration(root):
+    # Survives even an intent-only interruption with no discoverable process.
+    key = hashlib.sha256(os.fsencode(str(root))).hexdigest()
+    return Path.home() / "Library/Caches/meguri/allocations" / (key + ".json")
 
 
 def argv_for(pid):
@@ -52,22 +60,26 @@ def argv_for(pid):
 def identity(pid):
     if not isinstance(pid, int) or pid <= 1:
         raise RuntimeError("non-numeric or unsafe pid")
-    ps = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "uid=", "-o", "lstart="],
+    ps = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "uid=", "-o", "stat=", "-o", "lstart="],
                         capture_output=True, text=True)
     if ps.returncode == 1 and not ps.stdout.strip() and not ps.stderr.strip():
         return None
     if ps.returncode or not ps.stdout.strip():
         raise RuntimeError("process identity check failed; exit unknown")
-    uid, start = ps.stdout.strip().split(None, 1)
+    uid, status, start = ps.stdout.strip().split(None, 2)
+    if status[0] in "ZX":  # Defunct process: no executable remains to signal.
+        return None
     if int(uid) != os.getuid():
         raise RuntimeError("candidate has another uid")
     try:
         executable, args = argv_for(pid)
     except RuntimeError:
-        # A process can exit between ps and procargs. Only ps's explicit
-        # no-such-pid result certifies that; access/fork failures stay unknown.
-        gone = subprocess.run(["ps", "-p", str(pid), "-o", "pid="], capture_output=True, text=True)
+        # A process can exit between ps and procargs. Explicit absence or
+        # an explicit exited state certifies that; access failures stay unknown.
+        gone = subprocess.run(["ps", "-p", str(pid), "-o", "stat="], capture_output=True, text=True)
         if gone.returncode == 1 and not gone.stdout.strip() and not gone.stderr.strip():
+            return None
+        if gone.returncode == 0 and gone.stdout.strip() and gone.stdout.strip()[0] in "ZX" and not gone.stderr.strip():
             return None
         raise
     return {"pid": pid, "uid": int(uid), "start": start, "executable": executable}, args
@@ -129,10 +141,63 @@ def remember(proc, role, executable, cfg, root):
     raise RuntimeError(role + " executable and arguments could not be verified")
 
 
+def launch(role, command, executable, cfg, root, **kwargs):
+    path = root / (role + ".launch.json")
+    intent = {"run": root.parent.name, "uid": os.getuid(), "executable": executable,
+              "args": child_args(role, cfg, root), "cleanup_confirmed": False}
+    write(path, intent)  # Must precede Popen, including the observer's spawn.
+    proc = None
+    try:
+        proc = subprocess.Popen(command, **kwargs)
+        intent["pid"] = proc.pid
+        write(path, intent)
+        remember(proc, role, executable, cfg, root)
+        return proc
+    except Exception:
+        # No wait thread has been started for this child. Popen's signal/wait
+        # methods retain ownership and never signal a PID after reaping it.
+        # This also handles xcrun before it has exec'd the verified xctrace.
+        try:
+            if proc is not None:
+                proc.send_signal(signal.SIGINT if role == "trace" else signal.SIGTERM)
+                try:
+                    intent["exit"] = proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    intent["forced"] = True
+                    proc.kill()
+                    intent["exit"] = proc.wait(timeout=2)
+            else:
+                intent["not_spawned"] = True
+            intent["cleanup_confirmed"] = True
+        except Exception as exc:
+            intent["cleanup_error"] = str(exc)
+        write(path, intent)
+        raise
+
+
+def role_gone(role, cfg, root):
+    path = root / (role + ".json")
+    intent = root / (role + ".launch.json")
+    if intent.exists():
+        saved = read(intent)
+        if (saved.get("run") != root.parent.name or saved.get("uid") != os.getuid()
+                or saved.get("args") != child_args(role, cfg, root)):
+            raise RuntimeError(role + " launch ownership unknown")
+        if saved.get("cleanup_confirmed") is True and (type(saved.get("exit")) is int or saved.get("not_spawned") is True):
+            return True  # Persisted direct-child wait, never a recovered PID.
+        if not path.exists():
+            raise RuntimeError(role + " launch identity unknown; evidence retained")
+    if path.exists():
+        return not matches(read(path), child_args(role, cfg, root))
+    return role != "observer"
+
+
 def stop_owned(role, cfg, root, sig, seconds, proc=None):
     path = root / (role + ".json")
-    if not path.exists():
+    if role_gone(role, cfg, root):
         return
+    if not path.exists():
+        raise RuntimeError(role + " identity unknown; evidence retained")
     record = read(path)
     args = child_args(role, cfg, root)
     if not matches(record, args):
@@ -204,10 +269,9 @@ def observe(root):
         if not notify:
             raise RuntimeError("notifyutil unavailable")
         waiter_log = open(root / "notification.log", "wb")
-        waiter = subprocess.Popen([notify] + child_args("waiter", cfg, root),
+        waiter = launch("waiter", [notify] + child_args("waiter", cfg, root), notify, cfg, root,
                                   stdin=subprocess.DEVNULL, stdout=waiter_log, stderr=subprocess.STDOUT)
         meta["waiter_started_at"] = stamp()
-        remember(waiter, "waiter", notify, cfg, root)
 
         def notification_time():
             if waiter.wait() == 0:
@@ -222,10 +286,9 @@ def observe(root):
             raise RuntimeError("target changed immediately before attach")
         meta["attach_requested_at"] = stamp()
         trace_log = open(root / "xctrace.log", "wb")
-        trace = subprocess.Popen(["xcrun", "xctrace"] + child_args("trace", cfg, root),
+        trace = launch("trace", ["xcrun", "xctrace"] + child_args("trace", cfg, root), xctrace, cfg, root,
                                  stdin=subprocess.DEVNULL, stdout=trace_log, stderr=subprocess.STDOUT)
         meta["trace_process_started_at"] = stamp()
-        remember(trace, "trace", xctrace, cfg, root)
         write(root / "metadata.json", meta)
         deadline = time.monotonic() + 95
         while not stopping and not (root / "stop").exists() and time.monotonic() < deadline:
@@ -268,6 +331,10 @@ def observe(root):
             meta["errors"].append("trace did not finalize successfully")
         if not any(p.is_file() and p.stat().st_size > 0 for p in (root / "allocations.trace").rglob("*")):
             meta["errors"].append("trace absent or empty")
+        meta["launches"] = {role: read(root / (role + ".launch.json"))
+                            for role in ("waiter", "trace") if (root / (role + ".launch.json")).exists()}
+        if trace is None and "trace" in meta["launches"]:
+            meta["trace_exit"] = meta["launches"]["trace"].get("exit")
         meta["observer_ended_at"] = stamp()
         meta["status"] = "error" if meta["errors"] else "pass"
         write(root / "metadata.json", meta)
@@ -287,8 +354,7 @@ def stop(root, orphan=False):
     # Survives a lost SSH client or a dead observer. Identity mismatch never
     # permits a signal. Observer is confirmed gone before touching children.
     try:
-        record = root / "observer.json"
-        if record.exists() and matches(read(record), child_args("observer", cfg, root)):
+        if not role_gone("observer", cfg, root):
             raise RuntimeError("observer still running; children left for next lease")
         cfg = read(root / "config.json")
         for role, sig, seconds in (("trace", signal.SIGINT, 15), ("waiter", signal.SIGTERM, 2)):
@@ -301,10 +367,9 @@ def stop(root, orphan=False):
     for role in ("observer", "trace", "waiter"):
         path = root / (role + ".json")
         try:
-            if path.exists():
-                if matches(read(path), child_args(role, cfg, root)):
-                    confirmed = False
-            elif role == "observer" or meta.get("trace_process_started_at" if role == "trace" else "waiter_started_at"):
+            if not role_gone(role, cfg, root):
+                confirmed = False
+            elif not path.exists() and not (root / (role + ".launch.json")).exists() and meta.get("trace_process_started_at" if role == "trace" else "waiter_started_at"):
                 confirmed = False
         except Exception:
             confirmed = False
@@ -319,6 +384,7 @@ def stop(root, orphan=False):
     write(root / "metadata.json", meta)
     if not confirmed:
         return 2
+    registration(root).unlink(missing_ok=True)
     return 0 if orphan or meta["status"] == "pass" else 1
 
 
@@ -345,8 +411,11 @@ def main():
         raise RuntimeError("target already running before observation; refusing stale attach")
     cfg = {"binary": binary, "notification": "com.antoinefink.meguri.mg.allocations." + runid}
     write(root / "config.json", cfg)
+    registered = registration(root)
+    registered.parent.mkdir(parents=True, exist_ok=True)
+    write(registered, {"root": str(root)})
     with open(root / "observer.log", "wb") as log:
-        subprocess.Popen([sys.executable] + child_args("observer", cfg, root),
+        launch("observer", [sys.executable] + child_args("observer", cfg, root), sys.executable, cfg, root,
                          stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:

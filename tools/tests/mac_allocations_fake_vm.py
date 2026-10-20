@@ -24,20 +24,21 @@ if action == "--start":
         sys.exit(255)
 elif action == "--stop":
     assert (root / "started").exists()
+    successful = mode in ("pass", "stop-ssh-loss-confirmed")
     data = {"diagnostic_mode": "allocations", "ordinary_performance_receipt": False,
             "coverage": "uncertified/partial", "start_seen": mode != "missing-notify",
             "tracing_started_notification_at": "2026-10-20T10:20:30+00:00",
             "finalized": mode not in ("cleanup-failure", "stop-ssh-loss"),
-            "trace_exit": 0 if mode == "pass" else 64,
+            "trace_exit": 0 if successful else 64,
             "cleanup_confirmed": mode != "stop-ssh-loss",
-            "errors": [] if mode == "pass" else [mode], "status": "pass" if mode == "pass" else "error"}
+            "errors": [] if successful else [mode], "status": "pass" if successful else "error"}
     (root / "metadata.json").write_text(json.dumps(data))
     (root / "xctrace.log").write_text("fake trace finalization\n")
     if mode != "missing-trace":
         trace = root / "allocations.trace"
         trace.mkdir()
         (trace / "data").write_text("fake allocations")
-    if mode == "stop-ssh-loss":
+    if mode in ("stop-ssh-loss", "stop-ssh-loss-confirmed"):
         sys.exit(255)
     sys.exit(0 if mode == "pass" else 1)
 else:

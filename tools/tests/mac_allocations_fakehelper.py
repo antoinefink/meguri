@@ -25,6 +25,9 @@ class Allocations(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name) / "build/mg/ui-test/run-test/allocations"
         self.root.mkdir(parents=True)
+        home = patch.object(Path, "home", return_value=Path(self.tmp.name) / "home")
+        home.start()
+        self.addCleanup(home.stop)
         self.binary = str(Path(self.tmp.name) / "Build/Products/Profile/Meguri.app/Contents/MacOS/Meguri")
         self.cfg = {"binary": self.binary, "notification": "com.antoinefink.meguri.mg.allocations.run-test"}
         self.m.write(self.root / "config.json", self.cfg)
@@ -48,6 +51,11 @@ class Allocations(unittest.TestCase):
         proc = self.processes.get(pid)
         if proc is None or proc.rc is not None:
             return None
+        if getattr(proc, "role", None) and self.mode.startswith(proc.role + "-verify-"):
+            self.assertEqual(self.m.read(self.root / (proc.role + ".launch.json"))["pid"], pid)
+            raise RuntimeError(proc.role + " procargs access failure after Popen")
+        if self.mode == "xcrun-exec" and proc.role == "trace" and self.now < 0.1:
+            return dict(proc.record, executable="/usr/bin/xcrun"), ["xcrun"] + proc.argv
         record = dict(proc.record)
         if self.mode == "reuse" and self.now >= 0.3 and proc.role == "trace":
             record["start"] = "another process start"
@@ -69,10 +77,16 @@ class Allocations(unittest.TestCase):
     def popen(self, args, **kwargs):
         self.events.append(args)
         test = self
-        role = "trace" if args[:2] == ["xcrun", "xctrace"] else "waiter"
-        pid = 201 if role == "trace" else 200
-        executable = "/Xcode space's/usr/bin/xctrace" if role == "trace" else "/usr/bin/notifyutil"
+        role = "observer" if "--observe" in args else "trace" if args[:2] == ["xcrun", "xctrace"] else "waiter"
+        pid = {"trace": 201, "waiter": 200, "observer": 202}[role]
+        executable = {"trace": "/Xcode space's/usr/bin/xctrace", "waiter": "/usr/bin/notifyutil", "observer": sys.executable}[role]
         argv = [executable] + (args[2:] if role == "trace" else args[1:])
+        intent = self.m.read(self.root / (role + ".launch.json"))
+        self.assertNotIn("pid", intent)  # Intent is durable before any spawn.
+        self.assertEqual(intent["executable"], executable)
+        self.assertEqual(intent["args"], argv[1:])
+        self.assertEqual(intent["uid"], os.getuid())
+        self.assertEqual(intent["run"], self.root.parent.name)
 
         class Proc:
             def __init__(self):
@@ -82,14 +96,25 @@ class Allocations(unittest.TestCase):
             def poll(self):
                 if role == "trace" and test.mode == "attach-failure":
                     self.rc = 64
-                elif role == "trace" and test.mode not in ("stop", "reuse", "kill-fallback", "missing-notify") and test.now >= 0.2:
+                elif role == "trace" and not test.mode.startswith("trace-verify-") and test.mode not in ("stop", "reuse", "kill-fallback", "missing-notify") and test.now >= 0.2:
                     self.rc = 0
                 return self.rc
 
-            def wait(self):
-                if role == "waiter":
+            def wait(self, timeout=None):
+                test.events.append((self.pid, "wait", timeout))
+                if self.rc is None and test.mode.startswith(role + "-verify-"):
+                    test.now += timeout
+                    raise subprocess.TimeoutExpired(argv, timeout)
+                if role == "waiter" and self.rc is None:
                     self.rc = 0
                 return self.rc
+
+            def send_signal(self, sig):
+                if self.rc is None:
+                    test.kill(self.pid, sig)
+
+            def kill(self):
+                self.send_signal(signal.SIGKILL)
 
         proc = Proc()
         self.processes[pid] = proc
@@ -107,7 +132,9 @@ class Allocations(unittest.TestCase):
     def kill(self, pid, sig):
         self.events.append((pid, sig))
         proc = self.processes[pid]
-        if self.mode == "kill-fallback" and sig != signal.SIGKILL:
+        if (self.mode == "kill-fallback" or self.mode == proc.role + "-verify-kill") and sig != signal.SIGKILL:
+            return
+        if self.mode == proc.role + "-verify-unknown":
             return
         proc.rc = 0 if sig == signal.SIGINT else -int(sig)
 
@@ -119,6 +146,7 @@ class Allocations(unittest.TestCase):
                 self.target = target
 
             def start(self):
+                test.events.append("notification-thread")
                 if test.mode != "missing-notify":
                     self.target()
 
@@ -185,7 +213,7 @@ class Allocations(unittest.TestCase):
     def test_uid_and_numeric_identity(self):
         self.assertRaises(RuntimeError, self.m.identity, "123")
         self.assertRaises(RuntimeError, self.m.identity, 0)
-        with patch.object(self.m.subprocess, "run", return_value=types.SimpleNamespace(returncode=0, stdout="999999 Tue Oct 20 00:00:00 2026", stderr="")), patch.object(self.m, "argv_for") as argv:
+        with patch.object(self.m.subprocess, "run", return_value=types.SimpleNamespace(returncode=0, stdout="999999 S Tue Oct 20 00:00:00 2026", stderr="")), patch.object(self.m, "argv_for") as argv:
             self.assertRaises(RuntimeError, self.m.identity, 123)
             argv.assert_not_called()
         with patch.object(self.m.subprocess, "run", return_value=types.SimpleNamespace(returncode=1, stdout="", stderr="fork: Resource temporarily unavailable")):
@@ -213,6 +241,162 @@ class Allocations(unittest.TestCase):
         self.assertIn((201, signal.SIGINT), self.events)
         self.assertEqual(meta["trace_exit"], 0)
 
+    def test_failed_remember_reaps_owned_children(self):
+        for mode in ("waiter-verify-error", "trace-verify-error", "trace-verify-kill"):
+            with self.subTest(mode=mode):
+                self.mode = mode
+                self.now = self.lookups = 0
+                self.events = []
+                self.processes = {}
+                (self.root / "notification.json").unlink(missing_ok=True)
+                meta = self.observe()
+                role = mode.split("-")[0]
+                pid = 200 if role == "waiter" else 201
+                self.assertEqual(meta["status"], "error")
+                self.assertTrue(any("after Popen" in e for e in meta["errors"]))
+                self.assertIsNotNone(self.processes[pid].rc)
+                self.assertIn((pid, signal.SIGTERM if role == "waiter" else signal.SIGINT), self.events)
+                self.assertIn((pid, "wait", 2), self.events)
+                saved = meta["launches"][role]
+                self.assertTrue(saved["cleanup_confirmed"])
+                self.assertEqual(saved["exit"], self.processes[pid].rc)
+                if mode.endswith("kill"):
+                    self.assertIn((pid, signal.SIGKILL), self.events)
+                    self.assertTrue(saved["forced"])
+                if role == "waiter":
+                    self.assertNotIn("notification-thread", self.events)
+                    self.assertNotIn(201, self.processes)
+                self.assertLess(self.now, 3)
+                import shutil
+                shutil.rmtree(self.root / "allocations.trace", ignore_errors=True)
+
+    def test_failed_observer_remember_reaps_child(self):
+        self.mode = "observer-verify-error"
+        (self.root / "config.json").unlink()
+        with patch.object(self.m, "__file__", str(self.root / "mac-allocations.py")), \
+             patch.object(sys, "argv", ["helper", "--start", str(self.root), self.binary, "run-test"]), \
+             patch.object(self.m, "target", return_value=None), \
+             patch.object(self.m, "identity", self.identity), \
+             patch.object(self.m.subprocess, "Popen", self.popen), \
+             patch.object(self.m.os, "kill", self.kill):
+            self.assertRaisesRegex(RuntimeError, "after Popen", self.m.main)
+        self.assertIn((202, signal.SIGTERM), self.events)
+        self.assertIn((202, "wait", 2), self.events)
+        self.assertIsNotNone(self.processes[202].rc)
+        self.assertTrue(self.m.read(self.root / "observer.launch.json")["cleanup_confirmed"])
+
+    def test_transient_xcrun_exec_is_verified(self):
+        self.mode = "xcrun-exec"
+        self.assertEqual(self.observe()["status"], "pass")
+        self.assertEqual(self.m.read(self.root / "trace.json")["executable"], "/Xcode space's/usr/bin/xctrace")
+
+    def test_defunct_and_live_procargs_failure(self):
+        def ps(status):
+            return types.SimpleNamespace(returncode=0, stdout=str(os.getuid()) + " " + status + " Tue Oct 20 00:00:00 2026", stderr="")
+
+        for status in ("Z", "Z+", "X"):
+            with patch.object(self.m.subprocess, "run", return_value=ps(status)), patch.object(self.m, "argv_for") as argv:
+                self.assertIsNone(self.m.identity(123))
+                argv.assert_not_called()
+        with patch.object(self.m, "argv_for", side_effect=RuntimeError("access denied")):
+            for status in ("Z", "X", "S"):
+                with patch.object(self.m.subprocess, "run", side_effect=[ps("S"), types.SimpleNamespace(returncode=0, stdout=status, stderr="")]):
+                    if status == "S":
+                        self.assertRaisesRegex(RuntimeError, "access denied", self.m.identity, 123)
+                    else:
+                        self.assertIsNone(self.m.identity(123))
+
+    def test_interrupted_launch_stages_block_until_certified(self):
+        code = (SOURCE.parent / "mac-vm-lib.sh").read_text().split("<<'PYALLOC'\n", 1)[1].split("\nPYALLOC", 1)[0]
+        cfg = dict(self.cfg, target_pid=123)
+        self.m.write(self.root / "config.json", cfg)
+        (self.root / "mac-allocations.py").write_text("retained helper")
+        (self.root / "evidence").write_text("partial trace/logs")
+        self.m.write(self.root / "observer.json", self.record(301, sys.executable))
+        marker = self.m.registration(self.root)
+        marker.parent.mkdir(parents=True)
+        signals = []
+
+        def run(args, **_kwargs):
+            self.assertEqual(args[0], "pgrep")
+            # No process discovery is required to find unresolved launch state.
+            return subprocess.CompletedProcess(args, 1, "", "")
+
+        def recover(args):
+            self.assertEqual(args, ["python3", str(self.root / "mac-allocations.py"), "--orphan-stop", str(self.root)])
+            return self.m.stop(self.root, orphan=True)
+
+        def kill(pid, sig):
+            signals.append((pid, sig))
+            self.kill(pid, sig)
+
+        for stage in ("intent", "pid", "verified", "reused", "direct-wait"):
+            with self.subTest(stage=stage):
+                import shutil
+                shutil.rmtree(self.root / "allocations.trace", ignore_errors=True)
+                self.m.write(marker, {"root": str(self.root)})
+                self.m.write(self.root / "metadata.json", {"errors": [], "observer_ended_at": "done"})
+                path = self.root / "trace.json"
+                path.unlink(missing_ok=True)
+                intent = {"run": self.root.parent.name, "uid": os.getuid(), "executable": "/Xcode space's/usr/bin/xctrace",
+                          "args": self.m.child_args("trace", cfg, self.root), "cleanup_confirmed": False}
+                self.m.write(self.root / "trace.launch.json", intent)
+                signals.clear()
+                self.processes.clear()
+                if stage != "intent":
+                    proc = self.popen(["xcrun", "xctrace"] + intent["args"])
+                    intent["pid"] = proc.pid
+                    if stage in ("verified", "reused"):
+                        self.m.write(path, proc.record)
+                    if stage == "reused":
+                        proc.record = dict(proc.record, start="unrelated new process")
+                    if stage == "direct-wait":
+                        # A persisted successful wait certifies the old child,
+                        # even when the PID is now occupied by someone else.
+                        intent.update(cleanup_confirmed=True, exit=-15)
+                        proc.record = dict(proc.record, start="unrelated new process")
+                    self.m.write(self.root / "trace.launch.json", intent)
+                with patch.object(self.m, "identity", self.identity), \
+                     patch.object(self.m.subprocess, "run", run), \
+                     patch.object(self.m.subprocess, "call", recover), \
+                     patch.object(self.m.os, "kill", kill), \
+                     patch.object(self.m.time, "monotonic", lambda: self.now), \
+                     patch.object(self.m.time, "sleep", self.sleep):
+                    if stage in ("verified", "direct-wait"):
+                        exec(code, {})
+                        self.assertFalse(marker.exists())
+                        self.assertEqual(signals, [(201, signal.SIGINT)] if stage == "verified" else [])
+                    else:
+                        for _attempt in range(2):
+                            self.assertRaisesRegex(RuntimeError, "cleanup unconfirmed", exec, code, {})
+                        self.assertTrue(marker.exists())
+                        self.assertFalse(self.m.read(self.root / "metadata.json")["cleanup_confirmed"])
+                        self.assertEqual(signals, [])
+                self.assertTrue((self.root / "mac-allocations.py").exists())
+                self.assertEqual((self.root / "evidence").read_text(), "partial trace/logs")
+
+    def test_failed_direct_cleanup_retains_unknown_state(self):
+        self.mode = "trace-verify-unknown"
+        meta = self.observe()
+        saved = meta["launches"]["trace"]
+        self.assertEqual(meta["status"], "error")
+        self.assertFalse(saved["cleanup_confirmed"])
+        self.assertIn("cleanup_error", saved)
+        self.assertIsNone(self.processes[201].rc)
+        self.assertIn((201, signal.SIGINT), self.events)
+        self.assertIn((201, signal.SIGKILL), self.events)
+        self.assertEqual(self.events.count((201, "wait", 2)), 2)
+        self.assertLessEqual(self.now, 4.1)
+        # The observer has since exited. Its child still lacks saved identity;
+        # a later stop must neither signal the PID nor certify cleanup.
+        self.m.write(self.root / "observer.json", self.record(301, sys.executable))
+        self.events.clear()
+        with patch.object(self.m, "identity", self.identity), patch.object(self.m.os, "kill", self.kill):
+            self.assertEqual(self.m.stop(self.root), 2)
+        self.assertEqual(self.events, [])
+        self.assertTrue((self.root / "allocations.trace/data").exists())
+        self.assertFalse(self.m.read(self.root / "metadata.json")["cleanup_confirmed"])
+
     def test_pid_reuse_unsignalled(self):
         self.mode = "reuse"
         meta = self.observe()
@@ -230,8 +414,14 @@ class Allocations(unittest.TestCase):
                     (self.root / name).unlink(missing_ok=True)
                 self.now = self.lookups = 0
                 self.mode = mode
+                self.events = []
                 self.processes = {}
-                self.assertEqual(self.observe()["status"], "error")
+                meta = self.observe()
+                self.assertEqual(meta["status"], "error")
+                if mode == "attach-failure":
+                    self.assertEqual(meta["launches"]["trace"]["exit"], 64)
+                    self.assertTrue(meta["launches"]["trace"]["cleanup_confirmed"])
+                    self.assertFalse(any(isinstance(e, tuple) and len(e) == 2 and e[0] == 201 for e in self.events))
 
     def test_remote_stop_order_idempotence_and_reuse(self):
         cfg = dict(self.cfg, target_pid=123)
@@ -281,7 +471,7 @@ class Allocations(unittest.TestCase):
             pid = int(args[args.index("-p") + 1])
             ps_calls[pid] = ps_calls.get(pid, 0) + 1
             start = "changed start" if reuse_waiter and pid == 403 and ps_calls[pid] >= 2 else "Tue Oct 20 10:20:30 2026"
-            return subprocess.CompletedProcess(args, 0 if pid in bank else 1, str(os.getuid()) + " " + start if pid in bank else "", "")
+            return subprocess.CompletedProcess(args, 0 if pid in bank else 1, str(os.getuid()) + " S " + start if pid in bank else "", "")
 
         def sysctl(mib, _length, buf, size, *_unused):
             argv = bank[mib[2]]
@@ -320,6 +510,29 @@ class Allocations(unittest.TestCase):
             reuse_waiter = True
             self.assertRaisesRegex(RuntimeError, "waiter identity changed", exec, code, {})
             self.assertEqual(killed, [(403, signal.SIGTERM)])
+
+    def test_orphan_defunct_and_access_failure(self):
+        code = (SOURCE.parent / "mac-vm-lib.sh").read_text().split("<<'PYALLOC'\n", 1)[1].split("\nPYALLOC", 1)[0]
+        for status in ("Z", "X", "S", "defunct-race"):
+            with self.subTest(status=status):
+                def run(args, **_kwargs):
+                    if args[0] == "pgrep":
+                        return subprocess.CompletedProcess(args, 0, "403\n", "")
+                    self.assertEqual(args[0], "ps")
+                    value = ("Z" if status == "defunct-race" else status) if args[-1] == "stat=" else str(os.getuid()) + " " + ("S" if status == "defunct-race" else status) + " Tue Oct 20 10:20:30 2026"
+                    return subprocess.CompletedProcess(args, 0, value, "")
+
+                with patch.object(subprocess, "run", run), \
+                     patch.object(self.m.ctypes, "CDLL", return_value=types.SimpleNamespace(sysctl=lambda *_args: 1)) as libc, \
+                     patch.object(os, "kill") as kill, patch.object(subprocess, "call") as recover:
+                    if status == "S":
+                        self.assertRaisesRegex(RuntimeError, "argv unknown", exec, code, {})
+                    else:
+                        exec(code, {})
+                    if status in ("Z", "X"):
+                        libc.assert_not_called()
+                    kill.assert_not_called()
+                    recover.assert_not_called()
 
     def test_refuse_restart_or_preexisting_target(self):
         with patch.object(self.m, "__file__", str(self.root / "mac-allocations.py")), \

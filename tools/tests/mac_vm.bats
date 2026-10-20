@@ -599,12 +599,32 @@ case "${1:-}" in
   *) exec '"$python"' "$@" ;;
 esac'
   cat >>"$SB/tools/mg.d/zz-vm-fakes.sh" <<'EOF'
+eval "$(declare -f mg_mac_vm_copy_in | sed '1s/mg_mac_vm_copy_in/mg_allocation_fake_copy_in/')"
+mg_mac_vm_copy_in() {
+  case "$1" in */allocations)
+    case "${FAKE_ALLOCATIONS_COPY_IN_RC:-0}" in
+      2) mg__mac_vm_unreachable 'injected helper copy queue' 'Allocations helper copy'; return 2 ;;
+      1) mg_failure mac-vm-copy 'injected helper copy error'; return 1 ;;
+    esac
+    ;;
+  esac
+  mg_allocation_fake_copy_in "$@"
+}
 # Assert artifact collection happens before giving the VM lease back.
 eval "$(declare -f mg_mac_vm_copy_out | sed '1s/mg_mac_vm_copy_out/mg_allocation_fake_copy_out/')"
 mg_mac_vm_copy_out() {
   case "$1" in */allocations)
     test -f "$(mvl_lease_base "$MG_ROOT")/mac-vm.$(jq -r .name <<<"$MG_MAC_VM").lock/holder.json" || return 1
     echo 'allocations-fetch lease-held' >>"$STUB_LOG"
+    case "${FAKE_ALLOCATIONS_COPY_OUT_RC:-0}" in
+      2)
+        if [ "${FAKE_ALLOCATIONS_PARTIAL_COPY:-0}" = 1 ]; then
+          mg_allocation_fake_copy_out "$@" || return
+          rm -f "$1/allocations.trace/data"
+        fi
+        mg__mac_vm_unreachable 'injected trace copy queue' 'Allocations trace copy'; return 2 ;;
+      1) mg_failure mac-vm-copy 'injected trace copy error'; return 1 ;;
+    esac
     ;;
   esac
   mg_allocation_fake_copy_out "$@"
@@ -673,12 +693,17 @@ allocation_run() {
 @test "allocations missing notification/trace and unknown finalization cannot pass" {
   allocation_control_fake
   local mode
-  for mode in missing-notify missing-trace cleanup-failure stop-ssh-loss; do
+  for mode in missing-notify missing-trace cleanup-failure stop-ssh-loss stop-ssh-loss-confirmed; do
     FAKE_ALLOCATIONS="$mode" allocation_run
     [ "$status" -eq 2 ]
     [ "$(field .status)" = error ]
     [ "$(field .details.allocations_diagnostic_failed)" = true ]
     [ "$(field .summary.passed)" = 11 ]
+    case "$mode" in stop-ssh-loss*)
+      [ -f "$(vm_fs meguri-mac "$(dirname "$result")/allocations/metadata.json")" ]
+      [ "$(field .details.allocations_remote_evidence)" = "$(dirname "$result")/allocations" ]
+      ;;
+    esac
   done
 }
 
@@ -694,7 +719,90 @@ allocation_run() {
   [ "$status" -eq 1 ]
   [ "$(field .status)" = fail ]
   [ "$(field .summary.failed)" = 1 ]
+  [ "$(field .details.allocations_diagnostic_failed)" = null ]
+  [ "$(field .details.allocations_incomplete)" = true ]
+  [ "$(field .details.queued)" = false ]
+  [ -f "$(vm_fs meguri-mac "$(dirname "$result")/allocations/metadata.json")" ]
+}
+
+@test "allocations helper copy queue stays queued; a real copy error remains error" {
+  allocation_control_fake
+  FAKE_ALLOCATIONS_COPY_IN_RC=2 MEGURI_MAC_UI_ALLOW_HOST=1 allocation_run
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field .details.allocations_incomplete)" = true ]
+  [ "$(field .details.allocations_diagnostic_failed)" = null ]
+  [ "$(field '[.user_steps[] | select(.id == "mac-vm")] | length')" = 1 ]
+  [ "$(field '[.details.queued_parts[] | select(.part == "Allocations helper copy")] | length')" = 1 ]
+  not_called '^(vm-allocations|vm-xcodebuild|host-xcodebuild)'
+  FAKE_ALLOCATIONS_COPY_IN_RC=1 allocation_run
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
   [ "$(field .details.allocations_diagnostic_failed)" = true ]
+  not_called '^(vm-allocations|vm-xcodebuild|host-xcodebuild)'
+}
+
+@test "allocations trace copy queue preserves passing failing and errored XCTest and remote evidence" {
+  allocation_control_fake
+  local rc expected no_bundle
+  for rc in 0 65 70; do
+    no_bundle=0
+    case "$rc" in 0) expected=warn ;; 65) expected=fail ;; 70) expected=error; no_bundle=1 ;; esac
+    FAKE_ALLOCATIONS_COPY_OUT_RC=2 FAKE_VM_XCODEBUILD_RC="$rc" FAKE_VM_NO_BUNDLE="$no_bundle" allocation_run
+    [ "$(field .status)" = "$expected" ]
+    [ "$(field .details.allocations_diagnostic_failed)" = null ]
+    [ "$(field .details.allocations_incomplete)" = true ]
+    [ "$(field .details.allocations_remote_evidence)" = "$(dirname "$result")/allocations" ]
+    [ "$(field '[.user_steps[] | select(.id == "mac-vm")] | length')" = 1 ]
+    [ "$(field '[.details.queued_parts[] | select(.part == "Allocations trace copy")] | length')" = 1 ]
+    if [ "$rc" -eq 0 ]; then
+      [ "$(field .details.queued)" = true ]
+      [ "$(field .summary.passed)" = 11 ]
+    else
+      [ "$(field .details.queued)" = false ]
+      if [ "$rc" -eq 65 ]; then
+        [ "$(field .summary.failed)" = 1 ]
+      else
+        [ "$(field .summary.total)" = 0 ]
+        [ "$(field '[.failures[] | select(.id == "xcodebuild-test")] | length')" = 1 ]
+      fi
+    fi
+    [ -f "$(vm_fs meguri-mac "$(dirname "$result")/allocations/metadata.json")" ]
+    [ -f "$(vm_fs meguri-mac "$(dirname "$result")/allocations/allocations.trace/data")" ]
+    [ ! -f "$(dirname "$result")/allocations/metadata.json" ]
+    [ -f "$(dirname "$result")/allocations-control.log" ]
+  done
+  not_called '^host-xcodebuild'
+}
+
+@test "allocations trace transfer errors preserve XCTest failures" {
+  allocation_control_fake
+  FAKE_ALLOCATIONS_COPY_OUT_RC=1 allocation_run
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field .summary.passed)" = 11 ]
+  [ "$(field .details.allocations_diagnostic_failed)" = true ]
+  [ -f "$(vm_fs meguri-mac "$(dirname "$result")/allocations/allocations.trace/data")" ]
+  FAKE_ALLOCATIONS_COPY_OUT_RC=1 FAKE_VM_XCODEBUILD_RC=65 allocation_run
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field .summary.failed)" = 1 ]
+  [ "$(field .details.allocations_diagnostic_failed)" = true ]
+}
+
+@test "allocations queued partial trace copy retains metadata and local and remote evidence" {
+  allocation_control_fake
+  FAKE_ALLOCATIONS_COPY_OUT_RC=2 FAKE_ALLOCATIONS_PARTIAL_COPY=1 allocation_run
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field .details.allocations_incomplete)" = true ]
+  [ "$(field .details.allocations_diagnostic_failed)" = null ]
+  [ "$(field .details.allocations.coverage)" = uncertified/partial ]
+  [ "$(field '[.artifacts[] | select(.kind == "allocations")] | length')" = 1 ]
+  [ -f "$(dirname "$result")/allocations/metadata.json" ]
+  [ ! -f "$(dirname "$result")/allocations/allocations.trace/data" ]
+  [ -f "$(vm_fs meguri-mac "$(dirname "$result")/allocations/allocations.trace/data")" ]
 }
 
 @test "allocations losing the start SSH still stops remotely and fetches the error evidence" {
