@@ -544,6 +544,7 @@ exec '"$(command -v tar)"' "$@"'
   called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri_UI_macosx27.0-arm64.xctestrun -destination platform=macOS,arch=arm64 -resultBundlePath $SB/build/mg/ui-test/[^ ]+/mac.xcresult -collect-test-diagnostics never -only-testing:MeguriUITests/NavigationLayoutTests\$"
   not_called "^host-xcodebuild"
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+  [ ! -d "$(dirname "$result")/allocations" ]
 }
 
 @test "ui-test Profile on the Mac runs only the requested method with Meguri-Profile's Performance products in the VM" {
@@ -562,6 +563,7 @@ exec '"$(command -v tar)"' "$@"'
   [ ! -e "$(vm_fs meguri-mac "$(dirname "$result")/mac.xcresult")" ]
   [ "$(field '[.artifacts[] | select(.kind == "perf-result" or .kind == "metrics")] | length')" = 0 ]
   not_called '^host-xcodebuild'
+  [ ! -d "$(dirname "$result")/allocations" ]
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
   validate "$result"
@@ -582,6 +584,147 @@ exec '"$(command -v tar)"' "$@"'
     [ "$(field '.failures[0].id')" = usage ]
   done
   not_called '^(fake build|ssh |tart |vm-|host-xcodebuild)'
+}
+
+# This fake exercises the orchestration only. mac_allocations.bats runs the
+# real helper with deterministic process/clock fakes and no real attachment.
+allocation_control_fake() {
+  local python fake
+  printf -v python '%q' "$(command -v python3)"
+  printf -v fake '%q' "$REPO_ROOT/tools/tests/mac_allocations_fake_vm.py"
+  stub "$FAKE_VM_BIN/python3" '
+case "${1:-}" in
+  */allocations/mac-allocations.py)
+    exec '"$python"' '"$fake"' "$@" ;;
+  *) exec '"$python"' "$@" ;;
+esac'
+  cat >>"$SB/tools/mg.d/zz-vm-fakes.sh" <<'EOF'
+# Assert artifact collection happens before giving the VM lease back.
+eval "$(declare -f mg_mac_vm_copy_out | sed '1s/mg_mac_vm_copy_out/mg_allocation_fake_copy_out/')"
+mg_mac_vm_copy_out() {
+  case "$1" in */allocations)
+    test -f "$(mvl_lease_base "$MG_ROOT")/mac-vm.$(jq -r .name <<<"$MG_MAC_VM").lock/holder.json" || return 1
+    echo 'allocations-fetch lease-held' >>"$STUB_LOG"
+    ;;
+  esac
+  mg_allocation_fake_copy_out "$@"
+}
+EOF
+}
+
+allocation_run() {
+  mg ui-test --platform mac --config Profile --allocations --suite CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory
+}
+
+@test "allocations rejects incompatible flags/selectors before building or probing a VM" {
+  local platform config selector
+  for platform in mac iphone ipad; do
+    for config in Debug Profile; do
+      [ "$platform/$config" != mac/Profile ] || continue
+      mg ui-test --platform "$platform" --config "$config" --allocations --suite CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory
+      [ "$status" -eq 2 ]
+      [ "$(field '.failures[0].id')" = usage ]
+    done
+  done
+  for selector in CardSwapTimingSpikeTests CardSwapTimingSpikeTests/testDiagnostic NavigationLayoutTests; do
+    mg ui-test --platform mac --config Profile --allocations --suite "$selector"
+    [ "$status" -eq 2 ]
+  done
+  mg ui-test --platform mac --config Profile --allocations
+  [ "$status" -eq 2 ]
+  mg ui-test --platform mac --config Profile --allocations --suite CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory --suite CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory
+  [ "$status" -eq 2 ]
+  mg ui-test --platform mac --config Profile --allocations --device some-device --suite CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory
+  [ "$status" -eq 2 ]
+  not_called '^(fake build|ssh |tart |vm-|host-xcodebuild)'
+}
+
+@test "allocations never falls back to the host even when ordinary ui-test explicitly may" {
+  rm -f "$MEGURI_MAC_VM_CONFIG"
+  MEGURI_MAC_UI_ALLOW_HOST=1 allocation_run
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  not_called '^(fake build|host-xcodebuild|vm-xcodebuild|vm-allocations)'
+}
+
+@test "allocations starts before XCTest, stops and fetches under the lease and emits diagnostic-only artifacts" {
+  SB="$(new_checkout "repo's spaces")"
+  allocation_control_fake
+  allocation_run
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.diagnostic_mode)" = allocations ]
+  [ "$(field .details.ordinary_performance_receipt)" = false ]
+  [ "$(field .details.allocations.coverage)" = uncertified/partial ]
+  [ "$(field '.summary | "\(.passed) \(.failed)"')" = '11 0' ]
+  [ "$(grep -c '^vm-allocations --start lease-held$' "$STUB_LOG")" -eq 1 ]
+  [ "$(grep -c '^vm-allocations --stop lease-held$' "$STUB_LOG")" -eq 1 ]
+  [ "$(grep -c '^vm-xcodebuild ' "$STUB_LOG")" -eq 1 ]
+  called '^allocations-fetch lease-held$'
+  awk '/^vm-allocations --start/ {start=NR} /^vm-xcodebuild / {test=NR} /^vm-allocations --stop/ {stop=NR} END {exit !(start < test && test < stop)}' "$STUB_LOG"
+  [ -f "$(dirname "$result")/allocations/allocations.trace/data" ]
+  [ ! -e "$(vm_fs meguri-mac "$(dirname "$result")/allocations")" ]
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  not_called '^host-xcodebuild'
+  [ "$(field '[.artifacts[] | select(.kind == "perf-result" or .kind == "metrics")] | length')" = 0 ]
+  validate "$result"
+}
+
+@test "allocations missing notification/trace and unknown finalization cannot pass" {
+  allocation_control_fake
+  local mode
+  for mode in missing-notify missing-trace cleanup-failure stop-ssh-loss; do
+    FAKE_ALLOCATIONS="$mode" allocation_run
+    [ "$status" -eq 2 ]
+    [ "$(field .status)" = error ]
+    [ "$(field .details.allocations_diagnostic_failed)" = true ]
+    [ "$(field .summary.passed)" = 11 ]
+  done
+}
+
+@test "allocations preserves XCTest failures/counts when profiling or trace copy fails" {
+  allocation_control_fake
+  FAKE_ALLOCATIONS=missing-notify FAKE_VM_XCODEBUILD_RC=65 allocation_run
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field .summary.failed)" = 1 ]
+  [ "$(field .details.allocations_diagnostic_failed)" = true ]
+  # Match copy-out only, not helper-copy-in or the unrelated xcresult fetch.
+  FAKE_VM_SSH_FAIL='tar -C .* -cf - .allocations.' FAKE_VM_XCODEBUILD_RC=65 allocation_run
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field .summary.failed)" = 1 ]
+  [ "$(field .details.allocations_diagnostic_failed)" = true ]
+}
+
+@test "allocations losing the start SSH still stops remotely and fetches the error evidence" {
+  allocation_control_fake
+  FAKE_ALLOCATIONS=start-ssh-loss allocation_run
+  [ "$status" -eq 2 ]
+  [ "$(field .details.allocations_diagnostic_failed)" = true ]
+  called '^vm-allocations --stop lease-held$'
+  not_called '^vm-xcodebuild'
+  [ -f "$(dirname "$result")/allocations/metadata.json" ]
+}
+
+@test "allocations cancellation stops/fetches before VM lease release" {
+  allocation_control_fake
+  local job
+  FAKE_VM_XCODEBUILD_UNTIL="$BATS_TEST_TMPDIR/never" FAKE_VM_IGNORE_TERM=1 "$SB/tools/mg" ui-test \
+    --platform mac --config Profile --allocations --suite CardSwapTimingSpikeTests/testAThousandSwapsKeepTheSamePagesAndFlatMemory \
+    >"$BATS_TEST_TMPDIR/job.out" 2>"$BATS_TEST_TMPDIR/job.err" 3>&- &
+  job=$!
+  bg_track "$job"
+  wait_for "$BATS_TEST_TMPDIR/never.started"
+  kill -TERM "$job"
+  wait "$job" || true
+  result="$(tail -n 1 "$BATS_TEST_TMPDIR/job.out")"
+  [ "$(field '.failures[0].id')" = cancelled ]
+  called '^vm-allocations --stop lease-held$'
+  called '^allocations-fetch lease-held$'
+  [ -f "$(dirname "$result")/allocations/metadata.json" ]
+  [ ! -e "$(vm_fs meguri-mac "$(dirname "$result")/allocations")" ]
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
 }
 
 @test "a locked Mac with its display asleep does not hold up a VM run" {

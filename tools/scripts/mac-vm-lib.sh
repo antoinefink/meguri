@@ -337,8 +337,95 @@ mvl_stop_tests() {
   MVL_STOPPED=""
   MVL_REASON=""
   MVL_UNREACHABLE=""
-  # The brackets keep the shell that runs this command from matching itself.
-  out="$("$1" "p=$(mvl_q 'xcodebuild[ ]test-without-building|UITests-Runner[.]app/Contents/MacOS/|UITests-Runner[.]app/[^/]*UITests-Runner|/[x]ctest( |$)|[m]ac-hidden-launch[.]sh|/Build/Products/Debug/Meguri[.]app/Contents/MacOS/[M]eguri')
+  # Recover only this opt-in helper and its uniquely named trace/waiter.
+  # Discovery reads real argv; all signals still check uid/start/executable
+  # and exact run arguments. Other Instruments sessions never enter this path.
+  local allocations
+  allocations="$(cat <<'PYALLOC'
+import ctypes, os, pathlib, re, shutil, signal, subprocess, sys, time
+prefix = "com.antoinefink.meguri.mg.allocations."
+owned = r"/build/mg/ui-test/[A-Za-z0-9-]+/allocations/"
+notice = r"com[.]antoinefink[.]meguri[.]mg[.]allocations[.][A-Za-z0-9-]+( |$)"
+pattern = owned + r"[m]ac-allocations[.]py --observe |/[x]ctrace record --template Allocations --attach [0-9]+ --time-limit 90s --output .*" + owned + r"allocations[.]trace --no-prompt --notify-tracing-started " + notice + r"|/[n]otifyutil -1 " + notice
+p = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
+if p.returncode not in (0, 1) or p.stderr.strip():
+    sys.exit(1)
+def snapshot(pid):
+    p = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "uid=", "-o", "lstart="], capture_output=True, text=True)
+    if p.returncode == 1 and not p.stdout.strip() and not p.stderr.strip():
+        return None
+    if p.returncode or not p.stdout.strip():
+        raise RuntimeError("allocation orphan identity/exit unknown")
+    uid, start = p.stdout.strip().split(None, 1)
+    if int(uid) != os.getuid():
+        raise RuntimeError("allocation orphan uid mismatch")
+    libc = ctypes.CDLL(None, use_errno=True)
+    mib = (ctypes.c_int * 3)(1, 49, pid)
+    size = ctypes.c_size_t(1024 * 1024)
+    buf = ctypes.create_string_buffer(size.value)
+    if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0):
+        raise RuntimeError("allocation orphan argv unknown")
+    raw = buf.raw[:size.value]
+    argc = ctypes.c_int.from_buffer_copy(raw[:4]).value
+    exe, rest = raw[4:].split(b"\0", 1)
+    args = [os.fsdecode(a) for a in rest.lstrip(b"\0").split(b"\0")[:argc]]
+    if argc < 1 or len(args) != argc:
+        raise RuntimeError("allocation orphan argv incomplete")
+    return uid, start, os.fsdecode(exe), args
+roots, waiters = set(), []
+for value in p.stdout.split():
+    pid = int(value)
+    if pid <= 1:
+        raise RuntimeError("allocation orphan unsafe pid")
+    snap = snapshot(pid)
+    if snap is None:
+        continue
+    args = snap[3]
+    if len(args) == 4 and args[-2] == "--observe":
+        root = pathlib.Path(args[-1])
+        if args[-3] != str(root / "mac-allocations.py"):
+            raise RuntimeError("allocation observer path mismatch")
+    elif "--notify-tracing-started" in args and "--output" in args:
+        root = pathlib.Path(args[args.index("--output") + 1]).parent
+        if args[-1] != prefix + root.parent.name:
+            raise RuntimeError("allocation trace run mismatch")
+    elif len(args) == 3 and args[1] == "-1" and re.fullmatch(re.escape(prefix) + r"[A-Za-z0-9-]+", args[2]) and snap[2] == shutil.which("notifyutil"):
+        waiters.append((pid, snap))
+        continue
+    else:
+        raise RuntimeError("unverified allocation orphan")
+    if not re.search(r"/build/mg/ui-test/[A-Za-z0-9-]+/allocations$", str(root)):
+        raise RuntimeError("allocation orphan outside owned run")
+    roots.add(root)
+if roots or waiters:
+    print("mg-mac-vm: stopping", flush=True)
+for root in roots:
+    # Helper verifies saved start identities and exact argv before signalling.
+    if subprocess.call(["python3", str(root / "mac-allocations.py"), "--orphan-stop", str(root)]) != 0:
+        raise RuntimeError("allocation orphan cleanup unconfirmed")
+for pid, saved in waiters:
+    current = snapshot(pid)
+    if current is None:
+        continue
+    if current != saved:
+        raise RuntimeError("allocation waiter identity changed; not signalled")
+    os.kill(pid, signal.SIGTERM)
+    end = time.monotonic() + 2
+    while snapshot(pid) is not None and time.monotonic() < end:
+        time.sleep(0.05)
+    if snapshot(pid) is not None:
+        raise RuntimeError("allocation waiter exit unconfirmed")
+left = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
+if left.returncode != 1 or left.stderr.strip():
+    raise RuntimeError("allocation orphan exit unconfirmed")
+PYALLOC
+)"
+  out="$("$1" "if pgrep -f $(mvl_q '/build/mg/ui-test/[A-Za-z0-9-]+/allocations/[m]ac-allocations[.]py --observe |--notify-tracing-started com[.]antoinefink[.]meguri[.]mg[.]allocations[.][A-Za-z0-9-]+( |$)|/[n]otifyutil -1 com[.]antoinefink[.]meguri[.]mg[.]allocations[.][A-Za-z0-9-]+( |$)') >/dev/null; then
+  $(mvl_q python3 -c "$allocations") || exit \$?
+else
+  a=\$?; [ \"\$a\" -eq 1 ] || exit \"\$a\"
+fi
+p=$(mvl_q 'xcodebuild[ ]test-without-building|UITests-Runner[.]app/Contents/MacOS/|UITests-Runner[.]app/[^/]*UITests-Runner|/[x]ctest( |$)|[m]ac-hidden-launch[.]sh|/Build/Products/Debug/Meguri[.]app/Contents/MacOS/[M]eguri')
 if pgrep -f \"\$p\" >/dev/null; then
   echo 'mg-mac-vm: stopping'
   pkill -f \"\$p\"
