@@ -2,6 +2,12 @@
 
 Every verification job belongs to a tier (R1950). `tools/gate/tiers.yaml` is the one list: each run is a `tools/mg` job with its arguments, tier, the paths that trigger it, where its work happens (R1952) and a time budget. The gate refuses that file when a registered job has neither a run nor a line under `utilities`, so a new job must be placed in a tier in the change that adds it.
 
+## Current WIP cadence
+
+Antoine approved focused verification per unit on 2026-10-20. Each unit needs tests for its changed behavior, affected-platform builds, independent review and provenance/privacy/similarity checks. Record the selected checks and receipts in its review log. Resolve known failures before accepting it; focused verification cannot bypass a failed full gate.
+
+Run full gates at milestones, app handoffs and after changes to shared build/test tooling. Keep all final acceptance suites and required human evidence. The tier table and trigger definitions below still describe what a full gate runs; this WIP cadence changes how often it runs. Gate arguments, result validity, quarantine, catch-up and milestone evaluation stay as defined below.
+
 | Tier | When | What | Command |
 |---|---|---|---|
 | T0 | every change | static checks, then canaries, then for the changed paths: committed goldens on macOS and Linux, Rust and Swift unit tests, `lint-ui`, `core-lint`, `core-deny`, the notices check (U16), the similarity scan, snapshot and accessibility tests for touched UI, the simulator perf smoke for touched hot paths (R1863) | `tools/mg gate` |

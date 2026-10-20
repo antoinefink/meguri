@@ -4,7 +4,7 @@ You build Meguri from specs. Anki's source never enters your environment (KTD1, 
 
 ## Session
 
-- Current workflow (Antoine, 2026-10-18): work directly on `master` in the main checkout, with a session from `tools/mg session record`. Do not create branches or worktrees. The source exclusions below still apply, including to history and reports. Run the full `tools/mg gate --base <unit-start-commit>` before accepting the unit. The worktree setup below documents existing sessions only.
+- Current workflow (Antoine, 2026-10-18/20): work directly on `master` with a session from `tools/mg session record`; create no branches or worktrees. Source exclusions still apply to files, history and reports. Per unit, run focused tests, affected-platform builds, independent review and provenance/privacy/similarity checks; resolve known failures before acceptance. Full gates run at milestones, app handoffs and after shared build/test tooling changes. Final suites and human evidence remain mandatory. The worktree setup below documents existing sessions only.
 
 - Implement and fix through `tools/mg cleanroom --prompt <file> --session <id>` in a filtered copy of clean master. The orchestrator reviews its patch, applies it to master and runs verification there. See `tools/cleanroom/README.md`; no branches or worktrees are created. Infrastructure bootstrap and integration may use the main checkout, but must not read forbidden sources.
 
@@ -33,7 +33,7 @@ You build Meguri from specs. Anki's source never enters your environment (KTD1, 
 - No Anki web assets (reviewer scripts, image occlusion runtime, editor, MathJax configuration) in the app or in tests (R1960).
 - UI work: at most three render-and-fix rounds per screen, then hand it to the critic and the gates (R1987).
 - A similarity flag reaches you as the implementer view: file, lines, channel, score. Rewrite that region from the spec. Do not ask for the reviewer view. `tools/mg merge` copies it to `build/mg/merge-feedback/<run>/` in your worktree.
-- Before you hand back a round, commit and run `tools/mg gate --local`: every run your change triggers but the similarity scan and the oracle-image runs, which `tools/mg merge` adds (docs/process/tiers.md). Nothing retries; a flaky test is fixed or quarantined, never rerun until green.
+- Before handing back a round, run focused verification for changed behavior and affected builds. The filtered runner exports a patch; its orchestrator applies, commits and verifies through `tools/mg`, including provenance/privacy/similarity checks. Follow the full-gate cadence in `docs/process/tiers.md`. Nothing retries; a flaky test is fixed or quarantined, never rerun until green.
 
 ## Commits
 

@@ -13,7 +13,8 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 ## Tooling
 
-- Work directly on `master` in the main checkout; do not create branches or worktrees. Resume prepared work from existing worktrees without redoing it. Record each unit's starting commit, keep its review/fix log, and run `tools/mg gate --base <unit-start-commit>` before accepting it. Commit WIP with co-author attribution; push only `master`, never force. `tools/mg merge` is not required (Antoine, 2026-10-18).
+- Work directly on `master` in the main checkout; do not create branches or worktrees. Resume prepared work without redoing it. Record each unit's starting commit and review/fix log. Commit WIP with co-author attribution; push only `master`, never force. `tools/mg merge` is not required (Antoine, 2026-10-18).
+- WIP verification (Antoine, 2026-10-20): per unit, run focused tests, affected-platform builds, independent review, and provenance/privacy/similarity checks. Resolve known failures before acceptance. Run full gates at milestones, app handoffs and after shared build/test tooling changes. Final suites and required human evidence remain mandatory. See `docs/process/tiers.md`.
 
 - Build, test and verify only through `tools/mg <job>` (`tools/mg --list`; contract in `tools/AGENTS.md`). Rust, oracle and sync-server work runs in Docker; Apple builds run on the host; simulators and Mac UI suites run in the macOS test VM.
 - Never perform the one-time user steps (`docs/process/one-time-setup.md`); `tools/mg doctor` lists the missing ones.

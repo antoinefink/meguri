@@ -10,7 +10,7 @@ Meguri reimplements Anki's behavior without its code (KTD1, R1954–R1960, R2021
 | critic | packet directory, no tools (U10) | never |
 | infra, integrator | main checkout | no need |
 
-Antoine changed the build workflow on 2026-10-18: all new work happens directly on `master`, with no new branches or worktrees. Implementer and fixer sessions use `tools/mg session record`; their forbidden-source rules and commit trailers still apply. Existing role worktrees remain sources of prepared work. Their setup below describes the earlier workflow. Every completed unit requires its review log and a full `tools/mg gate --base <unit-start-commit>` receipt; `tools/mg merge` is optional.
+Antoine changed the build workflow on 2026-10-18: all new work happens directly on `master`, with no new branches or worktrees. Implementer and fixer sessions use `tools/mg session record`; their forbidden-source rules and commit trailers still apply. Existing role worktrees remain sources of prepared work. Their setup below describes the earlier workflow. Every completed unit requires its review log and verification receipts. Under the WIP cadence approved on 2026-10-20, focused tests, affected-platform builds, independent review and provenance/privacy/similarity checks run per unit; full gates run at milestones, app handoffs and after shared build/test tooling changes. Known failures block acceptance. Final suites and required human evidence stay mandatory; `tools/mg merge` is optional.
 
 For new implementation and fixes, `tools/mg cleanroom` exports a filtered copy of
 clean master into a separate container. Forbidden trees, build output, real Git
