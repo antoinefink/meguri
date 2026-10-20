@@ -726,6 +726,7 @@ extension TestHooks {
         }
 
         private static func memoryRegions() -> MemoryRegions {
+            #if os(macOS)
             var result = MemoryRegions()
             let pageSize = sysconf(_SC_PAGESIZE)
             if pageSize > 0 { result.pageSize = UInt64(pageSize) }
@@ -799,6 +800,11 @@ extension TestHooks {
             }
             result.reason = "callCap"
             return result
+            #else
+            return MemoryRegions(
+                kernelStatus: KERN_NOT_SUPPORTED,
+                reason: "region tags are collected only on macOS")
+            #endif
         }
 
         private static func addRegionCount(_ value: UInt64, to total: inout UInt64) -> Bool {
