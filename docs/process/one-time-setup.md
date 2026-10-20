@@ -25,6 +25,15 @@ Install the iOS 27 simulator runtime: Xcode › Settings › Components, or `xco
 
 Add the Apple account for team DNQ34W43XX: Xcode › Settings › Accounts › + › Apple Account. Until then, Mac builds are ad-hoc signed (no App Group) and device builds are blocked. Doctor warns.
 
+Physical development builds also need current account agreements and App Group
+`group.com.antoinefink.meguri.dev` assigned to both App IDs
+`com.antoinefink.meguri.dev` and `com.antoinefink.meguri.dev.widget`.
+Configure these in Certificates, Identifiers & Profiles. Doctor checks only
+whether the account is present; it does not establish profile validity.
+`ui-test --physical-device <identifier>` uses team signing and lets Xcode refresh
+profiles. Preserve the app and widget's shared-group entitlements.
+
+
 ### `docker-resources`
 
 Give Docker Desktop at least 12 CPUs and 16 GB of memory: Docker Desktop › Settings › Resources. The oracle runs 12 workers. Doctor warns below these values. It reads the memory total inside Docker's Linux VM, which is up to about 1 GB below the setting, so it accepts 90% of 16 GB.

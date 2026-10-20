@@ -57,3 +57,13 @@ available iPhone18,1 on iOS 27.0.1 (24A446). Run
 “PLA Update available” and requires acceptance of the updated Developer Program
 License Agreement. No app was installed and neither test ran. Both results remain
 pending; this build failure does not establish an S2(a) media failure.
+
+
+Antoine accepts the agreement. Run `ui-test/20261020T062310Z-67240` then
+creates profiles but stops on the app and widget App Group entitlement mismatch.
+Run `ui-test/20261020T062605Z-69473` has the same result with
+`REGISTER_APP_GROUPS=YES`; that setting is defined in Xcode's macOS specifications
+and is removed from the physical iOS command. Neither attempt installs the app
+or runs a test. Pending setup: register `group.com.antoinefink.meguri.dev` in
+the developer account and assign it to both development App IDs. Keep the
+existing entitlements. The next run must refresh profiles and execute both tests.
