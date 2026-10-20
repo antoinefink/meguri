@@ -70,10 +70,13 @@ final class TestPlanEditorProbeTests: XCTestCase {
             + (environment["MEGURI_PLAN_EDITOR_DISABLE_IOS_COMPONENT"] == "1" ? 1 : 0))
         func dumpTree() {
             let tree = roots().enumerated().map { "ROOT \($0.offset)\n\($0.element.debugDescription)" }
-            let menus = (app.menus.allElementsBoundByIndex + app.menuItems.allElementsBoundByIndex
-                + app.menuButtons.allElementsBoundByIndex + app.popUpButtons.allElementsBoundByIndex)
-                .filter { $0.isHittable }
-                .map { "MENU \($0.elementType.rawValue) label=\($0.label) identifier=\($0.identifier)" }
+            // Printed menu metadata is diagnostic only; actions use concrete selectors and hittability checks.
+            let menus = app.debugDescription.components(separatedBy: "\n").filter { line in
+                let element = line.trimmingCharacters(in: .whitespaces)
+                return ["Menu,", "MenuItem,", "MenuButton,", "PopUpButton,"].contains {
+                    element.hasPrefix($0)
+                } && line.contains("{{") && !line.contains(", {0.0, 0.0}}")
+            }
             let output = ("MEGURI_PLAN_EDITOR_TREE\n" + (tree + menus).joined(separator: "\n"))
                 .prefix(dumpLimit - 1)
             print(output)
