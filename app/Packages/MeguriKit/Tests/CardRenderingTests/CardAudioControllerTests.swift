@@ -791,11 +791,7 @@ enum NativeCardAudioChecks {
         fixture.add("/third.mp3", silent.data, "audio/mpeg")
         let diagnostics = CardDiagnostics()
         let backend = AVQueuePlayback()
-        var nativeSamples: [(position: TimeInterval, observedAt: TimeInterval, isPlaying: Bool)] = []
         var nativeCompletions: [(arrival: TimeInterval, mainEntry: TimeInterval)] = []
-        backend.onNativeSample = { position, observedAt, isPlaying in
-            if nativeSamples.count < 1024 { nativeSamples.append((position, observedAt, isPlaying)) }
-        }
         backend.onNativeCompletionInterval = { arrival, mainEntry in
             if nativeCompletions.count < 512 { nativeCompletions.append((arrival, mainEntry)) }
         }
@@ -856,10 +852,7 @@ enum NativeCardAudioChecks {
         controller.close()
         await controller.transportSettled()
         let nativeCompletion = try #require(nativeCompletions.first)
-        let firstClipSamples = nativeSamples.filter { $0.observedAt < firstCompletion }
-        let firstNotPlaying = firstClipSamples.first { !$0.isPlaying }?.observedAt
-        let maxFirstPosition = firstClipSamples.map(\.position).max()
-        print("nativeAudioQueueDelivery nativeArrival=\(nativeCompletion.arrival) mainEntry=\(nativeCompletion.mainEntry) arrivalLagRelativeToFirstEnd=\(nativeCompletion.arrival - firstEnd) mainHopLatency=\(nativeCompletion.mainEntry - nativeCompletion.arrival) lastFirstPosition=\(lastFirst.position) lastFirstDuration=\(lastFirst.duration) firstNotPlayingBeforeFirstCompletion=\(firstNotPlaying.map { String($0) } ?? "none") maxFirstClipPositionBeforeFirstCompletion=\(maxFirstPosition.map { String($0) } ?? "none") sampleCount=\(nativeSamples.count) sampleBufferFull=\(nativeSamples.count == 1024)")
+        print("nativeAudioQueueDelivery nativeArrival=\(nativeCompletion.arrival) mainEntry=\(nativeCompletion.mainEntry) arrivalLagRelativeToFirstEnd=\(nativeCompletion.arrival - firstEnd) mainHopLatency=\(nativeCompletion.mainEntry - nativeCompletion.arrival)")
     }
 
     static func securelyOpenedSilentFileActuallyAdvancesAndSeeks() async throws {

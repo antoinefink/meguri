@@ -9,7 +9,6 @@ public final class AVQueuePlayback: CardAudioBackend {
     var onNativePlayInterval: ((TimeInterval, TimeInterval) -> Void)?
     // Temporary, nil-by-default test diagnostics; no app/UI observation or logging.
     var onNativeCompletionInterval: (@MainActor (TimeInterval, TimeInterval) -> Void)?
-    var onNativeSample: (@MainActor (TimeInterval, TimeInterval, Bool) -> Void)?
     public init() {}
     public func prepare(_ file: MediaFile) async throws -> any CardAudioClip {
         let ext = (file.name as NSString).pathExtension.lowercased()
@@ -18,7 +17,7 @@ public final class AVQueuePlayback: CardAudioBackend {
         let owner = PlayerOwner(player: try await Self.makePlayer(at: url), file: file)
         let metadata = await owner.metadata()
         let clip = NativeClip(owner: owner, duration: metadata.duration, seekable: metadata.seekable,
-                              onPlay: onNativePlayInterval, onCompletion: onNativeCompletionInterval, onSample: onNativeSample)
+                              onPlay: onNativePlayInterval, onCompletion: onNativeCompletionInterval)
         return clip
     }
 
@@ -73,10 +72,9 @@ public final class AVQueuePlayback: CardAudioBackend {
             player.currentTime = time
             setDelegate(delegate)
         }
-        func sample() -> (sample: CardAudioSample, isPlaying: Bool) {
+        func sample() -> CardAudioSample {
             let position = player.currentTime
-            let sample = CardAudioSample(position: position, observedAt: ProcessInfo.processInfo.systemUptime)
-            return (sample, player.isPlaying)
+            return CardAudioSample(position: position, observedAt: ProcessInfo.processInfo.systemUptime)
         }
     }
 
@@ -141,12 +139,10 @@ public final class AVQueuePlayback: CardAudioBackend {
             set { completion.onEnd = newValue }
         }
         private let onPlay: ((TimeInterval, TimeInterval) -> Void)?
-        private let onSample: (@MainActor (TimeInterval, TimeInterval, Bool) -> Void)?
         init(owner: PlayerOwner, duration: TimeInterval, seekable: Bool, onPlay: ((TimeInterval, TimeInterval) -> Void)?,
-             onCompletion: (@MainActor (TimeInterval, TimeInterval) -> Void)?,
-             onSample: (@MainActor (TimeInterval, TimeInterval, Bool) -> Void)?) {
+             onCompletion: (@MainActor (TimeInterval, TimeInterval) -> Void)?) {
             self.owner = owner; self.duration = duration; self.seekable = seekable; self.onPlay = onPlay
-            self.completion = Completion(onInterval: onCompletion); self.onSample = onSample
+            self.completion = Completion(onInterval: onCompletion)
             super.init()
         }
         isolated deinit {
@@ -163,10 +159,6 @@ public final class AVQueuePlayback: CardAudioBackend {
         func seek(to time: TimeInterval) async throws {
             try await owner.seek(to: time, delegate: completion.makeDelegate())
         }
-        func sample() async -> CardAudioSample {
-            let (sample, isPlaying) = await owner.sample()
-            onSample?(sample.position, sample.observedAt, isPlaying)
-            return sample
-        }
+        func sample() async -> CardAudioSample { await owner.sample() }
     }
 }
