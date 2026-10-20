@@ -10,7 +10,7 @@ Antoine’s updated goal on 2026-10-20 allows up to 20 units changing only Rust 
 
 Manual device and reference checks are deferred until the final session (Antoine, 2026-10-20). Continue with automated VM tests. Final evidence remains required.
 
-The branch-merge procedure below remains available for historical receipts and existing tooling. Queued runs remain incomplete verification: run `tools/mg catch-up` between units and require passing results at milestone gates.
+The branch-merge procedure below remains available for historical receipts and existing tooling. Queued runs remain incomplete verification: run `tools/mg catch-up` between units and require passing results at milestone gates. Run catch-up on the clean gate commit before committing acceptance-only notes when possible, so it can reuse exact-commit passing results. Record both receipts afterwards.
 
 A full, clean main-checkout gate with an explicit base saves its queued checks
 for catch-up when the tip commit carries `Unit:`. Local, partial and dirty gates
