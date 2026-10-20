@@ -188,7 +188,7 @@ extension TestHooks {
             observations["currentHidden"] = page.webView.isAccessibilityHidden()
             observations["idleHidden"] = pair.idle.webView.isAccessibilityHidden()
             let webView = page.webView
-            let unignoredChildren = NSAccessibilityUnignoredChildren([webView]) as [Any]
+            let unignoredChildren = NSAccessibility.unignoredChildren(from: [webView]) as [Any]
             observations["macAccessibility"] = [
                 "currentIsElement": webView.isAccessibilityElement(),
                 "currentRole": webView.accessibilityRole()?.rawValue ?? "none",
