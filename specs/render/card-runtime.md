@@ -340,11 +340,13 @@ During steps 3 to 8, card code that reads `#qa.style.opacity` sees `0`. A templa
 
 | Update | Internal update callback | Internal shown callback |
 |---|---|---|
-| question | scroll the window to the top-left corner. Then set the `class` attribute of `<body>` to `bodyclass` exactly. | remember the element with id `typeans` (null if none) for `getTypedAnswer` (C10.3). If there is one, focus it (R534). Then, without waiting, preload the answer's images (C7.3). |
+| question | scroll the window to the top-left corner. Then set the `class` attribute of `<body>` to `bodyclass` exactly. | remember the element with id `typeans` (null if none) for `getTypedAnswer` (C10.3). If there is one, focus it when native keyboard ownership permits automatic focus (below, R534). Then, without waiting, preload the answer's images (C7.3). |
 | answer | if `bodyclass` is a non-empty string, set `<body>`'s `class` to it. Then, without waiting, once every `<img>` in the document has finished loading (C7.3), scroll the element with id `answer` into view, aligned to the top, if there is one. | nothing |
 | `_updateQA` call | the `onupdate` argument | the `onshown` argument |
 
-- R534 on iOS: U65's S1(e) (`docs/design/decisions/s1-occluded-page-swap.md`) found that `focus()` from page script after the swap raises the software keyboard with no tap, provided native has made the newly front web view first responder in the swap's turn (U67). The question's internal shown callback is that `focus()`: it runs at presentation (C6.6), after the swap, so no keyboard-specific code is needed in the runtime. S1(e) passed on the simulator; the device check is a U256 checkpoint.
+- **Automatic focus and native ownership.** U67 privately supplies whether review owns keyboard focus. Gate only the stock question/type-answer internal shown focus on that current ownership, including any later task that applies it. When a native editor, panel or sheet owns the keyboard, skip that automatic focus and leave no queued focus request that could take it later. Remembering `#typeans` for C10.3, answer preloading and the remaining hooks still run. Explicit card calls to DOM focus or an existing focus helper are unchanged; this gate neither replaces their behavior nor adds a page global. A standalone runtime with no native ownership override retains its existing automatic focus.
+
+- R534 on iOS: U65's S1(e) (`docs/design/decisions/s1-occluded-page-swap.md`) found that `focus()` from page script after the swap raises the software keyboard with no tap, provided native has made the newly front web view first responder in the swap's turn (U67). When review owns the keyboard, the question's internal shown callback performs that `focus()` at presentation (C6.6), after the swap commit. The ownership gate does not move allowed automatic focus before the commit or remove the normal R534 behavior. S1(e) passed on the simulator; the device check is a U256 checkpoint.
 
 ### C6.5 Script walk
 
