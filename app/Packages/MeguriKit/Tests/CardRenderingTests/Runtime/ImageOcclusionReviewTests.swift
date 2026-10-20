@@ -756,7 +756,6 @@ extension WebKitSuites.CardRuntimeSuites {
             let harness = WebTestHarness()
             defer { harness.close() }
             Self.instrument(harness, source: """
-                // Preserve the native accessor and receiver before the fixed-DPR override.
                 const originalWindow=window;
                 let owner=originalWindow, descriptor;
                 while(owner && !descriptor) {
@@ -764,76 +763,25 @@ extension WebKitSuites.CardRuntimeSuites {
                   owner=Object.getPrototypeOf(owner);
                 }
                 const getter=descriptor && descriptor.get;
-                const nativeStop=ResizeObserver.prototype.disconnect;
-                const add=EventTarget.prototype.addEventListener, remove=EventTarget.prototype.removeEventListener;
-                const queries=[], counters={resize:0,containerRO:0,resolutionChange:0};
-                let diagnosticActive=true;
-                const onResize=e=>{if(e.isTrusted) counters.resize++;};
-                const onResolution=e=>{if(e.isTrusted) counters.resolutionChange++;};
-                Reflect.apply(add,originalWindow,['resize',onResize]);
-                const observer=new ResizeObserver(()=>{counters.containerRO++;});
-                window.__ioZoomDiagnostic={
-                  observe:container=>observer.observe(container),
-                  resolution:m=>{if(diagnosticActive) {queries.push(m); Reflect.apply(add,m,['change',onResolution]);}},
-                  stop:()=>{
-                    diagnosticActive=false;
-                    Reflect.apply(nativeStop,observer,[]);
-                    Reflect.apply(remove,originalWindow,['resize',onResize]);
-                    for(const m of queries) Reflect.apply(remove,m,['change',onResolution]);
-                  },
-                  snapshot:()=>{
-                    let nativeDPR=null, nativeDPRStatus=!descriptor ? 'descriptor-unavailable' :
-                      typeof getter!=='function' ? 'getter-unavailable' : 'value-unavailable';
-                    if(typeof getter==='function') {
-                      try {
-                        const value=Reflect.apply(getter,originalWindow,[]);
-                        if(typeof value==='number' && Number.isFinite(value)) {nativeDPR=value; nativeDPRStatus='available';}
-                      } catch {}
-                    }
-                    const c=document.getElementById('image-occlusion-canvas');
-                    const container=document.getElementById('image-occlusion-container');
-                    const cr=c?.getBoundingClientRect(), r=container?.getBoundingClientRect(), v=originalWindow.visualViewport;
-                    return {nativeDPRDescriptorAvailable:!!descriptor,nativeDPRGetterAvailable:typeof getter==='function',nativeDPRStatus,nativeDPR,
-                      overriddenDPR:originalWindow.devicePixelRatio,ioPasses:originalWindow.__ioPasses,
-                      canvasClientWidth:c?.clientWidth??null,canvasClientHeight:c?.clientHeight??null,
-                      canvasRectWidth:cr?.width??null,canvasRectHeight:cr?.height??null,
-                      canvasBackingWidth:c?.width??null,canvasBackingHeight:c?.height??null,
-                      containerClientWidth:container?.clientWidth??null,containerClientHeight:container?.clientHeight??null,
-                      containerRectWidth:r?.width??null,containerRectHeight:r?.height??null,
-                      innerWidth:originalWindow.innerWidth,innerHeight:originalWindow.innerHeight,
-                      visualViewportWidth:v?.width??null,visualViewportHeight:v?.height??null,visualViewportScale:v?.scale??null,
-                      ...counters};
-                  }
-                };
-                window.__ioDPR=1; window.__ioMediaQueries=[]; window.__ioDisconnected=0;
-                Object.defineProperty(window,'devicePixelRatio',{get:function(){return __ioDPR;},configurable:true});
+                // Keep native zoom visible until the later controlled-DPR phase.
+                window.__ioDPR=null; window.__ioMediaQueries=[]; window.__ioDisconnected=0;
+                Object.defineProperty(window,'devicePixelRatio',{get:function(){
+                  if(typeof getter!=='function') throw Error('Native devicePixelRatio getter unavailable; live accessor required');
+                  return __ioDPR===null ? Reflect.apply(getter,originalWindow,[]) : __ioDPR;
+                },configurable:true});
                 const match=window.matchMedia;
                 window.matchMedia=function(q){
                   const m=Reflect.apply(match,window,[q]); __ioMediaQueries.push(m);
-                  if(/resolution/.test(q)) __ioZoomDiagnostic.resolution(m);
                   return m;
                 };
-                ResizeObserver.prototype.disconnect=function(){__ioDisconnected++; return Reflect.apply(nativeStop,this,[]);};
+                const stop=ResizeObserver.prototype.disconnect;
+                ResizeObserver.prototype.disconnect=function(){__ioDisconnected++; return Reflect.apply(stop,this,[]);};
                 """)
             let page = try await harness.openPage(size: CGSize(width: 390, height: 600))
-            func zoomDiagnostic(_ phase: String) async {
-                let bounds = page.webView.bounds
-                do {
-                    let json: String? = try await page.run("""
-                        return JSON.stringify({...__ioZoomDiagnostic.snapshot(),phase,pageZoom,boundsX,boundsY,boundsWidth,boundsHeight});
-                        """, ["phase": phase, "pageZoom": page.webView.pageZoom,
-                              "boundsX": bounds.origin.x, "boundsY": bounds.origin.y,
-                              "boundsWidth": bounds.width, "boundsHeight": bounds.height]) as? String
-                    print("U68_ZOOM_DIAGNOSTIC \(json ?? "{\"snapshotStatus\":\"unavailable\"}")")
-                } catch {
-                    print("U68_ZOOM_DIAGNOSTIC {\"snapshotStatus\":\"unavailable\"}")
-                }
-                if phase != "beforeZoom" { _ = try? await page.run("__ioZoomDiagnostic.stop();") }
-            }
+            try await page.run("if(!Number.isFinite(devicePixelRatio) || devicePixelRatio<=0) throw Error('Native devicePixelRatio must be finite and positive');")
             try await Self.prepare(harness, page)
             let auto = try Self.side().replacingOccurrences(of: "width: 400px", with: "width: auto")
             try await Self.showDrawn(page, auto)
-            try await page.run("__ioZoomDiagnostic.observe(document.getElementById('image-occlusion-container'));")
             #expect(try await page.string("__ioPasses") == "1")
             page.webView.frame.size.width = 700
             try await Self.passes(page, 2)
@@ -841,19 +789,16 @@ extension WebKitSuites.CardRuntimeSuites {
             #expect(try await page.string("__ioPasses") == "2")
             try await Self.expectCurrentSize(page)
             #expect(try await Self.pixel(page, ".5*W", ".175*H") == Self.red)
-            await zoomDiagnostic("beforeZoom")
             page.webView.pageZoom = 1.5
-            do {
-                try await Self.passes(page, 3)
-            } catch {
-                await zoomDiagnostic("pass3Error")
-                throw error
-            }
-            await zoomDiagnostic("pass3Success")
+            try await Self.passes(page, 3)
             try await Self.frames(page)
             #expect(try await page.string("__ioPasses") == "3")
             try await Self.expectCurrentSize(page)
-            try await page.run("__ioDPR=3; __ioMediaQueries[__ioMediaQueries.length-1].dispatchEvent(new Event('change'));")
+            try await page.run("""
+                const current=devicePixelRatio, next=current+1;
+                if(!Number.isFinite(next) || next<=0 || next===current) throw Error('Controlled DPR must be finite, positive and distinct');
+                __ioDPR=next; __ioMediaQueries[__ioMediaQueries.length-1].dispatchEvent(new Event('change'));
+                """)
             try await Self.passes(page, 4)
             try await Self.frames(page)
             #expect(try await page.string("__ioPasses") == "4")
