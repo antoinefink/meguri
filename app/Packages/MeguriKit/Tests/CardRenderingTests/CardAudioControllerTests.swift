@@ -350,7 +350,7 @@ import AVFoundation
         fixture.add("/q1.mp3", Data([1]), "")
         let backend = Backend(), session = Session()
         var controller: CardAudioController? = CardAudioController(resolver: try await fixture.resolved(), backend: backend, session: session)
-        weak var weakController = controller
+        weak let weakController = controller
         await controller?.prepare(payload: payload(), update: question)?.value
         let clip = try #require(backend.clips.first)
         let play = Hold(), stop = Hold()
