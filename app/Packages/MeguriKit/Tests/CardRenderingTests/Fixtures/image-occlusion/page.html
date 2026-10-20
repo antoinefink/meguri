@@ -1,0 +1,21 @@
+<style>
+#image-occlusion-container { width: 400px; max-height: none; }
+#image-occlusion-canvas {
+  --active-shape-color: #ff0000;
+  --inactive-shape-color: #0000ff;
+  --highlight-shape-color: #ffff0000;
+  --active-shape-border: 0px #000000;
+  --inactive-shape-border: 0px #000000;
+  --highlight-shape-border: 1px #00ff00;
+}
+</style>
+<div hidden>{{shapes}}</div>
+<div id="err"></div>
+<div id="image-occlusion-container"><img src="_io.png"><canvas id="image-occlusion-canvas"></canvas></div>
+{{button}}
+<script>
+try {
+  if (typeof anki.imageOcclusion.setup !== "function") document.getElementById("err").innerText = "API unavailable";
+  anki.imageOcclusion.setup(window.__ioOptions).then(function () { window.__ioResolved.push(window.__ioPasses); });
+} catch (error) { document.getElementById("err").innerText = String(error); }
+</script>

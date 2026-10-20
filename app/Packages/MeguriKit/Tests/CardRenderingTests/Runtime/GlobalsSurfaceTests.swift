@@ -98,8 +98,9 @@ extension WebKitSuites.CardRuntimeSuites {
 
         /// C9.4: the runtime creates no global lexical bindings: its top level
         /// is one expression statement that calls a function expression.
-        @Test func runtimeDeclaresNothingAtItsTopLevel() throws {
-            let source = String(decoding: try #require(CardRuntime.asset(at: "runtime.js")).data, as: UTF8.self)
+        @Test(arguments: ["runtime.js", "image-occlusion.js"])
+        func runtimeDeclaresNothingAtItsTopLevel(asset: String) throws {
+            let source = String(decoding: try #require(CardRuntime.asset(at: asset)).data, as: UTF8.self)
             var lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
             // The leading comment block.
             while let first = lines.first, first.hasPrefix("//") || first.isEmpty { lines.removeFirst() }
@@ -128,7 +129,8 @@ extension WebKitSuites.CardRuntimeSuites {
         /// own locals.
         @Test func pageScriptsNeverNameOtherClientsGlobals() throws {
             let runtime = String(decoding: try #require(CardRuntime.asset(at: "runtime.js")).data, as: UTF8.self)
-            for (script, source) in [("runtime.js", runtime), ("interaction.js", CardRuntime.interactionScript)] {
+            let occlusion = String(decoding: try #require(CardRuntime.asset(at: "image-occlusion.js")).data, as: UTF8.self)
+            for (script, source) in [("runtime.js", runtime), ("image-occlusion.js", occlusion), ("interaction.js", CardRuntime.interactionScript)] {
                 for name in Self.neverDefined {
                     let pattern = try Regex("(^|[^A-Za-z0-9_$])" + NSRegularExpression.escapedPattern(for: name) + "([^A-Za-z0-9_$]|$)")
                     #expect(!source.contains(pattern), "\(script) names \(name)")
@@ -384,7 +386,7 @@ extension WebKitSuites.CardRuntimeSuites {
                     var value = await anki.mutateNextCardStates("k", function () { called = true; });
                     return [String(value), String(called), Object.keys(anki).join("|")].join(",");
                     """)
-                #expect(result as? String == "undefined,false,mutateNextCardStates")
+                #expect(result as? String == "undefined,false,mutateNextCardStates|imageOcclusion|setupImageCloze")
             }
         }
 

@@ -618,12 +618,12 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
 /// Media made at run time: no binary fixture is committed.
 enum TestMedia {
     /// A PNG of `width` × `height` pixels in one colour.
-    static func png(width: Int = 4, height: Int = 4) -> Data {
+    static func png(width: Int = 4, height: Int = 4, color: CGColor? = nil) -> Data {
         let space = CGColorSpace(name: CGColorSpace.sRGB)!
         let context = CGContext(
             data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1))
+        context.setFillColor(color ?? CGColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         let data = NSMutableData()
         let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil)!

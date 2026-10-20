@@ -1,10 +1,10 @@
 # CardRuntime
 
-What every card page loads (specs/render/card-runtime.md, U66): `page.html` (skeleton with `{{…}}` markers that `CardRuntime.pageDocument` fills), `base.css`, `runtime.js` (page world), `interaction.js` (Meguri's content world), upstream jQuery. Tests: `Tests/CardRenderingTests/Runtime/`.
+What every card page loads (specs/render/card-runtime.md, U66): `page.html` (skeleton with `{{…}}` markers that `CardRuntime.pageDocument` fills), `base.css`, `runtime.js` and `image-occlusion.js` (separate page-world IIFEs), `interaction.js` (Meguri's content world), upstream jQuery. Tests: `Tests/CardRenderingTests/Runtime/`.
 
 ## Traps
 
-- **C9 surface only.** Keep the whole runtime inside one immediately invoked expression; only C9.1 names may become page globals. Define `pycmd` and `bridgeCommand` as non-configurable. `GlobalsSurfaceTests` also checks the source indentation.
+- **C9 surface only.** Keep each page-world asset inside its own immediately invoked expression; only C9.1 names may become page globals. Define `pycmd` and `bridgeCommand` as non-configurable. `GlobalsSurfaceTests` also checks the source indentation.
 - **Classic-script semantics** (C6.5). Never change a card script's `type`, add `"use strict"` or a wrapper, snapshot the script list (the walk reads a live collection by index), or re-run a script with `cloneNode`. Copies are fresh elements with cloned `Attr` nodes (`setAttributeNode`: no name validation) and the text nodes' data. After each script the walk awaits one microtask, so the promise jobs it queued run before the next script.
 - **Script kinds are WebKit's** (C6.5 waits only for `src` scripts the engine fetches). WebKit strips ASCII whitespace around a JavaScript `type` but not around `module`, so `type=" module "` is a data block there, unlike in the HTML standard; a `language` value is never stripped. `ScriptSemanticsTests.walkWaitsExactlyForTheScriptsTheEngineFetches` checks each form against the engine: add new forms there.
 - **Run first.** `runtime.js` is the first script in `<head>`; its window capture listeners (IME state, media hold, `meguri:native`, `meguri:query`, errors) exist before any card script, `reviewExtra` included. `interaction.js` is injected at document start, so its `meguri:signal` listener is the first on window and stops the event: card scripts never see signals.
@@ -24,3 +24,11 @@ Native → page, in the interaction world: `meguriCard.identity(card, generation
 Page → native: `meguriCard` messages `{signal, side, card?, generation?, …}`: `settled`, `shown`, `visible {token}`, `updateFailed {error}`, `command {command}` (pycmd) or `{reveal: true}` (`_typeAnsPress`), `error {kind, message, line?, column?, source?, phase, index?}`, `mediaError {tag, url, family?}`, `selection {selected}`, `focus {editable, typeans}`, `composition {active}`, `typedText {text}`. `meguriVisible` gets U12's `{token, card, phase}`: `settled` with the generation as token, `visible` with the swap's token. Everything from the page is untrusted (R2038).
 
 U67's observer retains emission identity (detached nodes included), and isolated `mediaPlayback {playing}` balances A7 ducking. `mediaArrived(names)` retries attributes/CSS without invoking the renderer. The internal `resume` operation discards HTML playback attempts held during suspension before restoring presentation; normal `present` retains C8.2. No page globals or side/script semantics change.
+
+## Image occlusion (U68)
+
+- Implement from `render/image-occlusion-review` only; no Anki assets or editor dependencies. Only `anki.imageOcclusion` and its exact `anki.setupImageCloze` alias are added.
+- Capture the already-installed listener registry's add/remove: IO key/button listeners count as card handlers. No tap/key listener or exempt style on the canvas, image or container.
+- `setup` fulfils before drawing; its detached frame work reports through C12. Never add a settling barrier or extend C6.6's budget. External `#err` belongs to the template.
+- Preserve Number/parseFloat differences, signed remainder, point strings, rounding and M6 operation order. The common 4096 reduction bounds both dimensions (D5).
+- Options stay live: read hooks at each pass. Each setup resets hidden state; key/redraw use latest options, each button listener its own call's options. Resize/DPR redraws neither wire buttons nor reset hidden state.

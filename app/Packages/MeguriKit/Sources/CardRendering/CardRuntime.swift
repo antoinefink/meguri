@@ -119,6 +119,7 @@ public nonisolated enum CardRuntime {
     private static let assets: [String: (file: String, mimeType: String)] = [
         "base.css": ("base.css", "text/css"),
         "runtime.js": ("runtime.js", "text/javascript"),
+        "image-occlusion.js": ("image-occlusion.js", "text/javascript"),
         "jquery-3.7.1.min.js": ("jquery-3.7.1.min.js", "text/javascript"),
     ]
 

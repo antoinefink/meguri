@@ -89,7 +89,8 @@ extension WebKitSuites {
         @Test func routesMethodsPoliciesAndFreshMisses() async throws {
             let fixture = MediaFixture()
             for name in ["x.svg", "x.html", "x.xhtml", "x.js", "x.woff2", "empty.bin"] { fixture.add("/" + name, Data(), "") }
-            for (path, status, policy) in [("/", 200, false), ("/_anki/runtime.js", 200, false), ("/_anki/no.js", 404, false),
+            for (path, status, policy) in [("/", 200, false), ("/_anki/runtime.js", 200, false),
+                                           ("/_anki/image-occlusion.js", 200, false), ("/_anki/no.js", 404, false),
                                            ("/_addons/x.js", 404, false), ("/%5Faddons/x.js", 404, false), ("/_ANKI/x.js", 404, false),
                                            ("/x.svg", 200, true), ("/x.html", 200, true), ("/x.xhtml", 200, true), ("/x.js", 200, false), ("/x.woff2", 200, false)] {
                 let task = try await Self.answer(URLRequest(url: URL(string: "meguri-media://media" + path)!), fixture: fixture)

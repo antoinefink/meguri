@@ -60,6 +60,7 @@ let package = Package(
                 .copy("Resources/CardRuntime/page.html"),
                 .copy("Resources/CardRuntime/base.css"),
                 .copy("Resources/CardRuntime/runtime.js"),
+                .copy("Resources/CardRuntime/image-occlusion.js"),
                 .copy("Resources/CardRuntime/interaction.js"),
                 .copy("Resources/CardRuntime/vendor/jquery-3.7.1.min.js"),
             ],
