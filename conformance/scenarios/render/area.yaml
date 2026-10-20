@@ -33,3 +33,6 @@ active:
   - "type-answer/corpus/*"
   - "media-escape/*"
   - "image-occlusion/render/*"
+
+# U68: markup fixtures for the image-occlusion review runtime.
+  - "image-occlusion/review/fixtures"

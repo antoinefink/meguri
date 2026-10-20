@@ -4,7 +4,7 @@
 # golden holds the exact `div` markup of every fixture side (classes by side
 # and activity, data attributes, the encoded label text). The runtime cases
 # (M14) wrap these outputs in their own page; nothing here runs a script.
-# Pending in Meguri until U64 fills the image-occlusion hook of `cloze:`.
+# U68 integrates this fixture with the current U64 provider.
 id: render/image-occlusion/review/fixtures
 description: "cloze: output of the image-occlusion fixtures used by the review runtime tests"
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
