@@ -27,11 +27,25 @@ Complete every WebKit dialog callback exactly once. If its page binding loses va
 
 ## B3. Links and the root document
 
-Apply R566–R570 through one routing policy for links, target=_blank and window.open. The host receives typed open requests and presents the permitted browser or scheme confirmation. The component does not create another card page. Navigation handling never reveals or answers a card; U180 separately treats links as exempt input targets.
+Apply R566–R570 through one routing policy for native open requests from links, target=_blank and window.open. The host receives typed open requests and presents the permitted browser or scheme confirmation. The component does not create another card page. Navigation handling never reveals or answers a card; U180 separately treats links as exempt input targets.
 
-For a same-document fragment, keep the root document URL unchanged and scroll to the fragment target through a fixed native-owned operation. An empty fragment scrolls to the top; an absent target leaves the scroll position unchanged. Pass fragment data as arguments, never as executable source. This preserves in-page movement without navigating or replacing the review document. javascript: links retain actual page-context execution through normal WebKit handling; do not replace them with an external-open request or a new native evaluator. Other same-document activity stays in the page. A document navigation away from the bound root is refused and routed only when R568/R569 permit an external open.
+For each native action, require all checks below:
+
+| Check | Rule |
+|---|---|
+| Page | Same live web view and its bound root document. |
+| Frame | Current main frame, confirmed by native frame data. |
+| Origin | Security origin matches the trusted native origin. |
+| Binding | Current card, generation and side. |
+| Request URL | sourceFrame.request.url may differ from the root URL for a valid fragment action. Exact URL equality is not required and cannot replace the checks above. |
+
+Keep all existing main-frame, origin and identity checks on the native bridge.
+
+For a same-document fragment, keep the root document URL unchanged and scroll to the fragment target through a fixed native-owned operation. An empty fragment scrolls to the top; an absent target leaves the scroll position unchanged. Pass fragment data as arguments, never as executable source. This preserves in-page movement without navigating or replacing the review document. javascript: links retain actual page-context execution through normal WebKit handling; do not replace them with an external-open request or a new native evaluator. Other same-document activity stays in the page. A top-level document navigation away from the bound root is refused and routed only when R568/R569 permit an external open.
 
 The file scheme is always refused, regardless of stored approvals. Scheme approval and link-opening preferences remain device-local, supplied by their owner; R569's confirmation is remembered per scheme, not per URL. This does not introduce a second settings store or expand the native message allowlist.
+
+Embedded frames may load web/inline documents under ordinary WebKit rules: http, https, about, data, blob, srcdoc and the bound collection origin. Such loads stay in their own frames. They grant no native URL open, dialog, collection action or top-level navigation; subframe dialogs complete neutrally under B2. Refuse frame file URLs and unknown external-app schemes. Add no native message, global or handler. Test with synthetic local/srcdoc fixtures and no external network requests; retain cases proving foreign frames cannot invoke native actions.
 
 ## B4. Zoom and live layout continuity
 
