@@ -144,7 +144,7 @@ extension TestHooks {
             var cardElementsFinalized = 0
         }
 
-        /// Native-process aggregates in bytes (except block and query counts).
+        /// Native-process aggregates in bytes (except block/query counts and region pages).
         /// VM counters overlap; they are not a replacement footprint.
         struct MemorySnapshot: Codable {
             var mallocBlocksInUse: UInt64
@@ -162,6 +162,26 @@ extension TestHooks {
             var ledgerPhysFootprintPeak: Int64?
             var ledgerTagMediaFootprint: Int64?
             var ledgerTagGraphicsFootprint: Int64?
+            var regions: MemoryRegions?
+        }
+
+        /// Non-atomic leaf-region totals, not a footprint: shared categories can overlap.
+        struct MemoryRegions: Codable {
+            struct Totals: Codable {
+                var virtualBytes: UInt64 = 0
+                var residentPages: UInt64 = 0
+                var dirtiedPages: UInt64 = 0
+                var sharedNowPrivatePages: UInt64 = 0
+                var swappedPages: UInt64 = 0
+            }
+
+            var byUserTag: [UInt32: Totals] = [:]
+            var pageSize: UInt64?
+            var calls = 0
+            var kernelStatus: Int32 = KERN_SUCCESS
+            var complete = false
+            var reason: String?
+            var reusablePagesNote = "pages_reusable omitted: SDK field availability unverified."
         }
 
         private(set) var reportJSON = "{}"
@@ -691,6 +711,7 @@ extension TestHooks {
                 mallocMaxSizeInUse: UInt64(stats.max_size_in_use),
                 taskVMInfoStatus: result,
                 taskVMInfoCount: count)
+            snapshot.regions = memoryRegions()
             guard result == KERN_SUCCESS, count >= fullCount else { return snapshot }
             snapshot.residentSize = info.resident_size
             snapshot.internalSize = info.internal
@@ -702,6 +723,89 @@ extension TestHooks {
             snapshot.ledgerTagMediaFootprint = info.ledger_tag_media_footprint
             snapshot.ledgerTagGraphicsFootprint = info.ledger_tag_graphics_footprint
             return snapshot
+        }
+
+        private static func memoryRegions() -> MemoryRegions {
+            var result = MemoryRegions()
+            let pageSize = sysconf(_SC_PAGESIZE)
+            if pageSize > 0 { result.pageSize = UInt64(pageSize) }
+            let fullCount = mach_msg_type_number_t(VM_REGION_SUBMAP_INFO_COUNT_64)
+            guard Int(fullCount) * MemoryLayout<integer_t>.size == MemoryLayout<vm_region_submap_info_data_64_t>.size else {
+                result.reason = "countMismatch"
+                return result
+            }
+            var address: mach_vm_address_t = 0
+            var depth: natural_t = 0
+            while result.calls < 4096 {
+                let requestedAddress = address
+                var size: mach_vm_size_t = 0
+                var info = vm_region_submap_info_data_64_t()
+                var count = fullCount
+                result.kernelStatus = withUnsafeMutablePointer(to: &info) {
+                    $0.withMemoryRebound(to: integer_t.self, capacity: Int(fullCount)) {
+                        mach_vm_region_recurse(mach_task_self_, &address, &size, &depth, $0, &count)
+                    }
+                }
+                result.calls += 1
+                if result.kernelStatus == KERN_INVALID_ADDRESS {
+                    result.complete = true
+                    return result
+                }
+                guard result.kernelStatus == KERN_SUCCESS else {
+                    result.reason = "kernelError"
+                    return result
+                }
+                guard count >= fullCount else {
+                    result.reason = "countMismatch"
+                    return result
+                }
+                guard depth <= 64 else {
+                    result.reason = "depthLimit"
+                    return result
+                }
+                guard address >= requestedAddress else {
+                    result.reason = "nonprogress"
+                    return result
+                }
+                guard size > 0 else {
+                    result.reason = "zeroSize"
+                    return result
+                }
+                if info.is_submap != 0 {
+                    guard depth < 64 else {
+                        result.reason = "depthLimit"
+                        return result
+                    }
+                    depth += 1
+                    continue
+                }
+                let (nextAddress, overflow) = address.addingReportingOverflow(size)
+                guard !overflow, nextAddress > address else {
+                    result.reason = overflow ? "addressOverflow" : "nonprogress"
+                    return result
+                }
+                let tag = UInt32(info.user_tag)
+                var totals = result.byUserTag[tag] ?? MemoryRegions.Totals()
+                guard addRegionCount(UInt64(size), to: &totals.virtualBytes),
+                      addRegionCount(UInt64(info.pages_resident), to: &totals.residentPages),
+                      addRegionCount(UInt64(info.pages_dirtied), to: &totals.dirtiedPages),
+                      addRegionCount(UInt64(info.pages_shared_now_private), to: &totals.sharedNowPrivatePages),
+                      addRegionCount(UInt64(info.pages_swapped_out), to: &totals.swappedPages) else {
+                    result.reason = "aggregateOverflow"
+                    return result
+                }
+                result.byUserTag[tag] = totals
+                address = nextAddress
+            }
+            result.reason = "callCap"
+            return result
+        }
+
+        private static func addRegionCount(_ value: UInt64, to total: inout UInt64) -> Bool {
+            let (sum, overflow) = total.addingReportingOverflow(value)
+            guard !overflow else { return false }
+            total = sum
+            return true
         }
 
         static func footprint() -> Int {
