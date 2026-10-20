@@ -17,17 +17,20 @@ import Testing
 
     @Test func unicodeCaseFreshArrivalAndNoSymlinks() async throws {
         let fixture = MediaFixture()
+        let volume = try fixture.root.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey])
+        let caseSensitive = try #require(volume.volumeSupportsCaseSensitiveNames)
         fixture.add("/cafe\u{301}.png", Data("nfd".utf8), "image/png")
         fixture.add("/photo.jpg", Data("photo".utf8), "image/jpeg")
         fixture.add("/MIXED.png", Data("winner".utf8), "image/png")
-        try fixture.addThrowing("/Mixed.png", Data("other".utf8), "image/png")
+        if caseSensitive {
+            fixture.add("/Mixed.png", Data("other".utf8), "image/png")
+            let upper = try #require(try FileManager.default.attributesOfItem(atPath: fixture.root.appending(path: "MIXED.png").path)[.systemFileNumber] as? NSNumber)
+            let mixed = try #require(try FileManager.default.attributesOfItem(atPath: fixture.root.appending(path: "Mixed.png").path)[.systemFileNumber] as? NSNumber)
+            #expect(upper != mixed)
+        }
         fixture.add("/x%20y.mp3", Data("percent".utf8), "audio/mpeg")
         let resolver = try await fixture.resolved()
-        let upper = try FileManager.default.attributesOfItem(atPath: fixture.root.appending(path: "MIXED.png").path)[.systemFileNumber] as? NSNumber
-        let mixed = try FileManager.default.attributesOfItem(atPath: fixture.root.appending(path: "Mixed.png").path)[.systemFileNumber] as? NSNumber
-        // A case-insensitive volume has one overwritten inode, not a real
-        // collision. The two-inode fixture asserts the UTF-8 winner.
-        let cases = [("/café.png", "nfd"), ("/PHOTO.JPG", "photo"), ("/MiXeD.png", upper != mixed ? "winner" : "other")]
+        let cases = [("/café.png", "nfd"), ("/PHOTO.JPG", "photo"), ("/MiXeD.png", "winner")]
         for (path, expected) in cases {
             let file = try await resolver.openURLPath(path)
             #expect(try await file.read(offset: 0, count: 32) == Data(expected.utf8))
