@@ -28,6 +28,8 @@ extension TestHooks {
             handler.engine = engine
             // Measurement proxy only: all responses come from production.
             let configuration = engine.configuration.copy() as! WKWebViewConfiguration
+            // The copy retains production's registration; replace it only here.
+            configuration.setURLSchemeHandler(nil, forURLScheme: scheme)
             configuration.setURLSchemeHandler(handler, forURLScheme: scheme)
             return configuration
         }

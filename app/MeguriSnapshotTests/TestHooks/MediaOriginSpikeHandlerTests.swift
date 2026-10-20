@@ -103,7 +103,17 @@ import WebKit
 
     @Test
     func productionRootLoadsTheDocumentAndRunsJavaScript() async throws {
-        let page = page()
+        let handler = handler()
+        handler.files["/_anki/page.html"] = (Data("<!doctype html><title>original</title><body></body>".utf8), "text/html")
+        let configuration = TestHooks.MediaOriginSpike.configuration(handler, persistent: false)
+        let original = handler.engine.configuration
+        let scheme = TestHooks.MediaOriginSpike.scheme
+        #expect(configuration !== original)
+        #expect(configuration.urlSchemeHandler(forURLScheme: scheme) === handler)
+        #expect(original.urlSchemeHandler(forURLScheme: scheme) === handler.engine.media)
+        #expect(configuration.websiteDataStore === original.websiteDataStore)
+        #expect(configuration.userContentController === original.userContentController)
+        let page = Page(configuration, handler: handler)
         try await page.open("_anki/page.html")
         let result = await page.run("""
             document.body.dataset.roundtrip = value;
