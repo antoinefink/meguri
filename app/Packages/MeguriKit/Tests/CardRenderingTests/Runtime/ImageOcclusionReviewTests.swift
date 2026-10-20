@@ -828,7 +828,7 @@ extension WebKitSuites.CardRuntimeSuites {
                 } catch {
                     print("U68_ZOOM_DIAGNOSTIC {\"snapshotStatus\":\"unavailable\"}")
                 }
-                if phase != "beforeZoom" { try? await page.run("__ioZoomDiagnostic.stop();") }
+                if phase != "beforeZoom" { _ = try? await page.run("__ioZoomDiagnostic.stop();") }
             }
             try await Self.prepare(harness, page)
             let auto = try Self.side().replacingOccurrences(of: "width: 400px", with: "width: auto")
