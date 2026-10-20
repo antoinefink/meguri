@@ -44,6 +44,12 @@ mg_ui_test__physical_check() {
     return 1
   fi
   rec="$(jq -c --arg id "$1" 'first(.[] | select(.identifier == $id)) // null' <<<"$MG_UI_PHYSICAL_DEVICES")"
+  if [ "$rec" != null ] && ! jq -e --arg axis "$2" '
+      .modelCode | if $axis == "iphone" then test("^iPhone")
+      elif $axis == "ipad" then test("^iPad") else false end' <<<"$rec" >/dev/null; then
+    mg_ui_test__usage "the physical device model must match --platform iphone or ipad"
+    return 1
+  fi
   if [ "$rec" = null ] || [ "$(jq -r .available <<<"$rec")" != true ]; then
     mg_user_step device-developer-mode missing true "Connect, unlock and pair the explicitly selected iOS device" \
       "Connect and unlock the phone, pair it in Xcode, and enable Developer Mode on it; then rerun the same explicit --physical-device command."
@@ -116,18 +122,18 @@ mg_ui_test() {
     build_args=(Performance Meguri-Profile)
   fi
   if [ -n "$physical" ]; then
-    mg_detail platform '"ios-device"'
-    mg_ui_test__physical_check "$physical" || return 0
+    mg_detail destination_platform '"ios-device"'
+    mg_ui_test__physical_check "$physical" "$platform" || return 0
     mg_host_lease --no-session || return 0
-    mg_ui_test__physical_check "$physical" || return 0
+    mg_ui_test__physical_check "$physical" "$platform" || return 0
     if [ "$config" = Debug ]; then
       export MG_APP_TEST_SCHEME=Meguri MG_APP_TEST_PLAN=UI
     fi
     mg_app_build ios-device "$config" ${build_args[0]+"${build_args[@]}"} || return 0
-    mg_ui_test__physical_check "$physical" || return 0
+    mg_ui_test__physical_check "$physical" "$platform" || return 0
     mg_app_xcodebuild_test "$MG_RUN_DIR/ios-device" ios-device "platform=iOS,id=$physical" "$config" "${only[@]}"
     result=$?
-    mg_ui_test__report "$MG_RUN_DIR/ios-device" "$result" physical
+    mg_ui_test__report "$MG_RUN_DIR/ios-device" "$result" physical "$suites"
     return 0
   fi
   if [ "$platform" = mac ]; then
@@ -165,12 +171,12 @@ mg_ui_test() {
   mg_ui_test__report "$MG_RUN_DIR/$platform" "$result"
 }
 
-# mg_ui_test__report <prefix> <test result 0|1|2|3|4> [physical]: counts and failing tests
+# mg_ui_test__report <prefix> <test result 0|1|2|3|4> [physical <selectors>]: counts and failing tests
 # from the result bundle, then the status. 3: dropped input (queued,
 # mac-input; independent failures were already recorded). 4: the test VM
 # could not be reached (queued, mac-vm).
 mg_ui_test__report() {
-  local prefix="$1" result="$2" summary f
+  local prefix="$1" result="$2" summary f cases
   if [ "$result" -eq 4 ] && [ "${3:-}" != physical ]; then
     mg_status pass
     mg_queued_settle
@@ -179,7 +185,7 @@ mg_ui_test__report() {
   summary="$(
     if [ "${3:-}" = physical ]; then set -o pipefail; fi
     xcrun xcresulttool get test-results summary --path "$prefix.xcresult" 2>/dev/null |
-    jq -c '{passed: .passedTests, failed: .failedTests, skipped: .skippedTests}')" || summary=""
+    jq -c '{passed: .passedTests, failed: .failedTests, skipped: .skippedTests, outcome: .result}')" || summary=""
   if [ "${3:-}" = physical ]; then
     case "$result" in 0|1|2) ;; *) result=2 ;; esac
     if ! jq -se 'length == 1 and (.[0] | type == "object" and all(.passed, .failed, .skipped;
@@ -189,9 +195,35 @@ mg_ui_test__report() {
       [ ! -d "$prefix.xcresult" ] || mg_artifact xcresult "$prefix.xcresult" "result bundle"
       return 0
     fi
-    if ! jq -e '.passed > 0 and .failed == 0 and .skipped == 0' <<<"$summary" >/dev/null; then
+    if ! jq -e '.outcome == "Passed" and .passed > 0 and .failed == 0 and .skipped == 0' <<<"$summary" >/dev/null; then
       mg_failure physical-device-results "physical UI tests require passed tests, zero failures and zero skipped tests"
       result=1
+    fi
+    cases="$(set -o pipefail
+      xcrun xcresulttool get test-results tests --path "$prefix.xcresult" 2>/dev/null |
+      jq -cse '
+        if length != 1 or (.[0] | type) != "object" or (.[0].testNodes | type) != "array"
+        then error("invalid test tree") else .[0] end
+        | if all(.testNodes[]; type == "object") and all(.testNodes[] | .. | objects;
+            all(.children?, .subTestNodes?; . == null or (type == "array" and all(.[]; type == "object"))))
+          then . else error("invalid test nodes") end
+        | [.testNodes[] | .. | objects | select(.nodeType? == "Test Case")
+          | select(([.children[]?, .subTestNodes[]? | .. | objects | select(.nodeType? == "Test Case")] | length) == 0)
+          | if (.nodeIdentifier | type) != "string" or (.result | type) != "string"
+            then error("invalid test case") else . end
+          | if (.nodeIdentifier | test("^(MeguriUITests/)?[A-Z][A-Za-z0-9]*/[A-Za-z0-9_]+(\\(\\))?$"))
+            then . else error("invalid method identifier") end
+          | {id: (.nodeIdentifier | capture("^(MeguriUITests/)?(?<id>[A-Z][A-Za-z0-9]*/[A-Za-z0-9_]+)(\\(\\))?$").id), result}]' 2>/dev/null)" || cases=""
+    if [ -z "$cases" ]; then
+      mg_failure physical-device-results "physical UI tests require a readable test tree"
+      result=2
+    elif ! jq -e --arg selectors "${4:-}" --argjson count "$(jq .passed <<<"$summary")" '
+        . as $cases | ($selectors | split(" ") | map(select(length > 0))) as $requested
+        | length > 0 and length == $count and all(.[]; .result == "Passed") and ($requested | length > 0)
+          and all($requested[]; . as $s | any($cases[];
+            if ($s | contains("/")) then .id == $s else (.id | split("/")[0]) == $s end))' <<<"$cases" >/dev/null; then
+      mg_failure physical-device-results "every physical selector must have a passed test method"
+      [ "$result" -eq 2 ] || result=1
     fi
   fi
   if [ -n "$summary" ]; then

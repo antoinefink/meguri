@@ -26,6 +26,7 @@ setup() {
   mkdir -p "$BIN"
   export STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
   export FX_DEVICES="$BATS_TEST_TMPDIR/devices.json" FX_SUMMARY="$BATS_TEST_TMPDIR/summary.json"
+  export FX_TESTS="$BATS_TEST_TMPDIR/tests.json"
   # Synthetic destination identifiers only, never a user's phone identity.
   export PHONE=00000000-0000000000000001
   SIM=00000000-0000-4000-8000-000000000002
@@ -39,6 +40,9 @@ setup() {
     {identifier:$m, name:"PRIVATE_MAC_NAME", modelCode:"Mac99,1",
       platform:"com.apple.platform.macosx", simulator:false, operatingSystemVersion:"27.0", available:true}]' >"$FX_DEVICES"
   echo '{"result":"Passed","passedTests":2,"failedTests":0,"skippedTests":0}' >"$FX_SUMMARY"
+  test_tree '[
+    {nodeType:"Test Case", nodeIdentifier:"MediaTests/testAudio()", result:"Passed"},
+    {nodeType:"Test Case", nodeIdentifier:"MediaTests/testVideo()", result:"Passed"}]'
   cat >"$SB/tools/mg.d/zz-physical-fakes.sh" <<'EOF'
 # Physical runs must ignore MG_SIM_RUNNER.
 MG_SIM_RUNNER=vm
@@ -60,7 +64,7 @@ case "$*" in
   "xcdevice list --timeout 20") cat "$FX_DEVICES"; exit "${FX_INVENTORY_RC:-0}" ;;
   "xcresulttool get build-results --path "*) echo "{\"errorCount\":0,\"warningCount\":0}" ;;
   "xcresulttool get test-results summary --path "*) cat "$FX_SUMMARY"; exit "${FX_SUMMARY_RC:-0}" ;;
-  "xcresulttool get test-results tests --path "*) echo "[]" ;;
+  "xcresulttool get test-results tests --path "*) cat "$FX_TESTS"; exit "${FX_TESTS_RC:-0}" ;;
   *) exit 97 ;;
 esac'
   stub plutil 'echo "plutil $*" >>"$STUB_LOG"
@@ -113,6 +117,10 @@ field() { jq -r "$@" "$result"; }
 called() { grep -Eq -- "$1" "$STUB_LOG" || { cat "$STUB_LOG"; return 1; }; }
 not_called() { ! grep -Eq -- "$1" "$STUB_LOG" || { cat "$STUB_LOG"; return 1; }; }
 phone_run() { mg ui-test --physical-device "$PHONE" --config Profile --suite MediaTests/testAudio --suite MediaTests/testVideo "$@"; }
+test_tree() {
+  jq -n "{testNodes:[{nodeType:\"Test Plan\", children:[{nodeType:\"UI test bundle\",
+    subTestNodes:[{nodeType:\"Test Suite\", name:\"MediaTests\", subTestNodes:$1}]}]}]}" >"$FX_TESTS"
+}
 
 @test "physical ui inventory uses xcdevice array keys and excludes personal fields, Mac and simulator identifiers" {
   mg ui-test --list-physical-devices
@@ -153,16 +161,19 @@ phone_run() { mg ui-test --physical-device "$PHONE" --config Profile --suite Med
   phone_run
   [ "$status" -eq 0 ]
   [ "$(field .status)" = pass ]
-  [ "$(field .counts.passed)" -eq 2 ]
-  [ "$(field .counts.skipped)" -eq 0 ]
+  [ "$(field .summary.passed)" -eq 2 ]
+  [ "$(field .summary.skipped)" -eq 0 ]
   [ "$(field .details.performance_test_policy.status)" = pass ]
   [ "$(field .details.build.platform)" = ios-device ]
+  [ "$(field .details.platform)" = iphone ]
+  [ "$(field .details.destination_platform)" = ios-device ]
   [[ "$(field .details.build.app)" == *'/Profile-iphoneos/Meguri.app' ]]
   called '^host-lease --no-session$'
   called '^xcframework .* --configuration Profile --slices mac,sim,device$'
-  called '^xcodebuild build-for-testing .* -scheme Meguri-Profile -testPlan Performance -configuration Profile -destination generic/platform=iOS .* -allowProvisioningUpdates$'
+  called '^xcodebuild build-for-testing .* -scheme Meguri-Profile -testPlan Performance -configuration Profile -destination generic/platform=iOS .* MEGURI_SIGNING=team -allowProvisioningUpdates$'
   called "^plutil -extract CFBundleIdentifier raw -o - $SB/build/app/DerivedData/Build/Products/Profile-iphoneos/Meguri.app/Info.plist$"
-  called "^xcodebuild test-without-building .* -scheme Meguri-Profile -testPlan Performance -configuration Profile -destination platform=iOS,id=$PHONE .* -allowProvisioningUpdates -parallel-testing-enabled NO -destination-timeout 60 -test-timeouts-enabled YES -only-testing:MeguriUITests/MediaTests/testAudio -only-testing:MeguriUITests/MediaTests/testVideo$"
+  called "^xcodebuild test-without-building .* -scheme Meguri-Profile -testPlan Performance -configuration Profile -destination platform=iOS,id=$PHONE .* MEGURI_SIGNING=team -allowProvisioningUpdates -parallel-testing-enabled NO -destination-timeout 60 -test-timeouts-enabled YES -only-testing:MeguriUITests/MediaTests/testAudio -only-testing:MeguriUITests/MediaTests/testVideo$"
+  called '^xcrun xcresulttool get test-results tests --path '
   not_called '^(sim-|vm-test)|xcrun (simctl|devicectl)'
   python3 "$SB/tools/tests/validate_result.py" "$result"
 }
@@ -171,8 +182,8 @@ phone_run() { mg ui-test --physical-device "$PHONE" --config Profile --suite Med
   MG_APP_TEST_SCHEME=Meguri-Profile MG_APP_TEST_PLAN=Performance \
     mg ui-test --physical-device "$PHONE" --suite MediaTests/testAudio
   [ "$status" -eq 0 ]
-  called '^xcodebuild build-for-testing .* -scheme Meguri -testPlan UI -configuration Debug -destination generic/platform=iOS '
-  called "^xcodebuild test-without-building .* -scheme Meguri -testPlan UI -configuration Debug -destination platform=iOS,id=$PHONE "
+  called '^xcodebuild build-for-testing .* -scheme Meguri -testPlan UI -configuration Debug -destination generic/platform=iOS .* MEGURI_SIGNING=team -allowProvisioningUpdates$'
+  called "^xcodebuild test-without-building .* -scheme Meguri -testPlan UI -configuration Debug -destination platform=iOS,id=$PHONE .* MEGURI_SIGNING=team "
   [ "$(field '.details.performance_test_policy // "absent"')" = absent ]
   not_called '^(sim-|vm-test)'
 }
@@ -229,6 +240,33 @@ phone_run() { mg ui-test --physical-device "$PHONE" --config Profile --suite Med
   not_called '^(lint|xcframework|host-lease|sim-|vm-test|xcodebuild|plutil)'
 }
 
+@test "physical ui rejects cross-family and unknown models before build" {
+  phone_run --platform ipad
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = usage ]
+  local model
+  for model in iPad99,1 Unknown99,1; do
+    jq --arg model "$model" '.[0].modelCode = $model' "$FX_DEVICES" >"$FX_DEVICES.tmp"
+    mv "$FX_DEVICES.tmp" "$FX_DEVICES"
+    phone_run --platform iphone
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+  done
+  phone_run --platform ipad
+  [ "$status" -eq 2 ]
+  not_called '^(lint|xcframework|host-lease|sim-|vm-test|xcodebuild|plutil)'
+}
+
+@test "physical ui records the requested iPad axis and device destination" {
+  jq '.[0].modelCode = "iPad99,1"' "$FX_DEVICES" >"$FX_DEVICES.tmp"
+  mv "$FX_DEVICES.tmp" "$FX_DEVICES"
+  phone_run --platform ipad
+  [ "$status" -eq 0 ]
+  [ "$(field .details.platform)" = ipad ]
+  [ "$(field .details.destination_platform)" = ios-device ]
+  [ "$(field .details.build.platform)" = ios-device ]
+}
+
 @test "physical ui accepts a CoreDevice UUID, refuses old OS, unsafe iphoneos policy and production bundle before tests" {
   jq --arg p "$PHONE" 'map(if .identifier == $p then .operatingSystemVersion = "26.4" else . end)' "$FX_DEVICES" >"$FX_DEVICES.tmp"
   mv "$FX_DEVICES.tmp" "$FX_DEVICES"
@@ -259,6 +297,7 @@ phone_run() { mg ui-test --physical-device "$PHONE" --config Profile --suite Med
 @test "physical ui cannot pass zero, failed, skipped or unreadable test results even when xcodebuild exits zero" {
   local summary
   for summary in '{"passedTests":0,"failedTests":0,"skippedTests":0}' \
+      '{"passedTests":0,"failedTests":0,"skippedTests":2}' \
       '{"passedTests":2,"failedTests":0,"skippedTests":1}' '{"passedTests":2,"failedTests":1,"skippedTests":0}'; do
     printf '%s\n' "$summary" >"$FX_SUMMARY"
     phone_run
@@ -280,6 +319,86 @@ phone_run() { mg ui-test --physical-device "$PHONE" --config Profile --suite Med
   [ "$status" -eq 1 ]
 }
 
+@test "physical ui rejects failed summary and count mismatch" {
+  local outcome
+  for outcome in Failed Unknown ''; do
+    jq -n --arg outcome "$outcome" '{result:$outcome,passedTests:2,failedTests:0,skippedTests:0}' >"$FX_SUMMARY"
+    phone_run
+    [ "$status" -eq 1 ]
+  done
+  echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' >"$FX_SUMMARY"
+  phone_run
+  [ "$status" -eq 1 ]
+}
+
+@test "physical ui requires both requested methods in the test tree" {
+  test_tree '[{nodeType:"Test Case", nodeIdentifier:"MediaTests/testAudio()", result:"Passed"}]'
+  phone_run
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = physical-device-results ]
+  test_tree '[
+    {nodeType:"Test Case", nodeIdentifier:"MediaTests/testAudioExtra()", result:"Passed"},
+    {nodeType:"Test Case", nodeIdentifier:"MediaTests/testVideo()", result:"Passed"}]'
+  phone_run
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+}
+
+@test "physical ui accepts exact method identifiers and a class with passed methods" {
+  test_tree '[
+    {nodeType:"Test Case", nodeIdentifier:"MeguriUITests/MediaTests/testAudio()", result:"Passed"},
+    {nodeType:"Test Case", nodeIdentifier:"MediaTests/testVideo", result:"Passed"}]'
+  phone_run
+  [ "$status" -eq 0 ]
+  mg ui-test --physical-device "$PHONE" --suite MediaTests
+  [ "$status" -eq 0 ]
+  jq 'walk(if type == "object" and has("subTestNodes") then .children = .subTestNodes | del(.subTestNodes) else . end)' \
+    "$FX_TESTS" >"$FX_TESTS.tmp"
+  mv "$FX_TESTS.tmp" "$FX_TESTS"
+  phone_run
+  [ "$status" -eq 0 ]
+}
+
+@test "physical ui refuses empty, skipped or failed terminal cases" {
+  local cases
+  for cases in '[]' \
+      '[{nodeType:"Test Suite", nodeIdentifier:"MediaTests/testAudio()", result:"Passed"}]' \
+      '[{nodeType:"Test Case", nodeIdentifier:"MediaTests/testAudio()", result:"Skipped"}]' \
+      '[{nodeType:"Test Case", nodeIdentifier:"MediaTests/testAudio()", result:"Failed"}]' \
+      '[{nodeType:"Test Case", nodeIdentifier:"MediaTests/testAudio()", result:"Passed",
+        subTestNodes:[{nodeType:"Test Case", nodeIdentifier:"MediaTests/testAudioExtra()", result:"Passed"}]}]'; do
+    test_tree "$cases"
+    mg ui-test --physical-device "$PHONE" --suite MediaTests/testAudio
+    [ "$status" -eq 1 ]
+    [ "$(field .status)" = fail ]
+  done
+  test_tree '[]'
+  mg ui-test --physical-device "$PHONE" --suite MediaTests
+  [ "$status" -eq 1 ]
+  test_tree '[{nodeType:"Test Case", nodeIdentifier:"MediaTestsExtra/testAudio()", result:"Passed"}]'
+  mg ui-test --physical-device "$PHONE" --suite MediaTests
+  [ "$status" -eq 1 ]
+}
+
+@test "physical ui refuses unreadable and malformed test trees" {
+  local tree
+  for tree in '' 'not JSON' '[]' '{}' '{"testNodes":{}}' '{"testNodes":[]} {"testNodes":[]}'; do
+    printf '%s\n' "$tree" >"$FX_TESTS"
+    phone_run
+    [ "$status" -eq 2 ]
+    [ "$(field .status)" = error ]
+  done
+  test_tree '[{nodeType:"Test Case", nodeIdentifier:null, result:"Passed"}]'
+  phone_run
+  [ "$status" -eq 2 ]
+  test_tree '[{nodeType:"Test Case", nodeIdentifier:"MediaTests/testAudio()", result:"Passed", children:"broken"}]'
+  phone_run
+  [ "$status" -eq 2 ]
+  test_tree '[{nodeType:"Test Case", nodeIdentifier:"MediaTests/testAudio()", result:"Passed"}]'
+  FX_TESTS_RC=1 phone_run
+  [ "$status" -eq 2 ]
+}
+
 @test "physical ui extension preserves simulator build and VM test dispatch with only the requested selector" {
   mg ui-test --platform iphone --device "$SIM" --suite MediaTests/testAudio
   [ "$status" -eq 0 ]
@@ -290,5 +409,5 @@ phone_run() { mg ui-test --physical-device "$PHONE" --config Profile --suite Med
   called '^xcframework .* --configuration Debug$'
   called '^xcodebuild build-for-testing .* -destination generic/platform=iOS Simulator '
   called "^vm-test .* UI iphonesimulator id=$SIM Debug -only-testing:MeguriUITests/MediaTests/testAudio$"
-  not_called '^(host-lease|plutil)|^xcrun xcdevice|^xcodebuild test-without-building|allowProvisioningUpdates|--slices'
+  not_called '^(host-lease|plutil)|^xcrun xcdevice|^xcodebuild test-without-building|allowProvisioningUpdates|--slices|MEGURI_SIGNING=team'
 }
