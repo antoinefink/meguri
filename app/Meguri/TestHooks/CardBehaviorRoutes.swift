@@ -217,7 +217,7 @@ extension TestHooks {
                     .accessibilityIdentifier("card.behavior.editor")
                 Text(String(localized: "Card status", table: "CardBehaviorRoutes"))
                     .font(.caption).accessibilityValue(model.state)
-                    .accessibilityIdentifier(model.state.hasPrefix("ready") ? "card.behavior.state" : "card.behavior.loading")
+                    .accessibilityIdentifier("card.behavior.state")
                 if let pair = model.pair {
                     CardBehaviorHost(pair: pair, presenter: model.presenter)
                         .frame(maxWidth: cardMaxWidth, maxHeight: .infinity)
