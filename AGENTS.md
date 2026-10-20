@@ -16,6 +16,8 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 - Work directly on `master` in the main checkout; do not create branches or worktrees. Resume prepared work without redoing it. Record each unit's starting commit and review/fix log. Commit WIP with co-author attribution; push only `master`, never force. `tools/mg merge` is not required (Antoine, 2026-10-18).
 - Verification (updated goal, 2026-10-20): keep focused tests, independent review, separate commits and provenance/privacy/similarity checks per unit. Batch at most 20 units changing only Rust internals between full gates; run earlier for milestones, Swift/FFI, shared schemas, sync contracts, tooling or meaningful integration risk. Record the batch base and covered units; resolve failures before the next batch or required boundary. Final suites and human evidence remain mandatory. See `docs/process/tiers.md`.
 
+- Remaining VoiceOver cursor and speech work is optional follow-up after the app goal (Antoine, 2026-10-20). Preserve its tests and failure evidence; it does not block units or milestones. Keyboard ownership, system accessibility audits, labels, contrast and hit targets remain required. Independent Rust work may proceed while U70 awaits its other checks.
+
 - Manual device and reference checks are deferred until the final session (Antoine, 2026-10-20). Continue with automated VM tests. Final evidence remains required.
 
 - Build, test and verify only through `tools/mg <job>` (`tools/mg --list`; contract in `tools/AGENTS.md`). Rust, oracle and sync-server work runs in Docker; Apple builds run on the host; simulators and Mac UI suites run in the macOS test VM.

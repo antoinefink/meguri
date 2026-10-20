@@ -8,6 +8,8 @@ Record the unit's starting commit before bringing in its work. Keep the spec, im
 
 Antoine’s updated goal on 2026-10-20 allows up to 20 units changing only Rust internals per full gate. Follow `docs/process/tiers.md`: keep focused Docker/Rust tests, independent review and separate commits per unit; record the batch base, covered units and shared gate receipt. Units awaiting a batch gate are implemented but not yet accepted. Run full gates at milestone boundaries and earlier for Swift/FFI, shared schemas, sync contracts, tooling or meaningful integration risk. Resolve failures before the next batch or required boundary. Final suites and human evidence remain required.
 
+Antoine made remaining VoiceOver cursor and speech work optional follow-up after app completion (2026-10-20). Its failed checks remain recorded and callable, but no longer block unit or milestone acceptance. Keyboard ownership, accessibility audits, labels, contrast and hit targets remain required. Independent Rust units may proceed while U70 awaits its non-VoiceOver review and full gate; keep it unaccepted until those pass.
+
 Manual device and reference checks are deferred until the final session (Antoine, 2026-10-20). Continue with automated VM tests. Final evidence remains required.
 
 The branch-merge procedure below remains available for historical receipts and existing tooling. Queued runs remain incomplete verification: run `tools/mg catch-up` between units and require passing results at milestone gates. Run catch-up on the clean gate commit before committing acceptance-only notes when possible, so it can reuse exact-commit passing results. Record both receipts afterwards.

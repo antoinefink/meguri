@@ -301,10 +301,12 @@ runs:
     triggers: [app/Meguri/, app/Packages/MeguriKit/, app/MeguriUITests/, tools/mg.d/a11y.sh]
     budget_s: 1800
   # U150/U70: shell layouts and native card behaviors share a build and UI
-  # test invocation on each platform.
+  # test invocation on each platform. Remaining VoiceOver scripts are optional
+  # follow-up (Antoine, 2026-10-20); keep every non-VoiceOver card test here.
+  # The four VoiceOver methods remain directly callable through ui-test.
   - id: ui-test-iphone
     job: ui-test
-    args: [--platform, iphone, --suite, NavigationLayoutTests, --suite, CardWebViewBehaviorUITests]
+    args: [--platform, iphone, --suite, NavigationLayoutTests, --suite, CardWebViewBehaviorUITests/testNativeConfirmAndAcceptedEmptyPrompt, --suite, CardWebViewBehaviorUITests/testResizeKeyboardTypedTextAndForegroundKeepDocumentThenCallbackRecoversIt, --suite, CardWebViewBehaviorUITests/testNativeZoomFrameAndSameDocumentLinks, --suite, CardWebViewBehaviorUITests/testCardSurfaceAccessibilityAudit]
     tier: T0
     placement: vm
     needs: [simulator]
@@ -313,7 +315,7 @@ runs:
     budget_s: 1800
   - id: ui-test-ipad
     job: ui-test
-    args: [--platform, ipad, --suite, NavigationLayoutTests, --suite, CardWebViewBehaviorUITests]
+    args: [--platform, ipad, --suite, NavigationLayoutTests, --suite, CardWebViewBehaviorUITests/testNativeConfirmAndAcceptedEmptyPrompt, --suite, CardWebViewBehaviorUITests/testResizeKeyboardTypedTextAndForegroundKeepDocumentThenCallbackRecoversIt, --suite, CardWebViewBehaviorUITests/testNativeZoomFrameAndSameDocumentLinks, --suite, CardWebViewBehaviorUITests/testCardSurfaceAccessibilityAudit]
     tier: T0
     placement: vm
     needs: [simulator]
@@ -322,7 +324,7 @@ runs:
     budget_s: 1800
   - id: ui-test-mac
     job: ui-test
-    args: [--platform, mac, --suite, NavigationLayoutTests, --suite, CardWebViewBehaviorUITests]
+    args: [--platform, mac, --suite, NavigationLayoutTests, --suite, CardWebViewBehaviorUITests/testNativeConfirmAndAcceptedEmptyPrompt, --suite, CardWebViewBehaviorUITests/testResizeKeyboardTypedTextAndForegroundKeepDocumentThenCallbackRecoversIt, --suite, CardWebViewBehaviorUITests/testNativeZoomFrameAndSameDocumentLinks, --suite, CardWebViewBehaviorUITests/testCardSurfaceAccessibilityAudit]
     tier: T0
     placement: vm
     needs: [mac-ui]

@@ -492,7 +492,7 @@ milestones:
   - id: M2
     name: Creation and maintenance
     plan:
-      gate: "U246: areas search (R1916–R1920), packages and maintenance (R1922–R1925), notes and rendering of editor previews. U249 adds saved searches, browser sorts and apkg/colpkg round trips. U244 browser, search and editor groups (R1824–R1836). U242 bulk, import, backup and Check DB (R1831, R1832, R1846–R1848). U250 classes: edit, bulk, import, export, Check DB. U251 disk-full and kill during import. U252–U254 for browser, editor, note types and IO editor. U253 VoiceOver for browser and editor."
+      gate: "U246: areas search (R1916–R1920), packages and maintenance (R1922–R1925), notes and rendering of editor previews. U249 adds saved searches, browser sorts and apkg/colpkg round trips. U244 browser, search and editor groups (R1824–R1836). U242 bulk, import, backup and Check DB (R1831, R1832, R1846–R1848). U250 classes: edit, bulk, import, export, Check DB. U251 disk-full and kill during import. U252–U254 for browser, editor, note types and IO editor."
       user_steps: "Variant picks for browser and editor. Device run (browser and editor budgets). One-time capture of the Word, Google Docs, Safari, Chrome and Yomitan clipboard payloads for U197's paste corpus (Google Docs needs Antoine's account, a stop condition for agents)"
     units: [U69, U71, U86, U87, U90, U91, U194, U196, U197, U200, U201, U202, U203, U205, U206, U207, U211,
       U212, U213, U214, U215, U216, U217, U218, U219, U220, U221, U223, U247]
@@ -546,8 +546,7 @@ milestones:
         plan:
           - U253
           - {text: "for browser, editor, note types and IO editor", items: [browse.browser, editor.add, editor.edit, noteTypes.list, noteTypes.templates, noteTypes.fields, noteTypes.preview, noteTypes.changeNoteType, imageOcclusion.editor]}
-          - {text: "U253 VoiceOver for browser and editor", items: [browse.browser, editor.add, editor.edit]}
-        why: U253's sweep of browser, editor, note types and IO editor (U252-U254), with VoiceOver for browser and editor
+        why: U253's accessibility sweep of browser, editor, note types and IO editor (U252-U254); VoiceOver scripts are optional follow-up (Antoine, 2026-10-20)
       - id: u254-critic
         run: u254-critic
         pending: U254
