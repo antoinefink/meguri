@@ -151,8 +151,8 @@ extension WebKitSuites {
             let fixture = MediaFixture()
             let configuration = CardWebConfiguration(store: .nonPersistent())
             var pair: CardPagePair? = try await make(fixture, configuration: configuration)
-            weak var weakPair = pair
-            weak var weakPage = pair?.current
+            weak let weakPair = pair
+            weak let weakPage = pair?.current
             pair?.close(); pair = nil
             #expect(weakPair == nil && weakPage == nil)
             #expect(CardWebConfiguration.storeIdentifier != UUID(uuidString: "6D656775-7269-5350-494B-453230303032"))
