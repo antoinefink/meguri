@@ -24,6 +24,10 @@ final class NativeMemoryProbeTests: XCTestCase {
         guard NSRunningApplication.runningApplications(withBundleIdentifier: build.expectedBundleIdentifier).isEmpty else {
             throw Failure.invalid("refusing to replace an existing app")
         }
+        let checkpointDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NativeMemoryProbe-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: checkpointDirectory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: checkpointDirectory) }
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(animations: false, route: "spike/card-swap").arguments
         app.launchEnvironment["MallocStackLogging"] = "lite"
@@ -37,21 +41,32 @@ final class NativeMemoryProbeTests: XCTestCase {
                 throw Failure.invalid("launched app identity changed")
             }
         }
-        func checkpoint(_ phase: String) throws {
+        func checkpoint(_ phase: CheckpointPhase) throws {
             try validate()
-            let proceed = XCTNSNotificationExpectation(
-                name: Notification.Name("com.antoinefink.meguri.dev.testhooks.nativeMemoryProbeContinue"),
-                object: nil, notificationCenter: DistributedNotificationCenter.default()
+            let continuation = checkpointDirectory.appendingPathComponent("\(phase.rawValue).continue")
+            let marker = try JSONSerialization.data(
+                withJSONObject: ["phase": phase.rawValue, "pid": pid, "continuationPath": continuation.path],
+                options: .sortedKeys
             )
-            print("MEGURI_NATIVE_MEMORY_CHECKPOINT phase=\(phase) pid=\(pid)")
-            guard XCTWaiter.wait(for: [proceed], timeout: 180) == .completed else {
-                throw Failure.invalid("\(phase) checkpoint did not receive continuation within 180s")
-            }
-            try validate()
+            print("MEGURI_NATIVE_MEMORY_CHECKPOINT \(String(decoding: marker, as: UTF8.self))")
+            let deadline = Date().addingTimeInterval(180)
+            repeat {
+                var status = stat()
+                if continuation.path.withCString({ lstat($0, &status) }) == 0 {
+                    guard status.st_mode & S_IFMT == S_IFREG, status.st_size == 0 else {
+                        throw Failure.invalid("\(phase.rawValue) continuation must be an empty regular file, not a link")
+                    }
+                    try validate()
+                    return
+                }
+                guard errno == ENOENT else { throw Failure.invalid("cannot inspect \(phase.rawValue) continuation") }
+                Thread.sleep(forTimeInterval: 0.1)
+            } while Date() < deadline
+            throw Failure.invalid("\(phase.rawValue) checkpoint did not receive continuation within 180s")
         }
         keep(Data("Instrumented Debug diagnostic; synthetic spike fixtures; MallocStackLogging=lite; no performance receipt or acceptance. PID=\(pid)".utf8), name: "diagnostic.txt")
         _ = try waitForReport(app, timeout: 30, phase: "baseline")
-        try checkpoint("baseline")
+        try checkpoint(.baseline)
         try validate()
         DistributedNotificationCenter.default().postNotificationName(
             Notification.Name("\(build.expectedBundleIdentifier).testhooks.cardSwapBurst"),
@@ -60,7 +75,7 @@ final class NativeMemoryProbeTests: XCTestCase {
         let report = try waitForReport(app, timeout: 600, phase: "end")
         XCTAssertEqual(report.burst?.pages, 2)
         XCTAssertEqual(report.burst?.swaps, 1000)
-        try checkpoint("end")
+        try checkpoint(.end)
         #else
         throw XCTSkip("native memory probe is macOS only")
         #endif
@@ -68,6 +83,7 @@ final class NativeMemoryProbeTests: XCTestCase {
 
     #if os(macOS)
     private enum Failure: Error { case invalid(String) }
+    private enum CheckpointPhase: String { case baseline, end }
 
     private func identify(_ app: XCUIApplication, build: BuildUnderTest) throws -> NSRunningApplication {
         guard app.state == .runningForeground || app.state == .runningBackground else { throw Failure.invalid("app is not running") }
