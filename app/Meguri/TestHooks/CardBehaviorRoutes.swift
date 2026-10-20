@@ -91,7 +91,7 @@ extension TestHooks {
                 """
             let heading: String
             switch answerForm {
-            case 1: heading = "<hr id=answer><h1>\(answer)</h1>"
+            case 1: heading = "<div style='height:1600px'></div><hr id=answer><h1>\(answer)</h1>"
             case 2: heading = "<h1>\(answer)</h1>"
             default: heading = "<h1 id=answer>\(answer)</h1>"
             }
@@ -135,15 +135,18 @@ extension TestHooks {
             let page = pair.current
             let result = try? await page.webView.callAsyncJavaScript("""
                 return JSON.stringify({text:document.getElementById('typeans')?.value||'', marker:window.domMarker,
-                  resizes:window.resizeEvents||0, height:innerHeight, viewport:document.getElementById('viewport')?.offsetHeight,
+                  resizes:window.resizeEvents||0, height:innerHeight, layoutHeight:document.documentElement.clientHeight,
+                  viewport:document.getElementById('viewport')?.offsetHeight,
                   scroll:scrollY, bottom:document.getElementById('bottom')?.getBoundingClientRect().bottom,
                   root:location.href, scriptRan:window.cardScriptRan===true});
                 """, arguments: [:], in: nil, in: .page)
             guard pair.current === page, page.update == update, !page.closed else { return }
             var observations = (result as? String).flatMap { $0.data(using: .utf8) }
                 .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            observations["pageZoom"] = page.webView.pageZoom
             #if os(iOS)
             observations["voiceFocus"] = nativeVoiceFocus
+            observations["pinch"] = page.webView.scrollView.zoomScale / page.webView.scrollView.minimumZoomScale
             if let window = page.webView.window {
                 let frame = page.webView.convert(page.webView.bounds, to: window)
                 observations["native"] = ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height,

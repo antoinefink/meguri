@@ -22,8 +22,8 @@ public nonisolated struct CardAccessibilityTarget: Equatable, Sendable {
     public let text: String
 }
 
-/// A small effect boundary lets offscreen component tests inspect a real
-/// WebKit target without posting to the workstation's accessibility service.
+/// Offscreen component tests suppress native effects. Actual OS targets and
+/// VoiceOver cursor movement require a supported, visible surface in the VM.
 struct CardAccessibilityEffects {
     var isActive: (CardNativeWebView) -> Bool = { view in
         #if os(macOS)

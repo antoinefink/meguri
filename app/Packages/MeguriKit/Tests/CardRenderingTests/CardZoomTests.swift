@@ -51,12 +51,19 @@ extension WebKitSuites {
                 try await fixture.bool("return !video.paused && video.currentTime>timeBefore;") == true
             }
             #expect(try await fixture.bool("return node===document.getElementById('typeans') && node.value==='ka' && video===document.getElementById('media') && !video.paused && video.currentTime>=timeBefore && runs===1;") == true)
-            #expect(try await fixture.bool("return Math.abs(document.getElementById('viewport').getBoundingClientRect().height-innerHeight)<1 && Math.abs(document.getElementById('bottom').getBoundingClientRect().bottom-innerHeight)<1;") == true)
+            #expect(try await fixture.bool("return Math.abs(document.getElementById('viewport').getBoundingClientRect().height-innerHeight)<1 && Math.abs(document.getElementById('bottom').getBoundingClientRect().bottom-document.documentElement.clientHeight)<1;") == true)
+            let nativeHeight = web.bounds.height
+            let matchesNativeHeight = try await web.callAsyncJavaScript("return Math.abs(innerHeight-nativeHeight)<1;",
+                arguments: ["nativeHeight": nativeHeight], in: nil, in: .page) as? Bool
+            #expect(matchesNativeHeight == true && web.pageZoom == 1)
             #expect(page.hostReports.viewRevision > epoch)
             #expect(try await fixture.bool("return Math.abs(scrollX/(document.scrollingElement.scrollWidth-document.scrollingElement.clientWidth)-.3)<.04;") == true)
             #if !os(macOS)
             #expect(web.scrollView.contentInsetAdjustmentBehavior == .never)
             #endif
+            // Continuity was asserted at its preserved scroll fractions above.
+            // Capture the real input/video/footer rather than the blank spacer.
+            try await fixture.script("scrollTo(0,0);await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));")
             try await fixture.snapshot("layout-light")
             try await fixture.pair.setAppearance(.dark)
             try await fixture.snapshot("layout-dark")

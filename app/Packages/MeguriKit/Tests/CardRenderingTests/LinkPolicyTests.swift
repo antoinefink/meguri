@@ -21,6 +21,18 @@ extension WebKitSuites {
             #expect(defaults.stringArray(forKey: "card.approvedURLSchemes") == ["mkdictionaries"])
         }
 
+        @Test func embeddedDocumentAdmissionNeverGrantsExternalAppNavigation() throws {
+            for value in ["http://example.com/frame", "https://example.com/frame", "about:blank", "about:srcdoc",
+                          "data:text/html,inline", "blob:https://example.com/synthetic", "meguri-media://media/frame.html"] {
+                #expect(LinkPolicy.admitsFrame(try #require(URL(string: value)), root: MediaOrigin.url))
+            }
+            for value in ["file:///blocked", "synthetic-device-app://entry", "javascript:void(0)",
+                          "meguri-media://foreign/frame.html", "meguri-media://media:123/frame.html",
+                          "meguri-media://user@media/frame.html"] {
+                #expect(!LinkPolicy.admitsFrame(try #require(URL(string: value)), root: MediaOrigin.url))
+            }
+        }
+
         @Test func actualNavigationFragmentsJavascriptWindowsAndFramesKeepRoot() async throws {
             let fixture = try await CardBehaviorFixture(platform: .iPhone)
             defer { fixture.close() }
@@ -49,8 +61,18 @@ extension WebKitSuites {
             try await CardBehaviorFixture.until("external preference was not applied") { fixture.presenter.opens.count == 4 }
             #expect(fixture.presenter.opens.last?.browser == .external)
             try await fixture.script("location.href='file:///blocked';")
-            try await fixture.script("const f=document.createElement('iframe');f.src='https://example.com/frame';document.body.append(f);")
-            try await fixture.script("await new Promise(r=>setTimeout(r,50));")
+            try await fixture.script("""
+                const f=document.createElement('iframe');f.id='embedded';
+                f.srcdoc="<p id=loaded>Embedded document</p><script>window.frameRan=true;window.open('https://example.com/frame');alert('blocked');window.frameConfirm=confirm('blocked');window.framePrompt=prompt('blocked');top.location.href='https://example.com/frame-top';</script>";
+                document.body.append(f);
+                """)
+            try await CardBehaviorFixture.until("embedded document and script did not load") {
+                try await fixture.bool("""
+                    const f=document.getElementById('embedded');
+                    return f.contentDocument?.getElementById('loaded')?.textContent==='Embedded document'
+                        && f.contentWindow.frameRan===true && f.contentWindow.frameConfirm===false && f.contentWindow.framePrompt===null;
+                    """) == true
+            }
             #expect(fixture.presenter.opens.count == 4 && fixture.presenter.dialogs.isEmpty)
             #expect(page.webView.url == MediaOrigin.url && fixture.pair.pages.count == 2)
             #expect(actions.isEmpty && fixture.pair.current.update?.side == .question)
@@ -107,7 +129,7 @@ extension WebKitSuites {
             try await fixture.present(.init(cardID: 1, question: "links", answer: "a"))
             let behavior = fixture.pair.current.behavior
             behavior.approvals = approvals
-            func route(_ value: String) throws { behavior.route(try #require(URL(string: value))) }
+            @MainActor func route(_ value: String) throws { behavior.route(try #require(URL(string: value))) }
             try route("missing-handler://x"); try route("file:///blocked")
             #expect(fixture.presenter.dialogs.isEmpty && fixture.presenter.opens.isEmpty)
             try route("MKDICTIONARIES://first")

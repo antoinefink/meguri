@@ -294,10 +294,15 @@ extension WebKitSuites {
             #expect(Set(baseNames).subtracting(actualNames).isEmpty)
             var actions: [CardBridgeAction] = []
             pair.onAction = { actions.append($0) }
-            let update = try await pair.prepare(CardPayload(cardID: 1, question: "<iframe srcdoc=\"<script>parent.postMessage('untrusted','*')</script>\"></iframe><script>if(typeof pycmd!=='undefined')pycmd('ease3')</script>", answer: "answer"))
+            let update = try await pair.prepare(CardPayload(cardID: 1, question: "<iframe srcdoc=\"<p id=loaded>Untrusted frame</p><script>window.frameRan=true;parent.postMessage('untrusted','*')</script>\"></iframe><script>if(typeof pycmd!=='undefined')pycmd('ease3')</script>", answer: "answer"))
             _ = try pair.present(update)
-            try await Task.sleep(for: .milliseconds(100))
             let page = pair.current.webView
+            try await CardBehaviorFixture.until("foreign frame did not execute its srcdoc") {
+                try await page.callAsyncJavaScript("const f=document.querySelector('iframe');return f.contentDocument?.getElementById('loaded')?.textContent==='Untrusted frame' && f.contentWindow.frameRan===true;", contentWorld: .page) as? Bool == true
+            }
+            try await CardBehaviorFixture.until("loaded foreign frame did not exercise bridge rejection") {
+                pair.diagnostics.entries.contains { $0.kind == "bridgeOrigin" }
+            }
             #expect(actions.isEmpty)
             let result = try await page.callAsyncJavaScript("return ['meguriCard','showAnswer','AnkiDroidJS','buttonAnswerEase1'].every(k=>typeof window[k]==='undefined');", contentWorld: .page) as? Bool
             #expect(result == true)

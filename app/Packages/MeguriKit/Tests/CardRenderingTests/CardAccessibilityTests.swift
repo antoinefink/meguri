@@ -29,7 +29,9 @@ extension WebKitSuites {
 
         #endif
 
-        @Test func realWebKitHitTestingTargetsAnswerSeparatorAndFallbackAtNativeZoom() async throws {
+        // DOM/binding coverage only. OS AX targeting and cursor traversal run
+        // on actual VM surfaces in CardWebViewBehaviorUITests, including Mac.
+        @Test func answerDOMMetadataMatchesBindingAtSavedZoom() async throws {
             let fixture = try await CardBehaviorFixture()
             defer { fixture.close() }
             let answers = ["<h2 id=answer>Native answer</h2>",
@@ -39,24 +41,12 @@ extension WebKitSuites {
             for (index, html) in answers.enumerated() {
                 try await fixture.present(.init(cardID: Int64(index + 1), question: "q", answer: html))
                 let page = fixture.pair.current
-                var posted: Any?
-                // Capture only. Never post to host VO or activate a window.
-                page.accessibilityEffects = CardAccessibilityEffects(isActive: { _ in true }, post: { posted = $0 })
                 fixture.pair.ownsKeyboardFocus = false
-                #if !os(macOS)
-                page.webView.scrollView.setZoomScale(2, animated: false)
-                #endif
                 _ = try await fixture.pair.showAnswer()
                 #expect(page.accessibilityTarget?.elementID == (index == 2 ? "qa" : "answer"))
-                let element = try #require(posted as? NSObject, "native hit testing must resolve a concrete answer element")
-                #if os(macOS)
-                let accessible = try #require(element as? any NSAccessibilityProtocol)
-                let nativeText = (accessible.accessibilityValue() as? String)
-                    ?? accessible.accessibilityTitle() ?? ""
-                #else
-                let nativeText = element.accessibilityLabel ?? element.accessibilityValue ?? ""
-                #endif
-                #expect(nativeText.contains("Native answer"), "the concrete native target must identify the answer, not a generic web area")
+                #expect(page.accessibilityTarget?.update == page.update)
+                #expect(page.accessibilityTarget?.text.contains("Native answer") == true)
+                #expect(page.webView.pageZoom == 1.5)
                 #expect(try await fixture.bool("return document.activeElement.id!=='answer' && document.activeElement.id!=='typeans';") == true)
             }
         }

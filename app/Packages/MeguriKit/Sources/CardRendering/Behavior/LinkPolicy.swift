@@ -19,6 +19,15 @@ public nonisolated enum LinkPolicy {
         case refuse, javascript, fragment(String), browser(CardBrowser), scheme(String)
     }
 
+    /// Admission only for documents staying inside an embedded frame. This
+    /// grants neither native actions nor navigation of the main document.
+    static func admitsFrame(_ url: URL, root: URL) -> Bool {
+        guard let scheme = canonicalScheme(url.scheme), scheme != "file" else { return false }
+        if ["http", "https", "about", "data", "blob"].contains(scheme) { return true }
+        return scheme == root.scheme && url.host == root.host && url.port == root.port
+            && url.user == nil && url.password == nil
+    }
+
     public static func route(_ url: URL, root: URL, platform: CardRuntime.Platform,
                              preferExternal: Bool) -> Route {
         guard let scheme = canonicalScheme(url.scheme) else { return .refuse }
