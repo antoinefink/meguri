@@ -300,11 +300,11 @@ runs:
     class: ui
     triggers: [app/Meguri/, app/Packages/MeguriKit/, app/MeguriUITests/, tools/mg.d/a11y.sh]
     budget_s: 1800
-  # U150: the shell's layouts (tabs, sidebar, size-class switch, deep links)
-  # on each platform; no other run starts NavigationLayoutTests.
+  # U150/U70: shell layouts and native card behaviors share a build and UI
+  # test invocation on each platform.
   - id: ui-test-iphone
     job: ui-test
-    args: [--platform, iphone, --suite, NavigationLayoutTests]
+    args: [--platform, iphone, --suite, NavigationLayoutTests, --suite, CardWebViewBehaviorUITests]
     tier: T0
     placement: vm
     needs: [simulator]
@@ -313,7 +313,7 @@ runs:
     budget_s: 1800
   - id: ui-test-ipad
     job: ui-test
-    args: [--platform, ipad, --suite, NavigationLayoutTests]
+    args: [--platform, ipad, --suite, NavigationLayoutTests, --suite, CardWebViewBehaviorUITests]
     tier: T0
     placement: vm
     needs: [simulator]
@@ -322,7 +322,7 @@ runs:
     budget_s: 1800
   - id: ui-test-mac
     job: ui-test
-    args: [--platform, mac, --suite, NavigationLayoutTests]
+    args: [--platform, mac, --suite, NavigationLayoutTests, --suite, CardWebViewBehaviorUITests]
     tier: T0
     placement: vm
     needs: [mac-ui]

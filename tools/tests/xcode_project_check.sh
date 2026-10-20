@@ -252,6 +252,17 @@ expect_info() { # expect_info <app> <key> <JSON value, null when absent>: the Ma
   [ "$actual" = "$3" ] || { echo "$2 is $actual, expected $3" && return 1; }
 }
 
+# R523/R2040: inspectability uses this native build policy, never DEBUG alone.
+card_inspection_build() {
+  case "$1" in
+    Debug) echo debug ;;
+    Profile) echo profile ;;
+    Release) echo personalRelease ;;
+    AppStore) echo appStore ;;
+    *) return 1 ;;
+  esac
+}
+
 no_build_settings_in_pbxproj() {
   local inline
   inline="$(awk '/buildSettings = \{/ {f = 1; next} f && /^[[:space:]]*\};/ {f = 0; next} f' "$PROJECT/project.pbxproj")"
@@ -313,6 +324,7 @@ if builds_phase; then
       check "$config $sdk: compilation conditions (hooks $hooks, AnkiWeb $ankiweb)" conditions_ok "$config" "$sdk" "$hooks" "$ankiweb"
       check "$config $sdk: core features '$features'" expect_setting "$config" "$sdk" MEGURI_CORE_FEATURES "$features"
       check "$config $sdk: bundle id $id" expect_setting "$config" "$sdk" PRODUCT_BUNDLE_IDENTIFIER "$id"
+      check "$config $sdk: card inspection policy" expect_setting "$config" "$sdk" INFOPLIST_KEY_MeguriCardInspectionBuild "$(card_inspection_build "$config")"
       check "$config $sdk: arm64 only" expect_setting "$config" "$sdk" ARCHS arm64
     done
     check "$config: iOS App Group group.$id" expect_setting "$config" iphonesimulator MEGURI_APP_GROUP "group.$id"
@@ -430,6 +442,7 @@ if builds_phase; then
       Debug) check "mac-$config starts as a UI element (LSUIElement)" expect_info "$app" LSUIElement true ;;
       *) check "mac-$config is a regular app (LSUIElement false)" expect_info "$app" LSUIElement false ;;
     esac
+    check "mac-$config built card inspection policy" expect_info "$app" MeguriCardInspectionBuild "\"$(card_inspection_build "$config")\""
     # shellcheck disable=SC2046
     markers="$(hook_markers $(executables "$app/Contents/MacOS" Meguri))"
     case "$config" in
