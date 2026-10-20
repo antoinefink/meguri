@@ -423,13 +423,12 @@ extension TestHooks {
                 let page = MediaOriginSpike.Page(MediaOriginSpike.configuration(handler, persistent: true), handler: handler)
                 self.page = page
                 do {
-                    try await page.open("_anki/storage.html") { result = "running: \($0.rawValue)" }
+                    try await page.open("_anki/storage.html")
                 } catch {
                     result = "error: \(error.localizedDescription)"
                     return
                 }
                 guard !Task.isCancelled else { return }
-                result = "running: storage script"
                 // Binding/navigation (10 s), script (10 s) and the flush
                 // delay (3 s) fit inside the existing 30 s UI observation.
                 let outcome = await page.run(Self.script, ["value": write ? UUID().uuidString : ""], within: 10)
