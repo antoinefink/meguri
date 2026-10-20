@@ -86,11 +86,23 @@ extension TestHooks {
             let inputLabel = String(localized: "Typed answer", table: "CardBehaviorRoutes")
             let jump = String(localized: "Jump to footer", table: "CardBehaviorRoutes")
             let scriptLink = String(localized: "Run card script", table: "CardBehaviorRoutes")
+            func escapedLinkLabel(_ value: String) -> String {
+                value.replacingOccurrences(of: "&", with: "&amp;")
+                    .replacingOccurrences(of: "<", with: "&lt;")
+                    .replacingOccurrences(of: ">", with: "&gt;")
+                    .replacingOccurrences(of: "\"", with: "&quot;")
+            }
+            let jumpHTML = escapedLinkLabel(jump)
+            let scriptLinkHTML = escapedLinkLabel(scriptLink)
             let html = """
                 <style>body{margin:0}input{font:inherit;min-height:44px;max-width:100%;box-sizing:border-box}
                 a{display:block;min-height:44px;box-sizing:border-box;padding:16px}#viewport{height:100vh}#space{height:200vh}#bottom{position:fixed;bottom:0;margin:0}</style>
                 <h1>\(title)</h1><input id=typeans aria-label="\(inputLabel)" autocapitalize=off autocorrect=off spellcheck=false>
-                <p><a href="#bottom">\(jump)</a> <a href="javascript:window.cardScriptRan=true;void(0)">\(scriptLink)</a></p>
+                <p><a href="#bottom" aria-label="\(jumpHTML)" style="display:flex;align-items:center;gap:8px">
+                <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44" role="img" aria-label="\(jumpHTML)" style="flex:none" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 6V28M13 19L22 28L31 19M8 36H36"/></svg>
+                <span>\(jumpHTML)</span></a> <a href="javascript:window.cardScriptRan=true;void(0)" aria-label="\(scriptLinkHTML)" style="display:flex;align-items:center;gap:8px">
+                <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44" role="img" aria-label="\(scriptLinkHTML)" style="flex:none" fill="currentColor"><path d="M14 8L36 22L14 36Z"/></svg>
+                <span>\(scriptLinkHTML)</span></a></p>
                 <div id=viewport></div><div id=space></div><p id=bottom>\(bottom)</p>
                 <script>window.resizeEvents=0;window.addEventListener('resize',()=>resizeEvents++);window.domMarker=Math.random();</script>
                 """
