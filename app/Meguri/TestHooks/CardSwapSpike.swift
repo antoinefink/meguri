@@ -161,6 +161,7 @@ extension TestHooks {
         @ObservationIgnored private var confirmations: [UInt64: CheckedContinuation<Void, Never>] = [:]
         @ObservationIgnored private var records: [Record] = []
         @ObservationIgnored private var started = false
+        @ObservationIgnored private var burstInProgress = false
         @ObservationIgnored private var triggers: [SpikeTrigger] = []
 
         /// One swap's times, in seconds on the input events' clock.
@@ -392,6 +393,7 @@ extension TestHooks {
             #if os(macOS)
             if mode == .capture { checkFrames() }
             #endif
+            guard mode != .timing || !burstInProgress else { return }
             report.periodMs = period * 1000
             report.web = stats(records.filter(\.web))
             report.baseline = stats(records.filter { !$0.web })
@@ -454,6 +456,12 @@ extension TestHooks {
         /// after 3 s; last, the pages collect their garbage and the
         /// finalized card elements are counted.
         private func burst(retaining: Bool = false) async {
+            guard !burstInProgress else { return }
+            burstInProgress = true
+            defer {
+                burstInProgress = false
+                publish()
+            }
             var burst = Burst()
             burst.retaining = retaining
             let pages = [ObjectIdentifier(front), ObjectIdentifier(back)]
@@ -512,14 +520,12 @@ extension TestHooks {
                 else {
                     report.lastConfirm = "error: card-element collection: \(counts)"
                     report.burst = burst
-                    publish()
                     return
                 }
                 burst.cardElementsRegistered += registered
                 burst.cardElementsFinalized += finalized
             }
             report.burst = burst
-            publish()
         }
 
         /// PRIVATE TEST SPI: request collection only after all memory samples,
