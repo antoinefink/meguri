@@ -58,7 +58,7 @@
 
 ## Tests
 
-- Physical iOS UI runners cannot read host build paths. The UI-test target's device-only artifact phase stages app Info.plist, executable and adjacent dylibs as plain `MeguriBuildUnderTest` resources before signing; keep its app dependency, sandbox inputs and always-run setting. Mac/simulator tests read the built app directly.
+- Physical iOS UI runners cannot read host build paths. The UI-test artifact phase stages only app Info.plist, executable and top-level dylibs in `TARGET_TEMP_DIR/MeguriBuildUnderTest`; the Resources phase copies that folder before signing. Keep the app dependency, always-run phase, target-only recursive script inputs and Mac/simulator resource exclusions. Trailing slashes do not grant recursive sandbox access; script outputs are literal. Mac/simulator tests read the built app directly.
 - Use snapshots for diagnostic hierarchy dumps; reserve `isHittable` for specific action targets, since enumerating menus serializes AX queries.
 - Accessibility identifiers: `area.screen.element[.id]`, element names lowerCamel (R1964).
 - System alerts drop the identifiers of their buttons, on iOS and on the Mac. Tests reach them through the alert (`app.alerts` on iOS, `app.sheets` on the Mac) and the button's label; identifier audits must accept them.

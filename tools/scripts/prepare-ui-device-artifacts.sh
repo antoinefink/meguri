@@ -29,17 +29,17 @@ plain_path() {
 }
 
 app="${BUILT_PRODUCTS_DIR:?}/Meguri.app"
-resources="${UNLOCALIZED_RESOURCES_FOLDER_PATH:?}"
-case "$resources" in
-  /*) fail "expected a relative UI-test resource path" ;;
-esac
-case "/$resources" in
-  */MeguriUITests.xctest) ;;
-  *) fail "expected resources inside MeguriUITests.xctest" ;;
-esac
-staging="${TARGET_BUILD_DIR:?}/$resources/MeguriBuildUnderTest"
+# Xcode allows writes throughout this target-owned temporary directory. Its
+# Resources phase copies the prepared folder into the test bundle before signing.
+staging="${TARGET_TEMP_DIR:?}/MeguriBuildUnderTest"
 plain_path "$app"
 plain_path "$staging"
+case "$staging/" in
+  "$app/"*) fail "staging path overlaps the built app" ;;
+esac
+case "$app/" in
+  "$staging/"*) fail "built app overlaps the staging path" ;;
+esac
 [ -d "$app" ] || fail "missing built app: $app"
 
 info="$app/Info.plist"

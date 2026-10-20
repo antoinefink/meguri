@@ -8,6 +8,12 @@ TEST_TARGET_NAME = Meguri
 GENERATE_INFOPLIST_FILE = YES
 INFOPLIST_FILE = MeguriUITests/Info.plist
 
+// Read the declared app subtree; prepare artifacts in target-owned temp space.
+USE_RECURSIVE_SCRIPT_INPUTS_IN_SCRIPT_PHASES = YES
+// Only device tests copy the prepared folder through the Resources phase.
+EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*] = $(inherited) MeguriBuildUnderTest
+EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*] = $(inherited) MeguriBuildUnderTest
+
 LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks @loader_path/Frameworks
 LD_RUNPATH_SEARCH_PATHS[sdk=macosx*] = $(inherited) @executable_path/../Frameworks @loader_path/../Frameworks
 

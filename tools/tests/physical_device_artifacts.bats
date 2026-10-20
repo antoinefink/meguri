@@ -11,12 +11,13 @@ setup() {
   tmp="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
   export PLATFORM_NAME=iphoneos CONFIGURATION=Profile
   export BUILT_PRODUCTS_DIR="$tmp/products with spaces" TARGET_BUILD_DIR="$tmp/test products"
+  export TARGET_TEMP_DIR="$tmp/UI-test target temp"
   export UNLOCALIZED_RESOURCES_FOLDER_PATH=MeguriUITests.xctest
   APP="$BUILT_PRODUCTS_DIR/Meguri.app"
   RESOURCES="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
-  STAGE="$RESOURCES/MeguriBuildUnderTest"
+  STAGE="$TARGET_TEMP_DIR/MeguriBuildUnderTest"
   BIN="$tmp/bin"
-  mkdir -p "$APP" "$RESOURCES" "$BIN"
+  mkdir -p "$APP" "$RESOURCES" "$TARGET_TEMP_DIR" "$BIN"
   export PLUTIL_LOG="$tmp/plutil.log"
   : >"$PLUTIL_LOG"
   cat >"$BIN/plutil" <<'PY'
@@ -87,11 +88,12 @@ stage() { run /bin/bash "$SCRIPT"; }
   done
 }
 
-@test "physical device artifacts: every rebuild clears stale files without touching other test resources" {
+@test "physical device artifacts: every rebuild clears only its fixed leaf" {
   stage
   [ "$status" -eq 0 ]
   mkdir "$STAGE/stale-directory"
   printf 'keep' >"$RESOURCES/other-resource"
+  printf 'keep temp' >"$TARGET_TEMP_DIR/other-output"
   ln -s "$RESOURCES/other-resource" "$STAGE/stale-link"
   rm "$APP/Meguri.debug.dylib"
   printf 'new app bytes' >"$APP/AppExecutable"
@@ -102,6 +104,18 @@ stage() { run /bin/bash "$SCRIPT"; }
   [ ! -e "$STAGE/stale-directory" ]
   [ ! -L "$STAGE/stale-link" ]
   [ "$(cat "$RESOURCES/other-resource")" = keep ]
+  [ "$(cat "$TARGET_TEMP_DIR/other-output")" = 'keep temp' ]
+  [ ! -e "$RESOURCES/MeguriBuildUnderTest" ]
+}
+
+@test "physical device artifacts: staging needs no test bundle paths" {
+  rm -rf "$TARGET_BUILD_DIR"
+  unset TARGET_BUILD_DIR UNLOCALIZED_RESOURCES_FOLDER_PATH
+  stage
+  [ "$status" -eq 0 ]
+  cmp "$APP/Info.plist" "$STAGE/Info.plist"
+  cmp "$APP/AppExecutable" "$STAGE/AppExecutable"
+  [ ! -e "$RESOURCES" ]
 }
 
 @test "physical device artifacts: missing or malformed Info and absent executable fail" {
@@ -189,7 +203,7 @@ PY
 }
 
 @test "physical device artifacts: symlink build roots or staging paths never redirect reads or deletion" {
-  local products="$BUILT_PRODUCTS_DIR" target="$TARGET_BUILD_DIR"
+  local products="$BUILT_PRODUCTS_DIR" target="$TARGET_TEMP_DIR"
   ln -s "$products" "$target/source-link"
   export BUILT_PRODUCTS_DIR="$target/source-link"
   stage
@@ -203,26 +217,55 @@ PY
   [ "$(cat "$target/keep/sentinel")" = keep ]
   [ -L "$STAGE" ]
   rm "$STAGE"
-  mv "$RESOURCES" "$target/saved-resources"
-  ln -s "$target/saved-resources" "$RESOURCES"
+  mv "$target" "$target-saved"
+  ln -s "$target-saved" "$target"
   stage
   [ "$status" -ne 0 ]
-  [ -L "$RESOURCES" ]
+  [ -L "$target" ]
+  [ "$(cat "$target-saved/keep/sentinel")" = keep ]
 }
 
 @test "physical device artifacts: traversal in Xcode directory inputs fails before staging" {
-  local products="$BUILT_PRODUCTS_DIR" resources="$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+  local products="$BUILT_PRODUCTS_DIR" target="$TARGET_TEMP_DIR" value
   export BUILT_PRODUCTS_DIR="$products/../products with spaces"
   stage
   [ "$status" -ne 0 ]
   export BUILT_PRODUCTS_DIR="$products"
-  export UNLOCALIZED_RESOURCES_FOLDER_PATH="../$resources"
-  stage
-  [ "$status" -ne 0 ]
-  export UNLOCALIZED_RESOURCES_FOLDER_PATH="/$resources"
+  for value in '' relative "$target/../UI-test target temp" "$target/." "$target//nested" "$target/"; do
+    export TARGET_TEMP_DIR="$value"
+    stage
+    [ "$status" -ne 0 ]
+    [ ! -e "$STAGE" ]
+  done
+  unset TARGET_TEMP_DIR
   stage
   [ "$status" -ne 0 ]
   [ ! -e "$STAGE" ]
+}
+
+@test "physical device artifacts: overlapping app and staging paths fail before changing either" {
+  local target="$TARGET_TEMP_DIR"
+  mkdir "$APP/MeguriBuildUnderTest"
+  printf keep >"$APP/MeguriBuildUnderTest/sentinel"
+  export TARGET_TEMP_DIR="$APP"
+  stage
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'staging path overlaps the built app'* ]]
+  [ "$(cat "$APP/MeguriBuildUnderTest/sentinel")" = keep ]
+  [ -f "$APP/Info.plist" ]
+  [ -f "$APP/AppExecutable" ]
+
+  export TARGET_TEMP_DIR="$target"
+  mkdir "$STAGE"
+  printf keep >"$STAGE/sentinel"
+  mv "$APP" "$STAGE/Meguri.app"
+  export BUILT_PRODUCTS_DIR="$STAGE"
+  stage
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'built app overlaps the staging path'* ]]
+  [ "$(cat "$STAGE/sentinel")" = keep ]
+  [ -f "$STAGE/Meguri.app/Info.plist" ]
+  [ -f "$STAGE/Meguri.app/AppExecutable" ]
 }
 
 @test "physical device artifacts: copying errors fail the build" {
@@ -237,7 +280,7 @@ PY
   local platform
   mkdir "$STAGE"
   printf untouched >"$STAGE/sentinel"
-  unset BUILT_PRODUCTS_DIR TARGET_BUILD_DIR UNLOCALIZED_RESOURCES_FOLDER_PATH
+  unset BUILT_PRODUCTS_DIR TARGET_TEMP_DIR TARGET_BUILD_DIR UNLOCALIZED_RESOURCES_FOLDER_PATH
   export CONFIGURATION=Release
   for platform in macosx iphonesimulator; do
     export PLATFORM_NAME="$platform"
@@ -263,21 +306,46 @@ def block(identifier):
 target = block("4D4547555249000000000300")
 phases = re.search(r"buildPhases = \((.*?)\);", target, re.S)[1]
 assert phases.index("0302 /* Sources */") < phases.index("0303 /* Frameworks */")
-assert phases.index("0303 /* Frameworks */") < phases.index("0304 /* Resources */")
-assert phases.index("0304 /* Resources */") < phases.index("0305 /* Prepare UI device artifacts */")
+assert phases.index("0303 /* Frameworks */") < phases.index("0305 /* Prepare UI device artifacts */")
+assert phases.index("0305 /* Prepare UI device artifacts */") < phases.index("0304 /* Resources */")
 assert "0320 /* PBXTargetDependency */" in re.search(r"dependencies = \((.*?)\);", target, re.S)[1]
 assert "target = 4D4547555249000000000100 /* Meguri */;" in block("4D4547555249000000000320")
 phase = block("4D4547555249000000000305")
 assert "isa = PBXShellScriptBuildPhase;" in phase and "alwaysOutOfDate = 1;" in phase
 inputs = re.search(r"inputPaths = \((.*?)\);", phase, re.S)[1]
 assert re.findall(r'"([^"\n]+)"', inputs) == [
-    "$(SRCROOT)/../tools/scripts/prepare-ui-device-artifacts.sh", "$(BUILT_PRODUCTS_DIR)/Meguri.app/"]
+    "$(SRCROOT)/../tools/scripts/prepare-ui-device-artifacts.sh", "$(BUILT_PRODUCTS_DIR)/Meguri.app"]
 outputs = re.search(r"outputPaths = \((.*?)\);", phase, re.S)[1]
 assert re.findall(r'"([^"\n]+)"', outputs) == [
-    "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/MeguriBuildUnderTest/"]
+    "$(TARGET_TEMP_DIR)/MeguriBuildUnderTest"]
 assert 'shellPath = /bin/bash;' in phase
 assert 'prepare-ui-device-artifacts.sh' in re.search(r"shellScript = ([^\n]+)", phase)[1]
+resources = block("4D4547555249000000000304")
+assert "isa = PBXResourcesBuildPhase;" in resources
+assert "0311 /* MeguriBuildUnderTest in Resources */" in re.search(r"files = \((.*?)\);", resources, re.S)[1]
+build_file = re.search(r"4D4547555249000000000311 /\*[^\n]*\*/ = \{([^\n]+)\};", project)[1]
+assert "isa = PBXBuildFile;" in build_file
+assert "fileRef = 4D4547555249000000000024 /* MeguriBuildUnderTest */;" in build_file
+file_ref = re.search(r"4D4547555249000000000024 /\*[^\n]*\*/ = \{([^\n]+)\};", project)[1]
+assert "isa = PBXFileReference;" in file_ref
+assert "lastKnownFileType = folder;" in file_ref
+assert "path = MeguriBuildUnderTest;" in file_ref
+assert "sourceTree = TARGET_TEMP_DIR;" in file_ref
+root_group = re.search(r"\t\t4D4547555249000000000002 = \{\n(.*?)\n\t\t\};", project, re.S)[1]
+assert "0024 /* MeguriBuildUnderTest */" in re.search(r"children = \((.*?)\);", root_group, re.S)[1]
+ui_config = root / "app/Config/MeguriUITests.xcconfig"
+assert re.search(r"^USE_RECURSIVE_SCRIPT_INPUTS_IN_SCRIPT_PHASES = YES$", ui_config.read_text(), re.M)
+exclusions = re.findall(r"^EXCLUDED_SOURCE_FILE_NAMES(.*?) = (.*)$", ui_config.read_text(), re.M)
+assert exclusions == [
+    ("[sdk=macosx*]", "$(inherited) MeguriBuildUnderTest"),
+    ("[sdk=iphonesimulator*]", "$(inherited) MeguriBuildUnderTest"),
+]
+for config in (root / "app/Config").glob("*.xcconfig"):
+    if config != ui_config:
+        assert "USE_RECURSIVE_SCRIPT_INPUTS_IN_SCRIPT_PHASES" not in config.read_text()
+assert "USE_RECURSIVE_SCRIPT_INPUTS_IN_SCRIPT_PHASES" not in project
 assert "ENABLE_USER_SCRIPT_SANDBOXING = YES" in (root / "app/Config/Base.xcconfig").read_text()
 assert "ENABLE_USER_SCRIPT_SANDBOXING" not in project
+assert "ENABLE_USER_SCRIPT_SANDBOXING" not in ui_config.read_text()
 PY
 }
