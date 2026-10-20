@@ -45,6 +45,12 @@ extension RenderingSpikes {
             let seekedTo: Double
             let playedTo: Double
             let paused: Bool
+            let readyState: Int
+            let networkState: Int
+            let ended: Bool
+            let playbackRate: Double
+            let cleanupPaused: Bool
+            let cleanupSourceAbsent: Bool
             let error: String?
         }
 
@@ -55,6 +61,7 @@ extension RenderingSpikes {
               media.addEventListener(name, resolve, { once: true });
               media.addEventListener("error", () => reject(new Error("media error " + (media.error && media.error.code))), { once: true });
             });
+            let result;
             try {
               if (media.readyState < 1) await event("loadedmetadata");
               const duration = media.duration;
@@ -66,10 +73,19 @@ extension RenderingSpikes {
               while (media.currentTime < seekedTo + 0.4 && performance.now() < until) {
                 await new Promise((resolve) => setTimeout(resolve, 50));
               }
-              return JSON.stringify({ duration, seekedTo, playedTo: media.currentTime, paused: media.paused, error: null });
+              result = { duration, seekedTo, playedTo: media.currentTime, paused: media.paused, error: null };
             } catch (error) {
-              return JSON.stringify({ duration: media.duration || 0, seekedTo: 0, playedTo: 0, paused: true, error: String(error) });
+              result = { duration: media.duration || 0, seekedTo: 0, playedTo: 0, paused: media.paused, error: String(error) };
+            } finally {
+              Object.assign(result, { readyState: media.readyState, networkState: media.networkState,
+                ended: media.ended, playbackRate: media.playbackRate });
+              media.pause();
+              media.removeAttribute("src");
+              media.load();
+              result.cleanupPaused = media.paused;
+              result.cleanupSourceAbsent = !media.hasAttribute("src");
             }
+            return JSON.stringify(result);
             """
 
         /// The ranged answers to requests for `path`: 206s whose Content-Range
@@ -109,6 +125,7 @@ extension RenderingSpikes {
                 try await page.json(SeekResult.self, Self.seekScript)
             }
             #expect(result.error == nil, "\(result.error ?? "")")
+            #expect(result.cleanupPaused && result.cleanupSourceAbsent)
             #expect(abs(result.duration - mp3.duration) < 2, "duration \(result.duration), file \(mp3.duration)")
             #expect(result.seekedTo >= mp3.duration * 0.89, "seeked to \(result.seekedTo) of \(mp3.duration)")
             #expect(result.playedTo > result.seekedTo + 0.3, "played from \(result.seekedTo) to \(result.playedTo)")
@@ -124,8 +141,22 @@ extension RenderingSpikes {
                 return first >= mp3.data.count * 8 / 10
             }
             #expect(!late.isEmpty, "no ranged request near 90 %: \(handler.requests(for: "/_long.mp3"))")
-            print("S2(a) mp3: duration \(result.duration) s, seeked to \(result.seekedTo), played to \(result.playedTo); requests: \(handler.requests(for: "/_long.mp3"))")
+            print("S2(a) mp3: duration \(result.duration) s, seeked to \(result.seekedTo), played to \(result.playedTo), paused \(result.paused), readyState \(result.readyState), networkState \(result.networkState), ended \(result.ended), playbackRate \(result.playbackRate); requests: \(handler.requests(for: "/_long.mp3"))")
+        }
+
+        @Test(.enabled(
+            if: CustomSchemeMediaSpikeTests.hypervisorPresent() == false,
+            "Audio playback requires confirmed real hardware (kern.hv_vmm_present); the test VM has no audio route."
+        ))
+        func securelyOpenedSilentFileActuallyAdvancesAndSeeks() async throws {
             try await NativeCardAudioChecks.securelyOpenedSilentFileActuallyAdvancesAndSeeks()
+        }
+
+        @Test(.enabled(
+            if: CustomSchemeMediaSpikeTests.hypervisorPresent() == false,
+            "Audio playback requires confirmed real hardware (kern.hv_vmm_present); the test VM has no audio route."
+        ))
+        func controllerQueueAdvancesAcrossMissingMiddleWithinBudget() async throws {
             try await NativeCardAudioChecks.controllerQueueAdvancesAcrossMissingMiddleWithinBudget()
         }
 
@@ -138,10 +169,11 @@ extension RenderingSpikes {
                 try await page.json(SeekResult.self, Self.seekScript)
             }
             #expect(result.error == nil, "\(result.error ?? "")")
+            #expect(result.cleanupPaused && result.cleanupSourceAbsent)
             #expect(result.seekedTo >= result.duration * 0.89, "seeked to \(result.seekedTo) of \(result.duration)")
             #expect(result.playedTo > result.seekedTo + 0.3, "played from \(result.seekedTo) to \(result.playedTo)")
             #expect(!Self.rangedAnswers(handler, path: "/_clip.mp4", total: mp4.count).isEmpty, "\(handler.requests(for: "/_clip.mp4"))")
-            print("S2(a) mp4: \(mp4.count) bytes, duration \(result.duration) s; requests: \(handler.requests(for: "/_clip.mp4"))")
+            print("S2(a) mp4: \(mp4.count) bytes, duration \(result.duration) s, paused \(result.paused), readyState \(result.readyState), networkState \(result.networkState), ended \(result.ended), playbackRate \(result.playbackRate); requests: \(handler.requests(for: "/_clip.mp4"))")
         }
 
         // MARK: S2(b): fetch and dynamic import

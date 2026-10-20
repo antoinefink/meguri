@@ -836,10 +836,11 @@ enum NativeCardAudioChecks {
         let lastFirst = try #require(first.last)
         let firstEnd = lastFirst.start + lastFirst.duration
         let thirdStart = try #require(third.first).start
-        print("nativeAudioQueue presentedAt=\(presentedAt) firstStart=\(firstStart) firstEnd=\(firstEnd) thirdStart=\(thirdStart) thirdEnd=\(thirdStart + third[0].duration) startup=\(firstStart - presentedAt) gap=\(thirdStart - firstEnd)")
+        let firstCompletion = try #require(completions[0])
+        print("nativeAudioQueue presentedAt=\(presentedAt) firstStart=\(firstStart) firstEnd=\(firstEnd) thirdStart=\(thirdStart) thirdEnd=\(thirdStart + third[0].duration) startup=\(firstStart - presentedAt) gap=\(thirdStart - firstEnd) firstCompletion=\(firstCompletion) completionLag=\(firstCompletion - firstEnd) remaining=\(thirdStart - firstCompletion)")
         #expect(thirdStart >= firstEnd - 0.020)
         #expect(thirdStart - firstEnd <= 0.100)
-        #expect(try #require(completions[0]) >= firstEnd - 0.020)
+        #expect(firstCompletion >= firstEnd - 0.020)
         #expect(diagnostics.entries.contains { $0.kind == "missingAudio" && $0.index == 1 && $0.update == update })
         #expect(controller.current == nil)
         #expect(MPNowPlayingInfoCenter.default().nowPlayingInfo == nil)
