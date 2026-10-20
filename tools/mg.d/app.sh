@@ -43,7 +43,7 @@ mg_app_build() {
     return 1
   fi
   mg_lint_ui_first || return 1
-  if ! mg__xcframework "$MG_RUN_DIR/xcframework.json"; then
+  if ! mg__xcframework "$MG_RUN_DIR/xcframework.json" --configuration "$config"; then
     mg_failure xcframework "building the core XCFramework failed; see log.txt" "tools/mg core-xcframework"
     mg_message "$MG_JOB: building the core XCFramework failed"
     mg_status fail

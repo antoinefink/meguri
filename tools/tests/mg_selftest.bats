@@ -1510,6 +1510,31 @@ lint/glass-outside-chrome" ]
   done
 }
 
+@test "build-app forwards its configuration to the core build after lint-ui and stops on core failure" {
+  lint_first_sandbox
+  export STUB_SWIFTLINT_REPORT="$BATS_TEST_TMPDIR/clean.json"
+  local platform config
+  for platform in mac ios-sim; do
+    for config in Debug Profile Release AppStore; do
+      : >"$STUB_LOG"
+      mg build-app --platform "$platform" --config "$config"
+      if [ "$platform" = mac ] && { [ "$config" = Release ] || [ "$config" = AppStore ]; }; then
+        [ "$status" -eq 2 ]
+        [ "$(field .status)" = error ]
+        [ "$(failure_ids)" = usage ]
+        [ ! -s "$STUB_LOG" ]
+        continue
+      fi
+      [ "$status" -eq 1 ] || { echo "$platform $config: exit $status; stderr: $stderr"; return 1; }
+      [ "$(field .status)" = fail ]
+      [ "$(failure_ids)" = xcframework ]
+      [ "$(stub_calls)" = "docker-info swiftlint build-core-xcframework.sh " ] || { echo "$platform $config: $(stub_calls)"; return 1; }
+      grep -Fx -- "build-core-xcframework.sh --configuration $config --report $(dirname "$result")/xcframework.json" "$STUB_LOG"
+      [ "$(jq -r .status "$(field '.artifacts[] | select(.kind == "lint-ui") | .path')")" = pass ]
+    done
+  done
+}
+
 @test "lint-ui that cannot run stops swift-test and xcode-check with an error" {
   lint_first_sandbox
   export STUB_DOCKER=0 STUB_SWIFTLINT_REPORT="$BATS_TEST_TMPDIR/clean.json"
