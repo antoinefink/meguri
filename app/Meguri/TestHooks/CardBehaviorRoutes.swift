@@ -214,6 +214,7 @@ extension TestHooks {
                     .textFieldStyle(.roundedBorder).controlSize(.large)
                     .frame(minHeight: Spacing.large * 2).contentShape(Rectangle())
                     .focused($nativeFocused)
+                    .accessibilityLabel(String(localized: "Native editor", table: "CardBehaviorRoutes"))
                     .accessibilityIdentifier("card.behavior.editor")
                 Text(String(localized: "Card status", table: "CardBehaviorRoutes"))
                     .font(.caption).accessibilityValue(model.state)

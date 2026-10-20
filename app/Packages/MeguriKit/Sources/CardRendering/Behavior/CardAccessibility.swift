@@ -66,26 +66,41 @@ extension CardPage {
                     if (content) { reading = sibling; text = content; break; }
                 }
             }
-            let rect = null;
+            const viewport = window.visualViewport;
+            const left = viewport?.offsetLeft ?? 0, top = viewport?.offsetTop ?? 0;
+            const width = viewport?.width ?? innerWidth, height = viewport?.height ?? innerHeight;
+            const visiblePoint = rect => {
+                const x1 = Math.max(rect.left, left), y1 = Math.max(rect.top, top);
+                const x2 = Math.min(rect.right, left + width), y2 = Math.min(rect.bottom, top + height);
+                return x2 > x1 && y2 > y1 ? {x:(x1 + x2) / 2, y:(y1 + y2) / 2} : null;
+            };
+            const excluded = element => element.closest('[aria-hidden="true"],script,style') ||
+                ['hidden', 'collapse'].includes(getComputedStyle(element).visibility);
+            let point = null;
             const walk = document.createTreeWalker(reading, NodeFilter.SHOW_TEXT);
             while (walk.nextNode()) {
                 const node = walk.currentNode, offset = node.textContent.search(/\\S/);
-                if (offset < 0 || !node.parentElement || node.parentElement.closest('[aria-hidden="true"],script,style')) continue;
-                const range = document.createRange();
-                range.setStart(node, offset); range.setEnd(node, offset + 1);
-                rect = Array.from(range.getClientRects()).find(r => r.width > 0 && r.height > 0);
-                if (rect) break;
+                if (offset < 0 || !node.parentElement || excluded(node.parentElement)) continue;
+                const readableRange = document.createRange();
+                readableRange.setStart(node, offset); readableRange.setEnd(node, node.textContent.trimEnd().length);
+                for (const rect of readableRange.getClientRects()) {
+                    point = visiblePoint(rect);
+                    if (point) break;
+                }
+                if (point) break;
             }
-            if (!rect) {
-                const image = reading.matches('img') ? reading : reading.querySelector('img[alt]');
-                if (image) rect = image.getBoundingClientRect();
+            if (!point) {
+                const images = reading.matches('img') ? [reading] : reading.querySelectorAll('img[alt]');
+                for (const image of images) {
+                    if (!excluded(image)) point = visiblePoint(image.getBoundingClientRect());
+                    if (point) break;
+                }
             }
-            if (!rect && reading.matches('input,textarea,button,select,[aria-label]')) rect = reading.getBoundingClientRect();
-            const viewport = window.visualViewport;
+            if (!point && reading.matches('input,textarea,button,select') && !excluded(reading)) {
+                point = visiblePoint(reading.getBoundingClientRect());
+            }
             return JSON.stringify({id:anchor.id, text:text.slice(0,4000),
-                x:rect ? rect.left + rect.width / 2 : null, y:rect ? rect.top + rect.height / 2 : null,
-                left:viewport?.offsetLeft || 0, top:viewport?.offsetTop || 0,
-                width:viewport?.width || innerWidth, height:viewport?.height || innerHeight});
+                x:point?.x ?? null, y:point?.y ?? null, left, top, width, height});
             """, world: Self.world)
         guard let data = json.data(using: .utf8), let value = try? JSONDecoder().decode(AccessibilityDOMTarget.self, from: data),
               update == binding, behaviorAvailable, hostReports.viewRevision == geometry else { return nil }

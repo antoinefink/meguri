@@ -23,7 +23,10 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         app.launchArguments = MeguriLaunch(locale: "en_US", animations: false, route: "card/behaviors").arguments
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
-        XCTAssert(wait { self.state(app).contains("ready card=1 side=question") }, state(app))
+        guard wait({ self.state(app).contains("ready card=1 side=question") }) else {
+            throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Card fixture did not become ready within 10 seconds: \(state(app))"])
+        }
         return app
     }
     private func state(_ app: XCUIApplication) -> String {
@@ -196,16 +199,29 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         #endif
         try voiceOver.enable()
         @MainActor func activateWithVoiceOver(_ element: XCUIElement) throws {
-            XCTAssert(element.waitForExistence(timeout: 3), "missing native VO control")
+            guard element.waitForExistence(timeout: 3) else {
+                throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 2,
+                              userInfo: [NSLocalizedDescriptionKey: "missing native VO control: \(element)"])
+            }
+            let label = element.label
+            guard !label.isEmpty else {
+                throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 3,
+                              userInfo: [NSLocalizedDescriptionKey: "native VO control has an empty label: \(element)"])
+            }
             #if os(macOS)
             try click(element, in: app)
             #else
             // With VoiceOverTouch, one tap selects. Verify the actual native
             // focused element and service speech before the activation gesture.
             element.tap()
-            XCTAssert(wait { (try? self.report(app)["voiceFocus"] as? String) == element.label }, state(app))
-            XCTAssert(wait { (try? voiceOver.currentSpeech().utterance.contains(element.label)) == true },
-                      "VoiceOver must focus the native control before activation: \(element.label)")
+            guard wait({ (try? self.report(app)["voiceFocus"] as? String) == label }) else {
+                throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 4,
+                              userInfo: [NSLocalizedDescriptionKey: "VoiceOver did not focus native control \(label) within 10 seconds: \(state(app))"])
+            }
+            guard wait({ (try? voiceOver.currentSpeech().utterance.contains(label)) == true }) else {
+                throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 5,
+                              userInfo: [NSLocalizedDescriptionKey: "VoiceOver must speak the native control before activation within 10 seconds: \(label)"])
+            }
             element.doubleTap()
             #endif
         }
