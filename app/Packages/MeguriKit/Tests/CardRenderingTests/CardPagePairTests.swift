@@ -343,9 +343,15 @@ extension WebKitSuites {
             defer { pair.close(); window.close() }
             try await pair.load()
             let web = pair.current.webView
-            let result = try await web.callAsyncJavaScript("const start=performance.now();try{await fetch('http://127.0.0.1:8765');return -1;}catch(e){return performance.now()-start;}", contentWorld: .page) as? Double
-            let elapsed = try #require(result)
-            #expect(elapsed >= 0 && elapsed < 50)
+            for url in ["http://127.0.0.1:8765", "http://127.1:8765", "http://2130706433:8765",
+                        "http://0x7f000001:8765", "http://0177.0.0.1:8765", "http://[::1]:8765",
+                        "http://[0:0:0:0:0:0:0:1]:8765", "http://[::ffff:127.0.0.1]:8765",
+                        "http://[::ffff:7fff:fffe]:8765"] {
+                let result = try await web.callAsyncJavaScript("const start=performance.now();try{await fetch(url);return -1;}catch(e){return performance.now()-start;}",
+                                                              arguments: ["url": url], contentWorld: .page) as? Double
+                let elapsed = try #require(result)
+                #expect(elapsed >= 0 && elapsed < 50, "\(url)")
+            }
             #expect(try await web.callAsyncJavaScript("return typeof webkit.messageHandlers.cb.postMessage==='function' && typeof webkit.messageHandlers.meguri.postMessage==='function' && !webkit.messageHandlers.meguriCard;", contentWorld: .page) as? Bool == true)
         }
         #endif

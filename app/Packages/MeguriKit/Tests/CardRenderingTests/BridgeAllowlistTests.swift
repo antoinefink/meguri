@@ -6,6 +6,78 @@ import WebKit
 
 extension WebKitSuites {
     @Suite struct BridgeAllowlistTests {
+        // Compile the production JSON on Mac too, even though only iOS
+        // installs it. NSRegularExpression accepts syntax WebKit rejects.
+        @Test func productionLoopbackRulesCompileInWebKit() async throws {
+            let source = try CardWebConfiguration.loopbackRules
+            let store = try #require(WKContentRuleListStore.default())
+            let identifier = "meguri.test.loopback.\(UUID().uuidString)"
+            let list: WKContentRuleList = try await withCheckedThrowingContinuation { continuation in
+                store.compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: source) { list, error in
+                    if let error { continuation.resume(throwing: error) }
+                    else if let list { continuation.resume(returning: list) }
+                    else { continuation.resume(throwing: URLError(.cannotLoadFromNetwork)) }
+                }
+            }
+            #expect(list.identifier == identifier)
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                store.removeContentRuleList(forIdentifier: identifier) { error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume() }
+                }
+            }
+        }
+
+        @Test func loopbackRulesMatchHostsWithoutBlockingRemoteURLText() throws {
+            let source = try CardWebConfiguration.loopbackRules
+            let rules = try #require(JSONSerialization.jsonObject(with: Data(source.utf8)) as? [[String: Any]])
+            let expressions = try rules.map { rule in
+                let trigger = try #require(rule["trigger"] as? [String: Any])
+                let filter = try #require(trigger["url-filter"] as? String)
+                #expect(trigger["url-filter-is-case-sensitive"] as? Bool == false)
+                return try NSRegularExpression(pattern: filter, options: .caseInsensitive)
+            }
+            // Fixed URL facts, independent of the production patterns. Numeric
+            // IPv4 spellings canonicalize to 127/8 before rule matching; the
+            // actual iOS fetch regression also exercises those raw spellings.
+            let cases: [(url: String, blocked: Bool)] = [
+                ("http://localhost/", true),
+                ("https://LOCALHOST.:8765/", true),
+                ("https://user:password@one.two.localhost.:443/path", true),
+                ("http://one..localhost/", true),
+                ("http://.localhost/", true),
+                ("http://127.0.0.1:8765/", true),
+                ("https://user:password@127.255.255.254/", true),
+                ("http://127.1/", true),
+                ("http://[::1]/", true),
+                ("https://user:password@[0:0:0:0:0:0:0:1]:443/", true),
+                ("http://[::ffff:127.0.0.1]/", true),
+                ("https://[::ffff:7f00:1]:8765/", true),
+                ("http://[::ffff:7fff:fffe]/", true),
+                ("http://example.com/", false),
+                ("https://localhost.example.com/", false),
+                ("http://notlocalhost/", false),
+                ("https://127.0.0.1.example.com/", false),
+                ("http://localhost@example.com/", false),
+                ("http://127.0.0.1:8765@example.com/", false),
+                ("https://user:localhost@[2001:db8::1]/", false),
+                ("http://[::1]@example.com/", false),
+                ("https://example.com/path/localhost?url=http://127.0.0.1/", false),
+                ("http://126.255.255.255/", false),
+                ("http://128.0.0.1/", false),
+                ("http://192.168.1.1:8765/", false),
+                ("http://[::2]/", false),
+                ("http://[::ffff:7e00:1]/", false),
+                ("http://[::ffff:8000:1]/", false),
+                ("ftp://localhost/", false),
+            ]
+            for testCase in cases {
+                let range = NSRange(testCase.url.startIndex..<testCase.url.endIndex, in: testCase.url)
+                let blocked = expressions.contains { $0.firstMatch(in: testCase.url, range: range) != nil }
+                #expect(blocked == testCase.blocked, "\(testCase.url)")
+            }
+        }
+
         @Test func strictTypesWorldsIdentitiesAndIdleAdmission() async throws {
             let fixture = MediaFixture()
             let configuration = CardWebConfiguration(store: .nonPersistent())

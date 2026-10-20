@@ -52,9 +52,9 @@ public final class CardWebConfiguration {
         if rules == nil {
             let controller = configuration.userContentController
             rules = Task {
-                let source = Self.loopbackRules
+                let source = try Self.loopbackRules
                 let list: WKContentRuleList = try await withCheckedThrowingContinuation { continuation in
-                    WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "meguri.card.loopback.v1", encodedContentRuleList: source) { list, error in
+                    WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "meguri.card.loopback.v2", encodedContentRuleList: source) { list, error in
                         if let list { continuation.resume(returning: list) }
                         else { continuation.resume(throwing: error ?? URLError(.cannotLoadFromNetwork)) }
                     }
@@ -66,7 +66,25 @@ public final class CardWebConfiguration {
         #endif
     }
 
-    // WebKit canonicalizes numeric IPv4 URLs before content-rule matching.
-    // Include raw spellings too, IPv6-mapped loopback and localhost subdomains.
-    public static let loopbackRules = #"[{"trigger":{"url-filter":"^https?://([^/@]+@)?(localhost\\.?|[^/:]+\\.localhost\\.?|127\\.[0-9.]+|2130706433|0x7f[0-9a-f.]*|0177\\.[0-7.]+|\\[(0*:)*1\\]|\\[::ffff:(127\\.[0-9.]+|7f[0-9a-f:]+)\\])(:[0-9]+)?/","url-filter-is-case-sensitive":false},"action":{"type":"block"}}]"#
+    // Content blockers match canonical URLs: numeric IPv4 becomes dotted
+    // decimal, IPv6 is compressed, and mapped IPv4 becomes hexadecimal IPv6.
+    // WebKit's regex subset has no alternation; keep host forms in separate
+    // rules and let JSON serialization handle their backslashes.
+    public static var loopbackRules: String {
+        get throws {
+            let hosts = [
+                #"([^/:@?#]*\.)?localhost\.?"#,
+                #"127\.[0-9.]+"#,
+                #"\[(0*:)*1\]"#,
+                #"\[::ffff:127\.[0-9.]+\]"#,
+                #"\[::ffff:7f[0-9a-f][0-9a-f]:[0-9a-f]+\]"#,
+            ]
+            let rules: [[String: Any]] = hosts.map { host in
+                let trigger: [String: Any] = ["url-filter": #"^https?://([^/?#@]*@)?"# + host + #"(:[0-9]+)?/"#,
+                                              "url-filter-is-case-sensitive": false]
+                return ["trigger": trigger, "action": ["type": "block"]]
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: rules), as: UTF8.self)
+        }
+    }
 }
