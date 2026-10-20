@@ -58,6 +58,9 @@ public final class CardPagePair {
     private var lifecycle: Task<Void, Never>?
     private var presentationWork: Task<Void, Never>?
     private var presentationEpoch = UUID()
+    private var physicalStop: Task<Void, Never>?
+    private var stopBindings: [(page: CardPage, update: CardUpdate?, document: UUID)] = []
+    private var stopWaiters: [UUID: AsyncStream<Void>.Continuation] = [:]
     private let compare: (TypeAnswerDescriptor, String) async throws -> String
 
     public init(configuration: CardWebConfiguration = .shared, resolver: MediaPathResolver,
@@ -141,11 +144,7 @@ public final class CardPagePair {
                 switch event {
                 case .stop:
                     self.lifecycleSuspended = true
-                    let stopEpoch = self.beginSuspension()
-                    self.presentationWork = Task { [weak self] in
-                        guard let self else { return }
-                        await self.unpresentSuspendedPages(stopEpoch)
-                    }
+                    self.beginSuspension()
                 case .pause:
                     for page in self.pages { page.pauseMediaWithoutWaiting() }
                     self.releaseHTMLAudio()
@@ -358,9 +357,10 @@ public final class CardPagePair {
         return (try? JSONDecoder().decode([String].self, from: Data(result.utf8))) ?? names
     }
     public func suspend() async {
+        guard !closed else { return }
         suspended = true
-        let stopEpoch = beginSuspension()
-        await unpresentSuspendedPages(stopEpoch)
+        beginSuspension()
+        await waitForPhysicalStop()
     }
 
     private func cancelPresentationWork() {
@@ -370,7 +370,7 @@ public final class CardPagePair {
     }
 
     /// Close page admission synchronously before starting asynchronous cleanup.
-    private func beginSuspension() -> UUID {
+    private func beginSuspension() {
         cancelPresentationWork()
         cancelRecovery()
         commitSerial += 1
@@ -379,14 +379,45 @@ public final class CardPagePair {
         releaseHTMLAudio()
         idle.invalidate()
         for page in pages { page.suspendPresentation() }
-        return presentationEpoch
+        // Availability may cancel foreground work, but cannot erase the
+        // physical pause. Repeated stops replace at most two pending bindings
+        // in one worker, including a replacement visit stopped in the meantime.
+        stopBindings = pages.map { ($0, $0.update, $0.documentID) }
+        guard physicalStop == nil else { return }
+        physicalStop = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                self.physicalStop = nil
+                self.stopBindings.removeAll()
+                self.finishStopWaiters()
+            }
+            while !self.stopBindings.isEmpty {
+                let (page, update, document) = self.stopBindings.removeFirst()
+                guard !self.closed, !Task.isCancelled else { return }
+                guard page.update == update, page.documentID == document else { continue }
+                try? await page.unpresent()
+            }
+        }
     }
 
-    private func unpresentSuspendedPages(_ stopEpoch: UUID) async {
-        for suspendedPage in pages {
-            guard !closed, presentationEpoch == stopEpoch, !Task.isCancelled else { return }
-            try? await suspendedPage.unpresent()
+    private func finishStopWaiters() {
+        let waiting = stopWaiters.values
+        stopWaiters.removeAll()
+        for waiter in waiting { waiter.finish() }
+    }
+
+    private func waitForPhysicalStop() async {
+        guard physicalStop != nil else { return }
+        let id = UUID()
+        let waiting = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        stopWaiters[id] = waiting.continuation
+        defer {
+            stopWaiters.removeValue(forKey: id)
+            waiting.continuation.finish()
         }
+        // AsyncStream ends on caller cancellation, releasing a superseded
+        // resume without cancelling the independently owned physical stop.
+        for await _ in waiting.stream { break }
     }
 
     public func resume() async {
@@ -420,6 +451,8 @@ public final class CardPagePair {
                     && !self.lifecycleSuspended && self.current === boundPage
                     && self.pages.map({ $0.update }) == updateBindings && self.pages.map({ $0.documentID }) == documentBindings
             }
+            await self.waitForPhysicalStop()
+            guard canContinue() else { return }
             for probedPage in self.pages {
                 guard canContinue() else { return }
                 _ = await probedPage.probeLiveness()
@@ -440,6 +473,9 @@ public final class CardPagePair {
         guard !closed else { return }
         closed = true; commitSerial += 1; hostInstallation = UUID()
         cancelPresentationWork()
+        physicalStop?.cancel(); physicalStop = nil
+        stopBindings.removeAll()
+        finishStopWaiters()
         cancelRecovery()
         audio.close()
         lifecycle?.cancel(); lifecycle = nil

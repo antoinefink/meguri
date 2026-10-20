@@ -167,17 +167,34 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         let voiceOver = XCUIDevice.shared.voiceOverService
         try voiceOver.enable()
         defer { try? voiceOver.disable() }
+        func activateWithVoiceOver(_ element: XCUIElement) throws {
+            XCTAssert(element.waitForExistence(timeout: 3), "missing native VO control")
+            // With VoiceOverTouch, one tap selects. Verify the actual native
+            // focused element and service speech before the activation gesture.
+            element.tap()
+            XCTAssert(wait { (try? self.report(app)["voiceFocus"] as? String) == element.label }, state(app))
+            XCTAssert(wait { (try? voiceOver.currentSpeech().utterance.contains(element.label)) == true },
+                      "VoiceOver must focus the native control before activation: \(element.label)")
+            element.doubleTap()
+        }
+        func voiceOverControl(_ id: String) throws {
+            let button = app.descendants(matching: .any).matching(identifier: "card.behavior.\(id)").firstMatch
+            if !button.exists || !button.isHittable {
+                try activateWithVoiceOver(app.descendants(matching: .any).matching(identifier: "card.behavior.actions").firstMatch)
+            }
+            try activateWithVoiceOver(button)
+        }
         for layoutIndex in 0...2 {
             if layoutIndex > 0 {
-                try control(layoutIndex == 1 ? "separator" : "fallback", in: app)
-                try control("next", in: app)
+                try voiceOverControl(layoutIndex == 1 ? "separator" : "fallback")
+                try voiceOverControl("next")
                 XCTAssert(wait { self.state(app).contains("card=\(layoutIndex + 1) side=question") }, state(app))
             }
             let nativeEditor = app.textFields["card.behavior.editor"]
-            try click(nativeEditor, in: app)
+            try activateWithVoiceOver(nativeEditor)
             nativeEditor.typeText("v\(layoutIndex)")
             let retainedText = try XCTUnwrap(nativeEditor.value as? String)
-            try control("reveal", in: app)
+            try voiceOverControl("reveal")
             XCTAssert(wait { self.state(app).contains("side=answer") }, state(app))
             XCTAssert(wait { (try? self.report(app)["voiceFocus"] as? String) == "Behavior answer" }, state(app))
             XCTAssertTrue(try voiceOver.currentSpeech().utterance.contains("Behavior answer"))

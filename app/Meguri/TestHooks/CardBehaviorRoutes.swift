@@ -192,10 +192,10 @@ extension TestHooks {
                 // or other presentation is competing for the explicit host.
                 control("Confirm", id: "confirm") { try await model.dialog(prompt: false) }
                 control("Prompt", id: "prompt") { try await model.dialog(prompt: true) }
+                control("Reveal answer", id: "reveal") { try await model.reveal() }
                 Menu(String(localized: "Card actions", table: "CardBehaviorRoutes")) {
                     control("Answer separator", id: "separator") { model.answerVariant(1) }
                     control("Answer fallback", id: "fallback") { model.answerVariant(2) }
-                    control("Reveal answer", id: "reveal") { try await model.reveal() }
                     control("Next card", id: "next") { try await model.next() }
                     control("Card zoom", id: "zoom") { model.zoom() }
                     control("Resize card", id: "resize") { model.narrow.toggle(); await model.refresh() }
