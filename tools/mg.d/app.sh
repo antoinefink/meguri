@@ -49,8 +49,13 @@ mg_app_build() {
       mg_status error
       return 1
     fi
+    if [ -z "${MG_UI_PHYSICAL_DEVICE:-}" ]; then
+      mg_failure physical-device "physical builds require the explicitly verified iOS destination"
+      mg_status error
+      return 1
+    fi
     core_args=(--slices mac,sim,device)
-    settings=(${settings[0]+"${settings[@]}"} MEGURI_SIGNING=team -allowProvisioningUpdates)
+    settings=(${settings[0]+"${settings[@]}"} MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration)
   fi
   if [ "$platform" = mac ] && ! mg_word_in "$config" "Debug Profile"; then
     mg_failure usage "the Mac builds only Debug and Profile here: $config carries the daily-driver ids (tools/mg xcode-check builds and unregisters it)"
@@ -66,7 +71,7 @@ mg_app_build() {
   fi
   case "$platform" in
     mac) dest="platform=macOS,arch=arm64" ;;
-    ios-device) dest="generic/platform=iOS" ;;
+    ios-device) dest="platform=iOS,id=$MG_UI_PHYSICAL_DEVICE" ;;
     *) dest="generic/platform=iOS Simulator" ;;
   esac
   result="$MG_RUN_DIR/build-$platform-$config-$plan.xcresult"
@@ -152,7 +157,7 @@ mg_app_xcodebuild_test() {
       mg_failure physical-device-bundle "refusing physical tests: built app must have CFBundleIdentifier com.antoinefink.meguri.dev"
       return 2
     fi
-    physical_args=(MEGURI_SIGNING=team -allowProvisioningUpdates -parallel-testing-enabled NO -destination-timeout 60
+    physical_args=(MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration -parallel-testing-enabled NO -destination-timeout 60
       -test-timeouts-enabled YES)
   fi
   rm -rf "$prefix.xcresult"

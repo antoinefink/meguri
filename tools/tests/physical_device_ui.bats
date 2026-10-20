@@ -87,7 +87,7 @@ done
 mkdir -p "$result"
 if [ "$action" = build-for-testing ]; then
   sdk=iphonesimulator
-  [ "$dest" != generic/platform=iOS ] || sdk=iphoneos
+  case "$dest" in platform=iOS,id=*) sdk=iphoneos ;; esac
   p="$dd/Build/Products"
   mkdir -p "$p/$config-$sdk/Meguri.app"
   echo "${FX_BUNDLE:-com.antoinefink.meguri.dev}" >"$p/$config-$sdk/Meguri.app/Info.plist"
@@ -170,9 +170,9 @@ test_tree() {
   [[ "$(field .details.build.app)" == *'/Profile-iphoneos/Meguri.app' ]]
   called '^host-lease --no-session$'
   called '^xcframework .* --configuration Profile --slices mac,sim,device$'
-  called '^xcodebuild build-for-testing .* -scheme Meguri-Profile -testPlan Performance -configuration Profile -destination generic/platform=iOS .* MEGURI_SIGNING=team -allowProvisioningUpdates$'
+  called "^xcodebuild build-for-testing .* -scheme Meguri-Profile -testPlan Performance -configuration Profile -destination platform=iOS,id=$PHONE .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration$"
   called "^plutil -extract CFBundleIdentifier raw -o - $SB/build/app/DerivedData/Build/Products/Profile-iphoneos/Meguri.app/Info.plist$"
-  called "^xcodebuild test-without-building .* -scheme Meguri-Profile -testPlan Performance -configuration Profile -destination platform=iOS,id=$PHONE .* MEGURI_SIGNING=team -allowProvisioningUpdates -parallel-testing-enabled NO -destination-timeout 60 -test-timeouts-enabled YES -only-testing:MeguriUITests/MediaTests/testAudio -only-testing:MeguriUITests/MediaTests/testVideo$"
+  called "^xcodebuild test-without-building .* -scheme Meguri-Profile -testPlan Performance -configuration Profile -destination platform=iOS,id=$PHONE .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration -parallel-testing-enabled NO -destination-timeout 60 -test-timeouts-enabled YES -only-testing:MeguriUITests/MediaTests/testAudio -only-testing:MeguriUITests/MediaTests/testVideo$"
   called '^xcrun xcresulttool get test-results tests --path '
   not_called '^(sim-|vm-test)|xcrun (simctl|devicectl)'
   python3 "$SB/tools/tests/validate_result.py" "$result"
@@ -182,7 +182,7 @@ test_tree() {
   MG_APP_TEST_SCHEME=Meguri-Profile MG_APP_TEST_PLAN=Performance \
     mg ui-test --physical-device "$PHONE" --suite MediaTests/testAudio
   [ "$status" -eq 0 ]
-  called '^xcodebuild build-for-testing .* -scheme Meguri -testPlan UI -configuration Debug -destination generic/platform=iOS .* MEGURI_SIGNING=team -allowProvisioningUpdates$'
+  called "^xcodebuild build-for-testing .* -scheme Meguri -testPlan UI -configuration Debug -destination platform=iOS,id=$PHONE .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration$"
   called "^xcodebuild test-without-building .* -scheme Meguri -testPlan UI -configuration Debug -destination platform=iOS,id=$PHONE .* MEGURI_SIGNING=team "
   [ "$(field '.details.performance_test_policy // "absent"')" = absent ]
   not_called '^(sim-|vm-test)'
