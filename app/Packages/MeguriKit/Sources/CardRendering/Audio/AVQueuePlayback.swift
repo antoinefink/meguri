@@ -7,6 +7,9 @@ public final class AVQueuePlayback: CardAudioBackend {
     public nonisolated enum Failure: Error { case unsupported }
     // Diagnostic seam for the existing generated-silent hardware helper.
     var onNativePlayInterval: ((TimeInterval, TimeInterval) -> Void)?
+    // Temporary, nil-by-default test diagnostics; no app/UI observation or logging.
+    var onNativeCompletionInterval: (@MainActor (TimeInterval, TimeInterval) -> Void)?
+    var onNativeSample: (@MainActor (TimeInterval, TimeInterval, Bool) -> Void)?
     public init() {}
     public func prepare(_ file: MediaFile) async throws -> any CardAudioClip {
         let ext = (file.name as NSString).pathExtension.lowercased()
@@ -14,7 +17,8 @@ public final class AVQueuePlayback: CardAudioBackend {
         let url = try await file.playbackURL()
         let owner = PlayerOwner(player: try await Self.makePlayer(at: url), file: file)
         let metadata = await owner.metadata()
-        let clip = NativeClip(owner: owner, duration: metadata.duration, seekable: metadata.seekable, onPlay: onNativePlayInterval)
+        let clip = NativeClip(owner: owner, duration: metadata.duration, seekable: metadata.seekable,
+                              onPlay: onNativePlayInterval, onCompletion: onNativeCompletionInterval, onSample: onNativeSample)
         return clip
     }
 
@@ -69,9 +73,10 @@ public final class AVQueuePlayback: CardAudioBackend {
             player.currentTime = time
             setDelegate(delegate)
         }
-        func sample() -> CardAudioSample {
+        func sample() -> (sample: CardAudioSample, isPlaying: Bool) {
             let position = player.currentTime
-            return CardAudioSample(position: position, observedAt: ProcessInfo.processInfo.systemUptime)
+            let sample = CardAudioSample(position: position, observedAt: ProcessInfo.processInfo.systemUptime)
+            return (sample, player.isPlaying)
         }
     }
 
@@ -80,16 +85,24 @@ public final class AVQueuePlayback: CardAudioBackend {
     @MainActor final class Completion {
         var onEnd: ((Bool) -> Void)? { didSet { invalidate() } }
         private var epoch: UInt64 = 0
+        private let onInterval: (@MainActor (TimeInterval, TimeInterval) -> Void)?
+
+        init(onInterval: (@MainActor (TimeInterval, TimeInterval) -> Void)? = nil) {
+            self.onInterval = onInterval
+        }
 
         func invalidate() { epoch += 1 }
         func makeDelegate() -> CompletionDelegate {
             invalidate()
             return CompletionDelegate(completion: self, epoch: epoch)
         }
-        fileprivate func deliver(_ success: Bool, epoch: UInt64) {
+        fileprivate func deliver(_ success: Bool, epoch: UInt64, arrivedAt: TimeInterval) {
+            let enteredAt = ProcessInfo.processInfo.systemUptime
             guard self.epoch == epoch else { return }
             invalidate() // Finish/decode-error duplicates complete this play only once.
+            let onInterval = self.onInterval
             onEnd?(success)
+            onInterval?(arrivedAt, enteredAt)
         }
     }
 
@@ -103,10 +116,11 @@ public final class AVQueuePlayback: CardAudioBackend {
         /// The production delegate hop; the task is exposed internally so tests
         /// can enqueue before an epoch change and await that exact delivery.
         @discardableResult func enqueue(success: Bool) -> Task<Void, Never> {
+            let arrivedAt = ProcessInfo.processInfo.systemUptime
             let completion = self.completion, epoch = self.epoch
             return Task { @MainActor in
                 guard let completion else { return }
-                completion.deliver(success, epoch: epoch)
+                completion.deliver(success, epoch: epoch, arrivedAt: arrivedAt)
             }
         }
         func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
@@ -119,7 +133,7 @@ public final class AVQueuePlayback: CardAudioBackend {
 
     private final class NativeClip: NSObject, CardAudioClip {
         private let owner: PlayerOwner
-        private let completion = Completion()
+        private let completion: Completion
         let duration: TimeInterval?
         let seekable: Bool
         var onEnd: ((Bool) -> Void)? {
@@ -127,8 +141,12 @@ public final class AVQueuePlayback: CardAudioBackend {
             set { completion.onEnd = newValue }
         }
         private let onPlay: ((TimeInterval, TimeInterval) -> Void)?
-        init(owner: PlayerOwner, duration: TimeInterval, seekable: Bool, onPlay: ((TimeInterval, TimeInterval) -> Void)?) {
+        private let onSample: (@MainActor (TimeInterval, TimeInterval, Bool) -> Void)?
+        init(owner: PlayerOwner, duration: TimeInterval, seekable: Bool, onPlay: ((TimeInterval, TimeInterval) -> Void)?,
+             onCompletion: (@MainActor (TimeInterval, TimeInterval) -> Void)?,
+             onSample: (@MainActor (TimeInterval, TimeInterval, Bool) -> Void)?) {
             self.owner = owner; self.duration = duration; self.seekable = seekable; self.onPlay = onPlay
+            self.completion = Completion(onInterval: onCompletion); self.onSample = onSample
             super.init()
         }
         isolated deinit {
@@ -145,6 +163,10 @@ public final class AVQueuePlayback: CardAudioBackend {
         func seek(to time: TimeInterval) async throws {
             try await owner.seek(to: time, delegate: completion.makeDelegate())
         }
-        func sample() async -> CardAudioSample { await owner.sample() }
+        func sample() async -> CardAudioSample {
+            let (sample, isPlaying) = await owner.sample()
+            onSample?(sample.position, sample.observedAt, isPlaying)
+            return sample
+        }
     }
 }
