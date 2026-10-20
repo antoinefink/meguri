@@ -315,19 +315,16 @@ extension WebKitSuites.CardRuntimeSuites {
             try await WebTestHarness.withPage { harness, page async throws in
                 try await Self.prepare(harness, page)
                 let markup = """
-                    <div hidden>
                     <span class="cloze" data-shape="rect"></span><p class="cloze" data-shape="rect"></p><div class="cloze" data-shape="RECT"></div>
                     <div class="cloze cloze-inactive" data-shape="rect" data-left=".5px" data-top="0x10" data-angle="-2500" data-width="5px" data-fill="" data-occludeinactive=" 1" data-ordinal="1,2"></div>
                     <div class="cloze" data-shape="rect" data-left="" data-top="  " data-angle="x"></div>
                     <div class="cloze" data-shape="text" data-left="2.5e-1" data-top="abc" data-font-size="" data-text="a&#x3A;b&#x0A;c" data-scale="2px"></div>
                     <div class="cloze" data-shape="polygon" data-points=".1,.2,ignored  .5"></div>
                     <div class="cloze" data-shape="polygon" data-points=""></div>
-                    </div>
                     """
-                var side = try Self.side()
-                let start = try #require(side.range(of: "<div hidden>"))
-                let end = try #require(side.range(of: "</div>", range: start.upperBound..<side.endIndex))
-                side.replaceSubrange(start.lowerBound..<end.upperBound, with: markup)
+                let side = try Self.fixture("page")
+                    .replacingOccurrences(of: "{{shapes}}", with: markup)
+                    .replacingOccurrences(of: "{{button}}", with: "")
                 try await page.run("""
                     __ioOptions.onWillDrawShapes=function(d) { __ioData=d; __ioPasses++; return {activeShapes:[],inactiveShapes:[],highlightShapes:[],properties:d.properties}; };
                     // Save native functions for assertions after the card runs.
@@ -347,7 +344,7 @@ extension WebKitSuites.CardRuntimeSuites {
                     (() => { const s=__ioData.activeShapes; return s.length===5 && __ioData.inactiveShapes.length===1 &&
                       s[0].left===0 && s[0].top===0 && s[0].angle===-90 && s[0].width===5 && Number.isNaN(s[0].height) && s[0].fill==='' && !s[0].occludeInactive && s[0].ordinal===1 &&
                       Number.isNaN(s[1].left) && Number.isNaN(s[1].top) && s[1].angle===0 &&
-                      s[2].left===.25 && s[2].top===0 && s[2].fontSize===undefined && s[2].text==='a:b\\nc' && s[2].scaleX===2 &&
+                      s[2].left===.25 && s[2].top===0 && s[2].fontSize===undefined && Array.from(s[2].text,c=>c.charCodeAt(0)).join(',')==='97,58,98,10,99' && s[2].scaleX===2 &&
                       s[3].points.length===3 && s[3].points[0].x==='.1' && s[3].points[0].y==='.2' && s[3].points[1].x==='' && s[3].points[1].y===0 && s[3].points[2].x==='.5' && s[3].points[2].y===0 &&
                       s[4].points[0].x===0 && s[4].points[0].y===0; })()
                     """))
@@ -413,6 +410,86 @@ extension WebKitSuites.CardRuntimeSuites {
                 }
                 #expect(harness.diagnostics.isEmpty)
             }
+        }
+
+        /// M5.1: each pending call waits for its original image even after
+        /// removal; fulfilment follows scheduling and precedes the no-op step.
+        @Test func detachedSetupStillWaitsForOriginalImage() async throws {
+            let harness = WebTestHarness()
+            defer { harness.close() }
+            Self.instrument(harness, source: """
+                window.__ioSetupTrace=[]; window.__ioCaptureSetupFrames=false; window.__ioSetupFramesScheduled=0;
+                const frame=window.requestAnimationFrame;
+                window.requestAnimationFrame=function(callback){
+                  if(!__ioCaptureSetupFrames) return Reflect.apply(frame,window,[callback]);
+                  const n=++__ioSetupFramesScheduled;
+                  __ioSetupTrace.push('scheduled:'+n);
+                  return Reflect.apply(frame,window,[function(time){
+                    __ioSetupTrace.push('frame:'+n);
+                    return Reflect.apply(callback,window,[time]);
+                  }]);
+                };
+                """)
+            let page = try await harness.openPage()
+            try await Self.prepare(harness, page)
+            harness.media.delay("/_io.png", by: .milliseconds(300))
+            try await page.showPresentedQuestion("<p>before pending setup</p>")
+            // Create the image directly, bypassing side preload. Removal and
+            // both setup calls happen in this task, before any image event.
+            let completeBeforeSetup = try #require(try await page.run("""
+                const qa=document.getElementById('qa');
+                qa.innerHTML='<div id="image-occlusion-container"><canvas id="image-occlusion-canvas"></canvas></div>';
+                const img=window.__ioOriginalImage=document.createElement('img');
+                document.getElementById('image-occlusion-container').prepend(img);
+                function originalReady(event){
+                  window.__ioOriginalEventTrusted=event.isTrusted;
+                  __ioSetupTrace.push(event.type);
+                  // Capture only scheduling in this image event's listeners.
+                  __ioCaptureSetupFrames=true;
+                }
+                img.addEventListener('load',originalReady,{once:true});
+                img.addEventListener('error',originalReady,{once:true});
+                img.src='_io.png';
+                const completeBeforeSetup=img.complete;
+                if(completeBeforeSetup!==false) throw Error('original image must be incomplete before setup');
+                const options={onWillDrawShapes:function(){__ioSetupTrace.push('unexpected draw');}};
+                for(let n=1;n<=2;n++){
+                  __ioSetupTrace.push('call:'+n);
+                  anki.imageOcclusion.setup(options).then(function(value){
+                    __ioSetupTrace.push('resolved:'+n+':'+String(value));
+                  });
+                }
+                function endReady(){__ioCaptureSetupFrames=false;}
+                img.addEventListener('load',endReady,{once:true});
+                img.addEventListener('error',endReady,{once:true});
+                qa.replaceChildren(document.createTextNode('next side'));
+                __ioSetupTrace.push('removed');
+                return completeBeforeSetup;
+                """) as? Bool)
+            try #require(!completeBeforeSetup)
+            try await harness.until("original image event and both setup fulfilments") {
+                try await page.bool("""
+                    (__ioSetupTrace.includes('load') || __ioSetupTrace.includes('error')) &&
+                    __ioSetupTrace.includes('resolved:1:undefined') && __ioSetupTrace.includes('resolved:2:undefined')
+                    """)
+            }
+            try await Self.frames(page)
+            let trace = try await page.json([String].self, "return JSON.stringify(__ioSetupTrace);")
+            #expect(Array(trace.prefix(3)) == ["call:1", "call:2", "removed"])
+            #expect(trace.count == 10, "setup trace: \(trace)")
+            let eventIndex = try #require(trace.firstIndex(of: "load"))
+            // Engines may checkpoint microtasks between event listeners. Each
+            // call must still schedule before its fulfilment and later frame.
+            for n in 1...2 {
+                let resolved = try #require(trace.firstIndex(of: "resolved:\(n):undefined"), "setup trace: \(trace)")
+                #expect(eventIndex < resolved, "image event must precede setup result: \(trace)")
+                let scheduled = try #require(trace.firstIndex(of: "scheduled:\(n)"), "setup trace: \(trace)")
+                let frame = try #require(trace.firstIndex(of: "frame:\(n)"), "setup trace: \(trace)")
+                #expect(eventIndex < scheduled && scheduled < resolved && resolved < frame, "setup trace: \(trace)")
+            }
+            #expect(try await page.bool("__ioOriginalEventTrusted && __ioOriginalImage.complete && __ioOriginalImage.naturalWidth===400 && !__ioOriginalImage.isConnected"))
+            #expect(try await page.string("document.getElementById('qa').textContent") == "next side")
+            #expect(harness.diagnostics.isEmpty)
         }
 
         /// ER1–6 and M9 error routes, with real native identity and no sync
@@ -653,7 +730,13 @@ extension WebKitSuites.CardRuntimeSuites {
                 let side = try Self.side().replacingOccurrences(of: "width: 400px", with: "width: \(width)px").replacingOccurrences(of: "_io.png", with: "_size\(index).png")
                 try await Self.showDrawn(page, side)
                 #expect(try await page.bool("document.getElementById('image-occlusion-canvas').width===\(w) && document.getElementById('image-occlusion-canvas').height===\(h)"))
-                #expect(try await page.bool("parseFloat(document.getElementById('image-occlusion-container').style.aspectRatio)===\(Double(nw)/Double(nh))"))
+                let actualRatio = try await page.string("document.getElementById('image-occlusion-container').style.aspectRatio")
+                let expectedRatio = try #require(try await page.run("""
+                    const expected=document.createElement('div');
+                    expected.style.aspectRatio=String(\(nw)/\(nh));
+                    return expected.style.aspectRatio;
+                    """) as? String)
+                #expect(actualRatio == expectedRatio, "aspect-ratio for \(nw)x\(nh): actual \(actualRatio), expected \(expectedRatio)")
                 #expect(try await page.bool("document.getElementById('image-occlusion-container').clientHeight===\(Int(Double(width)*Double(nh)/Double(nw)))"))
             }
             // Integer client-height limiting, with no independent axis stretch.
