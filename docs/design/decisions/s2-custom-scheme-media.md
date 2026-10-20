@@ -1,6 +1,6 @@
 # Spike S2: the custom-scheme media origin
 
-Date: 2026-10-16. Unit: U65. Toolchain: Xcode 27.0 (27A266a). Hosts: this Mac (Mac15,9, M3 Max, macOS 27.0.1 26A434), and the test VM `meguri-mac` (macOS 27.0.1 26A434), whose pool simulator Meguri-Pool-iphone-1 is an iPhone 17 Pro on iOS 27.0 (24A434). Status: S2(b) to (f) passed. S2(a) passed on the Mac, for `<audio>` and `<video>`, and on the iPhone simulator for `<video>`; it is **pending on an iOS 27 device for both `<audio>` and `<video>`**, which no agent can reach (runbook below; on 2026-10-16 `xcrun devicectl list devices` listed no device), so the configuration below is not yet confirmed for iOS. Question (KTD11, swiftui-arch §1.3): can a `meguri-media:` scheme handler serve card media with Range, `fetch()`, module imports, fonts and persistent storage, and keep scripts in media documents from running (R493–R503, R560)? If S2(a), (b) or (d) failed, U66 and U67 would take the `loadFileURL` fallback.
+Date: 2026-10-16. Unit: U65. Toolchain: Xcode 27.0 (27A266a). Hosts: this Mac (Mac15,9, M3 Max, macOS 27.0.1 26A434), and the test VM `meguri-mac` (macOS 27.0.1 26A434), whose pool simulator Meguri-Pool-iphone-1 is an iPhone 17 Pro on iOS 27.0 (24A434). Status: S2(b) to (f) passed. S2(a) passed on the Mac, for `<audio>` and `<video>`, and on the iPhone simulator for `<video>`; it is **pending on an iOS 27 device for both `<audio>` and `<video>`**, which was unavailable on 2026-10-16 (the 2026-10-20 signing attempt is recorded below), so the configuration below is not yet confirmed for iOS. Question (KTD11, swiftui-arch §1.3): can a `meguri-media:` scheme handler serve card media with Range, `fetch()`, module imports, fonts and persistent storage, and keep scripts in media documents from running (R493–R503, R560)? If S2(a), (b) or (d) failed, U66 and U67 would take the `loadFileURL` fallback.
 
 ## What was run
 
@@ -38,5 +38,22 @@ Red runs before the handler did Range and CSP (same tests, handler with both off
 ## Runbook: the iOS device check (Antoine)
 
 1. An iPhone on iOS 27 with Developer Mode on (user step `device-developer-mode`), unlocked, attached to this Mac.
-2. In Xcode, `app/Meguri.xcodeproj`, scheme Meguri-Profile, the iPhone as the destination. In the Test navigator, under the Performance plan, select `CardSwapTimingSpikeTests/testAudioSeeksToNinetyPercentThroughRangeRequests` and `testVideoSeeksToNinetyPercentThroughRangeRequests` and run them. They play the silent MP3 (no sound) and the muted video.
+2. Run `tools/mg ui-test --list-physical-devices` and select the connected iPhone identifier. Run the command below. It uses the Profile scheme, Performance plan and development bundle, playing the silent MP3 and muted video.
 3. The audio test passes when the MP3 seeks to at least 470 s of 525.5 s and plays on; the video test, when the video seeks to at least 17.9 s of 20 s and plays on. Each needs ranged requests in the last fifth, every one answered 206 with the `Content-Range` asked for and the file's bytes. Their activities `S2(a) audio {...}` and `S2(a) {...}` hold the numbers; record them in the results table above (a device column), with the device model and iOS build. Both passing confirms the configuration on iOS; either failing is S2(a) failing (Decision).
+
+
+```sh
+tools/mg ui-test --physical-device <identifier> --config Profile \
+  --suite CardSwapTimingSpikeTests/testAudioSeeksToNinetyPercentThroughRangeRequests \
+  --suite CardSwapTimingSpikeTests/testVideoSeeksToNinetyPercentThroughRangeRequests
+```
+
+### Device attempt, 2026-10-20
+
+Antoine authorizes both checks and connects an unlocked, paired iPhone with
+Developer Mode enabled. Inventory `ui-test/20261020T061557Z-52023` reports an
+available iPhone18,1 on iOS 27.0.1 (24A446). Run
+`ui-test/20261020T062002Z-55370` stops during provisioning: Apple reports
+“PLA Update available” and requires acceptance of the updated Developer Program
+License Agreement. No app was installed and neither test ran. Both results remain
+pending; this build failure does not establish an S2(a) media failure.
