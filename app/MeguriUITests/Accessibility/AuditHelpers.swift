@@ -235,11 +235,13 @@ enum AccessibilityAudit {
     /// appearance is the one the app shows, and audits the screen it opens
     /// and its touch targets. Optional readiness runs once after the anchor
     /// appears, before any screenshot or audit. The device appearance is
-    /// restored afterwards.
+    /// restored afterwards. Supplemental states use the same running app after
+    /// each main audit, and contribute to the same result.
     @MainActor
     static func runAllVariants(
         state: String, launch: MeguriLaunch, waitFor identifier: String, suppressions: [AuditSuppression],
-        ready: (@MainActor (XCUIApplication) throws -> Void)? = nil
+        ready: (@MainActor (XCUIApplication) throws -> Void)? = nil,
+        supplemental: (@MainActor (XCUIApplication, String) throws -> StateResult)? = nil
     ) throws -> StateResult {
         #if !os(macOS)
         let appearance = XCUIDevice.shared.appearance
@@ -264,9 +266,16 @@ enum AccessibilityAudit {
             guard shown.dark == variant.dark else {
                 throw AuditError(description: "\(state), \(variant): the app shows a \(shown.dark ? "dark" : "light") screen (median luminance \(String(format: "%.2f", shown.luminance))); the variant's appearance did not apply")
             }
-            findings += try run(app, variant: "\(state), \(variant)", suppressions: suppressions)
+            let mainLabel = supplemental == nil ? state : "\(state) main"
+            findings += try run(app, variant: "\(mainLabel), \(variant)", suppressions: suppressions)
             for violation in try TouchTargets.violations(in: app) where !touchTargets.contains(violation) {
                 touchTargets.append(violation)
+            }
+            if let extra = try supplemental?(app, variant.description) {
+                findings += extra.findings
+                for violation in extra.touchTargets where !touchTargets.contains(violation) {
+                    touchTargets.append(violation)
+                }
             }
         }
         return StateResult(state: state, findings: findings, touchTargets: touchTargets)

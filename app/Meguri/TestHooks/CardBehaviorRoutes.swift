@@ -303,8 +303,11 @@ extension TestHooks {
         @State private var model: CardBehaviorModel
         @State private var nativeText = ""
         @FocusState private var nativeFocused: Bool
-        #if os(macOS)
         @State private var actionsPresented = false
+        #if os(iOS)
+        @State private var pendingAction: (@MainActor () async throws -> Void)?
+        @State private var sheetActionTask: Task<Void, Never>?
+        @State private var fixtureActive = false
         #endif
         @Environment(\.colorScheme) private var appearance
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -325,12 +328,16 @@ extension TestHooks {
         var body: some View {
             GeometryReader { geometry in
                 VStack(spacing: Spacing.xSmall) {
+                    #if os(macOS)
                     if dynamicTypeSize.isAccessibilitySize {
                         ScrollView { controls }
                             .frame(maxHeight: geometry.size.height / 2)
                     } else {
                         controls
                     }
+                    #else
+                    controls.fixedSize(horizontal: false, vertical: true)
+                    #endif
                     if let pair = model.pair {
                         CardBehaviorHost(pair: pair, presenter: model.presenter)
                             .frame(maxWidth: cardMaxWidth, maxHeight: .infinity)
@@ -340,8 +347,46 @@ extension TestHooks {
             }
             .padding(.horizontal, Spacing.small)
             .background(ColorToken.backgroundPrimary.color)
-            .onAppear { model.start(appearance: appearance == .dark ? .dark : .light) }
-            .onDisappear { model.stop() }
+            #if os(iOS)
+            .sheet(isPresented: $actionsPresented, onDismiss: performPendingAction) {
+                NavigationStack {
+                    List {
+                        control("Confirm", id: "confirm", sheetAction: true) { try await model.dialog(prompt: false) }
+                        control("Prompt", id: "prompt", sheetAction: true) { try await model.dialog(prompt: true) }
+                        nativeActions
+                    }
+                    .accessibilityIdentifier("card.behavior.actions.list")
+                    .navigationTitle(String(localized: "Card actions", table: "CardBehaviorRoutes"))
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(String(localized: "Close", table: "CardBehaviorRoutes")) {
+                                pendingAction = nil
+                                actionsPresented = false
+                            }
+                            .accessibilityIdentifier("card.behavior.actions.close")
+                        }
+                    }
+                    .tint(ColorToken.textPrimary.color)
+                }
+            }
+            #endif
+            .onAppear {
+                #if os(iOS)
+                fixtureActive = true
+                #endif
+                model.start(appearance: appearance == .dark ? .dark : .light)
+            }
+            .onDisappear {
+                #if os(iOS)
+                fixtureActive = false
+                pendingAction = nil
+                sheetActionTask?.cancel()
+                sheetActionTask = nil
+                actionsPresented = false
+                #endif
+                model.stop()
+            }
             .onChange(of: nativeFocused) { _, focused in if focused { model.pair?.ownsKeyboardFocus = false } }
             .onChange(of: appearance) { _, value in
                 model.perform { try await model.pair?.setAppearance(value == .dark ? .dark : .light) }
@@ -349,10 +394,10 @@ extension TestHooks {
         }
         private var controls: some View {
             VStack(spacing: Spacing.xSmall) {
-                // Native dialogs start from visible controls, after no menu
-                // or other presentation is competing for the explicit host.
+                #if os(macOS)
                 control("Confirm", id: "confirm") { try await model.dialog(prompt: false) }
                 control("Prompt", id: "prompt") { try await model.dialog(prompt: true) }
+                #endif
                 let answerLayout = dynamicTypeSize.isAccessibilitySize
                     ? AnyLayout(VStackLayout(spacing: Spacing.xSmall))
                     : AnyLayout(HStackLayout(spacing: Spacing.xSmall))
@@ -372,7 +417,7 @@ extension TestHooks {
                             .frame(maxHeight: ContentWidth.readable)
                         }
                     #else
-                    Menu { nativeActions } label: { actionsLabel }
+                    Button { actionsPresented = true } label: { actionsLabel }
                     #endif
                 }
                 .buttonStyle(.bordered).controlSize(.large).tint(ColorToken.textPrimary.color)
@@ -401,31 +446,79 @@ extension TestHooks {
                 .fixedSize(horizontal: false, vertical: true)
         }
         @ViewBuilder private var nativeActions: some View {
-            control("Answer separator", id: "separator") { model.answerVariant(1) }
-            control("Answer fallback", id: "fallback") { model.answerVariant(2) }
-            control("Answer graphic", id: "graphic") { model.answerVariant(3) }
-            control("Card zoom", id: "zoom") { model.zoom() }
-            control("Resize card", id: "resize") { model.narrow.toggle(); await model.refresh() }
-            control("Read card state", id: "refresh") { await model.refresh() }
-            control("Suspend card", id: "suspend") { await model.suspend() }
-            control("Resume card", id: "resume") { await model.resume() }
-            control("Probe pages", id: "probe") { await model.probe() }
-            control("Simulate termination callback", id: "recover") { model.terminationCallback() }
-            control("Focus card", id: "focus") { try await model.focusCard() }
+            control("Answer separator", id: "separator", sheetAction: true) { model.answerVariant(1) }
+            control("Answer fallback", id: "fallback", sheetAction: true) { model.answerVariant(2) }
+            control("Answer graphic", id: "graphic", sheetAction: true) { model.answerVariant(3) }
+            control("Card zoom", id: "zoom", sheetAction: true) { model.zoom() }
+            control("Resize card", id: "resize", sheetAction: true) { model.narrow.toggle(); await model.refresh() }
+            control("Read card state", id: "refresh", sheetAction: true) { await model.refresh() }
+            control("Suspend card", id: "suspend", sheetAction: true) { await model.suspend() }
+            control("Resume card", id: "resume", sheetAction: true) { await model.resume() }
+            control("Probe pages", id: "probe", sheetAction: true) { await model.probe() }
+            control("Simulate termination callback", id: "recover", sheetAction: true) { model.terminationCallback() }
+            control("Focus card", id: "focus", sheetAction: true) { try await model.focusCard() }
         }
-        private func control(_ key: String.LocalizationValue, id: String, action: @escaping @MainActor () async throws -> Void) -> some View {
+        #if os(iOS)
+        private func performPendingAction() {
+            // Take synchronously: a second dismissal callback cannot schedule it again.
+            let action = pendingAction
+            pendingAction = nil
+            guard let action, fixtureActive, let pair = model.pair, !pair.current.closed else { return }
+            sheetActionTask = Task { @MainActor in
+                guard !Task.isCancelled, fixtureActive, model.pair === pair, !pair.current.closed else { return }
+                do { try await action() }
+                catch {
+                    if !Task.isCancelled, fixtureActive, model.pair === pair, !pair.current.closed {
+                        model.state = "failed: \(error)"
+                    }
+                }
+            }
+        }
+        #endif
+        @ViewBuilder private func control(
+            _ key: String.LocalizationValue, id: String, sheetAction: Bool = false,
+            action: @escaping @MainActor () async throws -> Void
+        ) -> some View {
+            #if os(iOS)
+            if sheetAction {
+                controlButton(key, id: id, sheetAction: true, action: action)
+                    .buttonStyle(.plain).tint(ColorToken.textPrimary.color)
+            } else {
+                controlButton(key, id: id, sheetAction: false, action: action)
+                    .buttonStyle(.bordered).controlSize(.large).tint(ColorToken.textPrimary.color)
+            }
+            #else
+            controlButton(key, id: id, sheetAction: false, action: action)
+                .buttonStyle(.bordered).controlSize(.large).tint(ColorToken.textPrimary.color)
+            #endif
+        }
+        private func controlButton(
+            _ key: String.LocalizationValue, id: String, sheetAction: Bool,
+            action: @escaping @MainActor () async throws -> Void
+        ) -> some View {
             Button {
                 #if os(macOS)
                 actionsPresented = false
+                #else
+                if sheetAction {
+                    guard fixtureActive, pendingAction == nil, let pair = model.pair, !pair.current.closed else { return }
+                    pendingAction = action
+                    actionsPresented = false
+                    return
+                }
                 #endif
                 model.perform(action)
             } label: {
                 Text(String(localized: key, table: "CardBehaviorRoutes"))
-                    .multilineTextAlignment(.center)
+                    .multilineTextAlignment(sheetAction ? .leading : .center)
                     .lineLimit(nil)
                     .fixedSize(horizontal: false, vertical: true)
+                    #if os(iOS)
+                    .frame(maxWidth: sheetAction ? .infinity : nil,
+                           minHeight: sheetAction ? Spacing.large * 2 : nil, alignment: .leading)
+                    .contentShape(Rectangle())
+                    #endif
             }
-            .buttonStyle(.bordered).controlSize(.large).tint(ColorToken.textPrimary.color)
             .accessibilityIdentifier("card.behavior.\(id)")
         }
     }

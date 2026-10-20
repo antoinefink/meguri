@@ -56,6 +56,27 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         element.clickOrTap()
     }
     private func control(_ id: String, in app: XCUIApplication) throws {
+        #if os(iOS)
+        if Self.sheetActionIDs.contains(id) {
+            let list = try openActions(in: app)
+            let button = list.buttons["card.behavior.\(id)"]
+            var previous: [String]?
+            for _ in 0..<40 {
+                if fullyVisible(button, in: visibleListBounds(list, in: app)) {
+                    try click(button, in: app)
+                    guard wait({ !list.exists }) else {
+                        throw AuditError(description: "Card actions did not dismiss after selecting \(id)")
+                    }
+                    return
+                }
+                let position = actionPositions(in: list, bounds: visibleListBounds(list, in: app))
+                guard position != previous else { break }
+                previous = position
+                scrollActions(list, in: app)
+            }
+            throw AuditError(description: "Native Card actions row \(id) never became fully visible and hittable")
+        }
+        #endif
         let button = app.descendants(matching: .any).matching(identifier: "card.behavior.\(id)").firstMatch
         if !button.exists || !button.isHittable {
             try click(app.descendants(matching: .any).matching(identifier: "card.behavior.actions").firstMatch, in: app)
@@ -63,6 +84,109 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         XCTAssert(button.waitForExistence(timeout: 3), "missing control \(id)")
         try click(button, in: app)
     }
+
+    #if os(iOS)
+    private static let sheetActionIDs = [
+        "confirm", "prompt", "separator", "fallback", "graphic", "zoom", "resize",
+        "refresh", "suspend", "resume", "probe", "recover", "focus",
+    ]
+
+    private func openActions(in app: XCUIApplication) throws -> XCUIElement {
+        let list = app.descendants(matching: .any).matching(identifier: "card.behavior.actions.list").firstMatch
+        if !list.exists {
+            try click(app.buttons["card.behavior.actions"], in: app)
+        }
+        guard list.waitForExistence(timeout: 5) else {
+            throw AuditError(description: "Native Card actions List did not appear")
+        }
+        return list
+    }
+
+    private func fullyVisible(_ element: XCUIElement, in bounds: CGRect) -> Bool {
+        guard element.exists else { return false }
+        let frame = element.frame
+        return !frame.isEmpty && [frame.minX, frame.minY, frame.width, frame.height].allSatisfy(\.isFinite)
+            && !bounds.isEmpty && bounds.contains(frame) && element.isHittable
+    }
+
+    private func visibleListBounds(_ list: XCUIElement, in app: XCUIApplication) -> CGRect {
+        var bounds = list.frame.intersection(app.windows.firstMatch.frame)
+        // List content may extend beneath the native navigation bar.
+        for bar in app.navigationBars.allElementsBoundByIndex where bar.exists && bar.frame.intersects(bounds) {
+            let top = max(bounds.minY, bar.frame.maxY)
+            bounds = CGRect(x: bounds.minX, y: top, width: bounds.width, height: max(0, bounds.maxY - top))
+        }
+        return bounds
+    }
+
+    private func actionPositions(in list: XCUIElement, bounds: CGRect) -> [String] {
+        Self.sheetActionIDs.compactMap { id in
+            let row = list.buttons["card.behavior.\(id)"]
+            guard row.exists else { return nil }
+            let frame = row.frame
+            guard !frame.isEmpty, frame.intersects(bounds),
+                  [frame.minX, frame.minY, frame.width, frame.height].allSatisfy(\.isFinite) else { return nil }
+            return "\(id):\(frame.minY.rounded()):\(frame.height.rounded())"
+        }
+    }
+
+    private func scrollActions(_ list: XCUIElement, in app: XCUIApplication) {
+        let bounds = visibleListBounds(list, in: app)
+        guard !bounds.isEmpty else { return }
+        let origin = list.coordinate(withNormalizedOffset: .zero)
+        let start = origin.withOffset(CGVector(dx: bounds.midX - list.frame.minX,
+                                               dy: bounds.minY - list.frame.minY + bounds.height * 0.7))
+        let end = start.withOffset(CGVector(dx: 0, dy: -bounds.height * 0.3))
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .default, thenHoldForDuration: 0)
+    }
+
+    private func auditActions(in app: XCUIApplication, variant: String, suppressions: [AuditSuppression]) throws -> AccessibilityAudit.StateResult {
+        func capture(_ label: String) {
+            let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+            shot.name = "card-behavior \(variant) \(label)"
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        capture("main")
+        let list = try openActions(in: app)
+        let close = app.buttons["card.behavior.actions.close"]
+        defer {
+            if close.exists { close.tap() }
+            XCTAssert(wait { !list.exists }, "Card actions did not close after audit (\(variant))")
+        }
+        var covered = Set<String>()
+        let required = Set(Self.sheetActionIDs + ["actions.close"])
+        var positions = Set<[String]>()
+        var findings: [AuditFinding] = []
+        var targets: [TouchTargetViolation] = []
+        for position in 0..<40 {
+            let bounds = visibleListBounds(list, in: app)
+            let signature = actionPositions(in: list, bounds: bounds)
+            guard positions.insert(signature).inserted else { break }
+            let label = "question sheet, \(variant), viewport \(position + 1)"
+            // Count only complete, hittable rows inside this native viewport.
+            let visible = Self.sheetActionIDs.filter {
+                fullyVisible(list.buttons["card.behavior.\($0)"], in: bounds)
+            }
+            let closeVisible = fullyVisible(close, in: app.windows.firstMatch.frame)
+            capture("sheet viewport \(position + 1)")
+            findings += try AccessibilityAudit.run(app, variant: label, suppressions: suppressions)
+            targets += try TouchTargets.violations(in: app).map {
+                TouchTargetViolation(identifier: "\(label): \($0.identifier)", label: $0.label,
+                                     size: $0.size, minimum: $0.minimum)
+            }
+            covered.formUnion(visible)
+            if closeVisible { covered.insert("actions.close") }
+            if covered == required { break }
+            scrollActions(list, in: app)
+        }
+        guard covered == required else {
+            throw AuditError(description: "Card actions audit (\(variant)) never audited fully visible, hittable controls: \(required.subtracting(covered).sorted().joined(separator: ", "))")
+        }
+        return AccessibilityAudit.StateResult(state: "question sheet, \(variant)", findings: findings, touchTargets: targets)
+    }
+    #endif
+
     private func wait(_ condition: @escaping () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(10)
         while !condition() {
@@ -429,9 +553,18 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         #if os(macOS)
         guard try build.bundleIdentifier.hasSuffix(".dev") else { throw XCTSkip("daily-driver Mac products cannot be launched by a test") }
         #endif
+        let suppressions = try AuditSuppressions.bundled()
+        let supplemental: (@MainActor (XCUIApplication, String) throws -> AccessibilityAudit.StateResult)?
+        #if os(iOS)
+        supplemental = { app, variant in
+            try self.auditActions(in: app, variant: variant, suppressions: suppressions)
+        }
+        #else
+        supplemental = nil
+        #endif
         let result = try AccessibilityAudit.runAllVariants(
             state: "question", launch: MeguriLaunch(locale: "en_US", animations: false, route: "card/behaviors"),
-            waitFor: "card.behavior.state", suppressions: AuditSuppressions.bundled(), ready: { app in
+            waitFor: "card.behavior.state", suppressions: suppressions, ready: { app in
                 var currentState = ""
                 var questionExists = false
                 let completed = self.wait {
@@ -444,7 +577,7 @@ final class CardWebViewBehaviorUITests: XCTestCase {
                     let reason = currentState.hasPrefix("failed") ? "failed" : "did not become ready within 10 seconds"
                     throw AuditError(description: "Card audit precondition \(reason): state=\(currentState), Behavior question present=\(questionExists)")
                 }
-            })
+            }, supplemental: supplemental)
         add(AccessibilityAudit.screenReport("card.behavior.surface", states: [result]))
         AccessibilityAudit.assertClean(result.findings)
         TouchTargets.assertMet(result.touchTargets)
