@@ -2,8 +2,8 @@
 # meguri_model::rng (R1875), so tests and the oracle get the same instants and
 # seeds. A clock module or a bench that must read the system clock opts out
 # locally with #[allow(clippy::disallowed_methods)]. Paths into crates that are
-# not dependencies are ignored, so jiff and chrono entries cost nothing until
-# one of them is added.
+# not dependencies are ignored. The four allow-invalid entries also ignore
+# unresolved API paths; they still deny those paths whenever reachable.
 
 disallowed-methods = [
   { path = "std::time::SystemTime::now", reason = "read time through meguri_model::clock::Clock (R1875)" },
@@ -14,7 +14,7 @@ disallowed-methods = [
   { path = "jiff::tz::TimeZone::system", reason = "the host supplies the UTC offset through meguri_model::clock::Clock (R1875)" },
   { path = "chrono::Utc::now", reason = "read time through meguri_model::clock::Clock (R1875)" },
   { path = "chrono::Local::now", reason = "read time through meguri_model::clock::Clock (R1875)" },
-  { path = "rand::thread_rng", reason = "draw randomness through meguri_model::rng::RandomSource (R1875)" },
+  { path = "rand::thread_rng", reason = "draw randomness through meguri_model::rng::RandomSource (R1875)", allow-invalid = true },
   { path = "rand::rng", reason = "draw randomness through meguri_model::rng::RandomSource (R1875)" },
   { path = "rand::random", reason = "draw randomness through meguri_model::rng::RandomSource (R1875)" },
   { path = "rand::random_range", reason = "draw randomness through meguri_model::rng::RandomSource (R1875)" },
@@ -22,11 +22,11 @@ disallowed-methods = [
   { path = "rand::random_ratio", reason = "draw randomness through meguri_model::rng::RandomSource (R1875)" },
   { path = "rand::random_iter", reason = "draw randomness through meguri_model::rng::RandomSource (R1875)" },
   { path = "rand::fill", reason = "draw randomness through meguri_model::rng::RandomSource (R1875)" },
-  { path = "rand::SeedableRng::from_os_rng", reason = "seed from meguri_model::rng::RandomSource (R1875)" },
-  { path = "rand::SeedableRng::try_from_os_rng", reason = "seed from meguri_model::rng::RandomSource (R1875)" },
+  { path = "rand::SeedableRng::from_os_rng", reason = "seed from meguri_model::rng::RandomSource (R1875)", allow-invalid = true },
+  { path = "rand::SeedableRng::try_from_os_rng", reason = "seed from meguri_model::rng::RandomSource (R1875)", allow-invalid = true },
 ]
 
 disallowed-types = [
   { path = "rand::rngs::ThreadRng", reason = "draw randomness through meguri_model::rng::RandomSource (R1875)" },
-  { path = "rand::rngs::OsRng", reason = "draw randomness through meguri_model::rng::RandomSource (R1875)" },
+  { path = "rand::rngs::OsRng", reason = "draw randomness through meguri_model::rng::RandomSource (R1875)", allow-invalid = true },
 ]

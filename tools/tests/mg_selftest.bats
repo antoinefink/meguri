@@ -971,6 +971,33 @@ layering/restricted/meguri-sched -> tokio" ]
   validate "$result"
 }
 
+@test "core-lint still denies the four reachable rand paths with allow-invalid" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  copy_core
+  # Compile this public probe without calling it or executing randomness.
+  printf '%s\n' '' '#[allow(deprecated)]' 'pub fn forbidden_randomness_probe() {' \
+    '    use rand::SeedableRng;' \
+    '' \
+    '    let _ = rand::thread_rng();' \
+    '    let _: Option<rand::rngs::OsRng> = None;' \
+    '    let _ = rand::rngs::StdRng::from_os_rng();' \
+    '    let _ = rand::rngs::StdRng::try_from_os_rng();' \
+    '}' >>"$SB/core/crates/meguri-engine/src/lib.rs"
+  mg core-lint
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  local path
+  for path in rand::thread_rng rand::SeedableRng::from_os_rng rand::SeedableRng::try_from_os_rng; do
+    jq -e --arg path "$path" '.failures | any(
+      (.id | startswith("clippy/clippy::disallowed_methods/crates/meguri-engine/src/lib.rs:"))
+      and (.message | contains("use of a disallowed method `" + $path + "`")))' "$result"
+  done
+  jq -e '.failures | any(
+    (.id | startswith("clippy/clippy::disallowed_types/crates/meguri-engine/src/lib.rs:"))
+    and (.message | contains("use of a disallowed type `rand::rngs::OsRng`")))' "$result"
+  validate "$result"
+}
+
 @test "core-lint's AnkiWeb scan flags a name meguri-sync compiles in without its features, not a gated one" {
   [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
   write_workspace
