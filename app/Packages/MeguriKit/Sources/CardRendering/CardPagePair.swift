@@ -446,7 +446,7 @@ public final class CardPagePair {
         let pendingResume = Task { [weak self, weak boundPage] in
             guard let self, let boundPage else { return }
             defer { if self.presentationEpoch == resumeEpoch { self.presentationWork = nil } }
-            func canContinue() -> Bool {
+            @MainActor func canContinue() -> Bool {
                 !Task.isCancelled && self.presentationEpoch == resumeEpoch && !self.closed && !self.suspended
                     && !self.lifecycleSuspended && self.current === boundPage
                     && self.pages.map({ $0.update }) == updateBindings && self.pages.map({ $0.documentID }) == documentBindings
@@ -538,7 +538,7 @@ public final class CardPagePair {
         recovery = Task { [weak self, weak surface] in
             guard let self, let surface else { return }
             defer { if self.recoveryID == job { self.recovery = nil } }
-            func validateVisit() throws {
+            @MainActor func validateVisit() throws {
                 try Task.checkCancellation()
                 guard !self.closed, !self.suspended, !self.lifecycleSuspended, self.recoveryID == job,
                       self.current === surface, surface.update == replacement else { throw CardPage.Failure.superseded }
