@@ -6,3 +6,4 @@
 - `prepare`'s returned identity is readiness; a runtime `settled` receipt can precede a concurrent appearance change's paint barrier. Async readiness/mutation boundaries await host context acknowledgement; after synchronous native geometry/scroll changes use `hostReports.refreshContext(for:)`. Acknowledgement proves no DOM/map freshness.
 - The native keyboard owner permits automatic focus of the answer field. Standalone C66 and explicit DOM focus retain their behavior.
 - Audio policy is caller-resolved from the home deck. Automatic transitions replace waiting entries and may retain only the current clip, including its paused state. Manual replay always replaces everything. U69 supplies non-native codecs.
+- `CardAudioController` changes logical state synchronously; `transportSettled()` waits for native effects.
