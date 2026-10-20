@@ -436,7 +436,7 @@ extension WebKitSuites.CardRuntimeSuites {
             try await page.showPresentedQuestion("<p>before pending setup</p>")
             // Create the image directly, bypassing side preload. Removal and
             // both setup calls happen in this task, before any image event.
-            let completeBeforeSetup = try #require(try await page.run("""
+            let completeBeforeSetup: Bool? = try await page.run("""
                 const qa=document.getElementById('qa');
                 qa.innerHTML='<div id="image-occlusion-container"><canvas id="image-occlusion-canvas"></canvas></div>';
                 const img=window.__ioOriginalImage=document.createElement('img');
@@ -465,8 +465,8 @@ extension WebKitSuites.CardRuntimeSuites {
                 qa.replaceChildren(document.createTextNode('next side'));
                 __ioSetupTrace.push('removed');
                 return completeBeforeSetup;
-                """) as? Bool)
-            try #require(!completeBeforeSetup)
+                """) as? Bool
+            try #require(completeBeforeSetup == false)
             try await harness.until("original image event and both setup fulfilments") {
                 try await page.bool("""
                     (__ioSetupTrace.includes('load') || __ioSetupTrace.includes('error')) &&
