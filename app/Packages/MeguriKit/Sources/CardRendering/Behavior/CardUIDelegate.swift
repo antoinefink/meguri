@@ -63,7 +63,7 @@ public final class CardPageBehavior: NSObject, WKUIDelegate {
         active && page?.update == update && self.epoch == epoch
     }
     private func accepts(_ webView: WKWebView, frame: WKFrameInfo) -> Bool {
-        page?.acceptsRootFrame(webView, frame: frame) == true
+        page?.allowsDocumentCallback(from: webView, frame: frame) == true
     }
     func dialog(_ request: CardDialog, completion: @escaping @MainActor (CardDialogResult?) -> Void) {
         guard active, let page, let update = page.update, let presenter, presenter.isAvailable else { completion(nil); return }

@@ -54,7 +54,7 @@ extension WebKitSuites {
             #expect(try await fixture.bool("return Math.abs(document.getElementById('viewport').getBoundingClientRect().height-innerHeight)<1 && Math.abs(document.getElementById('bottom').getBoundingClientRect().bottom-document.documentElement.clientHeight)<1;") == true)
             let nativeHeight = web.bounds.height
             let matchesNativeHeight = try await web.callAsyncJavaScript("return Math.abs(innerHeight-nativeHeight)<1;",
-                arguments: ["nativeHeight": nativeHeight], in: nil, in: .page) as? Bool
+                arguments: ["nativeHeight": nativeHeight], in: nil, contentWorld: .page) as? Bool
             #expect(matchesNativeHeight == true && web.pageZoom == 1)
             #expect(page.hostReports.viewRevision > epoch)
             #expect(try await fixture.bool("return Math.abs(scrollX/(document.scrollingElement.scrollWidth-document.scrollingElement.clientWidth)-.3)<.04;") == true)

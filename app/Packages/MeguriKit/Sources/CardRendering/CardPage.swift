@@ -51,6 +51,7 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     private var navigation: CheckedContinuation<Void, any Error>?
     private var navigationTarget: WKNavigation?
     private var rootLoadPending = false
+    private var committedRootDocument: UUID?
     private var loading: Task<Void, Never>?
     private var loadResult: Result<Void, any Error>?
     private var loadWaiters: [UUID: CheckedContinuation<Void, any Error>] = [:]
@@ -572,20 +573,39 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         catch { diagnostics.record("typedAnswerRead", update: update); return "" }
     }
 
+    func allowsDocumentCallback(from sender: WKWebView, frame: WKFrameInfo) -> Bool {
+        guard sender === webView, !closed, !processTerminated,
+              update != nil, !readyPhases.contains("failed"),
+              committedRootDocument == documentID, frame.isMainFrame else { return false }
+        let security = frame.securityOrigin
+        return security.protocol == MediaOrigin.scheme
+            && security.host == MediaOrigin.host && security.port == 0
+    }
+
+    public func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard webView === self.webView else { return }
+        committedRootDocument = !closed && !processTerminated && navigation === navigationTarget
+            && webView.url == MediaOrigin.url ? documentID : nil
+    }
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard navigation === navigationTarget else { return }
         self.navigation?.resume(); self.navigation = nil; navigationTarget = nil
     }
     public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
-        guard !closed, webView === self.webView, let url = navigationAction.request.url else { decisionHandler(.cancel); return }
+        guard !closed, !processTerminated, webView === self.webView, let url = navigationAction.request.url else { decisionHandler(.cancel); return }
         if rootLoadPending, navigationAction.targetFrame?.isMainFrame == true, url == MediaOrigin.url {
             rootLoadPending = false
             decisionHandler(.allow)
             return
         }
-        // A frame cannot navigate the root, open native UI or escape it.
-        guard navigationAction.sourceFrame.isMainFrame, navigationAction.sourceFrame.request.url == MediaOrigin.url else { decisionHandler(.cancel); return }
+        if navigationAction.targetFrame?.isMainFrame == false {
+            decisionHandler(committedRootDocument == documentID && LinkPolicy.admitsFrame(url, root: MediaOrigin.url) ? .allow : .cancel)
+            return
+        }
+        // Embedded documents may load, but only the trusted main frame may
+        // route links or ask WebKit to dispatch a new-window request.
+        guard allowsDocumentCallback(from: webView, frame: navigationAction.sourceFrame) else { decisionHandler(.cancel); return }
         // WebKit calls the UI delegate for new windows. That delegate uses
         // the identical policy and always returns nil (exactly two pages).
         if navigationAction.targetFrame == nil { decisionHandler(.allow); return }
@@ -595,7 +615,10 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     }
     public func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
                         decisionHandler: @escaping @MainActor (WKNavigationResponsePolicy) -> Void) {
-        decisionHandler(!closed && webView === self.webView && navigationResponse.isForMainFrame && navigationResponse.response.url == MediaOrigin.url ? .allow : .cancel)
+        guard !closed, !processTerminated, webView === self.webView, let url = navigationResponse.response.url else { decisionHandler(.cancel); return }
+        let allowed = navigationResponse.isForMainFrame ? url == MediaOrigin.url
+            : committedRootDocument == documentID && LinkPolicy.admitsFrame(url, root: MediaOrigin.url)
+        decisionHandler(allowed ? .allow : .cancel)
     }
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
         if navigation === navigationTarget { navigationFailed() }
@@ -609,6 +632,7 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         cancelLivenessProbes()
         terminations += 1
         processTerminated = true
+        committedRootDocument = nil
         reconstructionRequired = true
         documentID = UUID()
         hostInstalledDOM = false
@@ -654,6 +678,7 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         loadResult = nil
         loaded = false
         rootLoadPending = false
+        committedRootDocument = nil
         presented = false
         processTerminated = false
         reconstructionRequired = restoreValue

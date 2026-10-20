@@ -118,13 +118,13 @@ extension TestHooks {
         func focusCard() async throws {
             guard let pair else { return }
             pair.ownsKeyboardFocus = true
-            _ = try await pair.current.webView.callAsyncJavaScript("document.getElementById('typeans')?.focus();", arguments: [:], in: nil, in: .page)
+            _ = try await pair.current.webView.callAsyncJavaScript("document.getElementById('typeans')?.focus();", arguments: [:], in: nil, contentWorld: .page)
         }
         func dialog(prompt: Bool) async throws {
             guard let page = pair?.current else { return }
             let message = String(localized: "Card dialog example", table: "CardBehaviorRoutes")
             let result = try await page.webView.callAsyncJavaScript(prompt ? "return prompt(message, '');" : "return confirm(message);",
-                                                                  arguments: ["message": message], in: nil, in: .page)
+                                                                  arguments: ["message": message], in: nil, contentWorld: .page)
             if let text = result as? String { dialogResult = text.isEmpty ? "empty" : text }
             else if let value = result as? Bool { dialogResult = value ? "true" : "false" }
             else { dialogResult = "cancelled" }
@@ -139,7 +139,7 @@ extension TestHooks {
                   viewport:document.getElementById('viewport')?.offsetHeight,
                   scroll:scrollY, bottom:document.getElementById('bottom')?.getBoundingClientRect().bottom,
                   root:location.href, scriptRan:window.cardScriptRan===true});
-                """, arguments: [:], in: nil, in: .page)
+                """, arguments: [:], in: nil, contentWorld: .page)
             guard pair.current === page, page.update == update, !page.closed else { return }
             var observations = (result as? String).flatMap { $0.data(using: .utf8) }
                 .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]

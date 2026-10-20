@@ -132,7 +132,7 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         let before = try report(app)
         let height = try XCTUnwrap(before["height"] as? Double)
         XCTAssertEqual(try XCTUnwrap(before["viewport"] as? Double), height, accuracy: 1)
-        XCTAssertEqual(try XCTUnwrap(before["bottom"] as? Double), height, accuracy: 1)
+        XCTAssertEqual(try XCTUnwrap(before["bottom"] as? Double), try XCTUnwrap(before["layoutHeight"] as? Double), accuracy: 1)
         XCTAssertGreaterThan(web.frame.minY, app.windows.firstMatch.frame.minY)
         XCTAssertLessThanOrEqual(web.frame.maxY, app.windows.firstMatch.frame.maxY)
         #if !os(macOS)
@@ -159,16 +159,30 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         XCTAssert(wait { self.state(app).contains("card=2 side=question") }, state(app))
     }
 
-    #if os(iOS) && targetEnvironment(simulator)
-    /// Use tools/mg ui-test in the simulator VM. Check the native VO target
-    /// and its successor, then verify that typing still reaches the editor.
+    #if os(macOS) || (os(iOS) && targetEnvironment(simulator))
+    /// tools/mg ui-test on Mac/iPhone/iPad in the VM only. The public service
+    /// reads the current OS cursor; forward traversal proves its destination.
     func testVoiceOverAnswerTargetWithExternalKeyboardOwner() throws {
         let app = try launch()
+        try control("zoom", in: app)
+        XCTAssert(wait { self.state(app).contains("zoom=150") }, state(app))
+        #if os(iOS)
+        // Exercise touch zoom before enabling the screen reader.
+        let cardSurface = app.webViews.firstMatch
+        cardSurface.pinch(withScale: 2, velocity: 1)
+        try control("refresh", in: app)
+        let gestureReport = try report(app)
+        let questionGestureScale = try XCTUnwrap(gestureReport["pinch"] as? Double)
+        XCTAssertGreaterThan(questionGestureScale, 1)
+        #endif
         let voiceOver = XCUIDevice.shared.voiceOverService
         try voiceOver.enable()
         defer { try? voiceOver.disable() }
-        func activateWithVoiceOver(_ element: XCUIElement) throws {
+        @MainActor func activateWithVoiceOver(_ element: XCUIElement) throws {
             XCTAssert(element.waitForExistence(timeout: 3), "missing native VO control")
+            #if os(macOS)
+            try click(element, in: app)
+            #else
             // With VoiceOverTouch, one tap selects. Verify the actual native
             // focused element and service speech before the activation gesture.
             element.tap()
@@ -176,8 +190,9 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             XCTAssert(wait { (try? voiceOver.currentSpeech().utterance.contains(element.label)) == true },
                       "VoiceOver must focus the native control before activation: \(element.label)")
             element.doubleTap()
+            #endif
         }
-        func voiceOverControl(_ id: String) throws {
+        @MainActor func voiceOverControl(_ id: String) throws {
             let button = app.descendants(matching: .any).matching(identifier: "card.behavior.\(id)").firstMatch
             if !button.exists || !button.isHittable {
                 try activateWithVoiceOver(app.descendants(matching: .any).matching(identifier: "card.behavior.actions").firstMatch)
@@ -189,19 +204,31 @@ final class CardWebViewBehaviorUITests: XCTestCase {
                 try voiceOverControl(layoutIndex == 1 ? "separator" : "fallback")
                 try voiceOverControl("next")
                 XCTAssert(wait { self.state(app).contains("card=\(layoutIndex + 1) side=question") }, state(app))
+                #if os(iOS)
+                XCTAssertEqual(try XCTUnwrap(try report(app)["pinch"] as? Double), 1, accuracy: 0.01)
+                #endif
             }
             let nativeEditor = app.textFields["card.behavior.editor"]
             try activateWithVoiceOver(nativeEditor)
             nativeEditor.typeText("v\(layoutIndex)")
             let retainedText = try XCTUnwrap(nativeEditor.value as? String)
-            try voiceOverControl("reveal")
+            // This unique visible control avoids transient Menu ownership.
+            try activateWithVoiceOver(app.buttons["card.behavior.reveal"])
             XCTAssert(wait { self.state(app).contains("side=answer") }, state(app))
+            XCTAssertEqual(try XCTUnwrap(try report(app)["pageZoom"] as? Double), 1.5)
+            #if os(iOS)
             XCTAssert(wait { (try? self.report(app)["voiceFocus"] as? String) == "Behavior answer" }, state(app))
-            XCTAssertTrue(try voiceOver.currentSpeech().utterance.contains("Behavior answer"))
-            XCTAssertTrue(try voiceOver.moveForward().utterance.contains("Typed answer"), "The next VO element must follow the answer destination")
-            // Send keyboard input directly; the native editor must retain it.
+            if layoutIndex == 0 {
+                XCTAssertEqual(try XCTUnwrap(try report(app)["pinch"] as? Double), questionGestureScale, accuracy: 0.01)
+            }
+            #endif
+            XCTAssert(wait { (try? voiceOver.currentSpeech().utterance.contains("Behavior answer")) == true },
+                      "The current native VoiceOver cursor must identify the answer")
+            // Verify automatic reveal ownership BEFORE deliberate VO traversal
+            // to the card's input could change keyboard focus.
             app.typeText("x")
             XCTAssertEqual(nativeEditor.value as? String, retainedText + "x")
+            XCTAssertTrue(try voiceOver.moveForward().utterance.contains("Typed answer"), "The next VO element must follow the answer destination")
             XCTAssertEqual(app.webViews.count, 1)
         }
     }
