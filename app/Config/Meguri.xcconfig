@@ -14,6 +14,8 @@ GENERATE_INFOPLIST_FILE = YES
 INFOPLIST_FILE[sdk=iphone*] = Meguri/Info-iOS.plist
 INFOPLIST_FILE[sdk=macosx*] = Meguri/Info-macOS.plist
 INFOPLIST_KEY_CFBundleDisplayName = Meguri
+// Explicit distribution policy, including personal Release without hooks.
+INFOPLIST_KEY_MeguriCardInspectionBuild = $(MEGURI_CARD_INSPECTION_BUILD)
 INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.education
 // Debug builds start every Mac launch as a UI element (no Dock tile, never
 // reported Foreground); MeguriApp gives a launch the regular policy unless it

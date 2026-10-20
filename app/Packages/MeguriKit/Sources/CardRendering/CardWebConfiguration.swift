@@ -20,6 +20,7 @@ public final class CardWebConfiguration {
         hostBridge = CardHostBridge()
         configuration.websiteDataStore = store
         configuration.mediaTypesRequiringUserActionForPlayback = []
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         configuration.setURLSchemeHandler(media, forURLScheme: MediaOrigin.scheme)
         #if !os(macOS)
         configuration.allowsInlineMediaPlayback = true

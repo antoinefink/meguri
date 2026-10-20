@@ -221,6 +221,9 @@
     setFocusOwnership: function (owned) {
       toRuntime({ op: "focusOwnership", owned: owned === true });
     },
+    restoreTypedText: function (text) {
+      toRuntime({ op: "restoreTypedText", text: String(text) });
+    },
     // The page is now the one the user sees; `token` is the swap's (U12).
     present: function (token) {
       toRuntime({ op: "present", token: isNumber(token) ? token : null });

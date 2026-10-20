@@ -22,12 +22,14 @@ let features = [
 
 let package = Package(
     name: "MeguriKit",
+    defaultLocalization: "en",
     platforms: [.macOS("27.0"), .iOS("27.0")],
     products: [
         // Everything the app links. A new target joins this product, so the
         // Xcode project needs no edit.
         .library(
             name: "MeguriKit",
+    defaultLocalization: "en",
             targets: ["DesignSystem", "AppModel", "CardRendering", "HeatmapKit"] + features
         ),
         // The widget's only module: core-free (KTD16).
@@ -57,6 +59,7 @@ let package = Package(
             // Copied flat into the bundle; CardRuntime serves them under
             // /_anki/ (specs/render/card-runtime.md).
             resources: [
+                .process("Resources/CardBehavior.xcstrings"),
                 .copy("Resources/CardRuntime/page.html"),
                 .copy("Resources/CardRuntime/base.css"),
                 .copy("Resources/CardRuntime/runtime.js"),

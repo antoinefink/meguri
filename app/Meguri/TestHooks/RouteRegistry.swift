@@ -51,6 +51,7 @@ extension TestHooks {
             PerfRoutes.register(in: &registry)
             ShellRoutes.register(in: &registry)
             SpikeRoutes.register(in: &registry)
+            CardBehaviorRoutes.register(in: &registry)
             return registry
         }
 

@@ -59,6 +59,10 @@ open class CardNativeWebView: WKWebView {
     }
     #else
     private var lastHostGeometry: [CGFloat] = []
+    open override func didMoveToWindow() {
+        super.didMoveToWindow()
+        onHostGeometryChange?()
+    }
     open override var frame: CGRect {
         didSet { if oldValue != frame { onHostGeometryChange?() } }
     }

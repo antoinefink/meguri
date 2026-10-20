@@ -1,0 +1,11 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "card.dialog.cancel" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel" } } } },
+    "card.dialog.ok" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "OK" } } } },
+    "card.dialog.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Card" } } } },
+    "card.scheme.allow" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow" } } } },
+    "card.scheme.confirm %@" : { "comment" : "The placeholder is a URL scheme, never a URL or card text.", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow cards to open links with the %@ scheme in another app?" } } } }
+  },
+  "version" : "1.0"
+}

@@ -33,6 +33,10 @@
   const SetCtor = Set;
   const ElementCtor = Element;
   const HTMLElementCtor = HTMLElement;
+  const InputCtor = HTMLInputElement;
+  const TextAreaCtor = HTMLTextAreaElement;
+  const inputValueSetter = describeProperty(InputCtor.prototype, "value").set;
+  const textAreaValueSetter = describeProperty(TextAreaCtor.prototype, "value").set;
   const SVGElementCtor = SVGElement;
   const ShadowRootCtor = ShadowRoot;
   const mathMax = Math.max;
@@ -1276,6 +1280,19 @@
       case "focusOwnership":
         automaticTypeAnswerFocus = message.owned === true;
         break;
+      case "restoreTypedText": {
+        // Native admits the matching recovery binding before this operation.
+        // Keep C10's retained answer even on a comparison-only answer side.
+        const input = call(getElementById, doc, "typeans");
+        if (input instanceof TextAreaCtor) {
+          typedElement = input;
+          call(textAreaValueSetter, input, StringCtor(message.text));
+        } else {
+          typedElement = input instanceof InputCtor ? input : call(createElement, doc, "input");
+          call(inputValueSetter, typedElement, StringCtor(message.text));
+        }
+        break;
+      }
       case "identity":
         announced = { card: message.card, generation: message.generation };
         break;

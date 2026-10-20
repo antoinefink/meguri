@@ -5,6 +5,7 @@
 MEGURI_BUNDLE_ID_SUFFIX = .dev
 MEGURI_SWIFT_CONDITIONS = DEBUG MEGURI_TEST_HOOKS ANKIWEB_ENABLED
 MEGURI_CORE_FEATURES = ankiweb,test-hooks
+MEGURI_CARD_INSPECTION_BUILD = debug
 // Hook builds read fixtures from the checkout on the Mac (FixtureInstaller).
 MEGURI_ENTITLEMENTS_HOOKS_SUFFIX = -Dev
 // The Mac app starts as a UI element (U8d): see Meguri.xcconfig. Debug only:

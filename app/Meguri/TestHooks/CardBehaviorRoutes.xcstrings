@@ -1,0 +1,246 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Behavior question": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Behavior question"
+          }
+        }
+      }
+    },
+    "Behavior answer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Behavior answer"
+          }
+        }
+      }
+    },
+    "Fixed card footer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fixed card footer"
+          }
+        }
+      }
+    },
+    "Typed answer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Typed answer"
+          }
+        }
+      }
+    },
+    "Jump to footer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jump to footer"
+          }
+        }
+      }
+    },
+    "Run card script": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run card script"
+          }
+        }
+      }
+    },
+    "Card dialog example": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card dialog example"
+          }
+        }
+      }
+    },
+    "Card actions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card actions"
+          }
+        }
+      }
+    },
+    "Reveal answer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reveal answer"
+          }
+        }
+      }
+    },
+    "Next card": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next card"
+          }
+        }
+      }
+    },
+    "Card zoom": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card zoom"
+          }
+        }
+      }
+    },
+    "Resize card": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resize card"
+          }
+        }
+      }
+    },
+    "Read card state": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read card state"
+          }
+        }
+      }
+    },
+    "Suspend card": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suspend card"
+          }
+        }
+      }
+    },
+    "Resume card": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume card"
+          }
+        }
+      }
+    },
+    "Probe pages": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Probe pages"
+          }
+        }
+      }
+    },
+    "Simulate termination callback": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Simulate termination callback"
+          }
+        }
+      }
+    },
+    "Focus card": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Focus card"
+          }
+        }
+      }
+    },
+    "Card status": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card status"
+          }
+        }
+      }
+    },
+    "Native editor": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Native editor"
+          }
+        }
+      }
+    },
+    "Confirm": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm"
+          }
+        }
+      }
+    },
+    "Prompt": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prompt"
+          }
+        }
+      }
+    },
+    "Answer separator": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answer separator"
+          }
+        }
+      }
+    },
+    "Answer fallback": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answer fallback"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}
