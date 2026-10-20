@@ -14,6 +14,38 @@ extension WebKitSuites {
                   compare: @escaping (TypeAnswerDescriptor, String) async throws -> String = { _, text in "<code>\(text)</code>" }) async throws -> CardPagePair {
             CardPagePair(configuration: configuration ?? CardWebConfiguration(store: .nonPersistent()), resolver: try await fixture.resolved(), compare: compare)
         }
+        #if os(macOS)
+        @Test func ownedAccessibilityChildrenFollowSynchronousSwapsAndClearOnClose() async throws {
+            let fixture = MediaFixture()
+            let pair = try await make(fixture)
+            let window = SpikeWindow(pair.container)
+            defer { pair.close(); window.close() }
+            let views = pair.pages.map(\.webView)
+            func expectCurrentChildren() throws {
+                let children = try #require(pair.container.accessibilityChildren())
+                let navigation = try #require(pair.container.accessibilityChildrenInNavigationOrder())
+                #expect(children.count == 1)
+                #expect(navigation.count == 1)
+                #expect(children.first as? NSView === pair.current.webView)
+                #expect(navigation.first as? NSView === pair.current.webView)
+                #expect(pair.container.subviews.count == 2)
+                #expect(views.allSatisfy { $0.superview === pair.container })
+            }
+            try expectCurrentChildren()
+            try await pair.load()
+            for cardID in 1...2 {
+                let previousIdle = pair.idle.webView
+                let update = try await pair.prepare(.init(cardID: Int64(cardID), question: "question", answer: "answer"))
+                _ = try pair.present(update)
+                #expect(pair.current.webView === previousIdle)
+                try expectCurrentChildren()
+                try await pair.current.waitForShown(update)
+            }
+            pair.close()
+            #expect(pair.container.accessibilityChildren()?.isEmpty == true)
+            #expect(pair.container.accessibilityChildrenInNavigationOrder()?.isEmpty == true)
+        }
+        #endif
         @Test func samePageAnswerLiveAppearanceStorageAndPairScopedScripts() async throws {
             let fixture = MediaFixture()
             let configuration = CardWebConfiguration(store: .nonPersistent())

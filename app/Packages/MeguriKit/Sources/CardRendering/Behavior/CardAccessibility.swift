@@ -138,10 +138,18 @@ extension CardPage {
                             y: webView.isFlipped ? webView.bounds.minY + vertical : webView.bounds.maxY - vertical)
         let screenPoint = window.convertPoint(toScreen: webView.convert(local, to: nil))
         guard let element = webView.accessibilityHitTest(screenPoint) as? NSObject,
-              element !== webView,
-              let accessible = element as? any NSAccessibilityProtocol,
-              let role = accessible.accessibilityRole(),
-              role.rawValue != "AXWebArea", role.rawValue != "AXScrollArea", role.rawValue != "AXGroup" else { return (metadata, nil) }
+              element !== webView else { return (metadata, nil) }
+        if let accessible = element as? any NSAccessibilityProtocol {
+            guard let role = accessible.accessibilityRole(),
+                  role.rawValue != "AXWebArea", role.rawValue != "AXScrollArea", role.rawValue != "AXGroup" else { return (metadata, nil) }
+        } else {
+            // Public hit testing can return an opaque deepest descendant
+            // without full protocol conformance. Accept only that exact hit
+            // with no children, never an ordinary native container or element.
+            guard !(element is NSView), !(element is NSWindow), !(element is NSCell),
+                  !(element is NSAccessibilityElement),
+                  element.accessibilityArrayAttributeCount(.children) == 0 else { return (metadata, nil) }
+        }
         #else
         guard webView.window != nil else { return (metadata, nil) }
         let local = CGPoint(x: webView.bounds.minX + horizontal, y: webView.bounds.minY + vertical)

@@ -38,6 +38,13 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         let start = try XCTUnwrap(text.firstIndex(of: "{"), text)
         return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text[start...].utf8)) as? [String: Any])
     }
+    private func assertSingleActiveCardRoot(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let a = app.descendants(matching: .any).matching(identifier: "review.card.page.a")
+        let b = app.descendants(matching: .any).matching(identifier: "review.card.page.b")
+        XCTAssertEqual(a.count + b.count, 1, "exactly one named page root must be exported", file: file, line: line)
+        XCTAssertNotEqual(a.firstMatch.exists, b.firstMatch.exists,
+                          "the idle root must be absent", file: file, line: line)
+    }
     private func click(_ element: XCUIElement, in app: XCUIApplication) throws {
         #if os(macOS)
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
@@ -165,9 +172,7 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         try control("reveal", in: app)
         XCTAssert(wait { self.state(app).contains("side=answer") && self.state(app).contains("target=answer") }, state(app))
         XCTAssert(app.staticTexts["Behavior answer"].waitForExistence(timeout: 5))
-        XCTAssertNotEqual(app.webViews.matching(identifier: "review.card.page.a").firstMatch.exists,
-                          app.webViews.matching(identifier: "review.card.page.b").firstMatch.exists,
-                          "exactly one named page root must be exported; the idle root must be absent")
+        assertSingleActiveCardRoot(app)
         let pageReport = try report(app)
         XCTAssertEqual(pageReport["pageCount"] as? Int, 2)
         XCTAssertEqual(pageReport["distinctPages"] as? Bool, true)
@@ -263,22 +268,20 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         #if os(iOS)
         @MainActor func activateMenuItemWithVoiceOver(label: String) throws {
             func identifiesItem(_ utterance: String) -> Bool {
-                // Speech adds traits after the localized label. Match the whole
-                // label clause, never a substring of another fixture item.
-                utterance.components(separatedBy: CharacterSet(charactersIn: ",\n"))
-                    .contains { $0.trimmingCharacters(in: .whitespacesAndNewlines) == label }
+                // Native speech can separate the exact localized label from
+                // its traits with a space, comma or newline.
+                let speech = utterance.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard speech.hasPrefix(label) else { return false }
+                let suffix = speech.dropFirst(label.count)
+                guard let boundary = suffix.first else { return true }
+                return boundary == " " || boundary == "," || boundary.isNewline
             }
             var utterance = try voiceOver.currentSpeech().utterance
-            var visited: Set<String> = []
+            var visited: Set<[String]> = []
             for moves in 0...16 {
                 attachSpeech(utterance, name: "menu-\(label)-move-\(moves)")
-                if identifiesItem(utterance) {
-                    let selected = try voiceOver.currentSpeech().utterance
-                    attachSpeech(selected, name: "menu-\(label)-selected")
-                    guard identifiesItem(selected) else {
-                        throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 6,
-                                      userInfo: [NSLocalizedDescriptionKey: "VoiceOver selection changed before activating \(label): \(selected)"])
-                    }
+                let focusedLabel = try self.report(app)["voiceFocus"] as? String
+                if identifiesItem(utterance), focusedLabel == label {
                     let window = app.windows.firstMatch
                     let frame = window.frame
                     let coordinate = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -293,10 +296,21 @@ final class CardWebViewBehaviorUITests: XCTestCase {
                     }
                     // A VoiceOver double tap activates the selected item,
                     // independently of the gesture's position in the window.
+                    let selected = try voiceOver.currentSpeech().utterance
+                    let selectedFocus = try self.report(app)["voiceFocus"] as? String
+                    attachSpeech(selected, name: "menu-\(label)-selected")
+                    guard identifiesItem(selected), selectedFocus == label else {
+                        throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 6,
+                                      userInfo: [NSLocalizedDescriptionKey: "VoiceOver selection changed before activating \(label): \(selected), focus=\(selectedFocus ?? "<unavailable>")"])
+                    }
                     coordinate.doubleTap()
                     return
                 }
-                guard visited.insert(utterance).inserted, moves < 16 else {
+                // The pre-move announcement can repeat before the first real
+                // move. Detect cycles only among observed moves and include
+                // native focus, since speech alone can lag the cursor.
+                guard moves < 16,
+                      moves == 0 || visited.insert([focusedLabel ?? "<unavailable>", utterance]).inserted else {
                     throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 8,
                                   userInfo: [NSLocalizedDescriptionKey: "VoiceOver menu traversal cycled or exhausted 16 moves before \(label): \(utterance)"])
                 }
@@ -309,14 +323,14 @@ final class CardWebViewBehaviorUITests: XCTestCase {
                 throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 2,
                               userInfo: [NSLocalizedDescriptionKey: "missing native VO control: \(element)"])
             }
+            #if os(macOS)
+            try click(element, in: app)
+            #else
             let label = element.label
             guard !label.isEmpty else {
                 throw NSError(domain: "CardWebViewBehaviorUITests.Precondition", code: 3,
                               userInfo: [NSLocalizedDescriptionKey: "native VO control has an empty label: \(element)"])
             }
-            #if os(macOS)
-            try click(element, in: app)
-            #else
             if nativeMenuItem {
                 try activateMenuItemWithVoiceOver(label: label)
                 return
@@ -386,9 +400,7 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             if layoutIndex == 1 && !nextSpeech.contains("Typed answer") {
                 attachSpeech(try voiceOver.moveForward().utterance, name: "layout-\(layoutIndex)-next2")
             }
-            XCTAssertNotEqual(app.webViews.matching(identifier: "review.card.page.a").firstMatch.exists,
-                              app.webViews.matching(identifier: "review.card.page.b").firstMatch.exists,
-                              "exactly one named page root must be exported; the idle root must be absent")
+            assertSingleActiveCardRoot(app)
             XCTAssertEqual(answerReport["pageCount"] as? Int, 2)
             XCTAssertEqual(answerReport["distinctPages"] as? Bool, true)
             XCTAssertEqual(answerReport["currentHidden"] as? Bool, false)

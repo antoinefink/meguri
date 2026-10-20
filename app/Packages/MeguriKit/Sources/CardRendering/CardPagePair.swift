@@ -84,6 +84,10 @@ public final class CardPagePair {
         pages = [a, b]; current = a; idle = b
         container.addSubview(b.webView)
         container.addSubview(a.webView)
+        #if os(macOS)
+        container.setAccessibilityChildren([current.webView])
+        container.setAccessibilityChildrenInNavigationOrder([current.webView])
+        #endif
         for page in pages {
             page.webView.isInspectable = inspectorPolicy.isInspectable
             page.onTypedText = { [weak self, weak page] value in
@@ -223,6 +227,8 @@ public final class CardPagePair {
         next.webView.setIdle(false)
         old.webView.setIdle(true)
         #if os(macOS)
+        container.setAccessibilityChildren([next.webView])
+        container.setAccessibilityChildrenInNavigationOrder([next.webView])
         container.window?.recalculateKeyViewLoop()
         #endif
         old.leavePresentation()
@@ -472,6 +478,10 @@ public final class CardPagePair {
     public func close() {
         guard !closed else { return }
         closed = true; commitSerial += 1; hostInstallation = UUID()
+        #if os(macOS)
+        container.setAccessibilityChildren([])
+        container.setAccessibilityChildrenInNavigationOrder([])
+        #endif
         cancelPresentationWork()
         physicalStop?.cancel(); physicalStop = nil
         stopBindings.removeAll()
