@@ -1222,13 +1222,16 @@ impl ReviewService {
         let _control = self.control.acquire();
         self.end_inner(id)
     }
-    /// Host close must refuse an occupied lifecycle before starting shutdown.
-    /// Once admitted, retain the ordinary synchronous drain/release semantics.
-    pub fn try_end_for_close(&self, id: SessionId) -> Result<(), EngineError> {
+    /// Reserve the entire host close, including when no session is installed.
+    /// Shutdown runs with logical exclusion only, never a held mutex guard.
+    pub fn try_close_host(&self, shutdown: impl FnOnce() -> Result<(), EngineError>) -> Result<(), EngineError> {
         let _control = self.control.try_acquire().map_err(|_| EngineError::Busy {
             running_op: "review lifecycle".into(),
         })?;
-        self.end_inner(id)
+        if let Some(id) = self.active_session() {
+            self.end_inner(id)?;
+        }
+        shutdown()
     }
     /// Like start_controlled: cancellation before writer admission changes no
     /// session state; after admission the drain/release must really complete.
@@ -1324,8 +1327,8 @@ impl ReviewService {
         cancel: Arc<crate::CancelToken>,
         progress: crate::ProgressSink,
     ) -> Result<HistoryRestore, EngineError> {
-        let _control = self.control.acquire();
         cancel.check()?;
+        let _control = self.control.try_acquire()?;
         let (c, _) = self.bound()?;
         if self.active_session().is_some() || matches!(scope, UndoScope::Session(_)) {
             let head = if redo {

@@ -26,6 +26,47 @@ fn lifecycle_try_admission_refuses_mutex_contention_and_logical_occupancy() {
     assert!(gate.try_acquire().is_ok());
 }
 
+#[test]
+fn host_close_without_a_session_reserves_shutdown_and_releases_every_exit() {
+    let engine = Engine::new(EngineConfig::default()).unwrap();
+    let review = ReviewService::new(&engine, Arc::new(QueueProvider::default())).unwrap();
+    let permit = review.control.acquire();
+    assert_eq!(
+        review.try_close_host(|| panic!("busy close entered shutdown")),
+        Err(EngineError::Busy {
+            running_op: "review lifecycle".into()
+        })
+    );
+    drop(permit);
+    for exit in 0..3 {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            review.try_close_host(|| {
+                {
+                    let occupied = review
+                        .control
+                        .occupied
+                        .try_lock()
+                        .expect("shutdown holds admission mutex");
+                    assert!(*occupied);
+                }
+                assert!(review.inner.state.try_lock().is_ok(), "shutdown holds session mutex");
+                assert!(review.control.try_acquire().is_err());
+                match exit {
+                    0 => Err(EngineError::unavailable("shutdown failure")),
+                    1 => panic!("shutdown unwind"),
+                    _ => Ok(()),
+                }
+            })
+        }));
+        match exit {
+            0 => assert_eq!(result.unwrap(), Err(EngineError::unavailable("shutdown failure"))),
+            1 => assert!(result.is_err()),
+            _ => assert_eq!(result.unwrap(), Ok(())),
+        }
+        assert!(review.control.try_acquire().is_ok(), "close exit retained admission");
+    }
+}
+
 struct InspectCommit {
     review: Weak<ReviewService>,
     scope: UndoScope,

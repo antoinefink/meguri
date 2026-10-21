@@ -930,6 +930,21 @@ fn controlled_job_regressions(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<C
     let start = prompt(move || review_session::start_session(deck, None)).unwrap();
     queued(&c, "admit_review_lifecycle");
     assert!(start.result.result().unwrap().is_none());
+    // No session has been installed, but the queued start already owns the
+    // lifecycle. A refused close must also restore the runtime reservation.
+    for _ in 0..2 {
+        assert_eq!(
+            prompt(lifecycle::close_collection),
+            Err(CoreError::Busy {
+                running_op: "review lifecycle".into()
+            })
+        );
+        assert_eq!(
+            meguri_ffi::test_hooks::collection_for_testing().unwrap().generation(),
+            c.generation()
+        );
+        assert_eq!(deck_tree::deck_tree_with_counts().unwrap().generation, c.generation().0);
+    }
     start.handle.cancel.cancel().unwrap();
     drop(release);
     blocked.wait().unwrap();
@@ -1118,12 +1133,14 @@ fn controlled_job_regressions(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<C
     let failed = review_session::end_session(next).unwrap();
     let (outcome, more) = finish(rx, failed.id);
     events.extend(more);
-    assert!(matches!(
+    assert_eq!(
         outcome,
         JobOutcome::Failed {
-            error: CoreError::Unavailable { .. }
+            error: CoreError::InvalidArgument {
+                message: "NoSession".into()
+            }
         }
-    ));
+    );
     // Restore the accepted answer through the real global job so subsequent
     // fixture assertions still see the original two fresh cards.
     let restore_answer = undo::start_undo(ReviewUndoScope::Global).unwrap();

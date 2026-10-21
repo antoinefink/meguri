@@ -47,8 +47,11 @@ fn open_wires_derived_and_media_and_close_releases_retained_journal_handles() {
 
 #[test]
 fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
-    use meguri_engine::{CancelToken, EngineError, OpSource, OpSpec, ProgressSink, UndoScope};
-    use std::{sync::mpsc, time::Duration};
+    use meguri_engine::{CancelToken, EngineError, JobKind, OpSource, OpSpec, ProgressPhase, ProgressSink, UndoScope};
+    use std::{
+        sync::{Mutex, mpsc},
+        time::Duration,
+    };
 
     struct Release(mpsc::Sender<()>);
     impl Drop for Release {
@@ -56,8 +59,23 @@ fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
             let _ = self.0.send(());
         }
     }
+    struct StartGate {
+        enter: mpsc::Sender<()>,
+        wait: Mutex<Option<mpsc::Receiver<()>>>,
+    }
+    impl meguri_engine::session::SessionStartHook for StartGate {
+        fn session_starting(&self) {
+            let wait = self.wait.lock().unwrap().take();
+            if let Some(wait) = wait {
+                self.enter.send(()).unwrap();
+                wait.recv_timeout(Duration::from_secs(10)).unwrap();
+            }
+        }
+    }
     let dir = tempfile::tempdir().unwrap();
-    let host = Arc::new(CoreHost::open(config(dir.path())).unwrap());
+    let options = config(dir.path());
+    let process = meguri_host::ProcessCore::new(options.engine.clone()).unwrap();
+    let host = Arc::new(process.open(options.clone()).unwrap());
     let c = host.collection().unwrap();
     c.run(OpSpec::named("close fixture policy", OpSource::Maintenance), |ctx| {
         ctx.scope()
@@ -92,9 +110,47 @@ fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
         OpSource::UserUndoable,
     )
     .unwrap();
-    let meguri_engine::session::StartResult::Started { session_id, head, .. } =
-        host.review().start(deck, None).unwrap()
-    else {
+    // Park a controlled start inside admission, before it installs any shown
+    // state. Close must refuse even though active_session is still None.
+    let (enter, entered) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let start_release = Release(release);
+    host.review().add_session_start_hook(Arc::new(StartGate {
+        enter,
+        wait: Mutex::new(Some(wait)),
+    }));
+    let callers = meguri_engine::ThreadRegistry::default();
+    let starting_host = host.clone();
+    let start = callers
+        .spawn("close-test-start", meguri_engine::Qos::Default, move |_| {
+            starting_host
+                .review()
+                .start_controlled(deck, None, CancelToken::new(), ProgressSink::new())
+        })
+        .unwrap();
+    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(host.review().active_session(), None);
+    for _ in 0..2 {
+        let closing_host = host.clone();
+        let (send, recv) = mpsc::channel();
+        let close = callers
+            .spawn("close-test-before-install", meguri_engine::Qos::Default, move |_| {
+                let _ = send.send(closing_host.close());
+            })
+            .unwrap();
+        assert_eq!(
+            recv.recv_timeout(Duration::from_secs(1)).unwrap(),
+            Err(EngineError::Busy {
+                running_op: "review lifecycle".into()
+            })
+        );
+        close.join().unwrap();
+        assert_eq!(host.collection().unwrap().generation(), c.generation());
+        assert_eq!(host.review().active_session(), None);
+        assert!(c.reader(ReaderRole::Query).unwrap().deck(deck).unwrap().is_some());
+    }
+    drop(start_release);
+    let meguri_engine::session::StartResult::Started { session_id, head, .. } = start.join().unwrap().unwrap() else {
         panic!("close fixture must start")
     };
     let (enter, entered) = mpsc::channel();
@@ -161,11 +217,167 @@ fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
     blocked.wait().unwrap();
     assert!(matches!(restore.join().unwrap(), Err(EngineError::Cancelled)));
     assert_eq!(host.review().active_session(), Some(session_id));
-    host.close().unwrap();
+    // Enter both registered workers before close can take either control lane.
+    // Keep them registered through Engine::close's cancellation as well.
+    let mut restores = Vec::new();
+    for redo in [false, true] {
+        let restoring_host = host.clone();
+        let (enter, entered) = mpsc::channel();
+        let (admit, admission) = mpsc::channel();
+        let (finish, finishing) = mpsc::channel();
+        let (send, recv) = mpsc::channel();
+        let admission_release = Release(admit);
+        let finish_release = Release(finish);
+        let job = host
+            .engine()
+            .start_job(JobKind::BulkOp, move |ctx| {
+                ctx.cancel.check()?;
+                enter.send(()).unwrap();
+                admission.recv_timeout(Duration::from_secs(10)).unwrap();
+                let result = restoring_host
+                    .review()
+                    .restore_controlled(UndoScope::Global, redo, ctx.cancel.clone(), ctx.progress.clone())
+                    .map(|_| ());
+                send.send(result).unwrap();
+                finishing.recv_timeout(Duration::from_secs(10)).unwrap();
+                let result = restoring_host
+                    .review()
+                    .restore_controlled(UndoScope::Global, redo, ctx.cancel.clone(), ctx.progress.clone())
+                    .map(|_| ());
+                send.send(result.clone()).unwrap();
+                result
+            })
+            .unwrap();
+        entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(
+            host.engine()
+                .jobs()
+                .running()
+                .iter()
+                .any(|running| running.id == job.id)
+        );
+        restores.push((job, admission_release, finish_release, recv));
+    }
+    // First pause end_inner's drain while the session still exists: the close
+    // owns lifecycle admission, but Engine::close has not cancelled the jobs.
+    let (end_enter, end_entered) = mpsc::channel();
+    let (end_release, end_wait) = mpsc::channel();
+    let end_release = Release(end_release);
+    let end_wait = Mutex::new(Some(end_wait));
+    // Stop the review provider's flush in Engine::close, after end_inner has
+    // removed the session. The same close reservation must still exclude start.
+    let closing = Arc::downgrade(&host);
+    let (enter, entered) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let shutdown_release = Release(release);
+    let wait = Mutex::new(Some(wait));
+    host.review()
+        .journal_hook_for_testing(Arc::new(move |stage| {
+            if stage == meguri_engine::session::JournalStage::Compact {
+                let (enter, wait) = if closing.upgrade().unwrap().review().active_session().is_some() {
+                    (&end_enter, &end_wait)
+                } else {
+                    (&enter, &wait)
+                };
+                let wait = wait.lock().unwrap().take();
+                if let Some(wait) = wait {
+                    enter.send(()).unwrap();
+                    wait.recv_timeout(Duration::from_secs(10)).unwrap();
+                }
+            }
+        }))
+        .unwrap();
+    let closing_host = host.clone();
+    let (closed, close_result) = mpsc::channel();
+    let close = callers
+        .spawn("close-test-shutdown", meguri_engine::Qos::Default, move |_| {
+            let _ = closed.send(closing_host.close());
+        })
+        .unwrap();
+    end_entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    let undo = c.peek_undo(UndoScope::Global).unwrap();
+    let redo = c.peek_redo(UndoScope::Global).unwrap();
+    for (job, admission, _, recv) in &restores {
+        assert!(!job.cancel.is_cancelled());
+        admission.0.send(()).unwrap();
+        assert_eq!(
+            recv.recv_timeout(Duration::from_secs(1)).unwrap(),
+            Err(EngineError::CollectionUnavailable {
+                reason: "review lifecycle is busy".into()
+            })
+        );
+        assert_eq!(job.progress.phase(), ProgressPhase::Planning);
+        assert_eq!(host.collection().unwrap().generation(), c.generation());
+        assert_eq!(host.review().active_session(), Some(session_id));
+        assert_eq!(host.review().head(session_id, 3).unwrap(), head);
+        assert_eq!(c.peek_undo(UndoScope::Global).unwrap(), undo);
+        assert_eq!(c.peek_redo(UndoScope::Global).unwrap(), redo);
+    }
+    drop(end_release);
+    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(host.review().active_session(), None);
+    for (job, _, finish, recv) in &restores {
+        assert!(job.cancel.is_cancelled());
+        finish.0.send(()).unwrap();
+        assert_eq!(
+            recv.recv_timeout(Duration::from_secs(1)).unwrap(),
+            Err(EngineError::Cancelled)
+        );
+        assert_eq!(job.progress.phase(), ProgressPhase::Planning);
+    }
+    let starting_host = host.clone();
+    let (send, recv) = mpsc::channel();
+    let refused = callers
+        .spawn("close-test-during-shutdown", meguri_engine::Qos::Default, move |_| {
+            let _ = send.send(starting_host.review().start_controlled(
+                deck,
+                None,
+                CancelToken::new(),
+                ProgressSink::new(),
+            ));
+        })
+        .unwrap();
+    assert_eq!(
+        recv.recv_timeout(Duration::from_secs(1))
+            .expect("controlled start blocked during shutdown")
+            .unwrap_err(),
+        EngineError::CollectionUnavailable {
+            reason: "review lifecycle is busy".into()
+        }
+    );
+    refused.join().unwrap();
+    assert_eq!(host.review().active_session(), None);
+    drop(shutdown_release);
+    close_result.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+    close.join().unwrap();
+    assert!(host.engine().jobs().running().is_empty());
     assert_eq!(host.review().active_session(), None);
     assert!(host.collection().is_err());
     assert!(c.reader(ReaderRole::Query).is_err());
     host.close().unwrap();
+    let reopened = process.open(options).unwrap();
+    assert_eq!(reopened.review().active_session(), None);
+    assert_eq!(
+        reopened.review().head(session_id, 3),
+        Err(EngineError::InvalidArgument {
+            message: "NoSession".into()
+        })
+    );
+    let meguri_engine::session::StartResult::Started {
+        session_id: next,
+        generation,
+        head: next_head,
+        ..
+    } = reopened.review().start(deck, None).unwrap()
+    else {
+        panic!("reopened close fixture must start")
+    };
+    assert_ne!(next, session_id);
+    assert_ne!(generation, c.generation());
+    assert_eq!(generation, reopened.collection().unwrap().generation());
+    assert_eq!(reopened.review().head(next, 3).unwrap(), next_head);
+    assert!(reopened.review().head(session_id, 3).is_err());
+    reopened.close().unwrap();
 }
 
 #[test]
