@@ -206,6 +206,8 @@ What the oracle does in each, confirmed by running each scenario's steps after t
 - `sync/filtered-deck`: `converge` finds no difference on any party, the dumps after each sync show the filtered decks and their cards as client_a made them, and Meguri's edit travels as an incremental sync (`no_changes`, R1590).
 - `notetype/structure-changes`: each update changes its note type's `notetypes` row (`config`, `mtime_secs`, `usn` -1), the renamed field's `fields` row (`name`), each template that uses the renamed field (`config`: the reference in its text follows the rename), and adds one `fields` row and one `templates` row; template rows keep `mtime_secs` and `usn` 0 (`model/schema11-json` S6). Every note of the note type gets an empty last field (`flds`, `mod`, `usn` -1; sort field and checksum unchanged), and `col.mod` and `col.scm` take the update's instant. No card is made (each new template's front uses only the new, empty field), and no card, deck, preset, tag or config entry changes. Anki writes Vocab's note type, first field and first template without their unknown fields, the first field too although no edit touches it (a save rewrites every field and template row of the note type).
 
+`preservation/review/answers` records 200 reference answers on ten cards of the fixture's Steady preset. That preset has the later-list markers of `sched/fsrs-transitions#T13`; Meguri must refuse its answers under `sched/fsrs-policy#U4`. Preserve this complete reference input and golden; it is not a successful Meguri study case. U44 must prove R582 and `sched/fsrs-policy#K3` step 1 with 200 real answers, including rollover, on supported-home cards while preserving the fixture's opaque and unsupported data. U43 separately supplies N11.1's session API proof on supported-home fixtures. U246 reports the original reference's scope separately from those successful supported proofs.
+
 `area.yaml` lists a scenario as active in the change that lands what Meguri needs for it (`dsl.md` D9.1).
 
 U36 also runs on Meguri's executor, with its `legacy_json`, `legacy_update` and `blob_decode` adapters and `db_exec`, the model scenarios `model/proto/` and `model/schema11/` (all but `apkg-notetypes`) and `render/template/legacy-req` (`model-ops.md` L1, L2, L4; `render-ops.md` Q3); their specs are unchanged.
@@ -215,6 +217,8 @@ U36 also runs on Meguri's executor, with its `legacy_json`, `legacy_update` and 
 ### N11.1 Review session (U43)
 
 A 200-card review session through the session API on the fixture: the raw dump difference (N7) is limited to the answered cards' `cards` rows, their new `revlog` rows, the studied decks' `common`, `mtime_secs` and `usn`, `col.mod`, and the config keys `curDeck`, `setDueReviewer`, `restorePositionReviewer` and `resetCountsReviewer`, each only when the session itself writes it. `dueCounts`, `estTimes` and every other key keep their bytes, `usn` and `mtime_secs` (R582). `preservation/review/answers` is the same check against the oracle for the answers alone.
+
+N11.1's session proof uses supported-home cards and retains every stated preservation assertion. It must not study the Steady cards in the preserved reference case: R704 requires their refusal. U44's operation-level preservation proof does not substitute for this session API proof.
 
 ### N11.2 Render (U60, U62)
 
