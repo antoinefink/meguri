@@ -348,11 +348,11 @@ mod tests {
         );
         host.close().unwrap();
         assert_eq!(process.review().active_session(), None);
-        // Close ends this session; the retained handle still has the same generation.
+        // Close ends this session and releases the retained review provider binding.
         assert_eq!(
             process.review().head(SessionId(session_id), 3).unwrap_err(),
-            meguri_engine::EngineError::InvalidArgument {
-                message: "NoSession".into(),
+            meguri_engine::EngineError::CollectionUnavailable {
+                reason: "review provider is not bound".into(),
             }
         );
         let reopened = process.open(config).unwrap();
