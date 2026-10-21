@@ -852,10 +852,7 @@ fn verify_imported_sentinels(location: &CollectionLocation, nt: i64) {
             }
         }
     }
-    assert_eq!(
-        host.media().unwrap().store().lookup("surface.png").unwrap().is_some(),
-        true
-    );
+    assert!(host.media().unwrap().store().lookup("surface.png").unwrap().is_some());
     host.close().unwrap();
 }
 
