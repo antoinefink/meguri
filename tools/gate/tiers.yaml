@@ -135,7 +135,7 @@ runs:
     tier: T0
     placement: docker:dev
     class: unit
-    triggers: [core/, conformance/, tools/mg.d/core.sh]
+    triggers: [core/, conformance/, tools/mg.d/core.sh, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh]
     budget_s: 2400
 
   # --- T0: conformance on the committed goldens --------------------------------

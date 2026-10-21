@@ -19,7 +19,11 @@ setup() {
   cp -R "$BATS_FILE_TMPDIR/template" "$SB"
   export CALLS="$BATS_TEST_TMPDIR/calls" LIVE_STATUS=pass LIVE_REPORT=yes
   mkdir -p "$SB/stubs"
-  printf '#!/bin/sh\necho testkit >>"$CALLS"\n' >"$SB/stubs/cargo"
+  cat >"$SB/stubs/cargo" <<'EOF'
+#!/bin/sh
+echo testkit >>"$CALLS"
+printf '%s\n' "$@" >>"$CALLS.cargo-args"
+EOF
   chmod +x "$SB/stubs/cargo"
   export PATH="$SB/stubs:$PATH"
   cat >"$SB/tools/mg.d/zz-conformance-fixture.sh" <<'EOF'
@@ -37,6 +41,7 @@ mg_oracle__tree() { MG_ORACLE_TAG=fixture; MG_ORACLE_DIR="$MG_ROOT/build/oracle-
 mg_oracle__build() { echo oracle-build >>"$CALLS"; }
 mg_conf__dev() {
   echo docker-t0 >>"$CALLS"
+  mg_json_array "$@" >>"$CALLS.docker-args"
   fixture_report t0 "$MG_RUN_DIR/t0-docker.json" pass
 }
 mg_conf__cli_native() {
@@ -87,6 +92,30 @@ mg() {
   grep -qx docker-t0 "$CALLS"
   grep -qx t1 "$CALLS"
   jq -e '(.details.lanes|keys)==["docker","live","native"]' "$result"
+  python3 - "$CALLS" "$(dirname "$result")" "$SB" <<'PY'
+import json, pathlib, shlex, sys
+calls, run_dir, root = sys.argv[1:]
+assert pathlib.Path(calls + '.cargo-args').read_text().splitlines() == [
+    'test', '-q', '-p', 'meguri-testkit', '--tests', '--no-fail-fast',
+]
+native = [json.loads(line) for line in pathlib.Path(calls + '.args').read_text().splitlines()]
+assert len(native) == 2
+assert native[0] == [
+    'conformance', 'run', '--conformance', root + '/conformance',
+    '--lane', 'macos-native', '--report', run_dir + '/t0-native.json',
+]
+docker = [json.loads(line) for line in pathlib.Path(calls + '.docker-args').read_text().splitlines()]
+assert len(docker) == 1 and len(docker[0]) == 2 and docker[0][0] == '--'
+tokens = shlex.shlex(docker[0][1], posix=True, punctuation_chars=True)
+tokens.whitespace_split = True
+# Only the actual corpus CLI runs in Docker; core-test owns its unit suite.
+assert list(tokens) == [
+    'cd', 'core', ';', 'cargo', 'run', '-q', '-p', 'meguri-cli', '--',
+    'conformance', 'run', '--conformance', '/work/conformance',
+    '--lane', 'linux-docker', '--report',
+    '/work/' + str(pathlib.Path(run_dir).relative_to(root)) + '/t0-docker.json',
+]
+PY
 }
 
 @test "conformance live-only propagates T1 failures and missing reports" {
@@ -113,6 +142,7 @@ mg() {
 import sys, yaml
 runs = {r['id']: r for r in yaml.safe_load(open(sys.argv[1]))['runs']}
 t0, t1 = runs['conformance'], runs['live-oracle']
+assert set(t0['triggers']) <= set(runs['core-test']['triggers']), 'core-test must cover every conformance trigger'
 assert t0['args'] == ['--lane', 'all']
 assert t1['args'] == ['--live-only', '--lane', 'native']
 assert all(any(path.startswith(trigger) for trigger in t0['triggers']) for path in t1['filters'])

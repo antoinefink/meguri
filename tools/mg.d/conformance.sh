@@ -134,9 +134,8 @@ mg_conformance() {
     fi
   fi
 
-  # T0 on each lane: the testkit tests (one test per scenario, the runner's
-  # own tests and the 2,000-scenario budget) when no filter is given, then the
-  # JSON report of the selected scenarios.
+  # T0 reports selected scenarios on each lane. Unfiltered runs also test the
+  # native testkit; core-test owns Docker Rust unit tests.
   if [ "$t0" = true ] && [ "$lane" != docker ]; then
     local native="$MG_RUN_DIR/t0-native.json"
     if [ "${#filters[@]}" -eq 0 ]; then
@@ -156,18 +155,10 @@ mg_conformance() {
   if [ "$t0" = true ] && [ "$lane" != native ]; then
     local docker_report="$MG_RUN_DIR/t0-docker.json" script
     script="cd core"
-    if [ "${#filters[@]}" -eq 0 ]; then
-      script="$script && { cargo test -q -p meguri-testkit --tests --no-fail-fast >&2 || echo testkit-failed >\"/work/$(mg_conf__rel "$MG_RUN_DIR")/docker-testkit-failed\"; }"
-    fi
     script="$script; cargo run -q -p meguri-cli -- conformance run --conformance /work/conformance --lane linux-docker \
       --report /work/$(mg_conf__rel "$docker_report")$(mg_conf__quote ${filters[0]+"${filters[@]}"})"
     mg_conf__dev -- "$script"
     rc=$?
-    if [ -f "$MG_RUN_DIR/docker-testkit-failed" ]; then
-      mg_failure docker/testkit "meguri-testkit tests failed in the dev container; see log.txt" \
-        "tools/mg core-test -- -E 'package(meguri-testkit)'"
-      failed=true
-    fi
     mg_conf__lane_report docker "$docker_report" "$rc" || failed=true
     [ "$rc" -eq 0 ] || failed=true
   fi
