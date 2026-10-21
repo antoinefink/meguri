@@ -421,6 +421,7 @@ impl ExecShared {
             body: Box::new(ReplaceTask { swap, reply }),
         });
         rx.recv().unwrap_or(Replaced {
+            reopened: false,
             error: Some(EngineError::internal("the writer stopped during a replace")),
             generation: None,
             factory: None,

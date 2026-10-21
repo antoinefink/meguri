@@ -687,6 +687,8 @@ where
 
 /// What a replace leaves (`engine/lifecycle` L8).
 pub(crate) struct Replaced {
+    /// A new SQLite connection was installed after closing the old one.
+    pub reopened: bool,
     /// Why the swap, the reopen or the new generation's first day check
     /// failed; `factory` says whether a collection is open again.
     pub error: Option<EngineError>,
@@ -727,6 +729,7 @@ impl TaskBody for ReplaceTask {
         // succeed. An error returns its current readers without closing it.
         let Some(current) = env.collection.as_ref() else {
             let _ = reply.send(Replaced {
+                reopened: false,
                 error: Some(EngineError::unavailable("the collection is closed")),
                 generation: None,
                 factory: None,
@@ -737,9 +740,10 @@ impl TaskBody for ReplaceTask {
             .and_then(|()| crate::session::retire_incarnation(shared));
         if let Err(error) = journal_result {
             let _ = reply.send(Replaced {
+                reopened: false,
                 error: Some(error),
                 generation: None,
-                factory: Some(current.reader_factory()),
+                factory: None,
             });
             return;
         }
@@ -780,6 +784,7 @@ impl TaskBody for ReplaceTask {
             .managed();
         let replaced = match open_collection(&shared.path, &options) {
             Err(error) => Replaced {
+                reopened: false,
                 error: Some(match swapped {
                     Err(swap_error) => swap_error,
                     Ok(()) => EngineError::Open(error),
@@ -797,6 +802,7 @@ impl TaskBody for ReplaceTask {
                     let announce = shared.stream.reserve();
                     match first_day_check(env) {
                         Ok(()) => Replaced {
+                            reopened: true,
                             error: swapped.err(),
                             generation: Some(NewGeneration { generation, announce }),
                             factory: Some(factory),
@@ -819,6 +825,7 @@ impl TaskBody for ReplaceTask {
                                 }
                             };
                             Replaced {
+                                reopened: false,
                                 error: Some(error),
                                 generation: None,
                                 factory: None,
@@ -827,6 +834,7 @@ impl TaskBody for ReplaceTask {
                     }
                 } else {
                     Replaced {
+                        reopened: true,
                         error: swapped.err(),
                         generation: None,
                         factory: Some(factory),
@@ -839,6 +847,7 @@ impl TaskBody for ReplaceTask {
 
     fn fail(self: Box<Self>, error: EngineError) {
         let _ = self.reply.send(Replaced {
+            reopened: false,
             error: Some(error),
             generation: None,
             factory: None,

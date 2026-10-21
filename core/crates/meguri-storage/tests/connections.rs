@@ -293,3 +293,157 @@ fn raw_rows_give_each_value_by_its_storage_class() {
     drop(reader);
     opened.close().unwrap();
 }
+
+#[test]
+fn c12_open_rejects_persistent_and_restored_path_swaps_before_setup() {
+    use meguri_storage::connections::{WriterOpenHook, WriterOpenStage};
+    use std::os::unix::fs::MetadataExt;
+
+    for put_original_back in [false, true] {
+        let (directory, path) = copy_fixture("schema-18.anki2");
+        let candidate = directory.path().join("candidate.anki2");
+        let parked = directory.path().join("parked.anki2");
+        fs::copy(&path, &candidate).unwrap();
+        {
+            let connection = meguri_storage::rusqlite::Connection::open(&candidate).unwrap();
+            connection.execute_batch("UPDATE col SET mod = mod + 42").unwrap();
+        }
+        let file_id = |file: &std::path::Path| {
+            let metadata = fs::metadata(file).unwrap();
+            (metadata.dev(), metadata.ino())
+        };
+        let first_id = file_id(&path);
+        let second_id = file_id(&candidate);
+        assert_ne!(first_id, second_id);
+        let hashes = (sha256(&path), sha256(&candidate));
+        let live = path.clone();
+        let saved = parked.clone();
+        let second = candidate.clone();
+        let barrier = WriterOpenHook::for_path(
+            &path,
+            Arc::new(move |stage| match stage {
+                WriterOpenStage::Retained => {
+                    fs::rename(&live, &saved).unwrap();
+                    fs::rename(&second, &live).unwrap();
+                }
+                WriterOpenStage::SqliteOpened => {
+                    assert_eq!(file_id(&live), second_id);
+                    if put_original_back {
+                        fs::rename(&live, &second).unwrap();
+                        fs::rename(&saved, &live).unwrap();
+                        assert_eq!(file_id(&live), first_id);
+                    }
+                }
+            }),
+        );
+        let setup_count = Arc::new(AtomicUsize::new(0));
+        let observed = setup_count.clone();
+        let mut initializers = Initializers::new();
+        initializers.register(move |connection| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            connection.execute_batch("UPDATE col SET mod = mod + 1000")
+        });
+        let clock = common::clock();
+        let random = SeededRandom::new(12);
+        let failure =
+            open_collection(&path, &OpenOptions::new(&clock, &random).initializers(initializers)).unwrap_err();
+        drop(barrier);
+        if !put_original_back {
+            fs::rename(&path, &candidate).unwrap();
+            fs::rename(&parked, &path).unwrap();
+        }
+        assert!(matches!(failure, OpenError::Io { .. }), "{failure:?}");
+        if put_original_back {
+            assert!(
+                failure.to_string().contains("SQLite file identity check failed"),
+                "the retained file and restored path agree, but SQLite opened the other file: {failure}"
+            );
+        }
+        assert_eq!(setup_count.load(Ordering::SeqCst), 0);
+        assert_eq!((sha256(&path), sha256(&candidate)), hashes);
+        for file in [&path, &candidate] {
+            for suffix in ["-journal", "-wal", "-shm"] {
+                let mut name = file.as_os_str().to_owned();
+                name.push(suffix);
+                assert!(!std::path::PathBuf::from(name).exists());
+            }
+        }
+    }
+}
+
+#[test]
+fn c12_open_refuses_unsupported_failed_or_nonzero_file_control_results() {
+    use meguri_storage::{counting_vfs::CountingVfs, rusqlite::ffi};
+
+    let refusals = [
+        (ffi::SQLITE_NOTFOUND, 0),
+        (ffi::SQLITE_IOERR, 0),
+        (ffi::SQLITE_OK, 1),
+        (ffi::SQLITE_OK, -1),
+    ];
+    for reply in refusals {
+        let (_directory, path) = copy_fixture("schema-18.anki2");
+        let original_hash = sha256(&path);
+        let probe = CountingVfs::for_path(&path);
+        probe.has_moved_result(reply.0, reply.1);
+        let setup_count = Arc::new(AtomicUsize::new(0));
+        let observed = setup_count.clone();
+        let mut initializers = Initializers::new();
+        initializers.register(move |connection| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            connection.execute_batch("UPDATE col SET mod = mod + 1000")
+        });
+        let clock = common::clock();
+        let random = SeededRandom::new(12);
+        let failure =
+            open_collection(&path, &OpenOptions::new(&clock, &random).initializers(initializers)).unwrap_err();
+        assert!(matches!(failure, OpenError::Io { .. }), "{reply:?}: {failure:?}");
+        assert!(
+            failure.to_string().contains("SQLite file identity check failed"),
+            "{reply:?}: {failure}"
+        );
+        assert_eq!(setup_count.load(Ordering::SeqCst), 0, "{reply:?}");
+        assert_eq!(sha256(&path), original_hash, "{reply:?}");
+        assert!(probe.records().is_empty(), "{reply:?}: unexpected sync");
+        for suffix in ["-journal", "-wal", "-shm"] {
+            let mut name = path.as_os_str().to_owned();
+            name.push(suffix);
+            assert!(!std::path::PathBuf::from(name).exists());
+        }
+    }
+}
+
+#[test]
+fn c12_wal_and_two_reopens_keep_native_identity_config_and_schema() {
+    use std::os::unix::fs::MetadataExt;
+
+    let (_directory, path) = copy_fixture("schema-18.anki2");
+    let metadata = fs::metadata(&path).unwrap();
+    let expected_id = (metadata.dev(), metadata.ino());
+    let mut expected_catalog = None;
+    for opening in 0..3 {
+        let collection = open(&path).unwrap();
+        let writer = collection.writer();
+        assert_eq!(writer.native_identity().unwrap(), expected_id);
+        assert_eq!(text(&exec(writer, "PRAGMA journal_mode")), "wal");
+        let catalog = (
+            exec(writer, "SELECT * FROM config ORDER BY key").rows,
+            exec(
+                writer,
+                "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name",
+            )
+            .rows,
+        );
+        match &expected_catalog {
+            Some(expected) => assert_eq!(&catalog, expected),
+            None => expected_catalog = Some(catalog),
+        }
+        if opening == 0 {
+            exec(writer, "UPDATE cards SET flags = 3");
+            writer.sync_wal().unwrap();
+            assert_eq!(writer.native_identity().unwrap(), expected_id);
+        }
+        assert_eq!(int(&exec(writer, "SELECT count(*) FROM cards WHERE flags != 3")), 0);
+        collection.close().unwrap();
+    }
+}

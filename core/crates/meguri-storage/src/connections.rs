@@ -78,8 +78,55 @@ impl Writer {
     /// (the switch to WAL mode among them).
     pub(crate) fn open(path: &Path, initializers: &Initializers) -> Result<Writer, OpenError> {
         let identity_file = std::fs::File::open(path).map_err(|e| OpenError::Io { detail: e.to_string() })?;
+        #[cfg(feature = "test-hooks")]
+        writer_open_hooks::checkpoint(path, WriterOpenStage::Retained);
         let conn =
             Connection::open_with_flags(file_uri(path, None), READ_WRITE).map_err(|e| OpenError::from_sqlite(&e))?;
+        #[cfg(feature = "test-hooks")]
+        writer_open_hooks::checkpoint(path, WriterOpenStage::SqliteOpened);
+        // C12.1: validate the retained file and SQLite's main database before
+        // allowing connection setup to mutate either file. These checks cover
+        // the open sequence; they do not make pathname lookup atomic.
+        use std::os::unix::fs::MetadataExt;
+        let file_identity = {
+            let metadata = identity_file.metadata().map_err(|error| OpenError::Io {
+                detail: error.to_string(),
+            })?;
+            (metadata.dev(), metadata.ino())
+        };
+        let path_identity = {
+            let metadata = std::fs::metadata(path).map_err(|error| OpenError::Io {
+                detail: error.to_string(),
+            })?;
+            (metadata.dev(), metadata.ino())
+        };
+        if file_identity != path_identity {
+            return Err(OpenError::Io {
+                detail: "writer pathname no longer identifies the retained file".into(),
+            });
+        }
+
+        // SQLite may have opened a different file even when the path has
+        // already been restored. Ask that live connection about its main file.
+        let mut path_changed: std::ffi::c_int = -1;
+        // SAFETY: conn owns a live SQLite handle. The main database name is
+        // NUL-terminated, and the output points to an int valid for this call.
+        let control_status = unsafe {
+            rusqlite::ffi::sqlite3_file_control(
+                conn.handle(),
+                c"main".as_ptr(),
+                rusqlite::ffi::SQLITE_FCNTL_HAS_MOVED,
+                std::ptr::from_mut(&mut path_changed).cast(),
+            )
+        };
+        match (control_status, path_changed) {
+            (rusqlite::ffi::SQLITE_OK, 0) => {}
+            (status, value) => {
+                return Err(OpenError::Io {
+                    detail: format!("SQLite file identity check failed (status {status}, result {value})"),
+                });
+            }
+        }
         conn_init::full(&conn, initializers).map_err(|detail| OpenError::ConnectionInit { detail })?;
         conn.execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
             .map_err(|e| OpenError::from_sqlite(&e))?;
@@ -89,16 +136,6 @@ impl Writer {
                 detail: format!("the journal mode stayed {mode}, not wal"),
             },
         })?;
-        use std::os::unix::fs::MetadataExt;
-        let held = identity_file
-            .metadata()
-            .map_err(|e| OpenError::Io { detail: e.to_string() })?;
-        let named = std::fs::metadata(path).map_err(|e| OpenError::Io { detail: e.to_string() })?;
-        if (held.dev(), held.ino()) != (named.dev(), named.ino()) {
-            return Err(OpenError::Io {
-                detail: "collection changed while opening".into(),
-            });
-        }
         Ok(Writer {
             conn,
             identity_file,
@@ -107,6 +144,47 @@ impl Writer {
         })
     }
 }
+
+#[cfg(feature = "test-hooks")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WriterOpenStage {
+    Retained,
+    SqliteOpened,
+}
+
+#[cfg(feature = "test-hooks")]
+mod writer_open_hooks {
+    use super::*;
+    use std::{
+        collections::BTreeMap,
+        sync::{Arc, Mutex},
+    };
+    type Hook = Arc<dyn Fn(WriterOpenStage) + Send + Sync>;
+    static HOOKS: Mutex<BTreeMap<PathBuf, Hook>> = Mutex::new(BTreeMap::new());
+
+    /// Scoped barriers for one disposable collection; never holds the map
+    /// lock while a callback renames/restores its files.
+    pub struct WriterOpenHook(PathBuf);
+    impl WriterOpenHook {
+        pub fn for_path(path: &Path, hook: Hook) -> Self {
+            assert!(HOOKS.lock().unwrap().insert(path.to_owned(), hook).is_none());
+            Self(path.to_owned())
+        }
+    }
+    impl Drop for WriterOpenHook {
+        fn drop(&mut self) {
+            HOOKS.lock().unwrap().remove(&self.0);
+        }
+    }
+    pub(super) fn checkpoint(path: &Path, stage: WriterOpenStage) {
+        let hook = HOOKS.lock().unwrap().get(path).cloned();
+        if let Some(hook) = hook {
+            hook(stage);
+        }
+    }
+}
+#[cfg(feature = "test-hooks")]
+pub use writer_open_hooks::WriterOpenHook;
 
 /// What a reader is for (C6). Each reader serves one role; long-lived
 /// snapshots (a sync, a backup, a derived rebuild) never use the interactive,

@@ -42,10 +42,29 @@ pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Pr
     core.exec.wait_idle();
     core.readers.close_all();
     let old = core.exec.generation();
-    let replaced = core.exec.replace(swap);
-    let reopened = replaced.factory.is_some();
+    let mut replaced = core.exec.replace(swap);
+    let mut reopened = replaced.factory.is_some();
     if let Some(factory) = replaced.factory {
         core.readers.set_factory(factory);
+    }
+    if replaced.reopened {
+        let collection = Collection {
+            core: Arc::clone(core),
+            generation: core.exec.generation(),
+            privilege: Some(privilege),
+        };
+        for listener in engine.ports().generation_listeners {
+            if let Err(error) = listener.collection_reopened(&collection) {
+                // A reopened SQLite file alone is insufficient for Ready.
+                // Keep admission closed and the retired journal evidence;
+                // never publish a successful replacement with a broken provider.
+                replaced.error = Some(error);
+                replaced.generation = None;
+                reopened = false;
+                core.readers.close_all();
+                break;
+            }
+        }
     }
     let moved = replaced.generation.map(|moved: NewGeneration| {
         let new = moved.generation;

@@ -23,6 +23,12 @@ pub trait ChangeObserver: Send + Sync {
 /// undo, U26 invalidates derived data.
 pub trait GenerationListener: Send + Sync {
     fn name(&self) -> &str;
+    /// Rebind after an actual replacement reopen, including a failed swap
+    /// that kept the file/generation. Runs before readmission or announcement.
+    /// Providers without a file-bound incarnation need no work here.
+    fn collection_reopened(&self, _collection: &Collection) -> Result<(), EngineError> {
+        Ok(())
+    }
     fn collection_replaced(&self, old: Generation, new: Generation);
 }
 

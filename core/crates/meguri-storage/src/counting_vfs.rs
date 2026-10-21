@@ -20,6 +20,8 @@ pub struct SyncRecord {
 
 type Records = Arc<Mutex<Vec<SyncRecord>>>;
 static PATHS: Mutex<BTreeMap<PathBuf, Records>> = Mutex::new(BTreeMap::new());
+static HAS_MOVED: Mutex<BTreeMap<PathBuf, (i32, i32)>> = Mutex::new(BTreeMap::new());
+static MAIN_SYNC_FAILURE: Mutex<BTreeMap<PathBuf, ()>> = Mutex::new(BTreeMap::new());
 static FILES: Mutex<BTreeMap<usize, Arc<File>>> = Mutex::new(BTreeMap::new());
 static PARENT: OnceLock<usize> = OnceLock::new();
 static REGISTERED: OnceLock<()> = OnceLock::new();
@@ -53,10 +55,26 @@ impl CountingVfs {
     pub fn records(&self) -> Vec<SyncRecord> {
         self.records.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
+    /// Override only HAS_MOVED for this test path; other controls still reach
+    /// the native VFS with their original handle and argument.
+    pub fn has_moved_result(&self, result: i32, moved: i32) {
+        HAS_MOVED.lock().unwrap().insert(self.path.clone(), (result, moved));
+    }
+    pub fn fail_next_main_sync(&self) {
+        MAIN_SYNC_FAILURE.lock().unwrap().insert(self.path.clone(), ());
+    }
 }
 impl Drop for CountingVfs {
     fn drop(&mut self) {
         PATHS.lock().unwrap_or_else(PoisonError::into_inner).remove(&self.path);
+        HAS_MOVED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.path);
+        MAIN_SYNC_FAILURE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.path);
     }
 }
 pub(crate) fn selected(path: &Path) -> bool {
@@ -92,7 +110,7 @@ unsafe extern "C" fn open(
     out: *mut c_int,
 ) -> c_int {
     // SAFETY: SQLite supplies its allocated file buffer and filename. The
-    // parent's file size is unchanged. Only xSync/xClose are interposed;
+    // parent's file size is unchanged. Only sync/close/file-control are interposed;
     // every other method keeps receiving the original file pointer.
     unsafe {
         let result = ((*parent()).xOpen.unwrap())(parent(), name, file, flags, out);
@@ -118,6 +136,7 @@ unsafe extern "C" fn open(
         let mut methods = Box::new(std::ptr::read(original));
         methods.xSync = Some(sync);
         methods.xClose = Some(close);
+        methods.xFileControl = Some(file_control);
         let methods = Box::into_raw(methods);
         FILES.lock().unwrap_or_else(PoisonError::into_inner).insert(
             file as usize,
@@ -133,11 +152,43 @@ unsafe extern "C" fn open(
         result
     }
 }
+unsafe extern "C" fn file_control(file: *mut ffi::sqlite3_file, op: c_int, arg: *mut std::ffi::c_void) -> c_int {
+    let context = context(file);
+    if op == ffi::SQLITE_FCNTL_HAS_MOVED {
+        let injected = HAS_MOVED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(Path::new(&context.filename))
+            .copied();
+        if let Some((result, moved)) = injected {
+            // SAFETY: HAS_MOVED's argument is a writable int supplied by SQLite.
+            unsafe {
+                *arg.cast::<c_int>() = moved;
+            }
+            return result;
+        }
+    }
+    // SAFETY: the original live file and argument pass unchanged to its VFS.
+    unsafe {
+        ((*(context.original as *const ffi::sqlite3_io_methods))
+            .xFileControl
+            .unwrap())(file, op, arg)
+    }
+}
 unsafe extern "C" fn sync(file: *mut ffi::sqlite3_file, flags: c_int) -> c_int {
     let context = context(file);
     let started = clock::now();
+    let fail = MAIN_SYNC_FAILURE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .remove(Path::new(&context.filename))
+        .is_some();
     // SAFETY: the live handle and flags pass unchanged to its original VFS.
-    let result = unsafe { ((*(context.original as *const ffi::sqlite3_io_methods)).xSync.unwrap())(file, flags) };
+    let result = if fail {
+        ffi::SQLITE_IOERR_FSYNC
+    } else {
+        unsafe { ((*(context.original as *const ffi::sqlite3_io_methods)).xSync.unwrap())(file, flags) }
+    };
     let completed = clock::now();
     if let Some(records) = &context.records {
         records.lock().unwrap_or_else(PoisonError::into_inner).push(SyncRecord {

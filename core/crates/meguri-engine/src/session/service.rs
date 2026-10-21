@@ -777,10 +777,13 @@ impl ReviewService {
             // Capture current consumed inputs even on hits: delivery and stamps
             // are not freshness witnesses. Release the reader before HTML work.
             let capture = {
+                let state = self.inner.state.lock().unwrap();
+                let session = state.session.as_ref().filter(|s| s.id == id).ok_or_else(no_session)?;
                 let reader = c.reader(ReaderRole::Interactive)?;
                 let rows = reader.snapshot()?;
-                let card = rows.card(card)?.ok_or_else(|| invalid("render card disappeared"))?;
-                crate::rendering::Capture::read(&*rows, card, crate::rendering::RenderMode::Review, platform)?
+                let presentation = session.presentation.lock().unwrap();
+                let (_, card) = presentation_card(&*rows, &presentation.overlay, card, session.undo_view.as_ref())?;
+                review_capture(&*rows, card, session.undo_view.as_ref())?
             };
             if capture.key() != *key {
                 return Err(invalid("render changed during request"));
@@ -862,7 +865,7 @@ impl ReviewService {
         }
         c.core.exec.require_admission(None)?;
         let now = c.core.exec.clock.now_ms();
-        if at.0 > now {
+        if !is_redo && at.0 > now {
             return Err(invalid("answer instant is in the future"));
         }
         let mut state = self.inner.state.lock().unwrap();
@@ -1445,20 +1448,12 @@ fn sibling_ids(
         .map(|s| s.id)
         .collect())
 }
-#[allow(clippy::too_many_arguments)]
-fn project_item(
+fn presentation_card(
     rows: &impl ReadRows,
-    c: &Collection,
-    q: &SessionQueue,
     overlay: &Overlay,
     id: CardId,
-    kind: Kind,
-    at: i64,
-    today: u32,
-    boundary: i64,
-    chooser: &meguri_sched::load_balancer::LoadBalancer,
     undo: Option<&crate::undo::entry::Entry>,
-) -> Result<(HeadItem, Captured), EngineError> {
+) -> Result<(Vec<Cell>, Card), EngineError> {
     let mut image = rows
         .row_image(Table::Cards, &RowKey::Id(id.0))?
         .ok_or_else(|| invalid("queue card disappeared"))?;
@@ -1476,6 +1471,42 @@ fn project_item(
             image[i] = post[i].clone();
         }
     }
+    Ok((image, card))
+}
+
+// The projected note and card feed both the key and actual U62 payload,
+// including while committed undo waits for the writer.
+fn review_capture(
+    rows: &impl ReadRows,
+    card: Card,
+    undo: Option<&crate::undo::entry::Entry>,
+) -> Result<crate::rendering::Capture, EngineError> {
+    let note_id = card.note_id;
+    let mut render =
+        crate::rendering::Capture::read(rows, card, crate::rendering::RenderMode::Review, session_platform())?;
+    if let Some(entry) = undo
+        && let Some(change) = entry.journal.entry(Table::Notes, &RowKey::Id(note_id.0))
+        && let Some(before) = entry.before(change)?
+    {
+        render.note = meguri_model::note::Note::from_cells(&before).map_err(meguri_storage::StorageError::from)?;
+    }
+    Ok(render)
+}
+#[allow(clippy::too_many_arguments)]
+fn project_item(
+    rows: &impl ReadRows,
+    c: &Collection,
+    q: &SessionQueue,
+    overlay: &Overlay,
+    id: CardId,
+    kind: Kind,
+    at: i64,
+    today: u32,
+    boundary: i64,
+    chooser: &meguri_sched::load_balancer::LoadBalancer,
+    undo: Option<&crate::undo::entry::Entry>,
+) -> Result<(HeadItem, Captured), EngineError> {
+    let (image, card) = presentation_card(rows, overlay, id, undo)?;
     let mut models = FsrsCache::default();
     let removed = undo
         .map(|entry| {
@@ -1561,18 +1592,7 @@ fn project_item(
             )
             .map_err(|_| invalid("prediction card not permitted"))?;
     }
-    let mut render = crate::rendering::Capture::read(
-        rows,
-        card.clone(),
-        crate::rendering::RenderMode::Review,
-        session_platform(),
-    )?;
-    if let Some(entry) = undo
-        && let Some(change) = entry.journal.entry(Table::Notes, &RowKey::Id(card.note_id.0))
-        && let Some(before) = entry.before(change)?
-    {
-        render.note = meguri_model::note::Note::from_cells(&before).map_err(meguri_storage::StorageError::from)?;
-    }
+    let render = review_capture(rows, card.clone(), undo)?;
     let p = inputs.preset.fields();
     let item = HeadItem {
         card_id: id,
@@ -2130,6 +2150,18 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
             cache,
         } => {
             let (c, journal) = bound(inner)?;
+            // A queued callback from a retired session cannot borrow a new
+            // incarnation's binding, even when replacement kept the generation.
+            if !inner
+                .state
+                .lock()
+                .unwrap()
+                .session
+                .as_ref()
+                .is_some_and(|s| s.id == session && Arc::ptr_eq(&s.journal, &journal))
+            {
+                return Ok(());
+            }
             if pending.cancel.load(Ordering::Acquire)
                 || pending
                     .phase
@@ -2496,37 +2528,20 @@ impl GenerationListener for ReviewService {
     fn name(&self) -> &str {
         "review-session"
     }
-    fn collection_replaced(&self, _old: Generation, new: Generation) {
-        let c = {
+    fn collection_reopened(&self, c: &Collection) -> Result<(), EngineError> {
+        {
             let mut state = self.inner.state.lock().unwrap();
+            state.paused = true;
             state.session = None;
             state.render.clear();
             self.inner.owned.lock().unwrap().clear();
-            let Some(binding) = state.binding.as_mut() else { return };
-            binding.generation = new;
-            binding.core.upgrade().map(|core| Collection {
-                core,
-                generation: new,
-                privilege: None,
-            })
-        };
-        if let Some(c) = c {
-            let result = (|| {
-                let (identity, incarnation) = native_binding(&c)?;
-                let journal = Journal::open(c.path(), identity, incarnation, new, &self.threads)?;
-                *c.core.exec.review_journal.lock().unwrap() = Some(Arc::downgrade(&journal));
-                let mut state = self.inner.state.lock().unwrap();
-                if let Some(binding) = &mut state.binding {
-                    binding.journal = journal;
-                }
-                Ok::<(), EngineError>(())
-            })();
-            if let Err(e) = result {
-                self.inner.state.lock().unwrap().paused = true;
-                tracing::error!(%e, "rebind review after replacement");
-            }
+            // Drop the retired binding; queued old work must never find it
+            // under the reopened generation (which may be unchanged).
+            state.binding = None;
         }
+        self.run(c)
     }
+    fn collection_replaced(&self, _old: Generation, _new: Generation) {}
 }
 impl SuspendParticipant for ReviewService {
     fn name(&self) -> &str {

@@ -234,6 +234,8 @@ fn failed_resume_recovery_keeps_admission_closed_until_recovery_succeeds() {
 
 #[test]
 fn resume_recovery_runs_after_external_change_checks_without_changing_generation() {
+    use std::os::unix::fs::MetadataExt;
+
     let dir = tempfile::tempdir().unwrap();
     let config = config(dir.path());
     let path = config.collection_directory.join("collection.anki2");
@@ -241,20 +243,86 @@ fn resume_recovery_runs_after_external_change_checks_without_changing_generation
     let media = committed_publication(&host);
     let generation = host.engine().generation();
     host.engine().suspend(std::time::Duration::from_secs(2)).unwrap();
-    let replacement = dir.path().join("external.anki2");
-    std::fs::copy(&path, &replacement).unwrap();
+    let before = std::fs::metadata(&path).unwrap();
     {
-        let db = meguri_storage::raw::PlainDatabase::open(&replacement).unwrap();
+        let db = meguri_storage::raw::PlainDatabase::open(&path).unwrap();
         db.execute("UPDATE col SET mod = mod + 1", &[]).unwrap();
     }
-    std::fs::rename(replacement, path).unwrap();
+    let after = std::fs::metadata(&path).unwrap();
+    assert_eq!((after.dev(), after.ino()), (before.dev(), before.ino()));
     assert!(host.engine().resume().unwrap().external_change);
     assert_eq!(host.engine().generation(), generation);
     assert_eq!(
         std::fs::read(media.store().media_dir().join("recovered.png")).unwrap(),
         b"durable synthetic media"
     );
+    assert_eq!(media.store().pending().unwrap().len(), 1);
     host.media().unwrap().add("current.txt", b"current generation").unwrap();
+    host.close().unwrap();
+}
+
+#[test]
+fn resume_rejects_atomic_replacement_and_keeps_unretired_journal_and_admission_closed() {
+    use std::os::unix::fs::MetadataExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let config = config(dir.path());
+    let path = config.collection_directory.join("collection.anki2");
+    let journal = config.collection_directory.join("meguri-pending-answers.jsonl");
+    let host = CoreHost::open(config).unwrap();
+    let collection = host.collection().unwrap();
+    let media = committed_publication(&host);
+    let generation = host.engine().generation();
+    host.engine().suspend(std::time::Duration::from_secs(2)).unwrap();
+    let evidence = std::fs::read(&journal).unwrap();
+    assert!(!String::from_utf8_lossy(&evidence).contains("Retired"));
+    let original = std::fs::metadata(&path).unwrap();
+    // This fixture submits no review answers. Count logs to detect any insertion
+    // on refusal, without treating this as unresolved-answer replay coverage.
+    let review_log_count = || {
+        let db = meguri_storage::rusqlite::Connection::open_with_flags(
+            &path,
+            meguri_storage::rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        db.query_row("SELECT count(*) FROM revlog", [], |row| row.get::<_, i64>(0))
+            .unwrap()
+    };
+    let before_logs = review_log_count();
+    let replacement = dir.path().join("external.anki2");
+    std::fs::copy(&path, &replacement).unwrap();
+    {
+        let db = meguri_storage::raw::PlainDatabase::open(&replacement).unwrap();
+        db.execute("UPDATE col SET mod = mod + 1", &[]).unwrap();
+    }
+    std::fs::rename(&replacement, &path).unwrap();
+    let published = std::fs::metadata(&path).unwrap();
+    assert_ne!((published.dev(), published.ino()), (original.dev(), original.ino()));
+    assert_eq!(review_log_count(), before_logs);
+    for _ in 0..2 {
+        let error = host.engine().resume().unwrap_err();
+        let detail = format!("{error:?}").to_ascii_lowercase();
+        assert!(
+            detail.contains("identity") || detail.contains("native"),
+            "resume must report the file binding failure: {error}"
+        );
+        assert_eq!(host.engine().generation(), generation);
+        assert!(
+            collection
+                .run(
+                    meguri_engine::OpSpec::named("blocked replacement", meguri_engine::OpSource::UserNonUndoable),
+                    |_| Ok(())
+                )
+                .is_err()
+        );
+        assert!(media.add("blocked.txt", b"must not publish").is_err());
+        assert!(!media.store().media_dir().join("blocked.txt").exists());
+        assert!(media.store().pending().is_err());
+        let retained = std::fs::read(&journal).unwrap();
+        assert_eq!(retained, evidence, "resume must preserve the original binding");
+        assert!(!String::from_utf8_lossy(&retained).contains("Retired"));
+        assert_eq!(review_log_count(), before_logs);
+    }
     host.close().unwrap();
 }
 

@@ -1087,3 +1087,134 @@ fn c15_terminal_sync_error_blocks_committed_undo_and_restores_answered_queue() {
         "answer accepted after journal failure"
     );
 }
+
+#[test]
+fn c15_committed_leech_undo_renders_projected_note_while_writer_is_withheld() {
+    use meguri_model::{
+        card::{CardQueue, CardType},
+        ids::DeckConfigId,
+    };
+    let h = Harness::new(2);
+    let card = h.cards[0];
+    h.collection
+        .run(
+            OpSpec::named("leech rendering setup", OpSource::Maintenance),
+            move |ctx| {
+                let mut row = ctx.scope().card(card)?.unwrap();
+                row.card_type = CardType::Review;
+                row.queue = CardQueue::Review;
+                row.due = 0;
+                row.interval = 10;
+                row.ease_factor = 2500;
+                row.reps = 10;
+                row.lapses = 7;
+                ctx.scope().put(&row)?;
+                meguri_engine::deck_config::update_in(ctx.scope(), DeckConfigId(1), |p| {
+                    p.leech_threshold = 8;
+                    p.leech_action = 1;
+                })?;
+                let note = ctx.scope().note(row.note_id)?.unwrap();
+                let mut nt = ctx.scope().notetype(note.notetype_id)?.unwrap();
+                nt.templates[0].config.q_format = "{{Front}}|tags={{Tags}}".into();
+                ctx.scope().put_notetype(&nt)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let id = match h.review.start(DeckId(1), Some(card)).unwrap() {
+        meguri_engine::session::StartResult::Started { session_id, .. } => session_id,
+        other => panic!("{other:?}"),
+    };
+    let original = h.review.head(id, 3).unwrap();
+    let item = &original.items[0];
+    assert_eq!(item.card_id, card);
+    let original_page = h
+        .review
+        .render_head(id, &[item.render_key], meguri_engine::rendering::Platform::Mac)
+        .unwrap()
+        .remove(0);
+    assert!(!original_page.question.as_deref().unwrap().contains("leech"));
+    assert!(matches!(
+        h.review
+            .answer(id, card, Rating::Again, item.state_token, EpochMillis(NOW), 100)
+            .unwrap(),
+        AnswerOutcome::Accepted { leech: true, .. }
+    ));
+    h.settle();
+    let note_id = item.note_id;
+    assert!(
+        h.collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .note(note_id)
+            .unwrap()
+            .unwrap()
+            .tags
+            .contains("leech")
+    );
+    h.review.clear_render_cache_for_testing();
+    let (release, writing) = hold_writer(&h);
+    let restored = h.review.undo(UndoScope::Session(id)).unwrap();
+    let rendered = h.review.render_head(
+        id,
+        &[restored.items[0].render_key],
+        meguri_engine::rendering::Platform::Mac,
+    );
+    let physical_tags = h
+        .collection
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .note(note_id)
+        .unwrap()
+        .unwrap()
+        .tags;
+    release.send(()).unwrap();
+    writing.wait().unwrap();
+    h.settle();
+    assert!(physical_tags.contains("leech"), "the render preceded physical U25 undo");
+    assert_eq!(restored.items[0].render_key, item.render_key);
+    let rendered = rendered.unwrap().remove(0);
+    assert_eq!(rendered.question, original_page.question);
+    assert!(!rendered.question.as_deref().unwrap().contains("leech"));
+    assert_eq!(
+        h.review.head(id, 3).unwrap().items[0].render_key,
+        restored.items[0].render_key
+    );
+    assert!(h.logs().is_empty());
+}
+
+#[test]
+fn c15_pending_redo_keeps_effective_instant_after_clock_moves_back() {
+    let h = Harness::new(2);
+    let (id, initial) = h.start();
+    let item = &initial.items[0];
+    let (release, writing) = hold_writer(&h);
+    accepted(&h, id, initial.clone());
+    let restored = h.review.undo(UndoScope::Session(id)).unwrap();
+    h.clock.set_now_ms(NOW - 1000);
+    // Only an internal redo may replay the retained effective instant.
+    let future = h.review.answer(
+        id,
+        item.card_id,
+        Rating::Easy,
+        restored.items[0].state_token,
+        EpochMillis(NOW),
+        200,
+    );
+    let redo = h.review.redo(UndoScope::Session(id));
+    release.send(()).unwrap();
+    writing.wait().unwrap();
+    assert!(matches!(
+        future,
+        Err(meguri_engine::EngineError::InvalidArgument { .. })
+    ));
+    redo.unwrap();
+    h.settle();
+    assert_eq!(h.logs(), [NOW]);
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    let log = reader.revlog_entry(meguri_model::ids::RevlogId(NOW)).unwrap().unwrap();
+    assert_eq!(log.card_id, item.card_id);
+    assert_eq!(log.button, Rating::Easy as u8);
+    assert_eq!(log.answer_millis, 200);
+    assert_eq!(reader.card(item.card_id).unwrap().unwrap().reps, 1);
+}
