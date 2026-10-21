@@ -144,6 +144,19 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
     "$(jq '[.milestones[].units[]] | unique | length' "$d/manifest.json")" ]
   [ "$(jq '[.milestones[].units[]] | length' "$d/manifest.json")" -eq \
     "$(sed -n '/^### Unit Index/,/^### /p' "$REPO_ROOT/$(jq -r .plan "$d/manifest.json")" | grep -c '^| U[0-9]')" ]
+  # U37's strict optimized budget is required from M1R through final
+  # acceptance, independently of the inherited full Debug core suite.
+  local milestone
+  for milestone in $(jq -r '.milestones[].id' "$d/manifest.json"); do
+    python3 -B -I "$REPO_ROOT/tools/scripts/gates/milestone_gate.py" runs \
+      --manifest "$d/manifest.json" --config "$d/config.json" --milestone "$milestone" >"$d/runs.json"
+    jq -e '.runs | index("swift-test-core") != null' "$d/runs.json" >/dev/null
+    if [ "$milestone" = M0 ]; then
+      jq -e '.runs | index("swift-test-core-profile") == null' "$d/runs.json" >/dev/null
+    else
+      jq -e '.runs | index("swift-test-core-profile") != null' "$d/runs.json" >/dev/null
+    fi
+  done
 }
 
 @test "real milestone similarity scans the whole committed tree and requires exact result arguments" {

@@ -249,6 +249,14 @@ runs:
     class: unit
     triggers: [app/Packages/MeguriCore/, core/crates/, core/Cargo.lock, core/Cargo.toml, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/scripts/build-core-xcframework.sh, tools/mg.d/bridge.sh]
     budget_s: 1800
+  - id: swift-test-core-profile
+    job: swift-test
+    args: [--package, MeguriCore, --config, Profile, --, --filter, nativeGeneratedCountedTreeLiftAndValueConversionUnderFiveMilliseconds]
+    tier: T0
+    placement: host
+    class: perf
+    triggers: [app/Packages/MeguriCore/, core/crates/, core/Cargo.lock, core/Cargo.toml, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/scripts/build-core-xcframework.sh, tools/mg.d/bridge.sh]
+    budget_s: 1800
   - id: swift-test-kit
     job: swift-test
     args: [--package, MeguriKit]

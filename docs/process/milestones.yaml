@@ -287,6 +287,7 @@ milestones:
       U178, U179, U180, U181, U182, U185, U186, U187, U188, U228a, U243, U246, U248, U249, U250, U251,
       U256]
     suites:
+      - {id: swift-test-core-profile, run: swift-test-core-profile, why: "U37's 2,000-node generated decoder and value conversion stay below 5 ms on the M3 Max in an optimized build (R1802); inherited by later milestones"}
       - id: u246-conformance
         run: u246-conformance
         pending: U246

@@ -1827,9 +1827,16 @@ PY
   [ "$(jq '.quarantine.invalid | length' "$out")" = 0 ]
   # The canaries run first; T0 covers Rust, Swift, goldens, lint, deny, UI and the similarity scan.
   [ "$(jq -r '[.runs[] | select(.stage == "canary") | .id] | join(" ")' "$out")" = "pin-canary canary-scenarios" ]
-  for id in core-test conformance goldens-check lint-ui core-lint core-deny swift-test-core snapshots a11y-iphone similarity perf-smoke notices; do
+  for id in core-test conformance goldens-check lint-ui core-lint core-deny swift-test-core swift-test-core-profile snapshots a11y-iphone similarity perf-smoke notices; do
     jq -e --arg id "$id" '.runs[] | select(.id == $id and .tier == "T0")' "$out" >/dev/null || { echo "no T0 run $id"; return 1; }
   done
+  jq -e '.runs as $runs
+    | ($runs[] | select(.id == "swift-test-core")) as $debug
+    | ($runs[] | select(.id == "swift-test-core-profile")) as $profile
+    | $debug.args == ["--package", "MeguriCore"]
+      and $profile.job == "swift-test" and $profile.placement == ["host"]
+      and $profile.class == "perf" and $profile.triggers == $debug.triggers
+      and $profile.args == ["--package", "MeguriCore", "--config", "Profile", "--", "--filter", "nativeGeneratedCountedTreeLiftAndValueConversionUnderFiveMilliseconds"]' "$out" >/dev/null
   jq -e '.runs[] | select(.id == "live-oracle" and .tier == "T1" and .oracle)' "$out" >/dev/null
   jq -e '.runs[] | select(.id == "core-fuzz" and .tier == "T2" and (.args | index("{seed}")))' "$out" >/dev/null
   jq -e '.runs[] | select(.id == "private-suite" and .tier == "T3" and .where == "main")' "$out" >/dev/null
@@ -1857,6 +1864,9 @@ PY
   jq -e '.runs[] | select(.id == "live-oracle" and .action == "run" and (.args | index("sched")) and (.args | index("fp-probe")))' \
     "$BATS_TEST_TMPDIR/plan.json" >/dev/null
   jq -e '.runs[] | select(.id == "similarity" and .action == "run")' "$BATS_TEST_TMPDIR/plan.json" >/dev/null
+  for id in swift-test-core swift-test-core-profile; do
+    jq -e --arg id "$id" '.runs[] | select(.id == $id and .action == "run")' "$BATS_TEST_TMPDIR/plan.json" >/dev/null
+  done
   # A docs-only change runs nothing but the static checks.
   printf 'docs/process/notes.md\0' >"$BATS_TEST_TMPDIR/changed"
   python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
