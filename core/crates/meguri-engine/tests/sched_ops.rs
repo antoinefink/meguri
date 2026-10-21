@@ -691,7 +691,11 @@ fn home_unbury_and_query_exclude_cards_currently_in_an_external_filtered_deck() 
     assert!(no.changes.is_empty());
     assert_eq!(dump(c), before);
     assert_eq!(c.peek_undo(UndoScope::Global).unwrap(), status);
-    let external = read(c, ids[0]);
+    let external = c
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .row_image(Table::Cards, &RowKey::Id(ids[0].0))
+        .unwrap();
     assert_eq!(
         run(
             c,
@@ -705,7 +709,13 @@ fn home_unbury_and_query_exclude_cards_currently_in_an_external_filtered_deck() 
         1
     );
     assert_eq!(read(c, ids[1]).queue, CardQueue::New);
-    assert_eq!(read(c, ids[0]), external);
+    assert_eq!(
+        c.reader(ReaderRole::Query)
+            .unwrap()
+            .row_image(Table::Cards, &RowKey::Id(ids[0].0))
+            .unwrap(),
+        external
+    );
     assert_eq!(ops::buried_kinds(c, DeckId(42)).unwrap(), ops::BuriedKinds::default());
     exact_undo_redo(c, before, "Unbury/Unsuspend");
 }
