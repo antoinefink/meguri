@@ -4,7 +4,7 @@
 mg_job core-xcframework host mg_core_xcframework \
   "Build the core XCFramework and Swift bindings for MeguriCore; args go to tools/scripts/build-core-xcframework.sh (--configuration, --slices)"
 mg_job swift-test host mg_swift_test \
-  "swift test on a local package (--package, default MeguriCore) after lint-ui and core-xcframework (Debug); any compiler warning fails; args after -- go to swift test"
+  "swift test on a local package (--package, default MeguriCore), --config Debug|Profile (default Debug); matched core/SPM products, Profile tests under the host lease; any compiler warning fails; args after -- select tests"
 
 # mg__xcframework <report> [script args...]: run the build script, record its
 # report, and return its exit code.
@@ -37,9 +37,11 @@ mg_core_xcframework() {
   fi
 }
 
-# tools/mg swift-test [--package NAME] [-- swift test args]
+# tools/mg swift-test [--package NAME] [--config Debug|Profile] [-- swift test args]
 mg_swift_test() {
-  local package=MeguriCore usage="usage: tools/mg swift-test [--package NAME] [-- swift test args]"
+  local package=MeguriCore config=Debug spm_config=debug
+  local selection_args=()
+  local usage="usage: tools/mg swift-test [--package NAME] [--config Debug|Profile] [-- swift test args]"
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --package)
@@ -51,9 +53,58 @@ mg_swift_test() {
         package="$2"
         shift 2
         ;;
+      --config)
+        if [ "$#" -lt 2 ]; then
+          mg_failure usage "--config needs Debug or Profile; $usage"
+          mg_status error
+          return 0
+        fi
+        config="$2"
+        shift 2
+        ;;
       --) shift && break ;;
       *)
         mg_failure usage "unknown argument '$1'; $usage" "tools/mg swift-test"
+        mg_status error
+        return 0
+        ;;
+    esac
+  done
+  case "$config" in
+    Debug) ;;
+    Profile) spm_config=release ;;
+    *)
+      mg_failure usage "--config needs Debug or Profile; $usage"
+      mg_status error
+      return 0
+      ;;
+  esac
+  case "$package" in
+    '' | *[!a-zA-Z0-9_-]*)
+      mg_failure usage "--package needs a package directory name; $usage"
+      mg_status error
+      return 0
+      ;;
+  esac
+  # The existing callers only select tests. Keep product/cache flags out of
+  # the prebuilt invocation, including compiler and instrumentation options.
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --filter | --skip)
+        if [ "$#" -lt 2 ] || [ -z "$2" ] || [[ "$2" = -* ]]; then
+          mg_failure usage "$1 needs a test pattern; $usage"
+          mg_status error
+          return 0
+        fi
+        selection_args+=("$1" "$2")
+        shift 2
+        ;;
+      --filter=?* | --skip=?*)
+        selection_args+=("$1")
+        shift
+        ;;
+      *)
+        mg_failure usage "swift-test accepts only --filter/--skip test selection after --; use --config Debug|Profile for the build"
         mg_status error
         return 0
         ;;
@@ -67,7 +118,7 @@ mg_swift_test() {
   fi
 
   mg_lint_ui_first || return 0
-  if ! mg__xcframework "$MG_RUN_DIR/xcframework.json"; then
+  if ! mg__xcframework "$MG_RUN_DIR/xcframework.json" --configuration "$config"; then
     mg_failure xcframework "building the core XCFramework failed; see log.txt" "tools/mg core-xcframework"
     mg_status fail
     return 0
@@ -75,8 +126,16 @@ mg_swift_test() {
 
   # Zero diagnostics (U6): every warning in the package, the generated
   # bindings included, fails the run.
+  # Profile keeps optimized SPM products separate from ordinary Debug runs;
+  # build and --skip-build test always name the exact same cache and mode.
+  local product_args=(--configuration "$spm_config")
+  if [ "$config" = Profile ]; then
+    product_args+=(--scratch-path "$MG_ROOT/build/swift-test/$package/Profile")
+  fi
+  mg_detail configuration "$(jq -nc --arg core "$config" --arg swift "$spm_config" \
+    '{core: $core, swift: $swift}')"
   local build="$MG_RUN_DIR/swift-build.log" rc
-  swift build --package-path "$dir" --build-tests 2>&1 | tee "$build"
+  swift build --package-path "$dir" "${product_args[@]}" --build-tests 2>&1 | tee "$build"
   rc=${PIPESTATUS[0]}
   mg_artifact log "$build" "swift build"
   local warnings
@@ -91,9 +150,12 @@ mg_swift_test() {
     mg_status fail
     return 0
   fi
+  if [ "$config" = Profile ]; then
+    mg_host_lease --no-session || return 0
+  fi
 
   local xunit="$MG_RUN_DIR/xunit.xml" tests="$MG_RUN_DIR/xunit-swift-testing.xml"
-  swift test --package-path "$dir" --skip-build --xunit-output "$xunit" ${1+"$@"}
+  swift test --package-path "$dir" "${product_args[@]}" --skip-build --xunit-output "$xunit" ${selection_args[0]+"${selection_args[@]}"}
   rc=$?
   local total=0 failed=0 skipped=0
   if [ -f "$tests" ]; then
@@ -103,7 +165,7 @@ mg_swift_test() {
     skipped="$(xmllint --xpath 'count(//testcase[skipped])' "$tests")"
     xmllint --xpath '//testcase[failure or error]/@name' "$tests" 2>/dev/null |
       sed -n 's/.*name="\([^"]*\)".*/\1/p' | while IFS= read -r name; do
-      mg_failure "test/$name" "$name failed; see log.txt" "tools/mg swift-test --package $package -- --filter '$name'"
+      mg_failure "test/$name" "$name failed; see log.txt" "tools/mg swift-test --package $package --config $config -- --filter '$name'"
     done
   fi
   mg_count total "$total"
