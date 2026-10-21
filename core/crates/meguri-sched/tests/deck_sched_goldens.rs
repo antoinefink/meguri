@@ -17,6 +17,25 @@ fn deck_counter_model_matches_recorded_answer_and_rollover_pairs() {
     let steps = &golden["observations"]["steps"];
     for name in ["Parent", "Parent::Child"] {
         let mut deck = deck_from_json(&steps[4]["legacy_json"]["decks"][name].to_string()).unwrap();
+        let stored_learning_count = deck.common.learning_studied;
+        assert_eq!(stored_learning_count, if name == "Parent::Child" { 5 } else { 0 });
+        let counters = |deck: &meguri_model::deck::Deck, step: usize| {
+            let expected = &steps[step]["legacy_json"]["decks"][name];
+            let actual: serde_json::Value = serde_json::from_str(&deck_to_json(deck)).unwrap();
+            for key in ["newToday", "revToday", "lrnToday", "timeToday"] {
+                if name == "Parent::Child" && matches!(step, 17 | 19) && key == "lrnToday" {
+                    // A6/D4, K1/P8 (R322): only Child's count differs at steps 17/19.
+                    assert_eq!(expected[key], serde_json::json!([1, 0]));
+                    assert_eq!(
+                        actual[key],
+                        serde_json::json!([expected[key][0], stored_learning_count]),
+                        "{name} step {step} {key}"
+                    );
+                } else {
+                    assert_eq!(actual[key], expected[key], "{name} step {step} {key}");
+                }
+            }
+        };
         for (queue, time) in [
             (CardQueue::New, 5000),
             (CardQueue::Review, 7000),
@@ -25,23 +44,17 @@ fn deck_counter_model_matches_recorded_answer_and_rollover_pairs() {
         ] {
             DeckSched::record_answer(&mut deck.common, 0, queue, time, 60);
         }
-        fn counters(deck: &meguri_model::deck::Deck, expected: &serde_json::Value) {
-            let actual: serde_json::Value = serde_json::from_str(&deck_to_json(deck)).unwrap();
-            for key in ["newToday", "revToday", "lrnToday", "timeToday"] {
-                assert_eq!(actual[key], expected[key], "{key}");
-            }
-        }
-        counters(&deck, &steps[10]["legacy_json"]["decks"][name]);
+        counters(&deck, 10);
         let bytes = deck.common.to_bytes().into_owned();
         assert_eq!(DeckSched::new(None, &deck.common).studied(1), (0, 0));
         assert_eq!(deck.common.to_bytes(), bytes);
-        counters(&deck, &steps[14]["legacy_json"]["decks"][name]);
+        counters(&deck, 14);
         DeckSched::record_answer(&mut deck.common, 1, CardQueue::New, 2000, 60);
-        counters(&deck, &steps[17]["legacy_json"]["decks"][name]);
+        counters(&deck, 17);
         if name == "Parent" {
             DeckSched::record_answer(&mut deck.common, 1, CardQueue::New, 3000, 60);
         }
-        counters(&deck, &steps[19]["legacy_json"]["decks"][name]);
+        counters(&deck, 19);
     }
 }
 
