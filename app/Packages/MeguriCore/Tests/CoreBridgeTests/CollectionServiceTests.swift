@@ -12,9 +12,11 @@ private final class ServiceClock: CollectionClock {
     func zoneIdentifier() -> String { mainThreadCalls.withLock { $0.append(Thread.isMainThread) }; return "UTC" }
 }
 
-@MaintenanceLane private func bootstrapCollection(_ location: CoreBridge.CollectionLocation) throws {
-    try MaintenanceLane.shared.call("test.bootstrapCollection") {
-        try testBootstrapCollection(location: location.raw)
+private extension MaintenanceLane {
+    func bootstrapCollection(_ location: CoreBridge.CollectionLocation) throws {
+        try call("test.bootstrapCollection") {
+            try testBootstrapCollection(location: location.raw)
+        }
     }
 }
 
@@ -29,7 +31,7 @@ extension EventTests {
         try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let location = CoreBridge.CollectionLocation(collectionDirectory: collection, backupsDirectory: backups, appGroupSnapshot: root.appending(path: "widget.snapshot"))
-        try await bootstrapCollection(location)
+        try await MaintenanceLane.shared.bootstrapCollection(location)
         let clock = ServiceClock()
         let service = CoreCollectionService(clock: clock)
         let decks = CoreDeckService()

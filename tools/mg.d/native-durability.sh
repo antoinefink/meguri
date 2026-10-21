@@ -19,7 +19,7 @@ mg_native_durability() {
     mg_status error
     return 0
   fi
-  mg_detail environment "$(jq -nc --arg os "$(uname -sm)" --arg rustc "$(rustc -V 2>&1)" \
+  mg_detail environment "$(jq -nc --arg os "$(uname -sm)" --arg rustc "$(cd core && rustc -V 2>&1)" \
     '{os: $os, rustc: $rustc, target: "aarch64-apple-darwin", retries: 0}')"
   local package suite json log rc binary counts passed failed skipped
   local total_passed=0 total_failed=0 total_skipped=0 broken=false

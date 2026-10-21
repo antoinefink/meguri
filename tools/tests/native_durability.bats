@@ -27,7 +27,7 @@ setup() {
 mg_host_lease() { echo "lease $*" >>"$STUB_LOG"; [ "$*" = --no-session ]; }
 EOF
   stub uname 'case "$*" in -s) echo Darwin;; -m) echo arm64;; -sm) echo "Darwin arm64";; *) exit 97;; esac'
-  stub rustc 'echo "rustc fake"'
+  stub rustc 'echo "rustc $PWD $*" >>"$STUB_LOG"; echo "rustc fake"'
   cat >"$BIN/cargo" <<'EOF'
 #!/bin/bash
 echo "cargo $*" >>"$STUB_LOG"
@@ -90,10 +90,12 @@ field() { jq -r "$@" "$result"; }
   [ "$(field .status)" = pass ]
   [ "$(field .summary.passed)" -eq 6 ]
   [ "$(field .summary.total)" -eq 6 ]
+  [ "$(field .details.environment.rustc)" = 'rustc fake' ]
+  grep -Fx "rustc $SB/core -V" "$STUB_LOG"
   [ "$(field '.details.wal_durability.passed')" -eq 2 ]
   [ "$(grep -c '^cargo test .*--no-run .*--message-format json-render-diagnostics$' "$STUB_LOG")" -eq 2 ]
   [ "$(grep -c '^run .* --test-threads=1 --nocapture$' "$STUB_LOG")" -eq 3 ]
-  [ "$(sed -n '3p' "$STUB_LOG")" = 'lease --no-session' ]
+  [ "$(sed -n '4p' "$STUB_LOG")" = 'lease --no-session' ]
   grep -q '^U32 full WAL sync: p50=123us, p95=456us' "$(dirname "$result")/wal_durability.log"
   grep -Fx "fixtures $SB/build/fixtures" "$(dirname "$result")/suspend.log"
   python3 "$SB/tools/tests/validate_result.py" "$result"
