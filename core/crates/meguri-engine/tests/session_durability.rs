@@ -722,6 +722,128 @@ fn c12_late_prepared_ack_after_pending_undo_cannot_commit_and_cancel_precedes_co
     }
 }
 
+#[test]
+fn c12_pending_undo_holds_conflicting_writer_through_terminal_write_and_sync() {
+    let h = Harness::new(2);
+    let (id, initial) = h.start();
+    let card = initial.items[0].card_id;
+    let before_card = card_row(&h.collection, card);
+    let before_logs = log_rows(&h.collection);
+    let (entered, entry) = mpsc::channel();
+    let (prepared_release, prepared_gate) = mpsc::channel();
+    let (write_release, write_gate) = mpsc::channel();
+    let (sync_release, sync_gate) = mpsc::channel();
+    let gates = [
+        (JournalStage::PreparedSynced, Mutex::new(Some(prepared_gate))),
+        (JournalStage::TerminalWrite, Mutex::new(Some(write_gate))),
+        (JournalStage::TerminalSync, Mutex::new(Some(sync_gate))),
+    ];
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let synced = cancelled.clone();
+    let file = journal(h.collection.path());
+    h.review
+        .journal_hook_for_testing(Arc::new(move |stage| {
+            if let Some((_, gate)) = gates.iter().find(|(expected, _)| *expected == stage)
+                && let Some(gate) = gate.lock().unwrap().take()
+            {
+                entered.send(stage).unwrap();
+                gate.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+            if stage == JournalStage::TerminalSynced {
+                assert!(
+                    records(&fs::read(&file).unwrap())
+                        .iter()
+                        .any(|r| r["Terminal"]["status"] == "Cancelled")
+                );
+                synced.store(true, Ordering::Release);
+            }
+        }))
+        .unwrap();
+    accept(&h.review, id, &initial, Rating::Easy, NOW, 200);
+    assert_eq!(
+        entry.recv_timeout(Duration::from_secs(5)).unwrap(),
+        JournalStage::PreparedSynced
+    );
+    let review = h.review.clone();
+    let undo = h
+        .engine
+        .threads()
+        .spawn("test-terminal-gated-undo", meguri_engine::Qos::Default, move |_| {
+            review.undo(UndoScope::Session(id))
+        })
+        .unwrap();
+    let deadline = monotonic::now() + Duration::from_secs(5);
+    loop {
+        let restored = h.review.head(id, 3).unwrap();
+        if restored.items[0].card_id == card && restored.items[0].state_token == initial.items[0].state_token {
+            break;
+        }
+        assert!(monotonic::now() < deadline, "pending undo never restored the head");
+        std::thread::yield_now();
+    }
+    let (started, conflict_started) = mpsc::channel();
+    let conflict_cancelled = cancelled.clone();
+    let expected_card = before_card.clone();
+    let expected_logs = before_logs.clone();
+    let conflict_name = "terminal-gated conflicting writer";
+    let conflict = h
+        .collection
+        .submit(OpSpec::named(conflict_name, OpSource::Maintenance), move |ctx| {
+            started.send(()).unwrap();
+            assert!(
+                conflict_cancelled.load(Ordering::Acquire),
+                "writer passed an unsynced cancellation"
+            );
+            assert_eq!(
+                ctx.scope().row_image(Table::Cards, &RowKey::Id(card.0))?.unwrap(),
+                expected_card
+            );
+            for (id, row) in &expected_logs {
+                assert_eq!(
+                    ctx.scope().row_image(Table::Revlog, &RowKey::Id(*id))?.as_ref(),
+                    Some(row)
+                );
+            }
+            assert_eq!(
+                ctx.scope().ids_after(Table::Revlog, None, 100_000)?.len(),
+                expected_logs.len()
+            );
+            Ok(())
+        });
+    prepared_release.send(()).unwrap();
+    for (stage, release) in [
+        (JournalStage::TerminalWrite, write_release),
+        (JournalStage::TerminalSync, sync_release),
+    ] {
+        assert_eq!(entry.recv_timeout(Duration::from_secs(5)).unwrap(), stage);
+        assert!(!cancelled.load(Ordering::Acquire));
+        assert!(h.collection.has_queued_op_for_testing(conflict_name));
+        assert_eq!(
+            conflict_started.recv_timeout(Duration::from_millis(25)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        );
+        assert_eq!(card_row(&h.collection, card), before_card);
+        assert_eq!(log_rows(&h.collection), before_logs);
+        release.send(()).unwrap();
+    }
+    assert_eq!(undo.join().unwrap().unwrap().items[0].card_id, card);
+    conflict_started.recv_timeout(Duration::from_secs(5)).unwrap();
+    conflict.wait().unwrap();
+    h.settle();
+    assert!(cancelled.load(Ordering::Acquire));
+    assert_eq!(card_row(&h.collection, card), before_card);
+    assert_eq!(log_rows(&h.collection), before_logs);
+    let path = h.collection.path().to_owned();
+    h.engine.close().unwrap();
+    for _ in 0..2 {
+        let (engine, collection, _) =
+            session_support::open(&path, Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC")));
+        assert_eq!(card_row(&collection, card), before_card);
+        assert_eq!(log_rows(&collection), before_logs);
+        engine.close().unwrap();
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn c12_sigkill_one_second_after_actual_acceptance_preserves_exact_transition() {

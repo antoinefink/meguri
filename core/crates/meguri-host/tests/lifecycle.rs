@@ -254,6 +254,7 @@ fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
     });
     entered.recv_timeout(Duration::from_secs(5)).unwrap();
     let cancel = CancelToken::new();
+    assert!(!c.has_queued_op_for_testing("durability_control"));
     let restoring_host = host.clone();
     let restoring_cancel = cancel.clone();
     let restore = host
@@ -266,15 +267,10 @@ fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
         })
         .unwrap();
     let deadline = meguri_engine::monotonic::now() + Duration::from_secs(5);
-    loop {
-        match host.review().try_pending_restore(UndoScope::Global, false) {
-            Err(EngineError::CollectionUnavailable { reason }) if reason == "review lifecycle is busy" => break,
-            Ok(None) => {}
-            other => panic!("unexpected restore admission: {other:?}"),
-        }
+    while !c.has_queued_op_for_testing("durability_control") {
         assert!(
             meguri_engine::monotonic::now() < deadline,
-            "restore never owned lifecycle"
+            "restore never queued durability control"
         );
         std::thread::yield_now();
     }
@@ -381,6 +377,7 @@ fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
         })
         .unwrap();
     end_entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(host.review().peek_undo(UndoScope::Session(session_id)).is_ok());
     let closing_host = host.clone();
     let (closed, close_result) = mpsc::channel();
     let close = callers
@@ -390,9 +387,9 @@ fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
         .unwrap();
     let deadline = meguri_engine::monotonic::now() + Duration::from_secs(5);
     loop {
-        match host.review().try_pending_restore(UndoScope::Global, false) {
-            Err(EngineError::CollectionUnavailable { reason }) if reason == "review lifecycle is busy" => break,
-            Ok(None) => {}
+        match host.review().peek_undo(UndoScope::Session(session_id)) {
+            Err(EngineError::CollectionUnavailable { reason }) if reason == "answer chain is restoring" => break,
+            Ok(_) => {}
             other => panic!("unexpected close reservation: {other:?}"),
         }
         assert!(

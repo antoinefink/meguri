@@ -2289,7 +2289,7 @@ impl Application {
             return Err(invalid("injected review application failure"));
         }
         if self.cancel.load(Ordering::Acquire) || self.failed.load(Ordering::Acquire) {
-            return Err(EngineError::Cancelled);
+            return cancelled_application(&self.journal, self.event, &self.phase);
         }
         let card = ctx
             .scope()
@@ -2343,7 +2343,7 @@ impl Application {
         let phase = self.phase.clone();
         ctx.before_commit(move || {
             if cancel.load(Ordering::Acquire) || failed.load(Ordering::Acquire) {
-                return Err(EngineError::Cancelled);
+                return cancelled_application(&journal, event, &phase);
             }
             journal.prepare(event, receipt, generation)?;
             if cancel.load(Ordering::Acquire)
@@ -2352,7 +2352,7 @@ impl Application {
                     .compare_exchange(1, 2, Ordering::AcqRel, Ordering::Acquire)
                     .is_err()
             {
-                return Err(EngineError::Cancelled);
+                return cancelled_application(&journal, event, &phase);
             }
             Ok(())
         });
@@ -2366,6 +2366,15 @@ impl Application {
         });
         Ok(())
     }
+}
+// Phase 3 is owned by pending undo, unlike a failed answer chain's generic
+// cancellation. Keep the writer until that event's terminal record is durable.
+// These calls run before the commit lock and hold no session/presentation lock.
+fn cancelled_application(journal: &Journal, event: u64, phase: &AtomicU8) -> Result<(), EngineError> {
+    if phase.load(Ordering::Acquire) == 3 {
+        journal.terminal(event, Terminal::Cancelled)?;
+    }
+    Err(EngineError::Cancelled)
 }
 fn recorded_prelude(
     c: &Collection,

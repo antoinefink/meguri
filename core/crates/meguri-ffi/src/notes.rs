@@ -30,12 +30,31 @@ pub struct UpdateNoteRequest {
     pub fields: Vec<String>,
     pub tags: Vec<String>,
 }
+impl From<UpdateNoteRequest> for notes::UpdateNote {
+    fn from(request: UpdateNoteRequest) -> Self {
+        Self {
+            id: NoteId(request.id),
+            fields: request.fields,
+            tags: request.tags,
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct NoteMutation {
     pub summary: MutationSummary,
     pub id: i64,
     pub cards: Vec<i64>,
     pub written: bool,
+}
+impl NoteMutation {
+    fn with_cards(summary: MutationSummary, id: NoteId, cards: Vec<meguri_model::ids::CardId>, written: bool) -> Self {
+        Self {
+            summary,
+            id: id.0,
+            cards: cards.into_iter().map(|card| card.0).collect(),
+            written,
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct NoteRecord {
@@ -63,32 +82,24 @@ pub struct FieldCheck {
 pub fn add_note(request: AddNoteRequest) -> Result<NoteMutation, CoreError> {
     callback::enter("add_note");
     let r = notes::add(&runtime::host()?.collection()?, request.into(), OpSource::UserUndoable)?;
-    Ok(NoteMutation {
-        summary: MutationSummary::of(&r),
-        id: r.value.id.0,
-        cards: r.value.cards.iter().map(|i| i.0).collect(),
-        written: true,
-    })
+    Ok(NoteMutation::with_cards(
+        MutationSummary::of(&r),
+        r.value.id,
+        r.value.cards,
+        true,
+    ))
 }
 #[uniffi::export]
 pub fn update_note(request: UpdateNoteRequest) -> Result<NoteMutation, CoreError> {
     callback::enter("update_note");
     let id = request.id;
-    let r = notes::update(
-        &runtime::host()?.collection()?,
-        notes::UpdateNote {
-            id: NoteId(id),
-            fields: request.fields,
-            tags: request.tags,
-        },
-        OpSource::UserUndoable,
-    )?;
-    Ok(NoteMutation {
-        summary: MutationSummary::of(&r),
-        id,
-        cards: r.value.cards.iter().map(|i| i.0).collect(),
-        written: r.value.written,
-    })
+    let r = notes::update(&runtime::host()?.collection()?, request.into(), OpSource::UserUndoable)?;
+    Ok(NoteMutation::with_cards(
+        MutationSummary::of(&r),
+        NoteId(id),
+        r.value.cards,
+        r.value.written,
+    ))
 }
 #[uniffi::export]
 pub fn read_note(id: i64) -> Result<NoteRecord, CoreError> {

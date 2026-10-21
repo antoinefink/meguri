@@ -138,7 +138,7 @@ extension TestHooks {
 
         /// Each file in the collection directory: relative path, size and the
         /// first 12 hex digits of its SHA-256, sorted; `none` when empty.
-        static func describe(_ collection: CollectionLocation) -> String {
+        static func describe(_ collection: AppModel.CollectionLocation) -> String {
             let root = collection.directory.standardizedFileURL
             guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) else {
                 return "none"

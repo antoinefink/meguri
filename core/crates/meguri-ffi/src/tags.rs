@@ -264,7 +264,7 @@ pub fn start_delete_tags(text: String) -> Result<TagMutationJobStart, CoreError>
 #[uniffi::export]
 pub fn start_clear_unused_tags() -> Result<TagMutationJobStart, CoreError> {
     callback::enter("start_clear_unused_tags");
-    start(move |c, options| tags::clear_unused(c, options))
+    start(tags::clear_unused)
 }
 #[uniffi::export]
 pub fn set_tags_collapsed(names: Vec<String>, collapsed: bool) -> Result<CountMutation, CoreError> {

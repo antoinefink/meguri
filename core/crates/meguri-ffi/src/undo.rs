@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum UndoResult {
     Global {
-        summary: MutationSummary,
+        summary: Box<MutationSummary>,
         step: ReviewStepInfo,
     },
     Session {
@@ -62,7 +62,7 @@ fn start(scope: ReviewUndoScope, redo: bool) -> Result<UndoJobStart, CoreError> 
         {
             meguri_engine::session::HistoryRestore::Session(head) => UndoResult::Session { head: head.into() },
             meguri_engine::session::HistoryRestore::Global(r) => UndoResult::Global {
-                summary: MutationSummary::of(&r),
+                summary: Box::new(MutationSummary::of(&r)),
                 step: r.value.into(),
             },
         };

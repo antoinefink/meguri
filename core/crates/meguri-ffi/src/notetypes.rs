@@ -32,6 +32,17 @@ pub struct NewNotetypeTemplate {
     pub browser_front: String,
     pub browser_back: String,
 }
+impl From<NewNotetypeTemplate> for notetypes::NewTemplate {
+    fn from(template: NewNotetypeTemplate) -> Self {
+        Self {
+            name: template.name,
+            front: template.front,
+            back: template.back,
+            browser_front: template.browser_front,
+            browser_back: template.browser_back,
+        }
+    }
+}
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct AddNotetypeRequest {
     pub name: String,
@@ -81,6 +92,24 @@ pub struct NotetypeField {
     pub collapsed: bool,
     pub exclude_from_search: bool,
 }
+impl From<&meguri_model::notetype::NotetypeField> for NotetypeField {
+    fn from(field: &meguri_model::notetype::NotetypeField) -> Self {
+        let options = &field.config;
+        Self {
+            ord: field.ord,
+            id: options.id,
+            name: field.name.clone(),
+            sticky: options.sticky,
+            rtl: options.rtl,
+            font_name: options.font_name.clone(),
+            font_size: options.font_size,
+            description: options.description.clone(),
+            plain_text: options.plain_text,
+            collapsed: options.collapsed,
+            exclude_from_search: options.exclude_from_search,
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct NotetypeTemplate {
     pub ord: u32,
@@ -93,6 +122,23 @@ pub struct NotetypeTemplate {
     pub target_deck_id: i64,
     pub browser_font_name: String,
     pub browser_font_size: u32,
+}
+impl From<&meguri_model::notetype::NotetypeTemplate> for NotetypeTemplate {
+    fn from(template: &meguri_model::notetype::NotetypeTemplate) -> Self {
+        let formats = &template.config;
+        Self {
+            ord: template.ord,
+            id: formats.id,
+            name: template.name.clone(),
+            front: formats.q_format.clone(),
+            back: formats.a_format.clone(),
+            q_format_browser: formats.q_format_browser.clone(),
+            a_format_browser: formats.a_format_browser.clone(),
+            target_deck_id: formats.target_deck_id,
+            browser_font_name: formats.browser_font_name.clone(),
+            browser_font_size: formats.browser_font_size,
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct NotetypeRecord {
@@ -138,39 +184,8 @@ pub fn read_notetype(id: i64) -> Result<NotetypeRecord, CoreError> {
         sort_field: n.config.sort_field_idx,
         css: n.config.css.clone(),
         base: AggregateDigest::of(&n).0.to_vec(),
-        fields: n
-            .fields
-            .iter()
-            .map(|f| NotetypeField {
-                ord: f.ord,
-                id: f.config.id,
-                name: f.name.clone(),
-                sticky: f.config.sticky,
-                rtl: f.config.rtl,
-                font_name: f.config.font_name.clone(),
-                font_size: f.config.font_size,
-                description: f.config.description.clone(),
-                plain_text: f.config.plain_text,
-                collapsed: f.config.collapsed,
-                exclude_from_search: f.config.exclude_from_search,
-            })
-            .collect(),
-        templates: n
-            .templates
-            .iter()
-            .map(|t| NotetypeTemplate {
-                ord: t.ord,
-                id: t.config.id,
-                name: t.name.clone(),
-                front: t.config.q_format.clone(),
-                back: t.config.a_format.clone(),
-                q_format_browser: t.config.q_format_browser.clone(),
-                a_format_browser: t.config.a_format_browser.clone(),
-                target_deck_id: t.config.target_deck_id,
-                browser_font_name: t.config.browser_font_name.clone(),
-                browser_font_size: t.config.browser_font_size,
-            })
-            .collect(),
+        fields: n.fields.iter().map(NotetypeField::from).collect(),
+        templates: n.templates.iter().map(NotetypeTemplate::from).collect(),
     })
 }
 #[uniffi::export]
@@ -185,17 +200,7 @@ pub fn add_notetype(request: AddNotetypeRequest) -> Result<NotetypeMutation, Cor
         },
         fields: request.fields,
         css: request.css,
-        templates: request
-            .templates
-            .into_iter()
-            .map(|t| notetypes::NewTemplate {
-                name: t.name,
-                front: t.front,
-                back: t.back,
-                browser_front: t.browser_front,
-                browser_back: t.browser_back,
-            })
-            .collect(),
+        templates: request.templates.into_iter().map(Into::into).collect(),
     };
     Ok(notetypes::add(&runtime::host()?.collection()?, new)?.into())
 }

@@ -665,7 +665,7 @@ fn typed_surface(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>, zo
         panic!("global routed to session")
     };
     assert!(step.long_write.is_some());
-    summaries.push(summary);
+    summaries.push(*summary);
     assert!(matches!(
         undo::peek_redo(Scope::Global).unwrap(),
         Status::Available { .. }
@@ -995,20 +995,9 @@ fn controlled_job_regressions(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<C
         .value
         .id;
     let (release, blocked) = block(&c);
+    assert!(!c.has_queued_op_for_testing("durability_control"));
     let restore = undo::start_undo(ReviewUndoScope::Global).unwrap();
-    let deadline = meguri_engine::monotonic::now() + Duration::from_secs(1);
-    loop {
-        match undo::try_pending_review_restore(ReviewUndoScope::Global, false) {
-            Err(CoreError::Unavailable { reason }) if reason == "review lifecycle is busy" => break,
-            Ok(None) => {}
-            other => panic!("unexpected restore admission: {other:?}"),
-        }
-        assert!(
-            meguri_engine::monotonic::now() < deadline,
-            "restore never owned lifecycle"
-        );
-        std::thread::yield_now();
-    }
+    queued(&c, "durability_control");
     // Exercise the real runtime Closing reservation twice: refusal must retain
     // this usable host and session, rather than marking either disconnected.
     for _ in 0..2 {
