@@ -46,41 +46,25 @@ pub fn peek_undo(scope: ReviewUndoScope) -> Result<ReviewUndoStatus, CoreError> 
 #[uniffi::export]
 pub fn peek_redo(scope: ReviewUndoScope) -> Result<ReviewUndoStatus, CoreError> {
     callback::enter("peek_redo");
-    // U43's pending-answer redo stack is private and has no peek API. A
-    // collection-only peek would incorrectly report None for pending redo.
-    if matches!(scope, ReviewUndoScope::Session { .. }) {
-        return Err(CoreError::Unsupported {
-            feature: "session redo status requires ReviewService::peek_redo".into(),
-        });
-    }
-    Ok(runtime::host()?.collection()?.peek_redo(scope.into())?.into())
+    Ok(runtime::host()?.review().peek_redo(scope.into())?.into())
 }
 fn start(scope: ReviewUndoScope, redo: bool) -> Result<UndoJobStart, CoreError> {
     let host = runtime::host()?;
-    let c = host.collection()?;
     let result = Arc::new(Mutex::new(None));
     let out = result.clone();
     // Always use a job: the writer chooses the target when taking the op,
     // and a short peek can become a long write before then (U25 M4.1).
     let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |j| {
         j.cancel.check()?;
-        let session = matches!(scope, ReviewUndoScope::Session { .. }) || host.review().active_session().is_some();
-        let scope = scope.into();
-        let value = if session {
-            UndoResult::Session {
-                head: if redo {
-                    host.review().redo(scope)?
-                } else {
-                    host.review().undo(scope)?
-                }
-                .into(),
-            }
-        } else {
-            let r = if redo { c.redo(scope)? } else { c.undo(scope)? };
-            UndoResult::Global {
+        let value = match host
+            .review()
+            .restore_controlled(scope.into(), redo, j.cancel.clone(), j.progress.clone())?
+        {
+            meguri_engine::session::HistoryRestore::Session(head) => UndoResult::Session { head: head.into() },
+            meguri_engine::session::HistoryRestore::Global(r) => UndoResult::Global {
                 summary: MutationSummary::of(&r),
                 step: r.value.into(),
-            }
+            },
         };
         *out.lock().unwrap() = Some(value);
         Ok(())
@@ -99,4 +83,15 @@ pub fn start_undo(scope: ReviewUndoScope) -> Result<UndoJobStart, CoreError> {
 pub fn start_redo(scope: ReviewUndoScope) -> Result<UndoJobStart, CoreError> {
     callback::enter("start_redo");
     start(scope, true)
+}
+
+/// Admission and pending restoration are one service operation. None means
+/// use a history job; this export never falls through into a collection write.
+#[uniffi::export]
+pub fn try_pending_review_restore(scope: ReviewUndoScope, redo: bool) -> Result<Option<ReviewHead>, CoreError> {
+    callback::enter("try_pending_review_restore");
+    Ok(runtime::host()?
+        .review()
+        .try_pending_restore(scope.into(), redo)?
+        .map(Into::into))
 }

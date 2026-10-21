@@ -32,6 +32,9 @@ public struct CountedDeckTree: Sendable, Hashable {
     }
 }
 public protocol DeckService: Sendable {
+    func startRenameDeck(id: Int64, name: String) async throws(BridgeError) -> CoreDeckRenameJob
+    func startMoveDecks(ids: [Int64], parent: Int64?) async throws(BridgeError) -> CoreDeckMoveJob
+    func startCollapseDecks(ids: [Int64], scope: DeckCollapseScope, collapsed: Bool) async throws(BridgeError) -> CoreDeckCollapseJob
     func addDeck(name: String) async throws(BridgeError) -> DeckMutation
     func renameDeck(id: Int64, name: String) async throws(BridgeError) -> DeckMutation
     func moveDecks(ids: [Int64], parent: Int64?) async throws(BridgeError) -> CountMutation
@@ -115,9 +118,8 @@ public struct DeckDeletion: Sendable, Hashable {
     }
 }
 
-/// Cancellation is observed before engine orchestration starts. The current
-/// U25/deletion APIs do not accept a token after entry; that contract remains
-/// pending and callers must await completion before acting on cancellation.
+/// Planning and queued writes observe cancellation. Once admitted by the
+/// writer, restoration/deletion completes and preserves its committed result.
 public final class CoreDeckDeletionJob: Sendable {
     public let job: CoreJob
     private let raw: MeguriCoreBindings.DeckDeletionJob
@@ -137,13 +139,16 @@ extension CoreDeckService {
         try await InteractiveLane.shared.call(.addDeck) { DeckMutation(try MeguriCoreBindings.addDeck(name: name)) }
     }
     public func renameDeck(id: Int64, name: String) async throws(BridgeError) -> DeckMutation {
-        try await InteractiveLane.shared.call(.renameDeck) { DeckMutation(try MeguriCoreBindings.renameDeck(id: id, name: name)) }
+        let job = try await startRenameDeck(id: id, name: name)
+        return try await job.value()
     }
     public func moveDecks(ids: [Int64], parent: Int64?) async throws(BridgeError) -> CountMutation {
-        try await InteractiveLane.shared.call(.moveDecks) { CountMutation(try MeguriCoreBindings.moveDecks(ids: ids, parent: parent)) }
+        let job = try await startMoveDecks(ids: ids, parent: parent)
+        return try await job.value()
     }
     public func collapseDecks(ids: [Int64], scope: DeckCollapseScope, collapsed: Bool) async throws(BridgeError) -> MutationSummary {
-        try await InteractiveLane.shared.call(.collapseDecks) { MutationSummary(try MeguriCoreBindings.collapseDecks(ids: ids, scope: scope.raw, collapsed: collapsed)) }
+        let job = try await startCollapseDecks(ids: ids, scope: scope, collapsed: collapsed)
+        return try await job.value()
     }
     public func selectDeck(id: Int64) async throws(BridgeError) -> MutationSummary {
         try await InteractiveLane.shared.call(.selectDeck) { MutationSummary(try MeguriCoreBindings.selectDeck(id: id)) }
@@ -156,6 +161,75 @@ extension CoreDeckService {
         return try await MaintenanceLane.shared.call(.startDeleteDecks) {
             let raw = try MeguriCoreBindings.startDeleteDecks(ids: ids)
             return CoreDeckDeletionJob(job: try Jobs.track(raw.handle), raw: raw.result)
+        }
+    }
+}
+
+public final class CoreDeckRenameJob: Sendable {
+    public let job: CoreJob
+    private let raw: MeguriCoreBindings.DeckRenameJob
+    init(job: CoreJob, raw: MeguriCoreBindings.DeckRenameJob) { self.job = job; self.raw = raw }
+    public func value() async throws(BridgeError) -> DeckMutation {
+        try await job.value()
+        let raw = raw
+        return try await MaintenanceLane.shared.call(.deckRenameJobResult) {
+            guard let value = try raw.result() else { throw BridgeError.internal("Successful job has no result") }
+            return DeckMutation(value)
+        }
+    }
+}
+extension CoreDeckService {
+    public func startRenameDeck(id: Int64, name: String) async throws(BridgeError) -> CoreDeckRenameJob {
+        try await CoreEventStream.shared.start()
+        return try await MaintenanceLane.shared.call(.startRenameDeck) {
+            let raw = try MeguriCoreBindings.startRenameDeck(id: id, name: name)
+            return CoreDeckRenameJob(job: try Jobs.track(raw.handle), raw: raw.result)
+        }
+    }
+}
+
+public final class CoreDeckMoveJob: Sendable {
+    public let job: CoreJob
+    private let raw: MeguriCoreBindings.DeckMoveJob
+    init(job: CoreJob, raw: MeguriCoreBindings.DeckMoveJob) { self.job = job; self.raw = raw }
+    public func value() async throws(BridgeError) -> CountMutation {
+        try await job.value()
+        let raw = raw
+        return try await MaintenanceLane.shared.call(.deckMoveJobResult) {
+            guard let value = try raw.result() else { throw BridgeError.internal("Successful job has no result") }
+            return CountMutation(value)
+        }
+    }
+}
+extension CoreDeckService {
+    public func startMoveDecks(ids: [Int64], parent: Int64?) async throws(BridgeError) -> CoreDeckMoveJob {
+        try await CoreEventStream.shared.start()
+        return try await MaintenanceLane.shared.call(.startMoveDecks) {
+            let raw = try MeguriCoreBindings.startMoveDecks(ids: ids, parent: parent)
+            return CoreDeckMoveJob(job: try Jobs.track(raw.handle), raw: raw.result)
+        }
+    }
+}
+
+public final class CoreDeckCollapseJob: Sendable {
+    public let job: CoreJob
+    private let raw: MeguriCoreBindings.DeckCollapseJob
+    init(job: CoreJob, raw: MeguriCoreBindings.DeckCollapseJob) { self.job = job; self.raw = raw }
+    public func value() async throws(BridgeError) -> MutationSummary {
+        try await job.value()
+        let raw = raw
+        return try await MaintenanceLane.shared.call(.deckCollapseJobResult) {
+            guard let value = try raw.result() else { throw BridgeError.internal("Successful job has no result") }
+            return MutationSummary(value)
+        }
+    }
+}
+extension CoreDeckService {
+    public func startCollapseDecks(ids: [Int64], scope: DeckCollapseScope, collapsed: Bool) async throws(BridgeError) -> CoreDeckCollapseJob {
+        try await CoreEventStream.shared.start()
+        return try await MaintenanceLane.shared.call(.startCollapseDecks) {
+            let raw = try MeguriCoreBindings.startCollapseDecks(ids: ids, scope: scope.raw, collapsed: collapsed)
+            return CoreDeckCollapseJob(job: try Jobs.track(raw.handle), raw: raw.result)
         }
     }
 }

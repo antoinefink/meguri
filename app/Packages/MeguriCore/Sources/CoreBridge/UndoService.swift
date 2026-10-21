@@ -12,9 +12,8 @@ public enum UndoResult: Sendable, Hashable {
         }
     }
 }
-/// Cancellation is observed before engine orchestration starts. The current
-/// U25/deletion APIs do not accept a token after entry; that contract remains
-/// pending and callers must await completion before acting on cancellation.
+/// Planning and queued writes observe cancellation. Once admitted by the
+/// writer, restoration/deletion completes and preserves its committed result.
 public final class CoreUndoJob: Sendable {
     public let job: CoreJob
     private let raw: MeguriCoreBindings.UndoJob
@@ -29,11 +28,23 @@ public final class CoreUndoJob: Sendable {
     }
 }
 
+/// Pending review restoration is admitted atomically on the interactive lane;
+/// committed history is always restored by a cancellable core job.
+public enum CoreUndoStart: Sendable {
+    case restored(head: ReviewHead)
+    case job(CoreUndoJob)
+    public func value() async throws(BridgeError) -> UndoResult {
+        switch self {
+        case .restored(let head): return .session(head: head)
+        case .job(let job): return try await job.value()
+        }
+    }
+}
 public protocol UndoService: Sendable {
     func peekUndo(scope: ReviewUndoScope) async throws(BridgeError) -> ReviewUndoStatus
     func peekRedo(scope: ReviewUndoScope) async throws(BridgeError) -> ReviewUndoStatus
-    func startUndo(scope: ReviewUndoScope) async throws(BridgeError) -> CoreUndoJob
-    func startRedo(scope: ReviewUndoScope) async throws(BridgeError) -> CoreUndoJob
+    func startUndo(scope: ReviewUndoScope) async throws(BridgeError) -> CoreUndoStart
+    func startRedo(scope: ReviewUndoScope) async throws(BridgeError) -> CoreUndoStart
 }
 public actor CoreUndoService: UndoService {
     public init() {}
@@ -43,18 +54,24 @@ public actor CoreUndoService: UndoService {
     public func peekRedo(scope: ReviewUndoScope) async throws(BridgeError) -> ReviewUndoStatus {
         try await InteractiveLane.shared.call(.peekRedo) { ReviewUndoStatus(try MeguriCoreBindings.peekRedo(scope: scope.raw)) }
     }
-    public func startUndo(scope: ReviewUndoScope) async throws(BridgeError) -> CoreUndoJob {
+    public func startUndo(scope: ReviewUndoScope) async throws(BridgeError) -> CoreUndoStart {
+        if let head = try await InteractiveLane.shared.call(.tryPendingReviewRestore, {
+            try MeguriCoreBindings.tryPendingReviewRestore(scope: scope.raw, redo: false).map(ReviewHead.init)
+        }) { return .restored(head: head) }
         try await CoreEventStream.shared.start()
         return try await MaintenanceLane.shared.call(.startUndo) {
             let raw = try MeguriCoreBindings.startUndo(scope: scope.raw)
-            return CoreUndoJob(job: try Jobs.track(raw.handle), raw: raw.result)
+            return .job(CoreUndoJob(job: try Jobs.track(raw.handle), raw: raw.result))
         }
     }
-    public func startRedo(scope: ReviewUndoScope) async throws(BridgeError) -> CoreUndoJob {
+    public func startRedo(scope: ReviewUndoScope) async throws(BridgeError) -> CoreUndoStart {
+        if let head = try await InteractiveLane.shared.call(.tryPendingReviewRestore, {
+            try MeguriCoreBindings.tryPendingReviewRestore(scope: scope.raw, redo: true).map(ReviewHead.init)
+        }) { return .restored(head: head) }
         try await CoreEventStream.shared.start()
         return try await MaintenanceLane.shared.call(.startRedo) {
             let raw = try MeguriCoreBindings.startRedo(scope: scope.raw)
-            return CoreUndoJob(job: try Jobs.track(raw.handle), raw: raw.result)
+            return .job(CoreUndoJob(job: try Jobs.track(raw.handle), raw: raw.result))
         }
     }
 }

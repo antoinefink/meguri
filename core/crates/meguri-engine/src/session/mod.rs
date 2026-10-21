@@ -8,8 +8,8 @@ pub use journal::JournalStage;
 #[cfg(feature = "test-hooks")]
 pub use service::RenderStage;
 pub use service::{
-    AnswerOutcome, CurrentChange, Head, HeadDiff, HeadItem, HomePreset, Marks, PeekResult, Refusal, ReviewService,
-    SessionEvent, SessionStartHook, StartResult,
+    AnswerOutcome, CurrentChange, Head, HeadDiff, HeadItem, HistoryRestore, HomePreset, Marks, PeekResult, Refusal,
+    ReviewService, SessionEvent, SessionStartHook, StartResult,
 };
 pub(crate) use service::{Application, ProductionRestore};
 

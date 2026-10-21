@@ -323,25 +323,3 @@ pub fn set_notetype_template_options(request: NotetypeTemplateOptions) -> Result
     row.config.browser_font_size = request.browser_font_size;
     Ok(notetypes::save(&c, d, SaveOptions::default())?.into())
 }
-
-#[uniffi::export]
-pub fn rename_notetype_template(
-    id: i64,
-    base: Vec<u8>,
-    ord: u32,
-    template_id: Option<i64>,
-    name: String,
-) -> Result<NotetypeMutation, CoreError> {
-    callback::enter("rename_notetype_template");
-    let c = runtime::host()?.collection()?;
-    let mut d = draft(&c, id, base)?;
-    let row = d
-        .templates
-        .iter_mut()
-        .find(|t| t.ord == ord && t.config.id == template_id)
-        .ok_or_else(|| CoreError::InvalidArgument {
-            message: "template identity no longer matches".into(),
-        })?;
-    row.name = name;
-    Ok(notetypes::save(&c, d, SaveOptions::default())?.into())
-}

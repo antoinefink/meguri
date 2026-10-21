@@ -14,9 +14,18 @@ use crate::error::CoreError;
 /// At most ten updates a second reach Swift (R1858).
 pub const MIN_INTERVAL: std::time::Duration = meguri_engine::progress::MIN_INTERVAL;
 
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum JobProgressPhase {
+    Planning,
+    Committing,
+    Named { name: String },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct ProgressUpdate {
     pub job_id: u64,
+    pub phase: JobProgressPhase,
+    pub eta_millis: Option<u64>,
     pub completed: u64,
     /// `None` while the amount of work is unknown.
     pub total: Option<u64>,
@@ -85,6 +94,12 @@ impl meguri_engine::ProgressListener for Relay {
     fn on_progress(&self, progress: &Progress) {
         let update = ProgressUpdate {
             job_id: self.job_id,
+            phase: match &progress.phase {
+                meguri_engine::ProgressPhase::Planning => JobProgressPhase::Planning,
+                meguri_engine::ProgressPhase::Committing => JobProgressPhase::Committing,
+                meguri_engine::ProgressPhase::Named(name) => JobProgressPhase::Named { name: (*name).into() },
+            },
+            eta_millis: progress.eta.map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
             completed: progress.completed,
             total: progress.total,
         };
@@ -146,11 +161,26 @@ mod tests {
             updates[0],
             ProgressUpdate {
                 job_id: 7,
+                phase: JobProgressPhase::Planning,
+                eta_millis: None,
                 completed: 0,
                 total: Some(3_000)
             }
         );
         assert_eq!(updates[29].completed, 2_900);
+    }
+
+    #[test]
+    fn committing_phase_reaches_the_exported_progress_listener_unchanged() {
+        let sink = ProgressSink::new();
+        let progress = JobProgress::wrap(37, sink.clone());
+        let recorder = Arc::new(Recorder::default());
+        progress.set_listener(recorder.clone()).unwrap();
+        sink.set_phase(meguri_engine::ProgressPhase::Committing);
+        let updates = recorder.0.lock().unwrap();
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].phase, JobProgressPhase::Committing);
+        assert_eq!(updates[0].job_id, 37);
     }
 
     #[test]
@@ -166,6 +196,8 @@ mod tests {
             *recorder.0.lock().unwrap(),
             vec![ProgressUpdate {
                 job_id: 1,
+                phase: JobProgressPhase::Planning,
+                eta_millis: None,
                 completed: 2,
                 total: None
             }]

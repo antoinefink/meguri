@@ -43,35 +43,6 @@ pub fn add_deck(name: String) -> Result<DeckMutation, CoreError> {
     Ok(decks::add(&runtime::host()?.collection()?, name)?.into())
 }
 #[uniffi::export]
-pub fn rename_deck(id: i64, name: String) -> Result<DeckMutation, CoreError> {
-    callback::enter("rename_deck");
-    Ok(decks::rename(&runtime::host()?.collection()?, DeckId(id), name)?.into())
-}
-#[uniffi::export]
-pub fn move_decks(ids: Vec<i64>, parent: Option<i64>) -> Result<CountMutation, CoreError> {
-    callback::enter("move_decks");
-    Ok(decks::move_decks(
-        &runtime::host()?.collection()?,
-        ids.into_iter().map(DeckId).collect(),
-        parent.map(DeckId),
-    )?
-    .into())
-}
-#[uniffi::export]
-pub fn collapse_decks(ids: Vec<i64>, scope: DeckCollapseScope, collapsed: bool) -> Result<MutationSummary, CoreError> {
-    callback::enter("collapse_decks");
-    let scope = match scope {
-        DeckCollapseScope::Study => decks::CollapseScope::Study,
-        DeckCollapseScope::Browser => decks::CollapseScope::Browser,
-    };
-    Ok(MutationSummary::of(&decks::collapse(
-        &runtime::host()?.collection()?,
-        ids.into_iter().map(DeckId).collect(),
-        scope,
-        collapsed,
-    )?))
-}
-#[uniffi::export]
 pub fn select_deck(id: i64) -> Result<MutationSummary, CoreError> {
     callback::enter("select_deck");
     Ok(MutationSummary::of(&decks::select(
@@ -108,9 +79,6 @@ impl DeckDeletionJob {
         Ok(self.result.lock().unwrap().clone())
     }
 }
-/// The engine's deletion orchestrator owns backup/preconditions and no-op
-/// handling. Its current API accepts no token after invocation; cancellation
-/// is checked before entry, with the remaining contract reported in handoff.
 #[uniffi::export]
 pub fn start_delete_decks(ids: Vec<i64>) -> Result<DeckDeletionJobStart, CoreError> {
     callback::enter("start_delete_decks");
@@ -120,7 +88,13 @@ pub fn start_delete_decks(ids: Vec<i64>) -> Result<DeckDeletionJobStart, CoreErr
     let out = result.clone();
     let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |j| {
         j.cancel.check()?;
-        let r = meguri_engine::decks::delete(&c, ids.into_iter().map(DeckId).collect(), host.backup())?;
+        let r = meguri_engine::decks::delete_controlled(
+            &c,
+            ids.into_iter().map(DeckId).collect(),
+            host.backup(),
+            j.cancel.clone(),
+            j.progress.clone(),
+        )?;
         *out.lock().unwrap() = Some(DeckDeletion {
             summary: MutationSummary::of(&r),
             deleted: DeckDeletionSummary {
@@ -133,5 +107,125 @@ pub fn start_delete_decks(ids: Vec<i64>) -> Result<DeckDeletionJobStart, CoreErr
     Ok(DeckDeletionJobStart {
         handle: crate::jobs::wrap(handle),
         result: Arc::new(DeckDeletionJob { result }),
+    })
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct DeckRenameJobStart {
+    pub handle: crate::jobs::JobHandle,
+    pub result: Arc<DeckRenameJob>,
+}
+#[derive(Debug, uniffi::Object)]
+pub struct DeckRenameJob {
+    result: Arc<Mutex<Option<DeckMutation>>>,
+}
+#[uniffi::export]
+impl DeckRenameJob {
+    pub fn result(&self) -> Result<Option<DeckMutation>, CoreError> {
+        callback::enter("DeckRenameJob::result");
+        Ok(self.result.lock().unwrap().clone())
+    }
+}
+#[uniffi::export]
+pub fn start_rename_deck(id: i64, name: String) -> Result<DeckRenameJobStart, CoreError> {
+    callback::enter("start_rename_deck");
+    let c = runtime::host()?.collection()?;
+    let result = Arc::new(Mutex::new(None));
+    let out = result.clone();
+    let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |j| {
+        let value = decks::rename_controlled(&c, DeckId(id), name, j.cancel.clone(), j.progress.clone())?.into();
+        *out.lock().unwrap() = Some(value);
+        Ok(())
+    })?;
+    Ok(DeckRenameJobStart {
+        handle: crate::jobs::wrap(handle),
+        result: Arc::new(DeckRenameJob { result }),
+    })
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct DeckMoveJobStart {
+    pub handle: crate::jobs::JobHandle,
+    pub result: Arc<DeckMoveJob>,
+}
+#[derive(Debug, uniffi::Object)]
+pub struct DeckMoveJob {
+    result: Arc<Mutex<Option<CountMutation>>>,
+}
+#[uniffi::export]
+impl DeckMoveJob {
+    pub fn result(&self) -> Result<Option<CountMutation>, CoreError> {
+        callback::enter("DeckMoveJob::result");
+        Ok(self.result.lock().unwrap().clone())
+    }
+}
+#[uniffi::export]
+pub fn start_move_decks(ids: Vec<i64>, parent: Option<i64>) -> Result<DeckMoveJobStart, CoreError> {
+    callback::enter("start_move_decks");
+    let c = runtime::host()?.collection()?;
+    let result = Arc::new(Mutex::new(None));
+    let out = result.clone();
+    let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |j| {
+        let value = decks::move_decks_controlled(
+            &c,
+            ids.into_iter().map(DeckId).collect(),
+            parent.map(DeckId),
+            j.cancel.clone(),
+            j.progress.clone(),
+        )?
+        .into();
+        *out.lock().unwrap() = Some(value);
+        Ok(())
+    })?;
+    Ok(DeckMoveJobStart {
+        handle: crate::jobs::wrap(handle),
+        result: Arc::new(DeckMoveJob { result }),
+    })
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct DeckCollapseJobStart {
+    pub handle: crate::jobs::JobHandle,
+    pub result: Arc<DeckCollapseJob>,
+}
+#[derive(Debug, uniffi::Object)]
+pub struct DeckCollapseJob {
+    result: Arc<Mutex<Option<MutationSummary>>>,
+}
+#[uniffi::export]
+impl DeckCollapseJob {
+    pub fn result(&self) -> Result<Option<MutationSummary>, CoreError> {
+        callback::enter("DeckCollapseJob::result");
+        Ok(self.result.lock().unwrap().clone())
+    }
+}
+#[uniffi::export]
+pub fn start_collapse_decks(
+    ids: Vec<i64>,
+    scope: DeckCollapseScope,
+    collapsed: bool,
+) -> Result<DeckCollapseJobStart, CoreError> {
+    callback::enter("start_collapse_decks");
+    let c = runtime::host()?.collection()?;
+    let result = Arc::new(Mutex::new(None));
+    let out = result.clone();
+    let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |j| {
+        let value = MutationSummary::of(&decks::collapse_controlled(
+            &c,
+            ids.into_iter().map(DeckId).collect(),
+            match scope {
+                DeckCollapseScope::Study => decks::CollapseScope::Study,
+                DeckCollapseScope::Browser => decks::CollapseScope::Browser,
+            },
+            collapsed,
+            j.cancel.clone(),
+            j.progress.clone(),
+        )?);
+        *out.lock().unwrap() = Some(value);
+        Ok(())
+    })?;
+    Ok(DeckCollapseJobStart {
+        handle: crate::jobs::wrap(handle),
+        result: Arc::new(DeckCollapseJob { result }),
     })
 }

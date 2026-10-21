@@ -297,7 +297,6 @@ public struct NotetypeTemplateOptions: Sendable, Hashable {
 }
 
 public protocol NotetypeService: Sendable {
-    func renameNotetypeTemplate(id: Int64, base: [UInt8], ord: UInt32, templateId: Int64?, name: String) async throws(BridgeError) -> NotetypeMutation
     func notetypeNames() async throws(BridgeError) -> [NotetypeName]
     func readNotetype(id: Int64) async throws(BridgeError) -> NotetypeRecord
     func addNotetype(_ request: AddNotetypeRequest) async throws(BridgeError) -> NotetypeMutation
@@ -342,10 +341,4 @@ public actor CoreNotetypeService: NotetypeService {
     public func setNotetypeTemplateOptions(_ request: NotetypeTemplateOptions) async throws(BridgeError) -> NotetypeMutation {
         try await InteractiveLane.shared.call(.setNotetypeTemplateOptions) { NotetypeMutation(try MeguriCoreBindings.setNotetypeTemplateOptions(request: request.raw)) }
     }
-    public func renameNotetypeTemplate(id: Int64, base: [UInt8], ord: UInt32, templateId: Int64?, name: String) async throws(BridgeError) -> NotetypeMutation {
-        try await InteractiveLane.shared.call(.renameNotetypeTemplate) {
-            NotetypeMutation(try MeguriCoreBindings.renameNotetypeTemplate(id: id, base: Data(base), ord: ord, templateId: templateId, name: name))
-        }
-    }
-
 }

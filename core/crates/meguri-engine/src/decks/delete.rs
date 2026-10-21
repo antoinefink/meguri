@@ -1,6 +1,6 @@
 //! D8: summary, backup, subtree deletion, and graves in one undo step.
 use super::{filtered, is_filtered, names, ops};
-use crate::{Collection, EngineError, OpResult, Precondition};
+use crate::{CancelToken, Collection, EngineError, OpResult, Precondition, ProgressSink};
 use meguri_model::{grave::GraveKind, ids::DeckId, usn::Usn};
 use meguri_storage::{ReadRows, ReaderRole, Table, WriteScope};
 use std::{collections::BTreeSet, sync::Arc};
@@ -86,15 +86,29 @@ pub fn delete(
     ids: Vec<DeckId>,
     backup: Arc<dyn crate::ports::BackupService>,
 ) -> Result<OpResult<DeletionSummary>, EngineError> {
+    delete_controlled(collection, ids, backup, CancelToken::new(), ProgressSink::new())
+}
+
+pub fn delete_controlled(
+    collection: &Collection,
+    ids: Vec<DeckId>,
+    backup: Arc<dyn crate::ports::BackupService>,
+    cancel: Arc<CancelToken>,
+    progress: ProgressSink,
+) -> Result<OpResult<DeletionSummary>, EngineError> {
     for attempt in 0..=crate::executor::plan_commit::REPLANS {
+        cancel.check()?;
+        progress.set_phase(crate::ProgressPhase::Planning);
         let (summary, seq) = {
             let lease = collection.reader(ReaderRole::Maintenance)?;
             let snapshot = lease.snapshot()?;
             (deletion_summary(&*snapshot, &ids)?, snapshot.seq())
         };
+        cancel.check()?;
         if summary.cards > 0 {
             backup.before_deck_delete()?;
         }
+        cancel.check()?;
         let preconditions = [Table::Decks, Table::Cards]
             .into_iter()
             .map(|table| Precondition::TableUntouched { table, since: seq });
@@ -111,9 +125,12 @@ pub fn delete(
         } else {
             ops::spec("delete_decks", crate::undo::names::DELETE_DECK)
         };
-        let result = collection.run(spec.preconditions(preconditions), move |ctx| {
-            delete_in(ctx.scope(), &apply)
-        });
+        let result = collection.run(
+            spec.cancel(cancel.clone())
+                .progress(progress.clone())
+                .preconditions(preconditions),
+            move |ctx| delete_in(ctx.scope(), &apply),
+        );
         match result {
             Err(EngineError::Stale { .. }) if attempt < crate::executor::plan_commit::REPLANS => continue,
             other => return other,

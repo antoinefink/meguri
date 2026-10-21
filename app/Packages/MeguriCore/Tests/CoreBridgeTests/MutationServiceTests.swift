@@ -22,7 +22,7 @@ extension EventTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let location = CoreBridge.CollectionLocation(collectionDirectory: collection, backupsDirectory: backups,
                                                      appGroupSnapshot: root.appending(path: "widget.snapshot"))
-        try await MaintenanceLane.shared.call("test.bootstrapCollection") { try testBootstrapCollection(location: location.raw) }
+        try await MaintenanceLane.shared.bootstrapCollection(location)
         let clock = MutationClock()
         let collectionService = CoreCollectionService(clock: clock)
         let decks = CoreDeckService(), notes = CoreNoteService(), types = CoreNotetypeService()
@@ -34,6 +34,15 @@ extension EventTests {
             #expect(deck.summary.generation == generation)
             #expect(deck.summary.undoName == "Add Deck")
             #expect(deck.summary.changes.decks.contains { $0.id == deck.id && $0.change == .added })
+            let renaming = try await decks.startRenameDeck(id: deck.id, name: "Mutation services renamed")
+            // The starter returns a job; an interactive status call can run
+            // before its value is collected on the maintenance lane.
+            _ = try await undo.peekUndo(scope: .global)
+            #expect(try await renaming.value().id == deck.id)
+            let moving = try await decks.startMoveDecks(ids: [deck.id], parent: nil)
+            #expect(try await moving.value().count == 0)
+            let collapsing = try await decks.startCollapseDecks(ids: [deck.id], scope: .browser, collapsed: false)
+            #expect(try await collapsing.value().generation == generation)
             let nt = try await types.addStockNotetype(kind: .basic, name: "Service basic")
             let original = try await types.readNotetype(id: nt.id)
             let styled = try await types.setNotetypeCss(id: nt.id, base: original.base, css: ".card { color: green; }")

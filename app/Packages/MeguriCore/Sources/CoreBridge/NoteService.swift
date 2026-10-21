@@ -131,9 +131,8 @@ public enum FieldState: Sendable, Hashable {
     }
 }
 
-/// Cancellation is observed before engine orchestration starts. The current
-/// U25/deletion APIs do not accept a token after entry; that contract remains
-/// pending and callers must await completion before acting on cancellation.
+/// Planning and queued writes observe cancellation. Once admitted by the
+/// writer, restoration/deletion completes and preserves its committed result.
 public final class CoreNoteDeletionJob: Sendable {
     public let job: CoreJob
     private let raw: MeguriCoreBindings.NoteDeletionJob

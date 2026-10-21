@@ -434,7 +434,7 @@ impl Collection {
     /// there is none, it was uploaded or is pending upload, or its rows
     /// changed.
     pub fn submit_undo(&self, scope: UndoScope) -> Pending<OpResult<StepInfo>> {
-        self.submit_restore(UndoAction::Undo(scope))
+        self.submit_undo_controlled(scope, crate::CancelToken::new(), crate::ProgressSink::new())
     }
 
     // The session may restore presentation before the writer is free. Keep
@@ -458,9 +458,18 @@ impl Collection {
             .map(|meta| (entry.clone(), meta)))
     }
 
-    pub(crate) fn submit_answer_undo(&self, scope: UndoScope, expected: EntryId) -> Pending<OpResult<StepInfo>> {
+    pub(crate) fn submit_answer_undo(
+        &self,
+        scope: UndoScope,
+        expected: EntryId,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+    ) -> Pending<OpResult<StepInfo>> {
         let action = UndoAction::Undo(scope);
-        let mut spec = OpSpec::new(action.def(false), OpSource::UserUndoable).stamp(StampMode::CallerSupplied);
+        let mut spec = OpSpec::new(action.def(false), OpSource::UserUndoable)
+            .stamp(StampMode::CallerSupplied)
+            .cancel(cancel)
+            .progress(progress);
         spec.undo.action = Some(action);
         self.submit(spec, move |ctx| {
             if ctx.restore.is_none_or(|r| r.target != Some(Ok(expected))) {
@@ -478,19 +487,59 @@ impl Collection {
 
     /// Redoes the top redo step of `scope` as an op (M5).
     pub fn submit_redo(&self, scope: UndoScope) -> Pending<OpResult<StepInfo>> {
-        self.submit_restore(UndoAction::Redo(scope))
+        self.submit_redo_controlled(scope, crate::CancelToken::new(), crate::ProgressSink::new())
     }
 
     pub fn redo(&self, scope: UndoScope) -> Result<OpResult<StepInfo>, EngineError> {
         self.submit_redo(scope).wait()
     }
 
-    fn submit_restore(&self, action: UndoAction) -> Pending<OpResult<StepInfo>> {
+    pub fn submit_undo_controlled(
+        &self,
+        scope: UndoScope,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+    ) -> Pending<OpResult<StepInfo>> {
+        self.submit_restore(UndoAction::Undo(scope), cancel, progress)
+    }
+    pub fn submit_redo_controlled(
+        &self,
+        scope: UndoScope,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+    ) -> Pending<OpResult<StepInfo>> {
+        self.submit_restore(UndoAction::Redo(scope), cancel, progress)
+    }
+    pub fn undo_controlled(
+        &self,
+        scope: UndoScope,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+    ) -> Result<OpResult<StepInfo>, EngineError> {
+        self.submit_undo_controlled(scope, cancel, progress).wait()
+    }
+    pub fn redo_controlled(
+        &self,
+        scope: UndoScope,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+    ) -> Result<OpResult<StepInfo>, EngineError> {
+        self.submit_redo_controlled(scope, cancel, progress).wait()
+    }
+    fn submit_restore(
+        &self,
+        action: UndoAction,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+    ) -> Pending<OpResult<StepInfo>> {
         // Which step it restores, and so whether it runs as the long-write
         // variant with that step's declared write, is settled on the writer
         // as it takes the op (M4.1): a step recorded meanwhile, such as a
         // bulk op's that was running at submit, is the one it restores.
-        let mut spec = OpSpec::new(action.def(false), OpSource::UserUndoable).stamp(StampMode::CallerSupplied);
+        let mut spec = OpSpec::new(action.def(false), OpSource::UserUndoable)
+            .stamp(StampMode::CallerSupplied)
+            .cancel(cancel)
+            .progress(progress);
         spec.undo.action = Some(action);
         self.submit(spec, |ctx| ctx.restore_top())
     }

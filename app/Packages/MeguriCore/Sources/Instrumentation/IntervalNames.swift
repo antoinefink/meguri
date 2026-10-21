@@ -189,9 +189,9 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     public static let deckDeletionJobResult = BridgeCall("DeckDeletionJob.result")
     public static let addDeck = BridgeCall("add_deck")
-    public static let renameDeck = BridgeCall("rename_deck")
-    public static let moveDecks = BridgeCall("move_decks")
-    public static let collapseDecks = BridgeCall("collapse_decks")
+    public static let startRenameDeck = BridgeCall("start_rename_deck")
+    public static let startMoveDecks = BridgeCall("start_move_decks")
+    public static let startCollapseDecks = BridgeCall("start_collapse_decks")
     public static let selectDeck = BridgeCall("select_deck")
     public static let deckDeletionSummary = BridgeCall("deck_deletion_summary")
     public static let startDeleteDecks = BridgeCall("start_delete_decks")
@@ -242,10 +242,13 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let undoJobResult = BridgeCall("UndoJob.result")
     public static let peekUndo = BridgeCall("peek_undo")
     public static let peekRedo = BridgeCall("peek_redo")
+    public static let tryPendingReviewRestore = BridgeCall("try_pending_review_restore")
+    public static let deckRenameJobResult = BridgeCall("DeckRenameJob.result")
+    public static let deckMoveJobResult = BridgeCall("DeckMoveJob.result")
+    public static let deckCollapseJobResult = BridgeCall("DeckCollapseJob.result")
     public static let startUndo = BridgeCall("start_undo")
     public static let startRedo = BridgeCall("start_redo")
 
-    public static let renameNotetypeTemplate = BridgeCall("rename_notetype_template")
 
     public static let startAddNotes = BridgeCall("start_add_notes")
     public static let noteAdditionJobResult = BridgeCall("NoteAdditionJob.result")
@@ -255,7 +258,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         startOpen, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, deckStudyState, deckDescriptionHtml,
         startSession, peekFirstCard, sessionHead, refreshSessionCard, renderSessionHead, answerSession, endSession, peekReviewUndo, flushReviewForBackground,
         coreVersion, coreBuildInfo, setEventListener, cancelTokenNew, cancelTokenCancel, cancelTokenIsCancelled, renderCard, compareTypedAnswer, cardExcerpts,
-        deckDeletionJobResult, addDeck, renameDeck, moveDecks, collapseDecks,
+        deckDeletionJobResult, addDeck, startRenameDeck, startMoveDecks, startCollapseDecks,
         selectDeck, deckDeletionSummary, startDeleteDecks, noteDeletionJobResult, addNote,
         updateNote, readNote, checkNoteFields, startDeleteNotes, notetypeNames,
         readNotetype, addNotetype, addStockNotetype, cloneNotetype, ensureImageOcclusionNotetype,
@@ -266,6 +269,6 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         unmarkNotes, startUnmarkNotes, toggleNoteMark, startToggleNoteMark, startRenameTag,
         startReparentTags, startDeleteTags, startClearUnusedTags, addMedia, flushForBackground,
         suspend, resume, undoJobResult, peekUndo, peekRedo,
-        startUndo, startRedo, renameNotetypeTemplate, startAddNotes, noteAdditionJobResult,
+        tryPendingReviewRestore, deckRenameJobResult, deckMoveJobResult, deckCollapseJobResult, startUndo, startRedo, startAddNotes, noteAdditionJobResult,
     ]
 }

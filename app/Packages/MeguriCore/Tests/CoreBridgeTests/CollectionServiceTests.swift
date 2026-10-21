@@ -12,7 +12,7 @@ private final class ServiceClock: CollectionClock {
     func zoneIdentifier() -> String { mainThreadCalls.withLock { $0.append(Thread.isMainThread) }; return "UTC" }
 }
 
-private extension MaintenanceLane {
+extension MaintenanceLane {
     func bootstrapCollection(_ location: CoreBridge.CollectionLocation) throws {
         try call("test.bootstrapCollection") {
             try testBootstrapCollection(location: location.raw)

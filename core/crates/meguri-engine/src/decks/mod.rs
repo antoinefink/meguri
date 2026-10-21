@@ -8,8 +8,11 @@ pub mod ops;
 pub mod tree;
 
 pub use current::{current, select, select_in};
-pub use delete::{DeletionSummary, delete, delete_in, deletion_summary};
-pub use ops::{CollapseScope, add, add_in, collapse, collapse_in, move_decks, move_in, rename, rename_in, save_in};
+pub use delete::{DeletionSummary, delete, delete_controlled, delete_in, deletion_summary};
+pub use ops::{
+    CollapseScope, add, add_in, collapse, collapse_controlled, collapse_in, move_decks, move_decks_controlled, move_in,
+    rename, rename_controlled, rename_in, save_in,
+};
 
 use crate::EngineError;
 use meguri_model::{

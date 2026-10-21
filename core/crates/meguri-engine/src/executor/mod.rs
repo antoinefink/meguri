@@ -129,6 +129,11 @@ impl ExecShared {
         }
     }
 
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn has_queued_op(&self, name: &str) -> bool {
+        self.lock_queue().queues.contains_op(name)
+    }
+
     fn lock_queue(&self) -> MutexGuard<'_, QueueState> {
         self.queue.lock().unwrap_or_else(PoisonError::into_inner)
     }

@@ -433,23 +433,46 @@ fn typed_surface(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>, zo
         notes::read_note(-99),
         Err(CoreError::NoteNotFound { id: -99 })
     ));
+    #[cfg(feature = "test-hooks")]
+    controlled_job_regressions(rx, events);
     let deck = decks::add_deck("Surface".into()).unwrap();
     summaries.push(deck.summary.clone());
     assert_eq!(deck.summary.undo_name.as_deref(), Some("Add Deck"));
     assert_eq!(deck.summary.generation, 1);
     assert!(deck.summary.changes.decks.iter().any(|r| r.id == deck.id));
-    let renamed = decks::rename_deck(deck.id, "Surface renamed".into()).unwrap();
+    let rename_job = decks::start_rename_deck(deck.id, "Surface renamed".into()).unwrap();
+    let (outcome, more) = finish(rx, rename_job.handle.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    let renamed = rename_job.result.result().unwrap().unwrap();
     summaries.push(renamed.summary);
     assert_eq!(renamed.name, "Surface renamed");
     decks::add_deck("Surface renamed::Kid".into()).unwrap();
+    let refusal = decks::start_rename_deck(deck.id, "Surface renamed::Kid::Parent".into()).unwrap();
+    let (outcome, more) = finish(rx, refusal.handle.id);
+    events.extend(more);
     assert!(matches!(
-        decks::rename_deck(deck.id, "Surface renamed::Kid::Parent".into()),
-        Err(CoreError::DeckRefused {
-            refusal: meguri_ffi::error_types::DeckRefusal::UnderDescendant
-        })
+        outcome,
+        JobOutcome::Failed {
+            error: CoreError::DeckRefused {
+                refusal: meguri_ffi::error_types::DeckRefusal::UnderDescendant
+            }
+        }
     ));
-    let collapsed = decks::collapse_decks(vec![deck.id], decks::DeckCollapseScope::Browser, false).unwrap();
+    let collapsing = decks::start_collapse_decks(vec![deck.id], decks::DeckCollapseScope::Browser, false).unwrap();
+    let (outcome, more) = finish(rx, collapsing.handle.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    let collapsed = collapsing.result.result().unwrap().unwrap();
     summaries.push(collapsed);
+    let moving = decks::start_move_decks(vec![deck.id], None).unwrap();
+    let (outcome, more) = finish(rx, moving.handle.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    let moved = moving.result.result().unwrap().unwrap();
+    assert_eq!(moved.count, 0);
+    summaries.push(moved.summary);
+
     let nt = notetypes::notetype_names()
         .unwrap()
         .into_iter()
@@ -749,4 +772,181 @@ fn verify_imported_sentinels(location: &CollectionLocation, nt: i64) {
         true
     );
     host.close().unwrap();
+}
+
+#[cfg(feature = "test-hooks")]
+fn controlled_job_regressions(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>) {
+    use meguri_engine::Collection;
+    use meguri_ffi::{notes, review_session::ReviewUndoScope, undo};
+    use meguri_model::ids::NoteId;
+    struct Release(mpsc::Sender<()>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+    fn block(c: &Collection) -> (Release, meguri_engine::Pending<meguri_engine::OpResult<()>>) {
+        let (enter, entered) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let pending = c.submit(OpSpec::named("ffi cancellation gate", OpSource::Rollover), move |_| {
+            enter.send(()).unwrap();
+            wait.recv_timeout(Duration::from_secs(10)).unwrap();
+            Ok(())
+        });
+        entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        (Release(release), pending)
+    }
+    fn queued(c: &Collection, name: &str) {
+        let deadline = meguri_engine::monotonic::now() + Duration::from_secs(5);
+        while !c.has_queued_op_for_testing(name) {
+            assert!(meguri_engine::monotonic::now() < deadline, "never queued {name}");
+            std::thread::yield_now();
+        }
+    }
+    fn dump(c: &Collection) -> Vec<String> {
+        let r = c.reader(ReaderRole::Query).unwrap();
+        ["notes", "cards", "graves", "col", "decks"]
+            .iter()
+            .map(|table| {
+                format!(
+                    "{:?}",
+                    r.execute_raw(&format!("SELECT * FROM {table} ORDER BY 1"), &[])
+                        .unwrap()
+                        .rows
+                )
+            })
+            .collect()
+    }
+    fn stacks(c: &Collection) -> (meguri_engine::UndoStatus, meguri_engine::UndoStatus) {
+        (
+            c.peek_undo(meguri_engine::UndoScope::Global).unwrap(),
+            c.peek_redo(meguri_engine::UndoScope::Global).unwrap(),
+        )
+    }
+    let c = meguri_ffi::test_hooks::collection_for_testing().unwrap();
+    let nid = c
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .ids_after(meguri_storage::Table::Notes, None, 1)
+        .unwrap()[0];
+    let before = dump(&c);
+    let history = stacks(&c);
+    let log = c.path().with_file_name("deleted.txt");
+    let deleted = std::fs::read(&log).ok();
+    let (release, blocked) = block(&c);
+    let deletion = notes::start_delete_notes(vec![nid]).unwrap();
+    queued(&c, meguri_engine::undo::names::DELETE_NOTE);
+    deletion.handle.cancel.cancel().unwrap();
+    drop(release);
+    blocked.wait().unwrap();
+    let (outcome, more) = finish(rx, deletion.handle.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Cancelled);
+    assert!(deletion.result.result().unwrap().is_none());
+    assert_eq!(dump(&c), before);
+    assert_eq!(stacks(&c), history);
+    assert_eq!(std::fs::read(&log).ok(), deleted);
+
+    meguri_engine::notes::delete(&c, vec![NoteId(nid); 501], OpSource::UserUndoable)
+        .unwrap()
+        .unwrap();
+    for redo in [false, true] {
+        if redo {
+            let job = undo::start_undo(ReviewUndoScope::Global).unwrap();
+            let (outcome, more) = finish(rx, job.handle.id);
+            events.extend(more);
+            assert_eq!(outcome, JobOutcome::Succeeded);
+        }
+        let before = dump(&c);
+        let history = stacks(&c);
+        let (release, blocked) = block(&c);
+        let job = if redo {
+            undo::start_redo(ReviewUndoScope::Global)
+        } else {
+            undo::start_undo(ReviewUndoScope::Global)
+        }
+        .unwrap();
+        queued(&c, if redo { "redo" } else { "undo" });
+        job.handle.cancel.cancel().unwrap();
+        drop(release);
+        blocked.wait().unwrap();
+        let (outcome, more) = finish(rx, job.handle.id);
+        events.extend(more);
+        assert_eq!(outcome, JobOutcome::Cancelled);
+        assert!(job.result.result().unwrap().is_none());
+        assert_eq!(dump(&c), before);
+        assert_eq!(stacks(&c), history);
+    }
+    let redo = undo::start_redo(ReviewUndoScope::Global).unwrap();
+    let (outcome, more) = finish(rx, redo.handle.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    let restore = undo::start_undo(ReviewUndoScope::Global).unwrap();
+    let (outcome, more) = finish(rx, restore.handle.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+
+    struct FfiCommitGate {
+        enter: mpsc::Sender<()>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+    impl meguri_ffi::ProgressListener for FfiCommitGate {
+        fn on_progress(&self, p: meguri_ffi::ProgressUpdate) {
+            if p.phase == meguri_ffi::progress::JobProgressPhase::Committing {
+                self.enter.send(()).unwrap();
+                self.release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(10))
+                    .unwrap();
+            }
+        }
+    }
+    for restoring in [false, true] {
+        let (release, blocked) = block(&c);
+        let deletion = if !restoring {
+            Some(notes::start_delete_notes(vec![nid; 501]).unwrap())
+        } else {
+            None
+        };
+        let restoration = if restoring {
+            Some(undo::start_undo(ReviewUndoScope::Global).unwrap())
+        } else {
+            None
+        };
+        let handle = if let Some(job) = &deletion {
+            &job.handle
+        } else {
+            &restoration.as_ref().unwrap().handle
+        };
+        queued(&c, if restoring { "undo" } else { "bulk_op" });
+        let (enter, entered) = mpsc::channel();
+        let (finish_commit, wait) = mpsc::channel();
+        let _commit_release = Release(finish_commit.clone());
+        handle
+            .progress
+            .set_listener(Arc::new(FfiCommitGate {
+                enter,
+                release: Mutex::new(wait),
+            }))
+            .unwrap();
+        drop(release);
+        blocked.wait().unwrap();
+        entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        handle.cancel.cancel().unwrap();
+        let _ = finish_commit.send(());
+        let (outcome, more) = finish(rx, handle.id);
+        events.extend(more);
+        assert_eq!(outcome, JobOutcome::Succeeded);
+        if let Some(job) = deletion {
+            assert!(job.result.result().unwrap().unwrap().summary.unwrap().past_cancel_point);
+        }
+        if let Some(job) = restoration {
+            let Some(undo::UndoResult::Global { summary, step }) = job.result.result().unwrap() else {
+                panic!("global restore result")
+            };
+            assert!(summary.past_cancel_point);
+            assert!(step.long_write.is_some());
+        }
+    }
 }

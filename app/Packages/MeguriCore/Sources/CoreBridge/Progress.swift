@@ -2,13 +2,27 @@ internal import MeguriCoreBindings
 
 /// One progress report of a core job. Rust sends at most about ten a second
 /// (R1858); `CoreJob.progress` keeps only the newest.
+public enum CoreProgressPhase: Sendable, Hashable {
+    case planning
+    case committing
+    case named(String)
+}
 public struct CoreProgress: Sendable, Hashable {
+    public let phase: CoreProgressPhase
+    public var cancellable: Bool { phase != .committing }
+    public let etaMilliseconds: UInt64?
     public let job: JobID
     public let completed: UInt64
     /// `nil` while the amount of work is unknown.
     public let total: UInt64?
 
     init(_ update: MeguriCoreBindings.ProgressUpdate) {
+        switch update.phase {
+        case .planning: phase = .planning
+        case .committing: phase = .committing
+        case .named(let name): phase = .named(name)
+        }
+        etaMilliseconds = update.etaMillis
         job = JobID(rawValue: update.jobId)
         completed = update.completed
         total = update.total

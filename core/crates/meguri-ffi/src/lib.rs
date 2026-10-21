@@ -34,7 +34,7 @@ mod runtime;
 pub mod suspend;
 pub mod tags;
 #[cfg(feature = "test-hooks")]
-mod test_hooks;
+pub mod test_hooks;
 pub mod undo;
 
 pub use cancel::CancelToken;

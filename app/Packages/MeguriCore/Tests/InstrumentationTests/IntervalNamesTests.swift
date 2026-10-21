@@ -59,8 +59,8 @@ import Testing
             "core_version", "core_build_info", "set_event_listener",
             "CancelToken.new", "CancelToken.cancel", "CancelToken.isCancelled", "render_card",
             "compare_typed_answer", "card_excerpts",
-            "DeckDeletionJob.result", "add_deck", "rename_deck", "move_decks",
-            "collapse_decks", "select_deck", "deck_deletion_summary", "start_delete_decks",
+            "DeckDeletionJob.result", "add_deck", "start_rename_deck", "start_move_decks",
+            "start_collapse_decks", "select_deck", "deck_deletion_summary", "start_delete_decks",
             "NoteDeletionJob.result", "add_note", "update_note", "read_note",
             "check_note_fields", "start_delete_notes", "notetype_names", "read_notetype",
             "add_notetype", "add_stock_notetype", "clone_notetype", "ensure_image_occlusion_notetype",
@@ -73,7 +73,7 @@ import Testing
             "start_rename_tag", "start_reparent_tags", "start_delete_tags", "start_clear_unused_tags",
             "add_media", "flush_for_background", "suspend", "resume",
             "UndoJob.result", "peek_undo", "peek_redo", "start_undo",
-            "start_redo", "rename_notetype_template", "start_add_notes", "NoteAdditionJob.result",
+            "start_redo", "try_pending_review_restore", "DeckRenameJob.result", "DeckMoveJob.result", "DeckCollapseJob.result", "start_add_notes", "NoteAdditionJob.result",
         ])
         for call in BridgeCall.all {
             #expect(call.interval.category == .bridge)

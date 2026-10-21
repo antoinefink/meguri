@@ -526,7 +526,7 @@ pub enum ReviewUndoScope {
 }
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug, PartialEq, uniffi::Enum)]
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum ReviewDisabledReason {
     None,
     ClearedByRollover,

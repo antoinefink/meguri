@@ -160,19 +160,105 @@ pub fn collapse_in(
 pub fn add(collection: &Collection, name: String) -> Result<OpResult<Deck>, EngineError> {
     collection.run(spec("add_deck", undo::ADD_DECK), move |ctx| add_in(ctx.scope(), &name))
 }
+// Even a single edited deck can normalize/rename its entire descendant tree.
+// Include every requested iteration, even repeats, in the live-table bound.
+// Additions must replan the spec too.
+fn controlled<T: Send + 'static>(
+    collection: &Collection,
+    op: &'static str,
+    name: &'static str,
+    requested: usize,
+    cancel: std::sync::Arc<crate::CancelToken>,
+    progress: crate::ProgressSink,
+    apply: impl Fn(&mut WriteScope<'_>) -> Result<T, EngineError> + Send + Sync + 'static,
+) -> Result<OpResult<T>, EngineError> {
+    use crate::executor::plan_commit::{Plan, plan_and_commit_with};
+    plan_and_commit_with(
+        collection,
+        meguri_storage::ReaderRole::Maintenance,
+        spec(op, name).cancel(cancel).progress(progress),
+        |ctx| {
+            ctx.check_cancel()?;
+            let count = ctx.snapshot().deck_rows()?.len().max(1).saturating_mul(requested);
+            ctx.check_cancel()?;
+            Ok(Plan {
+                value: count,
+                preconditions: vec![crate::Precondition::TableUntouched {
+                    table: meguri_storage::Table::Decks,
+                    since: ctx.seq(),
+                }],
+            })
+        },
+        |base, count| {
+            if *count > crate::tags::LONG_WRITE_ROWS {
+                // Retain the caller's exact ports on the chosen catalog spec.
+                let mut chosen = base.clone();
+                chosen.def = crate::executor::catalog::BULK_OP;
+                chosen.declare_long_write(
+                    std::time::Duration::from_micros(100).saturating_mul(u32::try_from(*count).unwrap_or(u32::MAX)),
+                )
+            } else {
+                base.clone()
+            }
+        },
+        move |ctx, _| apply(ctx.scope()),
+    )
+}
 pub fn rename(collection: &Collection, id: DeckId, name: String) -> Result<OpResult<Deck>, EngineError> {
-    collection.run(spec("rename_deck", undo::RENAME_DECK), move |ctx| {
-        rename_in(ctx.scope(), id, &name)
-    })
+    rename_controlled(
+        collection,
+        id,
+        name,
+        crate::CancelToken::new(),
+        crate::ProgressSink::new(),
+    )
+}
+pub fn rename_controlled(
+    collection: &Collection,
+    id: DeckId,
+    name: String,
+    cancel: std::sync::Arc<crate::CancelToken>,
+    progress: crate::ProgressSink,
+) -> Result<OpResult<Deck>, EngineError> {
+    controlled(
+        collection,
+        "rename_deck",
+        undo::RENAME_DECK,
+        1,
+        cancel,
+        progress,
+        move |scope| rename_in(scope, id, &name),
+    )
 }
 pub fn move_decks(
     collection: &Collection,
     ids: Vec<DeckId>,
     parent: Option<DeckId>,
 ) -> Result<OpResult<usize>, EngineError> {
-    collection.run(spec("reparent_decks", undo::RENAME_DECK), move |ctx| {
-        move_in(ctx.scope(), &ids, parent)
-    })
+    move_decks_controlled(
+        collection,
+        ids,
+        parent,
+        crate::CancelToken::new(),
+        crate::ProgressSink::new(),
+    )
+}
+pub fn move_decks_controlled(
+    collection: &Collection,
+    ids: Vec<DeckId>,
+    parent: Option<DeckId>,
+    cancel: std::sync::Arc<crate::CancelToken>,
+    progress: crate::ProgressSink,
+) -> Result<OpResult<usize>, EngineError> {
+    controlled(
+        collection,
+        "reparent_decks",
+        undo::RENAME_DECK,
+        ids.len(),
+        cancel,
+        progress,
+        move |scope| move_in(scope, &ids, parent),
+    )
 }
 pub fn collapse(
     collection: &Collection,
@@ -180,7 +266,30 @@ pub fn collapse(
     which: CollapseScope,
     collapsed: bool,
 ) -> Result<OpResult<()>, EngineError> {
-    collection.run(spec("set_deck_collapsed", undo::EXPAND_COLLAPSE), move |ctx| {
-        collapse_in(ctx.scope(), &ids, which, collapsed)
-    })
+    collapse_controlled(
+        collection,
+        ids,
+        which,
+        collapsed,
+        crate::CancelToken::new(),
+        crate::ProgressSink::new(),
+    )
+}
+pub fn collapse_controlled(
+    collection: &Collection,
+    ids: Vec<DeckId>,
+    which: CollapseScope,
+    collapsed: bool,
+    cancel: std::sync::Arc<crate::CancelToken>,
+    progress: crate::ProgressSink,
+) -> Result<OpResult<()>, EngineError> {
+    controlled(
+        collection,
+        "set_deck_collapsed",
+        undo::EXPAND_COLLAPSE,
+        ids.len(),
+        cancel,
+        progress,
+        move |scope| collapse_in(scope, &ids, which, collapsed),
+    )
 }

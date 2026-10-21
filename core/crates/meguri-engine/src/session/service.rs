@@ -347,6 +347,11 @@ struct PendingAnswer {
     restorer: ProductionRestore,
 }
 #[derive(Clone)]
+struct PendingRedo {
+    event: u64,
+    frozen: FrozenAnswer,
+}
+#[derive(Clone)]
 struct Session {
     id: SessionId,
     deck: DeckId,
@@ -358,7 +363,7 @@ struct Session {
     last: Head,
     last_answer: i64,
     pending: Vec<PendingAnswer>,
-    redo: Vec<FrozenAnswer>,
+    redo: Vec<PendingRedo>,
     failed: Arc<AtomicBool>,
     built: Stamp,
     rollover_pending: bool,
@@ -442,6 +447,9 @@ enum Work {
         expected: crate::EntryId,
         restore: Box<ProductionRestore>,
         rollback: Box<UndoPresentation>,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+        reply: Option<mpsc::SyncSender<Result<Head, EngineError>>>,
     },
     Observe {
         generation: Generation,
@@ -478,6 +486,11 @@ pub enum RenderStage {
 }
 #[cfg(feature = "test-hooks")]
 type RenderHook = Arc<dyn Fn(RenderStage) + Send + Sync>;
+/// Job restoration stays under the existing lifecycle orchestration owner.
+pub enum HistoryRestore {
+    Session(Head),
+    Global(crate::OpResult<crate::StepInfo>),
+}
 pub struct ReviewService {
     inner: Arc<Inner>,
     threads: crate::ThreadRegistry,
@@ -487,6 +500,8 @@ pub struct ReviewService {
     renders: AtomicU64,
     #[cfg(feature = "test-hooks")]
     render_hook: Mutex<Option<RenderHook>>,
+    #[cfg(feature = "test-hooks")]
+    fail_restore_projection: AtomicBool,
 }
 impl ReviewService {
     pub fn new(engine: &Engine, queues: Arc<QueueProvider>) -> Result<Arc<Self>, EngineError> {
@@ -541,6 +556,8 @@ impl ReviewService {
             renders: AtomicU64::new(0),
             #[cfg(feature = "test-hooks")]
             render_hook: Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            fail_restore_projection: AtomicBool::new(false),
         }))
     }
     #[cfg(feature = "test-hooks")]
@@ -568,6 +585,10 @@ impl ReviewService {
     #[cfg(feature = "test-hooks")]
     pub fn fail_application_for_testing(&self, event: u64) {
         self.inner.fail_application.store(event, Ordering::Release);
+    }
+    #[cfg(feature = "test-hooks")]
+    pub fn fail_next_restore_projection_for_testing(&self) {
+        self.fail_restore_projection.store(true, Ordering::Release);
     }
     #[cfg(feature = "test-hooks")]
     pub fn fail_journal_for_testing(&self, stage: super::journal::JournalStage) -> Result<(), EngineError> {
@@ -1162,13 +1183,27 @@ impl ReviewService {
         Ok(())
     }
     pub fn peek_undo(&self, scope: UndoScope) -> Result<UndoStatus, EngineError> {
+        self.peek_restore(scope, false)
+    }
+    pub fn peek_redo(&self, scope: UndoScope) -> Result<UndoStatus, EngineError> {
+        self.peek_restore(scope, true)
+    }
+    fn peek_restore(&self, scope: UndoScope, redo: bool) -> Result<UndoStatus, EngineError> {
         let (c, _) = self.bound()?;
         let state = self.inner.state.lock().unwrap();
         if let UndoScope::Session(id) = scope {
-            let session = state.session.as_ref().filter(|s| s.id == id).ok_or_else(no_session)?;
-            if let Some(pending) = session.pending.last() {
+            let s = state.session.as_ref().filter(|s| s.id == id).ok_or_else(no_session)?;
+            if s.ending || s.restoring || s.failed.load(Ordering::Acquire) {
+                return Err(EngineError::unavailable("answer chain is restoring"));
+            }
+            let event = if redo {
+                s.redo.last().map(|p| p.event)
+            } else {
+                s.pending.last().map(|p| p.event)
+            };
+            if let Some(event) = event {
                 return Ok(UndoStatus::Available(crate::StepInfo {
-                    id: crate::EntryId(pending.event),
+                    id: crate::EntryId(event),
                     name: crate::undo::names::ANSWER_CARD,
                     kind: crate::StepKind::Answer,
                     session: Some(id),
@@ -1177,22 +1212,91 @@ impl ReviewService {
             }
         }
         drop(state);
-        c.peek_undo(scope)
+        if redo { c.peek_redo(scope) } else { c.peek_undo(scope) }
+    }
+    /// Atomic short admission: never falls through to collection history.
+    /// A busy lifecycle owner refuses promptly instead of waiting on a write.
+    pub fn try_pending_restore(&self, scope: UndoScope, redo: bool) -> Result<Option<Head>, EngineError> {
+        let _control = self
+            .control
+            .try_lock()
+            .map_err(|_| EngineError::unavailable("review lifecycle is busy"))?;
+        if redo {
+            self.redo_inner(scope, true, crate::CancelToken::new(), crate::ProgressSink::new())
+        } else {
+            self.undo_inner(scope, true, None)
+        }
+    }
+    pub fn restore_controlled(
+        &self,
+        scope: UndoScope,
+        redo: bool,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+    ) -> Result<HistoryRestore, EngineError> {
+        let _control = self.control.lock().unwrap();
+        cancel.check()?;
+        let (c, _) = self.bound()?;
+        if self.active_session().is_some() || matches!(scope, UndoScope::Session(_)) {
+            let head = if redo {
+                self.redo_inner(scope, false, cancel, progress)?
+            } else {
+                self.undo_inner(scope, false, Some((cancel, progress)))?
+            };
+            Ok(HistoryRestore::Session(head.ok_or_else(no_session)?))
+        } else {
+            let result = if redo {
+                c.redo_controlled(scope, cancel, progress)?
+            } else {
+                c.undo_controlled(scope, cancel, progress)?
+            };
+            Ok(HistoryRestore::Global(result))
+        }
     }
     pub fn undo(&self, scope: UndoScope) -> Result<Head, EngineError> {
+        let _control = self.control.lock().unwrap();
+        self.undo_inner(scope, false, None)?.ok_or_else(no_session)
+    }
+    fn undo_inner(
+        &self,
+        scope: UndoScope,
+        pending_only: bool,
+        ports: Option<(Arc<crate::CancelToken>, crate::ProgressSink)>,
+    ) -> Result<Option<Head>, EngineError> {
         let (c, journal) = self.bound()?;
         if let UndoScope::Session(id) = scope {
             let mut state = self.inner.state.lock().unwrap();
             let s = state.session.as_mut().filter(|s| s.id == id).ok_or_else(no_session)?;
-            if s.restoring || s.failed.load(Ordering::Acquire) {
+            if s.ending || s.restoring || s.failed.load(Ordering::Acquire) {
                 return Err(EngineError::unavailable("answer chain is restoring"));
             }
-            if let Some(pending) = s.pending.last().cloned().filter(|pending| {
-                pending
-                    .phase
-                    .try_update(Ordering::AcqRel, Ordering::Acquire, |p| (p < 2).then_some(3))
-                    .is_ok()
-            }) {
+            if let Some(pending) = s
+                .pending
+                .last()
+                .cloned()
+                .filter(|pending| pending.phase.load(Ordering::Acquire) < 2)
+            {
+                drop(state);
+                if let Some((cancel, progress)) = &ports {
+                    cancel.check()?;
+                    progress.set_phase(crate::ProgressPhase::Committing);
+                }
+                let mut state = self.inner.state.lock().unwrap();
+                let s = state.session.as_mut().filter(|s| s.id == id).ok_or_else(no_session)?;
+                if s.ending || s.restoring || s.failed.load(Ordering::Acquire) {
+                    return Err(EngineError::unavailable("answer chain is restoring"));
+                }
+                // The application worker or a new answer can win while progress
+                // is delivered without the service lock. Select again then.
+                if s.pending.last().is_none_or(|last| last.event != pending.event)
+                    || pending
+                        .phase
+                        .try_update(Ordering::AcqRel, Ordering::Acquire, |p| (p < 2).then_some(3))
+                        .is_err()
+                {
+                    drop(state);
+                    return self.undo_inner(scope, pending_only, ports);
+                }
                 pending.cancel.store(true, Ordering::Release);
                 let mut p = s.presentation.lock().unwrap();
                 let Presentation { queue, overlay, .. } = &mut *p;
@@ -1201,13 +1305,22 @@ impl ReviewService {
                 drop(p);
                 s.cache.undo_accepted(CardId(pending.frozen.card));
                 s.pending.pop();
-                s.redo.push(pending.frozen.clone());
+                s.redo.push(PendingRedo {
+                    event: pending.event,
+                    frozen: pending.frozen.clone(),
+                });
                 // Cancellation's file acknowledgement is required before a
                 // conflicting operation; UI restoration itself happens above.
                 drop(state);
                 journal.terminal(pending.event, Terminal::Cancelled)?;
-                return self.head(id, 3);
+                return self.head(id, 3).map(Some);
             }
+            drop(state);
+            if pending_only {
+                return Ok(None);
+            }
+            let mut state = self.inner.state.lock().unwrap();
+            let s = state.session.as_mut().filter(|s| s.id == id).ok_or_else(no_session)?;
             if s.pending.is_empty()
                 && let Some((entry, metadata)) = c.answer_undo_metadata(scope)?
                 && let Some(restore) = metadata.production
@@ -1237,6 +1350,15 @@ impl ReviewService {
                 };
                 s.restoring = true;
                 s.failed.store(true, Ordering::Release);
+                let (reply, wait) = if ports.is_some() {
+                    let (tx, rx) = mpsc::sync_channel(1);
+                    (Some(tx), Some(rx))
+                } else {
+                    (None, None)
+                };
+                let (cancel, progress) = ports
+                    .clone()
+                    .unwrap_or_else(|| (crate::CancelToken::new(), crate::ProgressSink::new()));
                 if self
                     .inner
                     .tx
@@ -1245,6 +1367,9 @@ impl ReviewService {
                         expected,
                         restore: Box::new(restore.clone()),
                         rollback: Box::new(rollback.clone()),
+                        cancel,
+                        progress,
+                        reply,
                     })
                     .is_err()
                 {
@@ -1254,23 +1379,44 @@ impl ReviewService {
                     s.failed.store(false, Ordering::Release);
                     return Err(EngineError::unavailable("review worker stopped"));
                 }
-                return Ok(head);
+                drop(state);
+                return if let Some(wait) = wait {
+                    wait.recv().map_err(invalid)?.map(Some)
+                } else {
+                    Ok(Some(head))
+                };
             }
         }
+        if pending_only {
+            return Ok(None);
+        }
         self.flush_for_background()?;
-        c.undo(scope)?;
         let id = self.active_session().ok_or_else(no_session)?;
-        self.head(id, 3)
+        let (cancel, progress) = ports.unwrap_or_else(|| (crate::CancelToken::new(), crate::ProgressSink::new()));
+        let restored = c.undo_controlled(scope, cancel, progress)?;
+        self.restored_head(&c, id, restored.seq).map(Some)
     }
     pub fn redo(&self, scope: UndoScope) -> Result<Head, EngineError> {
-        if self
-            .inner
-            .state
-            .lock()
-            .unwrap()
-            .session
-            .as_ref()
-            .is_some_and(|s| s.restoring)
+        let _control = self.control.lock().unwrap();
+        self.redo_inner(scope, false, crate::CancelToken::new(), crate::ProgressSink::new())?
+            .ok_or_else(no_session)
+    }
+    fn redo_inner(
+        &self,
+        scope: UndoScope,
+        pending_only: bool,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+    ) -> Result<Option<Head>, EngineError> {
+        if !pending_only
+            && self
+                .inner
+                .state
+                .lock()
+                .unwrap()
+                .session
+                .as_ref()
+                .is_some_and(|s| s.restoring)
         {
             self.flush_for_background()?;
         }
@@ -1279,12 +1425,13 @@ impl ReviewService {
             let frozen = {
                 let mut state = self.inner.state.lock().unwrap();
                 let session = state.session.as_mut().filter(|s| s.id == id).ok_or_else(no_session)?;
-                if session.restoring || session.failed.load(Ordering::Acquire) {
+                if session.ending || session.restoring || session.failed.load(Ordering::Acquire) {
                     return Err(EngineError::unavailable("answer chain is restoring"));
                 }
                 session.redo.last().cloned()
             };
-            if let Some(frozen) = frozen {
+            if let Some(redo) = frozen {
+                let frozen = redo.frozen;
                 let h = self.head(id, 10)?;
                 let item = h
                     .items
@@ -1292,6 +1439,8 @@ impl ReviewService {
                     .find(|h| h.card_id.0 == frozen.card)
                     .ok_or_else(|| invalid("redo card no longer presented"))?;
                 let request = frozen.request([0; 32])?;
+                cancel.check()?;
+                progress.set_phase(crate::ProgressPhase::Committing);
                 let outcome = self.answer_inner(
                     id,
                     item.card_id,
@@ -1307,12 +1456,49 @@ impl ReviewService {
                 if let Some(s) = self.inner.state.lock().unwrap().session.as_mut().filter(|s| s.id == id) {
                     s.redo.pop();
                 }
-                return self.head(id, 3);
+                return self.head(id, 3).map(Some);
             }
         }
-        c.redo(scope)?;
+        if pending_only {
+            return Ok(None);
+        }
+        self.flush_for_background()?;
         let id = self.active_session().ok_or_else(no_session)?;
-        self.head(id, 3)
+        let restored = c.redo_controlled(scope, cancel, progress)?;
+        self.restored_head(&c, id, restored.seq).map(Some)
+    }
+    fn restored_head(&self, c: &Collection, id: SessionId, seq: Seq) -> Result<Head, EngineError> {
+        #[cfg(feature = "test-hooks")]
+        let fail = self.fail_restore_projection.swap(false, Ordering::AcqRel);
+        #[cfg(not(feature = "test-hooks"))]
+        let fail = false;
+        let projected = if fail {
+            Err(EngineError::unavailable("injected restore projection failure"))
+        } else {
+            self.head(id, 3)
+        };
+        projected.map_err(|error| {
+            let error = EngineError::CommitCompleted {
+                seq,
+                message: format!("review projection unavailable: {error}"),
+            };
+            let mut state = self.inner.state.lock().unwrap();
+            if let Some(s) = state.session.as_mut().filter(|s| s.id == id) {
+                s.failed.store(true, Ordering::Release);
+                if let Some(item) = s.last.items.first() {
+                    emit(
+                        c,
+                        Some(seq),
+                        SessionEvent::CommitFailed {
+                            session_id: id,
+                            card_id: item.card_id,
+                            error: error.clone(),
+                        },
+                    );
+                }
+            }
+            error
+        })
     }
 }
 
@@ -2125,11 +2311,16 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
             expected,
             restore,
             rollback,
+            cancel,
+            progress,
+            reply,
         } => {
             let (c, journal) = bound(inner)?;
             // run_op retires WAL/Done evidence before the U25 mutation. No
             // service/presentation lock is held while the writer is occupied.
-            let outcome = c.submit_answer_undo(UndoScope::Session(session), expected).wait();
+            let outcome = c
+                .submit_answer_undo(UndoScope::Session(session), expected, cancel, progress)
+                .wait();
             let failure = match outcome {
                 Ok(_) | Err(EngineError::CommitCompleted { .. }) | Err(EngineError::MediaCommitPending { .. }) => None,
                 Err(error) => Some(error),
@@ -2139,7 +2330,7 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
                 return Ok(());
             };
             let old = s.last.items.clone();
-            if let Some(error) = failure {
+            if let Some(error) = failure.clone() {
                 restore.restore(crate::Direction::Redo);
                 (*rollback).restore(s);
                 emit(
@@ -2179,9 +2370,15 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
                 None,
                 SessionEvent::QueueHeadChanged {
                     session_id: session,
-                    diff: diff(&old, head),
+                    diff: diff(&old, head.clone()),
                 },
             );
+            if let Some(reply) = reply {
+                let _ = reply.send(match failure {
+                    Some(error) => Err(error),
+                    None => Ok(head),
+                });
+            }
             Ok(())
         }
         #[cfg(feature = "test-hooks")]

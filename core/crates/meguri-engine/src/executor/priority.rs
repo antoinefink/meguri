@@ -26,6 +26,14 @@ impl Queues {
         self.interactive.pop_front().or_else(|| self.background.pop_front())
     }
 
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn contains_op(&self, name: &str) -> bool {
+        self.interactive
+            .iter()
+            .chain(&self.background)
+            .any(|t| t.meta.name == name)
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.interactive.is_empty() && self.background.is_empty()
     }

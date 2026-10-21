@@ -158,9 +158,6 @@ impl NoteDeletionJob {
         Ok(self.result.lock().unwrap().clone())
     }
 }
-/// The engine's deletion orchestrator owns backup/preconditions and no-op
-/// handling. Its current API accepts no token after invocation; cancellation
-/// is checked before entry, with the remaining contract reported in handoff.
 #[uniffi::export]
 pub fn start_delete_notes(ids: Vec<i64>) -> Result<NoteDeletionJobStart, CoreError> {
     callback::enter("start_delete_notes");
@@ -169,10 +166,12 @@ pub fn start_delete_notes(ids: Vec<i64>) -> Result<NoteDeletionJobStart, CoreErr
     let out = result.clone();
     let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |j| {
         j.cancel.check()?;
-        let r = meguri_engine::notes::delete(
+        let r = meguri_engine::notes::delete_controlled(
             &c,
             ids.into_iter().map(NoteId).collect(),
             meguri_engine::OpSource::UserUndoable,
+            j.cancel.clone(),
+            j.progress.clone(),
         )?;
         *out.lock().unwrap() = Some(match r {
             Some(r) => NoteDeletion {

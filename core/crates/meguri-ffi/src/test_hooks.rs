@@ -135,3 +135,9 @@ pub fn test_bootstrap_collection(location: crate::collection::CollectionLocation
     )
     .map_err(CoreError::from)
 }
+
+/// Rust writer-gate fixtures use the runtime owned by the real exports.
+/// This helper is not a UniFFI export and adds no generated measurement API.
+pub fn collection_for_testing() -> Result<meguri_engine::Collection, CoreError> {
+    runtime::host()?.collection().map_err(Into::into)
+}
