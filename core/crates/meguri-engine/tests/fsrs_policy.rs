@@ -328,19 +328,29 @@ fn compatibility_digest(c: &Collection) -> CompatibilityDigest {
     }
 }
 
+fn answer_preservation_dump(c: &Collection) -> serde_json::Value {
+    let reader = c.reader(ReaderRole::Query).unwrap();
+    let snapshot = reader.snapshot().unwrap();
+    meguri_testkit::dump::preservation::raw_dump(|sql| snapshot.execute_raw(sql, &[])).unwrap()
+}
+
 #[test]
 fn compatibility_data_and_unsupported_rows_survive_enable_recompute_preset_save_sync_and_reopen() {
     use meguri_engine::sched::{
+        answer,
         fsrs_policy::unsupported_home_presets,
         memory::{self, Target},
     };
     use meguri_model::{
+        clock::Clock,
         config::ConfigEntry,
         ids::{DeckConfigId, DeckId},
         proto::{ProtoBlob, deck::DeckKind},
         time::EpochSecs,
         usn::Usn,
     };
+    use meguri_sched::{answer::Rating, states::fsrs_glue::FsrsCache};
+    use meguri_testkit::dump::preservation::assert_changes_allowed;
     let h = populate(4);
     h.collection
         .run(
@@ -473,6 +483,127 @@ fn compatibility_data_and_unsupported_rows_survive_enable_recompute_preset_save_
     );
     assert_eq!(report.changed, 1);
     assert_eq!(compatibility_digest(&h.collection), before);
+
+    // K3's exact seed: production Good answers on the supported normal home
+    // preset, on both sides of the scheduler's actual next-day boundary.
+    let first_day = h.collection.check_rollover().unwrap().today;
+    let boundary = h.collection.next_day_at().unwrap();
+    assert!(h.clock.now_ms() / 1000 < boundary);
+    let mut models = FsrsCache::default();
+    let mut previous = answer_preservation_dump(&h.collection);
+    for day_offset in 0..2 {
+        if day_offset == 1 {
+            h.clock.set_now_ms((boundary + 1) * 1000);
+        }
+        // D8 maintenance owns any rollover writes, separately from the answer.
+        // This seed has no buried cards, so maintenance must preserve all rows.
+        let day = h.collection.check_rollover().unwrap();
+        assert_eq!(day.today, first_day + day_offset);
+        if day_offset == 1 {
+            assert!(day.next_day_at > boundary);
+        }
+        let preimage = answer_preservation_dump(&h.collection);
+        assert_changes_allowed(&previous, &preimage, &[]).unwrap();
+        let (card, deck) = {
+            let rows = h.collection.reader(ReaderRole::Query).unwrap();
+            let card = rows.card(CardId(100)).unwrap().unwrap();
+            assert_eq!(card.deck_id, DeckId(1));
+            assert_eq!(card.original_deck_id, DeckId(0));
+            assert_eq!(card.queue, CardQueue::Review);
+            let deck = rows.deck(DeckId(1)).unwrap().unwrap();
+            let DeckKind::Normal(normal) = &deck.kind.kind else {
+                panic!("card100 must retain its normal home deck")
+            };
+            assert_eq!(normal.config_id, 1);
+            assert_eq!(deck.common.learning_studied, 17);
+            (card, deck)
+        }; // Release the only Query lease before prediction/answer maintenance.
+        let prediction = answer::predict(&h.collection, card.id, &mut models, None).unwrap();
+        assert_eq!(prediction.answered_at.0, h.clock.now_ms());
+        assert_eq!(prediction.today, day.today);
+        assert_eq!(prediction.next_day_at, day.next_day_at);
+        let request = prediction.answer(Rating::Good, 1_234);
+        let preview = request.chosen.revlog;
+        let result = answer::answer(&h.collection, request).unwrap().value;
+        assert!(!result.leech);
+        assert!(!result.suspended);
+        assert!(result.buried.is_empty());
+        let log_key = result.revlog_id.0.to_string();
+        assert_eq!(result.revlog_id.0, h.clock.now_ms());
+        assert!(preimage["revlog"].get(&log_key).is_none());
+        let postimage = answer_preservation_dump(&h.collection);
+        let mut allowed = vec!["/col/1/mod".to_owned(), format!("/revlog/{log_key}")];
+        for column in [
+            "mod", "usn", "type", "queue", "due", "ivl", "factor", "reps", "lapses", "left", "data",
+        ] {
+            allowed.push(format!("/cards/100/{column}"));
+        }
+        for column in ["common", "mtime_secs", "usn"] {
+            allowed.push(format!("/decks/1/{column}"));
+        }
+        // All config/preset rows, cards101..104, deck kind/extension bytes,
+        // other decks, notes and imported logs remain outside the allowlist.
+        assert_changes_allowed(
+            &preimage,
+            &postimage,
+            &allowed.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert_eq!(
+            postimage["revlog"].as_object().unwrap().len(),
+            preimage["revlog"].as_object().unwrap().len() + 1
+        );
+        let rows = h.collection.reader(ReaderRole::Query).unwrap();
+        let written = rows.card(card.id).unwrap().unwrap();
+        assert_eq!(written.reps, card.reps + 1);
+        assert_eq!(written.mtime.0, h.clock.now_ms() / 1000);
+        assert_eq!(written.usn.0, -1);
+        assert_eq!(written.data.last_review_secs, Some(h.clock.now_ms() / 1000));
+        assert!(written.data.memory_state.is_some());
+        assert_eq!(written.data.new_position, card.data.new_position);
+        assert_eq!(written.data.custom_data(), card.data.custom_data());
+        assert_eq!(
+            written.data.unknown_keys().collect::<Vec<_>>(),
+            card.data.unknown_keys().collect::<Vec<_>>()
+        );
+        let log = rows.revlog_entry(result.revlog_id).unwrap().unwrap();
+        assert_eq!(log.card_id, card.id);
+        assert_eq!(log.button, Rating::Good as u8);
+        assert_eq!(
+            (log.interval, log.last_interval, log.ease_factor),
+            (preview.interval, preview.last_interval, preview.factor)
+        );
+        assert_eq!(log.kind as u8, preview.kind);
+        assert_eq!(log.answer_millis, 1_234);
+        assert_eq!(log.usn.0, -1);
+        // Admit only A6's counters/day/time inside the rewritten common blob;
+        // the unused learning count and all remaining common fields stay exact.
+        let mut expected_common = deck.common.clone();
+        if expected_common.last_day_studied != day.today {
+            expected_common.last_day_studied = day.today;
+            expected_common.new_studied = 0;
+            expected_common.review_studied = 0;
+            expected_common.milliseconds_studied = 0;
+        }
+        expected_common.review_studied += 1;
+        expected_common.milliseconds_studied += 1_234;
+        let written_deck = rows.deck(deck.id).unwrap().unwrap();
+        assert_eq!(written_deck.common.to_bytes(), expected_common.to_bytes());
+        assert_eq!(written_deck.kind.to_bytes(), deck.kind.to_bytes());
+        assert_eq!(written_deck.mtime.0, h.clock.now_ms() / 1000);
+        assert_eq!(written_deck.usn.0, -1);
+        assert_eq!(rows.col().unwrap().modified.0, h.clock.now_ms());
+        drop(rows);
+        previous = postimage;
+    }
+    // Answers above verified their own exact preimages. Keep every subsequent
+    // nonanswer phase's existing whole-deck/whole-revlog checks strict.
+    let after_answers = compatibility_digest(&h.collection);
+    assert_eq!(after_answers.config, before.config);
+    assert_eq!(after_answers.unsupported_presets, before.unsupported_presets);
+    assert_eq!(after_answers.unsupported_cards, before.unsupported_cards);
+    assert_eq!(after_answers.normal_compat, before.normal_compat);
+    let before = after_answers;
     memory::recompute(
         &h.collection,
         Target::All,
@@ -483,7 +614,7 @@ fn compatibility_data_and_unsupported_rows_survive_enable_recompute_preset_save_
     .unwrap();
     assert_eq!(compatibility_digest(&h.collection), before);
     // Real existing P10 preset primitive; the full U49 options save remains
-    // its provider's later leg, as do U44 answers and U47 optimization.
+    // its provider's later leg, as does U47 optimization.
     h.collection
         .run(OpSpec::named("save_other_preset", OpSource::UserUndoable), |ctx| {
             meguri_engine::deck_config::update_in(ctx.scope(), DeckConfigId(5), |fields| fields.reviews_per_day = 19)
