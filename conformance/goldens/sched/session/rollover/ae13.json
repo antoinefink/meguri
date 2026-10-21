@@ -48,7 +48,7 @@
         "card": {
           "#c2": {
             "data": {},
-            "did": "Day",
+            "did": "QX_D01",
             "due": 1,
             "factor": 0,
             "flags": 0,
@@ -122,7 +122,7 @@
               "lrt": 1894766402,
               "s": 13.5874
             },
-            "did": "Day",
+            "did": "QX_D01",
             "due": 14,
             "factor": 2500,
             "flags": 0,
@@ -161,10 +161,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "driver_sha256": "9b5b72a872e653e261f80ba56ab4c80cb0ed388624fe2d866307a497a123e9af",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "sched/session/rollover/ae13",
-  "scenario_sha256": "df2244668ab8c7dbb390589a577676301c28e9b18cbcd09e63328c18ea8b70fb",
+  "scenario_sha256": "63f1dec77b8f45b0d4eb3b589bc3c8e6be541385a6432ae11263d2b96b1f64ce",
   "tz": "UTC"
 }
