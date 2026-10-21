@@ -2,6 +2,7 @@
 //! the file; the production WAL-sync path and SQLite's own syncs run unchanged.
 use std::collections::BTreeMap;
 use std::ffi::{CStr, c_char, c_int};
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
@@ -78,13 +79,17 @@ impl Drop for CountingVfs {
     }
 }
 pub(crate) fn selected(path: &Path) -> bool {
-    PATHS.lock().unwrap_or_else(PoisonError::into_inner).contains_key(path)
+    let Ok(path) = path.canonicalize() else {
+        return false;
+    };
+    PATHS.lock().unwrap_or_else(PoisonError::into_inner).contains_key(&path)
 }
 
 struct File {
     original: usize,
     methods: usize,
     filename: String,
+    path: Option<PathBuf>,
     open_flags: i32,
     records: Option<Records>,
 }
@@ -122,14 +127,25 @@ unsafe extern "C" fn open(
         } else {
             CStr::from_ptr(name).to_string_lossy().into_owned()
         };
+        // Normalize lookup identity before taking registry locks, but keep
+        // SQLite's actual filename untouched in the observation.
+        let path = if name.is_null() {
+            None
+        } else {
+            Path::new(std::ffi::OsStr::from_bytes(CStr::from_ptr(name).to_bytes()))
+                .canonicalize()
+                .ok()
+        };
         let paths = PATHS.lock().unwrap_or_else(PoisonError::into_inner);
-        let records = paths.iter().find_map(|(path, records)| {
-            let base = path.to_string_lossy();
-            (filename == base
-                || ["-wal", "-journal", "-shm"]
-                    .iter()
-                    .any(|suffix| filename == format!("{base}{suffix}")))
-            .then(|| records.clone())
+        let records = path.as_ref().and_then(|identity| {
+            paths.iter().find_map(|(path, records)| {
+                (identity == path
+                    || (flags & ffi::SQLITE_OPEN_MAIN_DB == 0
+                        && ["-wal", "-journal", "-shm"]
+                            .iter()
+                            .any(|suffix| *identity == crate::connections::sibling(path, suffix))))
+                .then(|| records.clone())
+            })
         });
         drop(paths);
         let original = (*file).pMethods;
@@ -144,6 +160,7 @@ unsafe extern "C" fn open(
                 original: original as usize,
                 methods: methods as usize,
                 filename,
+                path,
                 open_flags: flags,
                 records,
             }),
@@ -155,11 +172,13 @@ unsafe extern "C" fn open(
 unsafe extern "C" fn file_control(file: *mut ffi::sqlite3_file, op: c_int, arg: *mut std::ffi::c_void) -> c_int {
     let context = context(file);
     if op == ffi::SQLITE_FCNTL_HAS_MOVED {
-        let injected = HAS_MOVED
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(Path::new(&context.filename))
-            .copied();
+        let injected = context.path.as_ref().and_then(|path| {
+            HAS_MOVED
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(path)
+                .copied()
+        });
         if let Some((result, moved)) = injected {
             // SAFETY: HAS_MOVED's argument is a writable int supplied by SQLite.
             unsafe {
@@ -178,11 +197,13 @@ unsafe extern "C" fn file_control(file: *mut ffi::sqlite3_file, op: c_int, arg: 
 unsafe extern "C" fn sync(file: *mut ffi::sqlite3_file, flags: c_int) -> c_int {
     let context = context(file);
     let started = clock::now();
-    let fail = MAIN_SYNC_FAILURE
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .remove(Path::new(&context.filename))
-        .is_some();
+    let fail = context.path.as_ref().is_some_and(|path| {
+        MAIN_SYNC_FAILURE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(path)
+            .is_some()
+    });
     // SAFETY: the live handle and flags pass unchanged to its original VFS.
     let result = if fail {
         ffi::SQLITE_IOERR_FSYNC

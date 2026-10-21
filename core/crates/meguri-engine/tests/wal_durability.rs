@@ -224,6 +224,7 @@ fn a_replace_that_fails_after_swapping_the_file_still_flushes_the_reopened_write
 fn vfs_shim_counts_full_wal_syncs_covering_twenty_answers() {
     use meguri_storage::counting_vfs::{CountingVfs, clock};
     let (dir, path) = common::copy_fixture("schema-18.anki2");
+    let path = path.canonicalize().unwrap();
     let probe = CountingVfs::for_path(&path);
     let h = Harness::open_path(dir, path);
     let (_, cid) = common::steps::setup_note(&h.collection, "WAL sync answers");

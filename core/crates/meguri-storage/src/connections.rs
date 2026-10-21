@@ -297,4 +297,38 @@ mod tests {
             "file:/tmp/Caf%C3%A9~-_.db?mode=ro&immutable=1"
         );
     }
+
+    #[cfg(all(unix, feature = "test-hooks"))]
+    #[test]
+    fn uri_selects_counting_vfs_through_a_directory_symlink() {
+        use crate::counting_vfs::CountingVfs;
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let physical = directory.path().canonicalize().unwrap();
+        let path = physical.join("collection.anki2");
+        std::fs::write(&path, []).unwrap();
+        let alias = physical.join("alias");
+        symlink(&physical, &alias).unwrap();
+        let alias_path = alias.join("collection.anki2");
+        assert_ne!(alias_path, path);
+        assert_eq!(alias_path.canonicalize().unwrap(), path);
+        let probe = CountingVfs::for_path(&path);
+
+        for query in [None, Some("mode=ro"), Some("mode=ro&immutable=1")] {
+            let uri = file_uri(&alias_path, query);
+            let suffix = if query.is_some() {
+                "&vfs=meguri-counting"
+            } else {
+                "?vfs=meguri-counting"
+            };
+            assert!(uri.ends_with(suffix), "{uri}");
+        }
+        let unrelated = alias.join("other.anki2");
+        std::fs::write(&unrelated, []).unwrap();
+        assert!(!file_uri(&unrelated, None).contains("vfs="));
+        assert!(!file_uri(&alias.join("missing.anki2"), None).contains("vfs="));
+        drop(probe);
+        assert!(!file_uri(&alias_path, None).contains("vfs="));
+    }
 }

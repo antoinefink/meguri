@@ -221,7 +221,9 @@ The U32 review replaces it with a registered forwarding VFS selected through `vf
 
 A Linux smoke run of the registered observer on 2026-10-17 measured covering sync p50 2.500 µs and p95 3.458 µs, with three total VFS sync records; every answer met the one-second bound. This measures the container filesystem cache only.
 
-Apple physical-drive cost and native/simulator suspend timing are **queued**, owned by U37 (native Mac engine suites and counting-VFS p50/p95 before U37 acceptance) and U151 (Mac and VM simulator lifecycle integration before U151 acceptance/M1R). Their budgets and required artifacts are recorded in `docs/process/review-log/U32.md`. Every answer's WAL sync must complete within 1 s and successful suspend(2 s) must finish within 2 s at 150k cards. Linux filesystem timing is smoke evidence only and makes no claim about F_FULLFSYNC cost.
+A native Apple-silicon host run on 2026-10-21 (`native-durability/20261021T144201Z-66729`, bundled SQLite, Rust 1.99.0) measured covering FULL WAL sync p50 and p95 of 5.480416 ms, with three VFS sync records. All twenty answers met the unchanged one-second bound. These are covering-sync samples from the test, not twenty separate sync calls. The preceding native failure (`20261021T142916Z-52843`) observed no records because the test observer did not match a directory alias; it establishes no sync cost. The repaired observer keeps SQLite's actual filenames and flags, and its synthetic alias regressions failed before the repair and passed afterwards.
+
+The same native run passed all 19 engine suspend tests, including the 150k-card deadline case, all five WAL tests and the exported collection open/close test. U37's combined exported suspend/resume integration and U151's Mac and VM simulator lifecycle integration remain **queued** before their acceptance. Their budgets and required artifacts are recorded in `docs/process/review-log/U32.md`. Every answer's WAL sync must complete within 1 s and successful suspend(2 s) must finish within 2 s at 150k cards. This native preflight does not establish final device budgets; Linux filesystem timing remains smoke evidence only.
 
 ## C10. Close
 

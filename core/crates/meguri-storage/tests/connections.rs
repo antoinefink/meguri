@@ -51,6 +51,53 @@ fn the_writer_has_the_settings_of_c4_and_c9() {
     opened.close().unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn counting_vfs_records_a_real_full_wal_sync_through_a_directory_symlink() {
+    use meguri_storage::counting_vfs::{CountingVfs, clock};
+    use meguri_storage::rusqlite::ffi;
+    use std::os::unix::fs::symlink;
+
+    let (directory, path) = copy_fixture("schema-18.anki2");
+    let physical = path.canonicalize().unwrap();
+    let alias = directory.path().join("alias");
+    symlink(physical.parent().unwrap(), &alias).unwrap();
+    let alias_path = alias.join("collection.anki2");
+    assert_ne!(alias_path, physical);
+    assert_eq!(alias_path.canonicalize().unwrap(), physical);
+    let probe = CountingVfs::for_path(&physical);
+
+    // A different database in the same aliased directory stays unobserved.
+    let unrelated = alias.join("other.anki2");
+    fs::copy(&physical, &unrelated).unwrap();
+    let other = open(&unrelated).unwrap();
+    exec(other.writer(), "UPDATE cards SET flags = 2");
+    assert!(other.writer().sync_wal().unwrap());
+    other.close().unwrap();
+    assert!(probe.records().is_empty());
+
+    let opened = open(&alias_path).unwrap();
+    exec(opened.writer(), "UPDATE cards SET flags = 3");
+    let started = clock::now();
+    assert!(opened.writer().sync_wal().unwrap());
+    let records = probe.records();
+    let syncs: Vec<_> = records.iter().filter(|record| record.started >= started).collect();
+    assert_eq!(syncs.len(), 1, "{records:?}");
+    let record = syncs[0];
+    // Resolve the observed filename only for this comparison; the observer
+    // must retain exactly the filename supplied by SQLite, including aliases.
+    assert_eq!(
+        std::path::Path::new(&record.filename).canonicalize().unwrap(),
+        physical.with_extension("anki2-wal"),
+        "{record:?}"
+    );
+    assert_ne!(record.open_flags & ffi::SQLITE_OPEN_WAL, 0, "{record:?}");
+    assert_eq!(record.flags & 0x0f, ffi::SQLITE_SYNC_FULL, "{record:?}");
+    assert_eq!(record.result, ffi::SQLITE_OK, "{record:?}");
+    assert!(record.completed >= record.started, "{record:?}");
+    opened.close().unwrap();
+}
+
 #[test]
 fn each_reader_role_has_its_settings() {
     let (_dir, path) = copy_fixture("schema-18.anki2");
