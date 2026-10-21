@@ -1,5 +1,6 @@
 //! Held presentation, shared by production review and the E2 compatibility owner.
 //! No collection access, clock reads, executor, rendering or event delivery.
+pub mod overlay;
 pub mod token;
 
 use crate::queue::{Counts, Entry, Kind, LearningEntry, Queue};

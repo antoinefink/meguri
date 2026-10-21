@@ -46,6 +46,7 @@ pub struct AnswerCache {
     build: CacheBuildId,
     built: Stamp,
     scenario: bool,
+    snapshot_day: bool,
     enabled: bool,
     checked_second: Option<i64>,
     built_at: i64,
@@ -70,6 +71,49 @@ impl AnswerCache {
     /// H3 also needs a registered change witness when balancing is off.
     pub fn build_scenario_held(collection: &Collection) -> Result<Arc<Self>, EngineError> {
         Self::build_mode_inner(collection, true, true)?.ok_or_else(|| invalid("missing held build witness"))
+    }
+    pub(crate) fn build_session(collection: &Collection) -> Result<Arc<Self>, EngineError> {
+        Self::build_mode_inner(collection, false, true)?.ok_or_else(|| invalid("missing session cache"))
+    }
+    pub(crate) fn accept(&self, card: &Card, preset: DeckConfigId) {
+        if self.enabled && card.queue == CardQueue::Review {
+            self.value.lock().unwrap().append(
+                preset,
+                card.interval,
+                Entry {
+                    card: card.id,
+                    note: card.note_id,
+                },
+            );
+        }
+    }
+    pub(crate) fn from_session_snapshot(
+        collection: &Collection,
+        rows: &crate::Snapshot<'_>,
+        today: u32,
+        boundary: i64,
+        at: i64,
+    ) -> Result<Arc<Self>, EngineError> {
+        Self::from_snapshot(
+            collection,
+            rows,
+            super::DayReport {
+                today,
+                next_day_at: boundary,
+                rolled_over_from: None,
+            },
+            at,
+            false,
+            true,
+            true,
+        )?
+        .ok_or_else(|| invalid("missing session build cache"))
+    }
+    pub(crate) fn restore_view(&self, value: LoadBalancer) {
+        *self.value.lock().unwrap() = value;
+    }
+    pub(crate) fn undo_accepted(&self, card: CardId) {
+        self.value.lock().unwrap().remove_answer(card);
     }
     pub fn enabled(&self) -> bool {
         self.enabled
@@ -119,6 +163,7 @@ impl AnswerCache {
                     at,
                     true,
                     hold_disabled,
+                    false,
                 )?
             } else {
                 collection.core.exec.answer_caches.1.read_timed(
@@ -136,6 +181,7 @@ impl AnswerCache {
                             at,
                             false,
                             hold_disabled,
+                            false,
                         )
                     },
                 )?
@@ -155,6 +201,7 @@ impl AnswerCache {
         at: i64,
         scenario: bool,
         hold_disabled: bool,
+        snapshot_day: bool,
     ) -> Result<Option<Arc<Self>>, EngineError> {
         let (today, next_day_at) = (day.today, day.next_day_at);
         let clock = collection.core.exec.clock.as_ref();
@@ -208,6 +255,7 @@ impl AnswerCache {
             build: CacheBuildId(NEXT_BUILD.fetch_add(1, Ordering::Relaxed)),
             built,
             scenario,
+            snapshot_day,
             enabled,
             checked_second: (!scenario && at.div_euclid(1000) == next_day_at).then_some(at.div_euclid(1000)),
             built_at: at.div_euclid(1000),
@@ -227,6 +275,7 @@ impl AnswerCache {
         // A commit between the snapshot and registration must not be missed.
         if collection.last_seq() != rows.seq()
             || (!scenario
+                && !snapshot_day
                 && !collection.core.exec.day_clock.queue_report_is_current(
                     super::day_clock::DayReport {
                         today,
@@ -254,6 +303,7 @@ impl AnswerCache {
     pub fn is_current(&self, collection: &Collection) -> bool {
         self.bound_and_time_current(collection)
             && (self.scenario
+                || self.snapshot_day
                 || self.checked_second.is_none()
                 || collection
                     .core
@@ -373,6 +423,7 @@ pub struct AnswerMetadata {
     pub cache_build: Option<CacheBuildId>,
     cache: Option<Weak<AnswerCache>>,
     pub(crate) queue: Option<crate::session::held::QueueRestore>,
+    pub(crate) production: Option<crate::session::ProductionRestore>,
 }
 /// Also exposed to U43's restorer through RestoredStep::state. The row journal
 /// remains U25's authority; queue owners restore presentation/cutoff themselves.
@@ -393,6 +444,9 @@ impl UndoRestorer for AnswerRestorer {
         let Some(meta) = step.state.and_then(|s| s.downcast_ref::<AnswerMetadata>()) else {
             return;
         };
+        if let Some(queue) = &meta.production {
+            queue.restore(step.direction);
+        }
         if let Some(queue) = &meta.queue {
             queue.restore(step.direction);
         }
@@ -587,7 +641,6 @@ fn answer_with_queue(
     // The request's day/boundary belong to its recorded answer instant;
     // pending-session replay can submit that immutable event on a later day.
     collection.check_rollover()?;
-    let bound = collection.clone();
     let spec = OpSpec::named("answer_card", OpSource::UserUndoable)
         .stamp(StampMode::CallerSupplied)
         .undo_step(crate::undo::names::ANSWER_CARD, StepKind::Answer)
@@ -601,7 +654,60 @@ fn answer_with_queue(
     } else {
         spec
     };
-    collection.run(spec, move |ctx| {
+    submit_selected(collection, request, spec, queue, None).wait()
+}
+
+/// U43 submits frozen accepted events through this same U44 application.
+/// Its caller establishes recorded-time D8 before submission; no current-clock
+/// prelude is hidden here (opening recovery must never rewind the live clock).
+pub(crate) fn submit_session(
+    collection: &Collection,
+    request: AnswerRequest,
+    application: crate::session::Application,
+) -> crate::Pending<OpResult<AnswerResult>> {
+    let spec = OpSpec::named("answer_card", OpSource::UserUndoable)
+        .stamp(StampMode::CallerSupplied)
+        .undo_step(crate::undo::names::ANSWER_CARD, StepKind::Answer)
+        .session(request.session.expect("production answer session"))
+        .precondition(Precondition::RowDigest {
+            table: Table::Cards,
+            key: RowKey::Id(request.card.0),
+            digest: Some(request.state_token),
+        });
+    submit_selected(collection, request, spec, None, Some(application))
+}
+
+pub(crate) fn submit_replay(
+    collection: &Collection,
+    request: AnswerRequest,
+    application: crate::session::Application,
+) -> crate::Pending<OpResult<AnswerResult>> {
+    let spec = OpSpec::named("answer_card", OpSource::Rollover)
+        .stamp(StampMode::CallerSupplied)
+        .precondition(Precondition::RowDigest {
+            table: Table::Cards,
+            key: RowKey::Id(request.card.0),
+            digest: Some(request.state_token),
+        });
+    submit_selected(collection, request, spec, None, Some(application))
+}
+
+fn submit_selected(
+    collection: &Collection,
+    request: AnswerRequest,
+    spec: OpSpec,
+    queue: Option<Arc<Mutex<crate::session::held::HeldState>>>,
+    application: Option<crate::session::Application>,
+) -> crate::Pending<OpResult<AnswerResult>> {
+    let bound = collection.clone();
+    collection.submit(spec, move |ctx| {
+        if let Some(app) = &application {
+            app.validate(ctx, &request)?;
+        }
+        let base = ctx
+            .scope()
+            .row_digest(Table::Cards, &RowKey::Id(request.card.0))?
+            .ok_or_else(|| missing(Table::Cards, request.card.0))?;
         let card = ctx
             .scope()
             .card(request.card)?
@@ -648,11 +754,27 @@ fn answer_with_queue(
             cache_build: cache.as_ref().map(|c| c.build),
             cache: cache.as_ref().map(Arc::downgrade),
             queue: None,
+            production: None,
         };
         let scope = ctx.scope();
         scope.put_answer_card(&plan.card)?;
         let log = values::revlog::row(card.id, request.rating, &request.chosen, plan.elapsed_ms);
-        let revlog_id = scope.add_answer_revlog(&log, request.answered_at)?;
+        let revlog_id = if let Some(prepared) = application.as_ref().and_then(|a| a.assigned.as_ref()) {
+            let mut assigned = log.clone();
+            assigned.id = RevlogId(prepared.row[0]);
+            use meguri_storage::Record;
+            let cells = assigned.to_cells();
+            if cells
+                .iter()
+                .zip(&prepared.row)
+                .any(|(c, v)| *c != meguri_storage::Cell::Integer(*v))
+            {
+                return Err(invalid("prepared selected answer identity changed"));
+            }
+            scope.insert_prepared_answer(&assigned)?
+        } else {
+            scope.add_answer_revlog(&log, request.answered_at)?
+        };
         let decks = scope.deck_rows()?;
         let mut current = Some(deck);
         while let Some(deck) = current {
@@ -719,11 +841,23 @@ fn answer_with_queue(
             }
         }
         scope.set_col_mod(request.answered_at)?;
+        if let Some(app) = &application {
+            meta.production = app.restorer.clone();
+            app.prepare(ctx, revlog_id, base)?;
+        }
+        if application.as_ref().is_some_and(|a| a.clear_history) {
+            let core = Arc::downgrade(&bound.core);
+            ctx.on_commit(move |_| {
+                if let Some(core) = core.upgrade() {
+                    core.exec.undo.reset(crate::DisabledReason::ClearedByRollover);
+                }
+            });
+        }
         ctx.set_undo_state(Arc::new(meta.clone()));
         if let Some((record, next)) = queue_change {
             ctx.on_commit(move |_| record.commit(next));
         }
-        if let Some(cache) = cache {
+        if let Some(cache) = cache.filter(|_| !application.as_ref().is_some_and(|a| a.optimistic_cache)) {
             let written = plan.card.clone();
             let preset = preset.source().id;
             ctx.on_commit(move |_| {

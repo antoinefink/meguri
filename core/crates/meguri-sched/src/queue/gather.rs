@@ -5,6 +5,15 @@ use meguri_model::{card::Card, ids::DeckId};
 use meguri_storage::{ReadRows, StorageError, queries::sched_queue::Phase};
 
 pub fn build(rows: &impl ReadRows, env: &Environment, deck: DeckId) -> Result<Queue, StorageError> {
+    build_overlay(rows, env, deck, &[])
+}
+
+pub fn build_overlay(
+    rows: &impl ReadRows,
+    env: &Environment,
+    deck: DeckId,
+    overrides: &[Card],
+) -> Result<Queue, StorageError> {
     let selected = env.subtree(deck, true);
     let preset = env.index(deck).and_then(|i| env.preset(i));
     let review_order = preset.map_or(0, |p| {
@@ -36,8 +45,15 @@ pub fn build(rows: &impl ReadRows, env: &Environment, deck: DeckId) -> Result<Qu
         (Phase::Review, Kind::Review, 1),
         (Phase::New, Kind::New, 2),
     ] {
-        let mut cards =
-            rows.sched_queue_candidates(&selected, phase, review_order, env.today, env.now, env.next_day_at)?;
+        let mut cards = rows.sched_queue_candidates_overlay(
+            &selected,
+            phase,
+            review_order,
+            env.today,
+            env.now,
+            env.next_day_at,
+            overrides,
+        )?;
         if kind == Kind::New {
             order::gather(
                 &mut cards,

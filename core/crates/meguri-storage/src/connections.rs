@@ -60,14 +60,24 @@ pub(crate) const READ_WRITE: OpenFlags = OpenFlags::SQLITE_OPEN_READ_WRITE
 #[derive(Debug)]
 pub struct Writer {
     pub(crate) conn: Connection,
+    // Dropped after SQLite: closing another descriptor earlier releases POSIX locks.
+    identity_file: std::fs::File,
     #[cfg(feature = "test-hooks")]
     pub(crate) fail_next_wal_sync: std::cell::Cell<bool>,
 }
 
 impl Writer {
+    /// Identity of the descriptor retained before SQLite opened, under collection ownership.
+    pub fn native_identity(&self) -> Result<(u64, u64), StorageError> {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = self.identity_file.metadata()?;
+        Ok((metadata.dev(), metadata.ino()))
+    }
+
     /// Opens the writer: read-write, never create, then C5 and C4's settings
     /// (the switch to WAL mode among them).
     pub(crate) fn open(path: &Path, initializers: &Initializers) -> Result<Writer, OpenError> {
+        let identity_file = std::fs::File::open(path).map_err(|e| OpenError::Io { detail: e.to_string() })?;
         let conn =
             Connection::open_with_flags(file_uri(path, None), READ_WRITE).map_err(|e| OpenError::from_sqlite(&e))?;
         conn_init::full(&conn, initializers).map_err(|detail| OpenError::ConnectionInit { detail })?;
@@ -79,8 +89,19 @@ impl Writer {
                 detail: format!("the journal mode stayed {mode}, not wal"),
             },
         })?;
+        use std::os::unix::fs::MetadataExt;
+        let held = identity_file
+            .metadata()
+            .map_err(|e| OpenError::Io { detail: e.to_string() })?;
+        let named = std::fs::metadata(path).map_err(|e| OpenError::Io { detail: e.to_string() })?;
+        if (held.dev(), held.ino()) != (named.dev(), named.ino()) {
+            return Err(OpenError::Io {
+                detail: "collection changed while opening".into(),
+            });
+        }
         Ok(Writer {
             conn,
+            identity_file,
             #[cfg(feature = "test-hooks")]
             fail_next_wal_sync: std::cell::Cell::new(false),
         })

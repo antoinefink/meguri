@@ -92,7 +92,7 @@ pub(crate) fn parent(path: &Path) -> &Path {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."))
 }
-pub(crate) fn full_sync(file: &File) -> Result<(), StorageError> {
+pub fn full_sync(file: &File) -> Result<(), StorageError> {
     file.sync_all()?;
     #[cfg(target_vendor = "apple")]
     {

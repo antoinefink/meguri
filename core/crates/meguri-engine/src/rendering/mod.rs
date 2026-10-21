@@ -15,6 +15,8 @@ use meguri_template::{card, display};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RenderedCard {
+    /// Local references extracted from actual displayed HTML for preloading.
+    pub media_refs: Vec<String>,
     pub card_id: CardId,
     pub ordinal: u32,
     pub mode: RenderMode,
@@ -129,7 +131,19 @@ fn render_card_inner(
             type_answer::apply(sides, &question, &note, &kind, u32::from(card.ord) + 1, observation)?;
         (Some(sides.question), Some(sides.answer), descriptor)
     };
+    let mut media_refs = std::collections::BTreeSet::new();
+    for html in [&question, &answer].into_iter().flatten() {
+        media_refs.extend(meguri_text::media_refs::local_references(html));
+    }
+    for av in comparable.question_av.iter().chain(&comparable.answer_av) {
+        if let AvTag::Sound { name } = av
+            && !meguri_text::media_refs::is_remote(name)
+        {
+            media_refs.insert(name.clone());
+        }
+    }
     Ok(RenderedCard {
+        media_refs: media_refs.into_iter().collect(),
         card_id: id,
         ordinal: u32::from(card.ord),
         mode,

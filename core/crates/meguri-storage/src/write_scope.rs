@@ -412,6 +412,17 @@ impl<'c> WriteScope<'c> {
         Ok(entry.id)
     }
 
+    /// Replay an already prepared identity. Never overwrite a taken id.
+    pub fn insert_prepared_answer(&mut self, entry: &RevlogEntry) -> Result<RevlogId, StorageError> {
+        if rows::select_image(self.conn, Table::Revlog, &RowKey::Id(entry.id.0))?.is_some() {
+            return Err(StorageError::Mode {
+                detail: "prepared answer id is already occupied".into(),
+            });
+        }
+        self.put(entry)?;
+        Ok(entry.id)
+    }
+
     /// Only answer-owned fields are replaced; identity, original-deck fields
     /// and flags retain their stored representation.
     pub fn put_answer_card(&mut self, card: &Card) -> Result<Written, StorageError> {

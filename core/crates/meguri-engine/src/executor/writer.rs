@@ -226,7 +226,14 @@ impl WalFlush {
         // successful call advances coverage; a failure keeps every commit due.
         #[cfg(feature = "test-hooks")]
         let (started, through) = (monotonic::now(), shared.last_seq());
-        let result = collection.writer().sync_wal();
+        let result = collection
+            .writer()
+            .sync_wal()
+            .map_err(EngineError::from)
+            .and_then(|synced| {
+                crate::session::wal_covered(shared)?;
+                Ok(synced)
+            });
         #[cfg(feature = "test-hooks")]
         if !matches!(result, Ok(false)) {
             let completed = monotonic::now();
@@ -260,7 +267,12 @@ impl WalFlush {
                         None,
                         EventKind::Extension(Arc::new(crate::suspend::DurabilityStatus::Failed {
                             through: shared.last_seq(),
-                            error: error.clone(),
+                            error: match &error {
+                                EngineError::Storage(e) => e.clone(),
+                                _ => meguri_storage::StorageError::Io {
+                                    detail: error.to_string(),
+                                },
+                            },
                         })),
                     );
                 }
@@ -319,7 +331,7 @@ where
 fn run_op<T>(
     env: &mut WriterEnv<'_>,
     meta: &TaskMeta,
-    spec: OpSpec,
+    mut spec: OpSpec,
     op: impl FnOnce(&mut OpContext<'_, '_>) -> Result<T, EngineError>,
 ) -> Result<OpResult<T>, EngineError> {
     let started = monotonic::now();
@@ -346,9 +358,15 @@ fn run_op<T>(
         return Err(EngineError::unavailable("the collection is not open"));
     };
     let generation = shared.generation();
+    // Before any owned row mutation (including undo and revlog USN updates),
+    // retire every committed answer witness. No commit/snapshot lock is held.
+    crate::session::retire_witnesses(shared, collection.writer())?;
+    if spec.source == OpSource::UserUndoable && spec.undo.session.is_none() {
+        spec.undo.session = *shared.active_session.lock().unwrap();
+    }
     let mut scope = collection.writer().begin_write(
         spec.stamp_mode(),
-        shared.clock.as_ref(),
+        spec.recorded_clock.as_deref().unwrap_or(shared.clock.as_ref()),
         Some(collection.journal_options()),
     )?;
     // BEGIN IMMEDIATE excludes a foreign commit between this check and the op.
@@ -381,51 +399,57 @@ fn run_op<T>(
         restore: meta.restore,
         last_seq: shared.last_seq(),
         on_commit: Vec::new(),
+        before_commit: Vec::new(),
         random: Arc::clone(&env.reopen.random),
     };
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let value = op(&mut context)?;
-        for pending in &mut context.pending_media {
-            pending.prepare(context.scope)?;
+    // O3 and C12.3 share one failure boundary. The scope stays uncommitted
+    // throughout validation and the file worker's durable receipt response.
+    let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let result = op(&mut context)?;
+        for attachment in &mut context.pending_media {
+            attachment.prepare(context.scope)?;
         }
-        Ok(value)
-    }));
+        let restoring_undo = meta
+            .restore
+            .is_some_and(|restore| restore.action.direction() == Direction::Undo);
+        crate::schema_gate::guard(context.scope(), restoring_undo)?;
+        let observed_policy = if spec.source == OpSource::SyncIncoming {
+            Some(meguri_sched::model::sched_config::SchedConfig::new(context.scope()).fsrs()?)
+        } else {
+            None
+        };
+        for action in context.before_commit.drain(..) {
+            action()?;
+        }
+        Ok((result, observed_policy))
+    }))
+    .unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref())));
+    let (value, seen_fsrs) = match prepared {
+        Ok(values) => values,
+        Err(error) => {
+            drop(context);
+            scope.rollback()?;
+            return Err(error);
+        }
+    };
+    // Only successful preparation transfers these effects to the commit path.
+    // Failed preparation drops the remaining actions with the operation context.
     let pending_media = std::mem::take(&mut context.pending_media);
     let media = MediaNotes {
         added: std::mem::take(&mut context.media_added),
         removed: std::mem::take(&mut context.media_removed),
     };
-    let undo_notes = std::mem::take(&mut context.undo_notes);
+    let mut undo_notes = std::mem::take(&mut context.undo_notes);
     let hooks = std::mem::take(&mut context.on_commit);
-    let seen_fsrs = if spec.source == meguri_model::changes::OpSource::SyncIncoming {
-        Some(meguri_sched::model::sched_config::SchedConfig::new(context.scope()).fsrs())
-    } else {
-        None
-    };
-    let value = match outcome {
-        Ok(Ok(value)) => value,
-        Ok(Err(error)) => {
-            scope.rollback()?;
-            return Err(error);
-        }
-        Err(payload) => {
-            let error = EngineError::from_panic(payload.as_ref());
-            scope.rollback()?;
-            return Err(error);
-        }
-    };
-    // `notetypes/schema-changes` G6: a note type whose field or template
-    // count changed never commits with `scm <= ls`, except in the undo that
-    // restores the `scm` its step set.
-    let undoing = meta
-        .restore
-        .is_some_and(|restore| restore.action.direction() == Direction::Undo);
-    if let Err(error) = crate::schema_gate::guard(&scope, undoing) {
-        scope.rollback()?;
-        return Err(error);
+    drop(context);
+    if spec.source == OpSource::Rollover
+        && undo_notes.clear == Some(crate::ClearCause::Rollover)
+        && shared.active_session.lock().unwrap().is_some()
+    {
+        // C14 owns the clear while a production session is active: after
+        // its shown answer, or immediately when no card can remain shown.
+        undo_notes.clear = None;
     }
-
-    let seen_fsrs = seen_fsrs.transpose()?;
     // Commit and take the seq under the commit lock, so a snapshot begun
     // under it knows exactly which commits it sees (O6).
     let (committed, reservation) = {
@@ -483,6 +507,12 @@ fn run_op<T>(
     });
     let restoring_answer = matches!(&applied,crate::undo::Applied::Restored {state:Some(s),..}
         if s.downcast_ref::<crate::sched::answer::AnswerMetadata>().is_some());
+    if let Applied::Restored { state: Some(state), .. } = &applied
+        && let Some(meta) = state.downcast_ref::<crate::sched::answer::AnswerMetadata>()
+        && let Some(production) = &meta.production
+    {
+        production.own(generation, seq);
+    }
     shared.answer_caches.observe(
         &ObservedCommit {
             seq,
@@ -501,7 +531,10 @@ fn run_op<T>(
     // The day clock computes afresh after a change of its keys or of `col`
     // (`sched/day-clock` D6, D8). Noted before anyone hears of the commit, so
     // a check made on its event never takes the cached day.
-    if !change_set.is_empty() && shared.day_clock.note_commit(&change_set) {
+    if !shared.replaying_review.load(Ordering::Acquire)
+        && !change_set.is_empty()
+        && shared.day_clock.note_commit(&change_set)
+    {
         shared.day_clock.schedule_check(shared);
     }
     if change_set.is_empty() {
@@ -690,9 +723,9 @@ impl TaskBody for ReplaceTask {
     fn run(self: Box<Self>, env: &mut WriterEnv<'_>, _meta: &TaskMeta) {
         let ReplaceTask { swap, reply } = *self;
         let shared = env.shared;
-        // Closed before the replace got here: there is nothing to replace,
-        // and the swap must not touch a file nobody holds any more.
-        let Some(collection) = env.collection.take() else {
+        // Keep the live collection installed until both journal obligations
+        // succeed. An error returns its current readers without closing it.
+        let Some(current) = env.collection.as_ref() else {
             let _ = reply.send(Replaced {
                 error: Some(EngineError::unavailable("the collection is closed")),
                 generation: None,
@@ -700,6 +733,24 @@ impl TaskBody for ReplaceTask {
             });
             return;
         };
+        let journal_result = crate::session::retire_witnesses(shared, current.writer())
+            .and_then(|()| crate::session::retire_incarnation(shared));
+        if let Err(error) = journal_result {
+            let _ = reply.send(Replaced {
+                error: Some(error),
+                generation: None,
+                factory: Some(current.reader_factory()),
+            });
+            return;
+        }
+        // Only a durably closed incarnation may release review admission or
+        // surrender the open file to the existing replacement protocol.
+        *shared.active_session.lock().unwrap() = None;
+        *shared.fsrs_policy.review_active.lock().unwrap() = false;
+        let collection = env
+            .collection
+            .take()
+            .expect("validated collection remains on the writer");
         let closed = collection.close();
         let live = LiveFile::before_swap(&shared.path);
         // Never replace a file whose final commit/checkpoint could not be

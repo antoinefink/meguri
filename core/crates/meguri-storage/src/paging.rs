@@ -90,6 +90,28 @@ pub trait ReadRows: sealed::Connected {
     ) -> Result<Vec<Card>, StorageError> {
         crate::queries::sched_queue::candidates(self.connection(), decks, phase, order, today, now, boundary)
     }
+    #[allow(clippy::too_many_arguments)]
+    fn sched_queue_candidates_overlay(
+        &self,
+        decks: &[DeckId],
+        phase: crate::queries::sched_queue::Phase,
+        order: u8,
+        today: u32,
+        now: i64,
+        boundary: i64,
+        overrides: &[Card],
+    ) -> Result<Vec<Card>, StorageError> {
+        crate::queries::sched_queue::candidates_overlay(
+            self.connection(),
+            decks,
+            phase,
+            order,
+            today,
+            now,
+            boundary,
+            overrides,
+        )
+    }
     fn sched_deck_aggregates(
         &self,
         today: u32,

@@ -616,15 +616,25 @@ impl<'s> Exclusive<'s> {
             });
         }
         let (core, ports, _) = Exclusive::entry(slot, &engine.lock_state())?;
+        core.exec.review_accepting.store(false, Ordering::Release);
         for participant in &ports.suspend_participants {
-            participant.flush()?;
+            if let Err(error) = participant.flush() {
+                core.exec.review_accepting.store(true, Ordering::Release);
+                return Err(error);
+            }
         }
         let privilege = Privilege(engine.new_token());
         let prior = {
             let mut guard = engine.lock_state();
             // Checked again: the collection may have closed or failed while
             // the participants flushed.
-            let (again, _, prior) = Exclusive::entry(slot, &guard)?;
+            let (again, _, prior) = match Exclusive::entry(slot, &guard) {
+                Ok(entry) => entry,
+                Err(error) => {
+                    core.exec.review_accepting.store(true, Ordering::Release);
+                    return Err(error);
+                }
+            };
             if !Arc::ptr_eq(&again, &core) {
                 return Err(EngineError::unavailable("the collection closed"));
             }
@@ -737,6 +747,10 @@ impl Drop for Exclusive<'_> {
             },
         };
         // Admit first, so nobody woken by the state change is refused.
+        self.core
+            .exec
+            .review_accepting
+            .store(matches!(admission, Admission::Open), Ordering::Release);
         self.core.exec.set_admission(admission);
         engine.set_state_locked(&mut guard, back);
     }

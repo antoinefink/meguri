@@ -39,6 +39,10 @@ type AfterCommitHook = Box<dyn FnOnce(Seq) + Send>;
 
 /// What the writer thread and the submitters share.
 pub(crate) struct ExecShared {
+    pub(crate) review_journal: Mutex<Option<std::sync::Weak<crate::session::journal::Journal>>>,
+    pub(crate) replaying_review: std::sync::atomic::AtomicBool,
+    pub(crate) review_accepting: std::sync::atomic::AtomicBool,
+    pub(crate) active_session: Mutex<Option<crate::SessionId>>,
     pub(crate) answer_caches: crate::sched::answer::AnswerCaches,
     #[cfg(feature = "test-hooks")]
     pub(crate) after_commit: Mutex<Option<AfterCommitHook>>,
@@ -95,6 +99,10 @@ impl ExecShared {
     ) -> ExecShared {
         ExecShared {
             answer_caches: Default::default(),
+            review_journal: Mutex::default(),
+            active_session: Mutex::default(),
+            review_accepting: std::sync::atomic::AtomicBool::new(true),
+            replaying_review: std::sync::atomic::AtomicBool::new(false),
             #[cfg(feature = "test-hooks")]
             after_commit: Mutex::default(),
             #[cfg(feature = "test-hooks")]

@@ -71,7 +71,7 @@ impl PolicyState {
             review_active: Mutex::new(false),
         }
     }
-    fn seen(&self) -> bool {
+    pub(crate) fn seen(&self) -> bool {
         self.mark.lock().unwrap_or_else(PoisonError::into_inner).seen
     }
     pub(crate) fn observe_on(&self) {

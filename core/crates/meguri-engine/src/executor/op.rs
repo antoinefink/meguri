@@ -25,6 +25,7 @@ use crate::undo::{Restore, UndoManager, UndoNotes, UndoSpec};
 /// How an op is to run.
 #[derive(Clone, Debug)]
 pub struct OpSpec {
+    pub(crate) recorded_clock: Option<Arc<dyn meguri_model::clock::Clock>>,
     pub(crate) def: OpDef,
     pub(crate) source: OpSource,
     pub(crate) stamp: Option<StampMode>,
@@ -41,6 +42,7 @@ pub struct OpSpec {
 impl OpSpec {
     pub fn new(def: OpDef, source: OpSource) -> OpSpec {
         OpSpec {
+            recorded_clock: None,
             def,
             source,
             stamp: None,
@@ -58,6 +60,13 @@ impl OpSpec {
     /// A plain op (no catalog entry).
     pub fn named(name: &'static str, source: OpSource) -> OpSpec {
         OpSpec::new(OpDef::new(name), source)
+    }
+
+    /// Replay-local maintenance stamps use the recorded instant. This does
+    /// not change collection time or the live day cache.
+    pub(crate) fn recorded_time(mut self, clock: meguri_model::clock::FixedClock) -> Self {
+        self.recorded_clock = Some(Arc::new(clock));
+        self
     }
 
     pub fn def(&self) -> OpDef {
@@ -168,6 +177,7 @@ pub struct OpContext<'s, 'c> {
     /// Work for the writer once the op committed and published its change
     /// set (`OpContext::on_commit`); dropped when the op rolls back.
     pub(crate) on_commit: Vec<CommitHook>,
+    pub(crate) before_commit: Vec<Box<dyn FnOnce() -> Result<(), EngineError> + Send>>,
     /// The collection's random source (R1875): new field and template ids.
     pub(crate) random: Arc<dyn RandomSource>,
 }
@@ -237,6 +247,7 @@ impl<'c> OpContext<'_, 'c> {
         let savepoint = self.scope.savepoint()?;
         let media = (self.media_added.len(), self.media_removed.len());
         let hooks = self.on_commit.len();
+        let prepares = self.before_commit.len();
         let staged = self.pending_media.len();
         // The step notes into an empty set, kept only when it commits.
         let before = std::mem::take(&mut self.undo_notes);
@@ -253,6 +264,7 @@ impl<'c> OpContext<'_, 'c> {
                 self.media_added.truncate(media.0);
                 self.media_removed.truncate(media.1);
                 self.on_commit.truncate(hooks);
+                self.before_commit.truncate(prepares);
                 self.pending_media.truncate(staged);
                 Err(error)
             }
@@ -263,6 +275,12 @@ impl<'c> OpContext<'_, 'c> {
     /// set is published; never when the op rolls back.
     pub(crate) fn on_commit(&mut self, hook: impl FnOnce(CommitNotice) + Send + 'static) {
         self.on_commit.push(Box::new(hook));
+    }
+
+    /// Fallible durability acknowledgement, after final validation and before
+    /// taking the commit/snapshot lock. Dropped on rollback.
+    pub(crate) fn before_commit(&mut self, hook: impl FnOnce() -> Result<(), EngineError> + Send + 'static) {
+        self.before_commit.push(Box::new(hook));
     }
 
     /// Reports a media file the op added (U31 stages media inside the op).

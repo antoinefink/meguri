@@ -211,3 +211,13 @@ impl Environment {
 pub fn build(rows: &impl ReadRows, env: &Environment, deck: DeckId) -> Result<Queue, StorageError> {
     gather::build(rows, env, deck)
 }
+
+/// U43's optimistic rebuild uses the identical gather over read-only postimages.
+pub fn build_overlay(
+    rows: &impl ReadRows,
+    env: &Environment,
+    deck: DeckId,
+    overrides: &[meguri_model::card::Card],
+) -> Result<Queue, StorageError> {
+    gather::build_overlay(rows, env, deck, overrides)
+}

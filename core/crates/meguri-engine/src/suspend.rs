@@ -42,10 +42,12 @@ pub struct ResumeReport {
 
 pub(crate) enum Control {
     Flush,
+    ReviewIdentity,
     Suspend { deadline: Duration },
     Resume,
 }
 pub(crate) struct ControlReply {
+    pub review_identity: Option<((u64, u64), [u64; 2])>,
     pub external_change: bool,
     pub factory: Option<ReaderFactory>,
 }
@@ -133,6 +135,7 @@ impl Engine {
 
     fn quiesce_inner(&self, collection: &crate::Collection, deadline: Duration) -> Result<(), EngineError> {
         let exec = &collection.core.exec;
+        exec.review_accepting.store(false, std::sync::atomic::Ordering::Release);
         // Repeatable after a timeout: participants must make their flush and
         // suspend idempotent. They flush before we stop public admission.
         if self.lock_state().suspend_flush_pending {
@@ -260,13 +263,25 @@ impl Engine {
 
 pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<ControlReply, EngineError> {
     let mut reply = ControlReply {
+        review_identity: None,
         external_change: false,
         factory: None,
     };
     match action {
+        Control::ReviewIdentity => {
+            let collection = env
+                .collection
+                .as_ref()
+                .ok_or_else(|| EngineError::unavailable("collection closed"))?;
+            reply.review_identity = Some((
+                collection.writer().native_identity()?,
+                [env.reopen.random.next_u64(), env.reopen.random.next_u64()],
+            ));
+        }
         Control::Flush => {
             if let Some(collection) = env.collection.as_ref() {
                 collection.writer().sync_wal()?;
+                crate::session::wal_covered(env.shared)?;
             }
         }
         Control::Suspend { deadline } => {

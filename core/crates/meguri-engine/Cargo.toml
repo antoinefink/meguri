@@ -29,6 +29,9 @@ meguri-text.workspace = true
 regex.workspace = true
 rand.workspace = true
 tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 
 # The pthread QoS calls of the thread registry (KTD9).
 [target.'cfg(target_vendor = "apple")'.dependencies]
@@ -70,3 +73,7 @@ harness = false
 [[test]]
 name = "wal_durability"
 required-features = ["test-hooks"]
+
+[[bench]]
+name = "session"
+harness = false

@@ -13,7 +13,13 @@ pub struct Binding {
     pub roles: &'static [PortKind],
 }
 
-pub const PROVIDED: [Binding; 3] = [
+pub const PROVIDED: [Binding; 4] = [
+    Binding {
+        port: ServicePort::Review,
+        name: "review-session",
+        unit: "U43",
+        roles: &PortKind::ALL,
+    },
     Binding {
         port: ServicePort::DeckCounts,
         name: "deck-counts",

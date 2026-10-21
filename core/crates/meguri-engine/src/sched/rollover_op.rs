@@ -84,7 +84,7 @@ pub fn day_query(
 }
 
 /// Native lifecycle checks avoid synced bookkeeping when no card needs restoration.
-pub(super) fn automatic_day_query(
+pub(crate) fn automatic_day_query(
     scope: &mut WriteScope<'_>,
     cache: &mut DayCache,
     now: i64,

@@ -20,6 +20,7 @@ pub struct CoreHost {
     clock: Arc<dyn Clock>,
     backup: Arc<dyn BackupService>,
     queues: Arc<meguri_engine::sched::queue::QueueProvider>,
+    review: Arc<meguri_engine::session::ReviewService>,
 }
 
 impl CoreHost {
@@ -30,12 +31,17 @@ impl CoreHost {
         let derived = DerivedHost::builder(&engine).start()?;
         let media = Arc::new(MediaPort::new(config.clock.clone()));
         let queues = Arc::new(meguri_engine::sched::queue::QueueProvider::default());
+        let review = meguri_engine::session::ReviewService::new(&engine, queues.clone())?;
         let ports = derived
             .ports(Ports::new())
             .open_step(media.clone())
             .suspend_participant(media.clone())
             .observer(queues.clone())
-            .generation_listener(queues.clone());
+            .generation_listener(queues.clone())
+            .open_step(review.clone())
+            .observer(review.clone())
+            .generation_listener(review.clone())
+            .suspend_participant(review.clone());
         wiring::validate_ports(&ports)?;
         let options = OpenConfig::new(config.clock.clone(), config.random)
             .ports(ports)
@@ -73,6 +79,7 @@ impl CoreHost {
             clock: config.clock,
             backup,
             queues,
+            review,
         })
     }
 
@@ -90,6 +97,10 @@ impl CoreHost {
     }
     pub fn queues(&self) -> &meguri_engine::sched::queue::QueueProvider {
         &self.queues
+    }
+
+    pub fn review(&self) -> &meguri_engine::session::ReviewService {
+        &self.review
     }
 
     pub fn backup(&self) -> Arc<dyn BackupService> {

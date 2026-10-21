@@ -24,6 +24,22 @@ pub(crate) fn candidates(
     now: i64,
     boundary: i64,
 ) -> Result<Vec<Card>, StorageError> {
+    candidates_overlay(conn, decks, phase, order, today, now, boundary, &[])
+}
+
+/// A read-only CTE substitutes pending card postimages before the same U41
+/// predicates and ordering. It creates no table and writes no collection data.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn candidates_overlay(
+    conn: &Connection,
+    decks: &[DeckId],
+    phase: Phase,
+    order: u8,
+    today: u32,
+    now: i64,
+    boundary: i64,
+    overrides: &[Card],
+) -> Result<Vec<Card>, StorageError> {
     let ids = serde_json::to_string(&decks.iter().map(|d| d.0).collect::<Vec<_>>()).expect("integer ids");
     let predicate = match phase {
         Phase::Intraday => "c.queue IN (1,4) AND c.due<=?4",
@@ -55,11 +71,42 @@ pub(crate) fn candidates(
         .map(|c| format!("c.\"{c}\""))
         .collect::<Vec<_>>()
         .join(",");
+    let (prefix, source) = if overrides.is_empty() {
+        (String::new(), "cards")
+    } else {
+        let projection = Table::Cards
+            .columns()
+            .iter()
+            .enumerate()
+            .map(|(i, column)| format!("json_extract(o.value,'$[{i}]') AS \"{column}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        (
+            format!(
+                "WITH pending_cards AS (SELECT * FROM main.cards WHERE id NOT IN (SELECT json_extract(value,'$[0]') FROM json_each(?5)) UNION ALL SELECT {projection} FROM json_each(?5) o) "
+            ),
+            "pending_cards",
+        )
+    };
     let sql = format!(
-        "SELECT {columns} FROM cards c JOIN json_each(?1) d ON c.did=d.value WHERE {predicate} AND ?2 IS NOT NULL AND ?3 IS NOT NULL AND ?4 IS NOT NULL ORDER BY {keys}"
+        "{prefix}SELECT {columns} FROM {source} c JOIN json_each(?1) d ON c.did=d.value WHERE {predicate} AND ?2 IS NOT NULL AND ?3 IS NOT NULL AND ?4 IS NOT NULL AND ?5 IS NOT NULL ORDER BY {keys}"
     );
+    let override_values = overrides
+        .iter()
+        .map(|card| {
+            card.to_cells()
+                .into_iter()
+                .map(|cell| match cell {
+                    rows::Cell::Integer(v) => serde_json::Value::from(v),
+                    rows::Cell::Text(v) => serde_json::Value::String(String::from_utf8_lossy(&v).into_owned()),
+                    _ => unreachable!("Card::to_cells writes integer and text cells"),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let overrides_json = serde_json::to_string(&override_values).expect("card row values");
     let mut statement = conn.prepare_cached(&sql)?;
-    let found = statement.query_map((ids, i64::from(today), now, boundary), |row| {
+    let found = statement.query_map((ids, i64::from(today), now, boundary, overrides_json), |row| {
         rows::row_image(row, Table::Cards)
     })?;
     found
