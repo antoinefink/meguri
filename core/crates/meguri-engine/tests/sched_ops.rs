@@ -393,6 +393,58 @@ fn empty_filtered_preserves_negative_queues_and_deck_and_restores_preview_and_in
     assert_eq!(dump(c), before);
 }
 #[test]
+fn empty_filtered_excludes_rows_with_only_an_original_deck_match() {
+    let (h, ids, _) = setup();
+    let c = &h.collection;
+    let selected = [ids[0], ids[1]];
+    c.run(
+        OpSpec::named("filtered membership fixture", OpSource::Maintenance),
+        move |ctx| {
+            for (id, name) in [(42, "Filtered"), (43, "External")] {
+                let mut deck = ctx.scope().deck(DeckId(1))?.unwrap();
+                deck.id = DeckId(id);
+                deck.name = name.into();
+                deck.kind = ProtoBlob::new(DeckKindMessage::new(DeckKind::Filtered(FilteredDeck::default())));
+                ctx.scope().put(&deck)?;
+            }
+            for (index, id) in selected.into_iter().enumerate() {
+                let mut card = ctx.scope().card(id)?.unwrap();
+                card.deck_id = DeckId(if index == 0 { 42 } else { 43 });
+                card.original_deck_id = DeckId(if index == 0 { 1 } else { 42 });
+                card.original_due = 7 + index as i32;
+                card.due = -100_000;
+                card.queue = CardQueue::Preview;
+                ctx.scope().put(&card)?;
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    h.clock.step_ms(1000);
+    let before = dump(c);
+    let external = c
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .row_image(Table::Cards, &RowKey::Id(ids[1].0))
+        .unwrap();
+    assert_eq!(run(c, Request::EmptyFiltered { deck: DeckId(42) }).value.count, 1);
+    let returned = read(c, ids[0]);
+    assert_eq!((returned.deck_id, returned.original_deck_id), (DeckId(1), DeckId(0)));
+    assert_eq!(
+        (returned.due, returned.original_due, returned.queue),
+        (7, 0, CardQueue::New)
+    );
+    assert_eq!(dump(c)["decks"], before["decks"]);
+    assert_eq!(
+        c.reader(ReaderRole::Query)
+            .unwrap()
+            .row_image(Table::Cards, &RowKey::Id(ids[1].0))
+            .unwrap(),
+        external
+    );
+    exact_undo_redo(c, before, "Empty");
+}
+#[test]
 fn admitted_session_operation_drains_pending_answer_and_returns_real_head_and_scope() {
     let h = session_support::Harness::new(5);
     let (id, head) = h.start();
@@ -584,6 +636,128 @@ fn unbury_modes_and_query_use_actual_deck_descendants_and_current_due() {
         .count,
         0
     );
+}
+#[test]
+fn home_unbury_and_query_exclude_cards_currently_in_an_external_filtered_deck() {
+    let (h, ids, _) = setup();
+    let c = &h.collection;
+    let selected = [ids[0], ids[1]];
+    c.run(
+        OpSpec::named("external burial fixture", OpSource::Maintenance),
+        move |ctx| {
+            for (id, name) in [(42, "Home"), (43, "Home\u{1f}Sub"), (44, "External")] {
+                let mut deck = ctx.scope().deck(DeckId(1))?.unwrap();
+                deck.id = DeckId(id);
+                deck.name = name.into();
+                if id == 44 {
+                    deck.kind = ProtoBlob::new(DeckKindMessage::new(DeckKind::Filtered(FilteredDeck::default())));
+                }
+                ctx.scope().put(&deck)?;
+            }
+            for (index, id) in selected.into_iter().enumerate() {
+                let mut card = ctx.scope().card(id)?.unwrap();
+                card.deck_id = DeckId(if index == 0 { 44 } else { 43 });
+                card.original_deck_id = DeckId(if index == 0 { 42 } else { 0 });
+                card.queue = if index == 0 {
+                    CardQueue::BuriedByScheduler
+                } else {
+                    CardQueue::BuriedByUser
+                };
+                ctx.scope().put(&card)?;
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    h.clock.step_ms(1000);
+    assert_eq!(
+        ops::buried_kinds(c, DeckId(42)).unwrap(),
+        ops::BuriedKinds {
+            manual: true,
+            siblings: false
+        }
+    );
+    let before = dump(c);
+    let status = c.peek_undo(UndoScope::Global).unwrap();
+    let no = run(
+        c,
+        Request::UnburyDeck {
+            deck: DeckId(42),
+            mode: UnburyMode::Siblings,
+        },
+    );
+    assert_eq!(no.value.count, 0);
+    assert!(no.undo.is_none());
+    assert!(no.changes.is_empty());
+    assert_eq!(dump(c), before);
+    assert_eq!(c.peek_undo(UndoScope::Global).unwrap(), status);
+    let external = read(c, ids[0]);
+    assert_eq!(
+        run(
+            c,
+            Request::UnburyDeck {
+                deck: DeckId(42),
+                mode: UnburyMode::All
+            }
+        )
+        .value
+        .count,
+        1
+    );
+    assert_eq!(read(c, ids[1]).queue, CardQueue::New);
+    assert_eq!(read(c, ids[0]), external);
+    assert_eq!(ops::buried_kinds(c, DeckId(42)).unwrap(), ops::BuriedKinds::default());
+    exact_undo_redo(c, before, "Unbury/Unsuspend");
+}
+#[test]
+fn subtree_unbury_counts_a_filtered_descendant_with_a_home_ancestor_once() {
+    let (h, ids, _) = setup();
+    let c = &h.collection;
+    let id = ids[0];
+    c.run(
+        OpSpec::named("filtered descendant fixture", OpSource::Maintenance),
+        move |ctx| {
+            for (id, name) in [(42, "Home"), (43, "Home\u{1f}Filtered")] {
+                let mut deck = ctx.scope().deck(DeckId(1))?.unwrap();
+                deck.id = DeckId(id);
+                deck.name = name.into();
+                if id == 43 {
+                    deck.kind = ProtoBlob::new(DeckKindMessage::new(DeckKind::Filtered(FilteredDeck::default())));
+                }
+                ctx.scope().put(&deck)?;
+            }
+            let mut card = ctx.scope().card(id)?.unwrap();
+            card.deck_id = DeckId(43);
+            card.original_deck_id = DeckId(42);
+            card.original_due = 1_894_701_900;
+            card.due = -100_000;
+            card.card_type = CardType::Learning;
+            card.queue = CardQueue::BuriedByUser;
+            ctx.scope().put(&card)?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    h.clock.step_ms(1000);
+    let before = dump(c);
+    assert_eq!(
+        run(
+            c,
+            Request::UnburyDeck {
+                deck: DeckId(42),
+                mode: UnburyMode::All
+            }
+        )
+        .value
+        .count,
+        1
+    );
+    let restored = read(c, id);
+    assert_eq!(restored.queue, CardQueue::InterdayLearning);
+    assert_eq!((restored.deck_id, restored.original_deck_id), (DeckId(43), DeckId(42)));
+    assert_eq!((restored.due, restored.original_due), (-100_000, 1_894_701_900));
+    assert_eq!(dump(c)["decks"], before["decks"]);
+    exact_undo_redo(c, before, "Unbury/Unsuspend");
 }
 #[test]
 fn set_due_preflights_all_home_decks_and_empty_selection_writes_no_context() {

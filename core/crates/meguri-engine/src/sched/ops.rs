@@ -159,6 +159,7 @@ impl Request {
                     cards.extend(
                         rows.cards_of_deck(deck)?
                             .into_iter()
+                            .filter(|c| c.deck_id == deck)
                             .filter(|c| mode.includes(c.queue))
                             .map(|c| c.id),
                     );
@@ -170,7 +171,11 @@ impl Request {
                 if !matches!(row.kind.kind, DeckKind::Filtered(_)) {
                     return Err(refused(Refusal::NotFiltered { deck: *deck }));
                 }
-                rows.cards_of_deck(*deck)?.into_iter().map(|c| c.id).collect()
+                rows.cards_of_deck(*deck)?
+                    .into_iter()
+                    .filter(|c| c.deck_id == *deck)
+                    .map(|c| c.id)
+                    .collect()
             }
         };
         if !matches!(self, Self::Reset { .. } | Self::GradeNow { .. }) {
@@ -198,6 +203,9 @@ pub fn buried_kinds(collection: &Collection, deck: DeckId) -> Result<BuriedKinds
     let mut kinds = BuriedKinds::default();
     for deck in subtree(&*rows, deck)? {
         for card in rows.cards_of_deck(deck)? {
+            if card.deck_id != deck {
+                continue;
+            }
             kinds.manual |= card.queue == CardQueue::BuriedByUser;
             kinds.siblings |= card.queue == CardQueue::BuriedByScheduler;
         }
