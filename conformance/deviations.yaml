@@ -672,3 +672,17 @@ deviations:
         cards: ["#c1", "#c7", "#c2"]
         kinds: [review, new, review]
         counts: {new: 1, learning: 0, review: 2}
+  - id: deck-learning-count-rollover
+    requirement: R322
+    summary: Meguri preserves the stored legacy learning count under sched/fsrs-policy K1 and model/protobuf-records P8; Anki clears it on the first answer of a new day. The shared day still advances.
+    test: core/crates/meguri-engine/tests/fsrs_policy.rs compatibility_data_and_unsupported_rows_survive_enable_recompute_preset_save_sync_and_reopen
+    scenarios: [sched/data/deck-counters]
+    pointer: /steps/17/legacy_json/decks/Parent::Child/lrnToday/1
+    transform: {replace: 5}
+  - id: deck-learning-count-parent-answer
+    requirement: R322
+    summary: The unchanged child deck retains its preserved legacy learning count after the following answer on its parent; the recorded reference child count is zero.
+    test: core/crates/meguri-engine/tests/fsrs_policy.rs compatibility_data_and_unsupported_rows_survive_enable_recompute_preset_save_sync_and_reopen
+    scenarios: [sched/data/deck-counters]
+    pointer: /steps/19/legacy_json/decks/Parent::Child/lrnToday/1
+    transform: {replace: 5}

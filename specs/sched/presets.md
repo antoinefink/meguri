@@ -191,7 +191,7 @@ Golden `sched/data/preset-keep`: a preset with a starting ease of 2.3, intervals
 | `desired_retention` | normal deck, optional | `desiredRetention` (whole percent) | V7 |
 | `last_day_studied` | deck common | first element of the day arrays | the day the counters below belong to |
 | `new_studied`, `review_studied` | deck common | `newToday`, `revToday` | D4 |
-| `learning_studied` | deck common | `lrnToday` | an old scheduler's counter: kept, reset with the others (D4), never added to |
+| `learning_studied` | deck common | `lrnToday` | stored legacy count; Meguri preserves it across answers and day changes (D4), never adds to it |
 | `milliseconds_studied` | deck common | `timeToday` | D4 |
 
 Every deck write keeps what it does not change (`decks/decks#D13`). Meguri writes these fields with Anki's encodings so that other clients read the same limits and counts (R765).
@@ -234,14 +234,15 @@ The Today-only tab is the one the editor opens on when its `today` equals today 
 
 - **Reading.** A deck's new and review counts studied today are `new_studied` and `review_studied` when `last_day_studied` equals today, and 0 and 0 otherwise. Reading never writes: a deck last studied yesterday reports 0 without any change to its row.
 - **An answer** (U44) updates the deck the card is in when answered (`did`: the filtered deck while the card sits in one) and its ancestors, found by name from the parent upwards and stopping at the first one that does not exist (a damaged tree, `decks/decks#D3`), in this way for each:
-  1. when `last_day_studied` is not today, `new_studied`, `review_studied`, `learning_studied` and `milliseconds_studied` become 0 and `last_day_studied` becomes today;
+  1. when `last_day_studied` is not today, `new_studied`, `review_studied` and `milliseconds_studied` become 0 and `last_day_studied` becomes today;
   2. `new_studied` + 1 when the card's queue before the answer was 0; `review_studied` + 1 when it was 2 or 3; nothing for 1 and 4;
   3. `milliseconds_studied` + the answer time after the home preset's cap (`cap_answer_time_to_secs` × 1000 ms, V3), which is also the time the review log records;
   4. the deck is stamped (`mtime_secs`, `usn` -1), whether or not a counter changed.
+- `learning_studied` is preserved under `sched/fsrs-policy#K1` and `model/protobuf-records#P8` (R322). Anki resets it to 0 on the first answer of another day; Meguri does not. The shared `last_day_studied` still advances, so the day element of legacy `lrnToday` advances while its count stays.
 - The counters are signed 32-bit values. Custom study and other clients can lower them below zero (U48); Meguri reads and keeps negative values.
 - The global option "Limits start from top" (`applyAllParentLimits`) does not change which decks an answer updates.
 
-Golden `sched/data/deck-counters` (decks Parent and Parent::Child, default answer cap 60 s; Child's `lrnToday` set to `[0, 5]` beforehand):
+Reference golden `sched/data/deck-counters` (decks Parent and Parent::Child, default answer cap 60 s; Child's `lrnToday` set to `[0, 5]` beforehand):
 
 | Step | Parent | Parent::Child |
 |---|---|---|
@@ -249,6 +250,8 @@ Golden `sched/data/deck-counters` (decks Parent and Parent::Child, default answe
 | day 1, before any answer | unchanged, `mtime_secs` unchanged | unchanged |
 | day 1: new card in Child (2 s) | `[1,1]`, `[1,0]`, `[1,0]`, `[1,2000]` | the same |
 | day 1: new card in Parent (3 s) | `newToday` `[1,2]`, `timeToday` `[1,5000]` | unchanged |
+
+Meguri requires Child `lrnToday` `[1,5]` at both day-1 observations (steps 17 and 19), versus the reference `[1,0]`. Parent remains `[1,0]`; all other values in the table remain the reference values. These two scalar differences are declared in `conformance/deviations.yaml` under R322.
 
 ## D5. Filtered decks
 

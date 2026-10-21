@@ -224,6 +224,8 @@ These keep their bytes through every Meguri operation (answers, day rollovers, `
 | deck | `extend_new`, `extend_review`, `learning_studied` | `model/protobuf-records#P8` |
 | filtered deck | its definition (searches, limits, orders, reschedule and preview settings) | the decks area (U28) |
 
+`learning_studied` is the stored scalar. In legacy `lrnToday`, the first element comes from the shared `last_day_studied` (`model/schema11-json#S7.1`); that day may advance while the preserved count stays. The answer rule is `sched/answering#A6`; R322/P8 preservation takes precedence over the reference counter reset.
+
 ## K2. The custom scheduling script (R764)
 
 - `cardStateCustomizer` holds a JSON string of JavaScript that Anki's reviewers run on the four answer states before an answer is saved. Meguri never runs it, never reads it for scheduling and never writes it. A collection with a script schedules in Meguri exactly as without one (deviation from Anki's reviewers: custom scheduling is out of scope).
@@ -242,7 +244,7 @@ These keep their bytes through every Meguri operation (answers, day rollovers, `
 6. a `SyncIncoming` op that changes other keys and cards (`engine/op-model`; it needs no real sync);
 7. close and open.
 
-The digest covers: the K1 config rows (`KEY`, `usn`, `mtime_secs`, `val` bytes), the unknown config key's row, the whole rows of the three unsupported presets and of their cards, the Easy Days field bytes and unknown fields of the normal presets, and the `extend_new` and `extend_review` values of the decks. Equal digests mean the test passes.
+The digest covers: the K1 config rows (`KEY`, `usn`, `mtime_secs`, `val` bytes), the unknown config key's row, the whole rows of the three unsupported presets and of their cards, the Easy Days field bytes and unknown fields of the normal presets, and the `extend_new`, `extend_review` and `learning_studied` values of the decks. Equal digests mean the test passes.
 
 A step whose op has not landed when this unit does is added by the unit that lands it (T3): U47 (the optimizer) is in milestone M1, after this unit (M1R in the reviews-first plan of 2026-10-17), and U44 (answers) is not among this unit's dependencies.
 

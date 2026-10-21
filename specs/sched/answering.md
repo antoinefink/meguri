@@ -116,9 +116,11 @@ The decks: the card's deck (`did`), then its parent, then the parent's parent, u
 
 For each of these decks, in its `common` blob (`model/protobuf-records` P6.4):
 
-1. When `last_day_studied` is not `today`: `new_studied`, `review_studied`, `learning_studied` and `milliseconds_studied` become 0 and `last_day_studied` becomes `today`.
+1. When `last_day_studied` is not `today`: `new_studied`, `review_studied` and `milliseconds_studied` become 0 and `last_day_studied` becomes `today`.
 2. By the card's `queue` before the answer: 0 (new) adds 1 to `new_studied`; 2 (review) or 3 (interday learning) adds 1 to `review_studied`; any other queue adds to neither. An intraday learning answer uses no daily limit.
 3. `milliseconds_studied` += the review-log row's `time` (A5, already capped).
+
+Meguri preserves `learning_studied` on every answer, including the first answer of a new day (`sched/fsrs-policy#K1`, `model/protobuf-records#P8`; R322). Anki resets that legacy scalar to 0 with the other counters. The two exact replacements for `sched/data/deck-counters` are `deck-learning-count-rollover` and `deck-learning-count-parent-answer` in `conformance/deviations.yaml`.
 
 The deck row gets `mtime_secs` = `now_s` and `usn` -1, and its `common` blob is encoded again (`model/protobuf-records` P3, P5) with every other field as read: the collapse flags, `other` and unknown fields (P4). Its `name` and `kind` are written as stored: answering does not apply `decks/decks` D1's stored-name normalization or D2's unique-name rule.
 
