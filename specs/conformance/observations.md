@@ -45,7 +45,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `answer_labels` | card references or none | `{"#cN": {again, hard, good, easy}}`: the answer button labels now, each as its parts (O10) |
 | `net_probe` | `{host, port, timeout_ms?}` | `{connected, error}` (diagnostic, oracle only: proves the worker has no route out) |
 | `schema_objects` | none | `[{type, name, tbl_name, sql}]`, every object of the collection file's `sqlite_master` with its SQL text normalized (`storage-ops.md` P3) |
-| `queue` | none | `{cards, kinds, counts}`: current-deck presentation in full ordered ids, each kind and `{new, learning, review}` counts (`queue-ops.md` Q2); pending current provider proof |
+| `queue` | none | `{cards, kinds, counts}`: current-deck presentation in full ordered ids, each kind and `{new, learning, review}` counts (`queue-ops.md` Q2) |
 | `deck_counts` | none | `[{name, new, learning, review, children}]`: ordered count tree after the explicit compatibility prelude (`queue-ops.md` Q3); production uses D8 automatic maintenance |
 | `congrats` | none | `{learn_remaining, secs_until_next_learn, review_remaining, new_remaining, have_sched_buried, have_user_buried}`: the six compatibility facts, including all queue-1 cards (`queue-ops.md` Q4) |
 | `deck_tree` | none | `[{name, children}]`: the deck tree's top-level nodes in order, nested (`deck-ops.md` K12); `deck_counts` reports counts separately |
