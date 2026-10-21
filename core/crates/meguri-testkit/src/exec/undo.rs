@@ -20,6 +20,8 @@ fn restore(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError
         _ => return Err(core("expected undo or redo")),
     };
     let collection = session.engine_collection()?;
+    session.held_queue = None;
+    session.day.clear();
     let empty = if undo { "nothing_to_undo" } else { "nothing_to_redo" };
     let peek = if undo {
         collection.peek_undo(UndoScope::Global)

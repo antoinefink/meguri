@@ -407,6 +407,7 @@ struct State {
         Arc<crate::rendering::RenderedCard>,
     )>,
     paused: bool,
+    mutating: bool,
 }
 struct StreamWake {
     tx: mpsc::Sender<Work>,
@@ -463,7 +464,6 @@ enum Work {
         cards: Vec<crate::CardDelta>,
     },
     Barrier(mpsc::SyncSender<Result<(), EngineError>>, Duration),
-    #[cfg(feature = "test-hooks")]
     ApplicationBarrier(mpsc::SyncSender<()>),
     Stop,
 }
@@ -567,6 +567,7 @@ impl ReviewService {
                 session: None,
                 render: VecDeque::new(),
                 paused: false,
+                mutating: false,
             }),
             tx,
             queues,
@@ -849,6 +850,87 @@ impl ReviewService {
             }
         }
     }
+    /// U48 admission shares the lifecycle owner with start/end/undo/close.
+    /// Stop new optimistic answers before draining accepted ones; no service
+    /// mutex survives a writer or journal wait. The real observer projects the
+    /// committed change, using C13's patch/rebuild classifier.
+    pub fn sched_op(
+        &self,
+        request: crate::sched::ops::Request,
+        session: Option<SessionId>,
+        options: &crate::tags::RunOptions,
+    ) -> Result<crate::OpResult<crate::sched::ops::ResultValue>, EngineError> {
+        request.validate()?;
+        let _control = self.control.try_acquire()?;
+        if let Some(cancel) = &options.cancel {
+            cancel.check()?;
+        }
+        let (c, journal) = self.bound()?;
+        journal.check(c.generation())?;
+        {
+            let mut state = self.inner.state.lock().unwrap();
+            if state.paused || state.mutating {
+                return Err(EngineError::unavailable("review admission is closed"));
+            }
+            if let Some(id) = session {
+                let s = state.session.as_ref().filter(|s| s.id == id).ok_or_else(no_session)?;
+                if s.ending || s.restoring || s.failed.load(Ordering::Acquire) {
+                    return Err(EngineError::unavailable("review is restoring"));
+                }
+            }
+            state.mutating = true;
+        }
+        struct MutationAdmission<'a>(&'a Mutex<State>);
+        impl Drop for MutationAdmission<'_> {
+            fn drop(&mut self) {
+                self.0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .mutating = false;
+            }
+        }
+        let _admission = MutationAdmission(&self.inner.state);
+        self.drain_until(crate::monotonic::now() + Duration::from_secs(5))?;
+        if let Some(cancel) = &options.cancel {
+            cancel.check()?;
+        }
+        let old = session.and_then(|id| {
+            self.inner
+                .state
+                .lock()
+                .unwrap()
+                .session
+                .as_ref()
+                .filter(|s| s.id == id)
+                .map(|s| s.last.items.clone())
+        });
+        let mut result = crate::sched::ops::run_admitted(&c, request, session, options)?;
+        // run() returns after observers have enqueued Work::Observe. A worker
+        // barrier therefore witnesses that exact stream, never a preview or a
+        // caller-synthesized replacement queue.
+        let projected = (|| {
+            let (tx, rx) = mpsc::sync_channel(1);
+            self.inner.tx.send(Work::ApplicationBarrier(tx)).map_err(invalid)?;
+            rx.recv().map_err(invalid)?;
+            let mut state = self.inner.state.lock().unwrap();
+            if let Some(s) = state.session.as_mut() {
+                s.redo.clear();
+            }
+            if let Some(id) = session {
+                let s = state.session.as_mut().filter(|s| s.id == id).ok_or_else(no_session)?;
+                // Re-read full values after the ordered observer; no rebuild
+                // request is made by this operation API.
+                let head = project(&c, s, 3, None)?;
+                result.value.head_diff = Some(diff(old.as_deref().unwrap_or(&[]), head));
+            }
+            Ok::<_, EngineError>(())
+        })();
+        projected.map_err(|error| EngineError::CommitCompleted {
+            seq: result.seq,
+            message: error.to_string(),
+        })?;
+        Ok(result)
+    }
     pub fn head(&self, id: SessionId, count: usize) -> Result<Head, EngineError> {
         if !(1..=10).contains(&count) {
             return Err(invalid("head count must be 1..10"));
@@ -996,7 +1078,7 @@ impl ReviewService {
             return Err(invalid("answer instant is in the future"));
         }
         let mut state = self.inner.state.lock().unwrap();
-        if state.paused {
+        if state.paused || state.mutating {
             return Err(EngineError::unavailable("review is suspended"));
         }
         let session = state.session.as_mut().filter(|s| s.id == id).ok_or_else(no_session)?;
@@ -2569,7 +2651,6 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
             }
             Ok(())
         }
-        #[cfg(feature = "test-hooks")]
         Work::ApplicationBarrier(reply) => {
             let _ = reply.send(());
             Ok(())

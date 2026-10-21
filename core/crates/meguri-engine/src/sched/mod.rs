@@ -6,6 +6,7 @@ pub mod answer;
 pub mod day_clock;
 pub mod fsrs_policy;
 pub mod memory;
+pub mod ops;
 pub mod rollover_op;
 
 pub use day_clock::{DayClock, DayReport};

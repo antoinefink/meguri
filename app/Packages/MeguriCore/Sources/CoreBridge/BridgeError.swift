@@ -15,6 +15,7 @@ public enum BridgeError: Error, Sendable, Hashable {
     case insufficientSpace(required: UInt64, available: UInt64)
     case open(CollectionOpenFailure)
     case suspendDeadline(phase: String)
+    case schedOpRefused(SchedOpRefusal)
     case sessionActive
     case invalidTypeAnswerReplacement
     /// The call's `CancelToken` was cancelled.
@@ -65,6 +66,7 @@ extension BridgeError {
         case .InsufficientSpace(let required, let available): self = .insufficientSpace(required: required, available: available)
         case .Open(let failure): self = .open(CollectionOpenFailure(failure))
         case .SuspendDeadline(let phase): self = .suspendDeadline(phase: phase)
+        case .SchedOpRefused(let refusal): self = .schedOpRefused(SchedOpRefusal(refusal))
         case .SessionActive: self = .sessionActive
         case .InvalidTypeAnswerReplacement: self = .invalidTypeAnswerReplacement
         case .Cancelled: self = .cancelled

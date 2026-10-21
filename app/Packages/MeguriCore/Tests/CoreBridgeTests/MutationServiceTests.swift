@@ -55,6 +55,17 @@ extension EventTests {
             #expect(note.summary.generation == generation)
             #expect(note.summary.changes.notes.contains { $0.id == note.id })
             #expect(note.cards.count == 1)
+            let scheduling = CoreSchedOpsService()
+            let suspending = try await scheduling.start(.suspend(.cards(note.cards)), sessionID: nil)
+            let suspended = try await suspending.value()
+            #expect(suspended.count == 1 && suspended.summary.undoName == "Suspend")
+            #expect(suspended.summary.generation == generation && suspended.headDiff == nil)
+            let unsuspendingUndo = try await undo.startUndo(scope: .global)
+            guard case .global(_, let scheduledStep) = try await unsuspendingUndo.value() else {
+                Issue.record("Scheduling undo did not use the host"); try await collectionService.close(); return
+            }
+            #expect(scheduledStep.name == "Suspend" && scheduledStep.kind == .other)
+            #expect(try await scheduling.buriedKinds(deck: deck.id) == CoreBridge.BuriedKinds(manual: false, siblings: false))
             #expect(try await notes.checkNoteFields(notetypeId: nt.id, fields: ["front", "back"], ownNote: nil).duplicates == [note.id])
             let saved = try await notes.updateNote(.init(id: note.id, fields: ["persisted", "back"], tags: ["Parent::Child"]))
             #expect(saved.written)

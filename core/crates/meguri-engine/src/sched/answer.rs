@@ -499,12 +499,7 @@ pub struct Prediction {
 }
 impl Prediction {
     pub fn answer(self, rating: Rating, elapsed_ms: u64) -> AnswerRequest {
-        let chosen = match rating {
-            Rating::Again => self.states.again,
-            Rating::Hard => self.states.hard,
-            Rating::Good => self.states.good,
-            Rating::Easy => self.states.easy,
-        };
+        let chosen = meguri_sched::ops::grade_now::select(&self.states, rating);
         AnswerRequest {
             card: self.card,
             state_token: self.state_token,
@@ -549,65 +544,89 @@ pub fn predict(
         .answer_caches
         .1
         .read_timed(collection, ReaderRole::Interactive, |rows, env, at| {
-            let answered_at = EpochMillis(at);
-            let card = rows.card(id)?.ok_or_else(|| missing(Table::Cards, id.0))?;
-            let (preset, home) = home(&**rows, &card)?;
-            let normal = match &home.kind.kind {
-                DeckKind::Normal(n) => n,
-                _ => return Err(state_error("InFilteredDeck")),
-            };
-            let retention = DeckSched::new(Some(normal), &home.common).retention(preset.fields().desired_retention);
-            let mut history = Vec::new();
-            if card.card_type != CardType::New && card.data.memory_state.is_none() {
-                rows.visit_fsrs_histories(
-                    &meguri_storage::queries::revlog_fsrs::HistorySelection::Cards(vec![id]),
-                    |_, found| -> Result<(), StorageError> {
-                        history.extend_from_slice(found);
-                        Ok(())
-                    },
-                )?;
-            }
-            let memory = meguri_sched::memory::resolve::on_the_fly(models, &preset, &card, &history, env.next_day_at)
-                .map_err(state_error)?;
-            let last_review_time = match card.data.last_review_secs {
-                Some(t) => Some(t),
-                None => rows.fsrs_last_review_time(id)?,
-            };
-            let cfg = SchedConfig::new(&**rows);
-            let input = StateInput {
-                card: &card,
-                preset: &preset,
-                memory_state: memory,
-                last_review_time,
-                desired_retention: retention,
-                today: env.today,
-                next_day_at: env.next_day_at,
-                now: answered_at.whole_secs().0,
-                short_term_with_steps: cfg.fsrs_short_term_with_steps()?,
-                learn_ahead: cfg.collapse_time()?,
-            };
             let cache = cache.filter(|c| c.is_current(collection));
-            let states = if let Some(c) = &cache {
+            let mut prediction = if let Some(c) = &cache {
+                let card = rows.card(id)?.ok_or_else(|| missing(Table::Cards, id.0))?;
+                let (preset, _) = home(&**rows, &card)?;
                 c.with_chooser(collection, &card, &preset, |chooser| {
-                    next_states(models, &input, chooser)
-                })
+                    predict_in(
+                        &**rows,
+                        id,
+                        models,
+                        env.today,
+                        env.next_day_at,
+                        EpochMillis(at),
+                        chooser,
+                    )
+                })?
             } else {
-                next_states(models, &input, None)
-            }
-            .map_err(state_error)?;
-            let state_token = rows
-                .row_digest(Table::Cards, &RowKey::Id(id.0))?
-                .ok_or_else(|| missing(Table::Cards, id.0))?;
-            Ok(Prediction {
-                states,
-                card: id,
-                state_token,
-                today: env.today,
-                next_day_at: env.next_day_at,
-                answered_at,
-                cache,
-            })
+                predict_in(&**rows, id, models, env.today, env.next_day_at, EpochMillis(at), None)?
+            };
+            prediction.cache = cache;
+            Ok(prediction)
         })
+}
+
+/// U45 prediction from the live transaction. Later Grade Now siblings observe
+/// earlier U44 writes, using exactly the ordinary prediction inputs.
+pub(crate) fn predict_in(
+    rows: &impl ReadRows,
+    id: CardId,
+    models: &mut FsrsCache,
+    today: u32,
+    next_day_at: i64,
+    answered_at: EpochMillis,
+    chooser: Option<&mut dyn meguri_sched::states::interval_limits::FuzzedDayChooser>,
+) -> Result<Prediction, EngineError> {
+    let card = rows.card(id)?.ok_or_else(|| missing(Table::Cards, id.0))?;
+    let (preset, home) = home(rows, &card)?;
+    let normal = match &home.kind.kind {
+        DeckKind::Normal(n) => n,
+        _ => return Err(state_error("InFilteredDeck")),
+    };
+    let retention = DeckSched::new(Some(normal), &home.common).retention(preset.fields().desired_retention);
+    let mut history = Vec::new();
+    if card.card_type != CardType::New && card.data.memory_state.is_none() {
+        rows.visit_fsrs_histories(
+            &meguri_storage::queries::revlog_fsrs::HistorySelection::Cards(vec![id]),
+            |_, found| -> Result<(), StorageError> {
+                history.extend_from_slice(found);
+                Ok(())
+            },
+        )?;
+    }
+    let memory = meguri_sched::memory::resolve::on_the_fly(models, &preset, &card, &history, next_day_at)
+        .map_err(state_error)?;
+    let last_review_time = match card.data.last_review_secs {
+        Some(t) => Some(t),
+        None => rows.fsrs_last_review_time(id)?,
+    };
+    let cfg = SchedConfig::new(rows);
+    let input = StateInput {
+        card: &card,
+        preset: &preset,
+        memory_state: memory,
+        last_review_time,
+        desired_retention: retention,
+        today,
+        next_day_at,
+        now: answered_at.whole_secs().0,
+        short_term_with_steps: cfg.fsrs_short_term_with_steps()?,
+        learn_ahead: cfg.collapse_time()?,
+    };
+    let states = next_states(models, &input, chooser).map_err(state_error)?;
+    let state_token = rows
+        .row_digest(Table::Cards, &RowKey::Id(id.0))?
+        .ok_or_else(|| missing(Table::Cards, id.0))?;
+    Ok(Prediction {
+        states,
+        card: id,
+        state_token,
+        today,
+        next_day_at,
+        answered_at,
+        cache: None,
+    })
 }
 
 fn home(rows: &impl ReadRows, card: &Card) -> Result<(PresetView, meguri_model::deck::Deck), EngineError> {
@@ -704,186 +723,202 @@ fn submit_selected(
 ) -> crate::Pending<OpResult<AnswerResult>> {
     let bound = collection.clone();
     collection.submit(spec, move |ctx| {
-        if let Some(app) = &application {
-            app.validate(ctx, &request)?;
-        }
-        let base = ctx
-            .scope()
-            .row_digest(Table::Cards, &RowKey::Id(request.card.0))?
-            .ok_or_else(|| missing(Table::Cards, request.card.0))?;
-        let card = ctx
-            .scope()
-            .card(request.card)?
-            .ok_or_else(|| missing(Table::Cards, request.card.0))?;
-        let (preset, deck) = home(ctx.scope(), &card)?;
-        FsrsCache::default().model(&preset).map_err(state_error)?;
-        let normal = match &deck.kind.kind {
-            DeckKind::Normal(n) => n,
-            _ => return Err(state_error("InFilteredDeck")),
-        };
-        let retention = DeckSched::new(Some(normal), &deck.common).retention(preset.fields().desired_retention);
-        let until = request
-            .next_day_at
-            .saturating_sub(request.answered_at.whole_secs().0)
-            .max(0) as u64;
-        if request.chosen.delay != request.chosen.state.delay(until)
-            || request.chosen.revlog.interval != request.chosen.delay.revlog_interval()
-            || request.chosen.revlog.last_interval != request.current.delay(until).revlog_interval()
-            || request.chosen.revlog.kind
-                != match request.current {
-                    State::Review(_) => 1,
-                    State::Relearning { .. } => 2,
-                    _ => 0,
-                }
+        apply_in(ctx, &bound, request, queue, application, true)
+    })
+}
+
+/// Shared U44 transaction application. Production/replay retain validation,
+/// receipts and commit hooks; Grade Now supplies no queue/cache/application.
+pub(crate) fn apply_in(
+    ctx: &mut crate::OpContext<'_, '_>,
+    bound: &Collection,
+    request: AnswerRequest,
+    queue: Option<Arc<Mutex<crate::session::held::HeldState>>>,
+    application: Option<crate::session::Application>,
+    record_undo_state: bool,
+) -> Result<AnswerResult, EngineError> {
+    if let Some(app) = &application {
+        app.validate(ctx, &request)?;
+    }
+    let base = ctx
+        .scope()
+        .row_digest(Table::Cards, &RowKey::Id(request.card.0))?
+        .ok_or_else(|| missing(Table::Cards, request.card.0))?;
+    let card = ctx
+        .scope()
+        .card(request.card)?
+        .ok_or_else(|| missing(Table::Cards, request.card.0))?;
+    let (preset, deck) = home(ctx.scope(), &card)?;
+    FsrsCache::default().model(&preset).map_err(state_error)?;
+    let normal = match &deck.kind.kind {
+        DeckKind::Normal(n) => n,
+        _ => return Err(state_error("InFilteredDeck")),
+    };
+    let retention = DeckSched::new(Some(normal), &deck.common).retention(preset.fields().desired_retention);
+    let until = request
+        .next_day_at
+        .saturating_sub(request.answered_at.whole_secs().0)
+        .max(0) as u64;
+    if request.chosen.delay != request.chosen.state.delay(until)
+        || request.chosen.revlog.interval != request.chosen.delay.revlog_interval()
+        || request.chosen.revlog.last_interval != request.current.delay(until).revlog_interval()
+        || request.chosen.revlog.kind
+            != match request.current {
+                State::Review(_) => 1,
+                State::Relearning { .. } => 2,
+                _ => 0,
+            }
+    {
+        return Err(invalid("inconsistent selected answer values"));
+    }
+    let plan = values::plan(
+        &card,
+        request.current,
+        &request.chosen,
+        &preset,
+        retention,
+        request.today,
+        request.answered_at.0,
+        request.elapsed_ms,
+    )
+    .map_err(|e| invalid(e.to_string()))?;
+    let cache = request.cache.filter(|c| c.is_current(&bound));
+    let mut meta = AnswerMetadata {
+        card: card.id,
+        from_queue: request.from_queue,
+        learning_cutoff: request.learning_cutoff,
+        cache_build: cache.as_ref().map(|c| c.build),
+        cache: cache.as_ref().map(Arc::downgrade),
+        queue: None,
+        production: None,
+    };
+    let scope = ctx.scope();
+    scope.put_answer_card(&plan.card)?;
+    let log = values::revlog::row(card.id, request.rating, &request.chosen, plan.elapsed_ms);
+    let revlog_id = if let Some(prepared) = application.as_ref().and_then(|a| a.assigned.as_ref()) {
+        let mut assigned = log.clone();
+        assigned.id = RevlogId(prepared.row[0]);
+        use meguri_storage::Record;
+        let cells = assigned.to_cells();
+        if cells
+            .iter()
+            .zip(&prepared.row)
+            .any(|(c, v)| *c != meguri_storage::Cell::Integer(*v))
         {
-            return Err(invalid("inconsistent selected answer values"));
+            return Err(invalid("prepared selected answer identity changed"));
         }
-        let plan = values::plan(
-            &card,
-            request.current,
-            &request.chosen,
-            &preset,
-            retention,
+        scope.insert_prepared_answer(&assigned)?
+    } else {
+        scope.add_answer_revlog(&log, request.answered_at)?
+    };
+    let decks = scope.deck_rows()?;
+    let mut current = Some(deck);
+    while let Some(deck) = current {
+        let changed = values::deck_stats::answered(
+            &deck,
             request.today,
-            request.answered_at.0,
-            request.elapsed_ms,
-        )
-        .map_err(|e| invalid(e.to_string()))?;
-        let cache = request.cache.filter(|c| c.is_current(&bound));
-        let mut meta = AnswerMetadata {
-            card: card.id,
-            from_queue: request.from_queue,
-            learning_cutoff: request.learning_cutoff,
-            cache_build: cache.as_ref().map(|c| c.build),
-            cache: cache.as_ref().map(Arc::downgrade),
-            queue: None,
-            production: None,
-        };
-        let scope = ctx.scope();
-        scope.put_answer_card(&plan.card)?;
-        let log = values::revlog::row(card.id, request.rating, &request.chosen, plan.elapsed_ms);
-        let revlog_id = if let Some(prepared) = application.as_ref().and_then(|a| a.assigned.as_ref()) {
-            let mut assigned = log.clone();
-            assigned.id = RevlogId(prepared.row[0]);
-            use meguri_storage::Record;
-            let cells = assigned.to_cells();
-            if cells
+            card.queue,
+            plan.elapsed_ms,
+            request.answered_at.whole_secs().0,
+        );
+        scope.put(&changed)?;
+        current = deck.name.rsplit_once('\u{1f}').and_then(|(parent, _)| {
+            decks
                 .iter()
-                .zip(&prepared.row)
-                .any(|(c, v)| *c != meguri_storage::Cell::Integer(*v))
-            {
-                return Err(invalid("prepared selected answer identity changed"));
-            }
-            scope.insert_prepared_answer(&assigned)?
-        } else {
-            scope.add_answer_revlog(&log, request.answered_at)?
-        };
-        let decks = scope.deck_rows()?;
-        let mut current = Some(deck);
-        while let Some(deck) = current {
-            let changed = values::deck_stats::answered(
-                &deck,
-                request.today,
-                card.queue,
-                plan.elapsed_ms,
+                .find(|d| meguri_text::fold::compare_folded(&d.name, parent).is_eq())
+                .cloned()
+        });
+    }
+    let buried = scope
+        .answer_siblings(card.note_id, card.id)?
+        .into_iter()
+        .filter(|s| values::siblings::allowed(card.queue, s.queue, preset.fields()))
+        .map(|s| s.id)
+        .collect::<Vec<_>>();
+    let queue_change = queue
+        .as_ref()
+        .map(|owner| {
+            crate::session::held::QueueRestore::prepare(
+                owner,
+                &plan.card,
+                &buried,
                 request.answered_at.whole_secs().0,
-            );
-            scope.put(&changed)?;
-            current = deck.name.rsplit_once('\u{1f}').and_then(|(parent, _)| {
-                decks
-                    .iter()
-                    .find(|d| meguri_text::fold::compare_folded(&d.name, parent).is_eq())
-                    .cloned()
-            });
-        }
-        let buried = scope
-            .answer_siblings(card.note_id, card.id)?
-            .into_iter()
-            .filter(|s| values::siblings::allowed(card.queue, s.queue, preset.fields()))
-            .map(|s| s.id)
-            .collect::<Vec<_>>();
-        let queue_change = queue
-            .as_ref()
-            .map(|owner| {
-                crate::session::held::QueueRestore::prepare(
-                    owner,
-                    &plan.card,
-                    &buried,
-                    request.answered_at.whole_secs().0,
-                    request.next_day_at,
-                )
-            })
-            .transpose()?;
-        if let Some((record, _)) = &queue_change {
-            meta.queue = Some(record.clone());
-        }
-        if !buried.is_empty() {
-            let value = meguri_storage::ConfigValue::from(u64::from(request.today));
-            if scope.config_value("lastUnburied")? != Some(value.clone()) {
-                scope.put_config_entry(&ConfigEntry {
-                    key: "lastUnburied".into(),
-                    usn: Usn::PENDING,
-                    mtime: EpochSecs(request.answered_at.whole_secs().0),
-                    value: value.compact().into_bytes(),
-                })?;
-            }
-            for id in &buried {
-                scope.bury_answer_sibling(*id, request.answered_at.whole_secs().0)?;
-            }
-        }
-        if plan.leech {
-            // U30 writes locally-stamped tags/notes; this answer scope uses
-            // recorded timestamps, so explicitly stamp the note it changed.
-            if crate::tags::add_in(scope, &[card.note_id], "leech")? > 0 {
-                let mut note = scope
-                    .note(card.note_id)?
-                    .ok_or_else(|| missing(Table::Notes, card.note_id.0))?;
-                note.mtime = EpochSecs(request.answered_at.whole_secs().0);
-                note.usn = Usn::PENDING;
-                scope.put(&note)?;
-            }
-        }
-        scope.set_col_mod(request.answered_at)?;
-        if let Some(app) = &application {
-            meta.production = app.restorer.clone();
-            app.prepare(ctx, revlog_id, base)?;
-        }
-        if application.as_ref().is_some_and(|a| a.clear_history) {
-            let core = Arc::downgrade(&bound.core);
-            ctx.on_commit(move |_| {
-                if let Some(core) = core.upgrade() {
-                    core.exec.undo.reset(crate::DisabledReason::ClearedByRollover);
-                }
-            });
-        }
-        ctx.set_undo_state(Arc::new(meta.clone()));
-        if let Some((record, next)) = queue_change {
-            ctx.on_commit(move |_| record.commit(next));
-        }
-        if let Some(cache) = cache.filter(|_| !application.as_ref().is_some_and(|a| a.optimistic_cache)) {
-            let written = plan.card.clone();
-            let preset = preset.source().id;
-            ctx.on_commit(move |_| {
-                // Own col.mod invalidates the maintained report after the commit.
-                // The registered build/clock witness still proves W8 ownership.
-                if cache.enabled && cache.bound_and_time_current(&bound) && written.queue == CardQueue::Review {
-                    cache.value.lock().unwrap().append(
-                        preset,
-                        written.interval,
-                        Entry {
-                            card: written.id,
-                            note: written.note_id,
-                        },
-                    );
-                }
-            });
-        }
-        Ok(AnswerResult {
-            leech: plan.leech,
-            suspended: plan.suspended,
-            buried,
-            revlog_id,
-            metadata: meta,
+                request.next_day_at,
+            )
         })
+        .transpose()?;
+    if let Some((record, _)) = &queue_change {
+        meta.queue = Some(record.clone());
+    }
+    if !buried.is_empty() {
+        let value = meguri_storage::ConfigValue::from(u64::from(request.today));
+        if scope.config_value("lastUnburied")? != Some(value.clone()) {
+            scope.put_config_entry(&ConfigEntry {
+                key: "lastUnburied".into(),
+                usn: Usn::PENDING,
+                mtime: EpochSecs(request.answered_at.whole_secs().0),
+                value: value.compact().into_bytes(),
+            })?;
+        }
+        for id in &buried {
+            scope.bury_answer_sibling(*id, request.answered_at.whole_secs().0)?;
+        }
+    }
+    if plan.leech {
+        // U30 writes locally-stamped tags/notes; this answer scope uses
+        // recorded timestamps, so explicitly stamp the note it changed.
+        if crate::tags::add_in(scope, &[card.note_id], "leech")? > 0 {
+            let mut note = scope
+                .note(card.note_id)?
+                .ok_or_else(|| missing(Table::Notes, card.note_id.0))?;
+            note.mtime = EpochSecs(request.answered_at.whole_secs().0);
+            note.usn = Usn::PENDING;
+            scope.put(&note)?;
+        }
+    }
+    scope.set_col_mod(request.answered_at)?;
+    if let Some(app) = &application {
+        meta.production = app.restorer.clone();
+        app.prepare(ctx, revlog_id, base)?;
+    }
+    if application.as_ref().is_some_and(|a| a.clear_history) {
+        let core = Arc::downgrade(&bound.core);
+        ctx.on_commit(move |_| {
+            if let Some(core) = core.upgrade() {
+                core.exec.undo.reset(crate::DisabledReason::ClearedByRollover);
+            }
+        });
+    }
+    if record_undo_state {
+        ctx.set_undo_state(Arc::new(meta.clone()));
+    }
+    if let Some((record, next)) = queue_change {
+        ctx.on_commit(move |_| record.commit(next));
+    }
+    if let Some(cache) = cache.filter(|_| !application.as_ref().is_some_and(|a| a.optimistic_cache)) {
+        let written = plan.card.clone();
+        let bound = bound.clone();
+        let preset = preset.source().id;
+        ctx.on_commit(move |_| {
+            // Own col.mod invalidates the maintained report after the commit.
+            // The registered build/clock witness still proves W8 ownership.
+            if cache.enabled && cache.bound_and_time_current(&bound) && written.queue == CardQueue::Review {
+                cache.value.lock().unwrap().append(
+                    preset,
+                    written.interval,
+                    Entry {
+                        card: written.id,
+                        note: written.note_id,
+                    },
+                );
+            }
+        });
+    }
+    Ok(AnswerResult {
+        leech: plan.leech,
+        suspended: plan.suspended,
+        buried,
+        revlog_id,
+        metadata: meta,
     })
 }

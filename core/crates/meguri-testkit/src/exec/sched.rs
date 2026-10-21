@@ -25,6 +25,11 @@ use crate::scenario::{FsrsNextInput, FsrsNextRequest, LogicalRef, ObservationArg
 /// Registers the `fsrs_next` and `timing` kinds and the `reopen` op.
 pub(super) fn register(registry: &mut Registry) {
     registry.op("answer", answer_op);
+    for name in ["bury", "suspend", "unsuspend", "unbury_deck", "forget", "grade_now"] {
+        registry.op(name, manual_op);
+    }
+    registry.op_rejecting("set_due", &["invalid_days"], manual_op);
+    registry.op_rejecting("empty_filtered", &["not_filtered"], manual_op);
     registry.observation("revlog", revlog_observation);
     registry.observation("fsrs_next", observe);
     registry.observation("timing", timing);
@@ -659,4 +664,112 @@ fn queue_observation(session: &mut Session<'_>, request: &ObservationRequest) ->
             "review_remaining":state.review_remaining,"new_remaining":state.new_remaining,
             "have_sched_buried":state.sibling_buried>0,"have_user_buried":state.user_buried>0}))
     })
+}
+
+/// J1–J9 use only real hosted U48 operations; no fixture row mutation path.
+fn manual_op(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
+    use crate::scenario::{CardsOrNotes, SchedContext};
+    use meguri_engine::sched::ops::{self, Context, Request, Targets};
+    use meguri_model::ids::{CardId, NoteId};
+    let cards = |refs: &[crate::scenario::CardRef]| -> Result<Vec<CardId>, ExecError> {
+        refs.iter()
+            .map(|r| {
+                session
+                    .cards
+                    .get(r.0.index())
+                    .copied()
+                    .map(CardId)
+                    .ok_or_else(|| invalid("unknown card reference"))
+            })
+            .collect()
+    };
+    let targets = |refs: &CardsOrNotes| -> Result<Targets, ExecError> {
+        Ok(match refs {
+            CardsOrNotes::Cards(refs) => Targets::Cards(cards(refs)?),
+            CardsOrNotes::Notes(refs) => Targets::Notes(
+                refs.iter()
+                    .map(|r| {
+                        session
+                            .notes
+                            .get(r.0.index())
+                            .copied()
+                            .map(NoteId)
+                            .ok_or_else(|| invalid("unknown note reference"))
+                    })
+                    .collect::<Result<_, _>>()?,
+            ),
+        })
+    };
+    let context = |context: Option<SchedContext>| {
+        context.map(|c| match c {
+            SchedContext::Reviewer => Context::Reviewer,
+            SchedContext::Browser => Context::Browser,
+        })
+    };
+    let deck = |name: &str| -> Result<meguri_model::ids::DeckId, ExecError> {
+        let rows = session
+            .storage
+            .collection()
+            .ok_or_else(|| invalid("no collection"))?
+            .reader()?;
+        rows.deck_rows()
+            .map_err(|e| ExecError::new("core_error", e.to_string()))?
+            .into_iter()
+            .find(|d| d.human_name() == name)
+            .map(|d| d.id)
+            .ok_or_else(|| invalid("unknown deck"))
+    };
+    let request = match step {
+        Step::Bury(a) => Request::Bury(targets(a)?),
+        Step::Suspend(a) => Request::Suspend(targets(a)?),
+        Step::Unsuspend(a) => Request::Unsuspend(cards(&a.cards)?),
+        Step::UnburyDeck(a) => Request::UnburyDeck {
+            deck: deck(&a.deck)?,
+            mode: match a.mode {
+                crate::scenario::UnburyMode::All => ops::UnburyMode::All,
+                crate::scenario::UnburyMode::Manual => ops::UnburyMode::Manual,
+                crate::scenario::UnburyMode::Siblings => ops::UnburyMode::Siblings,
+            },
+        },
+        Step::SetDue(a) => Request::SetDue {
+            cards: cards(&a.cards)?,
+            days: a.days.clone(),
+            context: context(a.context),
+        },
+        Step::Forget(a) => Request::Reset {
+            cards: cards(&a.cards)?,
+            restore_position: a.restore_position,
+            reset_counts: a.reset_counts,
+            context: context(a.context),
+        },
+        Step::GradeNow(a) => Request::GradeNow {
+            cards: cards(&a.cards)?,
+            rating: match a.rating {
+                crate::scenario::Rating::Again => meguri_sched::answer::Rating::Again,
+                crate::scenario::Rating::Hard => meguri_sched::answer::Rating::Hard,
+                crate::scenario::Rating::Good => meguri_sched::answer::Rating::Good,
+                crate::scenario::Rating::Easy => meguri_sched::answer::Rating::Easy,
+            },
+        },
+        Step::EmptyFiltered(a) => Request::EmptyFiltered { deck: deck(&a.deck)? },
+        _ => return Err(invalid("expected scheduling operation")),
+    };
+    session.engine_collection()?;
+    session.held_queue = None;
+    let result = session
+        .storage
+        .host()?
+        .review()
+        .sched_op(request, None, &Default::default());
+    session.day.clear();
+    match result {
+        Ok(_) => Ok(OpResult::Done),
+        Err(meguri_engine::EngineError::SchedOp(ops::Refusal::InvalidDays(_))) => {
+            Ok(OpResult::Rejected("invalid_days"))
+        }
+        Err(meguri_engine::EngineError::SchedOp(ops::Refusal::NotFiltered { .. })) => {
+            Ok(OpResult::Rejected("not_filtered"))
+        }
+        Err(error) => Err(ExecError::new("core_error", error.to_string())),
+    }
 }

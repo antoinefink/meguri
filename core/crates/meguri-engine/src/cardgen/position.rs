@@ -28,13 +28,29 @@ pub fn sibling_position(cards: &[Card]) -> Option<u32> {
 }
 
 pub fn take_counter(scope: &mut WriteScope<'_>) -> Result<u32, EngineError> {
-    let counter = scope
+    let counter = read_counter(scope)?;
+    scope.set_config("nextPos", &ConfigValue::from(u64::from(counter.wrapping_add(1))))?;
+    Ok(counter)
+}
+
+pub(crate) fn read_counter(rows: &impl ReadRows) -> Result<u32, EngineError> {
+    Ok(rows
         .config_value("nextPos")?
         .and_then(|v| v.as_u64())
         .and_then(|v| u32::try_from(v).ok())
-        .unwrap_or(0);
-    scope.set_config("nextPos", &ConfigValue::from(u64::from(counter.wrapping_add(1))))?;
-    Ok(counter)
+        .unwrap_or(0))
+}
+pub(crate) fn write_counter(scope: &mut WriteScope<'_>, value: u32) -> Result<(), EngineError> {
+    let value = ConfigValue::from(u64::from(value));
+    if scope.config_value("nextPos")?.as_ref() != Some(&value) {
+        scope.put_config_entry(&meguri_model::config::ConfigEntry {
+            key: "nextPos".into(),
+            value: value.compact().into_bytes(),
+            mtime: scope.now().whole_secs(),
+            usn: meguri_model::usn::Usn::PENDING,
+        })?;
+    }
+    Ok(())
 }
 
 pub fn random_order(reader: &impl ReadRows, id: DeckId) -> Result<bool, EngineError> {

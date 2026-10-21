@@ -254,6 +254,12 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let startAddNotes = BridgeCall("start_add_notes")
     public static let noteAdditionJobResult = BridgeCall("NoteAdditionJob.result")
 
+    public static let parseDueDays = BridgeCall("parse_due_days")
+    public static let startSchedOp = BridgeCall("start_sched_op")
+    public static let schedOpJobResult = BridgeCall("SchedOpJob.result")
+    public static let startBuriedKinds = BridgeCall("start_buried_kinds")
+    public static let buriedKindsJobResult = BridgeCall("BuriedKindsJob.result")
+
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
         startOpen, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, deckStudyState, deckDescriptionHtml,
@@ -271,5 +277,6 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         startReparentTags, startDeleteTags, startClearUnusedTags, addMedia, flushForBackground,
         suspend, resume, undoJobResult, peekUndo, peekRedo,
         tryPendingReviewRestore, deckRenameJobResult, deckMoveJobResult, deckCollapseJobResult, startUndo, startRedo, startAddNotes, noteAdditionJobResult,
+        parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,
     ]
 }

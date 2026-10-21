@@ -74,6 +74,7 @@ import Testing
             "add_media", "flush_for_background", "suspend", "resume",
             "UndoJob.result", "peek_undo", "peek_redo", "try_pending_review_restore",
             "DeckRenameJob.result", "DeckMoveJob.result", "DeckCollapseJob.result", "start_undo", "start_redo", "start_add_notes", "NoteAdditionJob.result",
+            "parse_due_days", "start_sched_op", "SchedOpJob.result", "start_buried_kinds", "BuriedKindsJob.result",
         ])
         for call in BridgeCall.all {
             #expect(call.interval.category == .bridge)

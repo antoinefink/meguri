@@ -13,9 +13,9 @@ use serde_json::{Map, Value};
 
 use super::FormatError;
 use super::model::{
-    ActorName, CardsOrNotes, ClozeRequest, DUMP_TABLES, DraftArgs, FieldsCheckRequest, FsrsNextRequest, IgnoredBeforeCountRequest,
-    LegacyUpdate, LogicalRef, ObservationKind, RefKind, SaveDeckOptionsArgs, Scenario, SearchRequest, Side, Step,
-    SyncKind, TemplateRequest, TextRequest, canonical_search_texts,
+    ActorName, CardsOrNotes, ClozeRequest, DUMP_TABLES, DraftArgs, FieldsCheckRequest, FsrsNextRequest,
+    IgnoredBeforeCountRequest, LegacyUpdate, LogicalRef, ObservationKind, RefKind, SaveDeckOptionsArgs, Scenario,
+    SearchRequest, Side, Step, SyncKind, TemplateRequest, TextRequest, canonical_search_texts,
 };
 
 /// A draft-op argument's JSON shape (scenario.schema.json `$defs/step`).

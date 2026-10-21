@@ -7,6 +7,7 @@ pub mod compat;
 pub mod load_balancer;
 pub mod memory;
 pub mod model;
+pub mod ops;
 pub mod states;
 pub mod timing;
 

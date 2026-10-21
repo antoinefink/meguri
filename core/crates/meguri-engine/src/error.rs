@@ -13,6 +13,7 @@ use crate::undo::reasons::DisabledReason;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineError {
+    SchedOp(crate::sched::ops::Refusal),
     /// Imported type-in replacement template is malformed (render/type-answer A4.5).
     InvalidTypeAnswerReplacement,
     SessionActive,
@@ -150,6 +151,7 @@ impl From<OpenError> for EngineError {
 impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            EngineError::SchedOp(reason) => write!(f, "scheduling operation refused: {reason:?}"),
             EngineError::InvalidTypeAnswerReplacement => f.write_str("invalid_type_answer_replacement"),
             EngineError::SessionActive => f.write_str("review session is active"),
             EngineError::InvalidIgnoreBeforeDate { preset } => {
