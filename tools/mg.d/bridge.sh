@@ -130,7 +130,9 @@ mg_swift_test() {
   # build and --skip-build test always name the exact same cache and mode.
   local product_args=(--configuration "$spm_config")
   if [ "$config" = Profile ]; then
-    product_args+=(--scratch-path "$MG_ROOT/build/swift-test/$package/Profile")
+    # swiftbuild's release --build-tests leaves source modules without
+    # @testable access. Enable access without changing release optimization.
+    product_args+=(--scratch-path "$MG_ROOT/build/swift-test/$package/Profile" -Xswiftc -enable-testing)
   fi
   mg_detail configuration "$(jq -nc --arg core "$config" --arg swift "$spm_config" \
     '{core: $core, swift: $swift}')"

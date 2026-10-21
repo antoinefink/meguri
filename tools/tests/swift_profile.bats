@@ -146,9 +146,9 @@ field() { jq -r "$@" "$result"; }
 lease --no-session
 swift test" ]
   jq -se --arg scratch "$SB/build/swift-test/MeguriCore/Profile" '
-    .[0] == ["build", "--package-path", "app/Packages/MeguriCore", "--configuration", "release", "--scratch-path", $scratch, "--build-tests"]
-    and .[1][0:7] == ["test", "--package-path", "app/Packages/MeguriCore", "--configuration", "release", "--scratch-path", $scratch]
-    and .[1][7:9] == ["--skip-build", "--xunit-output"]
+    .[0] == ["build", "--package-path", "app/Packages/MeguriCore", "--configuration", "release", "--scratch-path", $scratch, "-Xswiftc", "-enable-testing", "--build-tests"]
+    and .[1][0:9] == ["test", "--package-path", "app/Packages/MeguriCore", "--configuration", "release", "--scratch-path", $scratch, "-Xswiftc", "-enable-testing"]
+    and .[1][9:11] == ["--skip-build", "--xunit-output"]
     and .[1][-2:] == ["--filter", "DeckServiceTests/twoThousandDecks"]' "$STUB_CALLS"
   python3 "$SB/tools/tests/validate_result.py" "$result"
 }
@@ -161,7 +161,7 @@ swift test" ]
   [ "$(field '.details | has("environment")')" = false ]
   grep -Fx "core --configuration Debug --report $(dirname "$result")/xcframework.json" "$STUB_LOG"
   ! grep -q '^lease ' "$STUB_LOG"
-  jq -se 'all(.[]; (index("--scratch-path") == null) and (index("--configuration") as $i | .[$i + 1] == "debug"))' "$STUB_CALLS"
+  jq -se 'all(.[]; (index("--scratch-path") == null) and (index("-Xswiftc") == null) and (index("--configuration") as $i | .[$i + 1] == "debug"))' "$STUB_CALLS"
 }
 
 @test "swift profile rejects configuration cache and target overrides before building" {
