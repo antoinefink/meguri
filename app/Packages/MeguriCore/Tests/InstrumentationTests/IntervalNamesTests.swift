@@ -55,7 +55,7 @@ import Testing
     @Test func bridgeCallsAreSignpostedUnderTheirExportNamesOnly() {
         #expect(BridgeCall.all.map(\.name) == [
             "start_open", "close_collection", "collection_lifecycle", "wait_collection_available", "deck_tree_with_counts", "deck_study_state", "deck_description_html",
-            "start_session", "peek_first_card", "session_head", "refresh_session_card", "render_session_head", "answer_session", "end_session", "peek_review_undo", "flush_review_for_background",
+            "start_session", "ReviewSessionJob.result", "peek_first_card", "session_head", "refresh_session_card", "render_session_head", "answer_session", "end_session", "peek_review_undo", "flush_review_for_background",
             "core_version", "core_build_info", "set_event_listener",
             "CancelToken.new", "CancelToken.cancel", "CancelToken.isCancelled", "render_card",
             "compare_typed_answer", "card_excerpts",
@@ -72,8 +72,8 @@ import Testing
             "unmark_notes", "start_unmark_notes", "toggle_note_mark", "start_toggle_note_mark",
             "start_rename_tag", "start_reparent_tags", "start_delete_tags", "start_clear_unused_tags",
             "add_media", "flush_for_background", "suspend", "resume",
-            "UndoJob.result", "peek_undo", "peek_redo", "start_undo",
-            "start_redo", "try_pending_review_restore", "DeckRenameJob.result", "DeckMoveJob.result", "DeckCollapseJob.result", "start_add_notes", "NoteAdditionJob.result",
+            "UndoJob.result", "peek_undo", "peek_redo", "try_pending_review_restore",
+            "DeckRenameJob.result", "DeckMoveJob.result", "DeckCollapseJob.result", "start_undo", "start_redo", "start_add_notes", "NoteAdditionJob.result",
         ])
         for call in BridgeCall.all {
             #expect(call.interval.category == .bridge)

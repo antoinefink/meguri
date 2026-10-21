@@ -61,6 +61,23 @@ fn finish(rx: &mpsc::Receiver<CoreEvent>, id: u64) -> (JobOutcome, Vec<CoreEvent
         }
     }
 }
+fn start_review(
+    rx: &mpsc::Receiver<CoreEvent>,
+    events: &mut Vec<CoreEvent>,
+    deck: i64,
+) -> review_session::ReviewStartResult {
+    let job = review_session::start_session(deck, None).unwrap();
+    let (outcome, more) = finish(rx, job.handle.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    job.result.result().unwrap().expect("completed start result")
+}
+fn end_review(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>, id: u64) {
+    let job = review_session::end_session(id).unwrap();
+    let (outcome, more) = finish(rx, job.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+}
 fn location(root: &Path) -> CollectionLocation {
     let collection = root.join("collection");
     let backups = root.join("backups");
@@ -250,14 +267,14 @@ fn exported_open_counts_review_close_reopen_upgrade_and_races() {
         generation,
         head,
         ..
-    } = review_session::start_session(tree.nodes[0].id, None).unwrap()
+    } = start_review(&rx, &mut events, tree.nodes[0].id)
     else {
         panic!("review must use the opened host")
     };
     assert_eq!(generation, 1);
     assert_eq!(head.counts.new, 2);
     assert!(!head.items.is_empty());
-    review_session::end_session(session_id).unwrap();
+    end_review(&rx, &mut events, session_id);
     lifecycle::close_collection().unwrap();
     assert_eq!(
         lifecycle::collection_lifecycle().unwrap(),
@@ -658,9 +675,7 @@ fn typed_surface(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>, zo
         undo::peek_undo(Scope::Session { session_id: u64::MAX }),
         Err(CoreError::InvalidArgument { .. })
     ));
-    let review_session::ReviewStartResult::Started { session_id, head, .. } =
-        review_session::start_session(zoo, None).unwrap()
-    else {
+    let review_session::ReviewStartResult::Started { session_id, head, .. } = start_review(rx, events, zoo) else {
         panic!("review start")
     };
     let card = &head.items[0];
@@ -698,7 +713,7 @@ fn typed_surface(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>, zo
     assert!(tags::mark_notes(vec![note.id]).is_err());
     let resumed = suspend::resume().unwrap();
     assert_eq!(resumed.active_session, Some(session_id));
-    review_session::end_session(session_id).unwrap();
+    end_review(rx, events, session_id);
     let imported = notes::read_note(card.note_id).unwrap();
     notes::update_note(notes::UpdateNoteRequest {
         id: imported.id,
@@ -886,7 +901,219 @@ fn controlled_job_regressions(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<C
             c.peek_redo(meguri_engine::UndoScope::Global).unwrap(),
         )
     }
+    // Execute each short export on a registered caller, with the writer
+    // positively occupied. A blocking export cannot pass on a later release.
+    fn prompt<T: Send + 'static>(call: impl FnOnce() -> T + Send + 'static) -> T {
+        let threads = meguri_engine::ThreadRegistry::default();
+        let (send, recv) = mpsc::channel();
+        let caller = threads
+            .spawn("ffi-lifecycle-caller", meguri_engine::Qos::Default, move |_| {
+                let _ = send.send(call());
+            })
+            .unwrap();
+        let value = recv
+            .recv_timeout(Duration::from_secs(1))
+            .expect("short lifecycle export blocked");
+        caller.join().unwrap();
+        value
+    }
     let c = meguri_ffi::test_hooks::collection_for_testing().unwrap();
+    let deck = deck_tree::deck_tree_with_counts().unwrap().nodes[0].id;
+    let (release, blocked) = block(&c);
+    let start = prompt(move || review_session::start_session(deck, None)).unwrap();
+    queued(&c, "admit_review_lifecycle");
+    assert!(start.result.result().unwrap().is_none());
+    start.handle.cancel.cancel().unwrap();
+    drop(release);
+    blocked.wait().unwrap();
+    let (outcome, more) = finish(rx, start.handle.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Cancelled);
+    assert!(start.result.result().unwrap().is_none());
+
+    let review_session::ReviewStartResult::Started {
+        session_id: id, head, ..
+    } = start_review(rx, events, deck)
+    else {
+        panic!("lifecycle fixture must start")
+    };
+    for restart in [true, false] {
+        let (release, blocked) = block(&c);
+        let start = if restart {
+            Some(prompt(move || review_session::start_session(deck, None)).unwrap())
+        } else {
+            None
+        };
+        let end = if !restart {
+            Some(prompt(move || review_session::end_session(id)).unwrap())
+        } else {
+            None
+        };
+        let handle = start.as_ref().map(|j| &j.handle).or(end.as_ref()).unwrap();
+        queued(&c, "admit_review_lifecycle");
+        assert_eq!(review_session::session_head(id, 3).unwrap(), head);
+        handle.cancel.cancel().unwrap();
+        drop(release);
+        blocked.wait().unwrap();
+        let (outcome, more) = finish(rx, handle.id);
+        events.extend(more);
+        assert_eq!(outcome, JobOutcome::Cancelled);
+        if let Some(start) = start {
+            assert!(start.result.result().unwrap().is_none());
+        }
+        assert_eq!(review_session::session_head(id, 3).unwrap(), head);
+    }
+
+    // A real restore owns the logical lifecycle while the writer is parked.
+    // Both exported jobs must complete with the actual busy error before it
+    // is released; internal synchronous start/end serialization is retained
+    // in session_controlled's existing concurrency test.
+    let added = meguri_engine::decks::add(&c, "Lifecycle restoration".into())
+        .unwrap()
+        .value
+        .id;
+    let (release, blocked) = block(&c);
+    let restore = undo::start_undo(ReviewUndoScope::Global).unwrap();
+    let deadline = meguri_engine::monotonic::now() + Duration::from_secs(1);
+    loop {
+        match undo::try_pending_review_restore(ReviewUndoScope::Global, false) {
+            Err(CoreError::Unavailable { reason }) if reason == "review lifecycle is busy" => break,
+            Ok(None) => {}
+            other => panic!("unexpected restore admission: {other:?}"),
+        }
+        assert!(
+            meguri_engine::monotonic::now() < deadline,
+            "restore never owned lifecycle"
+        );
+        std::thread::yield_now();
+    }
+    let refused = prompt(move || review_session::start_session(deck, None)).unwrap();
+    let (outcome, more) = finish(rx, refused.handle.id);
+    events.extend(more);
+    assert_eq!(
+        outcome,
+        JobOutcome::Failed {
+            error: CoreError::Unavailable {
+                reason: "review lifecycle is busy".into()
+            }
+        }
+    );
+    assert!(refused.result.result().unwrap().is_none());
+    let refused = prompt(move || review_session::end_session(id)).unwrap();
+    let (outcome, more) = finish(rx, refused.id);
+    events.extend(more);
+    assert_eq!(
+        outcome,
+        JobOutcome::Failed {
+            error: CoreError::Unavailable {
+                reason: "review lifecycle is busy".into()
+            }
+        }
+    );
+    assert!(restore.result.result().unwrap().is_none());
+    assert_eq!(review_session::session_head(id, 3).unwrap(), head);
+    drop(release);
+    blocked.wait().unwrap();
+    let (outcome, more) = finish(rx, restore.handle.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    assert!(matches!(
+        restore.result.result().unwrap(),
+        Some(undo::UndoResult::Session { .. })
+    ));
+    assert!(c.reader(ReaderRole::Query).unwrap().deck(added).unwrap().is_none());
+
+    let (release, blocked) = block(&c);
+    let restart = prompt(move || review_session::start_session(deck, None)).unwrap();
+    queued(&c, "admit_review_lifecycle");
+    assert!(restart.result.result().unwrap().is_none());
+    assert!(review_session::session_head(id, 3).is_ok());
+    let (enter, entered) = mpsc::channel();
+    let (commit, wait) = mpsc::channel();
+    let commit_release = Release(commit);
+    restart
+        .handle
+        .progress
+        .set_listener(Arc::new(FfiCommitGate {
+            enter,
+            release: Mutex::new(wait),
+        }))
+        .unwrap();
+    drop(release);
+    blocked.wait().unwrap();
+    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    // Cancellation after admission must retain the completed replacement.
+    restart.handle.cancel.cancel().unwrap();
+    drop(commit_release);
+    let (outcome, more) = finish(rx, restart.handle.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    let Some(review_session::ReviewStartResult::Started {
+        session_id: next, head, ..
+    }) = restart.result.result().unwrap()
+    else {
+        panic!("restart must really complete")
+    };
+    assert_ne!(next, id);
+    assert!(review_session::session_head(id, 3).is_err());
+    let (release, blocked) = block(&c);
+    let card = &head.items[0];
+    assert!(matches!(
+        review_session::answer_session(
+            next,
+            card.card_id,
+            review_session::ReviewRating::Easy,
+            card.state_token.clone(),
+            NOW,
+            100
+        )
+        .unwrap(),
+        review_session::ReviewAnswerOutcome::Accepted { .. }
+    ));
+    let end = prompt(move || review_session::end_session(next)).unwrap();
+    queued(&c, "admit_review_lifecycle");
+    assert!(review_session::session_head(next, 3).is_ok());
+    let (enter, entered) = mpsc::channel();
+    let (commit, wait) = mpsc::channel();
+    let commit_release = Release(commit);
+    end.progress
+        .set_listener(Arc::new(FfiCommitGate {
+            enter,
+            release: Mutex::new(wait),
+        }))
+        .unwrap();
+    drop(release);
+    blocked.wait().unwrap();
+    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    end.cancel.cancel().unwrap();
+    drop(commit_release);
+    let (outcome, more) = finish(rx, end.id);
+    assert!(more.iter().any(|e| matches!(
+        e.kind, CoreEventKind::SessionEnded { session_id } if session_id == next
+    )));
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    assert!(review_session::session_head(next, 3).is_err());
+    let failed = review_session::end_session(next).unwrap();
+    let (outcome, more) = finish(rx, failed.id);
+    events.extend(more);
+    assert!(matches!(
+        outcome,
+        JobOutcome::Failed {
+            error: CoreError::Unavailable { .. }
+        }
+    ));
+    // Restore the accepted answer through the real global job so subsequent
+    // fixture assertions still see the original two fresh cards.
+    let restore_answer = undo::start_undo(ReviewUndoScope::Global).unwrap();
+    let (outcome, more) = finish(rx, restore_answer.handle.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    assert!(matches!(
+        restore_answer.result.result().unwrap(),
+        Some(undo::UndoResult::Global { .. })
+    ));
+
     let nid = c
         .reader(ReaderRole::Query)
         .unwrap()

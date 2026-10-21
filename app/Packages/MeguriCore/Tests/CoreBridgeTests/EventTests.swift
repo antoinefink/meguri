@@ -22,6 +22,7 @@ final class RecordingListener: MeguriCoreBindings.CoreEventListener {
 
     let deliveries = Mutex<[Delivery]>([])
     let reentryErrors = Mutex<[BridgeError]>([])
+    let reentryVersions = Mutex<[String]>([])
     let callsBackIntoTheCore: Bool
 
     init(callsBackIntoTheCore: Bool = false) {
@@ -32,7 +33,8 @@ final class RecordingListener: MeguriCoreBindings.CoreEventListener {
         if callsBackIntoTheCore {
             // Forbidden (KTD9): a synchronous call into the core from the callback.
             do {
-                _ = try coreVersion()
+                let version = try coreVersion()
+                reentryVersions.withLock { $0.append(version) }
             } catch {
                 reentryErrors.withLock { $0.append(BridgeError(error)) }
             }
@@ -100,20 +102,29 @@ func withRawListener<T>(_ listener: RecordingListener, _ body: () async throws -
     }
 
     @Test func aCallbackThatCallsBackIntoTheCoreTripsTheDebugAssertion() async throws {
+        let info = try await Core.buildInfo()
         let listener = RecordingListener(callsBackIntoTheCore: true)
-        _ = try await withRawListener(listener) {
+        let deliveries = try await withRawListener(listener) {
             try await MaintenanceLane.shared.call("test.emitEvents") { try testEmitEvents(producers: 1, perProducer: 1) }
             return try await listener.waitForDeliveries(1)
         }
 
+        #expect(deliveries.count == 1)
         let errors = listener.reentryErrors.withLock { $0 }
-        #expect(errors.count == 1)
-        guard case .internal(let message)? = errors.first else {
-            Issue.record("expected an internal error, got \(errors)")
-            return
+        let versions = listener.reentryVersions.withLock { $0 }
+        #expect(errors.count + versions.count == 1)
+        if info.debugAssertions {
+            #expect(versions.isEmpty)
+            #expect(errors.count == 1)
+            guard case .internal(let message)? = errors.first else {
+                Issue.record("expected an internal error, got \(errors)")
+                return
+            }
+            #expect(message.contains("core export `core_version` was called synchronously from the Swift callback `CoreEventListener::on_event`; callbacks must never reenter the core (KTD9)"))
+        } else {
+            #expect(errors.isEmpty)
+            #expect(versions == [info.version])
         }
-        #expect(message.contains("core_version"))
-        #expect(message.contains("called synchronously from the Swift callback"))
     }
 
     @Test func coreEventStreamYieldsEventsInSeqOrder() async throws {

@@ -739,10 +739,32 @@ public enum ReviewUndoStatus: Sendable, Hashable {
     }
 }
 
+/// Lifecycle jobs cancel while queued for writer admission. Once committing,
+/// they finish the drain/release/start and report its actual outcome.
+public final class CoreReviewSessionJob: Sendable {
+    public let job: CoreJob
+    private let raw: MeguriCoreBindings.ReviewSessionJob
+    init(job: CoreJob, raw: MeguriCoreBindings.ReviewSessionJob) { self.job = job; self.raw = raw }
+    public func value() async throws(BridgeError) -> ReviewStartResult {
+        try await job.value()
+        let raw = raw
+        return try await MaintenanceLane.shared.call(.reviewSessionJobResult) {
+            guard let result = try raw.result() else { throw BridgeError.internal("Successful job has no result") }
+            return ReviewStartResult(result)
+        }
+    }
+}
+
 extension Core {
     public static func startSession(deckID: Int64, resumeCardID: Int64? = nil) async throws(BridgeError) -> ReviewStartResult {
-        try await InteractiveLane.shared.call(.startSession) {
-            ReviewStartResult(try MeguriCoreBindings.startSession(deckId: deckID, resumeCardId: resumeCardID))
+        let job = try await startSessionJob(deckID: deckID, resumeCardID: resumeCardID)
+        return try await job.value()
+    }
+    public static func startSessionJob(deckID: Int64, resumeCardID: Int64? = nil) async throws(BridgeError) -> CoreReviewSessionJob {
+        try await CoreEventStream.shared.start()
+        return try await MaintenanceLane.shared.call(.startSession) {
+            let raw = try MeguriCoreBindings.startSession(deckId: deckID, resumeCardId: resumeCardID)
+            return CoreReviewSessionJob(job: try Jobs.track(raw.handle), raw: raw.result)
         }
     }
     public static func peekFirstCard(deckID: Int64) async throws(BridgeError) -> ReviewPeekResult {
@@ -771,7 +793,11 @@ extension Core {
         }
     }
     public static func endSession(sessionID: UInt64) async throws(BridgeError) {
-        try await ControlLane.shared.call(.endSession) { try MeguriCoreBindings.endSession(sessionId: sessionID) }
+        let job = try await endSessionJob(sessionID: sessionID)
+        try await job.value()
+    }
+    public static func endSessionJob(sessionID: UInt64) async throws(BridgeError) -> CoreJob {
+        try await Jobs.start(.endSession) { try MeguriCoreBindings.endSession(sessionId: sessionID) }
     }
     public static func peekReviewUndo(scope: ReviewUndoScope) async throws(BridgeError) -> ReviewUndoStatus {
         try await InteractiveLane.shared.call(.peekReviewUndo) {

@@ -666,6 +666,40 @@ impl ReviewService {
     }
     pub fn start(&self, deck: DeckId, resume: Option<CardId>) -> Result<StartResult, EngineError> {
         let _control = self.control.acquire();
+        self.start_inner(deck, resume)
+    }
+    /// Bounded-job entry: refuse another lifecycle owner and remain cancellable
+    /// while queued for the writer. After admission, finish the lifecycle even
+    /// if cancellation arrives: ending a prior session cannot be rolled back.
+    pub fn start_controlled(
+        &self,
+        deck: DeckId,
+        resume: Option<CardId>,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+    ) -> Result<StartResult, EngineError> {
+        let _control = self.control.try_acquire()?;
+        self.admit_lifecycle_job(cancel, progress)?;
+        self.start_inner(deck, resume)
+    }
+    fn admit_lifecycle_job(
+        &self,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+    ) -> Result<(), EngineError> {
+        cancel.check()?;
+        let (c, _) = self.bound()?;
+        // No session/presentation mutex is held across this writer wait.
+        // Rollover leaves rows and history untouched for this empty op.
+        c.run(
+            OpSpec::named("admit_review_lifecycle", OpSource::Rollover).cancel(cancel.clone()),
+            |_| Ok(()),
+        )?;
+        cancel.check()?;
+        progress.set_phase(crate::ProgressPhase::Committing);
+        Ok(())
+    }
+    fn start_inner(&self, deck: DeckId, resume: Option<CardId>) -> Result<StartResult, EngineError> {
         if let Some(id) = self.active_session() {
             self.end_inner(id)?;
         }
@@ -1186,6 +1220,18 @@ impl ReviewService {
     }
     pub fn end(&self, id: SessionId) -> Result<(), EngineError> {
         let _control = self.control.acquire();
+        self.end_inner(id)
+    }
+    /// Like start_controlled: cancellation before writer admission changes no
+    /// session state; after admission the drain/release must really complete.
+    pub fn end_controlled(
+        &self,
+        id: SessionId,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+    ) -> Result<(), EngineError> {
+        let _control = self.control.try_acquire()?;
+        self.admit_lifecycle_job(cancel, progress)?;
         self.end_inner(id)
     }
     fn end_inner(&self, id: SessionId) -> Result<(), EngineError> {

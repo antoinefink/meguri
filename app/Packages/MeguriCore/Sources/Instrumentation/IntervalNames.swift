@@ -168,6 +168,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let deckDescriptionHtml = BridgeCall("deck_description_html")
 
     public static let startSession = BridgeCall("start_session")
+    public static let reviewSessionJobResult = BridgeCall("ReviewSessionJob.result")
     public static let peekFirstCard = BridgeCall("peek_first_card")
     public static let sessionHead = BridgeCall("session_head")
     public static let refreshSessionCard = BridgeCall("refresh_session_card")
@@ -256,7 +257,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
         startOpen, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, deckStudyState, deckDescriptionHtml,
-        startSession, peekFirstCard, sessionHead, refreshSessionCard, renderSessionHead, answerSession, endSession, peekReviewUndo, flushReviewForBackground,
+        startSession, reviewSessionJobResult, peekFirstCard, sessionHead, refreshSessionCard, renderSessionHead, answerSession, endSession, peekReviewUndo, flushReviewForBackground,
         coreVersion, coreBuildInfo, setEventListener, cancelTokenNew, cancelTokenCancel, cancelTokenIsCancelled, renderCard, compareTypedAnswer, cardExcerpts,
         deckDeletionJobResult, addDeck, startRenameDeck, startMoveDecks, startCollapseDecks,
         selectDeck, deckDeletionSummary, startDeleteDecks, noteDeletionJobResult, addNote,

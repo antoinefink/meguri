@@ -11,6 +11,7 @@ use meguri_model::{
     time::EpochMillis,
 };
 use meguri_sched::{self as sched, states::engine as states};
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct ReviewStateToken {
@@ -724,12 +725,44 @@ fn digest(bytes: Vec<u8>, name: &str) -> Result<[u8; 32], CoreError> {
         message: format!("{name} must contain exactly 32 bytes"),
     })
 }
+/// Start/end exports only enqueue bounded jobs. Completion is JobFinished;
+/// a start result is published only after the real service call succeeds.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct ReviewSessionJobStart {
+    pub handle: crate::jobs::JobHandle,
+    pub result: Arc<ReviewSessionJob>,
+}
+#[derive(Debug, uniffi::Object)]
+pub struct ReviewSessionJob {
+    result: Arc<Mutex<Option<ReviewStartResult>>>,
+}
 #[uniffi::export]
-pub fn start_session(deck_id: i64, resume_card_id: Option<i64>) -> Result<ReviewStartResult, CoreError> {
+impl ReviewSessionJob {
+    pub fn result(&self) -> Result<Option<ReviewStartResult>, CoreError> {
+        callback::enter("ReviewSessionJob::result");
+        Ok(self.result.lock().unwrap().clone())
+    }
+}
+#[uniffi::export]
+pub fn start_session(deck_id: i64, resume_card_id: Option<i64>) -> Result<ReviewSessionJobStart, CoreError> {
     callback::enter("start_session");
-    Ok(runtime::review()?
-        .start(DeckId(deck_id), resume_card_id.map(CardId))?
-        .into())
+    let review = runtime::review()?;
+    let result = Arc::new(Mutex::new(None));
+    let out = result.clone();
+    let handle = runtime::engine()?.start_job(engine::JobKind::BulkOp, move |j| {
+        let value = review.start_controlled(
+            DeckId(deck_id),
+            resume_card_id.map(CardId),
+            j.cancel.clone(),
+            j.progress.clone(),
+        )?;
+        *out.lock().unwrap() = Some(value.into());
+        Ok(())
+    })?;
+    Ok(ReviewSessionJobStart {
+        handle: crate::jobs::wrap(handle),
+        result: Arc::new(ReviewSessionJob { result }),
+    })
 }
 #[uniffi::export]
 pub fn peek_first_card(deck_id: i64) -> Result<ReviewPeekResult, CoreError> {
@@ -795,9 +828,13 @@ pub fn answer_session(
         .into())
 }
 #[uniffi::export]
-pub fn end_session(session_id: u64) -> Result<(), CoreError> {
+pub fn end_session(session_id: u64) -> Result<crate::jobs::JobHandle, CoreError> {
     callback::enter("end_session");
-    Ok(runtime::review()?.end(engine::SessionId(session_id))?)
+    let review = runtime::review()?;
+    let handle = runtime::engine()?.start_job(engine::JobKind::BulkOp, move |j| {
+        review.end_controlled(engine::SessionId(session_id), j.cancel.clone(), j.progress.clone())
+    })?;
+    Ok(crate::jobs::wrap(handle))
 }
 #[uniffi::export]
 pub fn peek_review_undo(scope: ReviewUndoScope) -> Result<ReviewUndoStatus, CoreError> {
