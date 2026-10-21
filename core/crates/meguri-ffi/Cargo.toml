@@ -21,6 +21,8 @@ meguri-sched.workspace = true
 # The change value types and ids the `Changes` event carries (KTD2).
 meguri-model.workspace = true
 meguri-template.workspace = true
+meguri-storage.workspace = true
+meguri-text.workspace = true
 uniffi.workspace = true
 
 [features]

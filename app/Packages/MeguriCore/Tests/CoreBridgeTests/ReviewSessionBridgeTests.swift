@@ -171,9 +171,25 @@ import MeguriCoreBindings
         #expect(mapped.typeIn == TypeAnswerDescriptor(expected: "answer", mode: .nc, caseInsensitive: true, font: "Serif", size: 22))
     }
 
-    @Test func closedReviewCallsUseRegisteredLanesUntilU37OpeningExists() async {
-        // This is a closed-collection/lane check. Live opening is proved by
-        // Rust's production composition test; exported Swift opening awaits U37.
+
+    @Test func malformedTokensAndRenderKeysReportTypedArgumentErrors() async {
+        for count in [0, 31, 33] {
+            do {
+                _ = try await Core.answerSession(sessionID: 91, cardID: -41, rating: .again, stateToken: .init(bytes: Array(repeating: 0, count: count)), answeredAtMs: 1, elapsedMs: 1)
+                Issue.record("Malformed state token accepted")
+            } catch { guard case .invalidArgument = error else { Issue.record("\(error)"); continue } }
+            do {
+                _ = try await Core.renderSessionHead(sessionID: 91, keys: [.init(bytes: Array(repeating: 0, count: count))], platform: .mac)
+                Issue.record("Malformed render key accepted")
+            } catch { guard case .invalidArgument = error else { Issue.record("\(error)"); continue } }
+        }
+    }
+}
+
+// Collection ownership is process-wide; serialize this refusal with U37 opens.
+extension EventTests {
+    @Test func closedReviewCallsUseRegisteredLanes() async {
+        // U37 open/read/close tests share this serialized suite.
         let calls: [() async throws -> Void] = [
             { _ = try await Core.startSession(deckID: 1, resumeCardID: -41) },
             { _ = try await Core.peekFirstCard(deckID: 1) },
@@ -189,23 +205,11 @@ import MeguriCoreBindings
             { try await Core.flushReviewForBackground() },
         ]
         for call in calls {
-            do { try await call(); Issue.record("Collection opening is unavailable until U37") }
+            do { try await call(); Issue.record("Expected closed-collection refusal") }
             catch let error as BridgeError {
                 guard case .unavailable = error else { Issue.record("Expected unavailable, got \(error)"); continue }
             } catch { Issue.record("Untyped bridge error: \(error)") }
         }
     }
 
-    @Test func malformedTokensAndRenderKeysReportTypedArgumentErrors() async {
-        for count in [0, 31, 33] {
-            do {
-                _ = try await Core.answerSession(sessionID: 91, cardID: -41, rating: .again, stateToken: .init(bytes: Array(repeating: 0, count: count)), answeredAtMs: 1, elapsedMs: 1)
-                Issue.record("Malformed state token accepted")
-            } catch { guard case .invalidArgument = error else { Issue.record("\(error)"); continue } }
-            do {
-                _ = try await Core.renderSessionHead(sessionID: 91, keys: [.init(bytes: Array(repeating: 0, count: count))], platform: .mac)
-                Issue.record("Malformed render key accepted")
-            } catch { guard case .invalidArgument = error else { Issue.record("\(error)"); continue } }
-        }
-    }
 }

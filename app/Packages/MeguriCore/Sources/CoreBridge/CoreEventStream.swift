@@ -13,6 +13,8 @@ public struct CoreEvent: Sendable, Hashable {
     public let kind: Kind
 
     public enum Kind: Sendable, Hashable {
+        case lifecycle(CollectionLifecycle)
+        case available
         case sessionStarted(sessionId: UInt64, deckId: Int64)
         case sessionEnded(sessionId: UInt64)
         case queueHeadChanged(sessionId: UInt64, diff: ReviewHeadDiff)
@@ -45,6 +47,8 @@ public struct CoreEvent: Sendable, Hashable {
         generation = event.generation
         causeSeq = event.causeSeq
         switch event.kind {
+        case .lifecycle(let state): kind = .lifecycle(CollectionLifecycle(state))
+        case .available: kind = .available
         case .sessionStarted(let sessionId, let deckId):
             kind = .sessionStarted(sessionId: sessionId, deckId: deckId)
         case .sessionEnded(let sessionId):

@@ -122,3 +122,16 @@ pub fn test_start_job(
         fail_with.map_or(Ok(()), Err)
     })
 }
+
+/// Synthetic empty collection for exported-service tests; no production opener.
+#[uniffi::export]
+pub fn test_bootstrap_collection(location: crate::collection::CollectionLocation) -> Result<(), CoreError> {
+    callback::enter("test_bootstrap_collection");
+    let clock = meguri_model::clock::FixedClock::new(1_894_701_600_000, meguri_model::clock::UtcOffset::UTC);
+    meguri_engine::bootstrap::create(
+        &std::path::Path::new(&location.collection_directory).join("collection.anki2"),
+        &clock,
+        &meguri_model::rng::SeededRandom::new(37),
+    )
+    .map_err(CoreError::from)
+}

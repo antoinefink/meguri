@@ -1696,6 +1696,7 @@ dependencies = [
  "meguri-storage",
  "meguri-template",
  "meguri-testkit",
+ "meguri-text",
  "tempfile",
  "uniffi",
 ]

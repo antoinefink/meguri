@@ -273,7 +273,25 @@ impl Engine {
     /// Opens the collection at `path` (`engine/lifecycle` L2). The engine's
     /// raw open entry point: only meguri-host calls it (`CoreHost::open`
     /// wires the ports), so layering-check refuses the name elsewhere.
-    pub fn open_raw(&self, path: &Path, mut config: OpenConfig) -> Result<Collection, EngineError> {
+    pub fn open_raw(&self, path: &Path, config: OpenConfig) -> Result<Collection, EngineError> {
+        // Foreign host inputs are synchronous. A panic before the writer starts
+        // must release the gate and permit another open. Started open steps are
+        // caught below, where their writer can still be joined.
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.open_raw_inner(path, config))).unwrap_or_else(
+            |payload| {
+                let error = EngineError::from_panic(payload.as_ref());
+                self.set_state(LifecycleState::Failed {
+                    reason: FailedReason::OpenStep {
+                        step: "open".into(),
+                        detail: error.to_string(),
+                    },
+                });
+                Err(error)
+            },
+        )
+    }
+
+    fn open_raw_inner(&self, path: &Path, mut config: OpenConfig) -> Result<Collection, EngineError> {
         // Compose here rather than in OpenConfig::new: callers can replace
         // its public initializer list. Reopen/resume keep this complete set.
         config.initializers.register(meguri_search::sqlfns::register);
@@ -412,7 +430,9 @@ impl Engine {
         ));
         steps.push((DAY_CLOCK_STEP, Box::new(|| privileged.restart_day_clock().map(drop))));
         for (name, run) in steps {
-            if let Err(error) = run() {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run))
+                .unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref())));
+            if let Err(error) = result {
                 if let Err(close_error) = shut_down(&core, Some(writer)) {
                     tracing::warn!(error = %close_error, "closing the collection after a failed open step");
                 }

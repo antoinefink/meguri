@@ -89,6 +89,7 @@ impl JobRegistry {
             cancel.cancel();
             drop(state);
             drop(slot);
+            drop(work); // Release captured reservations before publishing completion.
             self.inner.stream.publish(
                 generation,
                 None,
@@ -118,6 +119,7 @@ impl JobRegistry {
         let registry = self.clone();
         self.inner.pool.run(move || {
             let outcome = if context.cancel.is_cancelled() {
+                drop(work);
                 JobOutcome::Cancelled
             } else {
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&context))) {

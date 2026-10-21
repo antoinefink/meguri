@@ -4,7 +4,7 @@
 //! job, and its thread registry names the dispatcher thread. U37 opens the
 //! collection on it through `CoreHost::open` (U38).
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use meguri_engine::{Engine, EngineConfig};
 
@@ -14,6 +14,7 @@ use crate::events::Dispatcher;
 struct Runtime {
     process: meguri_host::ProcessCore,
     dispatcher: Arc<Dispatcher>,
+    host: Mutex<HostState>,
 }
 
 impl Runtime {
@@ -22,7 +23,11 @@ impl Runtime {
         let engine = process.engine();
         // Subscribe before exposing the process engine or review service.
         let dispatcher = Dispatcher::start(engine.stream(), engine.threads())?;
-        Ok(Self { process, dispatcher })
+        Ok(Self {
+            process,
+            dispatcher,
+            host: Mutex::new(HostState::Empty),
+        })
     }
 }
 
@@ -49,6 +54,88 @@ pub(crate) fn review() -> Result<&'static meguri_engine::session::ReviewService,
     let process = process()?;
     process.engine().collection()?;
     Ok(process.review())
+}
+
+// Keep the Arc in the slot while closing: an error or unwind cannot drop the
+// only owner. Opening and closing exclude each other without holding this
+// lock across CoreHost work or any foreign callback.
+enum HostState {
+    Empty,
+    Opening,
+    Open(Arc<meguri_host::CoreHost>),
+    Closing(Arc<meguri_host::CoreHost>),
+}
+
+pub(crate) struct OpenReservation {
+    runtime: &'static Runtime,
+    pending: bool,
+}
+pub(crate) fn reserve_open() -> Result<OpenReservation, CoreError> {
+    let runtime = runtime()?;
+    let mut state = runtime.host.lock().unwrap_or_else(PoisonError::into_inner);
+    if !matches!(*state, HostState::Empty) {
+        return Err(CoreError::Busy {
+            running_op: "collection open or close".into(),
+        });
+    }
+    *state = HostState::Opening;
+    Ok(OpenReservation { runtime, pending: true })
+}
+impl OpenReservation {
+    pub(crate) fn open(mut self, config: meguri_host::HostConfig) -> Result<(), CoreError> {
+        let host = Arc::new(self.runtime.process.open(config)?);
+        // No fallible call between receiving the host and retaining it.
+        *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host);
+        self.pending = false;
+        Ok(())
+    }
+}
+impl Drop for OpenReservation {
+    fn drop(&mut self) {
+        if self.pending {
+            *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Empty;
+        }
+    }
+}
+pub(crate) fn host() -> Result<Arc<meguri_host::CoreHost>, CoreError> {
+    match &*runtime()?.host.lock().unwrap_or_else(PoisonError::into_inner) {
+        HostState::Open(host) => Ok(host.clone()),
+        _ => Err(CoreError::Unavailable {
+            reason: "collection host is not ready".into(),
+        }),
+    }
+}
+pub(crate) fn close() -> Result<(), CoreError> {
+    let runtime = runtime()?;
+    let host = {
+        let mut state = runtime.host.lock().unwrap_or_else(PoisonError::into_inner);
+        match &*state {
+            HostState::Empty => return Ok(()),
+            HostState::Open(host) => {
+                let host = host.clone();
+                *state = HostState::Closing(host.clone());
+                host
+            }
+            _ => {
+                return Err(CoreError::Busy {
+                    running_op: "collection open or close".into(),
+                });
+            }
+        }
+    };
+    struct Restore<'a>(&'a Runtime);
+    impl Drop for Restore<'_> {
+        fn drop(&mut self) {
+            let mut state = self.0.host.lock().unwrap_or_else(PoisonError::into_inner);
+            if let HostState::Closing(host) = &*state {
+                *state = HostState::Open(host.clone());
+            }
+        }
+    }
+    let _restore = Restore(runtime);
+    host.close()?;
+    *runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Empty;
+    Ok(())
 }
 
 #[cfg(test)]

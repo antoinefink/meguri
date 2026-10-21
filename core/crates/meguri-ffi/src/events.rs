@@ -9,7 +9,7 @@
 //! wait in the subscription.
 //!
 //! Variants are added by their owning units (KTD9 lists them). Stream kinds
-//! that have no `CoreEventKind` variant yet (lifecycle, availability, write
+//! that have no `CoreEventKind` variant yet (write
 //! delays, extensions) are skipped until their units add one.
 
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
@@ -44,6 +44,10 @@ pub struct CoreEvent {
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum CoreEventKind {
+    Lifecycle {
+        state: crate::lifecycle::CollectionLifecycle,
+    },
+    Available,
     SessionStarted {
         session_id: u64,
         deck_id: i64,
@@ -148,7 +152,9 @@ fn stream_kind(kind: CoreEventKind) -> Result<EventKind, CoreError> {
             id: JobId(id),
             outcome: outcome.into(),
         }),
-        CoreEventKind::SessionStarted { .. }
+        CoreEventKind::Lifecycle { .. }
+        | CoreEventKind::Available
+        | CoreEventKind::SessionStarted { .. }
         | CoreEventKind::SessionEnded { .. }
         | CoreEventKind::QueueHeadChanged { .. }
         | CoreEventKind::CurrentCardChanged { .. }
@@ -187,10 +193,11 @@ fn core_event(event: &Event) -> Option<CoreEvent> {
         EventKind::Extension(value) => {
             session_event_kind(value.as_any().downcast_ref::<meguri_engine::session::SessionEvent>()?)
         }
-        EventKind::Lifecycle(_)
-        | EventKind::Available
-        | EventKind::WriteDelay { .. }
-        | EventKind::WriteDelayEnded { .. } => return None,
+        EventKind::Lifecycle(state) => CoreEventKind::Lifecycle {
+            state: state.clone().into(),
+        },
+        EventKind::Available => CoreEventKind::Available,
+        EventKind::WriteDelay { .. } | EventKind::WriteDelayEnded { .. } => return None,
     };
     Some(CoreEvent {
         seq: event.seq.0,

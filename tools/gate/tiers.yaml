@@ -137,6 +137,13 @@ runs:
     class: unit
     triggers: [core/, conformance/, tools/mg.d/core.sh, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh]
     budget_s: 2400
+  - id: native-durability
+    job: native-durability
+    tier: T0
+    placement: host
+    class: data-safety
+    triggers: [core/crates/meguri-ffi/, core/crates/meguri-host/, core/crates/meguri-engine/src/lifecycle/, core/crates/meguri-engine/src/suspend.rs, core/crates/meguri-engine/src/executor/, core/crates/meguri-engine/tests/suspend.rs, core/crates/meguri-engine/tests/wal_durability.rs, core/crates/meguri-storage/src/durability.rs, core/crates/meguri-storage/src/pragmas.rs, tools/mg.d/native-durability.sh, tools/tests/native_durability.bats]
+    budget_s: 1800
 
   # --- T0: conformance on the committed goldens --------------------------------
   - id: conformance

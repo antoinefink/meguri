@@ -1,5 +1,5 @@
 use std::{
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, PoisonError},
     time::Duration,
 };
 
@@ -48,7 +48,7 @@ impl ProcessCore {
         &self.review
     }
     pub fn open(&self, config: HostConfig) -> Result<CoreHost, EngineError> {
-        let mut opened = self.opened.lock().unwrap();
+        let mut opened = self.opened.lock().unwrap_or_else(PoisonError::into_inner);
         if *opened {
             return Err(EngineError::CollectionUnavailable {
                 reason: "process collection is already open".into(),
@@ -59,15 +59,38 @@ impl ProcessCore {
                 message: "process engine configuration is fixed at construction".into(),
             });
         }
-        let host = CoreHost::open_on(self, config)?;
         *opened = true;
+        drop(opened); // Host inputs can call Swift; never keep the ownership lock.
+        struct Reservation<'a> {
+            process: &'a ProcessCore,
+            committed: bool,
+        }
+        impl Drop for Reservation<'_> {
+            fn drop(&mut self) {
+                if !self.committed {
+                    *self.process.opened.lock().unwrap_or_else(PoisonError::into_inner) = false;
+                }
+            }
+        }
+        let mut reservation = Reservation {
+            process: self,
+            committed: false,
+        };
+        let host = CoreHost::open_on(self, config)?;
+        reservation.committed = true;
         Ok(host)
     }
 }
 
+enum CloseState {
+    Active,
+    Closing,
+    Closed,
+}
+
 pub struct CoreHost {
     process: ProcessCore,
-    closed: Mutex<bool>,
+    closed: Mutex<CloseState>,
     engine: Engine,
     derived: DerivedHost,
     media: Arc<MediaPort>,
@@ -107,7 +130,14 @@ impl CoreHost {
             .disk_space_provider(config.disk_space_provider);
         if let Err(error) = engine.open_raw(&paths.collection(), options) {
             let cleanup: Vec<_> = [
-                engine.close(),
+                // A failed raw open owns no live collection and already drains
+                // its writer. Calling close here would wait for the open job
+                // that is currently performing this very cleanup.
+                if engine.collection().is_ok() {
+                    engine.close()
+                } else {
+                    Ok(())
+                },
                 media.close_until(meguri_engine::monotonic::now() + Duration::from_secs(5)),
                 derived.close(),
             ]
@@ -132,7 +162,7 @@ impl CoreHost {
         let backup = config.test_backup.unwrap_or(backup);
         Ok(Self {
             process: process.clone(),
-            closed: Mutex::new(false),
+            closed: Mutex::new(CloseState::Active),
             engine,
             derived,
             media,
@@ -168,11 +198,28 @@ impl CoreHost {
     }
 
     pub fn close(&self) -> Result<(), EngineError> {
-        let mut closed = self.closed.lock().unwrap();
-        if *closed {
-            return Ok(());
+        {
+            let mut closed = self.closed.lock().unwrap_or_else(PoisonError::into_inner);
+            match *closed {
+                CloseState::Closed => return Ok(()),
+                CloseState::Closing => {
+                    return Err(EngineError::Busy {
+                        running_op: "collection close".into(),
+                    });
+                }
+                CloseState::Active => *closed = CloseState::Closing,
+            }
         }
-        let mut opened = self.process.opened.lock().unwrap();
+        struct Restore<'a>(&'a Mutex<CloseState>);
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+                if matches!(*state, CloseState::Closing) {
+                    *state = CloseState::Active;
+                }
+            }
+        }
+        let _restore = Restore(&self.closed);
         if self.engine.collection().is_ok()
             && let Some(id) = self.review.active_session()
         {
@@ -182,8 +229,8 @@ impl CoreHost {
         self.media
             .close_until(meguri_engine::monotonic::now() + Duration::from_secs(5))?;
         self.derived.close()?;
-        *closed = true;
-        *opened = false;
+        *self.closed.lock().unwrap_or_else(PoisonError::into_inner) = CloseState::Closed;
+        *self.process.opened.lock().unwrap_or_else(PoisonError::into_inner) = false;
         Ok(())
     }
 }
