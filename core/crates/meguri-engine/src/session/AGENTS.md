@@ -6,3 +6,4 @@
 - C5 `service` owns production admission and shown-card state. Its file worker owns no collection handle. Prepared receipts acknowledge before the executor commit lock; Done requires actual WAL coverage. Keep replay opening-only and recorded-time; current D8 remains the last open step.
 - Observer work only captures row images or wakes the existing ordered-stream subscription. Never wait for the review worker from a writer callback, or take the service state mutex there.
 - Session C6 uses Review and the native platform at peek/start/renderHead; a different platform is refused. U62's owned capture supplies both key and payload, including on cache hits; never attach a new render snapshot to a prior key.
+- Key-only projections share U62 metadata only within one borrowed snapshot; undo replaces note values after selecting the stored note’s type/template, matching the owned capture.

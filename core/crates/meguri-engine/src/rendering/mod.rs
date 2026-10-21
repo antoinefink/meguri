@@ -1,7 +1,7 @@
 //! One read-only, snapshot-consistent stored-card render (render/card-render-pipeline).
 mod cache;
 mod capture;
-pub(crate) use capture::Capture;
+pub(crate) use capture::{Capture, KeyBatch};
 mod special_fields;
 mod type_answer;
 use crate::{Collection, EngineError};

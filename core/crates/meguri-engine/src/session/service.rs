@@ -705,8 +705,10 @@ impl ReviewService {
             None => Ok(PeekResult::Empty),
             Some(e) => {
                 let mut models = FsrsCache::default();
+                let mut render_keys =
+                    crate::rendering::KeyBatch::new(&*rows, crate::rendering::RenderMode::Review, session_platform());
                 let item = project_item(
-                    &*rows,
+                    &mut render_keys,
                     &q,
                     &Overlay::default(),
                     e.id,
@@ -1481,16 +1483,23 @@ fn review_capture(
     card: Card,
     undo: Option<&crate::undo::entry::Entry>,
 ) -> Result<crate::rendering::Capture, EngineError> {
-    let note_id = card.note_id;
     let mut render =
         crate::rendering::Capture::read(rows, card, crate::rendering::RenderMode::Review, session_platform())?;
+    project_review_note(&mut render.note, undo)?;
+    Ok(render)
+}
+
+fn project_review_note(
+    note: &mut meguri_model::note::Note,
+    undo: Option<&crate::undo::entry::Entry>,
+) -> Result<(), EngineError> {
     if let Some(entry) = undo
-        && let Some(change) = entry.journal.entry(Table::Notes, &RowKey::Id(note_id.0))
+        && let Some(change) = entry.journal.entry(Table::Notes, &RowKey::Id(note.id.0))
         && let Some(before) = entry.before(change)?
     {
-        render.note = meguri_model::note::Note::from_cells(&before).map_err(meguri_storage::StorageError::from)?;
+        *note = meguri_model::note::Note::from_cells(&before).map_err(meguri_storage::StorageError::from)?;
     }
-    Ok(render)
+    Ok(())
 }
 #[allow(clippy::too_many_arguments)]
 fn capture_state(
@@ -1568,7 +1577,7 @@ fn capture_state(
 }
 #[allow(clippy::too_many_arguments)]
 fn project_item(
-    rows: &impl ReadRows,
+    render_keys: &mut crate::rendering::KeyBatch<'_, impl ReadRows>,
     q: &SessionQueue,
     overlay: &Overlay,
     id: CardId,
@@ -1580,6 +1589,7 @@ fn project_item(
     undo: Option<&crate::undo::entry::Entry>,
     models: &mut FsrsCache,
 ) -> Result<HeadItem, EngineError> {
+    let rows = render_keys.rows();
     let (token, states, captured) = capture_state(rows, overlay, id, at, today, boundary, chooser, undo, models)?;
     let Captured { card, inputs, .. } = &captured;
     let siblings = sibling_ids(rows, overlay, card, &inputs.preset, undo)?;
@@ -1607,7 +1617,7 @@ fn project_item(
             )
             .map_err(|_| invalid("prediction card not permitted"))?;
     }
-    let render = review_capture(rows, card.clone(), undo)?;
+    let (render_key, note) = render_keys.key(card, |note| project_review_note(note, undo))?;
     let p = inputs.preset.fields();
     let item = HeadItem {
         card_id: id,
@@ -1618,11 +1628,11 @@ fn project_item(
             kind
         },
         state_token: token,
-        render_key: render.key(),
+        render_key,
         next_states: states,
         predicted_next: predicted,
         flag: card.flags & 7,
-        marked: crate::tags::canonical::split_text(&render.note.tags).any(|t| t.to_lowercase() == "marked"),
+        marked: crate::tags::canonical::split_text(&note.tags).any(|t| t.to_lowercase() == "marked"),
         home_preset: HomePreset {
             id: inputs.preset.source().id,
             autoplay: !p.disable_autoplay,
@@ -1831,9 +1841,11 @@ fn project_snapshot(
     let chooser = s.cache.snapshot();
     let mut items = Vec::with_capacity(entries.len());
     let mut boundaries = Vec::new();
+    let mut render_keys =
+        crate::rendering::KeyBatch::new(&**rows, crate::rendering::RenderMode::Review, session_platform());
     for e in entries {
         let item = project_item(
-            &**rows,
+            &mut render_keys,
             &p.queue,
             &p.overlay,
             e.id,
