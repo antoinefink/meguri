@@ -411,8 +411,23 @@ impl Journal {
             })
             .map(|(id, _)| id)
             .collect::<Vec<_>>();
+        let mut acknowledgements = Vec::with_capacity(ids.len());
         for event in ids {
-            self.terminal(event, Terminal::Done)?;
+            let (tx, rx) = mpsc::sync_channel(1);
+            self.tx
+                .send(Work::Append(
+                    Box::new(Record::Terminal {
+                        event,
+                        status: Terminal::Done,
+                    }),
+                    Some(tx),
+                    monotonic::now() + Duration::from_secs(1),
+                ))
+                .map_err(error)?;
+            acknowledgements.push(rx);
+        }
+        for ack in acknowledgements {
+            ack.recv().map_err(error)??;
         }
         Ok(())
     }
@@ -450,7 +465,12 @@ fn file_loop(
     let mut fault = None;
     #[cfg(feature = "test-hooks")]
     let mut hook: Option<StageHook> = None;
-    while let Ok(work) = rx.recv() {
+    // Validation belongs to the file owner. Publish only records covered by
+    // full sync; never clone the accumulated event map for an append, or hold
+    // the shared UI-facing mutex across file I/O.
+    let mut validated = state.lock().unwrap().clone();
+    let mut deferred = None;
+    while let Some(work) = deferred.take().or_else(|| rx.recv().ok()) {
         let _busy = activity.busy();
         match work {
             Work::Stop => break,
@@ -489,6 +509,7 @@ fn file_loop(
                     create(&path, &h, true)?;
                     file = OpenOptions::new().append(true).open(&path).map_err(error)?;
                     state.lock().unwrap().events.retain(|id, _| *id >= h.next_event);
+                    validated.events.retain(|id, _| *id >= h.next_event);
                     number = 1;
                     Ok(())
                 })();
@@ -498,42 +519,41 @@ fn file_loop(
                 let _ = reply.send(result);
             }
             Work::Append(record, reply, deadline) => {
-                let record = *record;
+                // Drain only an already-queued, bounded prefix. Control work
+                // and barriers retain their exact place in the file order.
+                let mut batch = vec![(*record, reply, deadline)];
+                while batch.len() < 64 {
+                    match rx.try_recv() {
+                        Ok(Work::Append(record, reply, deadline)) => batch.push((*record, reply, deadline)),
+                        Ok(other) => {
+                            deferred = Some(other);
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
                 let result = (|| {
                     if let Some(e) = &state.lock().unwrap().failure {
                         return Err(e.clone());
                     }
-                    apply(&mut state.lock().unwrap().clone(), record.clone())?;
-                    let bytes = encode(number + 1, &record)?;
-                    #[cfg(feature = "test-hooks")]
-                    let stages = match &record {
-                        Record::Intent { .. } => [
-                            JournalStage::IntentWrite,
-                            JournalStage::IntentSync,
-                            JournalStage::IntentSynced,
-                        ],
-                        Record::Prepared { .. } => [
-                            JournalStage::PreparedWrite,
-                            JournalStage::PreparedSync,
-                            JournalStage::PreparedSynced,
-                        ],
-                        _ => [
-                            JournalStage::TerminalWrite,
-                            JournalStage::TerminalSync,
-                            JournalStage::TerminalSynced,
-                        ],
-                    };
-                    #[cfg(feature = "test-hooks")]
-                    stage(&mut fault, &hook, stages[0])?;
-                    file.write_all(&bytes).map_err(error)?;
-                    #[cfg(feature = "test-hooks")]
-                    stage(&mut fault, &hook, stages[1])?;
+                    for (offset, (record, _, _)) in batch.iter().enumerate() {
+                        apply(&mut validated, record.clone())?;
+                        let bytes = encode(number + offset as u64 + 1, record)?;
+                        #[cfg(feature = "test-hooks")]
+                        stage(&mut fault, &hook, record_stages(record)[0])?;
+                        file.write_all(&bytes).map_err(error)?;
+                        #[cfg(feature = "test-hooks")]
+                        stage(&mut fault, &hook, record_stages(record)[1])?;
+                    }
                     full_sync(&file)?;
-                    #[cfg(feature = "test-hooks")]
-                    stage(&mut fault, &hook, stages[2])?;
-                    number += 1;
-                    apply(&mut state.lock().unwrap(), record)?;
-                    if monotonic::now() > deadline {
+                    let covered_at = monotonic::now();
+                    for (record, _, _) in &batch {
+                        #[cfg(feature = "test-hooks")]
+                        stage(&mut fault, &hook, record_stages(record)[2])?;
+                        apply(&mut state.lock().unwrap(), record.clone())?;
+                    }
+                    number += batch.len() as u64;
+                    if batch.iter().any(|(_, _, deadline)| covered_at > *deadline) {
                         return Err(error("acceptance durability deadline exceeded"));
                     }
                     Ok(())
@@ -541,11 +561,36 @@ fn file_loop(
                 if let Err(e) = &result {
                     state.lock().unwrap().failure = Some(e.clone());
                 }
-                if let Some(reply) = reply {
-                    let _ = reply.send(result);
+                // Every receipt in this prefix is acknowledged only after
+                // the full sync that covers its frame. Failure stays sticky.
+                for (_, reply, _) in batch {
+                    if let Some(reply) = reply {
+                        let _ = reply.send(result.clone());
+                    }
                 }
             }
         }
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+fn record_stages(record: &Record) -> [JournalStage; 3] {
+    match record {
+        Record::Intent { .. } => [
+            JournalStage::IntentWrite,
+            JournalStage::IntentSync,
+            JournalStage::IntentSynced,
+        ],
+        Record::Prepared { .. } => [
+            JournalStage::PreparedWrite,
+            JournalStage::PreparedSync,
+            JournalStage::PreparedSynced,
+        ],
+        _ => [
+            JournalStage::TerminalWrite,
+            JournalStage::TerminalSync,
+            JournalStage::TerminalSynced,
+        ],
     }
 }
 

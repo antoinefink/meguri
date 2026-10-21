@@ -268,6 +268,10 @@ pub(crate) struct ProductionRestore {
     owned: Weak<Mutex<BTreeSet<(u64, u64)>>>,
     owner: Weak<Mutex<Presentation>>,
     record: QueueAnswer,
+    undone: Arc<AtomicBool>,
+    cache: Weak<AnswerCache>,
+    post: Card,
+    before_head: Head,
 }
 impl std::fmt::Debug for ProductionRestore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -283,6 +287,10 @@ impl ProductionRestore {
         }
     }
     pub(crate) fn restore(&self, direction: crate::Direction) {
+        let undo = direction == crate::Direction::Undo;
+        if self.undone.swap(undo, Ordering::AcqRel) == undo {
+            return;
+        }
         if let Some(owner) = self.owner.upgrade() {
             let mut p = owner.lock().unwrap();
             let result = match direction {
@@ -297,6 +305,11 @@ impl ProductionRestore {
                 p.force = if result.is_err() { card } else { None };
                 p.queue.set_current(card);
             }
+        }
+        if direction == crate::Direction::Undo
+            && let Some(cache) = self.cache.upgrade()
+        {
+            cache.undo_accepted(self.post.id);
         }
     }
 }
@@ -329,6 +342,7 @@ struct Session {
     failed: Arc<AtomicBool>,
     built: Stamp,
     rollover_pending: bool,
+    restoring: bool,
 }
 struct Binding {
     core: Weak<crate::collection::CollectionCore>,
@@ -373,11 +387,22 @@ struct Inner {
 }
 enum Work {
     Stream,
+    Empty {
+        session: SessionId,
+        head: Head,
+    },
     Answer {
         pending: Box<PendingAnswer>,
         session: SessionId,
         failed: Arc<AtomicBool>,
         cache: Arc<AnswerCache>,
+    },
+    Undo {
+        session: SessionId,
+        expected: crate::EntryId,
+        restore: Box<ProductionRestore>,
+        after_head: Head,
+        after_cache: meguri_sched::load_balancer::LoadBalancer,
     },
     Observe {
         generation: Generation,
@@ -514,6 +539,17 @@ impl ReviewService {
     pub fn render_count(&self) -> u64 {
         self.renders.load(Ordering::Relaxed)
     }
+    #[cfg(feature = "test-hooks")]
+    pub fn chooser_for_testing(&self, id: SessionId) -> Result<meguri_sched::load_balancer::LoadBalancer, EngineError> {
+        let state = self.inner.state.lock().unwrap();
+        Ok(state
+            .session
+            .as_ref()
+            .filter(|s| s.id == id)
+            .ok_or_else(no_session)?
+            .cache
+            .snapshot())
+    }
     fn bound(&self) -> Result<(Collection, Arc<Journal>), EngineError> {
         bound(&self.inner)
     }
@@ -594,6 +630,7 @@ impl ReviewService {
                 failed: Arc::new(AtomicBool::new(false)),
                 built,
                 rollover_pending: false,
+                restoring: false,
             };
             let head = project(&c, &mut session, 3, None)?;
             self.inner.state.lock().unwrap().session = Some(session);
@@ -661,7 +698,13 @@ impl ReviewService {
         journal.check(c.generation())?;
         let mut state = self.inner.state.lock().unwrap();
         let session = state.session.as_mut().filter(|s| s.id == id).ok_or_else(no_session)?;
-        let head = project(&c, session, count, None)?;
+        let head = if session.restoring {
+            let mut head = session.last.clone();
+            head.items.truncate(count);
+            head
+        } else {
+            project(&c, session, count, None)?
+        };
         drop(state);
         emit_empty(&self.inner, &c, id, &head)?;
         Ok(head)
@@ -888,8 +931,6 @@ impl ReviewService {
             captured.inputs.ahead,
         );
         drop(p);
-        drop(rows);
-        drop(r);
         // The file queue is independent of the writer, including when a long
         // write begins after this call. No sync/writer/render wait here.
         let event = journal.next_event();
@@ -911,6 +952,10 @@ impl ReviewService {
             owned: Arc::downgrade(&self.inner.owned),
             owner: Arc::downgrade(&session.presentation),
             record,
+            undone: Arc::new(AtomicBool::new(false)),
+            cache: Arc::downgrade(&session.cache),
+            post: post.clone(),
+            before_head: session.last.clone(),
         };
         drop(p);
         let pending = PendingAnswer {
@@ -935,7 +980,9 @@ impl ReviewService {
         if !is_redo {
             session.cache.accept(&post, captured.inputs.preset.source().id);
         }
-        let computed = project(&c, &mut draft, 3, Some(at));
+        // Reuse the exact freshness snapshot for the optimistic post-head;
+        // a second snapshot adds a commit-lock wait and can mix two commits.
+        let computed = project_snapshot(&c, &mut draft, &rows, 3, at);
         let head = match computed {
             Ok(h) => h,
             Err(e) => {
@@ -965,6 +1012,26 @@ impl ReviewService {
                 cache: session.cache.clone(),
             })
             .map_err(invalid)?;
+        if head.items.is_empty() {
+            if let Some(instant) = session.presentation.lock().unwrap().queue.waiting_until() {
+                emit(
+                    &c,
+                    None,
+                    SessionEvent::WaitingUntil {
+                        session_id: id,
+                        instant,
+                    },
+                );
+            } else {
+                self.inner
+                    .tx
+                    .send(Work::Empty {
+                        session: id,
+                        head: head.clone(),
+                    })
+                    .map_err(invalid)?;
+            }
+        }
         Ok(AnswerOutcome::Accepted {
             head_diff: diff(&old, head),
             leech: planned.leech,
@@ -1056,6 +1123,9 @@ impl ReviewService {
         if let UndoScope::Session(id) = scope {
             let mut state = self.inner.state.lock().unwrap();
             let s = state.session.as_mut().filter(|s| s.id == id).ok_or_else(no_session)?;
+            if s.restoring || s.failed.load(Ordering::Acquire) {
+                return Err(EngineError::unavailable("answer chain is restoring"));
+            }
             if let Some(pending) = s.pending.last().cloned().filter(|pending| {
                 pending
                     .phase
@@ -1077,6 +1147,48 @@ impl ReviewService {
                 journal.terminal(pending.event, Terminal::Cancelled)?;
                 return self.head(id, 3);
             }
+            if c.write_delay().is_some()
+                && s.pending.is_empty()
+                && let Some((expected, metadata)) = c.answer_undo_metadata(scope)?
+                && let Some(restore) = metadata.production
+                && restore
+                    .owner
+                    .upgrade()
+                    .is_some_and(|owner| Arc::ptr_eq(&owner, &s.presentation))
+                && {
+                    let p = s.presentation.lock().unwrap();
+                    !p.rebuild && p.queue.build() == restore.record.build
+                }
+                && c.core.exec.clock.now_ms().div_euclid(1000) < restore.before_head.valid_until
+            {
+                let after_head = s.last.clone();
+                let after_cache = s.cache.snapshot();
+                restore.restore(crate::Direction::Undo);
+                s.last = restore.before_head.clone();
+                s.restoring = true;
+                s.failed.store(true, Ordering::Release);
+                let head = s.last.clone();
+                if self
+                    .inner
+                    .tx
+                    .send(Work::Undo {
+                        session: id,
+                        expected,
+                        restore: Box::new(restore.clone()),
+                        after_head: after_head.clone(),
+                        after_cache: after_cache.clone(),
+                    })
+                    .is_err()
+                {
+                    restore.restore(crate::Direction::Redo);
+                    s.cache.restore_view(after_cache);
+                    s.last = after_head;
+                    s.restoring = false;
+                    s.failed.store(false, Ordering::Release);
+                    return Err(EngineError::unavailable("review worker stopped"));
+                }
+                return Ok(head);
+            }
         }
         self.flush_for_background()?;
         c.undo(scope)?;
@@ -1088,13 +1200,11 @@ impl ReviewService {
         if let UndoScope::Session(id) = scope {
             let frozen = {
                 let mut state = self.inner.state.lock().unwrap();
-                state
-                    .session
-                    .as_mut()
-                    .filter(|s| s.id == id)
-                    .ok_or_else(no_session)?
-                    .redo
-                    .pop()
+                let session = state.session.as_mut().filter(|s| s.id == id).ok_or_else(no_session)?;
+                if session.restoring || session.failed.load(Ordering::Acquire) {
+                    return Err(EngineError::unavailable("answer chain is restoring"));
+                }
+                session.redo.pop()
             };
             if let Some(frozen) = frozen {
                 let h = self.head(id, 10)?;
@@ -1422,7 +1532,16 @@ fn project(c: &Collection, s: &mut Session, count: usize, at: Option<i64>) -> Re
     let at = at.unwrap_or_else(|| c.core.exec.clock.now_ms());
     let r = c.reader(ReaderRole::Interactive)?;
     let rows = r.snapshot()?;
-    let day = timing(&*rows, c, at)?;
+    project_snapshot(c, s, &rows, count, at)
+}
+fn project_snapshot(
+    c: &Collection,
+    s: &mut Session,
+    rows: &crate::Snapshot<'_>,
+    count: usize,
+    at: i64,
+) -> Result<Head, EngineError> {
+    let day = timing(&**rows, c, at)?;
     let mut p = s.presentation.lock().unwrap();
     // Keep the boundary that supplied the shown labels. At day zero a real
     // boundary crossing need not change the clamped day number.
@@ -1435,7 +1554,7 @@ fn project(c: &Collection, s: &mut Session, count: usize, at: Option<i64>) -> Re
     }
     let wants_rebuild = p.rebuild || day_changed;
     if wants_rebuild {
-        let mut env = Environment::read(&*rows, day.today, at.div_euclid(1000), day.next_day_at)?;
+        let mut env = Environment::read(&**rows, day.today, at.div_euclid(1000), day.next_day_at)?;
         env.fsrs = true;
         let mut overrides = p
             .overlay
@@ -1486,7 +1605,7 @@ fn project(c: &Collection, s: &mut Session, count: usize, at: Option<i64>) -> Re
                 }
             }
         }
-        if day_changed && meguri_sched::timing::needs_unbury(SchedConfig::new(&*rows).last_unburied()?, day.today) {
+        if day_changed && meguri_sched::timing::needs_unbury(SchedConfig::new(&**rows).last_unburied()?, day.today) {
             for buried in rows.cards_in_queues(&[-2, -3])? {
                 if !overrides.contains_key(&buried.id)
                     && let Some(mut card) = rows.card(buried.id)?
@@ -1499,12 +1618,12 @@ fn project(c: &Collection, s: &mut Session, count: usize, at: Option<i64>) -> Re
                 }
             }
         }
-        let value = queue::build_overlay(&*rows, &env, s.deck, &overrides.into_values().collect::<Vec<_>>())?;
+        let value = queue::build_overlay(&**rows, &env, s.deck, &overrides.into_values().collect::<Vec<_>>())?;
         let keep_shown = day_changed
             && p.queue
                 .current()
                 .is_some_and(|id| value.presentation().iter().any(|e| e.id == id));
-        let cache = AnswerCache::from_session_snapshot(c, &rows, day.today, day.next_day_at, at)?;
+        let cache = AnswerCache::from_session_snapshot(c, rows, day.today, day.next_day_at, at)?;
         for pending in &s.pending {
             if receipts
                 .get(&pending.event)
@@ -1514,7 +1633,7 @@ fn project(c: &Collection, s: &mut Session, count: usize, at: Option<i64>) -> Re
             }
             cache.accept(
                 &pending.post,
-                frozen::inputs(&*rows, &pending.post, day.next_day_at, &mut FsrsCache::default())?
+                frozen::inputs(&**rows, &pending.post, day.next_day_at, &mut FsrsCache::default())?
                     .preset
                     .source()
                     .id,
@@ -1544,7 +1663,7 @@ fn project(c: &Collection, s: &mut Session, count: usize, at: Option<i64>) -> Re
     let mut boundaries = Vec::new();
     for e in entries {
         let (item, _) = project_item(
-            &*rows,
+            &**rows,
             c,
             &p.queue,
             &p.overlay,
@@ -1794,6 +1913,85 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
             Ok(())
         }
         Work::Stop => Ok(()),
+        Work::Empty { session, head } => {
+            let (c, _) = bound(inner)?;
+            if !inner
+                .state
+                .lock()
+                .unwrap()
+                .session
+                .as_ref()
+                .is_some_and(|s| s.id == session && s.last == head)
+            {
+                return Ok(());
+            }
+            emit_empty(inner, &c, session, &head)
+        }
+        Work::Undo {
+            session,
+            expected,
+            restore,
+            after_head,
+            after_cache,
+        } => {
+            let (c, journal) = bound(inner)?;
+            // run_op retires WAL/Done evidence before the U25 mutation. No
+            // service/presentation lock is held while the writer is occupied.
+            let outcome = c.submit_answer_undo(UndoScope::Session(session), expected).wait();
+            let failure = match outcome {
+                Ok(_) | Err(EngineError::CommitCompleted { .. }) | Err(EngineError::MediaCommitPending { .. }) => None,
+                Err(error) => Some(error),
+            };
+            let mut state = inner.state.lock().unwrap();
+            let Some(s) = state.session.as_mut().filter(|s| s.id == session) else {
+                return Ok(());
+            };
+            let old = s.last.items.clone();
+            if let Some(error) = failure {
+                restore.restore(crate::Direction::Redo);
+                s.cache.restore_view(after_cache);
+                s.last = after_head;
+                emit(
+                    &c,
+                    None,
+                    SessionEvent::CommitFailed {
+                        session_id: session,
+                        card_id: restore.post.id,
+                        error,
+                    },
+                );
+            }
+            s.restoring = false;
+            let projected = project(&c, s, 3, None);
+            let projection_failed = projected.is_err();
+            let head = projected.unwrap_or_else(|error| {
+                emit(
+                    &c,
+                    None,
+                    SessionEvent::CommitFailed {
+                        session_id: session,
+                        card_id: restore.post.id,
+                        error,
+                    },
+                );
+                s.last.clone()
+            });
+            // A durability failure keeps acceptance closed and its evidence
+            // intact. Successful restoration may admit subsequent answers.
+            s.failed.store(
+                projection_failed || journal.check(c.generation()).is_err(),
+                Ordering::Release,
+            );
+            emit(
+                &c,
+                None,
+                SessionEvent::QueueHeadChanged {
+                    session_id: session,
+                    diff: diff(&old, head),
+                },
+            );
+            Ok(())
+        }
         Work::Barrier(reply) => {
             let result = bound(inner).and_then(|(_, journal)| journal.barrier());
             let _ = reply.send(result);
@@ -1814,8 +2012,8 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
             {
                 return Ok(());
             }
-            journal.barrier()?;
             let outcome = (|| {
+                journal.barrier()?;
                 recorded_prelude(&c, &pending.frozen, Some(pending.cancel.clone()))?;
                 let digest = journal.resolved_base(&pending.frozen.base)?;
                 let mut request = pending.frozen.request(digest)?;
@@ -1890,17 +2088,20 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
                 p.queue.set_current(Some(CardId(pending.frozen.card)));
                 dropped
             };
-            journal.terminal(pending.event, Terminal::Dropped)?;
-            for d in dropped.iter().filter(|d| d.sequence != pending.event) {
-                journal.terminal(d.sequence, Terminal::Cancelled)?;
-            }
+            let terminal = (|| {
+                journal.terminal(pending.event, Terminal::Dropped)?;
+                for d in dropped.iter().filter(|d| d.sequence != pending.event) {
+                    journal.terminal(d.sequence, Terminal::Cancelled)?;
+                }
+                Ok::<(), EngineError>(())
+            })();
             emit(
                 &c,
                 None,
                 SessionEvent::CommitFailed {
                     session_id: session,
                     card_id: CardId(pending.frozen.card),
-                    error: failure.clone(),
+                    error: terminal.as_ref().err().unwrap_or(&failure).clone(),
                 },
             );
             let mut state = inner.state.lock().unwrap();
@@ -1915,7 +2116,7 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
                         diff: diff(&old, head),
                     },
                 );
-                failed.store(false, Ordering::Release);
+                failed.store(terminal.is_err(), Ordering::Release);
             }
             Ok(())
         }

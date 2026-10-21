@@ -446,6 +446,9 @@ impl UndoRestorer for AnswerRestorer {
         };
         if let Some(queue) = &meta.production {
             queue.restore(step.direction);
+            // Optimistic undo and U25 acknowledgement share one queue/W9
+            // removal. Actual redo adds no chooser contribution.
+            return;
         }
         if let Some(queue) = &meta.queue {
             queue.restore(step.direction);

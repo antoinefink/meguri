@@ -437,6 +437,41 @@ impl Collection {
         self.submit_restore(UndoAction::Undo(scope))
     }
 
+    // The session may restore presentation before the writer is free. Keep
+    // U25's selection authoritative and refuse if that selection changed.
+    pub(crate) fn answer_undo_metadata(
+        &self,
+        scope: UndoScope,
+    ) -> Result<Option<(EntryId, crate::sched::answer::AnswerMetadata)>, EngineError> {
+        let stack = self.undo_manager()?.lock();
+        let UndoStatus::Available(info) = stack.peek(Side::Undo, scope) else {
+            return Ok(None);
+        };
+        let entry = stack
+            .resolved_target(Side::Undo, scope, info.id)
+            .map_err(|reason| EngineError::UndoUnavailable { reason })?;
+        Ok(entry
+            .state
+            .as_ref()
+            .and_then(|s| s.downcast_ref::<crate::sched::answer::AnswerMetadata>())
+            .cloned()
+            .map(|meta| (info.id, meta)))
+    }
+
+    pub(crate) fn submit_answer_undo(&self, scope: UndoScope, expected: EntryId) -> Pending<OpResult<StepInfo>> {
+        let action = UndoAction::Undo(scope);
+        let mut spec = OpSpec::new(action.def(false), OpSource::UserUndoable).stamp(StampMode::CallerSupplied);
+        spec.undo.action = Some(action);
+        self.submit(spec, move |ctx| {
+            if ctx.restore.is_none_or(|r| r.target != Some(Ok(expected))) {
+                return Err(EngineError::UndoUnavailable {
+                    reason: DisabledReason::ChangedExternally,
+                });
+            }
+            ctx.restore_top()
+        })
+    }
+
     pub fn undo(&self, scope: UndoScope) -> Result<OpResult<StepInfo>, EngineError> {
         self.submit_undo(scope).wait()
     }

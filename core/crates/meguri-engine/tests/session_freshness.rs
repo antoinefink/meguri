@@ -820,13 +820,13 @@ fn c6_retains_last_eight_distinct_payloads_and_unchanged_peek_start_identity() {
         pages.push((item, page(&h, id, &head(&h, id).items[0])));
     }
     let renders = h.review.render_count();
-    for v in 2..10 {
+    for (v, prior) in pages.iter().enumerate().take(10).skip(2) {
         kind(&h, h.cards[0], move |nt| {
             nt.templates[0].config.q_format = format!("{{{{Front}}}} version {v}")
         });
         let item = head(&h, id).items[0].clone();
-        assert_eq!(item.render_key, pages[v].0.render_key);
-        assert!(Arc::ptr_eq(&pages[v].1, &page(&h, id, &item)));
+        assert_eq!(item.render_key, prior.0.render_key);
+        assert!(Arc::ptr_eq(&prior.1, &page(&h, id, &item)));
     }
     assert_eq!(h.review.render_count(), renders);
 }
