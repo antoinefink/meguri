@@ -349,7 +349,7 @@ fn two_hundred_supported_fixture_answers_over_twenty_days_preserve_foreign_data(
             logs.insert(log_id.0),
             "each production answer inserts its own revlog row"
         );
-        assert!(before["revlog"].get(&log_id.0.to_string()).is_none());
+        assert!(before["revlog"].get(log_id.0.to_string()).is_none());
         answer_counts[slot] += 1;
         ratings[rating as usize - 1] += 1;
         let after = dump(&h.collection);
