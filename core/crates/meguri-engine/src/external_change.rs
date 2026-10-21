@@ -13,6 +13,7 @@ pub(crate) fn notify(shared: &ExecShared, writer: &Writer, touched: &mut TouchIn
     let col = writer.col()?;
     shared.undo.reset(DisabledReason::ChangedExternally);
     shared.day_clock.drop_cached();
+    shared.answer_caches.invalidate_all();
     let mut changes = ChangeSet::empty(OpSource::Maintenance);
     changes.whole_collection = true;
     let changes = Arc::new(changes);

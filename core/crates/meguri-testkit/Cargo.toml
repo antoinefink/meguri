@@ -98,3 +98,7 @@ harness = false
 [[bench]]
 name = "queue_counts"
 harness = false
+
+[[bench]]
+name = "answer"
+harness = false

@@ -69,6 +69,16 @@ pub struct StoredConfig {
 /// Typed reads (`model/row-records`): a row that cannot be read is
 /// [`StorageError::Row`]; a missing row is `None`.
 pub trait ReadRows: sealed::Connected {
+    fn answer_due_range(&self, today: u32) -> Result<Vec<crate::queries::due_range::DueRow>, StorageError> {
+        crate::queries::due_range::read(self.connection(), today)
+    }
+    fn answer_siblings(
+        &self,
+        note: NoteId,
+        except: CardId,
+    ) -> Result<Vec<crate::queries::siblings::Sibling>, StorageError> {
+        crate::queries::siblings::read(self.connection(), note, except)
+    }
     fn sched_queue_candidates(
         &self,
         decks: &[DeckId],

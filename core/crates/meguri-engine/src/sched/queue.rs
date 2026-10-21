@@ -112,11 +112,21 @@ impl QueueProvider {
         role: ReaderRole,
         read: impl FnOnce(&crate::readers::Snapshot<'_>, &Environment) -> Result<T, EngineError>,
     ) -> Result<T, EngineError> {
+        self.read_timed(collection, role, |snapshot, env, _| read(snapshot, env))
+    }
+
+    /// Shared D8 snapshot protocol for answer prediction and cache construction.
+    pub(super) fn read_timed<T>(
+        &self,
+        collection: &Collection,
+        role: ReaderRole,
+        read: impl FnOnce(&crate::readers::Snapshot<'_>, &Environment, i64) -> Result<T, EngineError>,
+    ) -> Result<T, EngineError> {
         loop {
+            let day = collection.check_rollover()?;
             let now_ms = collection.core.exec.clock.now_ms();
             let offset = collection.core.exec.clock.utc_offset_at(now_ms);
             let zone = collection.core.exec.clock.zone_id();
-            let day = collection.check_rollover()?;
             // Even an empty maintenance op reserves a seq. Pin the state
             // after it completes, rather than rejecting our own prelude.
             let seq = collection.last_seq();
@@ -149,7 +159,7 @@ impl QueueProvider {
             }
             let env = Environment::read(&*snapshot, day.today, now_ms.div_euclid(1000), day.next_day_at)?;
             self.day(day.today);
-            return read(&snapshot, &env);
+            return read(&snapshot, &env, now_ms);
         }
     }
     pub fn queue(&self, collection: &Collection, deck: Option<DeckId>) -> Result<QueueSnapshot, EngineError> {

@@ -124,9 +124,23 @@ fn update(s: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
             Patch::Notetype(n)
         }),
     };
-    let Ok(parsed) = parsed else {
+    let Ok(mut parsed) = parsed else {
         return Ok(OpResult::Rejected("invalid_json"));
     };
+    if let Patch::Preset(p) = &mut parsed {
+        if let Some(stored) = writer(s)?.deck_config(p.id).map_err(core)? {
+            // Compare the schema-11 roundtrip of the bounded view. Equal
+            // content keeps the entire raw blob, including noncanonical bytes.
+            let roundtrip = schema11::deck_config_from_json(&schema11::deck_config_to_json(&stored.for_use()))
+                .map_err(core)?;
+            if p.config.same_content(&roundtrip.config) {
+                p.config = stored.config;
+            }
+        }
+        // L2's local-save stamps precede storage's equal-row comparison.
+        p.mtime = meguri_model::time::EpochSecs(s.clock.now_secs());
+        p.usn = meguri_model::usn::Usn::PENDING;
+    }
     let put = move |scope: &mut meguri_storage::WriteScope<'_>| match parsed {
         Patch::Deck(d) => scope.put(&d),
         Patch::Preset(p) => scope.put(&p),

@@ -398,6 +398,35 @@ impl<'c> WriteScope<'c> {
         self.add(entry).map(RevlogId)
     }
 
+    /// Allocate from the recorded answer instant (pending session replay may
+    /// commit later). This remains an insertion, never an existing-row update.
+    pub fn add_answer_revlog(
+        &mut self,
+        entry: &RevlogEntry,
+        answered_at: EpochMillis,
+    ) -> Result<RevlogId, StorageError> {
+        let id = ids::allocate(self.conn, Table::Revlog, answered_at.0)?;
+        let mut entry = entry.clone();
+        entry.id = RevlogId(id);
+        self.put(&entry)?;
+        Ok(entry.id)
+    }
+
+    /// Only answer-owned fields are replaced; identity, original-deck fields
+    /// and flags retain their stored representation.
+    pub fn put_answer_card(&mut self, card: &Card) -> Result<Written, StorageError> {
+        let Some(mut image) = rows::select_image(self.conn, Table::Cards, &RowKey::Id(card.id.0))? else {
+            return Err(StorageError::Mode {
+                detail: "answer card disappeared".into(),
+            });
+        };
+        let values = card.to_cells();
+        for i in [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 17] {
+            image[i] = values[i].clone();
+        }
+        self.put_cells(Table::Cards, image, false)
+    }
+
     /// Adds a deck under a new id (I2, I3).
     pub fn add_deck(&mut self, deck: &Deck) -> Result<DeckId, StorageError> {
         self.add(deck).map(DeckId)

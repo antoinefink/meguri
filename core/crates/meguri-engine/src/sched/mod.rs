@@ -5,6 +5,7 @@
 //! publishes `RolledOver`, `TimeZoneChanged` and `NextDayAtChanged`. The day
 //! math itself is meguri-sched's `timing`.
 
+pub mod answer;
 pub mod day_clock;
 pub mod fsrs_policy;
 pub mod memory;

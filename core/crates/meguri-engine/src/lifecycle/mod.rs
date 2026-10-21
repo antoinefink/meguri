@@ -364,6 +364,7 @@ impl Engine {
             render_cache: Default::default(),
             space: config.disk_space_provider,
         });
+        exec.undo.add_restorer(Arc::new(crate::sched::answer::AnswerRestorer));
         let reopen = Reopen {
             clock: Arc::clone(&config.clock),
             random: Arc::clone(&config.random),

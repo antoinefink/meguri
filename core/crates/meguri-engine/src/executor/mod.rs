@@ -39,6 +39,7 @@ type AfterCommitHook = Box<dyn FnOnce(Seq) + Send>;
 
 /// What the writer thread and the submitters share.
 pub(crate) struct ExecShared {
+    pub(crate) answer_caches: crate::sched::answer::AnswerCaches,
     #[cfg(feature = "test-hooks")]
     pub(crate) after_commit: Mutex<Option<AfterCommitHook>>,
     /// WAL syncs and write phases, recorded only after a test asks
@@ -93,6 +94,7 @@ impl ExecShared {
         last_seq: Seq,
     ) -> ExecShared {
         ExecShared {
+            answer_caches: Default::default(),
             #[cfg(feature = "test-hooks")]
             after_commit: Mutex::default(),
             #[cfg(feature = "test-hooks")]

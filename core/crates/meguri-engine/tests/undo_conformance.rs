@@ -1,6 +1,5 @@
 //! Undo scenarios through real U27 note add, update, generation and deletion.
-//! Uses U28 bootstrap and deck operations. The single answer remains a test
-//! stand-in until U44, and U38 owns the production undo session adapter.
+//! Uses production bootstrap, decks, answer and undo operations.
 
 mod common;
 
@@ -10,14 +9,10 @@ use std::time::Duration;
 
 use common::Harness;
 use meguri_engine::executor::catalog;
-use meguri_engine::undo::names::{ANSWER_CARD, UPDATE_CONFIG, UPDATE_NOTE};
+use meguri_engine::undo::names::{UPDATE_CONFIG, UPDATE_NOTE};
 use meguri_engine::{ClearCause, Collection, DisabledReason, EngineError, OpSpec, StepKind, UndoScope, UndoStatus};
-use meguri_model::card::{CardQueue, CardType};
-use meguri_model::card_data::MemoryState;
 use meguri_model::changes::OpSource;
-use meguri_model::ids::{CardId, DeckId, NoteId, NotetypeId, RevlogId};
-use meguri_model::revlog::{RevlogEntry, RevlogKind};
-use meguri_model::usn::Usn;
+use meguri_model::ids::{CardId, DeckId, NoteId, NotetypeId};
 use meguri_storage::raw::{RawRows, SqlValue};
 use meguri_storage::{ConfigValue, ReadRows, ReaderRole};
 use meguri_testkit::diff::{self, CompareOptions};
@@ -285,58 +280,22 @@ impl Player {
         meguri_engine::notes::delete(self.c(), existing, OpSource::UserUndoable).unwrap();
     }
 
-    /// `sched/answering` A2 to A5 for its A8 example, the only answer the
-    /// scenarios give: a new card answered Good with the default preset and
-    /// FSRS on, whose chosen state is learning with one step left, a delay
-    /// of 600 s and the memory state (2.3065, 2.118104). Its learning fuzz is
-    /// `sched/fuzz` Z7's first example (card 1894701600000, no review yet:
-    /// 739 s).
+    /// The same production prediction and answer operation used by U43/U48.
     fn answer(&self, spec: &AnswerSpec) {
-        assert_eq!(spec.rating, Rating::Good, "the stand-in answers Good only");
-        let cid = self.card(spec.card.0);
-        assert_eq!(cid, CardId(1_894_701_600_000), "Z7's example card");
-        let time_ms = u32::try_from(spec.time_ms.min(60_000)).unwrap();
-        self.c()
-            .run(
-                OpSpec::named("answer_card", OpSource::UserUndoable).undo_step(ANSWER_CARD, StepKind::Answer),
-                move |ctx| {
-                    let now = ctx.now().whole_secs().0;
-                    let mut card = ctx.scope().card(cid)?.expect("the card exists");
-                    assert_eq!(
-                        (card.card_type, card.reps),
-                        (CardType::New, 0),
-                        "Z7's example: a new card"
-                    );
-                    let (delay, fuzzed, stability, difficulty) = (600, 739, 2.3065_f32, 2.118_104_f32);
-                    let position = u32::try_from(card.due.max(0)).unwrap();
-                    card.card_type = CardType::Learning;
-                    card.queue = CardQueue::Learning;
-                    card.due = i32::try_from(now + fuzzed).unwrap();
-                    card.remaining_steps = 1;
-                    card.reps += 1;
-                    card.data.new_position = Some(position);
-                    card.data.memory_state = Some(MemoryState { stability, difficulty });
-                    card.data.desired_retention = Some(0.9);
-                    card.data.decay = Some(0.1542);
-                    card.data.last_review_secs = Some(now);
-                    ctx.scope().put(&card)?;
-                    // A5: the difficulty shifted, in f32, halves away from zero.
-                    let factor = (((difficulty - 1.0) / 9.0 + 0.1) * 1000.0).round();
-                    ctx.scope().add_revlog(&RevlogEntry {
-                        id: RevlogId(0),
-                        card_id: cid,
-                        usn: Usn::PENDING,
-                        button: 3,
-                        interval: -delay,
-                        last_interval: 0,
-                        ease_factor: factor as u32,
-                        answer_millis: time_ms,
-                        kind: RevlogKind::Learning,
-                    })?;
-                    Ok(())
-                },
-            )
-            .unwrap();
+        let rating = match spec.rating {
+            Rating::Again => meguri_sched::answer::Rating::Again,
+            Rating::Hard => meguri_sched::answer::Rating::Hard,
+            Rating::Good => meguri_sched::answer::Rating::Good,
+            Rating::Easy => meguri_sched::answer::Rating::Easy,
+        };
+        let prediction = meguri_engine::sched::answer::predict(
+            self.c(),
+            self.card(spec.card.0),
+            &mut meguri_sched::states::fsrs_glue::FsrsCache::default(),
+            None,
+        )
+        .unwrap();
+        meguri_engine::sched::answer::answer(self.c(), prediction.answer(rating, spec.time_ms)).unwrap();
     }
 
     /// V1: undo or redo with scope `Global`. Only a refusal by the step's own

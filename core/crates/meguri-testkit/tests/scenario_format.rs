@@ -2282,3 +2282,38 @@ fn queue_count_requests_follow_the_frozen_no_argument_schema() {
         }
     }
 }
+
+#[test]
+fn declared_filtered_answer_needs_follow_answer_ownership_without_runtime_inference() {
+    use meguri_testkit::exec::{Executor, MeguriExecutor};
+    use scenario::Side;
+    let plain = "id: capability/answer\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsteps: [{answer: {card: '#c1', rating: good}}]\n";
+    let parse = |text: &str| scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    let untagged = parse(plain);
+    assert!(!untagged.needs().ops.contains("answer.filtered"));
+    assert!(MeguriExecutor::new().missing(&untagged.needs()).is_empty());
+    let tagged = parse(&format!("tags: ['needs:answer.filtered']\n{plain}"));
+    assert!(tagged.needs().ops.contains("answer.filtered"));
+    assert_eq!(MeguriExecutor::new().missing(&tagged.needs()).ops, ["answer.filtered".to_owned()].into());
+    let metadata = parse(&format!("tags: ['unrelated:answer.filtered']\n{plain}"));
+    assert_eq!(metadata.needs(), untagged.needs());
+    let no_answer = parse(&format!("tags: ['needs:answer.filtered']\n{}", plain.replace("{answer: {card: '#c1', rating: good}}", "{advance: 1s}")));
+    assert!(!no_answer.needs().ops.contains("answer.filtered"));
+
+    let live = parse("id: capability/live\ntags: ['needs:answer.filtered']\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsteps:\n  - answer: {card: '#c1', rating: good}\n  - handoff: meguri\n  - advance: 1s\n");
+    assert!(live.needs_on(Side::Oracle).ops.contains("answer.filtered"));
+    assert!(!live.needs_on(Side::Meguri).ops.contains("answer.filtered"));
+    let mut reversed = live.clone();
+    reversed.steps[1] = Step::Handoff(Side::Oracle);
+    assert!(reversed.needs_on(Side::Meguri).ops.contains("answer.filtered"));
+    assert!(!reversed.needs_on(Side::Oracle).ops.contains("answer.filtered"));
+
+    let actors = actor_scenario("id: capability/actors\ntags: ['needs:answer.filtered']\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nactors: [client_a, meguri]\nsteps:\n  - answer: {card: '#c1', rating: good}\n  - actor: meguri\n  - advance: 1s\n").unwrap();
+    assert!(!actors.needs_of_meguri_actors().ops.contains("answer.filtered"));
+    let mut owned = actors.clone();
+    owned.steps.push(actors.steps[0].clone());
+    assert!(owned.needs_of_meguri_actors().ops.contains("answer.filtered"));
+    let existing = scenario::load(&conformance_dir().join("scenarios/sched/compat/enable-fsrs-live.yaml")).unwrap();
+    assert!(!existing.scenario.needs_on(Side::Meguri).ops.contains("answer"));
+    assert!(!existing.scenario.needs_on(Side::Meguri).ops.contains("answer.filtered"));
+}

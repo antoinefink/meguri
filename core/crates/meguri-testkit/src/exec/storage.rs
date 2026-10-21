@@ -990,6 +990,9 @@ mod tests {
             actor: None,
             storage: Storage::default(),
             day: Default::default(),
+            answer_cache: None,
+            answer_cache_held: false,
+            answer_cache_boundary: 0,
         };
         let file = session.storage.dir().unwrap().join(COLLECTION);
         fs::copy(

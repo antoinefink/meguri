@@ -38,6 +38,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "add_stock_notetype",
             "adopt",
             "advance",
+            "answer",
             "browser_config_set",
             "clear_unused_tags",
             "clone_notetype",
@@ -83,6 +84,8 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "update_notetype.template",
         ])
     );
+    assert!(json["language"]["ops"].as_array().unwrap().iter().any(|op| op == "answer.filtered"));
+    assert!(!json["supports"]["ops"].as_array().unwrap().iter().any(|op| op == "answer.filtered"));
     // dsl.md D8: U28 bootstrap declares the new_collection capability.
     assert_eq!(
         json["supports"]["setup"],
@@ -128,6 +131,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "render",
             "render_status",
             "review_html",
+            "revlog",
             "schema_objects",
             "search",
             "tag_tree",
@@ -144,7 +148,8 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     // set_config, undo-ops.md's undo, redo and remove_config, the eight ops
     // of tag-ops.md, browser-config-ops.md's browser_config_set, the note
     // type ops of notetype-ops.md and the deck ops of deck-ops.md, plus save_deck_options.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 63);
+    // D8 also lists the declared answer.filtered part; Meguri does not support it.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 64);
     for op in [
         "actor",
         "sync",
@@ -242,11 +247,21 @@ fn exec_prints_observations_and_reports_pending_scenarios() {
 
     let fsrs = conformance().join("scenarios/smoke/fsrs-new-card.yaml");
     let out = cli(&["conformance", "exec", fsrs.to_str().unwrap()]);
-    assert_eq!(out.status.code(), Some(1));
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    let actual: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(
-        text(&out.stderr).contains("smoke/fsrs-new-card: pending (needs ops: answer"),
-        "{}",
-        text(&out.stderr)
+        actual["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s.get("card").is_some())
+    );
+    assert!(
+        actual["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s.get("revlog").is_some())
     );
 }
 

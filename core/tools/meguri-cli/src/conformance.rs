@@ -328,7 +328,7 @@ fn capabilities() -> Result<i32, String> {
         "supports": executor.capabilities(),
         "language": {
             "setup": Setup::ORDER,
-            "ops": Step::NAMES.iter().filter(|n| **n != "observe").collect::<Vec<_>>(),
+            "ops": Step::NAMES.iter().filter(|n| **n != "observe").copied().chain(std::iter::once("answer.filtered")).collect::<Vec<_>>(),
             "observations": ObservationKind::ALL.iter().map(|k| k.name()).collect::<Vec<_>>(),
         },
     });

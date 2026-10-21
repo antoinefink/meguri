@@ -1167,3 +1167,34 @@ fn every_committed_actor_scenario_loads_and_is_never_invalid_in_t0() {
         .unwrap();
     assert_ne!(downloads.status, Status::Live, "Meguri cannot play an actor yet");
 }
+
+#[test]
+fn explicit_filtered_answer_part_is_pending_in_preflight_while_plain_answer_runs() {
+    for tagged in [false, true] {
+        let dir = tree();
+        let root = dir.path();
+        copy_smoke(root, "fsrs-new-card");
+        let path = root.join("scenarios/smoke/fsrs-new-card.yaml");
+        if tagged {
+            let original = fs::read_to_string(&path).unwrap();
+            let mut value = meguri_testkit::scenario::parse_yaml(&original).unwrap();
+            value["tags"] = json!(["needs:answer.filtered"]);
+            fs::write(&path, value.to_string()).unwrap();
+            // Only the temporary runner tree changes; comparison values are
+            // the committed recording, not a fabricated answer expectation.
+            let recorded = read_json(&root.join("goldens/smoke/fsrs-new-card.json"));
+            golden_for(root, "smoke/fsrs-new-card", recorded["observations"].clone());
+        }
+        let suite = Suite::open(root).unwrap();
+        let report = suite.run(&[], &MeguriExecutor::new(), "test");
+        let outcome = &report.outcomes[0];
+        if tagged {
+            assert_eq!(outcome.status, Status::Pending);
+            assert_eq!(outcome.missing.as_ref().unwrap().ops, ["answer.filtered".to_owned()].into());
+            assert_eq!(report.to_json()["totals"]["pending"], 1);
+            assert_eq!(report.to_json()["totals"]["pass"], 0);
+        } else {
+            assert_eq!(outcome.status, Status::Pass, "{}", report.render_text());
+        }
+    }
+}

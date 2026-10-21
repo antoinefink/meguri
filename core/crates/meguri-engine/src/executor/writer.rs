@@ -457,7 +457,7 @@ fn run_op<T>(
             Err(payload) => media_failures.push(crate::error::panic_message(payload.as_ref())),
         }
     }
-    let observing = !shared.observers.is_empty();
+    let observing = !shared.observers.is_empty() || shared.answer_caches.has_live();
     let derived = changes::derive(committed.journal.as_ref(), spec.source, media, observing);
     if let Some(journal) = &committed.journal {
         env.touched
@@ -465,6 +465,11 @@ fn run_op<T>(
     }
     let change_set = Arc::new(derived.changes);
     // The history changes before anyone sees the commit (engine/undo M2).
+    let answer_owner = undo_notes
+        .state
+        .as_ref()
+        .and_then(|s| s.downcast_ref::<crate::sched::answer::AnswerMetadata>())
+        .and_then(|m| m.cache_build);
     let applied = shared.undo.after_commit(CommitInfo {
         seq,
         began,
@@ -476,6 +481,22 @@ fn run_op<T>(
         changes: &change_set,
         notes: undo_notes,
     });
+    let restoring_answer = matches!(&applied,crate::undo::Applied::Restored {state:Some(s),..}
+        if s.downcast_ref::<crate::sched::answer::AnswerMetadata>().is_some());
+    shared.answer_caches.observe(
+        &ObservedCommit {
+            seq,
+            generation,
+            changes: &change_set,
+            cards: &derived.cards,
+            revlog_added: &derived.revlog_added,
+            revlog_removed: &derived.revlog_removed,
+            config: &derived.config,
+            collection: derived.collection.as_ref(),
+        },
+        answer_owner,
+        restoring_answer,
+    );
     shared.undo.notify_restorers(&applied, &change_set);
     // The day clock computes afresh after a change of its keys or of `col`
     // (`sched/day-clock` D6, D8). Noted before anyone hears of the commit, so

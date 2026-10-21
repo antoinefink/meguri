@@ -3035,6 +3035,7 @@ impl Scenario {
         }
         needs.setup.extend(self.setup.sections().into_iter().map(str::to_owned));
         add_step_needs(&mut needs, &self.steps);
+        self.add_filtered_answer_need(&mut needs, &self.steps);
         needs
     }
 
@@ -3111,7 +3112,10 @@ impl Scenario {
                 Step::Converge(_) => {
                     needs.observations.insert(ObservationKind::DbDump.name().to_owned());
                 }
-                _ if by.is_some_and(ActorName::is_meguri) => add_step_needs(&mut needs, std::slice::from_ref(step)),
+                _ if by.is_some_and(ActorName::is_meguri) => {
+                    add_step_needs(&mut needs, std::slice::from_ref(step));
+                    self.add_filtered_answer_need(&mut needs, std::slice::from_ref(step));
+                },
                 _ => {}
             }
         }
@@ -3165,11 +3169,22 @@ impl Scenario {
                 needs.setup.extend(self.setup.sections().into_iter().map(str::to_owned));
             }
             add_step_needs(&mut needs, &self.steps[segment.steps.clone()]);
+            self.add_filtered_answer_need(&mut needs, &self.steps[segment.steps.clone()]);
         }
         if self.has_handoffs() {
             needs.ops.insert("handoff".to_owned());
         }
         needs
+    }
+
+    // The one declared D8 part gates answer legs only, on the owning side.
+    // Other metadata never changes capabilities or runtime error handling.
+    fn add_filtered_answer_need(&self, needs: &mut Needs, steps: &[Step]) {
+        if self.tags.iter().any(|tag| tag == "needs:answer.filtered")
+            && steps.iter().any(|step| matches!(step, Step::Answer(_)))
+        {
+            needs.ops.insert("answer.filtered".to_owned());
+        }
     }
 
     /// Whether a step opens a fixture (storage-ops.md P1.3): the scenario

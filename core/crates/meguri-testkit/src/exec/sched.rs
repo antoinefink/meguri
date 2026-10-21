@@ -24,6 +24,8 @@ use crate::scenario::{FsrsNextInput, FsrsNextRequest, LogicalRef, ObservationArg
 
 /// Registers the `fsrs_next` and `timing` kinds and the `reopen` op.
 pub(super) fn register(registry: &mut Registry) {
+    registry.op("answer", answer_op);
+    registry.observation("revlog", revlog_observation);
     registry.observation("fsrs_next", observe);
     registry.observation("timing", timing);
     registry.observation("queue", queue_observation);
@@ -423,7 +425,14 @@ fn scheduling_states(session: &mut Session<'_>, request: &ObservationRequest) ->
             short_term_with_steps,
             learn_ahead,
         };
-        let states = next_states(&mut cache, &input, None).map_err(|e| ExecError::new("core_error", e.to_string()))?;
+        let states = if let Some(balance) = &session.answer_cache {
+            balance.with_chooser(&collection, &card, &preset, |chooser| {
+                next_states(&mut cache, &input, chooser)
+            })
+        } else {
+            next_states(&mut cache, &input, None)
+        }
+        .map_err(|e| ExecError::new("core_error", e.to_string()))?;
         let value = if request.kind.name() == "answer_labels" {
             let label = |l: &meguri_sched::states::labels::AnswerLabel| json!({"amount":l.amount,"less_than":l.less_than,"unit":l.unit.name()});
             json!({"again":label(&states.again.label),"hard":label(&states.hard.label),"good":label(&states.good.label),"easy":label(&states.easy.label)})
@@ -431,6 +440,88 @@ fn scheduling_states(session: &mut Session<'_>, request: &ObservationRequest) ->
             json!({"current":state_value(states.current)?,"again":state_value(states.again.state)?,"hard":state_value(states.hard.state)?,"good":state_value(states.good.state)?,"easy":state_value(states.easy.state)?})
         };
         out.insert(reference.to_string(), value);
+    }
+    Ok(Value::Object(out))
+}
+
+fn answer_op(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
+    let Step::Answer(spec) = step else {
+        return Err(invalid("expected answer"));
+    };
+    let id = *session
+        .cards
+        .get(spec.card.0.index())
+        .ok_or_else(|| invalid("unknown answer card"))?;
+    let collection = session.engine_collection()?;
+    let rating = match spec.rating {
+        crate::scenario::Rating::Again => meguri_sched::answer::Rating::Again,
+        crate::scenario::Rating::Hard => meguri_sched::answer::Rating::Hard,
+        crate::scenario::Rating::Good => meguri_sched::answer::Rating::Good,
+        crate::scenario::Rating::Easy => meguri_sched::answer::Rating::Easy,
+    };
+    let prediction = meguri_engine::sched::answer::predict(
+        &collection,
+        meguri_model::ids::CardId(id),
+        &mut meguri_sched::states::fsrs_glue::FsrsCache::default(),
+        session.answer_cache.clone(),
+    )
+    .map_err(|e| ExecError::new("core_error", e.to_string()))?;
+    let mut request = prediction.answer(rating, spec.time_ms);
+    // H4 deliberately has no mutable presentation queue or head validation.
+    // The kind exists solely for U25/W9's queue-side metadata.
+    if request.cache.is_some() {
+        request.from_queue = Some(match request.current {
+            meguri_sched::states::engine::State::New { .. } => meguri_sched::queue::Kind::New,
+            meguri_sched::states::engine::State::Review(_) => meguri_sched::queue::Kind::Review,
+            _ => meguri_sched::queue::Kind::Learning,
+        });
+    }
+    meguri_engine::sched::answer::answer(&collection, request)
+        .map_err(|e| ExecError::new("core_error", e.to_string()))?;
+    Ok(OpResult::Done)
+}
+
+fn revlog_observation(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
+    use meguri_storage::raw::SqlValue;
+    let collection = session.engine_collection()?;
+    let rows = collection
+        .reader(meguri_storage::ReaderRole::Query)
+        .map_err(|e| ExecError::new("core_error", e.to_string()))?;
+    let refs = match &request.args {
+        ObservationArgs::Refs(refs) => refs.clone(),
+        _ => (0..session.cards.len())
+            .map(|i| LogicalRef {
+                kind: RefKind::Card,
+                n: i as u32 + 1,
+            })
+            .collect(),
+    };
+    let mut out = serde_json::Map::new();
+    for reference in refs {
+        let id = *session
+            .cards
+            .get(reference.index())
+            .ok_or_else(|| invalid("unknown revlog card"))?;
+        let raw = rows
+            .execute_raw("SELECT * FROM revlog WHERE cid=? ORDER BY id", &[SqlValue::Integer(id)])
+            .map_err(|e| ExecError::new("core_error", e.to_string()))?;
+        let mut values = Vec::new();
+        for row in raw.rows {
+            let mut value = serde_json::Map::new();
+            for (col, cell) in raw.columns.iter().zip(row) {
+                let cell = if col == "cid" {
+                    json!(reference.to_string())
+                } else {
+                    match cell {
+                        SqlValue::Integer(v) => json!(v),
+                        _ => return Err(invalid("invalid stored revlog column")),
+                    }
+                };
+                value.insert(col.clone(), cell);
+            }
+            values.push(Value::Object(value));
+        }
+        out.insert(reference.to_string(), Value::Array(values));
     }
     Ok(Value::Object(out))
 }
@@ -484,6 +575,29 @@ fn queue_observation(session: &mut Session<'_>, request: &ObservationRequest) ->
         counts::{deck_tree, finished},
         queue::{self, Environment},
     };
+    if request.kind == ObservationKind::Queue {
+        let collection = session.engine_collection()?;
+        if session.answer_cache_held
+            && (session.clock.now_secs() >= session.answer_cache_boundary
+                || session
+                    .answer_cache
+                    .as_ref()
+                    .is_some_and(|c| !c.is_current(&collection)))
+        {
+            if let Some(c) = session.answer_cache.take() {
+                c.invalidate();
+            }
+            session.answer_cache_held = false;
+        }
+        if !session.answer_cache_held {
+            let cache = meguri_engine::sched::answer::AnswerCache::build_scenario_held(&collection)
+                .map_err(|e| ExecError::new("core_error", e.to_string()))?;
+            // A disabled chooser still registers H3's real-change witness.
+            session.answer_cache_boundary = cache.next_day_at();
+            session.answer_cache = Some(cache);
+            session.answer_cache_held = true;
+        }
+    }
     if request.kind == ObservationKind::DeckCounts {
         day_query_now(session)?;
     }

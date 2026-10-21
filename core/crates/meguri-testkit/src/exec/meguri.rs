@@ -227,6 +227,10 @@ pub struct Session<'a> {
     pub storage: super::storage::Storage,
     /// The day clock's cached day (`sched/day-clock` D6; `exec/sched.rs`).
     pub day: meguri_engine::DayCache,
+    /// H2/H3 holds only the chooser cache, never U41's presentation queue.
+    pub answer_cache: Option<Arc<meguri_engine::sched::answer::AnswerCache>>,
+    pub answer_cache_held: bool,
+    pub answer_cache_boundary: i64,
 }
 
 impl Session<'_> {
@@ -379,6 +383,9 @@ impl MeguriExecutor {
             actor: None,
             storage: Default::default(),
             day: Default::default(),
+            answer_cache: None,
+            answer_cache_held: false,
+            answer_cache_boundary: 0,
         };
         if self.registry.fixture_backup_witness {
             session.storage.fixture_backup_witness();
@@ -468,7 +475,18 @@ impl MeguriExecutor {
                     .ops
                     .get(name)
                     .ok_or_else(|| ExecError::new("unsupported_op", format!("no adapter for op {name}")))?;
-                match (adapter.run)(session, other)? {
+                let result = (adapter.run)(session, other);
+                if result.is_err()
+                    || matches!(&result, Ok(OpResult::Rejected("changed_externally")))
+                    || matches!(other, Step::Reopen(_))
+                    || matches!(other,Step::DbExec(args) if !args.sql.trim_start().to_ascii_lowercase().starts_with("select"))
+                {
+                    if let Some(c) = session.answer_cache.take() {
+                        c.invalidate();
+                    }
+                    session.answer_cache_held = false;
+                }
+                match result? {
                     OpResult::Done => {}
                     OpResult::Output(output) => {
                         out.insert(name.to_owned(), output);
@@ -541,6 +559,9 @@ impl MeguriExecutor {
                 actor: None,
                 storage: Default::default(),
                 day: Default::default(),
+                answer_cache: None,
+                answer_cache_held: false,
+                answer_cache_boundary: 0,
             };
             if self.registry.fixture_backup_witness {
                 session.storage.fixture_backup_witness();
