@@ -34,8 +34,13 @@ use op::{OpContext, OpResult, OpSpec, Pending, WriteDelay};
 use priority::Queues;
 use writer::{CloseTask, MaintenanceTask, OpTask, ReplaceTask, Replaced, Task, TaskMeta};
 
+#[cfg(feature = "test-hooks")]
+type AfterCommitHook = Box<dyn FnOnce(Seq) + Send>;
+
 /// What the writer thread and the submitters share.
 pub(crate) struct ExecShared {
+    #[cfg(feature = "test-hooks")]
+    pub(crate) after_commit: Mutex<Option<AfterCommitHook>>,
     /// WAL syncs and write phases, recorded only after a test asks
     /// (`Collection::record_durability_events`), so long runs with test hooks
     /// on (benches, fault loops) keep no growing log.
@@ -88,6 +93,8 @@ impl ExecShared {
         last_seq: Seq,
     ) -> ExecShared {
         ExecShared {
+            #[cfg(feature = "test-hooks")]
+            after_commit: Mutex::default(),
             #[cfg(feature = "test-hooks")]
             durability_events: Mutex::default(),
             queue: Mutex::new(QueueState {

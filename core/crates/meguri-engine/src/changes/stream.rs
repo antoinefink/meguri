@@ -19,6 +19,9 @@ use crate::jobs::{JobId, JobOutcome};
 use crate::lifecycle::{Generation, LifecycleState};
 use crate::monotonic;
 
+#[cfg(feature = "test-hooks")]
+type SettledWaitHook = Box<dyn FnOnce(Seq) + Send>;
+
 /// A position in the engine's one sequence: ops and events, from 1.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Seq(pub u64);
@@ -100,6 +103,8 @@ impl fmt::Debug for ChangeStream {
 #[derive(Default)]
 struct Inner {
     state: Mutex<State>,
+    #[cfg(feature = "test-hooks")]
+    on_wait: Mutex<Option<SettledWaitHook>>,
     /// Notified when `next_release` moves (`wait_settled`).
     released: Condvar,
 }
@@ -229,6 +234,13 @@ impl ChangeStream {
         Seq(self.inner.lock().next_release - 1)
     }
 
+    /// Observes one actual pending wait on this stream, under its state lock.
+    /// The hook must only notify; it must not wait or call the stream.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn on_next_settled_wait(&self, hook: impl FnOnce(Seq) + Send + 'static) {
+        *self.inner.on_wait.lock().unwrap() = Some(Box::new(hook));
+    }
+
     /// Waits until [`ChangeStream::settled_through`] reaches `seq`, a seq
     /// already handed out: every op up to it has run its in-core observers.
     pub(crate) fn wait_settled(&self, seq: Seq) {
@@ -236,7 +248,17 @@ impl ChangeStream {
         let _settled = self
             .inner
             .released
-            .wait_while(state, |state| state.next_release <= seq.0)
+            .wait_while(state, |state| {
+                let pending = state.next_release <= seq.0;
+                #[cfg(feature = "test-hooks")]
+                if pending {
+                    let hook = self.inner.on_wait.lock().unwrap().take();
+                    if let Some(hook) = hook {
+                        hook(seq);
+                    }
+                }
+                pending
+            })
             .unwrap_or_else(PoisonError::into_inner);
     }
 

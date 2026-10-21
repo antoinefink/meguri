@@ -269,6 +269,144 @@ fn reader_wait_across_rollover_refreshes_day_counts_and_queue_without_empty_writ
 }
 
 #[test]
+fn timing_commit_waits_for_day_invalidation_before_queue_or_counts() {
+    use std::{sync::mpsc, thread};
+
+    enum Progress {
+        Waiting(meguri_engine::Seq),
+        Returned,
+    }
+
+    for role in [ReaderRole::Query, ReaderRole::Interactive] {
+        let h = common::fresh();
+        let c = &h.collection;
+        let provider = Arc::new(QueueProvider::default());
+        let initial = c.check_rollover().unwrap();
+        // At 05:00, changing rollover from 04:00 to 06:00 moves today back.
+        h.clock.set_now_ms((initial.next_day_at + 3600) * 1000);
+        let old = c.check_rollover().unwrap();
+        let fresh_day = old.today - 1;
+        let ids = populate(
+            c,
+            vec![
+                (CardQueue::Review, i64::from(old.today), 1),
+                (CardQueue::Review, i64::from(old.today), 1),
+                (CardQueue::BuriedByScheduler, i64::from(old.today), 1),
+            ],
+        );
+        let buried = ids[2];
+        c.run(
+            OpSpec::named("timing race inputs", OpSource::Maintenance).stamp(StampMode::Raw),
+            move |ctx| {
+                let mut card = ctx.scope().card(buried)?.unwrap();
+                card.card_type = CardType::Review;
+                ctx.scope().put(&card)?;
+                // Exactly seven days ahead needs no old-day unbury, but
+                // becomes eight days ahead when the timing change moves back.
+                ctx.scope()
+                    .set_config_keeping_col_mod("lastUnburied", &ConfigValue::from(u64::from(old.today) + 7))?;
+                Ok(())
+            },
+        )
+        .unwrap();
+        c.check_rollover().unwrap();
+        assert_eq!(provider_counts(&provider, c, role).0.review, 2);
+
+        let (committed, published) = mpsc::channel();
+        let (resume, paused) = mpsc::channel();
+        c.after_next_commit(move |seq| {
+            let _ = committed.send(seq);
+            // Dropping the sender also releases the writer on assertion failure.
+            let _ = paused.recv();
+        });
+        let changed = ids[1];
+        let writer = {
+            let collection = c.clone();
+            thread::spawn(move || {
+                collection.run(
+                    OpSpec::named("timing race commit", OpSource::Maintenance).stamp(StampMode::Raw),
+                    move |ctx| {
+                        ctx.scope()
+                            .set_config_keeping_col_mod("rollover", &ConfigValue::from(6_i64))?;
+                        let mut card = ctx.scope().card(changed)?.unwrap();
+                        card.due = fresh_day as i32;
+                        ctx.scope().put(&card)?;
+                        Ok(())
+                    },
+                )
+            })
+        };
+        let seq = published.recv().unwrap();
+        let (progress, events) = mpsc::channel();
+        let waiting = progress.clone();
+        c.on_next_settled_wait(move |seq| {
+            let _ = waiting.send(Progress::Waiting(seq));
+        });
+        let requester = {
+            let provider = provider.clone();
+            let collection = c.clone();
+            thread::spawn(move || {
+                let answer = provider_counts(&provider, &collection, role);
+                let _ = progress.send(Progress::Returned);
+                answer
+            })
+        };
+        // An early return is an explicit failure event, not a timeout. The
+        // wait notification comes from the actual pending condvar predicate.
+        assert!(matches!(events.recv().unwrap(), Progress::Waiting(waiting) if waiting == seq));
+        assert_eq!(c.last_seq(), seq);
+        assert_eq!(
+            c.check_rollover().unwrap().today,
+            old.today,
+            "invalidation is still paused"
+        );
+        {
+            // The provider waits with neither its role reader nor commit lock
+            // held; the new rows are already visible while the old day is clean.
+            let reader = c.reader(role).unwrap();
+            let snapshot = reader.snapshot().unwrap();
+            assert_eq!(snapshot.seq(), seq);
+            assert_eq!(snapshot.card(changed).unwrap().unwrap().due, fresh_day as i32);
+            assert_eq!(
+                snapshot.card(buried).unwrap().unwrap().queue,
+                CardQueue::BuriedByScheduler
+            );
+            assert_eq!(
+                snapshot.config_value("rollover").unwrap(),
+                Some(ConfigValue::from(6_i64))
+            );
+        }
+        assert!(matches!(events.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        resume.send(()).unwrap();
+        writer.join().unwrap().unwrap();
+        let (counts, today) = requester.join().unwrap();
+        assert_eq!((counts.new, counts.learning, counts.review), (0, 0, 1), "{role:?}");
+        if role == ReaderRole::Interactive {
+            assert_eq!(today, Some(fresh_day));
+        }
+        let queue = provider.queue(c, None).unwrap();
+        assert_eq!(queue.value.today, fresh_day);
+        assert_eq!(
+            queue
+                .value
+                .presentation()
+                .iter()
+                .map(|entry| entry.id)
+                .collect::<Vec<_>>(),
+            vec![changed]
+        );
+        assert_eq!(provider.deck_counts(c).unwrap().counts(DeckId(1)).review, 1);
+        let reader = c.reader(ReaderRole::Query).unwrap();
+        assert_eq!(reader.card(buried).unwrap().unwrap().queue, CardQueue::Review);
+        assert_eq!(
+            reader.config_value("lastUnburied").unwrap(),
+            Some(ConfigValue::from(u64::from(fresh_day))),
+            "fresh-day maintenance completed before the product read"
+        );
+    }
+}
+
+#[test]
 fn fresh_legacy_report_at_exact_boundary_serves_queue_and_counts() {
     use meguri_model::clock::{StepClock, UtcOffset};
 

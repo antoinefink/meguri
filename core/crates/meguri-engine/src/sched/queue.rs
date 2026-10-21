@@ -120,6 +120,10 @@ impl QueueProvider {
             // Even an empty maintenance op reserves a seq. Pin the state
             // after it completes, rather than rejecting our own prelude.
             let seq = collection.last_seq();
+            // The commit lock is released before day invalidation and the
+            // observers run. Settle this seq before trusting its day report;
+            // a snapshot that races ahead of it must still retry below.
+            collection.core.exec.stream.wait_settled(seq);
             if collection.core.exec.clock.now_ms().div_euclid(1000) != now_ms.div_euclid(1000) {
                 continue;
             }

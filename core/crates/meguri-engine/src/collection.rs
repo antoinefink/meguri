@@ -50,6 +50,20 @@ impl fmt::Debug for Collection {
 }
 
 impl Collection {
+    /// Runs once after this collection's next op publishes its committed
+    /// seq, with no commit lock held, before day invalidation or observers.
+    #[cfg(feature = "test-hooks")]
+    pub fn after_next_commit(&self, hook: impl FnOnce(Seq) + Send + 'static) {
+        *self.core.exec.after_commit.lock().unwrap() = Some(Box::new(hook));
+    }
+
+    /// Observes one pending settled-seq wait on this collection's stream.
+    /// The hook must only notify; it runs under the stream's state lock.
+    #[cfg(feature = "test-hooks")]
+    pub fn on_next_settled_wait(&self, hook: impl FnOnce(Seq) + Send + 'static) {
+        self.core.exec.stream.on_next_settled_wait(hook);
+    }
+
     /// Starts recording the writer's WAL sync attempts and op write phases
     /// (storage C9.2). Nothing is recorded before this call.
     #[cfg(feature = "test-hooks")]

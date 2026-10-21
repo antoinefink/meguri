@@ -436,6 +436,13 @@ fn run_op<T>(
         (committed, reservation)
     };
     let seq = reservation.seq();
+    #[cfg(feature = "test-hooks")]
+    {
+        let hook = shared.after_commit.lock().unwrap().take();
+        if let Some(hook) = hook {
+            hook(seq);
+        }
+    }
     if seen_fsrs == Some(true) {
         shared.fsrs_policy.observe_on();
     }
