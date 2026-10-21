@@ -12,6 +12,8 @@ Antoine made remaining VoiceOver cursor and speech work optional follow-up after
 
 Manual device and reference checks are deferred until the final session (Antoine, 2026-10-20). Continue with automated VM tests. Final evidence remains required.
 
+Antoine approved one interim known-failure exception on 2026-10-21: exact R554 audio failure through U69, approval `E-20261021T134124Z-a07a`. Apply only the scope in `tiers.md`; all other checks must pass, the full gate stays failed, and M1R/final acceptance still requires the repair. Record the exception and supplementary T1 receipts in each affected unit log.
+
 The branch-merge procedure below remains available for historical receipts and existing tooling. Queued runs remain incomplete verification: run `tools/mg catch-up` between units and require passing results at milestone gates. Run catch-up on the clean gate commit before committing acceptance-only notes when possible, so it can reuse exact-commit passing results. Record both receipts afterwards.
 
 A full, clean main-checkout gate with an explicit base saves its queued checks

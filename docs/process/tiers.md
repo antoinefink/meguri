@@ -12,6 +12,14 @@ Individual gates use `tools/mg gate --base <unit-start-commit>`; an open batch a
 
 Milestone and final acceptance suites and required human evidence remain mandatory. Gate arguments, path triggers, result validity, quarantine, catch-up and milestone evaluation stay as defined below.
 
+### Approved interim R554 exception
+
+On 2026-10-21, Antoine approved “Allow this exact interim exception until U69 (Recommended).” Approval `E-20261021T134124Z-a07a` permits interim unit acceptance with only `swift-test` failure `test/controllerQueueAdvancesAcrossMissingMiddleWithinBudget()` unresolved. U69 owns the recorded 221 ms native audio issue. Every other required check must pass on the same production source; any additional failure still blocks acceptance.
+
+Keep the test enabled and every failure recorded. Preserve the 50 ms startup and 100 ms inter-clip limits and hardware conditions. Do not quarantine, skip, subtract latency or change tooling outcomes. The ordinary full-gate receipt stays failed. If T0 prevents required T1 runs, run those checks separately through `tools/mg` and record their actual receipts alongside the failed full gate; a selected T1 gate is supplementary evidence, never an ordinary passing full gate. Each affected unit log must name the approval, exact failure, all other receipts and this exception.
+
+This exception ends with U69. U69 must explain and correct a demonstrated measurement defect or make a supported playback repair; another passing run alone is not closure. Stop condition `E-20261020T055914Z-8ada` remains open and blocks M1R. Milestone and final acceptance still require the actual fix, unchanged limits and required device evidence. The earlier U67 ownership decision and historical red receipts are not reclassified.
+
 | Tier | When | What | Command |
 |---|---|---|---|
 | T0 | every change | static checks, then canaries, then for the changed paths: committed goldens on macOS and Linux, Rust and Swift unit tests, `lint-ui`, `core-lint`, `core-deny`, the notices check (U16), the similarity scan, snapshot and accessibility tests for touched UI, the simulator perf smoke for touched hot paths (R1863) | `tools/mg gate` |

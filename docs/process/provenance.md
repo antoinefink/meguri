@@ -14,6 +14,8 @@ Antoine changed the build workflow on 2026-10-18: all new work happens directly 
 
 Manual device and reference checks are deferred until the final session (Antoine, 2026-10-20). Continue with automated VM tests. Final evidence remains required.
 
+The sole interim exception to known failures blocking acceptance is Antoine's 2026-10-21 R554 decision, approval `E-20261021T134124Z-a07a`. Its exact scope is in `tiers.md`: until U69, retain the failed full gate and enabled test, require every other check, and record the exception per unit. M1R's technical stop condition and final acceptance requirements remain.
+
 For new implementation and fixes, `tools/mg cleanroom` exports a filtered copy of
 clean master into a separate container. Forbidden trees, build output, real Git
 history, host credentials and dependency caches are absent from its source view.
