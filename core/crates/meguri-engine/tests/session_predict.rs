@@ -35,9 +35,48 @@ fn choose(h: &Harness, id: meguri_engine::SessionId, head: &Head, rating: Rating
 }
 #[test]
 fn c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions() {
+    let mut tasks = Vec::with_capacity(4);
+    let mut launch_error = None;
+    for (begin, end) in [(0, 2500), (2500, 5000), (5000, 7500), (7500, 10000)] {
+        let launched = std::thread::Builder::new()
+            .name(format!("c8-sessions-{begin}-{end}"))
+            .spawn(move || run_session_range(begin..end));
+        match launched {
+            Ok(task) => tasks.push(task),
+            Err(cause) => {
+                launch_error = Some(cause);
+                break;
+            }
+        }
+    }
+
+    // Collect every result before allowing a thread failure to escape.
+    let mut first_panic = None;
+    for task in tasks {
+        let outcome = task.join();
+        if first_panic.is_none() {
+            first_panic = outcome.err();
+        }
+    }
+    if let Some(payload) = first_panic {
+        std::panic::resume_unwind(payload);
+    }
+    if let Some(cause) = launch_error {
+        panic!("could not launch C8 session range: {cause}");
+    }
+}
+fn run_session_range(range: std::ops::Range<usize>) {
+    // Construct the collection and its service within the owning test thread.
     let h = Harness::new(18);
     let mut random = 0x4d65_6775_7269_u64;
-    for _session in 0..10_000 {
+    let mut preceding_draws = range.start * 12;
+    while preceding_draws != 0 {
+        random ^= random << 13;
+        random ^= random >> 7;
+        random ^= random << 17;
+        preceding_draws -= 1;
+    }
+    for _session in range {
         h.clock.set_now_ms(session_support::NOW);
         let (id, _) = h.start();
         let mut steps = 0;
@@ -65,7 +104,9 @@ fn c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions() {
             h.clock.step_ms(((random >> 8) % 80 + 1) as i64 * 1000);
             steps += 1;
         }
-        assert!(steps >= 2, "a random session must exercise progression");
+        // Eighteen single-card notes, no siblings: at most twelve chosen
+        // answers can graduate cards. Counterfactuals are committed-undone.
+        assert_eq!(steps, 12, "every random session must consume twelve draws");
         h.review.end(id).unwrap();
         // Reset through the real operation journals, never rewrite expected
         // states from a case id or bypass the service with an answer adapter.

@@ -57,3 +57,8 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-engine) and (binary(session_durability) or test(=c15_committed_undo_returns_restored_head_during_real_200ms_sync_incoming) or test(=c12_every_acceptance_is_observed_fullsynced_while_a_later_writer_is_held))'
 threads-required = "num-test-threads"
+
+# C8 runs four collection-owning threads across its complete session set.
+[[profile.default.overrides]]
+filter = 'package(meguri-engine) and test(=c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions)'
+threads-required = 4
