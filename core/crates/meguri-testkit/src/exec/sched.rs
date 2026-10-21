@@ -454,7 +454,13 @@ fn answer_op(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecErr
         .get(spec.card.0.index())
         .ok_or_else(|| invalid("unknown answer card"))?;
     let collection = session.engine_collection()?;
-    if session.held_queue.as_ref().is_some_and(|held| !held.is_current()) {
+    // E2/P10 keeps the old presentation for the bounded answer across a
+    // boundary, even if day maintenance invalidated its chooser. Prediction
+    // and application independently reject stale caches; the next queue read
+    // still needs this build's boundary to rebuild and clear history.
+    if session.held_queue.as_ref().is_some_and(|held| {
+        !held.bound_to(&collection) || (!held.is_current() && session.clock.now_secs() < held.boundary())
+    }) {
         session.held_queue = None;
     }
     let rating = match spec.rating {

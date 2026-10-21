@@ -476,7 +476,7 @@ impl MeguriExecutor {
                     || matches!(&result, Ok(OpResult::Rejected("changed_externally")))
                     || matches!(other, Step::Reopen(_))
                     || matches!(other,Step::DbExec(args) if !args.sql.trim_start().to_ascii_lowercase().starts_with("select")))
-                    && let Some(held) = &session.held_queue
+                    && let Some(held) = session.held_queue.take()
                 {
                     held.invalidate();
                 }
