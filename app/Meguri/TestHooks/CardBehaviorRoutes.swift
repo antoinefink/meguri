@@ -24,7 +24,21 @@ extension TestHooks {
 
     @Observable final class CardBehaviorModel {
         var pair: CardPagePair?
-        var state = "loading"
+        private var status = "loading"
+        private var recoverySequence: UInt64 = 0
+        private var actionReceipt = "actionSequence=0 action=recover phase=none"
+        private var terminationReceipt = "callback=none"
+        private var nativeSnapshot = "native=none"
+        var state: String {
+            get {
+                let receipts = "\(actionReceipt) \(terminationReceipt) \(nativeSnapshot)"
+                if let json = status.firstIndex(of: "{") {
+                    return "\(status[..<json])\(receipts) | \(status[json...])"
+                }
+                return "\(status) \(receipts)"
+            }
+            set { status = newValue }
+        }
         var narrow = false
         var dialogResult = "none"
         let presenter = NativeCardBehaviorPresenter()
@@ -128,10 +142,22 @@ extension TestHooks {
         func suspend() async { await pair?.suspend(); await refresh() }
         func resume() async { await pair?.resume(); await refresh() }
         func probe() async { _ = await pair?.probeForegroundLiveness(); probes += 1; await refresh() }
+        func beginRecoveryReceipt() -> UInt64 {
+            recoverySequence += 1
+            recordRecoveryReceipt(recoverySequence, phase: "queued")
+            return recoverySequence
+        }
+        func recordRecoveryReceipt(_ sequence: UInt64?, phase: String) {
+            guard let sequence, sequence == recoverySequence else { return }
+            actionReceipt = "actionSequence=\(sequence) action=recover phase=\(phase)"
+        }
         func terminationCallback() {
             guard let page = pair?.current else { return }
+            let before = "callbackBeforeTerminations=\(page.terminations) callbackBeforeGeneration=\(page.update.map { String($0.generation) } ?? "none")"
+            terminationReceipt = "\(before) callbackAfter=pending"
             // Public native callback seam: this is not an OS process kill.
             page.webViewWebContentProcessDidTerminate(page.webView)
+            terminationReceipt = "\(before) callbackAfterTerminations=\(page.terminations) callbackAfterGeneration=\(page.update.map { String($0.generation) } ?? "none")"
         }
         func focusCard() async throws {
             guard let pair else { return }
@@ -149,8 +175,14 @@ extension TestHooks {
             await refresh()
         }
         func refresh() async {
-            guard let pair, let update = pair.current.update else { return }
+            guard let pair else { nativeSnapshot = "native=no-pair"; return }
             let page = pair.current
+            // Publish native-only evidence before JavaScript can suspend this read.
+            // Only fixed technical kinds are exported, never entry names or errors.
+            let kinds = Set(pair.diagnostics.entries.map(\.kind))
+                .intersection(["processTerminated", "recoveryUnavailable"]).sorted()
+            nativeSnapshot = "nativeClosed=\(page.closed) nativeTerminations=\(page.terminations) nativeGeneration=\(page.update.map { String($0.generation) } ?? "none") nativeSettled=\(page.settled) nativeKinds=\(kinds.isEmpty ? "none" : kinds.joined(separator: ","))"
+            guard let update = page.update else { return }
             let result = try? await page.webView.callAsyncJavaScript("""
                 const scalarRect = r => {
                   return [r.x,r.y,r.width,r.height].every(Number.isFinite)
@@ -284,8 +316,14 @@ extension TestHooks {
             report = (try? JSONSerialization.data(withJSONObject: observations)).flatMap { String(data: $0, encoding: .utf8) } ?? "unavailable"
             state = "ready card=\(update.card) side=\(update.sideName) generation=\(update.generation) zoom=\(Int(pair.cardZoom.percent)) dialog=\(dialogResult) target=\(page.accessibilityTarget?.elementID ?? "none") probe=\(probes) \(report)"
         }
-        func perform(_ action: @escaping @MainActor () async throws -> Void) {
-            Task { do { try await action() } catch { state = "failed: \(error)" } }
+        func perform(_ action: @escaping @MainActor () async throws -> Void, recoverySequence: UInt64? = nil) {
+            Task {
+                do {
+                    recordRecoveryReceipt(recoverySequence, phase: "invoking")
+                    try await action()
+                    recordRecoveryReceipt(recoverySequence, phase: "returned")
+                } catch { state = "failed: \(error)" }
+            }
         }
         func stop() {
             #if os(iOS)
@@ -306,6 +344,7 @@ extension TestHooks {
         @State private var actionsPresented = false
         #if os(iOS)
         @State private var pendingAction: (@MainActor () async throws -> Void)?
+        @State private var pendingRecoverySequence: UInt64?
         @State private var sheetActionTask: Task<Void, Never>?
         @State private var fixtureActive = false
         #endif
@@ -360,6 +399,8 @@ extension TestHooks {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Button {
+                            model.recordRecoveryReceipt(pendingRecoverySequence, phase: "drop-cancelled")
+                            pendingRecoverySequence = nil
                             pendingAction = nil
                             actionsPresented = false
                         } label: {
@@ -407,6 +448,8 @@ extension TestHooks {
             .onDisappear {
                 #if os(iOS)
                 fixtureActive = false
+                model.recordRecoveryReceipt(pendingRecoverySequence, phase: "drop-inactive")
+                pendingRecoverySequence = nil
                 pendingAction = nil
                 sheetActionTask?.cancel()
                 sheetActionTask = nil
@@ -490,10 +533,27 @@ extension TestHooks {
             // Take synchronously: a second dismissal callback cannot schedule it again.
             let action = pendingAction
             pendingAction = nil
-            guard let action, fixtureActive, let pair = model.pair, !pair.current.closed else { return }
+            let sequence = pendingRecoverySequence
+            pendingRecoverySequence = nil
+            if action != nil { model.recordRecoveryReceipt(sequence, phase: "dismissed") }
+            guard let action, fixtureActive, let pair = model.pair, !pair.current.closed else {
+                let reason = action == nil ? "drop-cancelled" : !fixtureActive ? "drop-inactive"
+                    : model.pair == nil ? "drop-no-pair" : "drop-closed"
+                model.recordRecoveryReceipt(sequence, phase: reason)
+                return
+            }
             sheetActionTask = Task { @MainActor in
-                guard !Task.isCancelled, fixtureActive, model.pair === pair, !pair.current.closed else { return }
-                do { try await action() }
+                guard !Task.isCancelled, fixtureActive, model.pair === pair, !pair.current.closed else {
+                    let reason = Task.isCancelled ? "drop-cancelled" : !fixtureActive ? "drop-inactive"
+                        : model.pair == nil ? "drop-no-pair" : model.pair !== pair ? "drop-identity-changed" : "drop-closed"
+                    model.recordRecoveryReceipt(sequence, phase: reason)
+                    return
+                }
+                do {
+                    model.recordRecoveryReceipt(sequence, phase: "invoking")
+                    try await action()
+                    model.recordRecoveryReceipt(sequence, phase: "returned")
+                }
                 catch {
                     if !Task.isCancelled, fixtureActive, model.pair === pair, !pair.current.closed {
                         model.state = "failed: \(error)"
@@ -524,17 +584,24 @@ extension TestHooks {
             action: @escaping @MainActor () async throws -> Void
         ) -> some View {
             Button {
+                let recoverySequence = id == "recover" ? model.beginRecoveryReceipt() : nil
                 #if os(macOS)
                 actionsPresented = false
                 #else
                 if sheetAction {
-                    guard fixtureActive, pendingAction == nil, let pair = model.pair, !pair.current.closed else { return }
+                    guard fixtureActive, pendingAction == nil, let pair = model.pair, !pair.current.closed else {
+                        let reason = !fixtureActive ? "drop-inactive" : pendingAction != nil ? "drop-pending"
+                            : model.pair == nil ? "drop-no-pair" : "drop-closed"
+                        model.recordRecoveryReceipt(recoverySequence, phase: reason)
+                        return
+                    }
                     pendingAction = action
+                    pendingRecoverySequence = recoverySequence
                     actionsPresented = false
                     return
                 }
                 #endif
-                model.perform(action)
+                model.perform(action, recoverySequence: recoverySequence)
             } label: {
                 Text(String(localized: key, table: "CardBehaviorRoutes"))
                     .multilineTextAlignment(sheetAction ? .leading : .center)

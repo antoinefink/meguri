@@ -310,10 +310,23 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         XCTAssert(wait { self.state(app).contains("probe=1") }, state(app))
         XCTAssertEqual(try report(app)["marker"] as? Double, initial["marker"] as? Double)
         try control("recover", in: app) // Controlled public callback, not a process kill.
-        XCTAssert(wait {
+        let recovered = wait {
             guard let current = try? self.report(app) else { return false }
             return current["text"] as? String == "ka" && current["marker"] as? Double != initial["marker"] as? Double
-        }, state(app))
+        }
+        if !recovered {
+            // One diagnostic read after the original deadline; never a recovery retry.
+            let before = state(app).components(separatedBy: " | ").first ?? "unavailable"
+            var refreshResult = "requested"
+            do { try control("refresh", in: app) }
+            catch { refreshResult = "control-unavailable" }
+            let after = state(app).components(separatedBy: " | ").first ?? "unavailable"
+            let diagnostic = XCTAttachment(string: "before refresh: \(before)\nafter refresh (\(refreshResult)): \(after)")
+            diagnostic.name = "recovery-deadline-diagnostics"
+            diagnostic.lifetime = .keepAlways
+            add(diagnostic)
+        }
+        XCTAssert(recovered, state(app))
         XCTAssertEqual(editor.value as? String, "native")
         try click(editor, in: app)
         app.typeText("-before")
