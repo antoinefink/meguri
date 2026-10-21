@@ -658,3 +658,17 @@ deviations:
         - [lastUnburied, -1, 1906617600, "138"]
         - [localOffset, -1, 1906531200, "-120"]
         - [rollover, -1, 1906531200, "4"]
+
+  # sched/queue-building B2.2: filtered descendants contribute to the list,
+  # while the study queue contains only normal decks (R706, R707).
+  - id: queue-nested-filtered-deck
+    requirement: R612
+    summary: The study queue excludes the four cards held in the filtered child; deck-list counts retain that child.
+    test: core/crates/meguri-engine/tests/sched_queue.rs nested_filtered_policy_is_narrow_queue_exclusion_with_list_and_compatibility_membership
+    scenarios: [sched/queue/gather/nested-filtered]
+    pointer: /steps/4/queue
+    transform:
+      replace:
+        cards: ["#c1", "#c7", "#c2"]
+        kinds: [review, new, review]
+        counts: {new: 1, learning: 0, review: 2}
