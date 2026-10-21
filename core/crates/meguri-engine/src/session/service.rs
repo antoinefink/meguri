@@ -2539,7 +2539,12 @@ impl GenerationListener for ReviewService {
             // under the reopened generation (which may be unchanged).
             state.binding = None;
         }
-        self.run(c)
+        self.run(c)?;
+        // Replay discards its historical day state. ReplaceTask has already
+        // run L8's first check; restore the quiet current D8 cache before
+        // fallible rebind returns and admission can reopen.
+        c.check_rollover()?;
+        Ok(())
     }
     fn collection_replaced(&self, _old: Generation, _new: Generation) {}
 }

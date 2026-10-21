@@ -273,22 +273,28 @@ fn resume_rejects_atomic_replacement_and_keeps_unretired_journal_and_admission_c
     let collection = host.collection().unwrap();
     let media = committed_publication(&host);
     let generation = host.engine().generation();
+    // This fixture submits no review answers. Count through an owned reader
+    // before suspension; an independent fd must not close behind SQLite owners.
+    let before_logs = collection
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .ids_after(meguri_storage::Table::Revlog, None, 100_000)
+        .unwrap()
+        .len();
     host.engine().suspend(std::time::Duration::from_secs(2)).unwrap();
     let evidence = std::fs::read(&journal).unwrap();
     assert!(!String::from_utf8_lossy(&evidence).contains("Retired"));
     let original = std::fs::metadata(&path).unwrap();
-    // This fixture submits no review answers. Count logs to detect any insertion
-    // on refusal, without treating this as unresolved-answer replay coverage.
+    // Called only while every managed collection connection is closed.
     let review_log_count = || {
         let db = meguri_storage::rusqlite::Connection::open_with_flags(
             &path,
             meguri_storage::rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
         .unwrap();
-        db.query_row("SELECT count(*) FROM revlog", [], |row| row.get::<_, i64>(0))
+        db.query_row("SELECT count(*) FROM revlog", [], |row| row.get::<_, usize>(0))
             .unwrap()
     };
-    let before_logs = review_log_count();
     let replacement = dir.path().join("external.anki2");
     std::fs::copy(&path, &replacement).unwrap();
     {
@@ -299,6 +305,7 @@ fn resume_rejects_atomic_replacement_and_keeps_unretired_journal_and_admission_c
     let published = std::fs::metadata(&path).unwrap();
     assert_ne!((published.dev(), published.ino()), (original.dev(), original.ino()));
     assert_eq!(review_log_count(), before_logs);
+    let mut recovered_pending = None;
     for _ in 0..2 {
         let error = host.engine().resume().unwrap_err();
         let detail = format!("{error:?}").to_ascii_lowercase();
@@ -317,13 +324,29 @@ fn resume_rejects_atomic_replacement_and_keeps_unretired_journal_and_admission_c
         );
         assert!(media.add("blocked.txt", b"must not publish").is_err());
         assert!(!media.store().media_dir().join("blocked.txt").exists());
-        assert!(media.store().pending().is_err());
+        // Media recovery precedes review identity validation. Its read store
+        // may remain open, but recovery is complete and retry is idempotent.
+        assert_eq!(
+            std::fs::read(media.store().media_dir().join("recovered.png")).unwrap(),
+            b"durable synthetic media"
+        );
+        let pending = media.store().pending().unwrap();
+        assert_eq!(pending.len(), 1);
+        if let Some(expected) = &recovered_pending {
+            assert_eq!(&pending, expected);
+        } else {
+            recovered_pending = Some(pending);
+        }
         let retained = std::fs::read(&journal).unwrap();
         assert_eq!(retained, evidence, "resume must preserve the original binding");
         assert!(!String::from_utf8_lossy(&retained).contains("Retired"));
-        assert_eq!(review_log_count(), before_logs);
     }
     host.close().unwrap();
+    assert_eq!(
+        review_log_count(),
+        before_logs,
+        "refusal must not replay or insert answers"
+    );
 }
 
 #[test]

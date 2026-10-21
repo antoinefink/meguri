@@ -10,7 +10,7 @@ use meguri_engine::{
     session::{AnswerOutcome, Head, JournalStage, ReviewService, SessionEvent, StartResult},
 };
 use meguri_model::{
-    clock::{StepClock, UtcOffset},
+    clock::{Clock, StepClock, UtcOffset},
     ids::{CardId, DeckId, RevlogId},
     rng::SeededRandom,
     time::EpochMillis,
@@ -51,15 +51,12 @@ fn journal_path(path: &Path) -> PathBuf {
     path.parent().unwrap().join("meguri-pending-answers.jsonl")
 }
 fn no_review(path: &Path, at: i64) -> (Engine, Collection) {
+    no_review_with_clock(path, Arc::new(StepClock::new(at, UtcOffset::UTC, "UTC")))
+}
+fn no_review_with_clock(path: &Path, clock: Arc<StepClock>) -> (Engine, Collection) {
     let engine = Engine::new(EngineConfig::default()).unwrap();
     let c = engine
-        .open_raw(
-            path,
-            OpenConfig::new(
-                Arc::new(StepClock::new(at, UtcOffset::UTC, "UTC")),
-                Arc::new(SeededRandom::new(43)),
-            ),
-        )
+        .open_raw(path, OpenConfig::new(clock, Arc::new(SeededRandom::new(43))))
         .unwrap();
     (engine, c)
 }
@@ -67,6 +64,17 @@ fn try_review(
     path: &Path,
     at: i64,
     offset: UtcOffset,
+) -> (
+    Engine,
+    Arc<ReviewService>,
+    meguri_engine::Subscription,
+    Result<Collection, EngineError>,
+) {
+    try_review_with_clock(path, Arc::new(StepClock::new(at, offset, "recorded-test")))
+}
+fn try_review_with_clock(
+    path: &Path,
+    clock: Arc<StepClock>,
 ) -> (
     Engine,
     Arc<ReviewService>,
@@ -86,17 +94,20 @@ fn try_review(
         .suspend_participant(review.clone());
     let result = engine.open_raw(
         path,
-        OpenConfig::new(
-            Arc::new(StepClock::new(at, offset, "recorded-test")),
-            Arc::new(SeededRandom::new(43)),
-        )
-        .ports(ports),
+        OpenConfig::new(clock, Arc::new(SeededRandom::new(43))).ports(ports),
     );
     (engine, review, stream, result)
 }
 fn replacement_events(stream: &meguri_engine::Subscription) -> Vec<meguri_engine::Generation> {
     let mut result = Vec::new();
     while let Some(event) = stream.try_recv() {
+        assert!(
+            !matches!(
+                &event.kind,
+                EventKind::RolledOver { .. } | EventKind::TimeZoneChanged { .. } | EventKind::NextDayAtChanged { .. }
+            ),
+            "replacement must initialize the day clock quietly"
+        );
         if let EventKind::CollectionReplaced { generation } = event.kind {
             result.push(generation);
         }
@@ -140,6 +151,13 @@ fn c12_replace_rebinds_success_unchanged_failure_and_changed_failure_before_read
         drop(exclusive);
         drop(slot);
         let current = h.engine.collection().unwrap();
+        let after_replace = current.last_seq();
+        current.check_rollover().unwrap();
+        assert_eq!(
+            current.last_seq(),
+            after_replace,
+            "{mode}: rebind must initialize current D8 before readmission"
+        );
         let moved = mode != "unchanged";
         assert_eq!(current.generation().0, old_generation.0 + u64::from(moved));
         assert_eq!(
@@ -218,6 +236,13 @@ fn c12_replace_checkpoint_failure_reopens_and_rebinds_the_unchanged_file() {
             .any(|r| r.result == meguri_storage::rusqlite::ffi::SQLITE_IOERR_FSYNC)
     );
     assert_eq!(engine.generation(), generation);
+    let after_replace = c.last_seq();
+    c.check_rollover().unwrap();
+    assert_eq!(
+        c.last_seq(),
+        after_replace,
+        "failed swap rebind must leave D8 initialized"
+    );
     assert!(replacement_events(&stream).is_empty());
     assert_eq!(review.active_session(), None);
     let (id, head) = start(&review);
@@ -369,6 +394,181 @@ fn reopen_twice_matches(a: &CapturedAnswer, expected: &common::steps::Dump) {
         let (engine, c, _) = session_support::open(&a.path, Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC")));
         assert_eq!(&common::steps::dump(&c), expected);
         engine.close().unwrap();
+    }
+}
+
+#[test]
+fn c12_historical_answer_recovery_precedes_current_day_and_offset_maintenance_twice() {
+    use meguri_model::{card::CardQueue, ids::DeckConfigId};
+    use meguri_storage::{Cell, ConfigValue, StampMode};
+
+    for creation_offset in [false, true] {
+        let mut buried = CardId(0);
+        let mut recorded_day = 0;
+        let a = capture_answer(|h| {
+            h.collection
+                .run(
+                    OpSpec::named("recorded day policy", OpSource::SyncIncoming).stamp(StampMode::Raw),
+                    move |ctx| {
+                        if creation_offset {
+                            ctx.scope().set_config("creationOffset", &ConfigValue::from(0_i64))?;
+                        } else {
+                            ctx.scope().remove_config("creationOffset")?;
+                        }
+                        ctx.scope().set_config("rollover", &ConfigValue::from(4_i64))?;
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            recorded_day = h.collection.today().unwrap();
+            buried = h.cards[2];
+            h.collection
+                .run(
+                    OpSpec::named("independent recorded-day burial", OpSource::SyncIncoming).stamp(StampMode::Raw),
+                    move |ctx| {
+                        ctx.scope()
+                            .set_config("lastUnburied", &ConfigValue::from(i64::from(recorded_day)))?;
+                        let mut card = ctx.scope().card(buried)?.unwrap();
+                        card.queue = CardQueue::BuriedByScheduler;
+                        card.flags = 5;
+                        ctx.scope().put(&card)?;
+                        let mut preset = ctx.scope().deck_config(DeckConfigId(1))?.unwrap();
+                        let mut bytes = preset.config.to_bytes().into_owned();
+                        // Supported opaque field 100: keep the real T13 checks.
+                        bytes.extend_from_slice(&[0xa0, 0x06, 0x07]);
+                        preset.config = meguri_model::proto::ProtoBlob::decode(&bytes).unwrap();
+                        ctx.scope().put(&preset)?;
+                        ctx.scope()
+                            .set_config("historical-opaque", &ConfigValue::String("retained".into()))?;
+                        Ok(())
+                    },
+                )
+                .unwrap();
+        });
+        assert_ne!(a.card, buried, "the automatic-unbury witness is not the answered card");
+
+        // The real accepted answer is the reference, including its assigned
+        // full revlog row, card data, stamps, deck counters and opaque cells.
+        let (engine, c) = no_review(&a.path, NOW);
+        assert_eq!(common::steps::dump(&c), a.after);
+        let r = c.reader(ReaderRole::Query).unwrap();
+        let mut accepted_rows = Vec::new();
+        for table in [
+            Table::Notes,
+            Table::Cards,
+            Table::Revlog,
+            Table::Decks,
+            Table::DeckConfig,
+        ] {
+            for id in r.ids_after(table, None, 100_000).unwrap() {
+                accepted_rows.push((table, id, r.row_image(table, &RowKey::Id(id)).unwrap().unwrap()));
+            }
+        }
+        let accepted_col = r.col().unwrap();
+        assert_eq!(r.card(buried).unwrap().unwrap().queue, CardQueue::BuriedByScheduler);
+        assert_eq!(
+            r.config_value("lastUnburied").unwrap(),
+            Some(ConfigValue::from(i64::from(recorded_day)))
+        );
+        let creation = r.config_value("creationOffset").unwrap();
+        assert_eq!(creation.is_some(), creation_offset);
+        drop(r);
+        engine.close().unwrap();
+
+        let future = NOW + 3 * 86_400_000;
+        let offset = UtcOffset::from_seconds(9 * 3600).unwrap();
+        let clock = Arc::new(StepClock::new(future, offset, "future-device"));
+        // Independently run current D8 on the already-applied answer. Only
+        // localOffset, lastUnburied and the separate buried card's queue may
+        // change. No replay decision or receipt is fabricated for this image.
+        let (engine, c) = no_review_with_clock(&a.path, clock.clone());
+        let future_day = c.today().unwrap();
+        assert!(future_day > recorded_day);
+        let r = c.reader(ReaderRole::Query).unwrap();
+        assert_eq!(
+            r.col().unwrap(),
+            accepted_col,
+            "automatic D8 preserves col, including mod"
+        );
+        for (table, id, image) in &accepted_rows {
+            let current = r.row_image(*table, &RowKey::Id(*id)).unwrap().unwrap();
+            if *table == Table::Cards && *id == buried.0 {
+                assert_eq!(current.len(), image.len());
+                let changes: Vec<_> = image.iter().zip(&current).filter(|(old, new)| old != new).collect();
+                assert_eq!(
+                    changes,
+                    vec![(&Cell::Integer(-2), &Cell::Integer(0))],
+                    "unbury preserves every other card cell, including mod/usn"
+                );
+            } else {
+                assert_eq!(&current, image, "current D8 must preserve {table:?}/{id}");
+            }
+        }
+        assert_eq!(
+            r.config_value("localOffset").unwrap(),
+            Some(ConfigValue::from(-540_i64))
+        );
+        assert_eq!(
+            r.config_value("lastUnburied").unwrap(),
+            Some(ConfigValue::from(i64::from(future_day)))
+        );
+        assert_eq!(r.config_value("creationOffset").unwrap(), creation);
+        assert_eq!(r.config_value("rollover").unwrap(), Some(ConfigValue::from(4_i64)));
+        assert_eq!(
+            r.config_value("historical-opaque").unwrap(),
+            Some(ConfigValue::String("retained".into()))
+        );
+        drop(r);
+        let expected = common::steps::dump(&c);
+        let current_only_seq = c.last_seq();
+        engine.close().unwrap();
+
+        for journal in [&a.intent, &a.prepared] {
+            restore_uncommitted(&a, journal);
+            for opening in 0..2 {
+                let (engine, review, stream, result) = try_review_with_clock(&a.path, clock.clone());
+                let c = result.unwrap();
+                assert!(matches!(engine.state(), LifecycleState::Ready { .. }));
+                assert_eq!(review.active_session(), None);
+                assert_eq!(logs(&c), [a.assigned]);
+                assert_eq!(
+                    common::steps::dump(&c),
+                    expected,
+                    "open {opening}: recorded answer plus only current D8 effects"
+                );
+                if opening == 1 {
+                    assert_eq!(
+                        c.last_seq(),
+                        current_only_seq,
+                        "terminal replay must run zero historical operations on the second open"
+                    );
+                }
+                let seq = c.last_seq();
+                c.check_rollover().unwrap();
+                assert_eq!(c.last_seq(), seq, "current D8 must be initialized before Ready");
+                assert_eq!(c.today().unwrap(), future_day);
+                assert_eq!(clock.now_ms(), future, "recovery must not rewind the supplied clock");
+                assert_eq!(clock.utc_offset_at(future), offset);
+                while let Some(event) = stream.try_recv() {
+                    assert!(
+                        !matches!(
+                            &event.kind,
+                            EventKind::RolledOver { .. }
+                                | EventKind::TimeZoneChanged { .. }
+                                | EventKind::NextDayAtChanged { .. }
+                        ),
+                        "historical recovery and first current D8 must emit no live day events"
+                    );
+                    if let EventKind::Extension(payload) = &event.kind {
+                        assert!(
+                            payload.as_any().downcast_ref::<SessionEvent>().is_none(),
+                            "recovery must neither drop the accepted answer nor publish session/head events"
+                        );
+                    }
+                }
+                engine.close().unwrap();
+            }
+        }
     }
 }
 
