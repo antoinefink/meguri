@@ -6,3 +6,4 @@
 - `model/` reuses the model's CardData codec. Only unknown raw JSON values and decoded custom-data contents are lossless across repeated writes; known floats undergo the specified rounding on every write.
 - Preset read bounds live in `DeckConfigMessage::for_use`; the raw schema-11 codec stays unbounded. Scheduling's missing-preset fallback is factory values, unlike the options editor's preset-1 fallback. Compare edits against the bounded view before writing, so an equal edit retains invalid source bytes.
 - Keep `nextPos`'s sole writer in engine/cardgen and day-marker writes in engine/sched. Config accessors reuse storage's typed JSON parser and no-op writer; never add a setter for a read-only compatibility key.
+- Load-balancer snapshots share day buckets: locate an undo match before copy-on-write, then decrement the actual removed entry's note count. W9 removes only the first card occurrence per bucket; other occurrences keep that note visible.

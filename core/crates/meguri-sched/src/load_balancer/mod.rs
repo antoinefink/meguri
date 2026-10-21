@@ -10,7 +10,7 @@ use meguri_model::{
     clock::Clock,
     ids::{CardId, DeckConfigId, NoteId},
 };
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Entry {
@@ -32,11 +32,30 @@ impl EasyDay {
         }
     }
 }
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct DayBucket {
+    entries: Vec<Entry>,
+    note_counts: BTreeMap<NoteId, usize>,
+}
+impl DayBucket {
+    fn push(&mut self, entry: Entry) {
+        self.entries.push(entry);
+        *self.note_counts.entry(entry.note).or_default() += 1;
+    }
+    fn remove(&mut self, at: usize) {
+        let entry = self.entries.remove(at);
+        let count = self.note_counts.get_mut(&entry.note).expect("entry note is indexed");
+        *count -= 1;
+        if *count == 0 {
+            self.note_counts.remove(&entry.note);
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoadBalancer {
     pub today: u32,
     pub next_day_at: i64,
-    days: BTreeMap<DeckConfigId, [Vec<Entry>; 99]>,
+    days: BTreeMap<DeckConfigId, [Arc<DayBucket>; 99]>,
     easy: BTreeMap<DeckConfigId, [EasyDay; 99]>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,12 +92,13 @@ impl LoadBalancer {
             });
             easy.insert(preset, classes);
         }
-        let mut days: BTreeMap<_, [Vec<Entry>; 99]> = BTreeMap::new();
+        let mut days: BTreeMap<_, [Arc<DayBucket>; 99]> = BTreeMap::new();
         for (preset, day, entry) in rows {
             if day < 99 {
-                days.entry(preset)
-                    .or_insert_with(|| std::array::from_fn(|_| Vec::new()))[day as usize]
-                    .push(entry);
+                let buckets = days
+                    .entry(preset)
+                    .or_insert_with(|| std::array::from_fn(|_| Arc::new(DayBucket::default())));
+                Arc::make_mut(&mut buckets[day as usize]).push(entry);
             }
         }
         Ok(Self {
@@ -92,7 +112,7 @@ impl LoadBalancer {
         self.days
             .get(&preset)
             .and_then(|v| v.get(day as usize))
-            .map_or(&[], |v| v.as_slice())
+            .map_or(&[], |v| v.entries.as_slice())
     }
     pub fn chooser(&self, preset: DeckConfigId, note: Option<NoteId>, seed: u64) -> Chooser<'_> {
         Chooser {
@@ -104,17 +124,17 @@ impl LoadBalancer {
     }
     pub fn append(&mut self, preset: DeckConfigId, day: u32, entry: Entry) {
         if let Some(days) = self.days.get_mut(&preset)
-            && let Some(entries) = days.get_mut(day as usize)
+            && let Some(bucket) = days.get_mut(day as usize)
         {
-            entries.push(entry);
+            Arc::make_mut(bucket).push(entry);
         }
     }
     /// W9 removes one per day, including entries present at the build.
     pub fn remove_answer(&mut self, card: CardId) {
         for days in self.days.values_mut() {
-            for entries in days {
-                if let Some(at) = entries.iter().position(|e| e.card == card) {
-                    entries.remove(at);
+            for bucket in days {
+                if let Some(at) = bucket.entries.iter().position(|e| e.card == card) {
+                    Arc::make_mut(bucket).remove(at);
                 }
             }
         }
@@ -123,7 +143,7 @@ impl LoadBalancer {
         let mut factors = vec![1.0; (upper - lower + 1) as usize];
         let Some(note) = note else { return factors };
         for day in 0..99usize {
-            if !self.days.values().any(|days| days[day].iter().any(|e| e.note == note)) {
+            if !self.days.values().any(|days| days[day].note_counts.contains_key(&note)) {
                 continue;
             }
             for (index, candidate) in (lower..=upper).enumerate() {
@@ -154,7 +174,7 @@ impl FuzzedDayChooser for Chooser<'_> {
             return None;
         }
         let counts = (lower..=upper)
-            .map(|d| days[d as usize].len() as u32)
+            .map(|d| days[d as usize].entries.len() as u32)
             .collect::<Vec<_>>();
         let classes = (lower..=upper).map(|d| easy[d as usize]).collect::<Vec<_>>();
         let e = easy_factors(&counts, &classes);
