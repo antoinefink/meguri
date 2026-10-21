@@ -37,7 +37,6 @@ impl<'a> DeckSched<'a> {
             common.last_day_studied = today;
             common.new_studied = 0;
             common.review_studied = 0;
-            common.learning_studied = 0;
             common.milliseconds_studied = 0;
         }
         match queue {

@@ -69,6 +69,37 @@ fn answers_reset_all_counters_lazily_and_cap_time_before_incrementing() {
             common.learning_studied,
             common.milliseconds_studied
         ),
-        (1, 0, 0, 2000)
+        (1, 0, 5, 2000)
     );
+}
+
+#[test]
+fn answers_preserve_stored_learning_count_across_day_rollovers() {
+    for learning_studied in [17, -5] {
+        let mut common = DeckCommon::default();
+        common.last_day_studied = 12;
+        common.new_studied = 8;
+        common.review_studied = 9;
+        common.learning_studied = learning_studied;
+        common.milliseconds_studied = 1234;
+        for (day, queue, time, new_studied, review_studied, milliseconds_studied) in [
+            (13, CardQueue::New, 2000, 1, 0, 2000),
+            (13, CardQueue::Review, 7000, 1, 1, 9000),
+            (13, CardQueue::Learning, 100000, 1, 1, 69000),
+            (13, CardQueue::InterdayLearning, 1000, 1, 2, 70000),
+            (14, CardQueue::Review, 3000, 0, 1, 3000),
+        ] {
+            DeckSched::record_answer(&mut common, day, queue, time, 60);
+            assert_eq!(
+                (
+                    common.last_day_studied,
+                    common.new_studied,
+                    common.review_studied,
+                    common.learning_studied,
+                    common.milliseconds_studied,
+                ),
+                (day, new_studied, review_studied, learning_studied, milliseconds_studied,)
+            );
+        }
+    }
 }
