@@ -1,0 +1,376 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894356000,
+              "s": 4.5
+            },
+            "did": "X0177",
+            "due": 0,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 4,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 3,
+            "type": 2,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "X0177",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        },
+        "legacy_json": {
+          "decks": {
+            "X0177": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1894701600000,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [0, 0],
+              "mod": 1894701600,
+              "name": "X0177",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1
+            }
+          }
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 4.99,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705200,
+              "s": 14.8964
+            },
+            "did": "X0177",
+            "due": 15,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 15,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 4,
+            "type": 2,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "X0177",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": -2,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 3,
+              "factor": 543,
+              "id": 1894705200000,
+              "ivl": 15,
+              "lastIvl": 4,
+              "time": 6000,
+              "type": 1,
+              "usn": -1
+            }
+          ]
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "answer_card"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Default", 0, 0, "08011001"],
+            ["X0177", 1894705200, -1, "08011001280138F02E"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200000]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894356000,
+              "s": 4.5
+            },
+            "did": "X0177",
+            "due": 0,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 4,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 3,
+            "type": 2,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "X0177",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c1": []
+        },
+        "undo_status": {
+          "redo": "answer_card",
+          "undo": null
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Default", 0, 0, "08011001"],
+            ["X0177", 1894701600, -1, "08011001"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000]
+          ]
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 4.99,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705200,
+              "s": 14.8964
+            },
+            "did": "X0177",
+            "due": 15,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 15,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 4,
+            "type": 2,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "X0177",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": -2,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 3,
+              "factor": 543,
+              "id": 1894705200000,
+              "ivl": 15,
+              "lastIvl": 4,
+              "time": 6000,
+              "type": 1,
+              "usn": -1
+            }
+          ]
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "answer_card"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Default", 0, 0, "08011001"],
+            ["X0177", 1894705200, -1, "08011001280138F02E"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200000]
+          ]
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "X0177": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1894701600000,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [0, 0],
+              "mod": 1894705200,
+              "name": "X0177",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 1],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 6000],
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "9b5b72a872e653e261f80ba56ab4c80cb0ed388624fe2d866307a497a123e9af",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/bury/ae22-undo",
+  "scenario_sha256": "559f7dd9a5316f505855b63cc188ee3afcb3145f453174f45d7baef34ff5fc11",
+  "tz": "UTC"
+}

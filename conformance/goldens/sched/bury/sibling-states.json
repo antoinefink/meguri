@@ -1,0 +1,512 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894356000,
+              "s": 4.5
+            },
+            "did": "X0035",
+            "due": 0,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 4,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 3,
+            "type": 2,
+            "usn": -1
+          },
+          "#c10": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894700400,
+              "s": 0.5
+            },
+            "did": "X0035",
+            "due": 1894703400,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c10",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 4,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "X0166",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c3": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894356000,
+              "s": 4.5
+            },
+            "did": "X0035",
+            "due": 0,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 4,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 2,
+            "queue": -1,
+            "reps": 3,
+            "type": 2,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {},
+            "did": "X0035",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 3,
+            "queue": -3,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c5": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894356000,
+              "s": 30.0
+            },
+            "did": "X0035",
+            "due": 30,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 34,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 4,
+            "queue": -2,
+            "reps": 5,
+            "type": 2,
+            "usn": -1
+          },
+          "#c6": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894356000,
+              "s": 4.5
+            },
+            "did": "X0166",
+            "due": 0,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 4,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 3,
+            "type": 2,
+            "usn": -1
+          },
+          "#c7": {
+            "data": {},
+            "did": "X0035",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c8": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894356000,
+              "s": 7.0
+            },
+            "did": "X0035",
+            "due": 3,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c8",
+            "ivl": 7,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 2,
+            "queue": 2,
+            "reps": 3,
+            "type": 2,
+            "usn": -1
+          },
+          "#c9": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894615200,
+              "s": 1.0
+            },
+            "did": "X0035",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c9",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 3,
+            "queue": 3,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          }
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 4.99,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705200,
+              "s": 14.8964
+            },
+            "did": "X0035",
+            "due": 15,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 15,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 4,
+            "type": 2,
+            "usn": -1
+          },
+          "#c10": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894700400,
+              "s": 0.5
+            },
+            "did": "X0035",
+            "due": 1894703400,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c10",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 4,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "X0166",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": -2,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c3": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894356000,
+              "s": 4.5
+            },
+            "did": "X0035",
+            "due": 0,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 4,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 2,
+            "queue": -1,
+            "reps": 3,
+            "type": 2,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {},
+            "did": "X0035",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 3,
+            "queue": -3,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c5": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894356000,
+              "s": 30.0
+            },
+            "did": "X0035",
+            "due": 30,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 34,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 4,
+            "queue": -2,
+            "reps": 5,
+            "type": 2,
+            "usn": -1
+          },
+          "#c6": {
+            "data": {
+              "d": 4.99,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705200,
+              "s": 14.8964
+            },
+            "did": "X0166",
+            "due": 17,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 17,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705200,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 4,
+            "type": 2,
+            "usn": -1
+          },
+          "#c7": {
+            "data": {},
+            "did": "X0035",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c8": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894356000,
+              "s": 7.0
+            },
+            "did": "X0035",
+            "due": 3,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c8",
+            "ivl": 7,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 2,
+            "queue": 2,
+            "reps": 3,
+            "type": 2,
+            "usn": -1
+          },
+          "#c9": {
+            "data": {
+              "d": 5.0,
+              "lrt": 1894615200,
+              "s": 1.0
+            },
+            "did": "X0035",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c9",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 3,
+            "queue": 3,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "9b5b72a872e653e261f80ba56ab4c80cb0ed388624fe2d866307a497a123e9af",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/bury/sibling-states",
+  "scenario_sha256": "f57ae7529ec5126a35bd10a8ae109a42d4c81375d62f2b37426e03252937786e",
+  "tz": "UTC"
+}
