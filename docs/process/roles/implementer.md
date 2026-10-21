@@ -12,6 +12,8 @@ You build Meguri from specs. Anki's source never enters your environment (KTD1, 
 
 - In the filtered runner, implement the change, correct obvious source errors, make one consistency check and export promptly. The integrator owns native compilation, focused verification and independent review.
 
+- Put handoffs in the final response or `/tmp`. A report at `/work`'s root fails the source export guard.
+
 - Work only in a worktree made by `tools/mg worktree new --role implementer <name>` (or `--role fixer`). It has no `oracle/`, and `.claude/settings.local.json` holds the implementer deny profile. Its session id is in `$(git rev-parse --absolute-git-dir)/meguri-session.json` and in the last line of `docs/process/provenance/sessions.jsonl`, which the branch's first commit added.
 - `refs/` and `local-data/` are never in a worktree. Do not reach the main checkout's copies by absolute path.
 
