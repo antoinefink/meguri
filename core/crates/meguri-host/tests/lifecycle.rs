@@ -46,6 +46,97 @@ fn open_wires_derived_and_media_and_close_releases_retained_journal_handles() {
 }
 
 #[test]
+fn host_close_unwind_retains_active_session_and_accepts_another_answer() {
+    use meguri_engine::{
+        EventKind, LifecycleState, OpSource, OpSpec,
+        session::{AnswerOutcome, SessionEvent, StartResult},
+    };
+    use meguri_model::time::EpochMillis;
+    use meguri_sched::answer::Rating;
+
+    let dir = tempfile::tempdir().unwrap();
+    let host = CoreHost::open(config(dir.path())).unwrap();
+    let c = host.collection().unwrap();
+    c.run(OpSpec::named("close unwind policy", OpSource::Maintenance), |ctx| {
+        ctx.scope()
+            .set_config("fsrs", &meguri_storage::ConfigValue::Bool(true))?;
+        ctx.scope()
+            .set_config("loadBalancerEnabled", &meguri_storage::ConfigValue::Bool(false))?;
+        Ok(())
+    })
+    .unwrap();
+    let deck = meguri_engine::decks::add(&c, "Close unwind".into()).unwrap().value.id;
+    let kind = meguri_engine::notetypes::add_stock(
+        &c,
+        meguri_engine::notetypes::StockKind::Basic,
+        Some("Close unwind".into()),
+    )
+    .unwrap()
+    .value
+    .id;
+    meguri_engine::notes::add(
+        &c,
+        meguri_engine::notes::AddNote {
+            notetype_id: kind,
+            fields: vec!["close unwind front".into(), "close unwind back".into()],
+            tags: vec![],
+            deck_id: deck,
+            guid: None,
+            update_add_defaults: false,
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+    let StartResult::Started { session_id, head, .. } = host.review().start(deck, None).unwrap() else {
+        panic!("close unwind fixture must start");
+    };
+    let ready = LifecycleState::Ready {
+        generation: c.generation(),
+    };
+    assert_eq!(host.engine().state(), ready);
+    let events = host.engine().stream().subscribe();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        host.review().try_close_host(
+            || panic!("shutdown unwound before doing work"),
+            || panic!("unwound shutdown published closed"),
+        )
+    }));
+    assert!(result.is_err());
+    assert_eq!(host.engine().state(), ready);
+    assert_eq!(host.collection().unwrap().generation(), c.generation());
+    assert_eq!(host.review().active_session(), Some(session_id));
+    assert_eq!(host.review().head(session_id, 3).unwrap(), head);
+    while let Some(event) = events.try_recv() {
+        if let EventKind::Extension(payload) = &event.kind {
+            assert!(
+                !matches!(
+                    payload.as_any().downcast_ref::<SessionEvent>(),
+                    Some(SessionEvent::SessionEnded { .. })
+                ),
+                "unwound shutdown ended the retained session"
+            );
+        }
+    }
+    let card = &head.items[0];
+    assert!(matches!(
+        host.review()
+            .answer(
+                session_id,
+                card.card_id,
+                Rating::Easy,
+                card.state_token,
+                EpochMillis(1_894_701_600_000),
+                100,
+            )
+            .unwrap(),
+        AnswerOutcome::Accepted { .. }
+    ));
+    // A successful retry also proves unwind released lifecycle admission.
+    host.close().unwrap();
+    assert_eq!(host.review().active_session(), None);
+}
+
+#[test]
 fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
     use meguri_engine::{CancelToken, EngineError, JobKind, OpSource, OpSpec, ProgressPhase, ProgressSink, UndoScope};
     use std::{
@@ -258,15 +349,14 @@ fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
         );
         restores.push((job, admission_release, finish_release, recv));
     }
-    // First pause end_inner's drain while the session still exists: the close
-    // owns lifecycle admission, but Engine::close has not cancelled the jobs.
+    // Hold the engine control lane in a background flush. Close must reserve
+    // review lifecycle while waiting for it, before cancelling registered jobs.
     let (end_enter, end_entered) = mpsc::channel();
     let (end_release, end_wait) = mpsc::channel();
     let end_release = Release(end_release);
     let end_wait = Mutex::new(Some(end_wait));
-    // Stop the review provider's flush in Engine::close, after end_inner has
-    // removed the session. The same close reservation must still exclude start.
-    let closing = Arc::downgrade(&host);
+    // Then stop Engine::close's own flush after job cancellation. The retained
+    // session must stay protected until shutdown has actually succeeded.
     let (enter, entered) = mpsc::channel();
     let (release, wait) = mpsc::channel();
     let shutdown_release = Release(release);
@@ -274,19 +364,23 @@ fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
     host.review()
         .journal_hook_for_testing(Arc::new(move |stage| {
             if stage == meguri_engine::session::JournalStage::Compact {
-                let (enter, wait) = if closing.upgrade().unwrap().review().active_session().is_some() {
-                    (&end_enter, &end_wait)
-                } else {
-                    (&enter, &wait)
-                };
-                let wait = wait.lock().unwrap().take();
-                if let Some(wait) = wait {
+                if let Some(wait) = end_wait.lock().unwrap().take() {
+                    end_enter.send(()).unwrap();
+                    wait.recv_timeout(Duration::from_secs(10)).unwrap();
+                } else if let Some(wait) = wait.lock().unwrap().take() {
                     enter.send(()).unwrap();
                     wait.recv_timeout(Duration::from_secs(10)).unwrap();
                 }
             }
         }))
         .unwrap();
+    let flushing_engine = host.engine().clone();
+    let flush = callers
+        .spawn("close-test-control-lane", meguri_engine::Qos::Default, move |_| {
+            flushing_engine.flush_for_background()
+        })
+        .unwrap();
+    end_entered.recv_timeout(Duration::from_secs(5)).unwrap();
     let closing_host = host.clone();
     let (closed, close_result) = mpsc::channel();
     let close = callers
@@ -294,7 +388,19 @@ fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
             let _ = closed.send(closing_host.close());
         })
         .unwrap();
-    end_entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    let deadline = meguri_engine::monotonic::now() + Duration::from_secs(5);
+    loop {
+        match host.review().try_pending_restore(UndoScope::Global, false) {
+            Err(EngineError::CollectionUnavailable { reason }) if reason == "review lifecycle is busy" => break,
+            Ok(None) => {}
+            other => panic!("unexpected close reservation: {other:?}"),
+        }
+        assert!(
+            meguri_engine::monotonic::now() < deadline,
+            "close never owned lifecycle"
+        );
+        std::thread::yield_now();
+    }
     let undo = c.peek_undo(UndoScope::Global).unwrap();
     let redo = c.peek_redo(UndoScope::Global).unwrap();
     for (job, admission, _, recv) in &restores {
@@ -314,8 +420,9 @@ fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
         assert_eq!(c.peek_redo(UndoScope::Global).unwrap(), redo);
     }
     drop(end_release);
+    flush.join().unwrap().unwrap();
     entered.recv_timeout(Duration::from_secs(5)).unwrap();
-    assert_eq!(host.review().active_session(), None);
+    assert_eq!(host.review().active_session(), Some(session_id));
     for (job, _, finish, recv) in &restores {
         assert!(job.cancel.is_cancelled());
         finish.0.send(()).unwrap();
@@ -346,7 +453,7 @@ fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
         }
     );
     refused.join().unwrap();
-    assert_eq!(host.review().active_session(), None);
+    assert_eq!(host.review().active_session(), Some(session_id));
     drop(shutdown_release);
     close_result.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
     close.join().unwrap();

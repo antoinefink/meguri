@@ -220,15 +220,19 @@ impl CoreHost {
             }
         }
         let _restore = Restore(&self.closed);
-        self.review.try_close_host(|| {
-            self.engine.close()?;
-            self.media
-                .close_until(meguri_engine::monotonic::now() + Duration::from_secs(5))?;
-            self.derived.close()?;
-            *self.closed.lock().unwrap_or_else(PoisonError::into_inner) = CloseState::Closed;
-            *self.process.opened.lock().unwrap_or_else(PoisonError::into_inner) = false;
-            Ok(())
-        })
+        self.review.try_close_host(
+            || {
+                self.engine.close()?;
+                self.media
+                    .close_until(meguri_engine::monotonic::now() + Duration::from_secs(5))?;
+                self.derived.close()?;
+                Ok(())
+            },
+            || {
+                *self.closed.lock().unwrap_or_else(PoisonError::into_inner) = CloseState::Closed;
+                *self.process.opened.lock().unwrap_or_else(PoisonError::into_inner) = false;
+            },
+        )
     }
 }
 

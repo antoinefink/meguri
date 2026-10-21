@@ -32,7 +32,10 @@ fn host_close_without_a_session_reserves_shutdown_and_releases_every_exit() {
     let review = ReviewService::new(&engine, Arc::new(QueueProvider::default())).unwrap();
     let permit = review.control.acquire();
     assert_eq!(
-        review.try_close_host(|| panic!("busy close entered shutdown")),
+        review.try_close_host(
+            || panic!("busy close entered shutdown"),
+            || panic!("busy close finished")
+        ),
         Err(EngineError::Busy {
             running_op: "review lifecycle".into()
         })
@@ -40,23 +43,33 @@ fn host_close_without_a_session_reserves_shutdown_and_releases_every_exit() {
     drop(permit);
     for exit in 0..3 {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            review.try_close_host(|| {
-                {
-                    let occupied = review
-                        .control
-                        .occupied
-                        .try_lock()
-                        .expect("shutdown holds admission mutex");
-                    assert!(*occupied);
-                }
-                assert!(review.inner.state.try_lock().is_ok(), "shutdown holds session mutex");
-                assert!(review.control.try_acquire().is_err());
-                match exit {
-                    0 => Err(EngineError::unavailable("shutdown failure")),
-                    1 => panic!("shutdown unwind"),
-                    _ => Ok(()),
-                }
-            })
+            review.try_close_host(
+                || {
+                    {
+                        let occupied = review
+                            .control
+                            .occupied
+                            .try_lock()
+                            .expect("shutdown holds admission mutex");
+                        assert!(*occupied);
+                    }
+                    assert!(review.inner.state.try_lock().is_ok(), "shutdown holds session mutex");
+                    assert!(review.control.try_acquire().is_err());
+                    match exit {
+                        0 => Err(EngineError::unavailable("shutdown failure")),
+                        1 => panic!("shutdown unwind"),
+                        _ => Ok(()),
+                    }
+                },
+                || {
+                    assert_eq!(exit, 2, "failed shutdown published closed");
+                    assert!(review.inner.state.try_lock().is_ok());
+                    assert!(
+                        review.control.try_acquire().is_err(),
+                        "close released before host transition"
+                    );
+                },
+            )
         }));
         match exit {
             0 => assert_eq!(result.unwrap(), Err(EngineError::unavailable("shutdown failure"))),

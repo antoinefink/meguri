@@ -532,6 +532,7 @@ impl Drop for LifecyclePermit<'_> {
 }
 pub struct ReviewService {
     inner: Arc<Inner>,
+    stream: crate::ChangeStream,
     threads: crate::ThreadRegistry,
     start_hooks: Mutex<Vec<Arc<dyn SessionStartHook>>>,
     worker: Mutex<Option<JoinHandle<()>>>,
@@ -588,6 +589,7 @@ impl ReviewService {
         wake.wake_by_ref();
         Ok(Arc::new(Self {
             inner,
+            stream: engine.stream().clone(),
             threads: engine.threads().clone(),
             start_hooks: Mutex::new(vec![Arc::new(engine.jobs().clone())]),
             worker: Mutex::new(Some(worker)),
@@ -1224,14 +1226,79 @@ impl ReviewService {
     }
     /// Reserve the entire host close, including when no session is installed.
     /// Shutdown runs with logical exclusion only, never a held mutex guard.
-    pub fn try_close_host(&self, shutdown: impl FnOnce() -> Result<(), EngineError>) -> Result<(), EngineError> {
+    /// Publish host ownership with `closed` only after successful review cleanup.
+    pub fn try_close_host(
+        &self,
+        shutdown: impl FnOnce() -> Result<(), EngineError>,
+        closed: impl FnOnce(),
+    ) -> Result<(), EngineError> {
         let _control = self.control.try_acquire().map_err(|_| EngineError::Busy {
             running_op: "review lifecycle".into(),
         })?;
-        if let Some(id) = self.active_session() {
-            self.end_inner(id)?;
+        let (exec, ending) = {
+            let mut state = self.inner.state.lock().unwrap();
+            // Capture only shared memory before shutdown can retire the core.
+            // Neither a reader nor ordinary writer admission is needed here.
+            let exec = state
+                .binding
+                .as_ref()
+                .and_then(|b| b.core.upgrade())
+                .map(|c| c.exec.clone());
+            let ending = state.session.as_mut().map(|s| {
+                let previous = s.ending;
+                s.ending = true;
+                (s.id, s.generation, previous)
+            });
+            (exec, ending)
+        };
+        struct RestoreEnding<'a> {
+            state: &'a Mutex<State>,
+            previous: Option<(SessionId, bool)>,
         }
-        shutdown()
+        impl Drop for RestoreEnding<'_> {
+            fn drop(&mut self) {
+                if let Some((id, previous)) = self.previous {
+                    let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if let Some(s) = state.session.as_mut().filter(|s| s.id == id) {
+                        s.ending = previous;
+                    }
+                }
+            }
+        }
+        let mut restore = RestoreEnding {
+            state: &self.inner.state,
+            previous: ending.map(|(id, _, previous)| (id, previous)),
+        };
+        // Engine::close owns the retryable participant flush/quiescence path,
+        // including fully suspended connections and failed-suspend admission.
+        shutdown()?;
+        restore.previous = None;
+        self.inner.observing.store(false, Ordering::Release);
+        let retired = {
+            let mut state = self.inner.state.lock().unwrap();
+            state.paused = true;
+            state.render.clear();
+            self.inner.owned.lock().unwrap().clear();
+            (state.session.take(), state.binding.take())
+        };
+        if let Some(exec) = exec {
+            *exec.fsrs_policy.review_active.lock().unwrap() = false;
+            *exec.active_session.lock().unwrap() = None;
+            *exec.review_journal.lock().unwrap() = None;
+        }
+        // Dropping the last journal owner joins its worker without a state lock.
+        drop(retired);
+        if let Some((id, generation, _)) = ending {
+            self.stream.publish(
+                generation,
+                None,
+                crate::EventKind::Extension(Arc::new(SessionEvent::SessionEnded { session_id: id })),
+            );
+        }
+        // Publish host ownership changes only after the old binding is gone,
+        // still under the same logical lifecycle reservation.
+        closed();
+        Ok(())
     }
     /// Like start_controlled: cancellation before writer admission changes no
     /// session state; after admission the drain/release must really complete.
