@@ -28,12 +28,32 @@ pub struct ReviewMemoryState {
     pub difficulty: f32,
 }
 
+impl From<meguri_model::card_data::MemoryState> for ReviewMemoryState {
+    fn from(v: meguri_model::card_data::MemoryState) -> Self {
+        Self {
+            stability: v.stability,
+            difficulty: v.difficulty,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct ReviewLearningState {
     pub remaining_steps: u32,
     pub scheduled_secs: u32,
     pub elapsed_secs: u32,
     pub memory_state: Option<ReviewMemoryState>,
+}
+
+impl From<sched::states::learning::LearningState> for ReviewLearningState {
+    fn from(v: sched::states::learning::LearningState) -> Self {
+        Self {
+            remaining_steps: v.remaining_steps,
+            scheduled_secs: v.scheduled_secs,
+            elapsed_secs: v.elapsed_secs,
+            memory_state: v.memory_state.map(Into::into),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -46,6 +66,19 @@ pub struct ReviewReviewState {
     pub memory_state: Option<ReviewMemoryState>,
 }
 
+impl From<states::ReviewState> for ReviewReviewState {
+    fn from(v: states::ReviewState) -> Self {
+        Self {
+            scheduled_days: v.scheduled_days,
+            elapsed_days: v.elapsed_days,
+            ease_factor: v.ease_factor,
+            lapses: v.lapses,
+            leeched: v.leeched,
+            memory_state: v.memory_state.map(Into::into),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct ReviewRevlogPreview {
     pub interval: i32,
@@ -54,11 +87,32 @@ pub struct ReviewRevlogPreview {
     pub factor: u32,
 }
 
+impl From<states::RevlogPreview> for ReviewRevlogPreview {
+    fn from(v: states::RevlogPreview) -> Self {
+        Self {
+            interval: v.interval,
+            last_interval: v.last_interval,
+            kind: v.kind,
+            factor: v.factor,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct ReviewAnswerLabel {
     pub less_than: bool,
     pub amount: String,
     pub unit: ReviewTimeUnit,
+}
+
+impl From<sched::states::labels::AnswerLabel> for ReviewAnswerLabel {
+    fn from(v: sched::states::labels::AnswerLabel) -> Self {
+        Self {
+            less_than: v.less_than,
+            amount: v.amount,
+            unit: v.unit.into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -71,6 +125,19 @@ pub struct ReviewAnswerState {
     pub label: ReviewAnswerLabel,
 }
 
+impl From<states::AnswerState> for ReviewAnswerState {
+    fn from(v: states::AnswerState) -> Self {
+        Self {
+            state: v.state.into(),
+            delay: v.delay.into(),
+            left: v.left,
+            factor: v.factor,
+            revlog: v.revlog.into(),
+            label: v.label.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct ReviewSchedulingStates {
     pub current: ReviewSchedulingState,
@@ -78,6 +145,18 @@ pub struct ReviewSchedulingStates {
     pub hard: ReviewAnswerState,
     pub good: ReviewAnswerState,
     pub easy: ReviewAnswerState,
+}
+
+impl From<states::SchedulingStates> for ReviewSchedulingStates {
+    fn from(v: states::SchedulingStates) -> Self {
+        Self {
+            current: v.current.into(),
+            again: v.again.into(),
+            hard: v.hard.into(),
+            good: v.good.into(),
+            easy: v.easy.into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -93,15 +172,34 @@ pub struct ReviewHomePreset {
     pub id: i64,
     pub autoplay: bool,
     pub skip_question_when_replaying_answer: bool,
+    pub wait_for_audio: bool,
     pub show_timer: bool,
     pub stop_timer_on_answer: bool,
     pub maximum_answer_seconds: u32,
     pub question_seconds: f32,
-    pub answer_seconds: f32,
     pub question_action: i32,
+    pub answer_seconds: f32,
     pub answer_action: i32,
-    pub wait_for_audio: bool,
     pub leech_action: i32,
+}
+
+impl From<session::HomePreset> for ReviewHomePreset {
+    fn from(v: session::HomePreset) -> Self {
+        Self {
+            id: v.id.0,
+            autoplay: v.autoplay,
+            skip_question_when_replaying_answer: v.skip_question_when_replaying_answer,
+            wait_for_audio: v.wait_for_audio,
+            show_timer: v.show_timer,
+            stop_timer_on_answer: v.stop_timer_on_answer,
+            maximum_answer_seconds: v.maximum_answer_seconds,
+            question_seconds: v.question_seconds,
+            question_action: v.question_action,
+            answer_seconds: v.answer_seconds,
+            answer_action: v.answer_action,
+            leech_action: v.leech_action,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -118,6 +216,32 @@ pub struct ReviewHeadItem {
     pub home_preset: ReviewHomePreset,
 }
 
+impl From<session::HeadItem> for ReviewHeadItem {
+    fn from(v: session::HeadItem) -> Self {
+        Self {
+            card_id: v.card_id.0,
+            note_id: v.note_id.0,
+            kind: v.kind.into(),
+            state_token: ReviewStateToken {
+                bytes: v.state_token.to_vec(),
+            },
+            render_key: ReviewRenderKey {
+                bytes: v.render_key.to_vec(),
+            },
+            next_states: v.next_states.into(),
+            predicted_next: ReviewPredictions {
+                again: v.predicted_next[0].map(|id| id.0),
+                hard: v.predicted_next[1].map(|id| id.0),
+                good: v.predicted_next[2].map(|id| id.0),
+                easy: v.predicted_next[3].map(|id| id.0),
+            },
+            flag: v.flag,
+            marked: v.marked,
+            home_preset: v.home_preset.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct ReviewCounts {
     pub new: u32,
@@ -125,11 +249,31 @@ pub struct ReviewCounts {
     pub review: u32,
 }
 
+impl From<sched::queue::Counts> for ReviewCounts {
+    fn from(v: sched::queue::Counts) -> Self {
+        Self {
+            new: v.new,
+            learning: v.learning,
+            review: v.review,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct ReviewHead {
     pub items: Vec<ReviewHeadItem>,
     pub counts: ReviewCounts,
     pub valid_until: i64,
+}
+
+impl From<session::Head> for ReviewHead {
+    fn from(v: session::Head) -> Self {
+        Self {
+            items: v.items.into_iter().map(Into::into).collect(),
+            counts: v.counts.into(),
+            valid_until: v.valid_until,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -140,11 +284,32 @@ pub struct ReviewMarks {
     pub relabel: bool,
 }
 
+impl From<session::Marks> for ReviewMarks {
+    fn from(v: session::Marks) -> Self {
+        Self {
+            added: v.added,
+            restate: v.restate,
+            rerender: v.rerender,
+            relabel: v.relabel,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct ReviewHeadDiff {
     pub head: ReviewHead,
     pub marks: Vec<ReviewMarks>,
     pub removed: Vec<i64>,
+}
+
+impl From<session::HeadDiff> for ReviewHeadDiff {
+    fn from(v: session::HeadDiff) -> Self {
+        Self {
+            head: v.head.into(),
+            marks: v.marks.into_iter().map(Into::into).collect(),
+            removed: v.removed.into_iter().map(|id| id.0).collect(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -154,27 +319,63 @@ pub struct ReviewDifference {
     pub review: i64,
 }
 
+impl From<sched::counts::finished::Difference> for ReviewDifference {
+    fn from(v: sched::counts::finished::Difference) -> Self {
+        Self {
+            new: v.new,
+            learning: v.learning,
+            review: v.review,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct ReviewDeckStudyState {
     pub deck: i64,
+    pub finished: bool,
+    pub empty: bool,
     pub queue_counts: ReviewCounts,
     pub list_counts: ReviewCounts,
     pub difference: ReviewDifference,
-    pub finished: bool,
+    pub tomorrow: ReviewCounts,
+    pub new_limit_reached: bool,
+    pub new_remaining: bool,
+    pub review_limit_reached: bool,
+    pub review_remaining: bool,
+    pub learning_remaining: u32,
     pub learning_remaining_today: u32,
     pub learning_later_today: u32,
+    pub secs_until_next_learn: i64,
     pub next_learning_due: Option<i64>,
     pub next_learning_ready_at: Option<i64>,
-    pub review_limit_reached: bool,
-    pub new_limit_reached: bool,
-    pub learning_remaining: u32,
-    pub secs_until_next_learn: i64,
-    pub review_remaining: bool,
-    pub new_remaining: bool,
     pub sibling_buried: u32,
     pub user_buried: u32,
-    pub tomorrow: ReviewCounts,
-    pub empty: bool,
+}
+
+impl From<sched::counts::finished::DeckStudyState> for ReviewDeckStudyState {
+    fn from(v: sched::counts::finished::DeckStudyState) -> Self {
+        Self {
+            deck: v.deck.0,
+            finished: v.finished,
+            empty: v.empty,
+            queue_counts: v.queue_counts.into(),
+            list_counts: v.list_counts.into(),
+            difference: v.difference.into(),
+            tomorrow: v.tomorrow.into(),
+            new_limit_reached: v.new_limit_reached,
+            new_remaining: v.new_remaining,
+            review_limit_reached: v.review_limit_reached,
+            review_remaining: v.review_remaining,
+            learning_remaining: v.learning_remaining,
+            learning_remaining_today: v.learning_remaining_today,
+            learning_later_today: v.learning_later_today,
+            secs_until_next_learn: v.secs_until_next_learn,
+            next_learning_due: v.next_learning_due,
+            next_learning_ready_at: v.next_learning_ready_at,
+            sibling_buried: v.sibling_buried,
+            user_buried: v.user_buried,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -190,6 +391,21 @@ pub struct ReviewStepInfo {
     pub kind: ReviewStepKind,
     pub session: Option<u64>,
     pub long_write: Option<ReviewDuration>,
+}
+
+impl From<engine::StepInfo> for ReviewStepInfo {
+    fn from(v: engine::StepInfo) -> Self {
+        Self {
+            id: v.id.0,
+            name: v.name.to_owned(),
+            kind: v.kind.into(),
+            session: v.session.map(|id| id.0),
+            long_write: v.long_write.map(|d| ReviewDuration {
+                seconds: d.as_secs(),
+                nanoseconds: d.subsec_nanos(),
+            }),
+        }
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -334,222 +550,6 @@ pub enum ReviewStepKind {
 pub enum ReviewUndoStatus {
     Available { step: ReviewStepInfo },
     Unavailable { reason: ReviewDisabledReason },
-}
-
-impl From<meguri_model::card_data::MemoryState> for ReviewMemoryState {
-    fn from(v: meguri_model::card_data::MemoryState) -> Self {
-        Self {
-            stability: v.stability,
-            difficulty: v.difficulty,
-        }
-    }
-}
-
-impl From<sched::states::learning::LearningState> for ReviewLearningState {
-    fn from(v: sched::states::learning::LearningState) -> Self {
-        Self {
-            remaining_steps: v.remaining_steps,
-            scheduled_secs: v.scheduled_secs,
-            elapsed_secs: v.elapsed_secs,
-            memory_state: v.memory_state.map(Into::into),
-        }
-    }
-}
-
-impl From<states::ReviewState> for ReviewReviewState {
-    fn from(v: states::ReviewState) -> Self {
-        Self {
-            scheduled_days: v.scheduled_days,
-            elapsed_days: v.elapsed_days,
-            ease_factor: v.ease_factor,
-            lapses: v.lapses,
-            leeched: v.leeched,
-            memory_state: v.memory_state.map(Into::into),
-        }
-    }
-}
-
-impl From<states::RevlogPreview> for ReviewRevlogPreview {
-    fn from(v: states::RevlogPreview) -> Self {
-        Self {
-            interval: v.interval,
-            last_interval: v.last_interval,
-            kind: v.kind,
-            factor: v.factor,
-        }
-    }
-}
-
-impl From<sched::states::labels::AnswerLabel> for ReviewAnswerLabel {
-    fn from(v: sched::states::labels::AnswerLabel) -> Self {
-        Self {
-            less_than: v.less_than,
-            amount: v.amount,
-            unit: v.unit.into(),
-        }
-    }
-}
-
-impl From<states::AnswerState> for ReviewAnswerState {
-    fn from(v: states::AnswerState) -> Self {
-        Self {
-            state: v.state.into(),
-            delay: v.delay.into(),
-            left: v.left,
-            factor: v.factor,
-            revlog: v.revlog.into(),
-            label: v.label.into(),
-        }
-    }
-}
-
-impl From<states::SchedulingStates> for ReviewSchedulingStates {
-    fn from(v: states::SchedulingStates) -> Self {
-        Self {
-            current: v.current.into(),
-            again: v.again.into(),
-            hard: v.hard.into(),
-            good: v.good.into(),
-            easy: v.easy.into(),
-        }
-    }
-}
-
-impl From<session::HomePreset> for ReviewHomePreset {
-    fn from(v: session::HomePreset) -> Self {
-        Self {
-            id: v.id.0,
-            autoplay: v.autoplay,
-            skip_question_when_replaying_answer: v.skip_question_when_replaying_answer,
-            show_timer: v.show_timer,
-            stop_timer_on_answer: v.stop_timer_on_answer,
-            maximum_answer_seconds: v.maximum_answer_seconds,
-            question_seconds: v.question_seconds,
-            answer_seconds: v.answer_seconds,
-            question_action: v.question_action,
-            answer_action: v.answer_action,
-            wait_for_audio: v.wait_for_audio,
-            leech_action: v.leech_action,
-        }
-    }
-}
-
-impl From<session::HeadItem> for ReviewHeadItem {
-    fn from(v: session::HeadItem) -> Self {
-        Self {
-            card_id: v.card_id.0,
-            note_id: v.note_id.0,
-            kind: v.kind.into(),
-            state_token: ReviewStateToken {
-                bytes: v.state_token.to_vec(),
-            },
-            render_key: ReviewRenderKey {
-                bytes: v.render_key.to_vec(),
-            },
-            next_states: v.next_states.into(),
-            predicted_next: ReviewPredictions {
-                again: v.predicted_next[0].map(|id| id.0),
-                hard: v.predicted_next[1].map(|id| id.0),
-                good: v.predicted_next[2].map(|id| id.0),
-                easy: v.predicted_next[3].map(|id| id.0),
-            },
-            flag: v.flag,
-            marked: v.marked,
-            home_preset: v.home_preset.into(),
-        }
-    }
-}
-
-impl From<sched::queue::Counts> for ReviewCounts {
-    fn from(v: sched::queue::Counts) -> Self {
-        Self {
-            new: v.new,
-            learning: v.learning,
-            review: v.review,
-        }
-    }
-}
-
-impl From<session::Head> for ReviewHead {
-    fn from(v: session::Head) -> Self {
-        Self {
-            items: v.items.into_iter().map(Into::into).collect(),
-            counts: v.counts.into(),
-            valid_until: v.valid_until,
-        }
-    }
-}
-
-impl From<session::Marks> for ReviewMarks {
-    fn from(v: session::Marks) -> Self {
-        Self {
-            added: v.added,
-            restate: v.restate,
-            rerender: v.rerender,
-            relabel: v.relabel,
-        }
-    }
-}
-
-impl From<session::HeadDiff> for ReviewHeadDiff {
-    fn from(v: session::HeadDiff) -> Self {
-        Self {
-            head: v.head.into(),
-            marks: v.marks.into_iter().map(Into::into).collect(),
-            removed: v.removed.into_iter().map(|id| id.0).collect(),
-        }
-    }
-}
-
-impl From<sched::counts::finished::Difference> for ReviewDifference {
-    fn from(v: sched::counts::finished::Difference) -> Self {
-        Self {
-            new: v.new,
-            learning: v.learning,
-            review: v.review,
-        }
-    }
-}
-
-impl From<sched::counts::finished::DeckStudyState> for ReviewDeckStudyState {
-    fn from(v: sched::counts::finished::DeckStudyState) -> Self {
-        Self {
-            deck: v.deck.0,
-            queue_counts: v.queue_counts.into(),
-            list_counts: v.list_counts.into(),
-            difference: v.difference.into(),
-            finished: v.finished,
-            learning_remaining_today: v.learning_remaining_today,
-            learning_later_today: v.learning_later_today,
-            next_learning_due: v.next_learning_due,
-            next_learning_ready_at: v.next_learning_ready_at,
-            review_limit_reached: v.review_limit_reached,
-            new_limit_reached: v.new_limit_reached,
-            learning_remaining: v.learning_remaining,
-            secs_until_next_learn: v.secs_until_next_learn,
-            review_remaining: v.review_remaining,
-            new_remaining: v.new_remaining,
-            sibling_buried: v.sibling_buried,
-            user_buried: v.user_buried,
-            tomorrow: v.tomorrow.into(),
-            empty: v.empty,
-        }
-    }
-}
-
-impl From<engine::StepInfo> for ReviewStepInfo {
-    fn from(v: engine::StepInfo) -> Self {
-        Self {
-            id: v.id.0,
-            name: v.name.to_owned(),
-            kind: v.kind.into(),
-            session: v.session.map(|id| id.0),
-            long_write: v.long_write.map(|d| ReviewDuration {
-                seconds: d.as_secs(),
-                nanoseconds: d.subsec_nanos(),
-            }),
-        }
-    }
 }
 
 impl From<sched::states::labels::TimeUnit> for ReviewTimeUnit {

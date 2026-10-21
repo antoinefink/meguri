@@ -62,14 +62,14 @@ pub struct HomePreset {
     pub id: DeckConfigId,
     pub autoplay: bool,
     pub skip_question_when_replaying_answer: bool,
+    pub wait_for_audio: bool,
     pub show_timer: bool,
     pub stop_timer_on_answer: bool,
     pub maximum_answer_seconds: u32,
     pub question_seconds: f32,
-    pub answer_seconds: f32,
     pub question_action: i32,
+    pub answer_seconds: f32,
     pub answer_action: i32,
-    pub wait_for_audio: bool,
     pub leech_action: i32,
 }
 #[derive(Clone, Debug, PartialEq)]
