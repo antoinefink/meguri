@@ -55,5 +55,5 @@ threads-required = "num-test-threads"
 
 # U43's UI undo and journal coverage bounds need an idle test runner.
 [[profile.default.overrides]]
-filter = 'package(meguri-engine) and (test(=c15_committed_undo_returns_restored_head_during_real_200ms_sync_incoming) or test(=c12_every_acceptance_is_observed_fullsynced_while_a_later_writer_is_held))'
+filter = 'package(meguri-engine) and (binary(session_durability) or test(=c15_committed_undo_returns_restored_head_during_real_200ms_sync_incoming) or test(=c12_every_acceptance_is_observed_fullsynced_while_a_later_writer_is_held))'
 threads-required = "num-test-threads"
