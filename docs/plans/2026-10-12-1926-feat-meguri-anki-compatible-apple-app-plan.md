@@ -6283,39 +6283,39 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
 
 **Approach:**
 - The load balancer cache holds:
-  - per-preset review-due counts for today..today+99;
+  - counts `C[p,d]`, with `d ∈ [today, today + 98]` (99 days): apply `sched/load-balancer#W2` to all rows without a type/queue filter; `p` comes from the current normal deck;
   - note-sibling due days;
   - Easy Days percentages per preset (R667, R669).
-- U43 builds the cache with each queue build (R668). The engine builds it on demand for Grade Now. It implements U45's fuzzed-day chooser for intervals ≤ 90 days when `loadBalancerEnabled` is on (R666). It is updated per applied answer and reverted on undo.
+- U43 creates the cache whenever it builds a queue (R668). Grade Now creates a temporary cache. With load balancing enabled, an offer qualifies when its integer target and minimum are each at most 90; otherwise it uses plain fuzz. A committed review result adds an entry without removing or deduplicating old entries. Undo removes one entry per day only from the same cache build. Redo adds no entry (`sched/load-balancer#W8`, `#W9`).
 - Split (KTD2): `meguri-sched/src/answer/` computes the rows to write as pure values (card fields, revlog row, deck counters, sibling queue changes, leech decision). `meguri-engine/src/ops/answer.rs` submits them as one op, adds the leech tag through U30 and registers the U25 restorer.
 - The answer op (engine, source `UserUndoable`, undo name "Answer Card") takes `{card id, chosen state from U45, answered_at ms, elapsed ms, from-queue kind}`. In one transaction it:
   1. writes the card fields per R675/R676, plus `pos` on first leaving New (R589) and the factor (R587), keeping `cd` (R591);
-  2. inserts one revlog row per R681: id = answer ms bumped to the next free ms; elapsed time capped at Maximum answer seconds (R678);
+  2. inserts one revlog row per R681: id = answer ms, or the table’s largest id plus one when that instant is taken, under the existing future-id cap; elapsed time capped at Maximum answer seconds (R678);
   3. increments deck counters on the current deck and its ancestors (R677);
-  4. buries siblings per R632/R633;
+  4. when siblings will actually be buried, establishes today’s lastUnburied marker in this transaction before their queue writes (D8), then buries them per R632/R633. The marker is journalled with the answer for rollback/undo/redo; earlier automatic maintenance remains separate;
   5. on leech, adds the `leech` note tag through U30 inside the same transaction, and suspends the card if the action says so (R672);
   6. records the undo step: before-images via U25, plus answer metadata (card id, from-queue kind, load balancer entry, learning cutoff) that U43 uses to restore the in-memory queue (R721).
 - The op result carries leech and suspended flags for the R673 notice, buried sibling ids, and the ChangeSet.
 - Meguri never writes revlog type 5. Revlog rows of other types are only appended or deleted by undo (R683, R684).
 - The custom scheduling JavaScript is ignored (R764).
 
-**Execution note:** Spec writer first. Then the implementer works test-first: every scenario compares card row, revlog row, deck row and sibling rows against oracle goldens (R1890).
+**Execution note:** Resume the prepared contracts and recorded cases. Preserve current U45/U46 arithmetic and memory rules; review-log preview/conversions come from `sched/fsrs-transitions#T15`. Stored leech threshold0 reads as8, and a missing home preset uses bounded built-in defaults (`sched/leeches#L1`, `sched/answering#A1`). No new tolerance or deviation is granted for a weighted-draw difference. The implementer still works test-first against exact rows and all four AE82 states (R1890).
 
 **Patterns to follow:** KTD5 op model (OpResult, ChangeSet, undo meta); C3 before-image undo.
 
 **Test scenarios:**
 - Covers AE22. Bury new and Bury review on; answering review card A Good buries new sibling B to queue −2. Undo puts B back to queue 0 and deletes A's revlog row; the deck counters return to their previous values.
-- Covers AE23 (load balancer part). Load balancer on, target 120 days: plain fuzz applies; target 30 days: the chosen day matches the oracle over a crafted due distribution.
+- AE23: compare the enabled and disabled chooser at a target of 120 days; both must use plain fuzz. At a target of 30 days, the enabled chooser must reproduce the reference selection for the crafted daily counts.
 - Covers AE82. Fixed card id, 3 prior reviews, load balancer on, crafted per-day counts and a sibling due near the target: all four intervals equal the oracle's at the same frozen instant.
 - Covers AE25. Threshold 8, Tag Only: the 8th lapse adds `leech` and keeps the card in relearning; the 10th does nothing; the 12th sets the leech flag again. With Suspend Card, the 8th lapse also sets queue −1.
 - Easy Days percentages from a synced preset change the chosen day as in the oracle; with the load balancer off they have no effect.
-- A revlog id collision (two answers in the same ms) bumps the second id to the next free ms.
-- Revlog `type` comes from the pre-answer state; `factor` holds the mapped difficulty (100–1100); `ivl`/`lastIvl` use negative seconds for learning.
-- Answering an intraday learning card changes no studied counter; a new card increments `new_studied` on the deck and all ancestors.
+- Review-log ids (`sched/revlog#E2`): unused answer instant `T` → `T`; occupied `T` → `max(revlog.id) + 1`, under `storage/ids-usn-mtime#I3`. Include an existing later row. With no later row, two answers at `T` produce ids `T`, `T + 1`.
+- Revlog `type` comes from the pre-answer state; `factor` holds mapped difficulty (100–1100). Use T15’s exact interval conversions: saturating negative seconds and signed low32bits for days, including imported current intervals.
+- An intraday learning answer increments neither new nor review studied count; the capped elapsed time still contributes to milliseconds_studied, and the normal new-day counter reset still applies. A new answer increments new_studied on its deck and every existing ancestor.
 - A review answer does not bury interday-learning siblings; suspended siblings stay suspended; siblings in another deck are buried.
 - Elapsed 95 s with Maximum answer seconds 60 records `time` = 60,000.
 - A card with `cd` set by another client keeps `cd` byte-identical after an answer.
-- Fault injection (U24 test hook) fails the revlog insert: no card, deck, sibling or tag change persists.
+- Fault injection (U24 test hook) fails the review-log insert: no card, deck, sibling, note/tag, answer-owned marker or col change persists, and no cache update occurs. Undo/redo restore the answer-owned marker; same-day reopen preserves newly buried cards. No-sibling answers add no marker; legacy collections gain no creationOffset.
 - Perf: the answer op commit ≤ 5 ms release at 14.4k cards; the 1 s durability bound (R2006) is asserted in U43.
 
 **Verification:** All `sched/answer`, `sched/loadbalancer`, `sched/bury`, `sched/leech` and `sched/revlog` goldens match; a property test of answer then undo returns a byte-identical collection digest (excluding the undo-free config keys). Every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here; `undo/revlog-taken-id` uses `answer`, `card` and `revlog`) passes on Meguri's executor on the macOS and Linux lanes, `undo/revlog-taken-id` with its three `undo-revlog-taken-id-*` deviations, and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1). `sched/day/legacy-timing-after-answer` passes on Meguri's executor on both lanes and is listed in `conformance/scenarios/sched/area.yaml`: a real answer in a collection without `creationOffset` leaves the day count legacy and writes no `creationOffset` (`sched/day-clock` D4, D12.3; moved from U40, amended 2026-10-16; `docs/process/review-log/U40.md`, A2).
