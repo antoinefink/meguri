@@ -254,6 +254,7 @@ struct Presentation {
     rebuild: bool,
     force: Option<CardId>,
     label_boundary: Option<i64>,
+    restore_cache: bool,
 }
 impl Presentation {
     fn rollover_due(&self, day: meguri_sched::timing::SchedDay, at: i64) -> bool {
@@ -271,7 +272,6 @@ pub(crate) struct ProductionRestore {
     undone: Arc<AtomicBool>,
     cache: Weak<AnswerCache>,
     post: Card,
-    before_head: Head,
 }
 impl std::fmt::Debug for ProductionRestore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -299,6 +299,7 @@ impl ProductionRestore {
             };
             if result.is_err() {
                 p.rebuild = true;
+                p.restore_cache = true;
             }
             if direction == crate::Direction::Undo {
                 let card = Some(self.record.removed.id());
@@ -343,6 +344,26 @@ struct Session {
     built: Stamp,
     rollover_pending: bool,
     restoring: bool,
+    undo_view: Option<crate::undo::entry::Entry>,
+}
+/// One owned rollback image for the asynchronous committed-undo presentation.
+#[derive(Clone)]
+struct UndoPresentation {
+    head: Head,
+    cache: Arc<AnswerCache>,
+    chooser: meguri_sched::load_balancer::LoadBalancer,
+    presentation: Presentation,
+    built: Stamp,
+}
+impl UndoPresentation {
+    fn restore(self, session: &mut Session) {
+        *session.presentation.lock().unwrap() = self.presentation;
+        self.cache.restore_view(self.chooser);
+        session.cache = self.cache;
+        session.built = self.built;
+        session.undo_view = None;
+        session.last = self.head;
+    }
 }
 struct Binding {
     core: Weak<crate::collection::CollectionCore>,
@@ -401,8 +422,7 @@ enum Work {
         session: SessionId,
         expected: crate::EntryId,
         restore: Box<ProductionRestore>,
-        after_head: Head,
-        after_cache: meguri_sched::load_balancer::LoadBalancer,
+        rollback: Box<UndoPresentation>,
     },
     Observe {
         generation: Generation,
@@ -411,6 +431,8 @@ enum Work {
         cards: Vec<crate::CardDelta>,
     },
     Barrier(mpsc::SyncSender<Result<(), EngineError>>),
+    #[cfg(feature = "test-hooks")]
+    ApplicationBarrier(mpsc::SyncSender<()>),
     Stop,
 }
 /// Narrow owner hook for U47: cancellation is requested synchronously, never
@@ -517,6 +539,13 @@ impl ReviewService {
     pub fn clear_render_cache_for_testing(&self) {
         self.inner.state.lock().unwrap().render.clear();
     }
+    /// Wait for accepted U44 applications, leaving WAL/Done coverage untouched.
+    #[cfg(feature = "test-hooks")]
+    pub fn application_barrier_for_testing(&self) -> Result<(), EngineError> {
+        let (tx, rx) = mpsc::sync_channel(1);
+        self.inner.tx.send(Work::ApplicationBarrier(tx)).map_err(invalid)?;
+        rx.recv_timeout(Duration::from_secs(5)).map_err(invalid)
+    }
     #[cfg(feature = "test-hooks")]
     pub fn fail_application_for_testing(&self, event: u64) {
         self.inner.fail_application.store(event, Ordering::Release);
@@ -616,6 +645,7 @@ impl ReviewService {
                     rebuild: false,
                     force: None,
                     label_boundary: None,
+                    restore_cache: false,
                 })),
                 cache,
                 journal: journal.clone(),
@@ -631,6 +661,7 @@ impl ReviewService {
                 built,
                 rollover_pending: false,
                 restoring: false,
+                undo_view: None,
             };
             let head = project(&c, &mut session, 3, None)?;
             self.inner.state.lock().unwrap().session = Some(session);
@@ -684,6 +715,7 @@ impl ReviewService {
                     day.today,
                     day.next_day_at,
                     &chooser,
+                    None,
                 )?
                 .0;
                 Ok(PeekResult::Card(item))
@@ -844,7 +876,9 @@ impl ReviewService {
         if session.failed.load(Ordering::Acquire) {
             return Err(EngineError::unavailable("answer chain is restoring"));
         }
-        let at = at.0.max(session.last_answer);
+        // C15 replays an already-effective instant; a later answer must not
+        // clamp that retained input a second time.
+        let at = if is_redo { at.0 } else { at.0.max(session.last_answer) };
         let old = session.last.items.clone();
         let permitted = session.presentation.lock().unwrap().queue.permits(card);
         if !permitted {
@@ -868,6 +902,7 @@ impl ReviewService {
             day.today,
             day.next_day_at,
             &chooser,
+            None,
         )?;
         if supplied != item.state_token {
             drop(p);
@@ -902,7 +937,7 @@ impl ReviewService {
         // The next optimistic answer consumes stored codec rounding, exactly
         // as it would after reading U44's actual postimage back from SQLite.
         let post = Card::from_cells(&post_image).map_err(meguri_storage::StorageError::from)?;
-        let buried = sibling_ids(&*rows, &p.overlay, &captured.card, &captured.inputs.preset)?;
+        let buried = sibling_ids(&*rows, &p.overlay, &captured.card, &captured.inputs.preset, None)?;
         let request = AnswerRequest {
             card,
             state_token: captured.digest,
@@ -955,7 +990,6 @@ impl ReviewService {
             undone: Arc::new(AtomicBool::new(false)),
             cache: Arc::downgrade(&session.cache),
             post: post.clone(),
-            before_head: session.last.clone(),
         };
         drop(p);
         let pending = PendingAnswer {
@@ -975,7 +1009,9 @@ impl ReviewService {
             draft.presentation.lock().unwrap().rebuild = true;
         }
         draft.last_answer = at;
-        draft.redo.clear();
+        if !is_redo {
+            draft.redo.clear();
+        }
         let prior_cache = session.cache.snapshot();
         if !is_redo {
             session.cache.accept(&post, captured.inputs.preset.source().id);
@@ -997,7 +1033,7 @@ impl ReviewService {
         let rolled_over = pending.clear_history;
         *session.presentation.lock().unwrap() = draft.presentation.lock().unwrap().clone();
         session.last = draft.last;
-        session.last_answer = at;
+        session.last_answer = session.last_answer.max(at);
         session.redo = draft.redo;
         session.cache = draft.cache;
         session.built = draft.built;
@@ -1147,27 +1183,35 @@ impl ReviewService {
                 journal.terminal(pending.event, Terminal::Cancelled)?;
                 return self.head(id, 3);
             }
-            if c.write_delay().is_some()
-                && s.pending.is_empty()
-                && let Some((expected, metadata)) = c.answer_undo_metadata(scope)?
+            if s.pending.is_empty()
+                && let Some((entry, metadata)) = c.answer_undo_metadata(scope)?
                 && let Some(restore) = metadata.production
                 && restore
                     .owner
                     .upgrade()
                     .is_some_and(|owner| Arc::ptr_eq(&owner, &s.presentation))
-                && {
-                    let p = s.presentation.lock().unwrap();
-                    !p.rebuild && p.queue.build() == restore.record.build
-                }
-                && c.core.exec.clock.now_ms().div_euclid(1000) < restore.before_head.valid_until
             {
-                let after_head = s.last.clone();
-                let after_cache = s.cache.snapshot();
+                let rollback = UndoPresentation {
+                    head: s.last.clone(),
+                    cache: s.cache.clone(),
+                    chooser: s.cache.snapshot(),
+                    presentation: s.presentation.lock().unwrap().clone(),
+                    built: s.built,
+                };
+                let expected = entry.info.id;
                 restore.restore(crate::Direction::Undo);
-                s.last = restore.before_head.clone();
+                s.undo_view = Some(entry);
+                let computed = project(&c, s, 3, None);
+                let head = match computed {
+                    Ok(head) => head,
+                    Err(error) => {
+                        restore.restore(crate::Direction::Redo);
+                        rollback.restore(s);
+                        return Err(error);
+                    }
+                };
                 s.restoring = true;
                 s.failed.store(true, Ordering::Release);
-                let head = s.last.clone();
                 if self
                     .inner
                     .tx
@@ -1175,14 +1219,12 @@ impl ReviewService {
                         session: id,
                         expected,
                         restore: Box::new(restore.clone()),
-                        after_head: after_head.clone(),
-                        after_cache: after_cache.clone(),
+                        rollback: Box::new(rollback.clone()),
                     })
                     .is_err()
                 {
                     restore.restore(crate::Direction::Redo);
-                    s.cache.restore_view(after_cache);
-                    s.last = after_head;
+                    rollback.restore(s);
                     s.restoring = false;
                     s.failed.store(false, Ordering::Release);
                     return Err(EngineError::unavailable("review worker stopped"));
@@ -1196,6 +1238,17 @@ impl ReviewService {
         self.head(id, 3)
     }
     pub fn redo(&self, scope: UndoScope) -> Result<Head, EngineError> {
+        if self
+            .inner
+            .state
+            .lock()
+            .unwrap()
+            .session
+            .as_ref()
+            .is_some_and(|s| s.restoring)
+        {
+            self.flush_for_background()?;
+        }
         let (c, _) = self.bound()?;
         if let UndoScope::Session(id) = scope {
             let frozen = {
@@ -1204,7 +1257,7 @@ impl ReviewService {
                 if session.restoring || session.failed.load(Ordering::Acquire) {
                     return Err(EngineError::unavailable("answer chain is restoring"));
                 }
-                session.redo.pop()
+                session.redo.last().cloned()
             };
             if let Some(frozen) = frozen {
                 let h = self.head(id, 10)?;
@@ -1214,7 +1267,7 @@ impl ReviewService {
                     .find(|h| h.card_id.0 == frozen.card)
                     .ok_or_else(|| invalid("redo card no longer presented"))?;
                 let request = frozen.request([0; 32])?;
-                self.answer_inner(
+                let outcome = self.answer_inner(
                     id,
                     item.card_id,
                     request.rating,
@@ -1223,6 +1276,12 @@ impl ReviewService {
                     request.elapsed_ms,
                     true,
                 )?;
+                if !matches!(outcome, AnswerOutcome::Accepted { .. }) {
+                    return Err(invalid("redo answer changed during validation"));
+                }
+                if let Some(s) = self.inner.state.lock().unwrap().session.as_mut().filter(|s| s.id == id) {
+                    s.redo.pop();
+                }
                 return self.head(id, 3);
             }
         }
@@ -1360,9 +1419,19 @@ fn sibling_ids(
     overlay: &Overlay,
     card: &Card,
     preset: &meguri_sched::model::preset::PresetView,
+    undo: Option<&crate::undo::entry::Entry>,
 ) -> Result<Vec<CardId>, EngineError> {
-    Ok(rows
-        .cards_of_note(card.note_id)?
+    let mut siblings = rows.cards_of_note(card.note_id)?;
+    if let Some(entry) = undo {
+        for sibling in &mut siblings {
+            if let Some(change) = entry.journal.entry(Table::Cards, &RowKey::Id(sibling.id.0))
+                && let Some(before) = entry.before(change)?
+            {
+                *sibling = Card::from_cells(&before).map_err(meguri_storage::StorageError::from)?;
+            }
+        }
+    }
+    Ok(siblings
         .into_iter()
         .map(|s| overlay.row(s.id).cloned().unwrap_or(s))
         .filter(|s| {
@@ -1388,10 +1457,17 @@ fn project_item(
     today: u32,
     boundary: i64,
     chooser: &meguri_sched::load_balancer::LoadBalancer,
+    undo: Option<&crate::undo::entry::Entry>,
 ) -> Result<(HeadItem, Captured), EngineError> {
     let mut image = rows
         .row_image(Table::Cards, &RowKey::Id(id.0))?
         .ok_or_else(|| invalid("queue card disappeared"))?;
+    if let Some(entry) = undo
+        && let Some(change) = entry.journal.entry(Table::Cards, &RowKey::Id(id.0))
+        && let Some(before) = entry.before(change)?
+    {
+        image = before;
+    }
     let stored = Card::from_cells(&image).map_err(meguri_storage::StorageError::from)?;
     let card = overlay.row(id).cloned().unwrap_or(stored);
     if overlay.row(id).is_some() {
@@ -1401,7 +1477,20 @@ fn project_item(
         }
     }
     let mut models = FsrsCache::default();
-    let inputs = frozen::inputs(rows, &card, boundary, &mut models)?;
+    let removed = undo
+        .map(|entry| {
+            entry
+                .journal
+                .entries()
+                .filter(|change| change.table() == Table::Revlog && !change.existed_before())
+                .filter_map(|change| match change.key() {
+                    RowKey::Id(id) => Some(*id),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let inputs = frozen::inputs_without_revlogs(rows, &card, boundary, &mut models, &removed)?;
     let (configured_preset, home_dr) = match &inputs.home.kind.kind {
         DeckKind::Normal(n) => (DeckConfigId(n.config_id), n.desired_retention),
         _ => return Err(invalid("non-normal home")),
@@ -1447,7 +1536,7 @@ fn project_item(
         meguri_sched::states::fuzz::seed(card.id.0 as u64, u64::from(card.reps)),
     );
     let states = next_states(&mut models, &input, if enabled { Some(&mut choose) } else { None }).map_err(invalid)?;
-    let siblings = sibling_ids(rows, overlay, &card, &inputs.preset)?;
+    let siblings = sibling_ids(rows, overlay, &card, &inputs.preset, undo)?;
     let mut predicted = [None; 4];
     let mut prediction_queue = q.clone();
     prediction_queue.set_current(Some(id));
@@ -1472,12 +1561,18 @@ fn project_item(
             )
             .map_err(|_| invalid("prediction card not permitted"))?;
     }
-    let render = crate::rendering::Capture::read(
+    let mut render = crate::rendering::Capture::read(
         rows,
         card.clone(),
         crate::rendering::RenderMode::Review,
         session_platform(),
     )?;
+    if let Some(entry) = undo
+        && let Some(change) = entry.journal.entry(Table::Notes, &RowKey::Id(card.note_id.0))
+        && let Some(before) = entry.before(change)?
+    {
+        render.note = meguri_model::note::Note::from_cells(&before).map_err(meguri_storage::StorageError::from)?;
+    }
     let p = inputs.preset.fields();
     let item = HeadItem {
         card_id: id,
@@ -1556,11 +1651,30 @@ fn project_snapshot(
     if wants_rebuild {
         let mut env = Environment::read(&**rows, day.today, at.div_euclid(1000), day.next_day_at)?;
         env.fsrs = true;
+        if let Some(entry) = &s.undo_view {
+            for change in entry.journal.entries().filter(|change| change.table() == Table::Decks) {
+                if let Some(before) = entry.before(change)? {
+                    let deck =
+                        meguri_model::deck::Deck::from_cells(&before).map_err(meguri_storage::StorageError::from)?;
+                    if let Some(current) = env.decks.iter_mut().find(|d| d.id == deck.id) {
+                        *current = deck;
+                    }
+                }
+            }
+        }
         let mut overrides = p
             .overlay
             .rows()
             .map(|card| (card.id, card.clone()))
             .collect::<BTreeMap<_, _>>();
+        if let Some(entry) = &s.undo_view {
+            for change in entry.journal.entries().filter(|change| change.table() == Table::Cards) {
+                if let Some(before) = entry.before(change)? {
+                    let card = Card::from_cells(&before).map_err(meguri_storage::StorageError::from)?;
+                    overrides.insert(card.id, card);
+                }
+            }
+        }
         let receipts = s.journal.entries().into_iter().collect::<BTreeMap<_, _>>();
         for pending in &s.pending {
             let represented = receipts
@@ -1623,7 +1737,13 @@ fn project_snapshot(
             && p.queue
                 .current()
                 .is_some_and(|id| value.presentation().iter().any(|e| e.id == id));
-        let cache = AnswerCache::from_session_snapshot(c, rows, day.today, day.next_day_at, at)?;
+        // W9: an answer's old cache cannot change a cache rebuilt meanwhile.
+        // The fresh queue for P9's build-changed case keeps that chooser view.
+        let cache = if !day_changed && (s.undo_view.is_some() || p.restore_cache) {
+            s.cache.clone()
+        } else {
+            AnswerCache::from_session_snapshot(c, rows, day.today, day.next_day_at, at)?
+        };
         for pending in &s.pending {
             if receipts
                 .get(&pending.event)
@@ -1646,6 +1766,7 @@ fn project_snapshot(
                 p.queue.set_current(Some(force));
             }
             p.rebuild = false;
+            p.restore_cache = false;
             p.label_boundary = Some(day.next_day_at);
             s.built = Stamp {
                 seq: rows.seq().0,
@@ -1673,6 +1794,7 @@ fn project_snapshot(
             day.today,
             day.next_day_at,
             &chooser,
+            s.undo_view.as_ref(),
         )?;
         for next in choices(&item.next_states) {
             match next.state {
@@ -1931,8 +2053,7 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
             session,
             expected,
             restore,
-            after_head,
-            after_cache,
+            rollback,
         } => {
             let (c, journal) = bound(inner)?;
             // run_op retires WAL/Done evidence before the U25 mutation. No
@@ -1949,8 +2070,7 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
             let old = s.last.items.clone();
             if let Some(error) = failure {
                 restore.restore(crate::Direction::Redo);
-                s.cache.restore_view(after_cache);
-                s.last = after_head;
+                (*rollback).restore(s);
                 emit(
                     &c,
                     None,
@@ -1962,6 +2082,7 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
                 );
             }
             s.restoring = false;
+            s.undo_view = None;
             let projected = project(&c, s, 3, None);
             let projection_failed = projected.is_err();
             let head = projected.unwrap_or_else(|error| {
@@ -1990,6 +2111,11 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
                     diff: diff(&old, head),
                 },
             );
+            Ok(())
+        }
+        #[cfg(feature = "test-hooks")]
+        Work::ApplicationBarrier(reply) => {
+            let _ = reply.send(());
             Ok(())
         }
         Work::Barrier(reply) => {
@@ -2167,7 +2293,9 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
             let old = s.last.items.clone();
             let current = old.first().map(|h| h.card_id);
             if action == Action::Rebuild {
-                s.presentation.lock().unwrap().rebuild = true;
+                let mut presentation = s.presentation.lock().unwrap();
+                presentation.rebuild = true;
+                presentation.restore_cache = false;
             }
             let head = project(&c, s, 3, None)?;
             if let Some(card) = current {

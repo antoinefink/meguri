@@ -172,6 +172,7 @@ fn p11_r722_committed_undo_restores_first_card_after_rebuild() {
     h.settle();
     let head = h.review.undo(UndoScope::Session(id)).unwrap();
     assert_eq!(head.items[0].card_id, shown);
+    h.settle();
     assert!(h.logs().is_empty());
 }
 #[test]
@@ -618,6 +619,14 @@ fn p11_r460_r461_labels_now_rebuild_and_clear_history_after_shown_answer() {
             h.collection.peek_undo(UndoScope::Session(id)).unwrap(),
             meguri_engine::UndoStatus::Unavailable(meguri_engine::DisabledReason::ClearedByRollover)
         );
+        let before_undo = common::steps::dump(&h.collection);
+        assert!(matches!(
+            h.review.undo(UndoScope::Session(id)),
+            Err(EngineError::UndoUnavailable {
+                reason: meguri_engine::DisabledReason::ClearedByRollover
+            })
+        ));
+        assert_eq!(common::steps::dump(&h.collection), before_undo);
         assert_eq!(h.review.active_session(), Some(id));
     }
 }
@@ -654,4 +663,69 @@ fn p11_p8_background_rebuild_emits_at_observed_commit_without_head_poll() {
         }
     }
     assert!(found, "an observed rebuild must publish before any explicit head poll");
+}
+
+#[test]
+fn c15_u25_hold_back_groups_real_answers_with_session_bury_until_scope_ends() {
+    use meguri_engine::{StepKind, UndoStatus};
+
+    let h = Harness::new(6);
+    let (id, initial) = h.start();
+    let second_head = accept(&h, id, &initial, Rating::Easy);
+    h.settle();
+    let first_step = match h.collection.peek_undo(UndoScope::Session(id)).unwrap() {
+        UndoStatus::Available(step) => step,
+        other => panic!("{other:?}"),
+    };
+    accept(&h, id, &second_head, Rating::Easy);
+    h.settle();
+    let second_step = match h.collection.peek_undo(UndoScope::Session(id)).unwrap() {
+        UndoStatus::Available(step) => step,
+        other => panic!("{other:?}"),
+    };
+    let buried = h.cards[4];
+    // U25's existing op seam stands in for future U48 UI. The writer assigns
+    // the active session, just as it does for other in-session user ops.
+    let bury = common::steps::bury(&h.collection, None, buried).unwrap();
+    h.settle();
+    let run = h.collection.held_back_run(Some(id)).unwrap();
+    assert_eq!(run.steps.len(), 2, "M8 stops at the newest answer");
+    assert_eq!(run.steps[0].id.0, bury.seq.0);
+    assert_eq!(run.steps[0].kind, StepKind::Other);
+    assert_eq!(run.steps[0].name, "Bury");
+    assert_eq!(run.steps[1], second_step);
+    assert!(run.steps.iter().all(|step| step.session == Some(id)));
+    assert!(run.steps.iter().all(|step| step.id != first_step.id));
+    assert!(run.touches(Table::Cards, &RowKey::Id(buried.0)));
+    assert!(run.touches(Table::Cards, &RowKey::Id(second_head.items[0].card_id.0)));
+    let hold = h
+        .collection
+        .run(OpSpec::named("real sync barrier", OpSource::SyncIncoming), move |ctx| {
+            ctx.begin_sync_hold(Some(id))
+        })
+        .unwrap()
+        .value;
+    assert_eq!(hold.run.steps, run.steps);
+    // The held run remains undoable; the earlier answer is upload-pending.
+    h.review.undo(UndoScope::Session(id)).unwrap();
+    assert_ne!(
+        h.collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .card(buried)
+            .unwrap()
+            .unwrap()
+            .queue,
+        meguri_model::card::CardQueue::BuriedByUser
+    );
+    h.review.undo(UndoScope::Session(id)).unwrap();
+    h.settle();
+    assert_eq!(h.logs().len(), 1);
+    assert_eq!(
+        h.collection.peek_undo(UndoScope::Session(id)).unwrap(),
+        UndoStatus::Unavailable(meguri_engine::DisabledReason::UploadPending)
+    );
+    h.review.end(id).unwrap();
+    assert!(h.review.active_session().is_none());
+    assert!(h.collection.held_back_run(None).unwrap().is_empty());
 }

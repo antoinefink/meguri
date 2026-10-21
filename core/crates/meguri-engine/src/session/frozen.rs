@@ -250,6 +250,16 @@ pub(crate) fn inputs(
     boundary: i64,
     models: &mut FsrsCache,
 ) -> Result<Inputs, EngineError> {
+    inputs_without_revlogs(rows, card, boundary, models, &[])
+}
+/// Project the same U44 inputs before a committed answer's journal is restored.
+pub(crate) fn inputs_without_revlogs(
+    rows: &impl ReadRows,
+    card: &Card,
+    boundary: i64,
+    models: &mut FsrsCache,
+    removed: &[i64],
+) -> Result<Inputs, EngineError> {
     let home = rows
         .deck(CardSched::new(card).home_deck())?
         .ok_or_else(|| error("missing home"))?;
@@ -260,11 +270,13 @@ pub(crate) fn inputs(
     models.model(&preset).map_err(error)?;
     let retention = DeckSched::new(Some(normal), &home.common).retention(preset.fields().desired_retention);
     let mut history = Vec::new();
-    if card.card_type != meguri_model::card::CardType::New && card.data.memory_state.is_none() {
+    if (card.card_type != meguri_model::card::CardType::New && card.data.memory_state.is_none())
+        || (!removed.is_empty() && card.data.last_review_secs.is_none())
+    {
         rows.visit_fsrs_histories(
             &meguri_storage::queries::revlog_fsrs::HistorySelection::Cards(vec![card.id]),
             |_, found| -> Result<(), StorageError> {
-                history.extend_from_slice(found);
+                history.extend(found.iter().filter(|r| !removed.contains(&r.id.0)).cloned());
                 Ok(())
             },
         )?;
@@ -273,6 +285,7 @@ pub(crate) fn inputs(
         meguri_sched::memory::resolve::on_the_fly(models, &preset, card, &history, boundary).map_err(error)?;
     let last = match card.data.last_review_secs {
         Some(t) => Some(t),
+        None if !removed.is_empty() => meguri_sched::memory::resolve::last_review_time(&history),
         None => rows.fsrs_last_review_time(card.id)?,
     };
     let cfg = SchedConfig::new(rows);

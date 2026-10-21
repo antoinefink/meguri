@@ -248,81 +248,158 @@ fn c12_kill_at_intent_prepared_commit_wal_and_done_then_reopen_twice() {
 fn c15_committed_undo_returns_restored_head_during_real_200ms_sync_incoming() {
     use meguri_storage::RowKey;
 
-    let h = Harness::new(4);
-    let (session, original) = h.start();
-    let card_id = original.items[0].card_id;
-    accepted(&h, session, original.clone());
-    h.settle();
-    let assigned_logs = h.logs();
-    assert_eq!(assigned_logs.len(), 1);
-    let assigned_card = h
-        .collection
-        .reader(ReaderRole::Query)
-        .unwrap()
-        .row_image(Table::Cards, &RowKey::Id(card_id.0))
-        .unwrap()
-        .unwrap();
-    let assigned_log = h
-        .collection
-        .reader(ReaderRole::Query)
-        .unwrap()
-        .row_image(Table::Revlog, &RowKey::Id(assigned_logs[0]))
-        .unwrap()
-        .unwrap();
+    for mode in ["sync", "ordinary", "rebuild", "expired"] {
+        let h = Harness::new(4);
+        if mode == "expired" {
+            let learning = h.cards[3];
+            h.collection
+                .run(
+                    OpSpec::named("held learning validity", OpSource::Maintenance),
+                    move |ctx| {
+                        let mut card = ctx.scope().card(learning)?.unwrap();
+                        card.card_type = meguri_model::card::CardType::Learning;
+                        card.queue = meguri_model::card::CardQueue::Learning;
+                        card.due = (NOW / 1000 + 1205) as i32;
+                        card.reps = 1;
+                        card.remaining_steps = 1001;
+                        ctx.scope().put(&card)?;
+                        Ok(())
+                    },
+                )
+                .unwrap();
+        }
+        let (session, original) = h.start();
+        let card_id = original.items[0].card_id;
+        accepted(&h, session, original.clone());
+        h.settle();
+        let assigned_logs = h.logs();
+        assert_eq!(assigned_logs.len(), 1);
+        let assigned_card = h
+            .collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .row_image(Table::Cards, &RowKey::Id(card_id.0))
+            .unwrap()
+            .unwrap();
+        let assigned_log = h
+            .collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .row_image(Table::Revlog, &RowKey::Id(assigned_logs[0]))
+            .unwrap()
+            .unwrap();
 
-    let (notify, started) = mpsc::sync_channel(1);
-    let (_keep_sync_busy, sync_window) = mpsc::channel::<()>();
-    let duration = Duration::from_millis(200);
-    let writing = h.collection.submit(
-        OpSpec::new(catalog::SYNC_INCOMING_MERGE, OpSource::SyncIncoming).declare_long_write(duration),
-        move |_| {
+        if mode == "rebuild" {
+            let timer = !original.items[0].home_preset.show_timer;
+            h.collection
+                .run(
+                    OpSpec::named("unrelated background rebuild", OpSource::Rollover),
+                    move |ctx| {
+                        ctx.scope()
+                            .set_config("collapseTime", &meguri_storage::ConfigValue::from(600u64))?;
+                        meguri_engine::deck_config::update_in(
+                            ctx.scope(),
+                            meguri_model::ids::DeckConfigId(1),
+                            |fields| {
+                                fields.show_timer = timer;
+                            },
+                        )?;
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            h.settle();
+        }
+        if mode == "expired" {
+            let before_day = h.collection.today().unwrap();
+            h.clock.set_now_ms((original.valid_until + 1) * 1000);
+            assert_eq!(h.collection.today().unwrap(), before_day);
+            assert!(h.clock.now_ms() / 1000 < h.collection.next_day_at().unwrap());
+        }
+        let cache_before = h.review.chooser_for_testing(session).unwrap();
+        let (notify, started) = mpsc::sync_channel(1);
+        let (_keep_sync_busy, sync_window) = mpsc::channel::<()>();
+        // An ordinary short op stays below O8's ~200 ms declaration threshold.
+        let duration = Duration::from_millis(if mode == "ordinary" { 100 } else { 200 });
+        let spec = if mode == "ordinary" {
+            OpSpec::named("ordinary writer window", OpSource::Rollover)
+        } else {
+            OpSpec::new(catalog::SYNC_INCOMING_MERGE, OpSource::SyncIncoming).declare_long_write(duration)
+        };
+        let writing = h.collection.submit(spec, move |_| {
             notify.send(()).unwrap();
             Ok(matches!(
                 sync_window.recv_timeout(duration),
                 Err(mpsc::RecvTimeoutError::Timeout)
             ))
-        },
-    );
-    started.recv_timeout(Duration::from_secs(5)).unwrap();
-    let (deliver, delivery) = mpsc::sync_channel(1);
-    let service = h.review.clone();
-    let caller = h
-        .engine
-        .threads()
-        .spawn("test-session-undo-return", meguri_engine::Qos::Default, move |_| {
-            let result = service.undo(UndoScope::Session(session));
-            deliver.send(result).unwrap();
-        })
-        .unwrap();
+        });
+        started.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(h.collection.write_delay().is_some(), mode != "ordinary");
+        let (deliver, delivery) = mpsc::sync_channel(1);
+        let service = h.review.clone();
+        let caller = h
+            .engine
+            .threads()
+            .spawn("test-session-undo-return", meguri_engine::Qos::Default, move |_| {
+                let result = service.undo(UndoScope::Session(session));
+                deliver.send(result).unwrap();
+            })
+            .unwrap();
 
-    let returned = delivery.recv_timeout(Duration::from_millis(50));
-    let presented_during_sync = h.review.head(session, 3);
-    let logs_during_sync = h.logs();
-    let occupied_for_full_window = writing.wait().unwrap().value;
-    caller.join().unwrap();
-    h.settle();
+        let returned = delivery.recv_timeout(Duration::from_millis(50));
+        let presented_during_sync = h.review.head(session, 3);
+        let logs_during_sync = h.logs();
+        let cache_during_sync = h.review.chooser_for_testing(session).unwrap();
+        let occupied_for_full_window = writing.wait().unwrap().value;
+        caller.join().unwrap();
+        h.settle();
 
-    assert!(occupied_for_full_window);
-    assert_eq!(returned.expect("session undo exceeded 50 ms").unwrap(), original);
-    assert_eq!(presented_during_sync.unwrap(), original);
-    assert_eq!(logs_during_sync, assigned_logs);
-    assert!(h.logs().is_empty());
-    assert_eq!(h.review.head(session, 3).unwrap().items[0].card_id, card_id);
+        assert!(occupied_for_full_window);
+        let returned = returned.expect("session undo exceeded 50 ms").unwrap();
+        assert_eq!(returned.items[0].card_id, card_id, "{mode}");
+        assert_eq!(presented_during_sync.unwrap(), returned, "{mode}");
+        assert_eq!(
+            h.review.head(session, 3).unwrap(),
+            returned,
+            "optimistic and actual U25 head: {mode}"
+        );
+        if mode == "rebuild" {
+            assert_ne!(returned.items[0].state_token, original.items[0].state_token);
+            assert_ne!(
+                returned.items[0].home_preset.show_timer,
+                original.items[0].home_preset.show_timer
+            );
+            assert_eq!(cache_during_sync, cache_before, "W9 leaves a rebuilt cache alone");
+            assert_eq!(h.review.chooser_for_testing(session).unwrap(), cache_before);
+        } else if mode == "expired" {
+            assert!(returned.valid_until > h.clock.now_ms() / 1000);
+            assert_ne!(returned.valid_until, original.valid_until);
+            assert_eq!(
+                returned.counts, original.counts,
+                "P9 retains its before-answer cutoff/count snapshot"
+            );
+        } else {
+            assert_eq!(returned, original);
+        }
+        assert_eq!(logs_during_sync, assigned_logs);
+        assert!(h.logs().is_empty());
+        assert_eq!(h.review.head(session, 3).unwrap().items[0].card_id, card_id);
 
-    h.review.redo(UndoScope::Session(session)).unwrap();
-    assert_eq!(h.logs(), assigned_logs);
-    let reader = h.collection.reader(ReaderRole::Query).unwrap();
-    assert_eq!(
-        reader.row_image(Table::Cards, &RowKey::Id(card_id.0)).unwrap().unwrap(),
-        assigned_card
-    );
-    assert_eq!(
-        reader
-            .row_image(Table::Revlog, &RowKey::Id(assigned_logs[0]))
-            .unwrap()
-            .unwrap(),
-        assigned_log
-    );
+        h.review.redo(UndoScope::Session(session)).unwrap();
+        assert_eq!(h.logs(), assigned_logs);
+        let reader = h.collection.reader(ReaderRole::Query).unwrap();
+        assert_eq!(
+            reader.row_image(Table::Cards, &RowKey::Id(card_id.0)).unwrap().unwrap(),
+            assigned_card
+        );
+        assert_eq!(
+            reader
+                .row_image(Table::Revlog, &RowKey::Id(assigned_logs[0]))
+                .unwrap()
+                .unwrap(),
+            assigned_log
+        );
+    }
 }
 
 #[test]
@@ -693,4 +770,320 @@ fn c17_waiting_until_due_minus_learn_ahead_is_emitted_at_acceptance_before_write
     assert_eq!(i64::from(committed.due), expected_due);
     assert_eq!(committed.queue, meguri_model::card::CardQueue::Learning);
     assert_eq!(h.logs().len(), 1);
+}
+
+#[test]
+fn c15_multiple_pending_redos_keep_each_effective_instant_rating_and_elapsed() {
+    use meguri_storage::RowKey;
+
+    let h = Harness::new(1);
+    let (id, initial) = h.start();
+    let card = initial.items[0].card_id;
+    let (release, writing) = hold_writer(&h);
+    let instants = [NOW - 10_000, NOW - 1000];
+    let elapsed = [99, 1234];
+    let mut head = initial.clone();
+    for index in 0..2 {
+        let AnswerOutcome::Accepted { head_diff, .. } = h
+            .review
+            .answer(
+                id,
+                card,
+                Rating::Again,
+                head.items[0].state_token,
+                EpochMillis(instants[index]),
+                elapsed[index],
+            )
+            .unwrap()
+        else {
+            panic!("pending learning answer refused")
+        };
+        assert_eq!(head_diff.head.items[0].card_id, card);
+        head = head_diff.head;
+    }
+    assert_eq!(h.review.undo(UndoScope::Session(id)).unwrap().items[0].card_id, card);
+    assert_eq!(
+        h.review.undo(UndoScope::Session(id)).unwrap().items[0].state_token,
+        initial.items[0].state_token
+    );
+    assert!(h.logs().is_empty());
+    h.clock.step_ms(10_000);
+    let first_redo = h.review.redo(UndoScope::Session(id)).unwrap();
+    assert_eq!(first_redo.items[0].card_id, card);
+    // The second pending redo must survive accepting the first redo.
+    h.review.redo(UndoScope::Session(id)).unwrap();
+    assert!(h.logs().is_empty());
+    release.send(()).unwrap();
+    writing.wait().unwrap();
+    h.settle();
+    assert_eq!(
+        h.logs(),
+        instants,
+        "redo must not clamp an older retained instant to last_answer"
+    );
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    for index in 0..2 {
+        let row = reader
+            .revlog_entry(meguri_model::ids::RevlogId(instants[index]))
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.card_id, card);
+        assert_eq!(row.button, Rating::Again as u8);
+        assert_eq!(row.answer_millis, elapsed[index] as u32);
+        assert_eq!(row.kind, meguri_model::revlog::RevlogKind::Learning);
+        assert!(row.interval < 0);
+        assert!(row.ease_factor > 0);
+    }
+    let stored = reader.card(card).unwrap().unwrap();
+    assert_eq!(stored.reps, 2);
+    assert_eq!(stored.data.last_review_secs, Some(instants[1] / 1000));
+    let assigned_card = reader.row_image(Table::Cards, &RowKey::Id(card.0)).unwrap().unwrap();
+    let assigned_log = reader
+        .row_image(Table::Revlog, &RowKey::Id(instants[1]))
+        .unwrap()
+        .unwrap();
+    drop(reader);
+    h.review.undo(UndoScope::Session(id)).unwrap();
+    h.settle();
+    h.review.redo(UndoScope::Session(id)).unwrap();
+    assert_eq!(h.logs(), instants);
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    assert_eq!(
+        reader.row_image(Table::Cards, &RowKey::Id(card.0)).unwrap().unwrap(),
+        assigned_card
+    );
+    assert_eq!(
+        reader
+            .row_image(Table::Revlog, &RowKey::Id(instants[1]))
+            .unwrap()
+            .unwrap(),
+        assigned_log
+    );
+}
+
+#[test]
+fn c9_w2_no_list_stays_absent_through_real_accept_commit_undo_redo() {
+    use meguri_engine::sched::answer::predict;
+    use meguri_model::ids::DeckConfigId;
+    use meguri_sched::states::{
+        fsrs_glue::FsrsCache,
+        interval_limits::{Delay, FuzzedDayChooser},
+    };
+    use meguri_storage::{ConfigValue, RowKey};
+
+    let fixture = Harness::new(1);
+    let card_id = fixture.cards[0];
+    fixture
+        .collection
+        .run(
+            OpSpec::named("enable balancing outside count window", OpSource::Maintenance),
+            move |op| {
+                let scope = op.scope();
+                let mut row = scope.card(card_id)?.unwrap();
+                row.due = 1000;
+                scope.put(&row)?;
+                scope.set_config("loadBalancerEnabled", &ConfigValue::Bool(true))?;
+                Ok(())
+            },
+        )
+        .unwrap();
+
+    let (session_id, mut shown) = fixture.start();
+    let built_cache = fixture.review.chooser_for_testing(session_id).unwrap();
+    let require_no_preset_entries = |phase: &str| {
+        let observed = fixture.review.chooser_for_testing(session_id).unwrap();
+        assert_eq!(observed, built_cache, "cache changed during {phase}");
+        let preset_id = DeckConfigId(1);
+        for offset in 0..99 {
+            assert!(observed.entries(preset_id, offset).is_empty(), "day {offset}: {phase}");
+        }
+        let mut offer = observed.chooser(preset_id, None, card_id.0 as u64);
+        assert_eq!(offer.choose(30.0, 1, 36500), None, "missing preset list: {phase}");
+    };
+    require_no_preset_entries("admission");
+    assert_eq!(
+        shown.items[0].next_states,
+        predict(&fixture.collection, card_id, &mut FsrsCache::default(), None)
+            .unwrap()
+            .states,
+        "an unavailable balancing choice must retain ordinary fuzz"
+    );
+
+    let (unblock, occupied) = hold_writer(&fixture);
+    let mut graduation_days = None;
+    for (rating, millis) in [(Rating::Again, 17), (Rating::Easy, 29)] {
+        let current = &shown.items[0];
+        assert_eq!(current.card_id, card_id);
+        if matches!(rating, Rating::Easy) {
+            let Delay::Days(days) = current.next_states.easy.delay else {
+                panic!("graduation must select a day interval");
+            };
+            graduation_days = Some(days);
+        }
+        shown = match fixture
+            .review
+            .answer(
+                session_id,
+                card_id,
+                rating,
+                current.state_token,
+                EpochMillis(NOW),
+                millis,
+            )
+            .unwrap()
+        {
+            AnswerOutcome::Accepted { head_diff, .. } => head_diff.head,
+            other => panic!("optimistic answer was refused: {other:?}"),
+        };
+        require_no_preset_entries("accepted while writer occupied");
+        assert!(
+            fixture.logs().is_empty(),
+            "acceptance must precede database application"
+        );
+    }
+    unblock.send(()).unwrap();
+    occupied.wait().unwrap();
+    fixture.settle();
+    require_no_preset_entries("both commits");
+
+    let capture_assigned_rows = || {
+        let ids = fixture.logs();
+        let reader = fixture.collection.reader(ReaderRole::Query).unwrap();
+        let card_row = reader.row_image(Table::Cards, &RowKey::Id(card_id.0)).unwrap().unwrap();
+        let log_rows = ids
+            .iter()
+            .map(|id| reader.row_image(Table::Revlog, &RowKey::Id(*id)).unwrap().unwrap())
+            .collect::<Vec<_>>();
+        (ids, card_row, log_rows)
+    };
+    let committed_rows = capture_assigned_rows();
+    assert_eq!(committed_rows.0.len(), 2);
+    assert_eq!(
+        fixture
+            .collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .card(card_id)
+            .unwrap()
+            .unwrap()
+            .interval,
+        graduation_days.unwrap()
+    );
+
+    let restored_question = fixture.review.undo(UndoScope::Session(session_id)).unwrap();
+    require_no_preset_entries("optimistic undo");
+    fixture.settle();
+    require_no_preset_entries("applied undo");
+    assert_eq!(
+        restored_question.items[0].next_states,
+        predict(&fixture.collection, card_id, &mut FsrsCache::default(), None)
+            .unwrap()
+            .states
+    );
+    fixture.review.redo(UndoScope::Session(session_id)).unwrap();
+    require_no_preset_entries("redo");
+    assert_eq!(
+        capture_assigned_rows(),
+        committed_rows,
+        "redo must reuse the assigned rows"
+    );
+}
+
+#[test]
+fn c15_terminal_sync_error_blocks_committed_undo_and_restores_answered_queue() {
+    use meguri_engine::session::SessionEvent;
+    use meguri_storage::RowKey;
+    use std::sync::Mutex;
+
+    let h = Harness::new(3);
+    let (id, initial) = h.start();
+    let item = &initial.items[0];
+    let card = item.card_id;
+    let events = h.engine.stream().subscribe();
+    let read_answer = || {
+        let ids = h.logs();
+        assert_eq!(ids.len(), 1);
+        let reader = h.collection.reader(ReaderRole::Query).unwrap();
+        let rows = [(Table::Cards, card.0), (Table::Revlog, ids[0])]
+            .map(|(table, key)| reader.row_image(table, &RowKey::Id(key)).unwrap().unwrap());
+        (ids, rows)
+    };
+
+    let (entered, entry) = mpsc::sync_channel(1);
+    let (release, resume) = mpsc::channel();
+    let resume = Mutex::new(resume);
+    h.review.fail_journal_for_testing(JournalStage::TerminalSync).unwrap();
+    h.review
+        .journal_hook_for_testing(Arc::new(move |stage| {
+            if stage == JournalStage::TerminalWrite {
+                entered.send(()).unwrap();
+                resume.lock().unwrap().recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+        }))
+        .unwrap();
+    let answered = match h
+        .review
+        .answer(
+            id,
+            card,
+            Rating::Easy,
+            item.state_token,
+            EpochMillis(h.clock.now_ms()),
+            200,
+        )
+        .unwrap()
+    {
+        AnswerOutcome::Accepted { head_diff, .. } => head_diff.head,
+        result => panic!("answer rejected: {result:?}"),
+    };
+    // A full flush would release the durability error before the undo request.
+    h.review.application_barrier_for_testing().unwrap();
+    entry.recv_timeout(Duration::from_secs(5)).unwrap();
+    let saved = read_answer();
+
+    let optimistic = h.review.undo(UndoScope::Session(id)).unwrap();
+    assert_eq!(optimistic.items[0].card_id, card);
+    assert_eq!(read_answer(), saved, "undo wrote while terminal writer was held");
+    release.send(()).unwrap();
+    assert!(h.review.flush_for_background().is_err());
+    h.review.application_barrier_for_testing().unwrap();
+    assert_eq!(read_answer(), saved, "terminal failure changed committed rows");
+    assert_eq!(
+        h.collection.peek_undo(UndoScope::Session(id)).unwrap().name(),
+        Some("Answer Card")
+    );
+
+    let evidence = std::fs::read_to_string(h.dir.path().join("meguri-pending-answers.jsonl")).unwrap();
+    assert!(evidence.contains("Intent"), "missing intent");
+    assert!(evidence.contains("Prepared"), "missing prepared record");
+
+    let mut last_failure = None;
+    let mut restoration = None;
+    while let Some(event) = events.try_recv() {
+        if let meguri_engine::EventKind::Extension(extension) = &event.kind {
+            match extension.as_any().downcast_ref::<SessionEvent>() {
+                Some(SessionEvent::CommitFailed { card_id, error, .. }) => {
+                    assert_eq!(*card_id, card);
+                    assert!(format!("{error:?}").contains("TerminalSync"));
+                    last_failure = Some(event.seq);
+                    restoration = None;
+                }
+                Some(SessionEvent::QueueHeadChanged { diff, .. }) if last_failure.is_some() => {
+                    assert_eq!(diff.head, answered);
+                    restoration = Some(event.seq);
+                }
+                _ => {}
+            }
+        }
+    }
+    let failed_at = last_failure.expect("missing commit failure");
+    assert!(restoration.expect("missing queue restoration") > failed_at);
+
+    let next = &answered.items[0];
+    assert!(
+        h.review
+            .answer(id, next.card_id, Rating::Easy, next.state_token, EpochMillis(NOW), 1)
+            .is_err(),
+        "answer accepted after journal failure"
+    );
 }

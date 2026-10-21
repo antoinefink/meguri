@@ -255,6 +255,7 @@ fn main() -> ExitCode {
                     });
                     review.flush_for_background().unwrap();
                     review.undo(UndoScope::Session(id)).unwrap();
+                    review.flush_for_background().unwrap();
                 }
                 total
             })
@@ -294,54 +295,52 @@ fn main() -> ExitCode {
                             card.card_id
                         );
                     });
+                    review.flush_for_background().unwrap();
                 }
                 total
             })
         });
         suite.push(undo.finish());
         let mut delayed_undo = Measurement::start("session.undo_to_head_sync200ms", Some(size));
-        criterion.bench_function(&format!("session/undo_to_head_sync200ms/{size}"), |b| {
-            b.iter_custom(|n| {
-                let mut total = Duration::ZERO;
-                for _ in 0..n {
-                    let head = review.head(id, 3).unwrap();
-                    let card = &head.items[0];
-                    review
-                        .answer(
-                            id,
-                            card.card_id,
-                            Rating::Good,
-                            card.state_token,
-                            EpochMillis(DEFAULT_NOW_MS),
-                            4000,
-                        )
-                        .unwrap();
-                    review.flush_for_background().unwrap();
-                    let (entered, ready) = std::sync::mpsc::sync_channel(1);
-                    let write = c.submit(
-                        OpSpec::new(
-                            meguri_engine::executor::catalog::SYNC_INCOMING_MERGE,
-                            OpSource::SyncIncoming,
-                        )
-                        .declare_long_write(Duration::from_millis(200)),
-                        move |_| {
-                            entered.send(()).unwrap();
-                            std::thread::sleep(Duration::from_millis(200));
-                            Ok(())
-                        },
-                    );
-                    ready.recv().unwrap();
-                    total += delayed_undo.run(1, |_| {
-                        assert_eq!(
-                            review.undo(UndoScope::Session(id)).unwrap().items[0].card_id,
-                            card.card_id
-                        );
-                    });
-                    write.wait().unwrap();
-                }
-                total
-            })
-        });
+        // Every sample needs a real 200 ms writer occupancy. Criterion would
+        // calibrate from just the tiny measured undo and request huge setups.
+        for _ in 0..20 {
+            let head = review.head(id, 3).unwrap();
+            let card = &head.items[0];
+            review
+                .answer(
+                    id,
+                    card.card_id,
+                    Rating::Good,
+                    card.state_token,
+                    EpochMillis(DEFAULT_NOW_MS),
+                    4000,
+                )
+                .unwrap();
+            review.flush_for_background().unwrap();
+            let (entered, ready) = std::sync::mpsc::sync_channel(1);
+            let write = c.submit(
+                OpSpec::new(
+                    meguri_engine::executor::catalog::SYNC_INCOMING_MERGE,
+                    OpSource::SyncIncoming,
+                )
+                .declare_long_write(Duration::from_millis(200)),
+                move |_| {
+                    entered.send(()).unwrap();
+                    std::thread::sleep(Duration::from_millis(200));
+                    Ok(())
+                },
+            );
+            ready.recv().unwrap();
+            delayed_undo.run(1, |_| {
+                assert_eq!(
+                    review.undo(UndoScope::Session(id)).unwrap().items[0].card_id,
+                    card.card_id
+                );
+            });
+            write.wait().unwrap();
+            review.flush_for_background().unwrap();
+        }
         suite.push(delayed_undo.finish());
         review.end(id).unwrap();
         engine.close().unwrap();

@@ -442,7 +442,7 @@ impl Collection {
     pub(crate) fn answer_undo_metadata(
         &self,
         scope: UndoScope,
-    ) -> Result<Option<(EntryId, crate::sched::answer::AnswerMetadata)>, EngineError> {
+    ) -> Result<Option<(Entry, crate::sched::answer::AnswerMetadata)>, EngineError> {
         let stack = self.undo_manager()?.lock();
         let UndoStatus::Available(info) = stack.peek(Side::Undo, scope) else {
             return Ok(None);
@@ -455,7 +455,7 @@ impl Collection {
             .as_ref()
             .and_then(|s| s.downcast_ref::<crate::sched::answer::AnswerMetadata>())
             .cloned()
-            .map(|meta| (info.id, meta)))
+            .map(|meta| (entry.clone(), meta)))
     }
 
     pub(crate) fn submit_answer_undo(&self, scope: UndoScope, expected: EntryId) -> Pending<OpResult<StepInfo>> {

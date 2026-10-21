@@ -53,6 +53,9 @@ fn c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions() {
                 choose(&h, id, &before, rating);
                 let restored = h.review.undo(UndoScope::Session(id)).unwrap();
                 assert_eq!(restored.items[0].card_id, before.items[0].card_id);
+                // The presentation returns before U25; settle the real undo
+                // before the next counterfactual uses its committed row.
+                h.settle();
             }
             random ^= random << 13;
             random ^= random >> 7;
