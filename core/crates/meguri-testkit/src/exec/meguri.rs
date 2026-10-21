@@ -472,14 +472,13 @@ impl MeguriExecutor {
                     .get(name)
                     .ok_or_else(|| ExecError::new("unsupported_op", format!("no adapter for op {name}")))?;
                 let result = (adapter.run)(session, other);
-                if result.is_err()
+                if (result.is_err()
                     || matches!(&result, Ok(OpResult::Rejected("changed_externally")))
                     || matches!(other, Step::Reopen(_))
-                    || matches!(other,Step::DbExec(args) if !args.sql.trim_start().to_ascii_lowercase().starts_with("select"))
+                    || matches!(other,Step::DbExec(args) if !args.sql.trim_start().to_ascii_lowercase().starts_with("select")))
+                    && let Some(held) = &session.held_queue
                 {
-                    if let Some(held) = &session.held_queue {
-                        held.invalidate();
-                    }
+                    held.invalidate();
                 }
                 match result? {
                     OpResult::Done => {}

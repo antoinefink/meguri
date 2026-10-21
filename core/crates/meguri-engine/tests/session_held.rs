@@ -52,7 +52,7 @@ fn fsrs_off_compatibility_queue_reads_write_nothing_and_never_select() {
     let before = common::steps::dump(c);
     let mod_before = c.reader(ReaderRole::Query).unwrap().col().unwrap().modified;
     let held = HeldQueue::build(c, Some(DeckId(1))).unwrap();
-    assert_eq!(held.read(h.clock.now_secs()).1.new, 4);
+    assert_eq!(held.read(h.clock.now_ms().div_euclid(1000)).1.new, 4);
     assert_eq!(common::steps::dump(c), before);
     assert_eq!(c.reader(ReaderRole::Query).unwrap().col().unwrap().modified, mod_before);
     assert_eq!(
@@ -65,7 +65,7 @@ fn fsrs_off_compatibility_queue_reads_write_nothing_and_never_select() {
 fn held_queue_progresses_while_unheld_u41_still_gathers_fresh() {
     let (h, ids) = setup();
     let held = HeldQueue::build(&h.collection, Some(DeckId(1))).unwrap();
-    let now = h.clock.now_secs();
+    let now = h.clock.now_ms().div_euclid(1000);
     assert_eq!(head(&held, now), ids);
     let result = held.answer(request(&h, &held, ids[0], Rating::Again)).unwrap();
     assert_eq!(result.value.metadata.from_queue, Some(Kind::New));
@@ -90,14 +90,14 @@ fn not_at_head_and_stale_answers_preserve_collection_and_presentation() {
         Err(meguri_engine::EngineError::Stale { .. })
     ));
     assert_eq!(common::steps::dump(&h.collection), before);
-    assert_eq!(head(&held, h.clock.now_secs()), ids);
+    assert_eq!(head(&held, h.clock.now_ms().div_euclid(1000)), ids);
 }
 
 #[test]
 fn global_answer_undo_redo_uses_registered_queue_restorer() {
     let (h, ids) = setup();
     let held = HeldQueue::build(&h.collection, Some(DeckId(1))).unwrap();
-    let now = h.clock.now_secs();
+    let now = h.clock.now_ms().div_euclid(1000);
     held.answer(request(&h, &held, ids[0], Rating::Again)).unwrap();
     let after = held.read(now);
     h.collection.undo(UndoScope::Global).unwrap();
@@ -110,7 +110,7 @@ fn global_answer_undo_redo_uses_registered_queue_restorer() {
 fn actual_redo_across_queue_invalidation_rebuilds_from_committed_rows() {
     let (h, ids) = setup();
     let mut held = HeldQueue::build(&h.collection, Some(DeckId(1))).unwrap();
-    let now = h.clock.now_secs();
+    let now = h.clock.now_ms().div_euclid(1000);
     held.answer(request(&h, &held, ids[0], Rating::Easy)).unwrap();
     h.collection.undo(UndoScope::Global).unwrap();
     held.invalidate();
