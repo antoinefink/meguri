@@ -43,3 +43,29 @@ They keep it across `answer`, the undo and redo of an answer, `set_flag`, the ta
 The six load-balancer cases have historical reference output. Their newly labelled inputs need fresh reference recordings. No current comparison or working product adapter is proved by that earlier output.
 
 U44 connects the answer provider and day chooser, then checks the complete cases on Linux and macOS. H2/H3 define the cache used by those cases. Activation requires successful product results on both systems. Existing request shapes, exact results and approved deviations remain the contract; these edits add no tolerance.
+
+## H6. Position-case evidence
+
+| Case | Requirements |
+|---|---|
+| `sched/data/positions` | P1; `conformance/dsl#D8.1`; `sched/card-data#K6`-K8 |
+| `sched/answer/positions-normal` | H5; `sched/card-data#K6`-K8 |
+| `sched/compat/enable-fsrs-live` | `conformance/dsl#D9.2`, D9.3 |
+
+### P1. Required equalities
+
+| Artifact | Commit | Path | Provenance |
+|---|---|---|---|
+| S0 | `b65827bdb6f21655730f5acf486739ae6d1dd846` | `conformance/scenarios/sched/data/positions.yaml` | archive |
+| S1 | `089d266546fb95c2a6aef93ea98268019430ab56` | `conformance/scenarios/sched/data/positions.yaml` | tag metadata |
+| G0 | `b65827bdb6f21655730f5acf486739ae6d1dd846` | `conformance/goldens/sched/data/positions.json` | archive |
+| G1 | `1f7e1611807ea4b1a2d8906d79fde2c078ea42e8` | `conformance/goldens/sched/data/positions.json` | `Role: oracle-maintainer`; H5 |
+
+- `S1.tags = ["needs:answer.filtered"]`
+- `S1` without `tags` = `S0`
+- `S1.clock = S0.clock`
+- `S1.setup = S0.setup`
+- `S1.steps = S0.steps`
+- `G1.observations = G0.observations`
+
+Comparison requirements: unchanged. Ownership: `conformance/dsl#D9.2`, D9.3. Engine assertion: `sched/answering#A12` (R53/R706), refusal writes = 0.
