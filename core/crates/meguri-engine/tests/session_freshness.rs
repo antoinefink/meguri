@@ -221,23 +221,126 @@ fn c5_missing_preset_keeps_configured_id_and_presence_even_with_factory_fallback
 
 #[test]
 fn c5_later_unsupported_list_still_refuses_with_fixed_id_and_mtime() {
-    let h = Harness::new(3);
-    let (id, _) = h.start();
-    edit(&h, |s| {
-        let mut p = s.deck_config(DeckConfigId(1))?.unwrap();
-        let mut bytes = p.config.to_bytes().into_owned();
-        bytes.extend_from_slice(&[0x3a, 0x01, 0x01]); // public P6.6 later-list marker
-        p.config = ProtoBlob::decode(&bytes).unwrap();
-        s.put(&p)?;
+    let study = Harness::new(5);
+    let card_ids = study.cards.clone();
+    edit(&study, move |store| {
+        let root = store.deck(DeckId(1))?.unwrap();
+        let DeckKind::Normal(root_settings) = &root.kind.kind else {
+            panic!("fixture root requires a normal deck")
+        };
+        assert_eq!(root_settings.config_id, 1);
+        let original = store.deck_config(DeckConfigId(1))?.unwrap();
+        for (home_id, config_id) in [(43004, 4), (43009, 9), (43011, 11)] {
+            let mut configuration = original.clone();
+            configuration.id = DeckConfigId(config_id);
+            configuration.name = format!("u43-config-{config_id}");
+            store.put(&configuration)?;
+            let mut home = root.clone();
+            home.id = DeckId(home_id);
+            home.name = if config_id == 11 {
+                format!("u43-home-{home_id}")
+            } else {
+                format!("{}\u{1f}u43-home-{home_id}", root.name)
+            };
+            let DeckKind::Normal(settings) = &mut home.kind.kind else {
+                panic!("fixture home requires a normal deck")
+            };
+            settings.config_id = config_id;
+            store.put(&home)?;
+        }
+        assert_eq!(store.card(card_ids[0])?.unwrap().deck_id, DeckId(1));
+        for (card_id, home_id) in card_ids.into_iter().skip(1).zip([43004, 43004, 43009, 43011]) {
+            let mut placed = store.card(card_id)?.unwrap();
+            placed.deck_id = DeckId(home_id);
+            store.put(&placed)?;
+        }
         Ok(())
     });
-    let protected = common::steps::dump(&h.collection);
-    assert!(h.review.head(id, 3).is_err());
-    assert!(matches!(
-        h.review.peek_first_card(DeckId(1)).unwrap(),
-        PeekResult::Refused(Refusal::PresetUnsupported { .. })
-    ));
-    assert_eq!(common::steps::dump(&h.collection), protected);
+
+    let (session, offered) = study.start();
+    let offered_card = offered
+        .items
+        .first()
+        .expect("supported session must offer a card")
+        .clone();
+    let notifications = study.engine.stream().subscribe();
+    let original_times: Vec<_> = {
+        let snapshot = study.collection.reader(ReaderRole::Query).unwrap();
+        [1, 4, 9, 11]
+            .into_iter()
+            .map(|number| {
+                let config_id = DeckConfigId(number);
+                let configuration = snapshot.deck_config(config_id).unwrap().unwrap();
+                (configuration.id, configuration.mtime)
+            })
+            .collect()
+    };
+    edit(&study, |store| {
+        for number in [1, 4, 9, 11] {
+            let mut configuration = store.deck_config(DeckConfigId(number))?.unwrap();
+            let mut encoded = configuration.config.to_bytes().into_owned();
+            encoded.extend_from_slice(&[0x3a, 0x01, 0x01]);
+            configuration.config = ProtoBlob::decode(&encoded).unwrap();
+            store.put(&configuration)?;
+        }
+        Ok(())
+    });
+
+    let required_presets = vec![DeckConfigId(1), DeckConfigId(4), DeckConfigId(9)];
+    let mut unsupported_count = 0;
+    while let Some(delivery) = notifications.try_recv() {
+        if let meguri_engine::EventKind::Extension(extension) = &delivery.kind
+            && let Some(SessionEvent::PresetUnsupported { session_id, preset_ids }) =
+                extension.as_any().downcast_ref::<SessionEvent>()
+        {
+            assert_eq!(*session_id, session);
+            assert_eq!(preset_ids, &required_presets);
+            unsupported_count += 1;
+        }
+    }
+    assert!(
+        unsupported_count > 0,
+        "preset commit must publish a typed refusal before any head request"
+    );
+
+    let committed_rows = common::steps::dump(&study.collection);
+    let unsupported = EngineError::Unsupported {
+        feature: "FSRS parameters".into(),
+    };
+    assert_eq!(
+        study
+            .review
+            .answer(
+                session,
+                offered_card.card_id,
+                Rating::Easy,
+                offered_card.state_token,
+                EpochMillis(study.clock.now_ms()),
+                100,
+            )
+            .unwrap_err(),
+        unsupported
+    );
+    assert_eq!(study.review.head(session, 3).unwrap_err(), unsupported);
+    match study.review.peek_first_card(DeckId(1)).unwrap() {
+        PeekResult::Refused(Refusal::PresetUnsupported { preset_ids }) => {
+            assert_eq!(preset_ids, required_presets);
+        }
+        result => panic!("studied tree must refuse unsupported presets: {result:?}"),
+    }
+    {
+        let snapshot = study.collection.reader(ReaderRole::Query).unwrap();
+        for (config_id, original_time) in original_times {
+            let configuration = snapshot.deck_config(config_id).unwrap().unwrap();
+            assert_eq!(configuration.id, config_id);
+            assert_eq!(configuration.mtime, original_time);
+        }
+    }
+    assert_eq!(
+        common::steps::dump(&study.collection),
+        committed_rows,
+        "refused answer and projections must preserve every collection row"
+    );
 }
 
 #[test]
@@ -912,4 +1015,85 @@ fn c5_next_boundary_only_change_within_same_day_invalidates_before_acceptance() 
         stored
     );
     stale(&h, id, &first);
+}
+
+#[test]
+fn c13_counts_only_rebuild_notifies_with_unchanged_complete_items_without_head_poll() {
+    let h = Harness::new(5);
+    let (_, before) = h.start();
+    h.settle();
+    let stream = h.engine.stream().subscribe();
+    let notetype_id = {
+        let rows = h.collection.reader(ReaderRole::Query).unwrap();
+        let card = rows.card(h.cards[0]).unwrap().unwrap();
+        rows.note(card.note_id).unwrap().unwrap().notetype_id
+    };
+    meguri_engine::notes::add(
+        &h.collection,
+        meguri_engine::notes::AddNote {
+            notetype_id,
+            fields: vec!["later new card".into(), "response".into()],
+            tags: Vec::new(),
+            deck_id: DeckId(1),
+            guid: None,
+            update_add_defaults: false,
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+    h.settle();
+    let mut changed = Vec::new();
+    while let Some(event) = stream.try_recv() {
+        if let meguri_engine::EventKind::Extension(payload) = &event.kind
+            && let Some(SessionEvent::QueueHeadChanged { diff, .. }) = payload.as_any().downcast_ref()
+        {
+            changed.push(diff.clone());
+        }
+    }
+    let update = changed.last().expect("new count must arrive on the session channel");
+    assert_eq!(update.head.items, before.items);
+    assert_eq!(update.head.counts.new, before.counts.new + 1);
+    assert_eq!(update.head.counts.learning, before.counts.learning);
+    assert_eq!(update.head.counts.review, before.counts.review);
+    assert_eq!(update.head.valid_until, before.valid_until);
+    assert!(update.removed.is_empty());
+    assert!(update.marks.iter().all(|mark| *mark == Default::default()));
+}
+
+#[test]
+fn c17_empty_rollover_publishes_valid_until_only_diff_without_head_poll() {
+    let h = Harness::new(0);
+    let (id, before) = h.start();
+    h.settle();
+    let stream = h.engine.stream().subscribe();
+    h.clock.set_now_ms(h.clock.now_ms() + 86_400_000);
+    h.collection.check_rollover().unwrap();
+    h.settle();
+    h.review.application_barrier_for_testing().unwrap();
+    let mut updates = Vec::new();
+    let mut completions = Vec::new();
+    while let Some(event) = stream.try_recv() {
+        if let meguri_engine::EventKind::Extension(payload) = &event.kind {
+            match payload.as_any().downcast_ref::<SessionEvent>() {
+                Some(SessionEvent::QueueHeadChanged { session_id, diff }) => {
+                    assert_eq!(*session_id, id);
+                    updates.push(diff.head.clone());
+                }
+                Some(SessionEvent::Finished { session_id, state }) => {
+                    assert_eq!(*session_id, id);
+                    completions.push(state.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+    let updated = updates.last().expect("rollover must publish the new validity boundary");
+    assert_eq!(updated.items, before.items);
+    assert_eq!(updated.counts, before.counts);
+    assert!(updated.valid_until > before.valid_until);
+    let actual = meguri_engine::sched::queue::QueueProvider::default()
+        .deck_study_state(&h.collection, Some(DeckId(1)))
+        .unwrap();
+    assert!(!completions.is_empty());
+    assert!(completions.iter().all(|state| *state == actual));
 }
