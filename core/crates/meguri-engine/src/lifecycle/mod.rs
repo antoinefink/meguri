@@ -277,6 +277,7 @@ impl Engine {
         // Compose here rather than in OpenConfig::new: callers can replace
         // its public initializer list. Reopen/resume keep this complete set.
         config.initializers.register(meguri_search::sqlfns::register);
+        config.initializers.register(meguri_sched::sqlfns::register);
         {
             let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
             let mut guard = self.lock_state();

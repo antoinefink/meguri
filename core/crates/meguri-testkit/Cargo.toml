@@ -94,3 +94,7 @@ harness = false
 [[bench]]
 name = "next_states"
 harness = false
+
+[[bench]]
+name = "queue_counts"
+harness = false

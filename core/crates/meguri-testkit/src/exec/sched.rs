@@ -26,6 +26,9 @@ use crate::scenario::{FsrsNextInput, FsrsNextRequest, LogicalRef, ObservationArg
 pub(super) fn register(registry: &mut Registry) {
     registry.observation("fsrs_next", observe);
     registry.observation("timing", timing);
+    registry.observation("queue", queue_observation);
+    registry.observation("deck_counts", queue_observation);
+    registry.observation("congrats", queue_observation);
     registry.observation("fuzz_table", fuzz_table);
     registry.observation("next_states", scheduling_states);
     registry.observation("answer_labels", scheduling_states);
@@ -470,4 +473,59 @@ fn review_value(r: meguri_sched::states::engine::ReviewState) -> Result<Value, E
     let mut value = json!({"scheduled_days":r.scheduled_days,"elapsed_days":r.elapsed_days,"ease_factor":state_float(r.ease_factor)?,"lapses":r.lapses,"leeched":r.leeched});
     memory_value(&mut value, r.memory_state)?;
     Ok(value)
+}
+
+/// Q2-Q4: complete typed dispatch. Only deck_counts requests the explicit
+/// compatibility prelude. queue/congrats never promote a raw collection or
+/// run implicit timing writes. Product reads use the host's QueueProvider.
+fn queue_observation(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
+    use crate::scenario::ObservationKind;
+    use meguri_sched::{
+        counts::{deck_tree, finished},
+        queue::{self, Environment},
+    };
+    if request.kind == ObservationKind::DeckCounts {
+        day_query_now(session)?;
+    }
+    let now = session.clock.now_secs();
+    let offset = session.clock.utc_offset_at(session.clock.now_ms());
+    let cached = session.day.valid_at(now, offset);
+    let core = |e: StorageError| ExecError::new("core_error", e.to_string());
+    let collection = session
+        .storage
+        .collection()
+        .ok_or_else(|| invalid("no collection is open"))?;
+    collection.with_snapshot(|rows| {
+        // The explicit cache is already cleared by raw writes, opens and
+        // timing-key writes. A read with no prior query computes day math only.
+        let day=if let Some(day)=cached {day} else {
+            let config=meguri_sched::model::sched_config::SchedConfig::new(rows);
+            meguri_sched::timing::sched_day(&meguri_sched::timing::DayInputs {
+                crt:rows.col().map_err(core)?.created.0, creation_offset:config.creation_offset().map_err(core)?,
+                rollover_hour:config.rollover_hour().map_err(core)?,offset,now,
+            })
+        };
+        let env=Environment::read(rows,day.today,now,day.next_day_at).map_err(core)?;
+        if request.kind==ObservationKind::Queue {
+            let q=queue::build(rows,&env,env.current).map_err(core)?;
+            let presented=q.presentation();
+            let cards=presented.iter().map(|c|session.cards.iter().position(|id|*id==c.id.0)
+                .map_or_else(||c.id.0.to_string(),|i|format!("#c{}",i+1))).collect::<Vec<_>>();
+            return Ok(json!({"cards":cards,"kinds":presented.iter().map(|c|c.kind.name()).collect::<Vec<_>>(),
+                "counts":{"new":q.counts.new,"learning":q.counts.learning,"review":q.counts.review}}));
+        }
+        let groups=rows.sched_deck_aggregates(env.today,env.now,env.next_day_at,env.ahead).map_err(core)?;
+        let list=deck_tree::build(&env,&groups,false);
+        if request.kind==ObservationKind::DeckCounts {
+            fn node(n:&deck_tree::Node)->Value { json!({"name":n.name,"new":n.counts.new,"learning":n.counts.learning,"review":n.counts.review,"children":n.children.iter().map(node).collect::<Vec<_>>()}) }
+            return Ok(Value::Array(list.nodes.iter().map(node).collect()));
+        }
+        let q=queue::build(rows,&env,env.current).map_err(core)?;
+        let tomorrow=deck_tree::build(&env,&groups,true);
+        let empty=rows.sched_subtree_empty(&env.subtree(env.current,false)).map_err(core)?;
+        let state=finished::build(&env,&q,&list,&tomorrow,&groups,empty);
+        Ok(json!({"learn_remaining":state.learning_remaining,"secs_until_next_learn":state.secs_until_next_learn,
+            "review_remaining":state.review_remaining,"new_remaining":state.new_remaining,
+            "have_sched_buried":state.sibling_buried>0,"have_user_buried":state.user_buried>0}))
+    })
 }

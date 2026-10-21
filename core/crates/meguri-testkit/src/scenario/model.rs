@@ -1806,6 +1806,8 @@ pub enum ObservationKind {
     FuzzTable,
     NetProbe,
     Queue,
+    DeckCounts,
+    Congrats,
     /// deck-ops.md K12.
     DeckTree,
     /// deck-ops.md K11.
@@ -1870,7 +1872,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 40] = [
+    pub const ALL: [ObservationKind; 42] = [
         ObservationKind::TypeAnswer,
         ObservationKind::ReviewHtml,
         ObservationKind::MediaDir,
@@ -1885,6 +1887,8 @@ impl ObservationKind {
         ObservationKind::FuzzTable,
         ObservationKind::NetProbe,
         ObservationKind::Queue,
+        ObservationKind::DeckCounts,
+        ObservationKind::Congrats,
         ObservationKind::DeckTree,
         ObservationKind::Decks,
         ObservationKind::Render,
@@ -1929,6 +1933,8 @@ impl ObservationKind {
             ObservationKind::FuzzTable => "fuzz_table",
             ObservationKind::NetProbe => "net_probe",
             ObservationKind::Queue => "queue",
+            ObservationKind::DeckCounts => "deck_counts",
+            ObservationKind::Congrats => "congrats",
             ObservationKind::DeckTree => "deck_tree",
             ObservationKind::Decks => "decks",
             ObservationKind::Render => "render",
@@ -1970,6 +1976,9 @@ impl ObservationKind {
             | ObservationKind::MediaTrash
             | ObservationKind::MediaPending
             | ObservationKind::Timing
+            | ObservationKind::Queue
+            | ObservationKind::DeckCounts
+            | ObservationKind::Congrats
             | ObservationKind::DeckTree
             | ObservationKind::Decks
             | ObservationKind::Digest
@@ -1997,10 +2006,9 @@ impl ObservationKind {
             | ObservationKind::FsrsNext
             | ObservationKind::IgnoredBeforeCount => ArgShape::Mapping,
             ObservationKind::CardExtractors => ArgShape::Mapping,
-            ObservationKind::Queue
-            | ObservationKind::DbDump
-            | ObservationKind::Stats
-            | ObservationKind::NotetypeStructure => ArgShape::OptionalMapping,
+            ObservationKind::DbDump | ObservationKind::Stats | ObservationKind::NotetypeStructure => {
+                ArgShape::OptionalMapping
+            }
             ObservationKind::ReviewHtml | ObservationKind::Search | ObservationKind::CanonicalSearch => ArgShape::List,
         }
     }

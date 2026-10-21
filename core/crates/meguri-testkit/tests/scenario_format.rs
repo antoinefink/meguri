@@ -419,11 +419,8 @@ fn observation_text_preserves_empty_arguments_refs_and_structured_syntax() {
         (json!("queue( \t)"), ObservationKind::Queue, ObservationArgs::None),
         (json!(" \tcard( #c2 ,\t#c1 ) \t"), ObservationKind::Card, refs.clone()),
         (json!({"card": ["#c2", "#c1"]}), ObservationKind::Card, refs),
-        (
-            json!({"queue": {"deck": "A"}}),
-            ObservationKind::Queue,
-            ObservationArgs::Mapping(json!({"deck": "A"}).as_object().unwrap().clone()),
-        ),
+        (json!("deck_counts"), ObservationKind::DeckCounts, ObservationArgs::None),
+        (json!("congrats"), ObservationKind::Congrats, ObservationArgs::None),
         (
             json!({"search": [{"query": "deck:A"}]}),
             ObservationKind::Search,
@@ -721,7 +718,10 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
             "steps: [{observe: [{canonical_search: [a]}, {canonical_search: [b]}]}]",
             "canonical_search is requested more than once",
         ),
-        ("steps: [{observe: [{queue: {deck: 1}}]}]", "deck"),
+        ("steps: [{observe: [{queue: {deck: 1}}]}]", "does not take"),
+        ("steps: [{observe: [{queue: {deck: A}}]}]", "does not take"),
+        ("steps: [{observe: [{deck_counts: {}}]}]", "does not take"),
+        ("steps: [{observe: [{congrats: []}]}]", "reference"),
         ("steps: [{handoff: elsewhere}]", "unknown variant"),
         ("steps: [{handoff: oracle}, {handoff: oracle}]", "alternate"),
         (
@@ -2255,4 +2255,30 @@ fn stock_render_handoff_needs_only_the_new_collection_and_handoff_on_meguri() {
     assert!(meguri.observations.is_empty(), "{}", meguri.summary());
     let oracle = parsed.needs_on(scenario::Side::Oracle);
     assert!(oracle.observations.contains("render_status"), "{}", oracle.summary());
+}
+
+#[test]
+fn queue_count_requests_follow_the_frozen_no_argument_schema() {
+    let schema: Value =
+        serde_json::from_str(&std::fs::read_to_string(conformance_dir().join("schema/scenario.schema.json")).unwrap())
+            .unwrap();
+    let observation = &schema["$defs"]["observation_request"];
+    // Locate the mapping alternative by its properties, keeping this test
+    // tied to the checked-in schema instead of a second invented shape.
+    let alternatives = observation["anyOf"].as_array().unwrap();
+    for name in ["queue", "deck_counts", "congrats"] {
+        let mapping = alternatives
+            .iter()
+            .find_map(|v| v.get("properties").and_then(|p| p.get(name)))
+            .expect("schema mapping");
+        assert_eq!(mapping["type"], json!("null"));
+        for request in [json!(name), json!({name:null})] {
+            let value = json!({"id":"sched/requests","clock":{"tz":"UTC","start":"2030-01-15T10:00:00"},"steps":[{"observe":[request]}]});
+            assert!(meguri_testkit::scenario::Scenario::from_value(&value).is_ok());
+        }
+        for arg in [json!({}), json!({"deck":"A"}), json!(["#c1"])] {
+            let value = json!({"id":"sched/requests","clock":{"tz":"UTC","start":"2030-01-15T10:00:00"},"steps":[{"observe":[{name:arg}]}]});
+            assert!(meguri_testkit::scenario::Scenario::from_value(&value).is_err());
+        }
+    }
 }

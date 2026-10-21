@@ -257,3 +257,23 @@ fn resume_recovery_runs_after_external_change_checks_without_changing_generation
     host.media().unwrap().add("current.txt", b"current generation").unwrap();
     host.close().unwrap();
 }
+
+#[test]
+fn real_deck_counts_provider_is_wired_observes_writes_and_keeps_backup_unavailable() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = CoreHost::open(config(dir.path())).unwrap();
+    let c = host.collection().unwrap();
+    let first = host.queues().deck_counts(&c).unwrap();
+    assert!(!first.nodes.is_empty());
+    let built = host.queues().queue(&c, None).unwrap();
+    meguri_engine::decks::add(&c, "U41 provider".into()).unwrap();
+    assert_eq!(
+        built.validity.action(),
+        meguri_sched::queue::rebuild_rules::Action::Rebuild
+    );
+    let tree = host.queues().deck_counts(&c).unwrap();
+    assert!(tree.nodes.iter().any(|n| n.name == "U41 provider"));
+    meguri_host::wiring::require(meguri_engine::ports::ServicePort::DeckCounts).unwrap();
+    assert!(host.backup().before_deck_delete().is_err());
+    host.close().unwrap();
+}

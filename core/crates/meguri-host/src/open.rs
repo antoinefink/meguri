@@ -19,6 +19,7 @@ pub struct CoreHost {
     media: Arc<MediaPort>,
     clock: Arc<dyn Clock>,
     backup: Arc<dyn BackupService>,
+    queues: Arc<meguri_engine::sched::queue::QueueProvider>,
 }
 
 impl CoreHost {
@@ -28,10 +29,13 @@ impl CoreHost {
         let engine = Engine::new(config.engine)?;
         let derived = DerivedHost::builder(&engine).start()?;
         let media = Arc::new(MediaPort::new(config.clock.clone()));
+        let queues = Arc::new(meguri_engine::sched::queue::QueueProvider::default());
         let ports = derived
             .ports(Ports::new())
             .open_step(media.clone())
-            .suspend_participant(media.clone());
+            .suspend_participant(media.clone())
+            .observer(queues.clone())
+            .generation_listener(queues.clone());
         wiring::validate_ports(&ports)?;
         let options = OpenConfig::new(config.clock.clone(), config.random)
             .ports(ports)
@@ -68,6 +72,7 @@ impl CoreHost {
             media,
             clock: config.clock,
             backup,
+            queues,
         })
     }
 
@@ -83,6 +88,10 @@ impl CoreHost {
     pub fn media(&self) -> Result<MediaService, EngineError> {
         MediaService::open(&self.collection()?, self.clock.clone())
     }
+    pub fn queues(&self) -> &meguri_engine::sched::queue::QueueProvider {
+        &self.queues
+    }
+
     pub fn backup(&self) -> Arc<dyn BackupService> {
         self.backup.clone()
     }

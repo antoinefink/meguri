@@ -7,3 +7,7 @@ pub mod memory;
 pub mod model;
 pub mod states;
 pub mod timing;
+
+pub mod counts;
+pub mod queue;
+pub mod sqlfns;

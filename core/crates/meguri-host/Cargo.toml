@@ -16,6 +16,7 @@ meguri-storage.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+meguri-sched.workspace = true
 serde_json.workspace = true
 meguri-engine = { workspace = true, features = ["test-hooks"] }
 meguri-model = { workspace = true, features = ["test-hooks"] }

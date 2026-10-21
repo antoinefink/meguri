@@ -388,7 +388,10 @@ fn open(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
         }
     }
     fs::copy(&fixture, &path).map_err(|e| ExecError::new("fixture_error", format!("{}: {e}", fixture.display())))?;
-    let opened = open_collection(&path, &OpenOptions::new(&*session.clock, &*session.random));
+    let opened = open_collection(
+        &path,
+        &OpenOptions::new(&*session.clock, &*session.random).initializers(scheduler_initializers()),
+    );
     // Another file: the cached day goes (D6); the open gate runs no day
     // query (`sched/day-clock` D14.2).
     session.day.clear();
@@ -571,7 +574,11 @@ fn new_collection(session: &mut Session<'_>) -> Result<(), ExecError> {
     session.storage.close()?;
     let path = session.storage.dir()?.join(COLLECTION);
     meguri_engine::bootstrap::create(&path, session.clock.as_ref(), session.random.as_ref()).map_err(core)?;
-    let collection = open_collection(&path, &OpenOptions::new(&*session.clock, &*session.random)).map_err(core)?;
+    let collection = open_collection(
+        &path,
+        &OpenOptions::new(&*session.clock, &*session.random).initializers(scheduler_initializers()),
+    )
+    .map_err(core)?;
     session.storage.opened(collection)?;
     session.day.clear();
     super::sched::day_query_now(session)?;
@@ -584,8 +591,11 @@ pub(super) fn reopen_collection(session: &mut Session<'_>) -> Result<(), ExecErr
     collection(session)?;
     session.storage.close()?;
     let path = session.storage.dir()?.join(COLLECTION);
-    let collection = open_collection(&path, &OpenOptions::new(&*session.clock, &*session.random))
-        .map_err(|e| core(format!("reopening the collection: {e}")))?;
+    let collection = open_collection(
+        &path,
+        &OpenOptions::new(&*session.clock, &*session.random).initializers(scheduler_initializers()),
+    )
+    .map_err(|e| core(format!("reopening the collection: {e}")))?;
     session.storage.opened(collection)
 }
 
@@ -888,7 +898,7 @@ fn hand_in(session: &mut Session<'_>, dir: &Path) -> Result<(), ExecError> {
     copy_handoff(dir, &to).map_err(|e| ExecError::new("handoff_error", format!("{}: {e}", dir.display())))?;
     let collection = open_collection(
         &to.join(COLLECTION),
-        &OpenOptions::new(&*session.clock, &*session.random),
+        &OpenOptions::new(&*session.clock, &*session.random).initializers(scheduler_initializers()),
     )
     .map_err(|e| ExecError::new("handoff_error", format!("opening the handed-over collection: {e}")))?;
     session.day.clear();
@@ -978,7 +988,11 @@ mod tests {
             &file,
         )
         .unwrap();
-        let opened = open_collection(&file, &OpenOptions::new(&*session.clock, &*session.random)).unwrap();
+        let opened = open_collection(
+            &file,
+            &OpenOptions::new(&*session.clock, &*session.random).initializers(scheduler_initializers()),
+        )
+        .unwrap();
         session.storage.opened(opened).unwrap();
         let sql = |session: &mut Session<'_>, sql: &str| {
             let step: Step = serde_json::from_value(json!({"db_exec": {"sql": sql}})).unwrap();
@@ -1036,4 +1050,13 @@ mod tests {
         assert_eq!(strip_field(&[0x00, 0x01], 9), None);
         assert_eq!(strip_field(&[0x0b], 9), None);
     }
+}
+
+/// Raw protocol opens keep their maintenance policy, but queue statements
+/// need the same pure scalar registrations as engine connections.
+fn scheduler_initializers() -> meguri_storage::Initializers {
+    let mut initializers = meguri_storage::Initializers::new();
+    initializers.register(meguri_search::sqlfns::register);
+    initializers.register(meguri_sched::sqlfns::register);
+    initializers
 }

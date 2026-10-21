@@ -601,11 +601,6 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
                 return bad("takes {host, port, timeout_ms?}");
             }
         }
-        ObservationKind::Queue => {
-            if map.get("deck").is_some_and(|d| !d.is_string()) {
-                return bad("deck is a deck name");
-            }
-        }
         // model-ops.md L1 and L4.
         ObservationKind::LegacyJson | ObservationKind::BlobDecode => {
             let lists_ok = map.iter().all(|(key, names)| {

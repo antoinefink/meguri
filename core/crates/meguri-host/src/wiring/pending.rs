@@ -1,19 +1,12 @@
 //! Removed by the named provider units when their real wiring lands.
 use meguri_engine::ports::{ServicePort, Unavailable};
 
-pub const PENDING: [(ServicePort, Unavailable); 6] = [
+pub const PENDING: [(ServicePort, Unavailable); 5] = [
     (
         ServicePort::Backup,
         Unavailable {
             feature: "safety backups",
             provider_unit: "U127",
-        },
-    ),
-    (
-        ServicePort::DeckCounts,
-        Unavailable {
-            feature: "deck counts",
-            provider_unit: "U41",
         },
     ),
     (

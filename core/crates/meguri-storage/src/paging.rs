@@ -69,6 +69,30 @@ pub struct StoredConfig {
 /// Typed reads (`model/row-records`): a row that cannot be read is
 /// [`StorageError::Row`]; a missing row is `None`.
 pub trait ReadRows: sealed::Connected {
+    fn sched_queue_candidates(
+        &self,
+        decks: &[DeckId],
+        phase: crate::queries::sched_queue::Phase,
+        order: u8,
+        today: u32,
+        now: i64,
+        boundary: i64,
+    ) -> Result<Vec<Card>, StorageError> {
+        crate::queries::sched_queue::candidates(self.connection(), decks, phase, order, today, now, boundary)
+    }
+    fn sched_deck_aggregates(
+        &self,
+        today: u32,
+        now: i64,
+        boundary: i64,
+        ahead: u32,
+    ) -> Result<Vec<crate::queries::sched_queue::DeckAggregate>, StorageError> {
+        crate::queries::sched_queue::aggregate(self.connection(), today, now, boundary, ahead)
+    }
+    fn sched_subtree_empty(&self, decks: &[DeckId]) -> Result<bool, StorageError> {
+        crate::queries::sched_queue::empty(self.connection(), decks)
+    }
+
     /// Execute the read-only one-column card-id statement compiled by the
     /// search crate. SQL remains inside storage; callers bind typed cells.
     fn search_card_ids(&self, sql: &str, params: &[Cell]) -> Result<Vec<CardId>, StorageError> {

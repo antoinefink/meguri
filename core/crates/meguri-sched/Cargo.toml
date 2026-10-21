@@ -11,6 +11,8 @@ fsrs.workspace = true
 # The clock seam's offsets (UtcOffset, Clock) for the day clock (timing/).
 meguri-model.workspace = true
 meguri-storage.workspace = true
+meguri-text.workspace = true
+rusqlite.workspace = true
 fuzz_rand.workspace = true
 
 [dev-dependencies]

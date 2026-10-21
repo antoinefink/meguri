@@ -158,6 +158,22 @@ impl DayClock {
         )
     }
 
+    /// Queue watches consult the maintained clock without scheduling an op.
+    pub(super) fn queue_day_is_current(&self, today: u32, boundary: i64) -> bool {
+        self.unchanged(&self.now())
+            .is_some_and(|d| d.today == today && d.next_day_at == boundary)
+    }
+
+    /// D8 report validation after a queue prelude; D4 may report a boundary equal to now.
+    pub(super) fn queue_report_is_current(&self, day: DayReport, zone: &str) -> bool {
+        let state = self.lock();
+        state.changes == state.checked
+            && !state.parked
+            && state.reported.as_ref().is_some_and(|reported| {
+                reported.day == day.today && reported.next_day_at == day.next_day_at && reported.zone == zone
+            })
+    }
+
     /// The writer's side of a check, inside a `Rollover` op (D8 steps 1 to
     /// 5; D9, D10).
     pub(crate) fn run(self: &Arc<DayClock>, ctx: &mut OpContext<'_, '_>) -> Result<DayReport, EngineError> {

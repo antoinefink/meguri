@@ -1703,6 +1703,7 @@ version = "0.0.0"
 dependencies = [
  "meguri-engine",
  "meguri-model",
+ "meguri-sched",
  "meguri-storage",
  "serde_json",
  "tempfile",
@@ -1731,7 +1732,9 @@ dependencies = [
  "fsrs",
  "meguri-model",
  "meguri-storage",
+ "meguri-text",
  "rand 0.9.4",
+ "rusqlite",
  "serde_json",
  "tempfile",
 ]
