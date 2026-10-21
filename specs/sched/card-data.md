@@ -126,7 +126,7 @@ A card leaves the new state when an operation gives a card of type 0 another typ
    - in a normal deck: `due`;
    - in a filtered deck (the card's `did` is a filtered deck): `odue` when it is not 0, otherwise `due`;
    - and 0 when that value is negative.
-   A preview answer (K5.1) saves nothing; an answer that leaves the card new saves nothing.
+   The filtered/preview branches describe reference behavior and stored-data interoperability. Meguri does not answer a card in filtered membership: `sched/answering#A12` returns `InFilteredDeck` without writes. This rule does not remove the stored original-position facts used by other operations. A preview answer (K5.1) saves nothing; an answer that leaves the card new saves nothing.
 2. **Set due date** (U48). When the card's type is 0 (whatever its queue: suspended and buried new cards too), `pos` = `odue` when `odid` is not 0, otherwise `due`, read as an unsigned 32-bit number: a negative value wraps (-1 gives 4294967295), which is the position K7 stores as that negative `due`. For any other type `pos` keeps its value, present or not.
 3. **Forget** (U48). `pos` is removed. With "Restore original position", the card's new `due` is its last position when it has one: for a card of type 0 its current position (rule 2's value), otherwise `pos` when present; else the position U48 assigns.
 4. Nothing else writes or removes `pos`: an answer of a card that is not new keeps it, and so do Change Deck, suspend, bury, reposition and every edit.
@@ -135,13 +135,13 @@ A card leaves the new state when an operation gives a card of type 0 another typ
 |---|---|---|
 | new, `due` 41 | answer Good | 41 |
 | new, `due` -1 (position 4294967295) | answer Good | 0 |
-| new in the filtered deck Cram (rescheduling on), `odue` 7 | answer Good | 7 |
+| new in filtered membership, `odue` 7 | reference answer Good; Meguri refuses (A12) | reference `pos` 7; Meguri unchanged |
 | learning, `pos` 41 | answer Good (graduates) | 41 |
 | new, `due` -1 | set due date | 4294967295 |
 | review, no `pos` | set due date | absent |
 | review, `pos` 12 | Forget | absent; `due` 12 with "Restore original position" |
 
-The first four rows are the golden of `sched/data/positions`; set due date and Forget get their scenarios with U48's ops.
+The first four reference rows are recorded in `sched/data/positions`. That full mixed-scope case requires `answer.filtered` and stays product-pending. `sched/answer/positions-normal` covers the supported normal-deck rows separately. Set Due Date and Forget retain U48’s real-operation evidence obligations.
 
 ## K7. New positions and the counter (R590)
 
@@ -158,13 +158,26 @@ The first four rows are the golden of `sched/data/positions`; set due date and F
 
 ## K8. Scenarios
 
-| Scenario | Covers | Golden |
+| Scenario | Contract | Evidence |
 |---|---|---|
-| `sched/data/answer-data` | K5 (`pos`, `s`, `d`, `dr`, `decay`, `lrt` of a first answer), `sched/presets#V6`, `#V7` | recorded |
-| `sched/data/answer-keeps-cd` | K5 (`cd` and `pos` kept by answers of review and learning cards), unknown keys | recorded; deviation `card-data-unknown-keys-answer` |
-| `sched/data/positions` | K6 rule 1 (normal deck, negative `due`, filtered deck, a later answer), K7 | recorded |
+| `sched/data/answer-data` | K5; `sched/presets#V6`, V7 | recorded |
+| `sched/data/answer-keeps-cd` | K5; retained `cd`/`pos`; unknown keys | recorded; deviation `card-data-unknown-keys-answer` |
+| `sched/data/positions` | K6, K7 | `conformance/answer-ops#H6` |
+| `sched/answer/positions-normal` | K6 rules 1 and 4; K7 | `conformance/answer-ops#H6` |
 | `sched/unbury-on-rollover/both-kinds` (U40) | K3 | recorded |
 
-The scenarios answer cards, so Meguri's executor runs them once answering exists (U44); until then they are `pending`. Their goldens already give the model's tests exact output: the `data` text after each answer (`answer-data` step 12, `answer-keeps-cd` step 6, `positions` steps 15 and 18) for card values the same goldens show (the memory states are U45's results, taken as given).
+Answer-case acceptance requires the real answer adapter and H6 evidence. H6 controls the two position cases; A12 controls refusal; D8.1 controls capability preflight.
+
+Existing recorded model-test inputs:
+
+| Case | `data` observations |
+|---|---|
+| `sched/data/answer-data` | step 12 |
+| `sched/data/answer-keeps-cd` | step 6 |
+| `sched/data/positions` | steps 15, 18 |
+
+Use each golden's corresponding card values; its memory states are U45 results.
+
+Harvest row `h151bd9c1b80b` remains deferred for the existing U48/U246 current/original/saved-position follow-up, including real Reset/Set Due Date operations. Normal-answer proof does not close that whole obligation.
 
 Meguri's own tests (`core/crates/meguri-sched/tests/card_data_roundtrip.rs`) add what no golden shows: a property test that an answer's rewrite of `s`, `d`, `dr`, `decay` and `lrt` leaves every other key, `cd` and unknown keys included, byte for byte the same over 10,000 random inputs (R588); K3's table on the helper itself; K6 rules 2 and 3 until U48's scenarios exist.
