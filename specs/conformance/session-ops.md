@@ -45,11 +45,20 @@ Historical receipts identify the prepared artifacts, before the privacy repair:
 | native compare `20261018T055309Z-13969` | PASS 8/8 |
 | whole corpus `20261018T055009Z-10577` | 431 PASS / 41 FAIL |
 
-Current obligations:
+Current evidence:
 
-| Scope | Required evidence |
+| command | args | result.json | commit | dirty | status | total/passed/failed/skipped |
+|---|---|---|---|---|---|---|
+| `tools/mg oracle` | `record sched/session/rollover/ae13` | `build/mg/oracle/20261021T035447Z-19239/result.json` | `d4ee2d87` | false | PASS | 1/1/0/0 |
+| `tools/mg oracle` | `compare sched/session/` | `build/mg/oracle/20261021T035529Z-20184/result.json` | `d4216c3e` | false | PASS | 8/8/0/0 |
+| `tools/mg oracle` | `compare --platform apple sched/session/` | `build/mg/oracle/20261021T035540Z-20857/result.json` | `d4216c3e` | false | PASS | 8/8/0/0 |
+| `tools/mg goldens-check` | `--base f53b01f634026681eeaf0addc4682fa81a4ba589` | `build/mg/goldens-check/20261021T035555Z-21314/result.json` | `d4216c3e` | false | PASS | 627/627/0/0 |
+
+| schema_files | schema_errors |
 |---|---|
-| `sched/session/rollover/ae13` | `tools/mg oracle record sched/session/rollover/ae13` |
-| `sched/session/` | `tools/mg oracle compare sched/session/` on Linux and native |
-| product activation | D8 / D10; both lanes |
-| C5 | C18 |
+| 1372 | 0 |
+
+| Pending scope | Status | Required evidence |
+|---|---|---|
+| Product activation | PENDING | D8 / D10; both product lanes |
+| C5 | PENDING | C18 |
