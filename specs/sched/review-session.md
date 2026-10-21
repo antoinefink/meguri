@@ -176,7 +176,7 @@ Result: `Started{sessionId, generation, head, counts, validUntil, timeLim}` or `
    - any card in the selected deck tree has an unsupported home preset under the shared U45 check: `PresetUnsupported` with distinct preset ids ascending. Inspect all represented homes, including suspended, buried, future and otherwise ungathered cards, not only queue entries;
    - balancing is on and any preset of the collection has an Easy Days list of length other than 0 or 7: `PresetUnsupported` with those ids ascending (`sched/load-balancer#W2`). This check is collection-wide, distinct from the home-preset check.
 2. **Optimizer.** Fire the session-start hook, which requests cancellation of training without waiting (U47, KTD8).
-3. **Selection.** Write `curDeck`/`activeDecks` through the existing select-deck op, skip-undo (`engine/undo#M2`); equal values write nothing. Complete the reserved start consistently with that write. A failed start releases its reservation and exposes no active session.
+3. **Selection.** Delegate to `decks/decks#D11`: the existing select-deck op writes only `curDeck`, skip-undo (`engine/undo#M2`), and writes nothing when that value is unchanged. Preserve `activeDecks` here. Complete the reserved start consistently with that write. A failed start releases its reservation and exposes no active session. D11 leaves R41's additional `activeDecks` behavior to U152/U175; those owners must close it for both deck-page opening and review start before final app acceptance, through the shared selection contract with write-on-change and skip-undo preserved.
 4. **Build.** Use current U41 queue and U44 cache contracts at the start instant. Build failure releases admission without a partially exposed session.
 5. **Current card.** Use `resumeCardId` when presented, otherwise head item 0 (C4).
 6. Emit `SessionStarted`; return head(3), counts, C7 `validUntil` and `timeLim`.
@@ -215,19 +215,45 @@ Returns the head item that `startSession(deckId)` would show first, or `Refused`
 A digest that changes whenever the states an answer would apply may have changed for a reason other than the passing time of day. Two tokens are compared only for equality. It is a SHA-256 over these parts, each in a fixed encoding:
 
 - the card part: the card row's `type`, `queue`, `due`, `ivl`, `factor`, `reps`, `lapses`, `left`, `odue`, `odid`, `did`, `data` (its exact bytes) and `mod`;
-- the home preset's id and its `mtime_secs` (a marker when no preset has that id), and the home deck's own desired retention (`sched/presets#V7`; present or absent);
+- the home preset's id and its `mtime_secs` (a marker when no preset has that id), the home deck's own desired retention (`sched/presets#V7`; present or absent), and the effective home-input fingerprint below;
 - `fsrsShortTermWithStepsEnabled` and `collapseTime` as read (`sched/config-keys#G2`);
 - the day number and `next_day_at` (`sched/day-clock`). The next-state engine reads both (`sched/fsrs-transitions#T14`), and `next_day_at` alone moves when the `rollover` hour or the offsets change within a day.
 
 Include the resolved U46 memory state and last-review input when either comes from history rather than stored `data` (`sched/memory-state#M2`, M3). Compute that projection at the head's state-computation instant; changes to its resolved inputs must invalidate the token even without a card-row edit. These parts cover the state inputs of `sched/fsrs-transitions#T14` except passing time. Not in it: the card's flags and `usn`, the note, the load-balancer cache (labels are recomputed after every answer instead, C9 step 5), and the time of day (C7 covers it). Setting a flag (which keeps `mod`, `tags/flags-and-marked`) therefore leaves the token as it was.
 
+| C5 additional input | Required projection |
+|---|---|
+| `sched/fsrs-transitions#T2.1`, T13 | selected list kind and length; effective parameter f32 bits; support markers |
+| T2.5, T11-T14 | effective learning/relearning steps, maximum interval, starting ease, leech threshold, resolved desired retention |
+| C12.2 / U44 | bounded answer-time cap, sibling-bury modes, leech action |
+| read semantics | existing provider bounds/defaults |
+| encoding | typed values; distinct sequence/presence boundaries; exact effective f32 bits |
+| same-second changes | equal id/mtime does not imply equal fingerprint when effective inputs differ |
+
+This ADDS to the identity fields above. Preset name, `usn`, opaque/unknown members, optimizer metadata, unused SM-2 settings and unselected older lists are not added dependencies; later unsupported-list markers remain required. If an existing required mtime changes, the before-acceptance token can still change with equal effective semantics. C12.2's after-acceptance guard remains distinct: unrelated mtime/opaque changes alone do not veto an accepted intent. Keep exact card `data`/`mod` requirements; this fingerprint neither rewrites protected bytes nor replaces the full-row precondition.
+
 The **card-row digest** used in preconditions is a different value: `RowDigest` over the whole stored row (`engine/op-model#O7`). The session reads it when it checks a token (C9 step 3) and passes it with the answer.
 
 ## C6. `renderKey` and `renderHead`
 
-- `renderKey`: a digest of the card id, `ord`, `did`, `odid`, the card's flags, the note's `mod`, and the note type's id and `mtime_secs`. A page rendered for one key stays valid while the key is unchanged. A prepared page stays valid only while `(cardId, stateToken, renderKey)` is unchanged (KTD7).
+- `renderKey`: a digest of the card id, `ord`, `did`, `odid`, the card's flags, the note's `mod`, the note type's id and `mtime_secs`, plus the render-input fingerprint below. A page rendered for one key stays valid while the key is unchanged. A prepared page stays valid only while `(cardId, stateToken, renderKey)` is unchanged (KTD7).
 - `renderHead(sessionId, renderKeys)` returns one U62 `RenderedCard` per key, with media references for preloading (R444). It runs on the interactive lane. Rendered cards are cached by `renderKey`; the cache keeps at least the last 8 keys, so head diffs and an undo reuse them. A test-only counter counts renders.
 - `answer` never renders: its result holds ids, tokens, labels, predictions, counts and flags only.
+
+The extra C6 projection is the consumed review read-set of `render/card-render-pipeline#K2`-K4, K9-K11 and `render/type-answer#A1`, A4:
+
+| Contract boundary | Captured values |
+|---|---|
+| K2 / K3 | note-type id/name/kind/CSS; selected template ordinal/name and exact question/answer text; deck presence and resolved full name, using the original deck where required |
+| K3 / type-answer A1, A4 | field values in order; declared field names/ordinals in order; font/size; tag tokens in stored order with duplicates retained |
+| K9 | effective `hideAudioPlayButtons` and `reviewExtra` |
+| K11 | render mode and host platform |
+
+All pre-existing C6 card identity, ordinal, deck ids, whole flags and note/type timestamps remain required. Fixed mode/platform cache context is valid only with identical context at peek, start and renderHead. Serialization distinguishes types and boundaries and retains exact consumed text; no Unicode normalization.
+
+Only the listed consumed values extend that identity. K5-only browser formats, other templates, unknown stored members and scheduling-only card/deck content do not extend it: `data`, daily counters and `usn` remain excluded. Appearance, zoom and media-arrival invalidation stays with its existing owners.
+
+One owned internal U62 input capture must feed both fingerprint and actual rendering/cache value; no new public DTO or second renderer is required. Recheck against the current head at point of use, not only on change delivery. If another render snapshot differs from the requested key's capture, return through the existing stale/fresh-head path instead of caching/serving that payload under the old key. An older in-flight result cannot replace a newer payload under its key. U62's exact-template-text parse validation remains unchanged. Identical inputs yield identical identities across unchanged peek/start and undo, without a global revision stamp.
 
 ## C7. `validUntil`
 
@@ -367,6 +393,7 @@ For every committed change set that is not the session's own answer, undo or red
 
 - The current `sched/queue-building#B10` inputs and row precedence decide, including ownership proof, whole-collection and generation changes. **rebuild**: the session rebuilds in the background (a `SuspendParticipant`, C16), then applies the current-card rule (C4) and emits `QueueHeadChanged`. **patch**: no rebuild; the render keys of the queued cards of the changed notes and note types are computed again.
 - Whatever the class, the session computes the tokens and render keys of the head items the change set touched (card, note, note type, deck, preset or config key) and reports changes in a head diff: `restate` when the token changed, `rerender` when the render key changed.
+- Recompute C5/C6 fingerprints for affected note/type/home-deck/config dependencies even when their timestamps are equal. Shared-note/type edits and resolved ancestor-deck renames refresh every dependent head. Unrelated entries retain their identities/pages; memory-only changes keep C6. Complete R330 head values still refresh when their settings change with equal keys, through the existing complete-item head diff/event.
 - The current card: `CurrentCardChanged{eligible}` when it is still presented and its token or render key changed (the side on screen is rendered again, R456); `{memoryOnly}` when its only change is the memory state in `data` (`s`, `d`, `dr`, `decay`, `lrt`; the change set's memory-only flag, U24): new labels and token, no new page; `{removed}` when it is no longer presented: the UI moves to the new head with "This card was changed elsewhere" (R456).
 - An op the user starts from the review screen (U48's bury, suspend, flag, forget, set due date, and editing, R1812) names the session and returns a head diff in its result: the head of a fresh build at its commit instant, with the current-card rule, computed by patching or rebuilding (C18 checks it against a fresh build).
 - A memory-state change of other cards keeps their render keys and changes their tokens.
@@ -423,6 +450,11 @@ Mandatory additional evidence:
 |---|---|
 | C2 / S3 | writer admission versus enable/end; unsupported homes on suspended/buried/future cards; invalid global Easy Days in an unused preset; admitted FSRS-off continuation |
 | C5 / M2-M3 | next_day_at-only changes; resolved history changes without a card-row edit |
+| C5 effective home inputs | two same-second parameter/step/retention edits with equal id/mtime; stale prior token writes zero; later unsupported list; bounded cap/bury/leech changes |
+| C5 identity domains | with existing stamps fixed, unknown/runtime/unused preset metadata leaves tokens equal; changed required preset mtime still changes before-acceptance identity but alone does not reject C12's accepted intent |
+| C6 / C13 | two same-second field/tag edits; selected template/CSS/type/template-name/field/type-in metadata edits; home/ancestor deck rename; correct new package with unchanged stamps |
+| C6 cache binding | race older/newer snapshots and cache insertion; no payload under a different capture's key; unchanged peek/start; repeat cache hit; answer renders zero; display config/platform/mode isolation |
+| C5 / C6 preservation | flag: C5 equal, C6 changed; usn-only: both equal; memory-only: C6 equal/no render; unrelated heads retain both keys; unknown/unselected render inputs with existing stamps fixed add no invalidation |
 | C9 / W8-W9 | two optimistic answers of one card; each accepted cache contribution counted once across commit |
 | C12.1 | declared write starts after Accepted; ordinary queued burst exceeds 1 s; every acceptance satisfies its deadline |
 | C12.3-C12.5 | crash at each state boundary; taken/capped id; different row at assigned id; unrelated future revlog; same-card committed prefixes; prepare/WAL/terminal sync failures |
