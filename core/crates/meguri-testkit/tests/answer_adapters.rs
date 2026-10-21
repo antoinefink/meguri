@@ -20,7 +20,7 @@ fn run(body: &str, executor: &MeguriExecutor) -> Value {
 
 fn witness(session: &mut Session<'_>, _: &ObservationRequest) -> Result<Value, ExecError> {
     let collection = session.engine_collection()?;
-    Ok(match session.answer_cache.as_ref() {
+    Ok(match session.held_queue.as_ref().map(|held| held.cache()) {
         Some(cache) => {
             json!({"build": cache.identity().0, "enabled": cache.enabled(), "current": cache.is_current(&collection)})
         }

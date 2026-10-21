@@ -372,6 +372,7 @@ pub struct AnswerMetadata {
     pub learning_cutoff: Option<i64>,
     pub cache_build: Option<CacheBuildId>,
     cache: Option<Weak<AnswerCache>>,
+    pub(crate) queue: Option<crate::session::held::QueueRestore>,
 }
 /// Also exposed to U43's restorer through RestoredStep::state. The row journal
 /// remains U25's authority; queue owners restore presentation/cutoff themselves.
@@ -392,6 +393,9 @@ impl UndoRestorer for AnswerRestorer {
         let Some(meta) = step.state.and_then(|s| s.downcast_ref::<AnswerMetadata>()) else {
             return;
         };
+        if let Some(queue) = &meta.queue {
+            queue.restore(step.direction);
+        }
         if step.direction == Direction::Undo
             && meta.from_queue.is_some()
             && let Some(cache) = meta.cache.as_ref().and_then(Weak::upgrade)
@@ -563,6 +567,22 @@ fn home(rows: &impl ReadRows, card: &Card) -> Result<(PresetView, meguri_model::
 }
 
 pub fn answer(collection: &Collection, request: AnswerRequest) -> Result<OpResult<AnswerResult>, EngineError> {
+    answer_with_queue(collection, request, None)
+}
+
+pub(crate) fn answer_held(
+    collection: &Collection,
+    request: AnswerRequest,
+    queue: Arc<Mutex<crate::session::held::HeldState>>,
+) -> Result<OpResult<AnswerResult>, EngineError> {
+    answer_with_queue(collection, request, Some(queue))
+}
+
+fn answer_with_queue(
+    collection: &Collection,
+    request: AnswerRequest,
+    queue: Option<Arc<Mutex<crate::session::held::HeldState>>>,
+) -> Result<OpResult<AnswerResult>, EngineError> {
     // D8 must finish with no reader held, before the writer submission.
     // The request's day/boundary belong to its recorded answer instant;
     // pending-session replay can submit that immutable event on a later day.
@@ -621,12 +641,13 @@ pub fn answer(collection: &Collection, request: AnswerRequest) -> Result<OpResul
         )
         .map_err(|e| invalid(e.to_string()))?;
         let cache = request.cache.filter(|c| c.is_current(&bound));
-        let meta = AnswerMetadata {
+        let mut meta = AnswerMetadata {
             card: card.id,
             from_queue: request.from_queue,
             learning_cutoff: request.learning_cutoff,
             cache_build: cache.as_ref().map(|c| c.build),
             cache: cache.as_ref().map(Arc::downgrade),
+            queue: None,
         };
         let scope = ctx.scope();
         scope.put_answer_card(&plan.card)?;
@@ -656,6 +677,21 @@ pub fn answer(collection: &Collection, request: AnswerRequest) -> Result<OpResul
             .filter(|s| values::siblings::allowed(card.queue, s.queue, preset.fields()))
             .map(|s| s.id)
             .collect::<Vec<_>>();
+        let queue_change = queue
+            .as_ref()
+            .map(|owner| {
+                crate::session::held::QueueRestore::prepare(
+                    owner,
+                    &plan.card,
+                    &buried,
+                    request.answered_at.whole_secs().0,
+                    request.next_day_at,
+                )
+            })
+            .transpose()?;
+        if let Some((record, _)) = &queue_change {
+            meta.queue = Some(record.clone());
+        }
         if !buried.is_empty() {
             let value = meguri_storage::ConfigValue::from(u64::from(request.today));
             if scope.config_value("lastUnburied")? != Some(value.clone()) {
@@ -684,6 +720,9 @@ pub fn answer(collection: &Collection, request: AnswerRequest) -> Result<OpResul
         }
         scope.set_col_mod(request.answered_at)?;
         ctx.set_undo_state(Arc::new(meta.clone()));
+        if let Some((record, next)) = queue_change {
+            ctx.on_commit(move |_| record.commit(next));
+        }
         if let Some(cache) = cache {
             let written = plan.card.clone();
             let preset = preset.source().id;

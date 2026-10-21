@@ -165,6 +165,28 @@ impl QueueProvider {
     pub fn queue(&self, collection: &Collection, deck: Option<DeckId>) -> Result<QueueSnapshot, EngineError> {
         self.queue_with_ownership(collection, deck, Arc::new(|_| false))
     }
+    /// E2 compatibility presentation uses the same gather, with pure timing.
+    /// It performs no D8 maintenance, admission, selection or current ownership.
+    pub fn compatibility_queue(
+        &self,
+        collection: &Collection,
+        deck: Option<DeckId>,
+    ) -> Result<queue::Queue, EngineError> {
+        let lease = collection.reader(ReaderRole::Interactive)?;
+        let rows = lease.snapshot()?;
+        let clock = collection.core.exec.clock.as_ref();
+        let at = clock.now_ms();
+        let config = meguri_sched::model::sched_config::SchedConfig::new(&*rows);
+        let day = meguri_sched::timing::sched_day(&meguri_sched::timing::DayInputs {
+            crt: rows.col()?.created.0,
+            creation_offset: config.creation_offset()?,
+            rollover_hour: config.rollover_hour()?,
+            offset: clock.utc_offset_at(at),
+            now: at.div_euclid(1000),
+        });
+        let env = Environment::read(&*rows, day.today, at.div_euclid(1000), day.next_day_at)?;
+        Ok(queue::build(&*rows, &env, deck.unwrap_or(env.current))?)
+    }
     /// U43 supplies proof for its own answer/undo/redo seq in this generation.
     /// The callback runs on the writer and must not wait for another op.
     pub fn queue_with_ownership(

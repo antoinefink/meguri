@@ -227,10 +227,8 @@ pub struct Session<'a> {
     pub storage: super::storage::Storage,
     /// The day clock's cached day (`sched/day-clock` D6; `exec/sched.rs`).
     pub day: meguri_engine::DayCache,
-    /// H2/H3 holds only the chooser cache, never U41's presentation queue.
-    pub answer_cache: Option<Arc<meguri_engine::sched::answer::AnswerCache>>,
-    pub answer_cache_held: bool,
-    pub answer_cache_boundary: i64,
+    /// E2 owns the real engine-held presentation and U44 chooser cache.
+    pub held_queue: Option<meguri_engine::session::held::HeldQueue>,
 }
 
 impl Session<'_> {
@@ -383,9 +381,7 @@ impl MeguriExecutor {
             actor: None,
             storage: Default::default(),
             day: Default::default(),
-            answer_cache: None,
-            answer_cache_held: false,
-            answer_cache_boundary: 0,
+            held_queue: None,
         };
         if self.registry.fixture_backup_witness {
             session.storage.fixture_backup_witness();
@@ -481,10 +477,9 @@ impl MeguriExecutor {
                     || matches!(other, Step::Reopen(_))
                     || matches!(other,Step::DbExec(args) if !args.sql.trim_start().to_ascii_lowercase().starts_with("select"))
                 {
-                    if let Some(c) = session.answer_cache.take() {
-                        c.invalidate();
+                    if let Some(held) = &session.held_queue {
+                        held.invalidate();
                     }
-                    session.answer_cache_held = false;
                 }
                 match result? {
                     OpResult::Done => {}
@@ -559,9 +554,7 @@ impl MeguriExecutor {
                 actor: None,
                 storage: Default::default(),
                 day: Default::default(),
-                answer_cache: None,
-                answer_cache_held: false,
-                answer_cache_boundary: 0,
+                held_queue: None,
             };
             if self.registry.fixture_backup_witness {
                 session.storage.fixture_backup_witness();

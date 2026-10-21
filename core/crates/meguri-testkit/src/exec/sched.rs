@@ -425,7 +425,8 @@ fn scheduling_states(session: &mut Session<'_>, request: &ObservationRequest) ->
             short_term_with_steps,
             learn_ahead,
         };
-        let states = if let Some(balance) = &session.answer_cache {
+        let states = if let Some(held) = &session.held_queue {
+            let balance = held.cache();
             balance.with_chooser(&collection, &card, &preset, |chooser| {
                 next_states(&mut cache, &input, chooser)
             })
@@ -453,6 +454,9 @@ fn answer_op(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecErr
         .get(spec.card.0.index())
         .ok_or_else(|| invalid("unknown answer card"))?;
     let collection = session.engine_collection()?;
+    if session.held_queue.as_ref().is_some_and(|held| !held.is_current()) {
+        session.held_queue = None;
+    }
     let rating = match spec.rating {
         crate::scenario::Rating::Again => meguri_sched::answer::Rating::Again,
         crate::scenario::Rating::Hard => meguri_sched::answer::Rating::Hard,
@@ -463,21 +467,16 @@ fn answer_op(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecErr
         &collection,
         meguri_model::ids::CardId(id),
         &mut meguri_sched::states::fsrs_glue::FsrsCache::default(),
-        session.answer_cache.clone(),
+        session.held_queue.as_ref().map(|held| held.cache()),
     )
     .map_err(|e| ExecError::new("core_error", e.to_string()))?;
-    let mut request = prediction.answer(rating, spec.time_ms);
-    // H4 deliberately has no mutable presentation queue or head validation.
-    // The kind exists solely for U25/W9's queue-side metadata.
-    if request.cache.is_some() {
-        request.from_queue = Some(match request.current {
-            meguri_sched::states::engine::State::New { .. } => meguri_sched::queue::Kind::New,
-            meguri_sched::states::engine::State::Review(_) => meguri_sched::queue::Kind::Review,
-            _ => meguri_sched::queue::Kind::Learning,
-        });
+    let request = prediction.answer(rating, spec.time_ms);
+    if let Some(held) = &session.held_queue {
+        held.answer(request)
+    } else {
+        meguri_engine::sched::answer::answer(&collection, request)
     }
-    meguri_engine::sched::answer::answer(&collection, request)
-        .map_err(|e| ExecError::new("core_error", e.to_string()))?;
+    .map_err(|e| ExecError::new("core_error", e.to_string()))?;
     Ok(OpResult::Done)
 }
 
@@ -566,9 +565,9 @@ fn review_value(r: meguri_sched::states::engine::ReviewState) -> Result<Value, E
     Ok(value)
 }
 
-/// Q2-Q4: complete typed dispatch. Only deck_counts requests the explicit
-/// compatibility prelude. queue/congrats never promote a raw collection or
-/// run implicit timing writes. Product reads use the host's QueueProvider.
+/// Q2-Q4: only deck_counts requests the explicit compatibility prelude.
+/// Queue holds the engine's E2 presentation without C2 selection/admission;
+/// congrats uses a fresh U41 build. Product queries use the host provider.
 fn queue_observation(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
     use crate::scenario::ObservationKind;
     use meguri_sched::{
@@ -577,26 +576,46 @@ fn queue_observation(session: &mut Session<'_>, request: &ObservationRequest) ->
     };
     if request.kind == ObservationKind::Queue {
         let collection = session.engine_collection()?;
-        if session.answer_cache_held
-            && (session.clock.now_secs() >= session.answer_cache_boundary
-                || session
-                    .answer_cache
-                    .as_ref()
-                    .is_some_and(|c| !c.is_current(&collection)))
+        let now = session.clock.now_secs();
+        if session
+            .held_queue
+            .as_ref()
+            .is_some_and(|held| !held.bound_to(&collection))
         {
-            if let Some(c) = session.answer_cache.take() {
-                c.invalidate();
+            session.held_queue = None;
+        }
+        if let Some(held) = &mut session.held_queue {
+            if now >= held.boundary() {
+                collection
+                    .clear_undo(meguri_engine::ClearCause::Rollover)
+                    .map_err(|e| ExecError::new("core_error", e.to_string()))?;
+                held.refresh()
+                    .map_err(|e| ExecError::new("core_error", e.to_string()))?;
+            } else if !held.is_current() {
+                held.refresh()
+                    .map_err(|e| ExecError::new("core_error", e.to_string()))?;
             }
-            session.answer_cache_held = false;
+        } else {
+            session.held_queue = Some(
+                meguri_engine::session::held::HeldQueue::build(&collection, None)
+                    .map_err(|e| ExecError::new("core_error", e.to_string()))?,
+            );
         }
-        if !session.answer_cache_held {
-            let cache = meguri_engine::sched::answer::AnswerCache::build_scenario_held(&collection)
-                .map_err(|e| ExecError::new("core_error", e.to_string()))?;
-            // A disabled chooser still registers H3's real-change witness.
-            session.answer_cache_boundary = cache.next_day_at();
-            session.answer_cache = Some(cache);
-            session.answer_cache_held = true;
-        }
+        let (presented, counts) = session.held_queue.as_ref().unwrap().read(now);
+        let cards = presented
+            .iter()
+            .map(|c| {
+                session
+                    .cards
+                    .iter()
+                    .position(|id| *id == c.id.0)
+                    .map_or_else(|| c.id.0.to_string(), |i| format!("#c{}", i + 1))
+            })
+            .collect::<Vec<_>>();
+        return Ok(
+            json!({"cards": cards, "kinds": presented.iter().map(|c| c.kind.name()).collect::<Vec<_>>(),
+            "counts": {"new": counts.new, "learning": counts.learning, "review": counts.review}}),
+        );
     }
     if request.kind == ObservationKind::DeckCounts {
         day_query_now(session)?;
@@ -620,14 +639,6 @@ fn queue_observation(session: &mut Session<'_>, request: &ObservationRequest) ->
             })
         };
         let env=Environment::read(rows,day.today,now,day.next_day_at).map_err(core)?;
-        if request.kind==ObservationKind::Queue {
-            let q=queue::build(rows,&env,env.current).map_err(core)?;
-            let presented=q.presentation();
-            let cards=presented.iter().map(|c|session.cards.iter().position(|id|*id==c.id.0)
-                .map_or_else(||c.id.0.to_string(),|i|format!("#c{}",i+1))).collect::<Vec<_>>();
-            return Ok(json!({"cards":cards,"kinds":presented.iter().map(|c|c.kind.name()).collect::<Vec<_>>(),
-                "counts":{"new":q.counts.new,"learning":q.counts.learning,"review":q.counts.review}}));
-        }
         let groups=rows.sched_deck_aggregates(env.today,env.now,env.next_day_at,env.ahead).map_err(core)?;
         let list=deck_tree::build(&env,&groups,false);
         if request.kind==ObservationKind::DeckCounts {

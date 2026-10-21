@@ -12,4 +12,5 @@ pub mod timing;
 
 pub mod counts;
 pub mod queue;
+pub mod session;
 pub mod sqlfns;

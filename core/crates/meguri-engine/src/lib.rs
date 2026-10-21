@@ -42,6 +42,7 @@ pub mod readers;
 pub mod rendering;
 pub mod sched;
 pub mod schema_gate;
+pub mod session;
 pub mod suspend;
 pub mod tags;
 pub mod threads;

@@ -1,9 +1,6 @@
-//! The scheduler's engine side. So far the day clock (U40, contract C6,
-//! `specs/sched/day-clock.md`): `rollover_op` runs one day query with its
-//! writes and unbury on a write scope; `day_clock` keeps the collection's
-//! cached day and reported values, runs the query in `Rollover` ops, and
-//! publishes `RolledOver`, `TimeZoneChanged` and `NextDayAtChanged`. The day
-//! math itself is meguri-sched's `timing`.
+//! Scheduler operations: U40 day maintenance, U41 queries, U44 answers,
+//! U46 memory resolution and U50 policy. Pure scheduling lives in meguri-sched;
+//! held presentation ownership lives in engine/session.
 
 pub mod answer;
 pub mod day_clock;

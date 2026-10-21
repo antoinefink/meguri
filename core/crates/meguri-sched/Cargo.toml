@@ -13,6 +13,7 @@ meguri-model.workspace = true
 meguri-storage.workspace = true
 meguri-text.workspace = true
 rusqlite.workspace = true
+sha2.workspace = true
 fuzz_rand.workspace = true
 
 [dev-dependencies]
