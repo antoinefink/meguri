@@ -19,26 +19,36 @@ use meguri_sched::{
 };
 
 fn card() -> meguri_model::card::Card {
-    meguri_model::card::Card {
-        id: CardId(11),
-        note_id: NoteId(7),
-        deck_id: DeckId(1),
-        ord: 0,
-        mtime: EpochSecs(4),
-        usn: Usn(2),
-        card_type: CardType::New,
-        queue: CardQueue::New,
-        due: 3,
-        interval: 0,
-        ease_factor: 0,
-        reps: 0,
-        lapses: 0,
-        remaining_steps: 0,
-        original_due: 0,
-        original_deck_id: DeckId(0),
-        flags: 5,
-        data: meguri_model::card_data::CardData::parse(r#"{"cd":"{ \"client\": 1 }","unknown": [ 1, 2 ]}"#),
-    }
+    use meguri_storage::rows::{Cell, Record};
+
+    // Decode a complete row in model/row-records R4 column order.
+    let mut cells: Vec<Cell> = [
+        // id, nid, did, ord, mod, usn
+        11,
+        7,
+        1,
+        0,
+        4,
+        2,
+        // type, queue, due
+        CardType::New.stored(),
+        CardQueue::New.stored(),
+        3,
+        // ivl, factor, reps, lapses, left, odue, odid, flags
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        5,
+    ]
+    .into_iter()
+    .map(Cell::Integer)
+    .collect();
+    cells.push(Cell::text(r#"{"cd":"{ \"client\": 1 }","unknown": [ 1, 2 ]}"#));
+    meguri_model::card::Card::from_cells(&cells).expect("valid answer fixture row")
 }
 fn preset() -> PresetView {
     PresetView::new(&DeckConfig {
