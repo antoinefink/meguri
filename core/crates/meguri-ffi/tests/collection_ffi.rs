@@ -411,6 +411,23 @@ fn exported_open_counts_review_close_reopen_upgrade_and_races() {
     );
 }
 
+// Mirrors model ChangeSet::is_empty, including flags outside the row lists.
+fn changes_empty(changes: &meguri_ffi::changes::ChangeSet) -> bool {
+    !changes.whole_collection
+        && changes.cards.is_empty()
+        && changes.notes.is_empty()
+        && changes.notetypes.is_empty()
+        && changes.decks.is_empty()
+        && changes.deck_configs.is_empty()
+        && changes.config_keys.is_empty()
+        && changes.tags.is_empty()
+        && changes.revlog_added.is_empty()
+        && changes.revlog_removed.is_empty()
+        && changes.media_added.is_empty()
+        && changes.media_removed.is_empty()
+        && !changes.collection_row
+}
+
 // Runs within the single process-runtime test above, using only real exports.
 fn typed_surface(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>, zoo: i64) -> (i64, i64) {
     use meguri_ffi::{decks, mutations::MutationSummary, notes, notetypes, suspend, tags, undo};
@@ -459,11 +476,35 @@ fn typed_surface(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>, zo
             }
         }
     ));
+    let tree = deck_tree::deck_tree_with_counts().unwrap();
+    let root = tree
+        .nodes
+        .iter()
+        .find(|node| node.id == deck.id)
+        .expect("renamed deck at root");
+    assert_eq!(root.name, "Surface renamed");
+    assert!(root.browser_collapsed, "deck {} should initially be collapsed", deck.id);
+    let expanding = decks::start_collapse_decks(vec![deck.id], decks::DeckCollapseScope::Browser, false).unwrap();
+    let (outcome, more) = finish(rx, expanding.handle.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    let expanded = expanding.result.result().unwrap().unwrap();
+    assert!(
+        !changes_empty(&expanded.changes),
+        "expand deck {}: {expanded:?}",
+        deck.id
+    );
+    summaries.push(expanded);
     let collapsing = decks::start_collapse_decks(vec![deck.id], decks::DeckCollapseScope::Browser, false).unwrap();
     let (outcome, more) = finish(rx, collapsing.handle.id);
     events.extend(more);
     assert_eq!(outcome, JobOutcome::Succeeded);
     let collapsed = collapsing.result.result().unwrap().unwrap();
+    assert!(
+        changes_empty(&collapsed.changes),
+        "collapse deck {}: {collapsed:?}",
+        deck.id
+    );
     summaries.push(collapsed);
     let moving = decks::start_move_decks(vec![deck.id], None).unwrap();
     let (outcome, more) = finish(rx, moving.handle.id);
@@ -471,6 +512,11 @@ fn typed_surface(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>, zo
     assert_eq!(outcome, JobOutcome::Succeeded);
     let moved = moving.result.result().unwrap().unwrap();
     assert_eq!(moved.count, 0);
+    assert!(
+        changes_empty(&moved.summary.changes),
+        "move root deck {}: {moved:?}",
+        deck.id
+    );
     summaries.push(moved.summary);
 
     let nt = notetypes::notetype_names()
@@ -717,13 +763,30 @@ fn typed_surface(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>, zo
     assert_eq!(absent.count, 0);
     assert!(absent.summary.is_none());
     for summary in summaries {
-        let event = events.iter().find(|e| e.seq == summary.seq).expect("commit envelope");
-        assert_eq!(event.generation, summary.generation);
+        let envelopes: Vec<_> = events
+            .iter()
+            .filter(|e| e.seq == summary.seq && matches!(&e.kind, CoreEventKind::Changes { .. }))
+            .collect();
+        if changes_empty(&summary.changes) {
+            assert!(
+                envelopes.is_empty(),
+                "no-op published Changes: {summary:?}; {envelopes:?}"
+            );
+            continue;
+        }
+        assert_eq!(
+            envelopes.len(),
+            1,
+            "expected one commit envelope: {summary:?}; {envelopes:?}"
+        );
+        let event = envelopes[0];
+        assert_eq!(event.generation, summary.generation, "summary: {summary:?}");
         assert_eq!(
             event.kind,
             CoreEventKind::Changes {
-                changes: summary.changes
-            }
+                changes: summary.changes.clone()
+            },
+            "summary: {summary:?}"
         );
     }
     (note.id, nt)

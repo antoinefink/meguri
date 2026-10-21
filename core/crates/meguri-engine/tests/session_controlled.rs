@@ -192,6 +192,7 @@ fn session_end_and_restart_cannot_turn_a_committed_restore_into_retryable_failur
         gate.wait_entered();
         let review = h.review.clone();
         let (enter, entered) = mpsc::channel();
+        let (done, completed) = mpsc::channel();
         let lifecycle = h
             .engine
             .threads()
@@ -200,15 +201,19 @@ fn session_end_and_restart_cannot_turn_a_committed_restore_into_retryable_failur
                 meguri_engine::Qos::Default,
                 move |_| {
                     enter.send(()).unwrap();
-                    if restart {
+                    let result = if restart {
                         review.start(DeckId(1), None).map(Some)
                     } else {
                         review.end(id).map(|_| None)
-                    }
+                    };
+                    done.send(()).unwrap();
+                    result
                 },
             )
             .unwrap();
         entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(matches!(completed.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert!(h.review.try_pending_restore(UndoScope::Session(id), false).is_err());
         assert_eq!(h.review.active_session(), Some(id));
         gate.open();
         assert!(matches!(restore.join().unwrap(), Ok(HistoryRestore::Session(_))));

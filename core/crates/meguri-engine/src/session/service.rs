@@ -41,7 +41,7 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{
-        Arc, Mutex, Weak,
+        Arc, Condvar, Mutex, Weak,
         atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
         mpsc,
     },
@@ -52,6 +52,9 @@ use std::{
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 static NEXT_BUILD: AtomicU64 = AtomicU64::new(1);
+#[cfg(test)]
+#[path = "lifecycle_tests.rs"]
+mod lifecycle_tests;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Refusal {
     FsrsPolicyPending,
@@ -491,12 +494,48 @@ pub enum HistoryRestore {
     Session(Head),
     Global(crate::OpResult<crate::StepInfo>),
 }
+/// Excludes lifecycle owners without holding a mutex across their work or
+/// synchronous progress delivery. Session `restoring` tracks worker state.
+#[derive(Default)]
+struct LifecycleGate {
+    occupied: Mutex<bool>,
+    changed: Condvar,
+}
+struct LifecyclePermit<'a>(&'a LifecycleGate);
+impl LifecycleGate {
+    fn acquire(&self) -> LifecyclePermit<'_> {
+        let mut occupied = self.occupied.lock().unwrap();
+        while *occupied {
+            occupied = self.changed.wait(occupied).unwrap();
+        }
+        *occupied = true;
+        drop(occupied);
+        LifecyclePermit(self)
+    }
+    fn try_acquire(&self) -> Result<LifecyclePermit<'_>, EngineError> {
+        let busy = || EngineError::unavailable("review lifecycle is busy");
+        let mut occupied = self.occupied.try_lock().map_err(|_| busy())?;
+        if *occupied {
+            return Err(busy());
+        }
+        *occupied = true;
+        drop(occupied);
+        Ok(LifecyclePermit(self))
+    }
+}
+impl Drop for LifecyclePermit<'_> {
+    fn drop(&mut self) {
+        let mut occupied = self.0.occupied.lock().unwrap();
+        *occupied = false;
+        self.0.changed.notify_one();
+    }
+}
 pub struct ReviewService {
     inner: Arc<Inner>,
     threads: crate::ThreadRegistry,
     start_hooks: Mutex<Vec<Arc<dyn SessionStartHook>>>,
     worker: Mutex<Option<JoinHandle<()>>>,
-    control: Mutex<()>,
+    control: LifecycleGate,
     renders: AtomicU64,
     #[cfg(feature = "test-hooks")]
     render_hook: Mutex<Option<RenderHook>>,
@@ -552,7 +591,7 @@ impl ReviewService {
             threads: engine.threads().clone(),
             start_hooks: Mutex::new(vec![Arc::new(engine.jobs().clone())]),
             worker: Mutex::new(Some(worker)),
-            control: Mutex::new(()),
+            control: LifecycleGate::default(),
             renders: AtomicU64::new(0),
             #[cfg(feature = "test-hooks")]
             render_hook: Mutex::new(None),
@@ -626,7 +665,7 @@ impl ReviewService {
         self.inner.state.lock().unwrap().session.as_ref().map(|s| s.id)
     }
     pub fn start(&self, deck: DeckId, resume: Option<CardId>) -> Result<StartResult, EngineError> {
-        let _control = self.control.lock().unwrap();
+        let _control = self.control.acquire();
         if let Some(id) = self.active_session() {
             self.end_inner(id)?;
         }
@@ -1146,7 +1185,7 @@ impl ReviewService {
         Ok(())
     }
     pub fn end(&self, id: SessionId) -> Result<(), EngineError> {
-        let _control = self.control.lock().unwrap();
+        let _control = self.control.acquire();
         self.end_inner(id)
     }
     fn end_inner(&self, id: SessionId) -> Result<(), EngineError> {
@@ -1217,10 +1256,7 @@ impl ReviewService {
     /// Atomic short admission: never falls through to collection history.
     /// A busy lifecycle owner refuses promptly instead of waiting on a write.
     pub fn try_pending_restore(&self, scope: UndoScope, redo: bool) -> Result<Option<Head>, EngineError> {
-        let _control = self
-            .control
-            .try_lock()
-            .map_err(|_| EngineError::unavailable("review lifecycle is busy"))?;
+        let _control = self.control.try_acquire()?;
         if redo {
             self.redo_inner(scope, true, crate::CancelToken::new(), crate::ProgressSink::new())
         } else {
@@ -1234,7 +1270,7 @@ impl ReviewService {
         cancel: Arc<crate::CancelToken>,
         progress: crate::ProgressSink,
     ) -> Result<HistoryRestore, EngineError> {
-        let _control = self.control.lock().unwrap();
+        let _control = self.control.acquire();
         cancel.check()?;
         let (c, _) = self.bound()?;
         if self.active_session().is_some() || matches!(scope, UndoScope::Session(_)) {
@@ -1254,7 +1290,7 @@ impl ReviewService {
         }
     }
     pub fn undo(&self, scope: UndoScope) -> Result<Head, EngineError> {
-        let _control = self.control.lock().unwrap();
+        let _control = self.control.acquire();
         self.undo_inner(scope, false, None)?.ok_or_else(no_session)
     }
     fn undo_inner(
@@ -1397,7 +1433,7 @@ impl ReviewService {
         self.restored_head(&c, id, restored.seq).map(Some)
     }
     pub fn redo(&self, scope: UndoScope) -> Result<Head, EngineError> {
-        let _control = self.control.lock().unwrap();
+        let _control = self.control.acquire();
         self.redo_inner(scope, false, crate::CancelToken::new(), crate::ProgressSink::new())?
             .ok_or_else(no_session)
     }
