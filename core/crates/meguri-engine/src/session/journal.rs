@@ -441,9 +441,29 @@ impl Journal {
         self.tx.send(Work::Compact(tx)).map_err(error)?;
         rx.recv().map_err(error)?
     }
+    pub(crate) fn barrier_until(&self, deadline: Duration) -> Result<(), EngineError> {
+        let (tx, rx) = mpsc::sync_channel(1);
+        self.tx.send(Work::Barrier(tx)).map_err(error)?;
+        wait_until(rx, deadline)
+    }
+    pub(crate) fn compact_until(&self, deadline: Duration) -> Result<(), EngineError> {
+        let (tx, rx) = mpsc::sync_channel(1);
+        self.tx.send(Work::Compact(tx)).map_err(error)?;
+        wait_until(rx, deadline)
+    }
     pub(crate) fn retire(&self) -> Result<(), EngineError> {
         self.append(Record::Retired)
     }
+}
+fn wait_until(reply: mpsc::Receiver<Result<(), EngineError>>, deadline: Duration) -> Result<(), EngineError> {
+    reply
+        .recv_timeout(deadline.saturating_sub(monotonic::now()))
+        .map_err(|failure| match failure {
+            mpsc::RecvTimeoutError::Timeout => EngineError::SuspendDeadline {
+                phase: "review journal".into(),
+            },
+            mpsc::RecvTimeoutError::Disconnected => error(failure),
+        })?
 }
 impl Drop for Journal {
     fn drop(&mut self) {

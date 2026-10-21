@@ -267,7 +267,9 @@ pub(crate) fn inputs_without_revlogs(
         return Err(error("non-normal home"));
     };
     let preset = PresetView::for_config(rows, meguri_model::ids::DeckConfigId(normal.config_id))?;
-    models.model(&preset).map_err(error)?;
+    models
+        .model(&preset)
+        .map_err(|_| crate::sched::memory::error(meguri_sched::memory::resolve::MemoryError::UnsupportedParams))?;
     let retention = DeckSched::new(Some(normal), &home.common).retention(preset.fields().desired_retention);
     let mut history = Vec::new();
     if (card.card_type != meguri_model::card::CardType::New && card.data.memory_state.is_none())
@@ -281,8 +283,8 @@ pub(crate) fn inputs_without_revlogs(
             },
         )?;
     }
-    let resolved =
-        meguri_sched::memory::resolve::on_the_fly(models, &preset, card, &history, boundary).map_err(error)?;
+    let resolved = meguri_sched::memory::resolve::on_the_fly(models, &preset, card, &history, boundary)
+        .map_err(crate::sched::memory::error)?;
     let last = match card.data.last_review_secs {
         Some(t) => Some(t),
         None if !removed.is_empty() => meguri_sched::memory::resolve::last_review_time(&history),

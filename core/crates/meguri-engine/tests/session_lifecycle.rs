@@ -840,68 +840,212 @@ fn c16_end_drains_before_competing_enable_or_start_and_emits_one_end() {
 
 #[test]
 fn c16_failed_terminal_sync_errors_and_retains_admission_and_recovery_evidence() {
-    let h = Harness::new(8);
-    let (session_key, visible) = h.start();
-    h.settle();
-    let events = h.engine.stream().subscribe();
-    let evidence = observe_answers(&h, None);
-    h.review.fail_journal_for_testing(JournalStage::TerminalSync).unwrap();
-    let (release_writer, pending) = occupy_writer(&h.collection);
-    let subjects = accept_five(&h, session_key, visible);
-    let service = h.review.clone();
-    let (result_tx, result_rx) = mpsc::sync_channel(1);
-    let driver = ThreadRegistry::default()
-        .spawn("test-end-terminal-error", Qos::Default, move |_| {
-            result_tx.send(service.end(session_key)).unwrap();
+    let fixture = Harness::new(8);
+    let (active_id, first_page) = fixture.start();
+    fixture.settle();
+    let delivered = fixture.engine.stream().subscribe();
+    let observations = observe_answers(&fixture, None);
+    fixture
+        .review
+        .fail_journal_for_testing(JournalStage::TerminalSync)
+        .unwrap();
+    let (unblock, writing) = occupy_writer(&fixture.collection);
+    let accepted_ids = accept_five(&fixture, active_id, first_page);
+    assert_eq!(accepted_ids.len(), 5);
+    let control_service = fixture.review.clone();
+    let (completion_send, completion_receive) = mpsc::sync_channel(1);
+    let outside_threads = ThreadRegistry::default();
+    let end_call = outside_threads
+        .spawn("terminal-failure-end-caller", Qos::Default, move |_| {
+            completion_send.send(control_service.end(active_id)).unwrap();
         })
         .unwrap();
-    assert!(matches!(
-        result_rx.recv_timeout(Duration::from_millis(100)),
-        Err(mpsc::RecvTimeoutError::Timeout)
-    ));
-    release_writer.send(()).unwrap();
-    pending.wait().unwrap();
-    assert!(result_rx.recv_timeout(WAIT).unwrap().is_err());
-    driver.join().unwrap();
-    assert_eq!(h.review.active_session(), Some(session_key));
-    assert_eq!(
-        enable_fsrs(&h.collection, &Default::default()).unwrap_err(),
-        EngineError::SessionActive
-    );
-    assert!(h.review.start(DeckId(1), None).is_err());
-    let path = h
+    let early_completion = completion_receive.recv_timeout(Duration::from_millis(100));
+    unblock.send(()).unwrap();
+    writing.wait().unwrap();
+    let completion = completion_receive.recv_timeout(WAIT).unwrap();
+    end_call.join().unwrap();
+    assert!(matches!(early_completion, Err(mpsc::RecvTimeoutError::Timeout)));
+    let persistent_error = completion.unwrap_err();
+    match &persistent_error {
+        EngineError::Storage(meguri_storage::StorageError::Io { detail }) => {
+            assert!(detail.contains("TerminalSync"), "wrong journal fault: {detail}");
+        }
+        other => panic!("terminal sync returned another error category: {other:?}"),
+    }
+    assert_eq!(fixture.review.active_session(), Some(active_id));
+    let evidence_path = fixture
         .collection
         .path()
         .parent()
         .unwrap()
         .join("meguri-pending-answers.jsonl");
-    let retained = fs::read(&path).unwrap();
-    let frames = journal_records(&retained);
-    assert_eq!(frames.iter().filter(|frame| frame.get("Intent").is_some()).count(), 5);
-    assert!(frames.iter().any(|frame| frame.get("Prepared").is_some()));
-    assert!(evidence.lock().unwrap().terminal.is_empty());
-    while let Some(event) = events.try_recv() {
-        if let EventKind::Extension(extension) = &event.kind {
-            assert!(
-                !matches!(extension.as_any().downcast_ref::<SessionEvent>(), Some(SessionEvent::SessionEnded { session_id }) if *session_id == session_key)
-            );
+    let retained_bytes = fs::read(&evidence_path).unwrap();
+    let retained_records = journal_records(&retained_bytes);
+    assert_eq!(
+        retained_records
+            .iter()
+            .filter(|value| value.get("Intent").is_some())
+            .count(),
+        5
+    );
+    assert!(retained_records.iter().any(|value| value.get("Prepared").is_some()));
+
+    let enable_result = enable_fsrs(&fixture.collection, &Default::default()).unwrap_err();
+    assert_eq!(enable_result, persistent_error);
+    assert_eq!(fixture.review.active_session(), Some(active_id));
+    assert_eq!(fs::read(&evidence_path).unwrap(), retained_bytes);
+    let start_result = fixture.review.start(DeckId(1), None).unwrap_err();
+    assert_eq!(start_result, persistent_error);
+    assert_eq!(fixture.review.active_session(), Some(active_id));
+    assert_eq!(fs::read(&evidence_path).unwrap(), retained_bytes);
+
+    let captured = observations.lock().unwrap();
+    assert!(captured.terminal.is_empty());
+    assert!(!captured.applied.is_empty());
+    let stored_ids = fixture.logs();
+    assert!(!stored_ids.is_empty());
+    assert!(stored_ids.len() <= accepted_ids.len());
+    let storage = fixture.collection.reader(ReaderRole::Query).unwrap();
+    let wal = fixture.collection.durability_events();
+    for receipt in &captured.applied {
+        assert!(
+            wal.syncs
+                .iter()
+                .any(|sync| !sync.succeeded && sync.through >= receipt.commit)
+        );
+        let row = storage
+            .row_image(Table::Revlog, &RowKey::Id(receipt.row[0]))
+            .unwrap()
+            .unwrap();
+        let assigned_cells: Vec<_> = receipt.row.iter().map(|value| Cell::Integer(*value)).collect();
+        assert_eq!(row, assigned_cells);
+    }
+    while let Some(envelope) = delivered.try_recv() {
+        if let EventKind::Extension(payload) = &envelope.kind {
+            if let Some(SessionEvent::SessionEnded { session_id }) = payload.as_any().downcast_ref() {
+                assert_ne!(*session_id, active_id);
+            }
         }
     }
-    // The failed file worker is not silently replaced by a new session.
-    assert_eq!(fs::read(&path).unwrap(), retained);
-    let applied = evidence.lock().unwrap().applied.clone();
-    assert!(!applied.is_empty());
-    let logs = h.logs();
-    assert!(!logs.is_empty());
-    assert!(logs.len() <= subjects.len());
-    let reader = h.collection.reader(ReaderRole::Query).unwrap();
-    for answer in &applied {
-        assert_eq!(
-            reader
-                .row_image(Table::Revlog, &RowKey::Id(answer.row[0]))
-                .unwrap()
+}
+
+#[test]
+fn c16_suspend_deadline_bounds_compaction_and_a_barrier_queued_behind_it() {
+    let fixture = Harness::new(8);
+    let (session_id, initial) = fixture.start();
+    fixture.settle();
+    fixture.collection.record_durability_events();
+    let (at_compact, compact_reached) = mpsc::sync_channel(1);
+    let (allow_compact, compact_release) = mpsc::sync_channel(1);
+    let once = Mutex::new(Some(compact_release));
+    fixture
+        .review
+        .journal_hook_for_testing(Arc::new(move |stage| {
+            if stage == JournalStage::Compact
+                && let Some(release) = once.lock().unwrap().take()
+            {
+                at_compact.send(()).unwrap();
+                release.recv_timeout(WAIT).unwrap();
+            }
+        }))
+        .unwrap();
+    let (allow_writer, writer) = occupy_writer(&fixture.collection);
+    let answered = accept_five(&fixture, session_id, initial);
+    allow_writer.send(()).unwrap();
+    writer.wait().unwrap();
+    fixture.review.application_barrier_for_testing().unwrap();
+
+    let callers = ThreadRegistry::default();
+    let engine = fixture.engine.clone();
+    let (first_send, first_receive) = mpsc::sync_channel(1);
+    let first = callers
+        .spawn("compact-deadline-caller", Qos::Default, move |_| {
+            let began = monotonic::now();
+            let result = engine.suspend(Duration::from_secs(1));
+            first_send.send((result, monotonic::now() - began)).unwrap();
+        })
+        .unwrap();
+    let reached = compact_reached.recv_timeout(WAIT);
+    let path = fixture
+        .collection
+        .path()
+        .parent()
+        .unwrap()
+        .join("meguri-pending-answers.jsonl");
+    let before_release = fs::read(&path).unwrap();
+    let first_reply = first_receive.recv_timeout(Duration::from_secs(2));
+    let mut later = None;
+    let mut later_reply = None;
+    if reached.is_ok() && first_reply.is_ok() {
+        let engine = fixture.engine.clone();
+        let (send, receive) = mpsc::sync_channel(1);
+        later = Some(
+            callers
+                .spawn("queued-journal-barrier-caller", Qos::Default, move |_| {
+                    let began = monotonic::now();
+                    let result = engine.suspend(Duration::from_millis(300));
+                    send.send((result, monotonic::now() - began)).unwrap();
+                })
                 .unwrap(),
-            answer.row.iter().copied().map(Cell::Integer).collect::<Vec<_>>()
         );
+        later_reply = Some(receive.recv_timeout(Duration::from_secs(1)));
     }
+    let after_timeouts = fs::read(&path).unwrap();
+    allow_compact.send(()).unwrap();
+    first.join().unwrap();
+    if let Some(caller) = later {
+        caller.join().unwrap();
+    }
+    reached.unwrap();
+    let (first_result, first_elapsed) = first_reply.unwrap();
+    assert!(matches!(first_result, Err(EngineError::SuspendDeadline { .. })));
+    assert!(first_elapsed >= Duration::from_secs(1));
+    assert!(first_elapsed < Duration::from_millis(1500));
+    let (second_result, second_elapsed) = later_reply.unwrap().unwrap();
+    assert!(matches!(second_result, Err(EngineError::SuspendDeadline { .. })));
+    assert!(second_elapsed >= Duration::from_millis(300));
+    assert!(second_elapsed < Duration::from_millis(800));
+    assert_eq!(before_release, after_timeouts);
+    let entries = journal_records(&before_release);
+    assert_eq!(entries.iter().filter(|entry| entry.get("Intent").is_some()).count(), 5);
+    assert_eq!(
+        entries.iter().filter(|entry| entry.get("Terminal").is_some()).count(),
+        5
+    );
+    let assigned: Vec<[i64; 9]> = entries
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .get("Prepared")
+                .map(|prepared| serde_json::from_value(prepared["receipt"]["row"].clone()).unwrap())
+        })
+        .collect();
+    assert_eq!(assigned.len(), 5);
+    assert_eq!(fixture.review.active_session(), Some(session_id));
+
+    fixture.engine.resume().unwrap();
+    fixture.review.flush_for_background().unwrap();
+    assert_eq!(fixture.engine.suspend(WAIT).unwrap(), SuspendOutcome::Suspended);
+    fixture.engine.resume().unwrap();
+    assert_eq!(fixture.logs().len(), 5);
+    let rows = fixture.collection.reader(ReaderRole::Query).unwrap();
+    for (card_id, receipt) in answered.iter().zip(assigned) {
+        assert_eq!(receipt[1], card_id.0);
+        assert_eq!(
+            rows.row_image(Table::Revlog, &RowKey::Id(receipt[0])).unwrap().unwrap(),
+            receipt.into_iter().map(Cell::Integer).collect::<Vec<_>>()
+        );
+        let card = rows.card(*card_id).unwrap().unwrap();
+        assert_eq!(card.reps, 1);
+        assert_eq!(card.data.last_review_secs, Some(NOW / 1000));
+    }
+    assert!(
+        fixture
+            .collection
+            .durability_events()
+            .syncs
+            .iter()
+            .any(|sync| sync.succeeded)
+    );
 }

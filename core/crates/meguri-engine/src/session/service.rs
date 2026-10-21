@@ -430,7 +430,7 @@ enum Work {
         changes: Box<meguri_model::changes::ChangeSet>,
         cards: Vec<crate::CardDelta>,
     },
-    Barrier(mpsc::SyncSender<Result<(), EngineError>>),
+    Barrier(mpsc::SyncSender<Result<(), EngineError>>, Duration),
     #[cfg(feature = "test-hooks")]
     ApplicationBarrier(mpsc::SyncSender<()>),
     Stop,
@@ -1083,7 +1083,7 @@ impl ReviewService {
     }
     fn drain_until(&self, deadline: Duration) -> Result<(), EngineError> {
         let (tx, rx) = mpsc::sync_channel(1);
-        self.inner.tx.send(Work::Barrier(tx)).map_err(invalid)?;
+        self.inner.tx.send(Work::Barrier(tx, deadline)).map_err(invalid)?;
         rx.recv_timeout(deadline.saturating_sub(crate::monotonic::now()))
             .map_err(|_| EngineError::SuspendDeadline {
                 phase: "review-session".into(),
@@ -1096,9 +1096,9 @@ impl ReviewService {
             .ok_or_else(|| EngineError::SuspendDeadline {
                 phase: "review WAL".into(),
             })??;
-        journal.barrier()?;
+        journal.barrier_until(deadline)?;
         if c.write_delay().is_none() {
-            journal.compact()?;
+            journal.compact_until(deadline)?;
         }
         Ok(())
     }
@@ -1665,6 +1665,28 @@ fn project(c: &Collection, s: &mut Session, count: usize, at: Option<i64>) -> Re
     let mut models = FsrsCache::default();
     project_snapshot(c, s, &rows, count, at, &mut models)
 }
+fn project_background(c: &Collection, s: &mut Session, seq: Seq) -> Result<Option<Head>, EngineError> {
+    let at = c.core.exec.clock.now_ms();
+    let reader = c.reader(ReaderRole::Interactive)?;
+    let rows = reader.snapshot()?;
+    match project_snapshot(c, s, &rows, 3, at, &mut FsrsCache::default()) {
+        Ok(head) => Ok(Some(head)),
+        Err(EngineError::Unsupported { feature }) if feature == "FSRS parameters" => {
+            let env = Environment::read(&*rows, 0, at.div_euclid(1000), 0)?;
+            let preset_ids = crate::sched::fsrs_policy::unsupported_home_presets(&*rows, &env.subtree(s.deck, false))?;
+            emit(
+                c,
+                Some(seq),
+                SessionEvent::PresetUnsupported {
+                    session_id: s.id,
+                    preset_ids,
+                },
+            );
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
 fn project_snapshot(
     c: &Collection,
     s: &mut Session,
@@ -2051,18 +2073,23 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
                         {
                             let mut state = inner.state.lock().unwrap();
                             if let Some(s) = state.session.as_mut().filter(|s| s.generation == event.generation) {
-                                let old = s.last.items.clone();
-                                let head = project(&c, s, 3, None)?;
-                                if old != head.items {
+                                let old = s.last.clone();
+                                let Some(head) = project_background(&c, s, event.seq)? else {
+                                    continue;
+                                };
+                                if old != head {
                                     emit(
                                         &c,
                                         Some(event.seq),
                                         SessionEvent::QueueHeadChanged {
                                             session_id: s.id,
-                                            diff: diff(&old, head),
+                                            diff: diff(&old.items, head.clone()),
                                         },
                                     );
                                 }
+                                let empty = Work::Empty { session: s.id, head };
+                                drop(state);
+                                inner.tx.send(empty).map_err(invalid)?;
                             }
                         }
                     }
@@ -2155,8 +2182,8 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
             let _ = reply.send(());
             Ok(())
         }
-        Work::Barrier(reply) => {
-            let result = bound(inner).and_then(|(_, journal)| journal.barrier());
+        Work::Barrier(reply, deadline) => {
+            let result = bound(inner).and_then(|(_, journal)| journal.barrier_until(deadline));
             let _ = reply.send(result);
             Ok(())
         }
@@ -2339,16 +2366,18 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
             if owned {
                 return Ok(());
             }
-            let old = s.last.items.clone();
-            let current = old.first().map(|h| h.card_id);
+            let old = s.last.clone();
+            let current = old.items.first().map(|h| h.card_id);
             if action == Action::Rebuild {
                 let mut presentation = s.presentation.lock().unwrap();
                 presentation.rebuild = true;
                 presentation.restore_cache = false;
             }
-            let head = project(&c, s, 3, None)?;
+            let Some(head) = project_background(&c, s, seq)? else {
+                return Ok(());
+            };
             if let Some(card) = current {
-                let prior = old.first().unwrap();
+                let prior = old.items.first().unwrap();
                 let item = head.items.iter().find(|h| h.card_id == card);
                 if item.is_none()
                     || item.is_some_and(|h| h.state_token != prior.state_token || h.render_key != prior.render_key)
@@ -2371,16 +2400,19 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
                     );
                 }
             }
-            if old != head.items {
+            if old != head {
                 emit(
                     &c,
                     Some(seq),
                     SessionEvent::QueueHeadChanged {
                         session_id: s.id,
-                        diff: diff(&old, head),
+                        diff: diff(&old.items, head.clone()),
                     },
                 );
             }
+            let empty = Work::Empty { session: s.id, head };
+            drop(state);
+            inner.tx.send(empty).map_err(invalid)?;
             Ok(())
         }
     }

@@ -1218,3 +1218,105 @@ fn c15_pending_redo_keeps_effective_instant_after_clock_moves_back() {
     assert_eq!(log.answer_millis, 200);
     assert_eq!(reader.card(item.card_id).unwrap().unwrap().reps, 1);
 }
+
+#[test]
+fn c17_external_last_card_removal_emits_finished_without_head_poll() {
+    let h = Harness::new(1);
+    let (id, shown) = h.start();
+    h.settle();
+    let stream = h.engine.stream().subscribe();
+    let removed = shown.items[0].card_id;
+    h.collection
+        .run(
+            OpSpec::named("remove presented card", OpSource::UserUndoable),
+            move |ctx| {
+                ctx.scope().remove_card(removed)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    h.settle();
+    h.review.application_barrier_for_testing().unwrap();
+    let mut empty = false;
+    let mut finished = false;
+    let actual = meguri_engine::sched::queue::QueueProvider::default()
+        .deck_study_state(&h.collection, Some(DeckId(1)))
+        .unwrap();
+    while let Some(event) = stream.try_recv() {
+        if let meguri_engine::EventKind::Extension(payload) = &event.kind {
+            match payload.as_any().downcast_ref::<meguri_engine::session::SessionEvent>() {
+                Some(meguri_engine::session::SessionEvent::QueueHeadChanged { session_id, diff }) => {
+                    assert_eq!(*session_id, id);
+                    assert!(diff.head.items.is_empty());
+                    assert_eq!(diff.removed, vec![removed]);
+                    empty = true;
+                }
+                Some(meguri_engine::session::SessionEvent::Finished { session_id, state }) => {
+                    assert_eq!(*session_id, id);
+                    assert_eq!(*state, actual);
+                    finished = true;
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(empty);
+    assert!(finished, "committed removal must reach the empty-state publisher");
+}
+
+#[test]
+fn c17_external_move_to_held_learning_emits_wait_without_head_poll() {
+    let h = Harness::new(1);
+    h.collection
+        .run(OpSpec::named("learning horizon setup", OpSource::Maintenance), |ctx| {
+            ctx.scope()
+                .set_config("collapseTime", &meguri_storage::ConfigValue::from(1200u64))?;
+            Ok(())
+        })
+        .unwrap();
+    let (id, shown) = h.start();
+    h.settle();
+    let stream = h.engine.stream().subscribe();
+    let card_id = shown.items[0].card_id;
+    let due = NOW / 1000 + 3600;
+    h.collection
+        .run(
+            OpSpec::named("move shown card beyond horizon", OpSource::SyncIncoming),
+            move |ctx| {
+                let mut card = ctx.scope().card(card_id)?.unwrap();
+                card.card_type = meguri_model::card::CardType::Learning;
+                card.queue = meguri_model::card::CardQueue::Learning;
+                card.due = i32::try_from(due).unwrap();
+                card.remaining_steps = 1;
+                ctx.scope().put(&card)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    h.settle();
+    h.review.application_barrier_for_testing().unwrap();
+    let mut waits = Vec::new();
+    let mut empty = false;
+    while let Some(event) = stream.try_recv() {
+        if let meguri_engine::EventKind::Extension(payload) = &event.kind {
+            match payload.as_any().downcast_ref::<meguri_engine::session::SessionEvent>() {
+                Some(meguri_engine::session::SessionEvent::QueueHeadChanged { session_id, diff }) => {
+                    assert_eq!(*session_id, id);
+                    assert!(diff.head.items.is_empty());
+                    empty = true;
+                }
+                Some(meguri_engine::session::SessionEvent::WaitingUntil { session_id, instant }) => {
+                    assert_eq!(*session_id, id);
+                    waits.push(*instant);
+                }
+                Some(meguri_engine::session::SessionEvent::Finished { .. }) => {
+                    panic!("the remaining learning entry requires a wait");
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(empty);
+    assert!(!waits.is_empty());
+    assert!(waits.iter().all(|instant| *instant == due - 1200));
+}
