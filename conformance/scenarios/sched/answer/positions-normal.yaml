@@ -1,0 +1,85 @@
+id: sched/answer/positions-normal
+clock:
+  tz: UTC
+  start: '2030-01-15T10:00:00'
+setup:
+  config:
+    fsrs: true
+    loadBalancerEnabled: false
+  notetypes:
+  - name: P0001
+    fields:
+    - f0001
+    - f0002
+    templates:
+    - name: t0001
+      front: '{{f0001}}'
+      back: '{{f0002}}'
+    - name: t0002
+      front: '{{f0002}}'
+      back: '{{f0001}}'
+    css: ''
+steps:
+- observe:
+  - timing
+- set_config:
+    key: nextPos
+    value: 41
+- add_note:
+    notetype: P0001
+    fields:
+    - v0001
+    - v0002
+- db_exec:
+    sql: SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'
+- set_config:
+    key: nextPos
+    value: 4294967295
+- add_note:
+    notetype: P0001
+    fields:
+    - v0003
+    - v0004
+- db_exec:
+    sql: SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'
+- set_config:
+    key: nextPos
+    value: v0000
+- add_note:
+    notetype: P0001
+    fields:
+    - v0005
+    - v0006
+- db_exec:
+    sql: SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'
+- observe:
+  - card
+- answer:
+    card: '#c1'
+    rating: good
+- observe:
+  - card(#c1)
+  - revlog(#c1)
+- answer:
+    card: '#c3'
+    rating: good
+- observe:
+  - card(#c3)
+  - revlog(#c3)
+- answer:
+    card: '#c5'
+    rating: good
+- observe:
+  - card(#c5)
+  - revlog(#c5)
+- observe:
+  - card
+- advance: 10m
+- answer:
+    card: '#c1'
+    rating: good
+- observe:
+  - card(#c1)
+  - revlog(#c1)
+- db_exec:
+    sql: SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'

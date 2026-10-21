@@ -9,6 +9,7 @@
 # nextPos "x". c5 is then moved by hand into the filtered deck Cram (rescheduling
 # on) with original due 7 before it is answered.
 id: sched/data/positions
+tags: ["needs:answer.filtered"]
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
 setup:
   config: {fsrs: true}

@@ -222,3 +222,6 @@ newLimitToday
 reviewLimitToday
 newToday
 revToday
+# Explicit finer-capability metadata (D8.1).
+needs:answer.filtered
+answer.filtered

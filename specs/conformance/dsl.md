@@ -51,7 +51,7 @@ The `compare` section (D5) is part of the value, so changing a comparison hint m
 |---|---|---|
 | `id` | yes | D1 |
 | `description` | no | one line for people |
-| `tags` | no | list of strings: matrix dimensions and other metadata read by checkers and tools, never by executors; `generated` marks generator output, `clock-free` a scenario whose observations hold at any instant (`float-determinism.md` F6.3) |
+| `tags` | no | list of strings: matrix dimensions and other metadata read by checkers and tools, never by executors; `generated` marks generator output, `clock-free` a scenario whose observations hold at any instant (`float-determinism.md` F6.3); D8.1 defines one explicit finer-capability tag for the preflight checker |
 | `clock` | yes | D5 |
 | `compare` | no | D5 |
 | `setup` | no | D6 |
@@ -217,6 +217,14 @@ An op with no output records `{}`; an op with output records `{<op>: <output>}`.
 - An observation's spec may likewise declare a finer capability, listed with observation kinds. A `template` request containing any card case needs both `template` and `template.card` (`render-ops.md` Q1.3); new-note cases need only `template`. Finer capabilities gate execution without changing the observation's wire kind or value.
 - Meguri's executor implements a part of the language through per-area adapters (`core/crates/meguri-testkit/src/exec/<area>.rs`). `meguri-cli conformance capabilities` lists them. The adapters that write and open a collection in a handoff directory count as the `handoff` op. The ability to play an actor of an actor scenario, through the parties executor, counts as the `actor` op (`sync-ops.md` S10.2).
 - **The new collection** (D6) is a capability of its own, `new_collection`, listed with the setup sections. Meguri declares it once its executor starts every scenario that needs it from a new collection made at `clock.start`: U28's bootstrap (`storage/new-collection`), or before it a stand-in that an area's spec defines (the note type area's, U29). A scenario needs it unless its first step is `open` (`storage-ops.md` P1) or it has no `setup` and touches no collection: every step is `advance`, `set_clock` or an `observe` of kinds that never read a collection (`text`, `cloze`, `image_occlusion`, `type_answer`, `fsrs_next`, `canonical_search` (`search-ops.md` S2), `card_extractors` (`extractor-ops.md` E5), and `template` when every case is a new-note case). So `smoke/runner-empty` (no steps) needs nothing, while a scenario with no setup that runs `set_config` or `db_exec`, or observes `timing`, needs it: without it the scenario is `pending`, not an `error` for want of an open collection. A live scenario needs it when Meguri runs its first segment (D9.2); an actor scenario needs it for each Meguri actor, which starts from a new collection (`sync-ops.md` S2.2, S10.2).
+
+### D8.1 Explicit filtered-answer metadata
+
+The one exact tag `needs:answer.filtered` adds the finer op need `answer.filtered` when Meguri owns an `answer` step. This is checker metadata under D4; executors do not use it to change an answer’s behavior. `conformance/answer-ops#H6` defines its scope. No other `needs:` tag is interpreted as a capability through this convention.
+
+Apply the normal capability comparison before execution: a missing `answer.filtered` gives pending under D10. The tag never produces pass, changes expected observations, catches an execution error or permits a filtered answer. Meguri does not declare this capability while filtered study is excluded.
+
+The ownership rules of D9.2/D9.3 still apply. Consider only Meguri-owned segments or actors when checking for answer steps; an oracle-only prelude adds no answer need. Authors use this tag only to declare filtered answering in the portions Meguri would execute. Do not infer it from scenario ids, labels or SQL text. Unknown/unrelated metadata tags keep their existing behavior.
 
 ## D9. Area metadata and live scenarios
 

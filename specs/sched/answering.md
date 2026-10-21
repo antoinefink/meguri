@@ -189,7 +189,7 @@ Meguri never answers with FSRS off. For reading goldens recorded with `fsrs: fal
 
 ## A12. Cards in filtered decks
 
-Meguri cannot study filtered decks (R53, R706). A card whose `odid` is not 0 has no next states in Meguri: the next-state engine refuses it with `InFilteredDeck` (`sched/fsrs-transitions#T14`), and the answer operation refuses it with the same error and writes nothing. Review-log rows of type 3 are therefore never written (`sched/revlog#E1`). Anki answers such cards with its filtered-deck states (rescheduling and preview), which no Meguri scenario uses.
+Meguri cannot study filtered decks (R53, R706). A card whose `odid` is not 0 has no next states in Meguri: the next-state engine refuses it with `InFilteredDeck` (`sched/fsrs-transitions#T14`), and the answer operation refuses it with the same error and writes nothing. Review-log rows of type 3 are therefore never written (`sched/revlog#E1`). The reference supports filtered rescheduling/preview states. A preserved mixed-scope reference scenario may contain that path; it declares the unavailable finer capability under `conformance/answer-ops#H6` and does not run as a successful Meguri case. Neither the tag nor reference output changes the product refusal.
 
 ## A13. The answer operation (engine)
 
