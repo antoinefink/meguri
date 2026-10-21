@@ -1,0 +1,56 @@
+# A learning card answered while the main list holds cards, and the fixed
+# cutoff (R620, R621, R623; specs/sched/review-session.md P2, P4, P5, P8).
+# Default preset, learn-ahead 1,200 s, FSRS on, load balancer off. Mix holds
+# learning cards #c1 (due 30 s ago) and #c2 (due in 100 s) and reviews #c3,
+# #c4, #c5 due 2 days ago, yesterday and today.
+# 1. Again on #c1 at 10:00:00: with reviews still queued there is no move; it
+#    waits behind the reviews, before #c2.
+# 2. At 10:01:30 its due has passed, but the cutoff is still 10:00:00: same
+#    order.
+# 3. Good on #c3 moves the cutoff to 10:01:30: #c1 is now due and comes
+#    before the remaining reviews.
+# 4. At 10:01:50 #c2's due has passed too: the held queue keeps it behind the
+#    reviews. A raw write drops the queue; the fresh build at 10:01:50 puts
+#    both learning cards first.
+# Needs queue held across answers (specs/conformance/session-ops.md E2).
+id: sched/session/requeue/main-not-empty
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  decks: [Mix]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Mix, fields: [learning-a, a]}
+    - {notetype: Card, deck: Mix, fields: [learning-b, b]}
+    - {notetype: Card, deck: Mix, fields: [review-a, c]}
+    - {notetype: Card, deck: Mix, fields: [review-b, d]}
+    - {notetype: Card, deck: Mix, fields: [review-c, e]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5,
+        factor = 2500, reps = v.column6, left = v.column7, data = v.column8
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 1, 1, 1894701570, 0, 2, 2, '{"s":0.4,"d":6.0,"lrt":1894701500}'),
+          (2, 1, 1, 1894701700, 0, 1, 1, '{"s":2.3,"d":5.0,"lrt":1894701000}'),
+          (3, 2, 2, -2, 3, 4, 0, '{"s":3.5,"d":5.0,"lrt":1894269600}'),
+          (4, 2, 2, -1, 4, 5, 0, '{"s":4.4,"d":6.0,"lrt":1894269600}'),
+          (5, 2, 2, 0, 5, 6, 0, '{"s":5.2,"d":4.2,"lrt":1894269600}')
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: Mix}
+  - observe: [queue]
+  - answer: {card: "#c1", rating: again, time_ms: 4000}
+  - observe: [queue]
+  - advance: 90s
+  - observe: [queue]
+  - answer: {card: "#c3", rating: good, time_ms: 6000}
+  - observe: [queue]
+  - advance: 20s
+  - observe: [queue]
+  - db_exec: {sql: "UPDATE cards SET usn = usn WHERE 0"}
+  - observe: [queue]

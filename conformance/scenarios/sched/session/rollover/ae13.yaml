@@ -1,0 +1,52 @@
+id: sched/session/rollover/ae13
+clock: {tz: UTC, start: "2030-01-16T03:40:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: QX_P01, bury_new: true, new_per_day: 1}
+  decks:
+    - {name: QX_D01, preset: QX_P01}
+  notetypes:
+    - name: QX_NT02
+      fields: [QX_F01, QX_F02]
+      templates:
+        - {name: QX_T01, front: "{{QX_F01}}", back: "{{QX_F02}}"}
+        - {name: QX_T02, front: "{{QX_F02}}", back: "{{QX_F01}}"}
+    - name: QX_NT01
+      fields: [QX_F01, QX_F02]
+      templates: [{name: QX_T01, front: "{{QX_F01}}", back: "{{QX_F02}}"}]
+  notes:
+    - {notetype: QX_NT02, deck: QX_D01, fields: [QX_V01, QX_V02]}
+    - {notetype: QX_NT01, deck: QX_D01, fields: [QX_V03, QX_V04]}
+    - {notetype: QX_NT01, deck: QX_D01, fields: [QX_V05, QX_V06]}
+    - {notetype: QX_NT01, deck: QX_D01, fields: [QX_V07, QX_V08]}
+steps:
+  - observe: [timing]
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 2, queue = 2, due = v.column2, ivl = v.column3, factor = 2500,
+        reps = v.column4, data = v.column5
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 0, 5, 4, '{"s":5.2,"d":4.2,"lrt":1894333200}'),
+          (3, 0, 3, 3, '{"s":3.5,"d":5.0,"lrt":1894506000}'),
+          (4, -1, 4, 5, '{"s":4.4,"d":6.0,"lrt":1894333200}')
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: QX_D01}
+  - observe: [queue]
+  - answer: {card: "#c4", rating: good, time_ms: 5000}
+  - observe: [queue]
+  - advance: 1m
+  - answer: {card: "#c1", rating: good, time_ms: 5000}
+  - observe: [queue, "card(#c2)"]
+  - advance: 1m
+  - answer: {card: "#c5", rating: good, time_ms: 5000}
+  - observe: [queue]
+  - set_clock: "2030-01-16T03:59:58"
+  - observe: [queue]
+  - advance: 4s
+  - observe: [timing]
+  - answer: {card: "#c3", rating: good, time_ms: 5000}
+  - observe: ["card(#c3)"]
+  - observe: [queue, undo_status]

@@ -1,0 +1,53 @@
+# Undo and redo of answers in a held queue (R720, R721, R722; specs/sched/
+# review-session.md P9). Default deck and preset, learn-ahead 1,200 s, FSRS
+# on, load balancer off. The Default deck holds learning #c1 (due 20 s ago,
+# last step), review #c2, new #c3 and learning #c4 (due in 15 s). The state
+# write empties both histories and comes before the queue is held
+# (session-ops.md E3 rules 1 and 7).
+# 1. At 10:00:30 Good graduates #c1; the answer moves the cutoff to 10:00:30,
+#    so #c4 (due 10:00:15) comes first.
+# 2. Again on #c4 requeues it behind the main list.
+# 3. Undo puts #c4 back first; undo again puts #c1 back first, with the
+#    cutoff from before its answer: #c4 is behind the main list again.
+# 4. Redo answers #c1 again but keeps that older cutoff: #c4 stays behind
+#    the main list. Redo of #c4 requeues it.
+# Counts follow every step. Needs queue, answer, undo, redo, undo_status.
+id: sched/session/undo/answer-undo-redo
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, fields: [learning-last, a]}
+    - {notetype: Card, fields: [review, b]}
+    - {notetype: Card, fields: [new, c]}
+    - {notetype: Card, fields: [learning-soon, d]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5,
+        factor = v.column6, reps = v.column7, left = v.column8, data = v.column9
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 1, 1, 1894701580, 0, 2500, 1, 1, '{"s":1.1,"d":5.5,"lrt":1894701000}'),
+          (2, 2, 2, 0, 4, 2500, 5, 0, '{"s":4.4,"d":6.0,"lrt":1894356000}'),
+          (4, 1, 1, 1894701615, 0, 2500, 2, 2, '{"s":0.4,"d":6.0,"lrt":1894701500}')
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - observe: [queue]
+  - advance: 30s
+  - answer: {card: "#c1", rating: good, time_ms: 7000}
+  - observe: [queue, undo_status]
+  - answer: {card: "#c4", rating: again, time_ms: 4000}
+  - observe: [queue, undo_status]
+  - undo: {}
+  - observe: [queue, undo_status]
+  - undo: {}
+  - observe: [queue, undo_status]
+  - redo: {}
+  - observe: [queue, undo_status]
+  - redo: {}
+  - observe: [queue, undo_status]

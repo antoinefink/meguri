@@ -1,0 +1,48 @@
+# Learning requeue with the main list empty (R621; specs/sched/
+# review-session.md P5). Default preset (steps 1m 10m), learn-ahead 1,200 s,
+# FSRS on, load balancer off. Lang holds two intraday learning cards and
+# nothing else: #c1 due 30 s ago and #c2 due in 5 minutes, both attempted.
+# The queue is held from the first read (cutoff 10:00:00).
+# 1. Again on #c1 gives it a stored due near 10:01:00, before #c2. Since
+#    the main list is empty and #c2, the first learning entry, is due later
+#    and within the learn-ahead edge, the queue moves #c1 to one second after
+#    #c2: #c2 comes first. The card row keeps its own due (db_exec).
+# 2. Two minutes later #c1's stored due has passed but #c2's has not; the
+#    counts are not 0, so the cutoff stays and the order stays #c2, #c1.
+# 3. Good on #c2 (last step) graduates it; the queue presents #c1.
+# 4. Again on #c1 with no other learning card: it is presented again.
+# Needs queue (queue-ops.md Q2) held across answers (session-ops.md E2).
+id: sched/session/requeue/after-next-learning
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  decks: [Lang]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Lang, fields: [first, a]}
+    - {notetype: Card, deck: Lang, fields: [second, b]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 1, queue = 1, due = v.column2, reps = v.column3, left = v.column4, data = v.column5
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 1894701570, 2, 2, '{"s":0.4,"d":6.0,"lrt":1894701500}'),
+          (2, 1894701900, 1, 1, '{"s":2.3,"d":5.0,"lrt":1894701300}')
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: Lang}
+  - observe: [queue]
+  - answer: {card: "#c1", rating: again, time_ms: 4000}
+  - observe: [queue]
+  - db_exec: {sql: "SELECT due, queue, reps FROM cards ORDER BY id"}
+  - advance: 2m
+  - observe: [queue]
+  - answer: {card: "#c2", rating: good, time_ms: 3000}
+  - observe: [queue]
+  - answer: {card: "#c1", rating: again, time_ms: 5000}
+  - observe: [queue]
+  - db_exec: {sql: "SELECT due, queue, reps FROM cards ORDER BY id"}

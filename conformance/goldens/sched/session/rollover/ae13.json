@@ -1,0 +1,170 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-16T03:40:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894765200,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c4", "#c1", "#c5", "#c3"],
+          "counts": {
+            "learning": 0,
+            "new": 1,
+            "review": 3
+          },
+          "kinds": ["review", "review", "new", "review"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c1", "#c5", "#c3"],
+          "counts": {
+            "learning": 0,
+            "new": 1,
+            "review": 2
+          },
+          "kinds": ["review", "new", "review"]
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c2": {
+            "data": {},
+            "did": "Day",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894765260,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": -2,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        },
+        "queue": {
+          "cards": ["#c5", "#c3"],
+          "counts": {
+            "learning": 0,
+            "new": 1,
+            "review": 1
+          },
+          "kinds": ["new", "review"]
+        }
+      },
+      {},
+      {},
+      {
+        "queue": {
+          "cards": ["#c3", "#c5"],
+          "counts": {
+            "learning": 1,
+            "new": 0,
+            "review": 1
+          },
+          "kinds": ["review", "learning"]
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c3", "#c5"],
+          "counts": {
+            "learning": 1,
+            "new": 0,
+            "review": 1
+          },
+          "kinds": ["review", "learning"]
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 1,
+          "next_day_at": 1894852800,
+          "now": 1894766402,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c3": {
+            "data": {
+              "d": 4.99,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894766402,
+              "s": 13.5874
+            },
+            "did": "Day",
+            "due": 14,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 13,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894766402,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 4,
+            "type": 2,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "queue": {
+          "cards": ["#c5", "#c2"],
+          "counts": {
+            "learning": 1,
+            "new": 1,
+            "review": 0
+          },
+          "kinds": ["learning", "new"]
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": null
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "eb8f9a3655be51ed1a69be5f4332d8716984d3c6270379a03d5a8f27adfea68a",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/session/rollover/ae13",
+  "scenario_sha256": "df2244668ab8c7dbb390589a577676301c28e9b18cbcd09e63328c18ea8b70fb",
+  "tz": "UTC"
+}

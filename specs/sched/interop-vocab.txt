@@ -185,3 +185,5 @@ leechAction
 conf
 common
 WeightedIndex
+timeLim
+activeDecks

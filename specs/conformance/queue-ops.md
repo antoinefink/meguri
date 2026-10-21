@@ -27,7 +27,7 @@ The decks area's op (`deck-ops.md` K7, U28): `{deck}`, a deck by its stored huma
 
 ### Q2.2 Side effects
 
-Reading the queue writes nothing to the collection. Anki keeps the queue it built until something requires a rebuild. Meguri’s executor keeps no mutable presentation queue (a session is U43’s). For U44 scenarios it can retain only the load-balancer cache defined by `answer-ops.md` H2/H3; that cache does not change Q2’s presentation value or Q2.3’s fresh-build prerequisites.
+Reading the queue writes nothing to the collection. Both executors retain compatibility presentation state and any load-balancer cache under `session-ops.md` E2 and `answer-ops.md` H2/H3. This is distinct from production C2 admission. Q2.3 still governs fresh builds; subsequent held reads follow part P.
 
 ### Q2.3 Reading a fresh build
 
@@ -38,7 +38,7 @@ A queue read shows a fresh build only when Anki has none held, so queue scenario
 - right after an op that changes cards (other than flags), decks or presets: `add_note`, `legacy_update`, `db_exec` with a statement other than `select` (which empties every cached view on both executors, `record-ops.md` W1), and the like;
 - after the clock moved to another day.
 
-After `advance` within a day, or after `set_config`, a scenario first selects another deck and then the studied deck again (`set_current_deck` twice), or runs a `db_exec` that changes nothing (`UPDATE cards SET usn = usn WHERE 0`). Reads after `answer` show the queue the session keeps (U43's scenarios, not this file's).
+After `advance` within a day, or after `set_config`, a scenario first selects another deck and then the studied deck again (`set_current_deck` twice), or runs a `db_exec` that changes nothing (`UPDATE cards SET usn = usn WHERE 0`). Reads after `answer` show the held presentation (`session-ops.md` E1-E3), rather than a fresh build.
 
 ## Q3. `deck_counts` (observation kind)
 

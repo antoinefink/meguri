@@ -1,0 +1,52 @@
+# Which cards an answer may take from a held queue, and the learning count
+# (R729; specs/sched/review-session.md P4 step 1). Default preset,
+# learn-ahead 1,200 s, FSRS on, load balancer off, everything at 10:00:00.
+# Any holds learning #c5 due 10 s ago, reviews #c1 and #c2, learning #c3 due
+# in 5 minutes (behind the reviews) and learning #c4 due in 25 minutes (held,
+# not presented). The queue presents #c5, #c1, #c2, #c3 with learning count 2.
+# 1. Good on #c1, the first review, while #c5 is presented first: accepted.
+# 2. Good on #c3, presented after the reviews: accepted; requeued at its next
+#    step, still behind #c2.
+# 3. Again on #c4, which the queue holds but does not present: accepted. The
+#    removal lowers the learning count although #c4 was not counted, and the
+#    requeue raises it: the count stays 2 while three learning cards are
+#    presented.
+# Needs queue held across answers (specs/conformance/session-ops.md E2).
+id: sched/session/head/learning-anywhere
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  decks: [Any]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Any, fields: [review-a, a]}
+    - {notetype: Card, deck: Any, fields: [review-b, b]}
+    - {notetype: Card, deck: Any, fields: [learning-later, c]}
+    - {notetype: Card, deck: Any, fields: [learning-held, d]}
+    - {notetype: Card, deck: Any, fields: [learning-due, e]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5,
+        factor = 2500, reps = v.column6, left = v.column7, data = v.column8
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 2, 2, -1, 3, 4, 0, '{"s":3.5,"d":5.0,"lrt":1894356000}'),
+          (2, 2, 2, 0, 4, 5, 0, '{"s":4.4,"d":6.0,"lrt":1894356000}'),
+          (3, 1, 1, 1894701900, 0, 1, 2, '{"s":0.4,"d":6.0,"lrt":1894701500}'),
+          (4, 1, 1, 1894703100, 0, 2, 1, '{"s":2.3,"d":5.0,"lrt":1894701000}'),
+          (5, 1, 1, 1894701590, 0, 1, 1, '{"s":1.1,"d":5.5,"lrt":1894701000}')
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: Any}
+  - observe: [queue]
+  - answer: {card: "#c1", rating: good, time_ms: 5000}
+  - observe: [queue]
+  - answer: {card: "#c3", rating: good, time_ms: 5000}
+  - observe: [queue]
+  - answer: {card: "#c4", rating: again, time_ms: 5000}
+  - observe: [queue]
+  - db_exec: {sql: "SELECT due, queue, reps FROM cards ORDER BY id"}

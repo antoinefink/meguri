@@ -1,0 +1,346 @@
+# A full drain under a scripted rating policy (R1894; specs/sched/
+# review-session.md P2 to P6). Deck Drain and its child Drain::Part, default
+# preset (steps 1m 10m, relearning 10m, 20 new and 200 reviews a day),
+# learn-ahead 1,200 s, FSRS on, load balancer off, from 10:00:00 UTC. 40
+# one-card notes: 16 new cards; 9 intraday learning cards due from 10 minutes
+# ago to 50 minutes ahead (one in relearning, two held beyond the learn-ahead
+# limit at the start); 3 interday learning cards and 12 reviews due today or
+# earlier. The queue is held from the first read. Every answer is the card
+# the queue presents first (each answered card was taken from the oracle's
+# queue read just before it): Good, except Again on every 5th answer. The
+# clock moves 10 s, 40 s and 25 s in turn between answers, so learning cards
+# come due during the session. The queue (order, kinds, counts) is read after
+# every answer until it presents nothing; every card has then graduated.
+# Needs queue held across answers (specs/conformance/session-ops.md E2).
+id: sched/session/drain/mixed-40
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  decks: [Drain, "Drain::Part"]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Drain, fields: [w01, a]}
+    - {notetype: Card, deck: Drain, fields: [w02, a]}
+    - {notetype: Card, deck: Drain, fields: [w03, a]}
+    - {notetype: Card, deck: Drain, fields: [w04, a]}
+    - {notetype: Card, deck: Drain, fields: [w05, a]}
+    - {notetype: Card, deck: "Drain::Part", fields: [w06, a]}
+    - {notetype: Card, deck: "Drain::Part", fields: [w07, a]}
+    - {notetype: Card, deck: "Drain::Part", fields: [w08, a]}
+    - {notetype: Card, deck: Drain, fields: [w09, a]}
+    - {notetype: Card, deck: Drain, fields: [w10, a]}
+    - {notetype: Card, deck: Drain, fields: [w11, a]}
+    - {notetype: Card, deck: Drain, fields: [w12, a]}
+    - {notetype: Card, deck: Drain, fields: [w13, a]}
+    - {notetype: Card, deck: "Drain::Part", fields: [w14, a]}
+    - {notetype: Card, deck: "Drain::Part", fields: [w15, a]}
+    - {notetype: Card, deck: "Drain::Part", fields: [w16, a]}
+    - {notetype: Card, deck: "Drain::Part", fields: [w17, a]}
+    - {notetype: Card, deck: Drain, fields: [w18, a]}
+    - {notetype: Card, deck: Drain, fields: [w19, a]}
+    - {notetype: Card, deck: "Drain::Part", fields: [w20, a]}
+    - {notetype: Card, deck: Drain, fields: [w21, a]}
+    - {notetype: Card, deck: Drain, fields: [w22, a]}
+    - {notetype: Card, deck: "Drain::Part", fields: [w23, a]}
+    - {notetype: Card, deck: Drain, fields: [w24, a]}
+    - {notetype: Card, deck: Drain, fields: [w25, a]}
+    - {notetype: Card, deck: Drain, fields: [w26, a]}
+    - {notetype: Card, deck: "Drain::Part", fields: [w27, a]}
+    - {notetype: Card, deck: Drain, fields: [w28, a]}
+    - {notetype: Card, deck: Drain, fields: [w29, a]}
+    - {notetype: Card, deck: Drain, fields: [w30, a]}
+    - {notetype: Card, deck: Drain, fields: [w31, a]}
+    - {notetype: Card, deck: "Drain::Part", fields: [w32, a]}
+    - {notetype: Card, deck: Drain, fields: [w33, a]}
+    - {notetype: Card, deck: Drain, fields: [w34, a]}
+    - {notetype: Card, deck: Drain, fields: [w35, a]}
+    - {notetype: Card, deck: "Drain::Part", fields: [w36, a]}
+    - {notetype: Card, deck: Drain, fields: [w37, a]}
+    - {notetype: Card, deck: Drain, fields: [w38, a]}
+    - {notetype: Card, deck: Drain, fields: [w39, a]}
+    - {notetype: Card, deck: "Drain::Part", fields: [w40, a]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5,
+        factor = CASE WHEN v.column2 = 0 THEN 0 ELSE 2500 END, reps = v.column6, left = v.column7, data = v.column8
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (17, 1, 1, 1894701000, 0, 3, 1, '{"s":0.9,"d":6.1,"lrt":1894701000}'),
+          (18, 1, 1, 1894701480, 0, 1, 2, '{"s":0.4,"d":6.8,"lrt":1894701420}'),
+          (19, 1, 1, 1894701570, 0, 2, 1, '{"s":1.2,"d":5.5,"lrt":1894701300}'),
+          (20, 1, 1, 1894701690, 0, 1, 2, '{"s":0.4,"d":6.8,"lrt":1894701630}'),
+          (21, 1, 1, 1894702000, 0, 2, 1, '{"s":1.1,"d":5.9,"lrt":1894701300}'),
+          (22, 1, 1, 1894702600, 0, 1, 1, '{"s":2.3,"d":5.0,"lrt":1894700500}'),
+          (23, 1, 1, 1894703100, 0, 2, 2, '{"s":0.6,"d":6.3,"lrt":1894701500}'),
+          (24, 1, 1, 1894704600, 0, 1, 1, '{"s":2.3,"d":5.0,"lrt":1894700000}'),
+          (25, 3, 1, 1894701540, 0, 7, 1, '{"s":3.1,"d":7.2,"lrt":1894701000}'),
+          (26, 1, 3, 0, 0, 2, 1, '{"s":1.4,"d":5.6,"lrt":1894615200}'),
+          (27, 1, 3, -1, 0, 3, 1, '{"s":1.4,"d":5.6,"lrt":1894528800}'),
+          (28, 1, 3, 0, 0, 4, 1, '{"s":1.4,"d":5.6,"lrt":1894615200}'),
+          (29, 2, 2, 0, 3, 4, 0, '{"s":3.5,"d":5.0,"lrt":1894442400}'),
+          (30, 2, 2, -1, 5, 5, 0, '{"s":5.2,"d":4.2,"lrt":1894183200}'),
+          (31, 2, 2, 0, 8, 6, 0, '{"s":8.8,"d":6.6,"lrt":1894010400}'),
+          (32, 2, 2, -2, 2, 7, 0, '{"s":2.1,"d":7.9,"lrt":1894356000}'),
+          (33, 2, 2, 0, 13, 8, 0, '{"s":14.0,"d":3.3,"lrt":1893578400}'),
+          (34, 2, 2, -3, 21, 4, 0, '{"s":22.5,"d":5.5,"lrt":1892628000}'),
+          (35, 2, 2, 0, 4, 5, 0, '{"s":4.4,"d":6.0,"lrt":1894356000}'),
+          (36, 2, 2, -1, 6, 6, 0, '{"s":6.1,"d":4.8,"lrt":1894096800}'),
+          (37, 2, 2, 0, 9, 7, 0, '{"s":9.7,"d":5.1,"lrt":1893924000}'),
+          (38, 2, 2, -5, 30, 8, 0, '{"s":31.0,"d":2.9,"lrt":1891677600}'),
+          (39, 2, 2, 0, 1, 4, 0, '{"s":1.3,"d":8.4,"lrt":1894615200}'),
+          (40, 2, 2, -1, 11, 5, 0, '{"s":11.9,"d":5.8,"lrt":1893664800}')
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: Drain}
+  - observe: [queue]
+  - answer: {card: "#c17", rating: good, time_ms: 3000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c18", rating: good, time_ms: 4000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c25", rating: good, time_ms: 5000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c19", rating: good, time_ms: 6000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c1", rating: again, time_ms: 7000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c20", rating: good, time_ms: 8000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c38", rating: good, time_ms: 2000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c2", rating: good, time_ms: 3000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c1", rating: good, time_ms: 4000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c34", rating: again, time_ms: 5000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c3", rating: good, time_ms: 6000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c32", rating: good, time_ms: 7000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c4", rating: good, time_ms: 8000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c27", rating: good, time_ms: 2000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c5", rating: again, time_ms: 3000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c40", rating: good, time_ms: 4000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c9", rating: good, time_ms: 5000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c21", rating: good, time_ms: 6000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c5", rating: good, time_ms: 7000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c36", rating: again, time_ms: 8000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c10", rating: good, time_ms: 2000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c30", rating: good, time_ms: 3000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c11", rating: good, time_ms: 4000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c28", rating: good, time_ms: 5000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c12", rating: again, time_ms: 6000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c39", rating: good, time_ms: 7000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c13", rating: good, time_ms: 8000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c35", rating: good, time_ms: 2000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c18", rating: good, time_ms: 3000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c12", rating: again, time_ms: 4000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c6", rating: good, time_ms: 5000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c37", rating: good, time_ms: 6000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c7", rating: good, time_ms: 7000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c12", rating: good, time_ms: 8000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c26", rating: again, time_ms: 2000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c20", rating: good, time_ms: 3000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c2", rating: good, time_ms: 4000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c34", rating: good, time_ms: 5000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c1", rating: good, time_ms: 6000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c3", rating: again, time_ms: 7000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c26", rating: good, time_ms: 8000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c4", rating: good, time_ms: 2000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c22", rating: good, time_ms: 3000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c3", rating: good, time_ms: 4000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c8", rating: again, time_ms: 5000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c33", rating: good, time_ms: 6000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c14", rating: good, time_ms: 7000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c9", rating: good, time_ms: 8000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c5", rating: good, time_ms: 2000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c8", rating: again, time_ms: 3000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c36", rating: good, time_ms: 4000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c10", rating: good, time_ms: 5000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c29", rating: good, time_ms: 6000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c11", rating: good, time_ms: 7000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c13", rating: again, time_ms: 8000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c8", rating: good, time_ms: 2000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c15", rating: good, time_ms: 3000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c31", rating: good, time_ms: 4000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c13", rating: good, time_ms: 5000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c6", rating: again, time_ms: 6000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c16", rating: good, time_ms: 7000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c23", rating: good, time_ms: 8000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c7", rating: good, time_ms: 2000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c12", rating: good, time_ms: 3000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c6", rating: again, time_ms: 4000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c26", rating: good, time_ms: 5000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c6", rating: good, time_ms: 6000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c3", rating: good, time_ms: 7000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c14", rating: good, time_ms: 8000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c8", rating: again, time_ms: 2000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c15", rating: good, time_ms: 3000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c8", rating: good, time_ms: 4000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c16", rating: good, time_ms: 5000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c13", rating: good, time_ms: 6000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c23", rating: again, time_ms: 7000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c6", rating: good, time_ms: 8000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c23", rating: good, time_ms: 2000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c8", rating: good, time_ms: 3000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c23", rating: good, time_ms: 4000}
+  - observe: [queue]
+  - advance: 40s
+  - answer: {card: "#c24", rating: again, time_ms: 5000}
+  - observe: [queue]
+  - advance: 25s
+  - answer: {card: "#c24", rating: good, time_ms: 6000}
+  - observe: [queue]
+  - advance: 10s
+  - answer: {card: "#c24", rating: good, time_ms: 7000}
+  - observe: [queue]
+  - advance: 40s
+  - db_exec: {sql: "SELECT queue, due, reps FROM cards ORDER BY id"}

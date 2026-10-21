@@ -1,0 +1,42 @@
+# A held learning card becomes available when a read finds every count at 0
+# (R622; specs/sched/review-session.md P3). collapseTime 120 s, default
+# preset (steps 1m 10m), FSRS on, load balancer off. Wait holds new card #c1
+# and learning card #c2 due at 10:10:00, beyond the 2-minute learn-ahead
+# limit. Good on #c1 at 10:00:00 sends it to its 10-minute step (past the
+# limit too): the queue presents nothing. Reads at 10:07:59 present nothing;
+# at 10:08:00 (#c2's due − 120 s) the read presents #c2. Good graduates #c2;
+# #c1 then appears at its own due − 120 s. The congratulations data agrees
+# (sched/counts.md C7).
+# Needs queue held across answers (specs/conformance/session-ops.md E2).
+id: sched/session/cutoff/refresh-when-empty
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false, collapseTime: 120}
+  decks: [Wait]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Wait, fields: [new, a]}
+    - {notetype: Card, deck: Wait, fields: [learning, b]}
+steps:
+  - db_exec:
+      sql: >-
+        UPDATE cards SET type = 1, queue = 1, due = 1894702200, reps = 1, left = 1,
+        data = '{"s":2.3,"d":5.0,"lrt":1894701000}' WHERE nid = (SELECT max(id) FROM notes)
+  - set_current_deck: {deck: Wait}
+  - observe: [queue]
+  - answer: {card: "#c1", rating: good, time_ms: 6000}
+  - observe: [queue, congrats]
+  - db_exec: {sql: "SELECT due, queue FROM cards ORDER BY id"}
+  - advance: 479s
+  - observe: [queue]
+  - advance: 1s
+  - observe: [queue]
+  - answer: {card: "#c2", rating: good, time_ms: 6000}
+  - observe: [queue]
+  - advance: 138s
+  - observe: [queue]
+  - advance: 1s
+  - observe: [queue]

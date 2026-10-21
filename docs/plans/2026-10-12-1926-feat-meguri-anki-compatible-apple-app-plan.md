@@ -6340,7 +6340,7 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
 
 **Approach:**
 - **C5 record** (names directional):
-  - `startSession(deckId, resumeCardId?)` → `{sessionId, generation, head(3), counts by kind, validUntil, timeLim}` | `Refused{PresetUnsupported{presetIds} | FsrsPolicyPending}`, which writes nothing: `PresetUnsupported` when any card in the deck tree has a home preset for which U45 returns `UnsupportedParams` (R704), `FsrsPolicyPending` while U50's status is not `ok`. It is one op that writes `curDeck` (R326), and before building it fires the session-start hook through which U47 cancels a running optimizer job, so the rule holds whatever the UI does (KTD8).
+  - `startSession(deckId, resumeCardId?)` → `{sessionId, generation, head(3), counts by kind, validUntil, timeLim}` | `Refused{PresetUnsupported{presetIds} | FsrsPolicyPending}`. Writer-serialized admission shares U50's collection-owned reservation with enable/end (`sched/review-session#C2`). Check policy first, then every represented home preset, including suspended/buried/future cards; independently check collection-wide Easy Days lengths when balancing is on. Refusal writes nothing and fires no hook. After admission, fire optimizer cancellation and select `curDeck`/`activeDecks` skip-undo before building. Release admission only after end drains. An admitted session continues FSRS answering after sync switches FSRS off (S3).
   - `peekFirstCard(deckId)` → the first head item with no queue state and no `curDeck` write, ≤ 20 ms at 150k. U176 prepares it before the session starts (R1813); `startSession` reuses that page only when `(cardId, stateToken, renderKey)` all match its first head item, and otherwise the card is rendered again.
   - Head item: card id, note id, queue kind, `stateToken`, `renderKey` (digest of card id, ordinal, deck and original deck, flags, note mtime, notetype id and mtime), the four next states with label strings and interval seconds (U45), `predictedNext[rating]`, flag and marked state, and the R330 home-preset values (audio R748, timers R749, auto advance R750, maximum answer seconds, leech action). No HTML.
   - `renderHead(sessionId, renderKeys)` on the interactive lane → one U62 `RenderedCard` per key, with media refs for preload. Payloads are cached by `renderKey`, so undo and head diffs reuse them.
@@ -6354,28 +6354,30 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
   - the card row's scheduling columns, `data` and mtime;
   - the home preset's id and mtime, and the deck DR override;
   - the global flags that feed U45;
-  - the day number.
+  - the day number, `next_day_at`, and the resolved U46 inputs of `sched/review-session#C5` when absent from stored data.
   Load balancer inputs are not in the token. After every accepted answer, the session recomputes states for the cached heads and pushes label diffs in the same `Accepted` result, so labels always equal what answering applies (R656). A `head` entry is valid only with its latest labels.
 - Answer path:
   1. Verify the card is the head (learning-anywhere rule per R729); Grade Now bypasses the session.
   2. Recompute the token from the committed row plus the overlay. On mismatch, write nothing and return `Stale`; the session rebuilds silently and the UI shows the R728 notice only if the card is still due.
-  3. Compute states (U45, with the U46 on-the-fly memory state), update the overlay (in-memory queue, learning requeue per R621, cutoff, counts, load balancer cache, predictions), and return.
-  4. Submit the U44 op to the executor at once (durable ≤ 1 s, R2006). When U24 publishes a declared long write (U24 owns the list), the overlay keeps the answers, the pending-answer journal makes them durable, and they commit right after with their `stateToken` preconditions (R727–R729).
+  3. Compute states (U45, with the U46 on-the-fly memory state), update the overlay (in-memory queue, learning requeue per R621, cutoff, counts, load balancer cache, predictions), and return. U44 W8/W9 accounting occurs exactly once across optimistic acceptance, commit and undo (`sched/review-session#C9`).
+  4. Submit U44 and enqueue the immutable journal intent before returning Accepted (durable ≤ 1 s, R2006). Journal every accepted answer on the non-writer worker; no UI fsync wait. A delay that begins later, or ordinary queued answers, cannot bypass that deadline. Apply the frozen accepted transition with C12 base/context guards, not a new reopening-time choice.
   5. On commit failure: emit `CommitFailed`, drop the later uncommitted answers in order, and restore the queue to the failed card (R680).
-- Pending-answer journal (owner; KTD6, R2006, R1491): a device-only file next to the collection, using U32's paths and atomic-file helper, never in `collection.anki2` (R2016).
-  - While a declared delay is published, each accepted answer is appended with card id, rating, `answeredAtMs`, `msTaken` and the card-row digest part of its `stateToken`; a non-writer thread fsyncs the file within 1 s. An entry is removed when its op commits or when the answer is undone before commit.
-  - At open, as a U24 open-time step before `Ready` and so before any study or sync, the remaining entries replay in order as U44 answer ops at their recorded time with their card-row precondition. An entry whose revlog id already exists is skipped; a precondition mismatch drops the entry and records it in the open report (the R728 path).
-  - Entering `ExclusiveBusy` drains the journal with the overlay (U24); a generation change discards it.
-- Rebuilds follow U41 `rebuild_rules` on in-core ChangeSets. They run in the background and return a head diff under the KTD7 keep rule. A current card changed only in memory state emits `memoryOnly`.
+- Pending-answer journal: `sched/review-session#C12` owns the complete contract (KTD6, R2006, R1491). Required order:
+  - every Accepted -> asynchronous intent -> durable coverage by acceptance + 1 s, independent of `WriteDelay`;
+  - actual U44 assigned id/full row and base/post digest -> durable prepared receipt outside commit/snapshot lock -> COMMIT -> WAL coverage -> durable Done;
+  - committed undo or other mutation of unresolved evidence -> C12.7 closure first;
+  - recovery before Ready -> exact assigned identity/base/context checks in sequence -> recorded-time D8 and frozen accepted transition -> current D8 last;
+  - controlled replacement and file errors -> C12.7/C12.8. No synced schema/config/memo identity is added. K1/P8 and protected bytes remain unchanged. S3 still governs admitted FSRS-off answers.
+- Rebuilds follow current U41 B10 with ChangeSet plus ObservedCommit, before/after images, seq/generation and session ownership; whole-collection invalidation takes precedence. They run in the background and return a head diff under the KTD7 keep rule. A current card changed only in memory state emits `memoryOnly`.
 - Rollover: on `RolledOver`, recompute the current card's states and labels at once (R600, R460). Rebuild the queue after the current answer (R461). The session stays one session (R463).
 - Undo and redo (session side of C3):
   - Session-scoped `peek`, `undo` and `redo` (U25 scopes) are answered here first: `peek` reports overlay steps first.
-  - Undoing the session's top answer restores the overlay and the head at once from the in-memory answer metadata (R1811). If the answer is still uncommitted, its pending op is dropped without a write, and a session redo re-applies it from the same metadata; otherwise the U25 undo op is submitted asynchronously, with the same `CommitFailed` recovery as answers.
+  - Undoing the session's top answer restores the overlay and the head at once from the in-memory answer metadata (R1811). If the answer is still uncommitted, its pending op is durably cancelled before application (C12), and a session redo re-applies it from the same metadata; otherwise C12 retires the committed witness before the asynchronous U25 undo; `CommitFailed` recovery remains the same as answers.
   - A `Global` undo issued while the overlay holds uncommitted answers waits for it to drain before targeting U25.
   - Undo puts the card at the head on its question side even after a rebuild (R722) and restores the cutoff and load balancer entry. Redo advances (R720). Non-answer undo steps patch the queue in place (R1812); U48's ops take an optional session id and return a head diff.
 - Every undo entry made while the session is active carries the session id. U107 uses this for hold-back (KTD6); `endSession` closes the scope.
 - Suspend: the session is a `SuspendParticipant` (U32). `flush_for_background` commits its overlay answers; `suspend` stops background rebuilds. Entering `ExclusiveBusy` flushes the overlay too (U24).
-- Spec: `specs/sched/review-session.md` separates the Anki-derived queue progression (oracle-checked) from Meguri-only contract behavior (tokens, overlay, predictions, stale recovery). Each Meguri deviation (R728 silent recovery) gets an entry in the R1889 known-deviations list.
+- Spec: `specs/sched/review-session.md` separates the Anki-derived queue progression (oracle-checked) from Meguri-only contract behavior (tokens, overlay, predictions, stale recovery). Part P11 records product-only differences tested in C18; no scenario tolerance or new deviation is introduced.
 
 **Execution note:** Spec writer first for queue progression and learning requeue. The C5 contract parts are specified from the Product Contract and this plan (no Anki source needed). Implementer test-first, with a fault-injection suite for commit failure.
 
@@ -6404,6 +6406,10 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
 - A deck tree holding a card of a 34-value preset → `Refused{PresetUnsupported}` with no `curDeck` write; with U50's status `needsEnable` → `Refused{FsrsPolicyPending}`.
 - `peekFirstCard` at 150k → ≤ 20 ms and `col.mod` unchanged; `startSession` right after returns the same card id and `stateToken`.
 - Perf: `answer()` ≤ 1 ms at p95 release excluding the commit, also while a sync snapshot, a streaming `re:` search and a stats cache build run (KTD3); `renderHead` for one Migaku-like card ≤ 5 ms p95 on the M3 Max; `startSession` plus `head(3)` fits the R1813 150 ms budget at 14.4k cards; undo to head ≤ 50 ms (R1811), also during a 200 ms SyncIncoming commit.
+
+- Execute every additional C18 evidence row, including C12.1 late WriteDelay and ordinary queue bursts, C12.3-C12.5 identity/coverage failures, C12.6 recorded-time/context checks, C12.7 undo/replacement and C12.8 corruption. Existing U43 test vectors and budgets remain mandatory.
+- C2/C5: unsupported homes represented only by suspended cards; invalid Easy Days on an unused preset; enable/start/end writer races; admitted sync-off continuation; next_day_at-only and resolved-history freshness.
+- Run the real supported-home 200-answer session API preservation proof (`conformance/normalized-dump#N11.1`). The original unsupported reference case remains unchanged and is not product proof; its U246 accounting remains due.
 
 **Verification:** `conformance/scenarios/sched/session/` goldens match; the fault-injection and durability tests pass in Docker; the CoreBridge Swift tests pass with `swift test`.
 

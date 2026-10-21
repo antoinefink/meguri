@@ -1,0 +1,56 @@
+# Learning requeue: what "the first learning entry" means (R621; specs/sched/
+# review-session.md P1, P5). Default preset (steps 1m 10m), learn-ahead
+# 1,200 s, FSRS on, load balancer off, at 10:00:00. Three decks, each studied
+# in turn with nothing in its main list, each with a learning card due 30 s
+# ago (#c1, #c3, #c5, attempted) answered Again (stored due near 10:01):
+# - Fresh: the other card #c2 (due 10:05) was never answered (reps 0). The
+#   requeued card moves to 10:05:01, after #c2's due, but attempted cards sort
+#   first, so #c1 is presented again before #c2.
+# - Edge: #c4 is due at 10:19:59, so #c4's due + 1 s reaches the edge
+#   (10:20:00): no move, #c3 comes first.
+# - Near: #c6 is due at 10:19:58: #c5 moves to 10:19:59 and comes after #c6.
+# The card rows keep their stored due times (db_exec). Needs queue held
+# across answers (specs/conformance/session-ops.md E2).
+id: sched/session/requeue/front-rules
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  decks: [Fresh, Edge, Near]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Fresh, fields: [fresh-answered, a]}
+    - {notetype: Card, deck: Fresh, fields: [fresh-unseen, b]}
+    - {notetype: Card, deck: Edge, fields: [edge-answered, c]}
+    - {notetype: Card, deck: Edge, fields: [edge-waiting, d]}
+    - {notetype: Card, deck: Near, fields: [near-answered, e]}
+    - {notetype: Card, deck: Near, fields: [near-waiting, f]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 1, queue = 1, due = v.column2, reps = v.column3, left = v.column4, data = v.column5
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 1894701570, 2, 2, '{"s":0.4,"d":6.0,"lrt":1894701500}'),
+          (2, 1894701900, 0, 2, '{}'),
+          (3, 1894701570, 2, 2, '{"s":0.4,"d":6.0,"lrt":1894701500}'),
+          (4, 1894702799, 1, 1, '{"s":2.3,"d":5.0,"lrt":1894701000}'),
+          (5, 1894701570, 2, 2, '{"s":0.4,"d":6.0,"lrt":1894701500}'),
+          (6, 1894702798, 1, 1, '{"s":2.3,"d":5.0,"lrt":1894701000}')
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: Fresh}
+  - observe: [queue]
+  - answer: {card: "#c1", rating: again, time_ms: 3000}
+  - observe: [queue]
+  - set_current_deck: {deck: Edge}
+  - observe: [queue]
+  - answer: {card: "#c3", rating: again, time_ms: 3000}
+  - observe: [queue]
+  - set_current_deck: {deck: Near}
+  - observe: [queue]
+  - answer: {card: "#c5", rating: again, time_ms: 3000}
+  - observe: [queue]
+  - db_exec: {sql: "SELECT due, queue, reps FROM cards ORDER BY id"}

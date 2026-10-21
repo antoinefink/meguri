@@ -36,3 +36,5 @@
 - `queue` reports a new build only under Q2.3 (`specs/conformance/queue-ops.md`). After a same-day clock or config change, choose another deck, then the study deck. Q3's explicit compatibility check is separate from D8's automatic count maintenance. Original recorded pairs remain exact; new inputs need oracle output.
 
 - Load-balancer cases follow `specs/conformance/answer-ops.md` H4: build the held cache with `queue` after the final raw write, answer only its head, and stay within one scheduler day. After changing build config, drop the held cache with a raw no-op write and build again.
+
+- Held-session progression follows `specs/conformance/session-ops.md` E2/E3. Compatibility queue reads do not perform production C2 admission. Keep learning keys distinct, answer only a main head or held learning entry, and retain the documented rollover observation schedule.
