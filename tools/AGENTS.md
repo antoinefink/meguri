@@ -4,6 +4,8 @@
 
 - Run host Apple jobs one at a time, including Swift package tests. Their core XCFramework and bindings are shared across configurations; another build can replace them after Xcode's pre-action releases its lock. Rust and image jobs may run alongside Apple work. Run `selftest-xcframework` alone on a quiet machine: its unchanged-input check has a strict timing budget.
 
+- Run `core-test` separately from builds and `core-lint` when it includes WAL, suspension or latency bounds. Nextest reservations isolate tests within one run; these checks require an idle machine.
+
 - Profile Performance builds must pass `scripts/performance-test-policy.py <generated-xctestrun> <source-Performance-plan>` before products reach the VM: three exact disabled source checker policies, no conflicting configuration overrides, generated UI-app checker flags false or omitted, and no MainThreadChecker/libRPAC injections. Never sanitize generated policy to pass the guard.
 - `ui-test --physical-device <identifier>` alone opts into host Xcode tests on that available iOS 27+ device, with Debug/Profile development products; no Mac screen or simulator fallback. `--list-physical-devices` only inventories sanitized xcdevice destinations.
 
