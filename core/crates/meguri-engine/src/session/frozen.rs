@@ -240,10 +240,8 @@ pub(crate) struct Inputs {
     pub last_review: Option<i64>,
     pub short_term: bool,
     pub ahead: u32,
-    pub context: [u8; 32],
 }
-/// C12.2's semantic projection deliberately excludes counters, stamps, unknown
-/// bytes, queue order/limits and the current chooser distribution.
+/// Resolve scheduling inputs without constructing C12.2's semantic context.
 pub(crate) fn inputs(
     rows: &impl ReadRows,
     card: &Card,
@@ -293,6 +291,31 @@ pub(crate) fn inputs_without_revlogs(
     let cfg = SchedConfig::new(rows);
     let short_term = cfg.fsrs_short_term_with_steps()?;
     let ahead = cfg.collapse_time()?;
+    Ok(Inputs {
+        preset,
+        home,
+        retention,
+        memory: resolved,
+        last_review: last,
+        short_term,
+        ahead,
+    })
+}
+
+/// C12.2's semantic projection deliberately excludes counters, stamps, unknown
+/// bytes, queue order/limits and the current chooser distribution.
+pub(crate) fn context(rows: &impl ReadRows, card: &Card, inputs: &Inputs) -> Result<[u8; 32], EngineError> {
+    let preset = &inputs.preset;
+    let home = &inputs.home;
+    let meguri_model::proto::deck::DeckKind::Normal(normal) = &home.kind.kind else {
+        return Err(error("non-normal home"));
+    };
+    let retention = inputs.retention;
+    let resolved = inputs.memory;
+    let last = inputs.last_review;
+    let short_term = inputs.short_term;
+    let ahead = inputs.ahead;
+    let cfg = SchedConfig::new(rows);
     let p = preset.fields();
     let projection = serde_json::json!({
         "home": home.id.0, "preset": normal.config_id, "home_dr": normal.desired_retention.map(f32::to_bits),
@@ -307,17 +330,7 @@ pub(crate) fn inputs_without_revlogs(
         "history_memory": if card.data.memory_state.is_none() { memory(resolved) } else { None },
         "history_last": if card.data.last_review_secs.is_none() { last } else { None },
     });
-    let context = Sha256::digest(serde_json::to_vec(&projection).map_err(error)?).into();
-    Ok(Inputs {
-        preset,
-        home,
-        retention,
-        memory: resolved,
-        last_review: last,
-        short_term,
-        ahead,
-        context,
-    })
+    Ok(Sha256::digest(serde_json::to_vec(&projection).map_err(error)?).into())
 }
 
 #[cfg(test)]

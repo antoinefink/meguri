@@ -717,8 +717,7 @@ impl ReviewService {
                     &chooser,
                     None,
                     &mut models,
-                )?
-                .0;
+                )?;
                 Ok(PeekResult::Card(item))
             }
         }
@@ -919,6 +918,8 @@ impl ReviewService {
                 notice,
             });
         }
+        let digest = meguri_storage::journal::digest(&captured.image);
+        let context = frozen::context(&*rows, &captured.card, &captured.inputs)?;
         let index = rating as usize - 1;
         let chosen = choices(&states)[index].clone();
         let planned = plan(
@@ -943,7 +944,7 @@ impl ReviewService {
         let buried = sibling_ids(&*rows, &p.overlay, &captured.card, &captured.inputs.preset, None)?;
         let request = AnswerRequest {
             card,
-            state_token: captured.digest,
+            state_token: digest,
             current: states.current,
             chosen,
             rating,
@@ -960,11 +961,11 @@ impl ReviewService {
             .overlay
             .predecessor(card)
             .map(Base::Predecessor)
-            .unwrap_or(Base::Row(captured.digest));
+            .unwrap_or(Base::Row(digest));
         let frozen = FrozenAnswer::capture(
             &request,
             base,
-            captured.inputs.context,
+            context,
             c.core.exec.clock.utc_offset_at(at),
             captured.inputs.ahead,
         );
@@ -1415,7 +1416,6 @@ struct Captured {
     image: meguri_storage::RowImage,
     card: Card,
     inputs: frozen::Inputs,
-    digest: [u8; 32],
 }
 fn sibling_ids(
     rows: &impl ReadRows,
@@ -1564,17 +1564,7 @@ fn capture_state(
         meguri_sched::states::fuzz::seed(card.id.0 as u64, u64::from(card.reps)),
     );
     let states = next_states(models, &input, if enabled { Some(&mut choose) } else { None }).map_err(invalid)?;
-    let digest = meguri_storage::journal::digest(&image);
-    Ok((
-        token,
-        states,
-        Captured {
-            image,
-            card,
-            inputs,
-            digest,
-        },
-    ))
+    Ok((token, states, Captured { image, card, inputs }))
 }
 #[allow(clippy::too_many_arguments)]
 fn project_item(
@@ -1589,7 +1579,7 @@ fn project_item(
     chooser: &meguri_sched::load_balancer::LoadBalancer,
     undo: Option<&crate::undo::entry::Entry>,
     models: &mut FsrsCache,
-) -> Result<(HeadItem, Captured), EngineError> {
+) -> Result<HeadItem, EngineError> {
     let (token, states, captured) = capture_state(rows, overlay, id, at, today, boundary, chooser, undo, models)?;
     let Captured { card, inputs, .. } = &captured;
     let siblings = sibling_ids(rows, overlay, card, &inputs.preset, undo)?;
@@ -1648,7 +1638,7 @@ fn project_item(
             leech_action: p.leech_action,
         },
     };
-    Ok((item, captured))
+    Ok(item)
 }
 // C6 permits a fixed context when peek, start and renderHead share it.
 fn session_platform() -> crate::rendering::Platform {
@@ -1842,7 +1832,7 @@ fn project_snapshot(
     let mut items = Vec::with_capacity(entries.len());
     let mut boundaries = Vec::new();
     for e in entries {
-        let (item, _) = project_item(
+        let item = project_item(
             &**rows,
             &p.queue,
             &p.overlay,
@@ -1943,7 +1933,7 @@ impl Application {
             .card(request.card)?
             .ok_or_else(|| invalid("answer card missing"))?;
         let inputs = frozen::inputs(ctx.scope(), &card, self.frozen.boundary, &mut FsrsCache::default())?;
-        if inputs.context != self.frozen.context {
+        if frozen::context(ctx.scope(), &card, &inputs)? != self.frozen.context {
             return Err(EngineError::Stale {
                 table: Table::Cards,
                 key: "answer semantic context".into(),
@@ -2035,8 +2025,8 @@ fn recorded_prelude(
                 .scope()
                 .card(CardId(frozen.card))?
                 .ok_or_else(|| invalid("replay card missing"))?;
-            if frozen::inputs(ctx.scope(), &card, frozen.boundary, &mut FsrsCache::default())?.context != frozen.context
-            {
+            let inputs = frozen::inputs(ctx.scope(), &card, frozen.boundary, &mut FsrsCache::default())?;
+            if frozen::context(ctx.scope(), &card, &inputs)? != frozen.context {
                 return Err(EngineError::Stale {
                     table: Table::Cards,
                     key: "recorded policy".into(),
