@@ -1,7 +1,6 @@
-//! Recorded scenarios run the real U27 adapters. Test-only setup/auxiliary
-//! adapters stand in only for U44/U128; they are never T0 capabilities.
+//! Recorded scenarios run the production adapters. Only U128's `check_db`
+//! remains a test-only auxiliary; it is never a T0 capability.
 use meguri_engine::notes;
-use meguri_model::ids::CardId;
 use meguri_storage::{ReadRows, StampMode, WriteScope};
 use meguri_testkit::exec::{ExecError, OpResult, Registry, Session};
 use meguri_testkit::scenario::Step;
@@ -43,7 +42,6 @@ pub fn play(id: &str) {
 
 fn executor() -> MeguriExecutor {
     let mut registry: Registry = MeguriExecutor::core_registry();
-    registry.op("answer", answer);
     registry.op_rejecting("check_db", &["corrupt"], check_db);
     MeguriExecutor::with(registry)
 }
@@ -69,25 +67,6 @@ fn scope<T: Send + 'static>(
         )
         .map(|result| result.value)
         .map_err(core)
-}
-fn answer(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
-    let Step::Answer(args) = step else { unreachable!() };
-    let id = CardId(session.cards[args.card.0.index()]);
-    // U44's two recorded answers: only type/queue/due are observed here.
-    let due = match session.scenario.scenario.id.as_str() {
-        "cardgen/position/counter" => 1894702270,
-        "cardgen/position/random" => 1894705895,
-        other => return Err(core(format!("no answer stand-in for {other}"))),
-    };
-    scope(session, StampMode::Local, move |scope| {
-        let mut card = scope.card(id).map_err(core)?.unwrap();
-        card.card_type = meguri_model::card::CardType::Learning;
-        card.queue = meguri_model::card::CardQueue::Learning;
-        card.due = due;
-        scope.put(&card).map_err(core)?;
-        Ok(())
-    })?;
-    Ok(OpResult::Done)
 }
 fn check_db(session: &mut Session<'_>, _step: &Step) -> Result<OpResult, ExecError> {
     let count = scope(session, StampMode::CallerSupplied, |scope| {
