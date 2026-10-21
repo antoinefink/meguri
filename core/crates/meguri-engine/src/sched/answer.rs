@@ -562,11 +562,11 @@ fn home(rows: &impl ReadRows, card: &Card) -> Result<(PresetView, meguri_model::
     Ok((PresetView::for_config(rows, DeckConfigId(normal.config_id))?, deck))
 }
 
-pub fn answer(collection: &Collection, mut request: AnswerRequest) -> Result<OpResult<AnswerResult>, EngineError> {
+pub fn answer(collection: &Collection, request: AnswerRequest) -> Result<OpResult<AnswerResult>, EngineError> {
     // D8 must finish with no reader held, before the writer submission.
-    let day = collection.check_rollover()?;
-    request.today = day.today;
-    request.next_day_at = day.next_day_at;
+    // The request's day/boundary belong to its recorded answer instant;
+    // pending-session replay can submit that immutable event on a later day.
+    collection.check_rollover()?;
     let bound = collection.clone();
     let spec = OpSpec::named("answer_card", OpSource::UserUndoable)
         .stamp(StampMode::CallerSupplied)

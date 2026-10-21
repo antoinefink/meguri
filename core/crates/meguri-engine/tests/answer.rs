@@ -849,18 +849,154 @@ fn fresh_legacy_boundary_cache_balances_predictions_for_only_the_checked_second(
 }
 
 #[test]
-fn answer_uses_the_completed_current_report_for_due_and_studied_day() {
+fn answer_rejects_a_boundary_inconsistent_with_the_selected_learning_delay() {
     let (h, id, _) = setup();
     let p = answer::predict(&h.collection, id, &mut FsrsCache::default(), None).unwrap();
+    let mut request = p.answer(Rating::Good, 0);
+    assert_eq!(
+        request.chosen.delay,
+        meguri_sched::states::interval_limits::Delay::Seconds(600)
+    );
+    // At this boundary the chosen 600-second step would have to be interday.
+    request.next_day_at = request.answered_at.whole_secs().0 + 600;
+    let before = images(&h);
+    assert!(matches!(
+        answer::answer(&h.collection, request),
+        Err(meguri_engine::EngineError::InvalidArgument { message })
+            if message == "inconsistent selected answer values"
+    ));
+    assert_eq!(images(&h), before);
+}
+
+#[test]
+fn recorded_review_submitted_after_rollover_keeps_its_answer_time_day() {
+    use meguri_model::{revlog::RevlogKind, usn::Usn};
+    let (h, id, _) = setup();
+    review(&h, id, 1, 8);
+    h.collection
+        .run(OpSpec::named("bound review interval", OpSource::Maintenance), |ctx| {
+            let mut preset = ctx.scope().deck_config(DeckConfigId(1))?.unwrap();
+            preset.config.maximum_review_interval = 5;
+            ctx.scope().put(&preset)?;
+            Ok(())
+        })
+        .unwrap();
+    let boundary = h.collection.check_rollover().unwrap().next_day_at;
+    let at = (boundary - 600) * 1000 + 321;
+    h.clock.set_now_ms(at);
+    let p = answer::predict(&h.collection, id, &mut FsrsCache::default(), None).unwrap();
+    assert_eq!(p.next_day_at, boundary);
     let today = p.today;
-    let mut request = p.answer(Rating::Easy, 0);
-    request.today = today.wrapping_add(91);
-    request.next_day_at = 1;
-    answer::answer(&h.collection, request).unwrap();
+    let token = p.state_token;
+    let request = p.answer(Rating::Good, 1234);
+    assert_eq!(request.answered_at.0, at);
+    assert_eq!(
+        request.chosen.delay,
+        meguri_sched::states::interval_limits::Delay::Days(5)
+    );
+    h.clock.set_now_ms((boundary + 3600) * 1000);
+    assert_eq!(h.collection.check_rollover().unwrap().today, today.wrapping_add(1));
+    assert_eq!(
+        h.collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .row_digest(Table::Cards, &RowKey::Id(id.0))
+            .unwrap(),
+        Some(token),
+        "maintenance leaves the recorded card unchanged"
+    );
+    let result = answer::answer(&h.collection, request).unwrap();
     let rows = h.collection.reader(ReaderRole::Query).unwrap();
-    let card = rows.card(id).unwrap().unwrap();
-    assert_eq!(card.due, today as i32 + card.interval as i32);
-    assert_eq!(rows.deck(DeckId(1)).unwrap().unwrap().common.last_day_studied, today);
+    let saved = rows.card(id).unwrap().unwrap();
+    assert_eq!((saved.card_type, saved.queue), (CardType::Review, CardQueue::Review));
+    assert_eq!(
+        (saved.due, saved.interval, saved.reps),
+        (today.wrapping_add(5) as i32, 5, 11)
+    );
+    assert_eq!((saved.mtime.0, saved.usn), (at / 1000, Usn::PENDING));
+    assert_eq!(saved.data.last_review_secs, Some(at / 1000));
+    assert_eq!(result.value.revlog_id.0, at);
+    let log = rows.revlog_entry(result.value.revlog_id).unwrap().unwrap();
+    assert_eq!(
+        (log.kind, log.button, log.interval, log.last_interval),
+        (RevlogKind::Review, 3, 5, 20)
+    );
+    assert_eq!((log.answer_millis, log.usn), (1234, Usn::PENDING));
+    let deck = rows.deck(DeckId(1)).unwrap().unwrap();
+    assert_eq!((deck.mtime.0, deck.usn), (at / 1000, Usn::PENDING));
+    assert_eq!(deck.common.last_day_studied, today);
+    assert_eq!(
+        (
+            deck.common.new_studied,
+            deck.common.review_studied,
+            deck.common.learning_studied
+        ),
+        (0, 1, 0)
+    );
+    assert_eq!(deck.common.milliseconds_studied, 1234);
+    assert_eq!(rows.col().unwrap().modified.0, at);
+}
+
+#[test]
+fn recorded_exact_boundary_learning_submitted_after_rollover_stays_interday() {
+    use meguri_model::{revlog::RevlogKind, usn::Usn};
+    use meguri_sched::{states::engine::State, states::interval_limits::Delay};
+    let (h, id, _) = setup();
+    let boundary = h.collection.check_rollover().unwrap().next_day_at;
+    h.clock.set_now_ms((boundary - 1200) * 1000);
+    let first = answer::predict(&h.collection, id, &mut FsrsCache::default(), None).unwrap();
+    answer::answer(&h.collection, first.answer(Rating::Again, 0)).unwrap();
+    let at = (boundary - 600) * 1000;
+    h.clock.set_now_ms(at);
+    let p = answer::predict(&h.collection, id, &mut FsrsCache::default(), None).unwrap();
+    assert!(matches!(p.states.current, State::Learning(_)));
+    assert!(matches!(p.states.good.state, State::Learning(l) if l.scheduled_secs == 600));
+    assert_eq!(p.next_day_at - p.answered_at.whole_secs().0, 600);
+    let today = p.today;
+    let token = p.state_token;
+    let request = p.answer(Rating::Good, 1234);
+    assert_eq!(request.chosen.delay, Delay::Days(1));
+    h.clock.set_now_ms((boundary + 3600) * 1000);
+    assert_eq!(h.collection.check_rollover().unwrap().today, today.wrapping_add(1));
+    assert_eq!(
+        h.collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .row_digest(Table::Cards, &RowKey::Id(id.0))
+            .unwrap(),
+        Some(token),
+        "maintenance leaves the recorded card unchanged"
+    );
+    let result = answer::answer(&h.collection, request).unwrap();
+    let rows = h.collection.reader(ReaderRole::Query).unwrap();
+    let saved = rows.card(id).unwrap().unwrap();
+    assert_eq!(
+        (saved.card_type, saved.queue),
+        (CardType::Learning, CardQueue::InterdayLearning)
+    );
+    assert_eq!((saved.due, saved.reps), (today.wrapping_add(1) as i32, 2));
+    assert_eq!((saved.mtime.0, saved.usn), (at / 1000, Usn::PENDING));
+    assert_eq!(saved.data.last_review_secs, Some(at / 1000));
+    assert_eq!(result.value.revlog_id.0, at);
+    let log = rows.revlog_entry(result.value.revlog_id).unwrap().unwrap();
+    assert_eq!(
+        (log.kind, log.button, log.interval, log.last_interval),
+        (RevlogKind::Learning, 3, 1, -60)
+    );
+    assert_eq!((log.answer_millis, log.usn), (1234, Usn::PENDING));
+    let deck = rows.deck(DeckId(1)).unwrap().unwrap();
+    assert_eq!((deck.mtime.0, deck.usn), (at / 1000, Usn::PENDING));
+    assert_eq!(deck.common.last_day_studied, today);
+    assert_eq!(
+        (
+            deck.common.new_studied,
+            deck.common.review_studied,
+            deck.common.learning_studied
+        ),
+        (1, 0, 0)
+    );
+    assert_eq!(deck.common.milliseconds_studied, 1234);
+    assert_eq!(rows.col().unwrap().modified.0, at);
 }
 
 #[test]

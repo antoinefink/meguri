@@ -4,7 +4,7 @@ use crate::scenario::{ObservationArgs, ObservationRequest, Step};
 use meguri_model::{
     BlobError, ModelError,
     proto::{
-        BlobMessage,
+        BlobMessage, ProtoBlob,
         deck::{DeckCommon, DeckKindMessage},
         deck_config::DeckConfigMessage,
         notetype::{FieldConfig, NotetypeConfig, TemplateConfig},
@@ -129,11 +129,18 @@ fn update(s: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     };
     if let Patch::Preset(p) = &mut parsed {
         if let Some(stored) = writer(s)?.deck_config(p.id).map_err(core)? {
-            // Compare the schema-11 roundtrip of the bounded view. Equal
-            // content keeps the entire raw blob, including noncanonical bytes.
-            let roundtrip =
-                schema11::deck_config_from_json(&schema11::deck_config_to_json(&stored.for_use())).map_err(core)?;
-            if p.config.same_content(&roundtrip.config) {
+            // Schema-11 cannot carry unknown protobuf fields. Keep those
+            // opaque fields when saving its converted known values (P4).
+            if !stored.config.unknown_fields().is_empty() {
+                let mut bytes = p.config.encode();
+                for field in stored.config.unknown_fields().iter() {
+                    bytes.extend_from_slice(field.bytes());
+                }
+                p.config = ProtoBlob::decode(&bytes).map_err(core)?;
+            }
+            // P5 compares actual stored content, before read bounds: an L2
+            // save must persist any replacements supplied by the L1 view.
+            if p.config.same_content(&stored.config) {
                 p.config = stored.config;
             }
         }
