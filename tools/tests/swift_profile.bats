@@ -25,6 +25,25 @@ setup() {
   export STUB_LOG="$BATS_TEST_TMPDIR/stub.log" STUB_CALLS="$BATS_TEST_TMPDIR/calls.jsonl"
   : >"$STUB_LOG"
   : >"$STUB_CALLS"
+  cat >"$BIN/sysctl" <<'EOF'
+#!/bin/bash
+[ "$*" = '-n machdep.cpu.brand_string' ] || exit 97
+echo 'Apple M3 Max'
+EOF
+  cat >"$BIN/sw_vers" <<'EOF'
+#!/bin/bash
+case "$*" in
+  -productVersion) echo '27.0' ;;
+  -buildVersion) echo '26A123' ;;
+  *) exit 97 ;;
+esac
+EOF
+  cat >"$BIN/uname" <<'EOF'
+#!/bin/bash
+[ "$*" = -m ] || exit 97
+echo arm64
+EOF
+  chmod +x "$BIN/sysctl" "$BIN/sw_vers" "$BIN/uname"
   cat >"$SB/tools/mg.d/zz-swift-profile-fakes.sh" <<'EOF'
 mg_lint_ui_first() { echo lint >>"$STUB_LOG"; }
 mg_host_lease() {
@@ -121,6 +140,7 @@ field() { jq -r "$@" "$result"; }
   [ "$(field .summary.passed)" -eq 1 ]
   [ "$(field .details.configuration.core)" = Profile ]
   [ "$(field .details.configuration.swift)" = release ]
+  [ "$(field '.details.environment | tojson')" = '{"cpu":"Apple M3 Max","os":"macOS 27.0","os_build":"26A123","arch":"arm64"}' ]
   grep -Fx "core --configuration Profile --report $(dirname "$result")/xcframework.json" "$STUB_LOG"
   [ "$(sed -n '3,5p' "$STUB_LOG")" = "swift build
 lease --no-session
@@ -138,6 +158,7 @@ swift test" ]
   [ "$status" -eq 0 ]
   [ "$(field .details.configuration.core)" = Debug ]
   [ "$(field .details.configuration.swift)" = debug ]
+  [ "$(field '.details | has("environment")')" = false ]
   grep -Fx "core --configuration Debug --report $(dirname "$result")/xcframework.json" "$STUB_LOG"
   ! grep -q '^lease ' "$STUB_LOG"
   jq -se 'all(.[]; (index("--scratch-path") == null) and (index("--configuration") as $i | .[$i + 1] == "debug"))' "$STUB_CALLS"

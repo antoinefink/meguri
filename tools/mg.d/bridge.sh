@@ -134,6 +134,13 @@ mg_swift_test() {
   fi
   mg_detail configuration "$(jq -nc --arg core "$config" --arg swift "$spm_config" \
     '{core: $core, swift: $swift}')"
+  if [ "$config" = Profile ]; then
+    mg_detail environment "$(jq -nc \
+      --arg cpu "$(sysctl -n machdep.cpu.brand_string 2>/dev/null)" \
+      --arg os "macOS $(sw_vers -productVersion 2>/dev/null)" \
+      --arg os_build "$(sw_vers -buildVersion 2>/dev/null)" --arg arch "$(uname -m)" \
+      '{cpu: $cpu, os: $os, os_build: $os_build, arch: $arch}')"
+  fi
   local build="$MG_RUN_DIR/swift-build.log" rc
   swift build --package-path "$dir" "${product_args[@]}" --build-tests 2>&1 | tee "$build"
   rc=${PIPESTATUS[0]}
