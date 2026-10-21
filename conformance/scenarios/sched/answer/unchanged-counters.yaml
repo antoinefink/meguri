@@ -1,0 +1,53 @@
+id: sched/answer/unchanged-counters
+clock:
+  tz: UTC
+  start: '2030-01-15T10:00:00'
+setup:
+  config:
+    fsrs: true
+    loadBalancerEnabled: false
+  decks:
+  - X0038
+  notetypes:
+  - name: X0152
+    fields:
+    - X0032
+    - A0010
+    templates:
+    - name: X0059
+      front: '{{X0032}}'
+      back: '{{A0010}}'
+  notes:
+  - notetype: X0152
+    deck: X0038
+    fields:
+    - x0155
+    - x0158
+steps:
+- observe:
+  - timing
+- advance: 1h
+- answer:
+    card: '#c1'
+    rating: good
+    time_ms: 3000
+- observe:
+  - card(#c1)
+  - legacy_json:
+      decks:
+      - X0038
+- db_exec:
+    sql: SELECT name, mtime_secs, usn FROM decks ORDER BY name
+- advance: 11m
+- answer:
+    card: '#c1'
+    rating: good
+    time_ms: 0
+- observe:
+  - card(#c1)
+  - revlog(#c1)
+  - legacy_json:
+      decks:
+      - X0038
+- db_exec:
+    sql: SELECT name, mtime_secs, usn FROM decks ORDER BY name

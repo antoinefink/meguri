@@ -1,0 +1,137 @@
+id: sched/loadbalancer/cache-update
+clock:
+  tz: UTC
+  start: '2030-01-15T10:00:00'
+setup:
+  config:
+    fsrs: true
+    loadBalancerEnabled: true
+  presets:
+  - name: X0049
+  decks:
+  - X0151
+  - X0139
+  - name: X0049
+    preset: X0049
+  notetypes:
+  - name: X0152
+    fields:
+    - X0032
+    - A0010
+    templates:
+    - name: X0059
+      front: '{{X0032}}'
+      back: '{{A0010}}'
+  - name: X0050
+    fields:
+    - A0001
+    - A0004
+    - A0014
+    - A0027
+    - X0002
+    templates:
+    - name: X0159
+      front: '{{A0001}}'
+      back: '{{A0001}}'
+    - name: X0160
+      front: '{{A0004}}'
+      back: '{{A0001}}'
+    - name: X0161
+      front: '{{A0014}}'
+      back: '{{A0001}}'
+    - name: X0162
+      front: '{{A0027}}'
+      back: '{{A0001}}'
+    - name: X0163
+      front: '{{X0002}}'
+      back: '{{A0001}}'
+  notes:
+  - notetype: X0152
+    fields:
+    - a0001
+    - a0003
+  - notetype: X0152
+    deck: X0151
+    fields:
+    - a0005
+    - x0151
+  - notetype: X0152
+    deck: X0151
+    fields:
+    - a0006
+    - x0151
+  - notetype: X0152
+    deck: X0151
+    fields:
+    - a0007
+    - x0151
+  - notetype: X0152
+    deck: X0151
+    fields:
+    - a0008
+    - x0151
+  - notetype: X0152
+    deck: X0151
+    fields:
+    - a0009
+    - x0151
+  - notetype: X0152
+    deck: X0049
+    fields:
+    - x0002
+    - x0049
+  - notetype: X0050
+    deck: X0139
+    fields:
+    - x0094
+    - x0095
+    - x0096
+    - x0097
+    - x0098
+  - notetype: X0050
+    deck: X0139
+    fields:
+    - x0099
+    - x0100
+    - x0101
+    - x0102
+    - x0103
+steps:
+- observe:
+  - timing
+- db_exec:
+    sql: UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, factor = v.column6,
+      reps = v.column7, left = 0, data = v.column8 FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n
+      FROM cards) AS c JOIN (VALUES (1, 2, 2, 0, 10, 2500, 13, '{"s":10.0,"d":5.0,"lrt":1894269600}'), (2, 2, 2,
+      5, 10, 2500, 6, '{"s":10.0,"d":5.0,"lrt":1893924000}'), (3, 2, 2, 5, 10, 2500, 6, '{"s":10.0,"d":5.0,"lrt":1893924000}'),
+      (4, 2, 2, 5, 10, 2500, 6, '{"s":10.0,"d":5.0,"lrt":1893924000}'), (5, 2, 2, 5, 10, 2500, 6, '{"s":10.0,"d":5.0,"lrt":1893924000}'),
+      (6, 2, 2, 5, 10, 2500, 6, '{"s":10.0,"d":5.0,"lrt":1893924000}'), (7, 2, 2, -3, 10, 2500, 6, '{"s":10.0,"d":5.0,"lrt":1893924000}'),
+      (8, 2, 2, 15, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}'), (9, 2, 2, 17, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}'),
+      (10, 2, 2, 18, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}'), (11, 2, 2, 20, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}'),
+      (12, 2, 2, 21, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}'), (13, 2, 2, 23, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}'),
+      (14, 2, 2, 24, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}'), (15, 2, 2, 25, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}'),
+      (16, 2, 2, 26, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}'), (17, 2, 2, 70, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}')
+      ) AS v ON v.column1 = c.n WHERE cards.id = c.cid
+- advance: 1h
+- observe:
+  - 'next_states(#c1, #c2, #c3, #c4, #c5, #c6, #c7)'
+- observe:
+  - queue
+- observe:
+  - 'next_states(#c1, #c2, #c3, #c4, #c5, #c6, #c7)'
+- answer:
+    card: '#c1'
+    rating: good
+    time_ms: 4000
+- observe:
+  - card(#c1)
+  - 'next_states(#c2, #c3, #c4, #c5, #c6, #c7)'
+- advance: 1m
+- undo: {}
+- observe:
+  - card(#c1)
+  - 'next_states(#c2, #c3, #c4, #c5, #c6)'
+- redo: {}
+- observe:
+  - card(#c1)
+  - 'next_states(#c2, #c3, #c4, #c5, #c6)'

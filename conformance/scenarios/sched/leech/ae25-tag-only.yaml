@@ -1,0 +1,79 @@
+id: sched/leech/ae25-tag-only
+clock:
+  tz: UTC
+  start: '2030-01-15T10:00:00'
+setup:
+  config:
+    fsrs: true
+    loadBalancerEnabled: false
+  presets:
+  - name: Leech
+    relearn_steps:
+    - 10m
+    leech_threshold: 8
+    leech_action: tag_only
+  decks:
+  - name: X0045
+    preset: Leech
+  notetypes:
+  - name: X0152
+    fields:
+    - X0032
+    - A0010
+    templates:
+    - name: X0059
+      front: '{{X0032}}'
+      back: '{{A0010}}'
+  notes:
+  - notetype: X0152
+    deck: X0045
+    fields:
+    - x0146
+    - x0176
+steps:
+- observe:
+  - timing
+- db_exec:
+    sql: UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 10, factor = 2500, reps = 20, lapses = 7, data = '{"s":10.0,"d":5.0,"lrt":1893837600}'
+- advance: 1h
+- observe:
+  - next_states(#c1)
+- answer:
+    card: '#c1'
+    rating: again
+    time_ms: 3000
+- observe:
+  - card(#c1)
+  - revlog(#c1)
+- db_exec:
+    sql: SELECT tags, mod, usn FROM notes
+- db_exec:
+    sql: SELECT tag, usn, collapsed FROM tags ORDER BY tag
+- db_exec:
+    sql: UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 10, left = 0, lapses = 9
+- advance: 1m
+- observe:
+  - next_states(#c1)
+- answer:
+    card: '#c1'
+    rating: again
+    time_ms: 3000
+- observe:
+  - card(#c1)
+- db_exec:
+    sql: SELECT tags, mod, usn FROM notes
+- db_exec:
+    sql: UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 10, left = 0, lapses = 11
+- advance: 1m
+- observe:
+  - next_states(#c1)
+- answer:
+    card: '#c1'
+    rating: again
+    time_ms: 3000
+- observe:
+  - card(#c1)
+- db_exec:
+    sql: SELECT tags, mod, usn FROM notes
+- db_exec:
+    sql: SELECT tag, usn, collapsed FROM tags ORDER BY tag

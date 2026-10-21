@@ -172,3 +172,16 @@ ord
 meguri_card_f32
 meguri_retrievability
 meguri_relative_retrievability
+# U44 stored fields, schema-11 paths, tag and public chooser interface.
+buryInterdayLearning
+new.bury
+rev.bury
+lapse.leechFails
+lapse.leechAction
+leech
+leech_action
+leech_threshold
+leechAction
+conf
+common
+WeightedIndex

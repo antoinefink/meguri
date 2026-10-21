@@ -1,0 +1,64 @@
+id: sched/leech/zero-threshold
+clock:
+  tz: UTC
+  start: '2030-01-15T10:00:00'
+setup:
+  config:
+    fsrs: true
+    loadBalancerEnabled: false
+  presets:
+  - name: X0178
+    relearn_steps:
+    - 10m
+    leech_action: tag_only
+  decks:
+  - name: X0178
+    preset: X0178
+  notetypes:
+  - name: X0152
+    fields:
+    - X0032
+    - A0010
+    templates:
+    - name: X0059
+      front: '{{X0032}}'
+      back: '{{A0010}}'
+  notes:
+  - notetype: X0152
+    deck: X0178
+    fields:
+    - x0053
+    - x0028
+  - notetype: X0152
+    deck: X0178
+    fields:
+    - x0033
+    - x0034
+steps:
+- observe:
+  - timing
+- db_exec:
+    sql: UPDATE deck_config SET config = CAST(config || X'B00100' AS BLOB) WHERE name = 'X0178'
+- db_exec:
+    sql: SELECT name, hex(config) FROM deck_config WHERE name = 'X0178'
+- db_exec:
+    sql: UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 10, factor = 2500, reps = 20, lapses = v.column2,
+      data = '{"s":10.0,"d":5.0,"lrt":1893837600}' FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n
+      FROM cards) AS c JOIN (VALUES (1, 7), (2, 2)) AS v ON v.column1 = c.n WHERE cards.id = c.cid
+- advance: 1h
+- observe:
+  - 'next_states(#c1, #c2)'
+- answer:
+    card: '#c1'
+    rating: again
+    time_ms: 1000
+- answer:
+    card: '#c2'
+    rating: again
+    time_ms: 1000
+- observe:
+  - 'card(#c1, #c2)'
+- db_exec:
+    sql: SELECT sfld, tags FROM notes ORDER BY id
+- db_exec:
+    sql: SELECT name, hex(config) FROM deck_config WHERE name = 'X0178'

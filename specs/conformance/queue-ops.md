@@ -27,7 +27,7 @@ The decks area's op (`deck-ops.md` K7, U28): `{deck}`, a deck by its stored huma
 
 ### Q2.2 Side effects
 
-Reading the queue writes nothing to the collection. Anki keeps the queue it built until something requires a rebuild; Meguri's executor keeps none (a session is U43's).
+Reading the queue writes nothing to the collection. Anki keeps the queue it built until something requires a rebuild. Meguri’s executor keeps no mutable presentation queue (a session is U43’s). For U44 scenarios it can retain only the load-balancer cache defined by `answer-ops.md` H2/H3; that cache does not change Q2’s presentation value or Q2.3’s fresh-build prerequisites.
 
 ### Q2.3 Reading a fresh build
 

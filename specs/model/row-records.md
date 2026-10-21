@@ -98,7 +98,7 @@ Meguri keeps `odue`, `odid` and filtered-deck membership intact although it neve
 | `time` | u32 | answer time in milliseconds |
 | `type` | review kind | 0 learning, 1 review, 2 relearning, 3 filtered (early review), 4 manual, 5 rescheduled |
 
-- Meguri writes kinds 0, 1, 2, 4 and 5, and keeps rows of kind 3 it receives (R1462).
+- Meguri writes kinds 0, 1 and 2 for answers and 4 for Set Due Date and Reset, never 3 or 5. It keeps received rows of every kind (R683; R1462 also lists 5, resolved by `sched/revlog#E1`).
 - Read tolerances: `ivl` and `lastIvl` are read after conversion to an integer (a REAL value is truncated by SQLite); `time` reads as 0 when it is not an INTEGER within the `u32` range; `type` takes the low 8 bits and reads as 0 when the result is not a known kind. Meguri never rewrites a revlog row it did not create, so these read values never replace stored ones.
 
 ## R6. `graves`

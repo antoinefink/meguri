@@ -1,0 +1,93 @@
+id: sched/leech/suspend
+clock:
+  tz: UTC
+  start: '2030-01-15T10:00:00'
+setup:
+  config:
+    fsrs: true
+    loadBalancerEnabled: false
+  presets:
+  - name: X0156
+    relearn_steps:
+    - 10m
+    leech_threshold: 8
+    leech_action: suspend
+  - name: X0054
+    relearn_steps: []
+    leech_threshold: 8
+    leech_action: suspend
+  decks:
+  - name: X0156
+    preset: X0156
+  - name: X0054
+    preset: X0054
+  notetypes:
+  - name: X0152
+    fields:
+    - X0032
+    - A0010
+    templates:
+    - name: X0059
+      front: '{{X0032}}'
+      back: '{{A0010}}'
+  notes:
+  - notetype: X0152
+    deck: X0156
+    fields:
+    - x0141
+    - a0012
+  - notetype: X0152
+    deck: X0054
+    fields:
+    - x0169
+    - x0170
+steps:
+- observe:
+  - timing
+- db_exec:
+    sql: UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 10, factor = 2500, reps = 20, lapses = 7, data = '{"s":10.0,"d":5.0,"lrt":1893837600}'
+- advance: 1h
+- observe:
+  - 'next_states(#c1, #c2)'
+- answer:
+    card: '#c1'
+    rating: again
+    time_ms: 2000
+- observe:
+  - card(#c1)
+  - undo_status
+- db_exec:
+    sql: SELECT sfld, tags, mod, usn FROM notes ORDER BY id
+- db_exec:
+    sql: SELECT tag, usn, collapsed FROM tags ORDER BY tag
+- advance: 1m
+- answer:
+    card: '#c2'
+    rating: again
+    time_ms: 2000
+- observe:
+  - card(#c2)
+  - revlog(#c2)
+- db_exec:
+    sql: SELECT sfld, tags, mod, usn FROM notes ORDER BY id
+- db_exec:
+    sql: SELECT tag, usn, collapsed FROM tags ORDER BY tag
+- advance: 1m
+- undo: {}
+- observe:
+  - card(#c2)
+  - revlog(#c2)
+  - undo_status
+- db_exec:
+    sql: SELECT sfld, tags, mod, usn FROM notes ORDER BY id
+- db_exec:
+    sql: SELECT tag, usn, collapsed FROM tags ORDER BY tag
+- undo: {}
+- observe:
+  - card(#c1)
+  - revlog(#c1)
+  - undo_status
+- db_exec:
+    sql: SELECT sfld, tags, mod, usn FROM notes ORDER BY id
+- db_exec:
+    sql: SELECT tag, usn, collapsed FROM tags ORDER BY tag

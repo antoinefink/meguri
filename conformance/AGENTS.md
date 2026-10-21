@@ -34,3 +34,5 @@
 - Scenario and golden strings carry U+2028, U+0085 and other line-breaking characters raw: split JSON lines on `\n` only, never with Python's `splitlines()`.
 
 - `queue` reports a new build only under Q2.3 (`specs/conformance/queue-ops.md`). After a same-day clock or config change, choose another deck, then the study deck. Q3's explicit compatibility check is separate from D8's automatic count maintenance. Original recorded pairs remain exact; new inputs need oracle output.
+
+- Load-balancer cases follow `specs/conformance/answer-ops.md` H4: build the held cache with `queue` after the final raw write, answer only its head, and stay within one scheduler day. After changing build config, drop the held cache with a raw no-op write and build again.

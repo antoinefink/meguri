@@ -1,0 +1,80 @@
+id: sched/bury/ae22-undo
+clock:
+  tz: UTC
+  start: '2030-01-15T10:00:00'
+setup:
+  config:
+    fsrs: true
+    loadBalancerEnabled: false
+  presets:
+  - name: X0150
+    bury_new: true
+    bury_reviews: true
+  decks:
+  - name: X0177
+    preset: X0150
+  notetypes:
+  - name: X0174
+    fields:
+    - X0032
+    - A0010
+    templates:
+    - name: X0029
+      front: '{{X0032}}'
+      back: '{{A0010}}'
+    - name: X0144
+      front: '{{A0010}}'
+      back: '{{X0032}}'
+  notes:
+  - notetype: X0174
+    deck: X0177
+    fields:
+    - a0022
+    - x0037
+steps:
+- observe:
+  - timing
+- db_exec:
+    sql: UPDATE cards SET type = 2, queue = 2, ivl = 4, due = 0, factor = 2500, reps = 3, data = '{"s":4.5,"d":5.0,"lrt":1894356000}'
+      WHERE ord = 0
+- advance: 1h
+- observe:
+  - 'card(#c1, #c2)'
+  - legacy_json:
+      decks:
+      - X0177
+- answer:
+    card: '#c1'
+    rating: good
+    time_ms: 6000
+- observe:
+  - 'card(#c1, #c2)'
+  - revlog(#c1)
+  - undo_status
+- db_exec:
+    sql: SELECT name, mtime_secs, usn, hex(common) FROM decks ORDER BY name
+- db_exec:
+    sql: SELECT mod FROM col
+- advance: 1m
+- undo: {}
+- observe:
+  - 'card(#c1, #c2)'
+  - revlog(#c1)
+  - undo_status
+- db_exec:
+    sql: SELECT name, mtime_secs, usn, hex(common) FROM decks ORDER BY name
+- db_exec:
+    sql: SELECT mod FROM col
+- redo: {}
+- observe:
+  - 'card(#c1, #c2)'
+  - revlog(#c1)
+  - undo_status
+- db_exec:
+    sql: SELECT name, mtime_secs, usn, hex(common) FROM decks ORDER BY name
+- db_exec:
+    sql: SELECT mod FROM col
+- observe:
+  - legacy_json:
+      decks:
+      - X0177

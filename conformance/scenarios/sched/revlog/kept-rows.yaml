@@ -1,0 +1,71 @@
+id: sched/revlog/kept-rows
+clock:
+  tz: UTC
+  start: '2030-01-15T10:00:00'
+setup:
+  config:
+    fsrs: true
+    loadBalancerEnabled: false
+  presets:
+  - name: A0020
+  decks:
+  - name: A0021
+    preset: A0020
+  notetypes:
+  - name: X0152
+    fields:
+    - X0032
+    - A0010
+    templates:
+    - name: X0059
+      front: '{{X0032}}'
+      back: '{{A0010}}'
+  notes:
+  - notetype: X0152
+    deck: A0021
+    fields:
+    - x0036
+    - x0046
+  - notetype: X0152
+    deck: A0021
+    fields:
+    - x0143
+    - a0011
+steps:
+- observe:
+  - timing
+- legacy_update:
+    preset: A0020
+    patch:
+      maxTaken: 10
+- db_exec:
+    sql: UPDATE cards SET type = 2, queue = 2, ivl = 4, due = 0, factor = 2500, reps = 4, data = '{"s":4.5,"d":5.0,"lrt":1894356000}'
+      WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1)
+- advance: 1h
+- db_exec:
+    sql: INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, c.id, v.column3,
+      v.column4, v.column5, v.column6, v.column7, v.column8, v.column9 FROM (SELECT id, row_number() OVER (ORDER
+      BY id) AS n FROM cards) AS c JOIN (VALUES (1894356000000, 1, 3, 3, 4, -600, 2500, 8000, 0), (1894356100000,
+      1, 4, 0, 4, 4, 2500, 0, 4), (1894356200000, 1, 5, 3, 4, 4, 2500, 5000, 3), (1894356300000, 1, 6, 0, 6, 4,
+      0, 0, 5), (1894705200000, 1, 7, 1, -600, 4, 450, 7000, 1), (1894705205000, 1, 8, 2, 6, 4, 470, 2000, 2), (1894356400000,
+      2, 3, 3, 1, 0, 0, 3000, 0), (1894356500000, 2, 4, 1, -600, 1, 0, 4000, 2) ) AS v ON v.column2 = c.n
+- delete_notes:
+    notes:
+    - '#n2'
+- answer:
+    card: '#c1'
+    rating: good
+    time_ms: 25000
+- observe:
+  - card(#c1)
+  - 'revlog(#c1, #c2)'
+- db_exec:
+    sql: SELECT count(*) FROM revlog
+- advance: 1m
+- undo: {}
+- observe:
+  - card(#c1)
+  - 'revlog(#c1, #c2)'
+  - undo_status
+- db_exec:
+    sql: SELECT count(*) FROM revlog

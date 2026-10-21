@@ -1,0 +1,85 @@
+id: sched/leech/thresholds
+clock:
+  tz: UTC
+  start: '2030-01-15T10:00:00'
+setup:
+  config:
+    fsrs: true
+    loadBalancerEnabled: false
+  presets:
+  - name: X0059
+    relearn_steps:
+    - 10m
+    leech_threshold: 1
+    leech_action: tag_only
+  - name: X0057
+    relearn_steps:
+    - 10m
+    leech_threshold: 8
+  decks:
+  - name: X0059
+    preset: X0059
+  - name: X0057
+    preset: X0057
+  notetypes:
+  - name: X0152
+    fields:
+    - X0032
+    - A0010
+    templates:
+    - name: X0059
+      front: '{{X0032}}'
+      back: '{{A0010}}'
+  notes:
+  - notetype: X0152
+    deck: X0059
+    fields:
+    - x0055
+    - a0025
+  - notetype: X0152
+    deck: X0057
+    fields:
+    - x0048
+    - x0142
+steps:
+- observe:
+  - timing
+- db_exec:
+    sql: UPDATE deck_config SET config = CAST(config || X'A80105' AS BLOB) WHERE name = 'X0057'
+- db_exec:
+    sql: INSERT INTO tags (tag, usn, collapsed, config) VALUES ('LEECH', 0, 0, NULL)
+- db_exec:
+    sql: UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 10, factor = 2500, reps = 20, lapses = v.column2,
+      data = '{"s":10.0,"d":5.0,"lrt":1893837600}' FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n
+      FROM cards) AS c JOIN (VALUES (1, 0), (2, 7)) AS v ON v.column1 = c.n WHERE cards.id = c.cid
+- advance: 1h
+- observe:
+  - 'next_states(#c1, #c2)'
+- answer:
+    card: '#c1'
+    rating: again
+    time_ms: 1000
+- answer:
+    card: '#c2'
+    rating: again
+    time_ms: 1000
+- observe:
+  - 'card(#c1, #c2)'
+- db_exec:
+    sql: SELECT sfld, tags, mod, usn FROM notes ORDER BY id
+- db_exec:
+    sql: SELECT tag, usn, collapsed FROM tags ORDER BY tag
+- db_exec:
+    sql: UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 10, left = 0, lapses = 1 WHERE id = (SELECT id FROM
+      cards ORDER BY id LIMIT 1)
+- advance: 1m
+- observe:
+  - next_states(#c1)
+- answer:
+    card: '#c1'
+    rating: again
+    time_ms: 1000
+- observe:
+  - card(#c1)
+- db_exec:
+    sql: SELECT sfld, tags, mod, usn FROM notes ORDER BY id

@@ -1,0 +1,124 @@
+id: sched/bury/answer-kinds
+clock:
+  tz: UTC
+  start: '2030-01-15T10:00:00'
+setup:
+  config:
+    fsrs: true
+    loadBalancerEnabled: false
+  presets:
+  - name: A0002
+    bury_new: true
+    bury_reviews: true
+    bury_interday_learning: true
+  decks:
+  - name: X0157
+    preset: A0002
+  notetypes:
+  - name: X0027
+    fields:
+    - A0001
+    - A0004
+    - A0014
+    - A0027
+    - X0002
+    templates:
+    - name: X0159
+      front: '{{A0001}}'
+      back: '{{A0004}}'
+    - name: X0160
+      front: '{{A0004}}'
+      back: '{{A0001}}'
+    - name: X0161
+      front: '{{A0014}}'
+      back: '{{A0001}}'
+    - name: X0162
+      front: '{{A0027}}'
+      back: '{{A0001}}'
+    - name: X0163
+      front: '{{X0002}}'
+      back: '{{A0001}}'
+  notes:
+  - notetype: X0027
+    deck: X0157
+    fields:
+    - x0042
+    - a0005
+    - a0015
+    - a0028
+    - x0003
+  - notetype: X0027
+    deck: X0157
+    fields:
+    - x0041
+    - a0006
+    - a0016
+    - a0029
+    - x0009
+  - notetype: X0027
+    deck: X0157
+    fields:
+    - x0039
+    - a0007
+    - a0017
+    - a0030
+    - x0015
+  - notetype: X0027
+    deck: X0157
+    fields:
+    - x0040
+    - a0008
+    - a0018
+    - a0031
+    - x0021
+  - notetype: X0027
+    deck: X0157
+    fields:
+    - x0043
+    - a0009
+    - a0019
+    - a0032
+    - x0022
+steps:
+- observe:
+  - timing
+- db_exec:
+    sql: UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, factor = v.column6,
+      reps = v.column7, left = v.column8, data = v.column9 FROM (VALUES (2, 2, 2, 5, 9, 2500, 4, 0, '{"s":9.0,"d":5.0,"lrt":1894356000}'),
+      (3, 1, 3, 1, 0, 0, 1, 1, '{"s":1.0,"d":5.0,"lrt":1894615200}'), (4, 1, 1, 1894703400, 0, 0, 1, 1, '{"s":0.5,"d":5.0,"lrt":1894700400}')
+      ) AS v WHERE cards.ord = v.column1
+- db_exec:
+    sql: UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, factor = v.column6,
+      reps = v.column7, left = v.column8, data = v.column9 FROM notes JOIN (VALUES ('x0042', 2, 2, 0, 4, 2500, 3,
+      0, '{"s":4.5,"d":5.0,"lrt":1894356000}'), ('x0039', 1, 3, 0, 0, 0, 1, 1, '{"s":1.0,"d":5.0,"lrt":1894615200}'),
+      ('x0040', 1, 1, 1894702200, 0, 0, 1, 1, '{"s":0.5,"d":5.0,"lrt":1894701000}'), ('x0043', 2, -1, 0, 4, 2500,
+      3, 0, '{"s":4.5,"d":5.0,"lrt":1894356000}') ) AS v ON v.column1 = notes.sfld WHERE cards.nid = notes.id AND
+      cards.ord = 0
+- advance: 1h
+- observe:
+  - 'card(#c1, #c6, #c11, #c16, #c21)'
+- answer:
+    card: '#c1'
+    rating: good
+    time_ms: 1000
+- answer:
+    card: '#c6'
+    rating: good
+    time_ms: 2000
+- answer:
+    card: '#c11'
+    rating: good
+    time_ms: 3000
+- answer:
+    card: '#c16'
+    rating: good
+    time_ms: 4000
+- answer:
+    card: '#c21'
+    rating: good
+    time_ms: 5000
+- observe:
+  - card
+  - legacy_json:
+      decks:
+      - X0157

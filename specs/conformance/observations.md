@@ -81,7 +81,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 
 ## O5. Scheduling states
 
-`next_states` values follow the scheduler's protobuf state messages, flattened:
+`next_states` values follow the scheduler's protobuf state messages, flattened. A held scenario load-balancer cache participates under `answer-ops.md` H1–H4; the request and output shapes do not change:
 
 - a state is `{kind, ...fields}` with `kind` one of `new`, `learning`, `review`, `relearning`, `preview`, `rescheduling`;
 - `new`: `position`; `learning`: `remaining_steps`, `scheduled_secs`, `elapsed_secs`, `memory_state?`; `review`: `scheduled_days`, `elapsed_days`, `ease_factor`, `lapses`, `leeched`, `memory_state?`; `relearning`: `learning` and `review`, each the matching state without `kind`;
