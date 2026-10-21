@@ -65,6 +65,16 @@ case "$name $*" in
     mkdir -p "$dd/Build/Products"
     sdk=iphonesimulator root="$config-iphonesimulator"
     case "$dest" in platform=macOS*) sdk=macosx root="$config" ;; esac
+    if [ "$sdk" = macosx ] && [ "$plan" = Unit ]; then
+      excluded="$dd/Build/Products/$root/Meguri.app/Contents/PlugIns/MeguriSnapshotTests.xctest"
+      if [ -e "$excluded" ] || [ "${STUB_MAC_UNIT_BUILD_FAIL:-0}" = 1 ]; then
+        echo "    export PRIVATE_PLACEHOLDER=error: synthetic-environment-marker"
+        echo "$dd/Build/Products/$root/Meguri.app: signing refused the generated bundle"
+        echo "In subcomponent: $excluded"
+        echo "Command CodeSign failed with a nonzero exit code"
+        exit 65
+      fi
+    fi
     [ "${STUB_NO_XCTESTRUN:-}" != "$sdk" ] || exit 0
     echo "__TESTROOT__/$root/" >"$dd/Build/Products/${scheme}_${plan}_${sdk}27.0-arm64.xctestrun"
     mkdir -p "$dd/Build/Products/$root/Meguri.app"
@@ -462,6 +472,45 @@ assert_project_presence_missing() {
   FAKE_VM_TEST_RC=65 check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
   [ "$status" -ne 0 ]
   tap_line 'not ok [0-9]+ iphone-Debug-TestHooksTests: Passed .*'
+}
+
+@test "xcode-check removes only the excluded Snapshot bundle before its first Mac Unit build" {
+  local work="$BATS_TEST_TMPDIR/work" dd="$BATS_TEST_TMPDIR/work/DerivedData-tests"
+  local stale="$dd/Build/Products/Debug/Meguri.app/Contents/PlugIns/MeguriSnapshotTests.xctest"
+  mkdir -p "$stale" "$dd/Build/Products/Debug/Unrelated.framework" \
+    "$dd/Build/Products/Debug/Meguri.app/Contents/PlugIns/OtherTests.xctest" \
+    "$dd/Build/Intermediates.noindex" "$work/earlier.xcresult"
+  echo malformed >"$stale/Info.plist"
+  echo unrelated-product >"$dd/Build/Products/Debug/Unrelated.framework/keep"
+  echo unrelated-bundle >"$dd/Build/Products/Debug/Meguri.app/Contents/PlugIns/OtherTests.xctest/keep"
+  echo cached-intermediate >"$dd/Build/Intermediates.noindex/keep"
+  echo earlier-result >"$work/earlier.xcresult/keep"
+  check_project --phase devices
+  tap_line 'ok [0-9]+ mac-unit: Passed .*'
+  tap_line 'ok [0-9]+ mac-app-hosted: Passed .*'
+  [ ! -e "$stale" ]
+  [ "$(cat "$dd/Build/Products/Debug/Unrelated.framework/keep")" = unrelated-product ]
+  [ "$(cat "$dd/Build/Products/Debug/Meguri.app/Contents/PlugIns/OtherTests.xctest/keep")" = unrelated-bundle ]
+  [ "$(cat "$dd/Build/Intermediates.noindex/keep")" = cached-intermediate ]
+  [ "$(cat "$work/earlier.xcresult/keep")" = earlier-result ]
+  [ "$(grep -c '^xcodebuild build-for-testing .* -testPlan Unit .* -destination platform=macOS,arch=arm64 ' "$STUB_LOG")" -eq 1 ]
+  called '^vm-xcodebuild .*Meguri_Unit_macosx27.0-arm64.xctestrun '
+  not_called '^xcodebuild test '
+}
+
+@test "xcode-check keeps a failed Mac Unit build red and prints only bounded diagnostic lines" {
+  STUB_MAC_UNIT_BUILD_FAIL=1 check_project --phase devices
+  [ "$status" -ne 0 ]
+  tap_line 'not ok [0-9]+ mac-unit: .*'
+  tap_line '# xcodebuild exit 70; log: .*mac-unit.log'
+  tap_line '# .*Meguri.app: signing refused the generated bundle'
+  tap_line '# In subcomponent: .*MeguriSnapshotTests.xctest'
+  tap_line '# Command CodeSign failed with a nonzero exit code'
+  ! grep -q 'synthetic-environment-marker' <<<"$output"
+  ! grep -Eq '^ok [0-9]+ mac-unit' <<<"$output"
+  [ "$(grep -c '^xcodebuild build-for-testing .* -testPlan Unit .* -destination platform=macOS,arch=arm64 ' "$STUB_LOG")" -eq 1 ]
+  not_called '^vm-xcodebuild .*Meguri_Unit_macosx27.0-arm64.xctestrun '
+  tap_line 'ok [0-9]+ mac-app-hosted: Passed .*'
 }
 
 @test "VM runs read current baselines, fixtures, scripts, workspace manifest and color catalog, not earlier copies" {

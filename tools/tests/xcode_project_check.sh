@@ -565,6 +565,15 @@ test_in_vm() {
     return 71
   fi
   case "$dest" in platform=macOS*) sdk=macosx build_dest="$dest" ;; esac
+  # Unit excludes the app-hosted Snapshot target. An old incomplete copy
+  # inside its host app can make signing fail before any Unit test builds.
+  # Remove only that excluded generated bundle, before the first build.
+  if [ "$name" = mac-unit ] && [ "$sdk" = macosx ] && [ "$plan" = Unit ]; then
+    if ! rm -rf "$DD_TESTS/Build/Products/$config/Meguri.app/Contents/PlugIns/MeguriSnapshotTests.xctest"; then
+      echo "xcode_project_check: cannot remove the excluded Snapshot test bundle before the Unit build" >"$log"
+      return 70
+    fi
+  fi
   if ! xcodebuild build-for-testing -project "$PROJECT" -scheme "$scheme" -testPlan "$plan" -configuration "$config" \
     -destination "$build_dest" -derivedDataPath "$DD_TESTS" >"$log" 2>&1; then
     echo "xcode_project_check: the build for testing failed" >>"$log"
@@ -646,7 +655,8 @@ run_tests() {
     skip "$name" "user step uitest-automation: macOS has not allowed UI automation (docs/process/one-time-setup.md)"
   else
     not_ok "$name: ${summary:-no result}" "xcodebuild exit $rc; log: $LOGS/$name.log" \
-      "$(grep -E 'error:|failed \(|^xcode_project_check: ' "$LOGS/$name.log" | head -n 8)"
+      "$(grep -E 'error:|failed \(|^xcode_project_check: |^/.*\.app: |^In subcomponent: |^Command CodeSign failed with a nonzero exit code$' "$LOGS/$name.log" |
+        grep -vE '^[[:space:]]*export[[:space:]]' | head -n 8)"
   fi
 }
 
