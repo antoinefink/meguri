@@ -910,6 +910,15 @@ fn finish(session: &mut Session<'_>) -> Result<(), ExecError> {
     session.storage.guard()
 }
 
+/// Raw protocol opens keep their maintenance policy, but queue statements
+/// need the same pure scalar registrations as engine connections.
+fn scheduler_initializers() -> meguri_storage::Initializers {
+    let mut initializers = meguri_storage::Initializers::new();
+    initializers.register(meguri_search::sqlfns::register);
+    initializers.register(meguri_sched::sqlfns::register);
+    initializers
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1050,13 +1059,4 @@ mod tests {
         assert_eq!(strip_field(&[0x00, 0x01], 9), None);
         assert_eq!(strip_field(&[0x0b], 9), None);
     }
-}
-
-/// Raw protocol opens keep their maintenance policy, but queue statements
-/// need the same pure scalar registrations as engine connections.
-fn scheduler_initializers() -> meguri_storage::Initializers {
-    let mut initializers = meguri_storage::Initializers::new();
-    initializers.register(meguri_search::sqlfns::register);
-    initializers.register(meguri_sched::sqlfns::register);
-    initializers
 }
