@@ -132,7 +132,7 @@ A queue belongs to the day it was built on. Anki notices a new day at its next r
 
 ## P11. Differences from Anki (R1889)
 
-None of these differences shows in a scenario: each is either a result the oracle cannot produce through the scenario language (an answer with stale states, a card the reviewer keeps on screen) or a failure Anki raises, which scenarios avoid. `conformance/deviations.yaml` therefore has no entry for them; the Meguri tests of C18 assert Meguri's side.
+R1889 references: `conformance/dsl#D13`; `conformance/deviations.yaml` header. Proof obligations: P11.1 and C18. This table authorizes no scenario transform.
 
 | Situation | Anki 26.09.3 | Meguri |
 |---|---|---|
@@ -143,6 +143,20 @@ None of these differences shows in a scenario: each is either a result the oracl
 | When a rebuild happens (P8) | at the next read | at the change, in the background |
 | A new day while a card is shown (R460, R461) | nothing until the next read; then the queue and history are dropped | the shown card's states and labels are recomputed at once; the rebuild and the history clear follow its answer (C14) |
 | Load balancer on and a preset with an Easy Days list of a length other than 0 or 7 (`sched/load-balancer#W2` row 5) | every queue build fails with an error | `startSession` refuses with `PresetUnsupported` naming those presets (C2) |
+
+### P11.1 Production proof mapping
+
+| P11 situation | Mandatory contract assertion |
+|---|---|
+| R727/R728 | C10 / AE27: Stale, zero writes, rebuilt head and notice predicate |
+| R457 | C4 / C13: current-card retention across rebuild |
+| R722 | C15 / AE22: undo puts card first after rebuild |
+| P7 | C8 / C9: remove and decrement buried queued siblings |
+| P8 | C13: background rebuild at observed commit |
+| R460/R461 | C14 / AE13: labels now; rebuild/history after answer |
+| invalid Easy Days | C2: global check, named preset refusal, zero writes |
+
+C18 owns execution of this mapping. It is separate from scenario activation and adds no transform to D13.
 
 # Part C. The session contract (C5, Meguri)
 

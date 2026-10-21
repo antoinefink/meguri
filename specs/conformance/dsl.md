@@ -317,7 +317,7 @@ For every scenario that is not `pass`, the runner reports (R1888):
 
 ## D13. Known deviations
 
-`conformance/deviations.yaml` (schema `deviations.schema.json`) lists every deliberate difference from the oracle (R1889):
+`conformance/deviations.yaml` (schema `deviations.schema.json`) lists deliberate changes to golden comparisons (R1889). Its header also links production-only contract differences that have no scenario observation to transform. For C5, `sched/review-session#P11` is that register; it requires concrete production test identities and evidence before acceptance. This reference grants no comparison tolerance. A transform entry retains the following shape:
 
 ```yaml
 deviations:

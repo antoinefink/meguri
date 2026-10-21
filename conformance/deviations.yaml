@@ -2,6 +2,8 @@
 # schema/deviations.schema.json). The runner applies only the transforms listed
 # here; any other difference from a golden fails. Every entry names the
 # requirement and a scenario or test that asserts Meguri's own behavior.
+# C5-only contract differences: specs/sched/review-session.md P11.
+# That register requires production test identities/evidence; it changes no transform.
 deviations:
   - id: card-data-unknown-keys
     requirement: R1461

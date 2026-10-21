@@ -6377,7 +6377,7 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
   - Undo puts the card at the head on its question side even after a rebuild (R722) and restores the cutoff and load balancer entry. Redo advances (R720). Non-answer undo steps patch the queue in place (R1812); U48's ops take an optional session id and return a head diff.
 - Every undo entry made while the session is active carries the session id. U107 uses this for hold-back (KTD6); `endSession` closes the scope.
 - Suspend: the session is a `SuspendParticipant` (U32). `flush_for_background` commits its overlay answers; `suspend` stops background rebuilds. Entering `ExclusiveBusy` flushes the overlay too (U24).
-- Spec: `specs/sched/review-session.md` separates the Anki-derived queue progression (oracle-checked) from Meguri-only contract behavior (tokens, overlay, predictions, stale recovery). Part P11 records product-only differences tested in C18; no scenario tolerance or new deviation is introduced.
+- Spec: `specs/sched/review-session.md` separates the Anki-derived queue progression (oracle-checked) from Meguri-only contract behavior (tokens, overlay, predictions, stale recovery). Part P11 is the R1889 register for C5-only differences, linked from D13 and the known-deviations header. Before U43 acceptance, its seven rows require actual production test ids and successful receipts in the review log. Existing scenario transforms and tolerances remain unchanged.
 
 **Execution note:** Spec writer first for queue progression and learning requeue. The C5 contract parts are specified from the Product Contract and this plan (no Anki source needed). Implementer test-first, with a fault-injection suite for commit failure.
 
