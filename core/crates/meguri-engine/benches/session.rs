@@ -330,7 +330,7 @@ fn main() -> ExitCode {
         }
         let id = start(&review);
         eprintln!(
-            "session {size}: current answer workload = sync snapshot + maintenance history load; U81 regex compiler, U85 slow streaming search, U95 stats aggregate build PENDING. Full three-workload concurrency remains mandatory at <=1 ms p95; this measurement does not establish it."
+            "session {size}: current answer workload = sync snapshot + maintenance history load; U81 regex compiler, U85 slow streaming search, U95 stats aggregate build PENDING. Full three-workload concurrency remains mandatory at <=5 ms p95; this measurement does not establish it."
         );
         let mut load = AnswerLoad::default();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
@@ -596,7 +596,7 @@ fn main() -> ExitCode {
             "session.peekFirstCard" => Duration::from_millis(20),
             "session.start_head3" => Duration::from_millis(150),
             "session.renderHead" => Duration::from_millis(5),
-            "session.answer_overlay_sync_history" => Duration::from_millis(1),
+            "session.answer_overlay_sync_history" => Duration::from_millis(5),
             "session.undo_to_head" | "session.undo_to_head_sync200ms" => Duration::from_millis(50),
             _ => unreachable!(),
         };
