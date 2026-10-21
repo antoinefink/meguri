@@ -704,9 +704,9 @@ impl ReviewService {
         match first {
             None => Ok(PeekResult::Empty),
             Some(e) => {
+                let mut models = FsrsCache::default();
                 let item = project_item(
                     &*rows,
-                    &c,
                     &q,
                     &Overlay::default(),
                     e.id,
@@ -716,6 +716,7 @@ impl ReviewService {
                     day.next_day_at,
                     &chooser,
                     None,
+                    &mut models,
                 )?
                 .0;
                 Ok(PeekResult::Card(item))
@@ -894,20 +895,19 @@ impl ReviewService {
         let p = session.presentation.lock().unwrap();
         let kind = p.queue.kind(card).ok_or_else(|| invalid("missing queue entry"))?;
         let chooser = session.cache.snapshot();
-        let (item, captured) = project_item(
+        let mut models = FsrsCache::default();
+        let (token, states, captured) = capture_state(
             &*rows,
-            &c,
-            &p.queue,
             &p.overlay,
             card,
-            kind,
             at,
             day.today,
             day.next_day_at,
             &chooser,
             None,
+            &mut models,
         )?;
-        if supplied != item.state_token {
+        if supplied != token {
             drop(p);
             drop(rows);
             drop(r);
@@ -920,10 +920,10 @@ impl ReviewService {
             });
         }
         let index = rating as usize - 1;
-        let chosen = choices(&item.next_states)[index].clone();
+        let chosen = choices(&states)[index].clone();
         let planned = plan(
             &captured.card,
-            item.next_states.current,
+            states.current,
             &chosen,
             &captured.inputs.preset,
             captured.inputs.retention,
@@ -944,7 +944,7 @@ impl ReviewService {
         let request = AnswerRequest {
             card,
             state_token: captured.digest,
-            current: item.next_states.current,
+            current: states.current,
             chosen,
             rating,
             today: day.today,
@@ -1021,7 +1021,7 @@ impl ReviewService {
         }
         // Reuse the exact freshness snapshot for the optimistic post-head;
         // a second snapshot adds a commit-lock wait and can mix two commits.
-        let computed = project_snapshot(&c, &mut draft, &rows, 3, at);
+        let computed = project_snapshot(&c, &mut draft, &rows, 3, at, &mut models);
         let head = match computed {
             Ok(h) => h,
             Err(e) => {
@@ -1493,21 +1493,18 @@ fn review_capture(
     Ok(render)
 }
 #[allow(clippy::too_many_arguments)]
-fn project_item(
+fn capture_state(
     rows: &impl ReadRows,
-    c: &Collection,
-    q: &SessionQueue,
     overlay: &Overlay,
     id: CardId,
-    kind: Kind,
     at: i64,
     today: u32,
     boundary: i64,
     chooser: &meguri_sched::load_balancer::LoadBalancer,
     undo: Option<&crate::undo::entry::Entry>,
-) -> Result<(HeadItem, Captured), EngineError> {
+    models: &mut FsrsCache,
+) -> Result<(StateToken, SchedulingStates, Captured), EngineError> {
     let (image, card) = presentation_card(rows, overlay, id, undo)?;
-    let mut models = FsrsCache::default();
     let removed = undo
         .map(|entry| {
             entry
@@ -1521,7 +1518,7 @@ fn project_item(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let inputs = frozen::inputs_without_revlogs(rows, &card, boundary, &mut models, &removed)?;
+    let inputs = frozen::inputs_without_revlogs(rows, &card, boundary, models, &removed)?;
     let (configured_preset, home_dr) = match &inputs.home.kind.kind {
         DeckKind::Normal(n) => (DeckConfigId(n.config_id), n.desired_retention),
         _ => return Err(invalid("non-normal home")),
@@ -1566,14 +1563,42 @@ fn project_item(
         inputs.preset.fields().bury_reviews.then_some(card.note_id),
         meguri_sched::states::fuzz::seed(card.id.0 as u64, u64::from(card.reps)),
     );
-    let states = next_states(&mut models, &input, if enabled { Some(&mut choose) } else { None }).map_err(invalid)?;
-    let siblings = sibling_ids(rows, overlay, &card, &inputs.preset, undo)?;
+    let states = next_states(models, &input, if enabled { Some(&mut choose) } else { None }).map_err(invalid)?;
+    let digest = meguri_storage::journal::digest(&image);
+    Ok((
+        token,
+        states,
+        Captured {
+            image,
+            card,
+            inputs,
+            digest,
+        },
+    ))
+}
+#[allow(clippy::too_many_arguments)]
+fn project_item(
+    rows: &impl ReadRows,
+    q: &SessionQueue,
+    overlay: &Overlay,
+    id: CardId,
+    kind: Kind,
+    at: i64,
+    today: u32,
+    boundary: i64,
+    chooser: &meguri_sched::load_balancer::LoadBalancer,
+    undo: Option<&crate::undo::entry::Entry>,
+    models: &mut FsrsCache,
+) -> Result<(HeadItem, Captured), EngineError> {
+    let (token, states, captured) = capture_state(rows, overlay, id, at, today, boundary, chooser, undo, models)?;
+    let Captured { card, inputs, .. } = &captured;
+    let siblings = sibling_ids(rows, overlay, card, &inputs.preset, undo)?;
     let mut predicted = [None; 4];
     let mut prediction_queue = q.clone();
     prediction_queue.set_current(Some(id));
     for (index, chosen) in choices(&states).into_iter().enumerate() {
         let planned = plan(
-            &card,
+            card,
             states.current,
             chosen,
             &inputs.preset,
@@ -1623,17 +1648,7 @@ fn project_item(
             leech_action: p.leech_action,
         },
     };
-    let digest = meguri_storage::journal::digest(&image);
-    let _ = c; // Rendering is intentionally absent from head/prediction.
-    Ok((
-        item,
-        Captured {
-            image,
-            card,
-            inputs,
-            digest,
-        },
-    ))
+    Ok((item, captured))
 }
 // C6 permits a fixed context when peek, start and renderHead share it.
 fn session_platform() -> crate::rendering::Platform {
@@ -1647,7 +1662,8 @@ fn project(c: &Collection, s: &mut Session, count: usize, at: Option<i64>) -> Re
     let at = at.unwrap_or_else(|| c.core.exec.clock.now_ms());
     let r = c.reader(ReaderRole::Interactive)?;
     let rows = r.snapshot()?;
-    project_snapshot(c, s, &rows, count, at)
+    let mut models = FsrsCache::default();
+    project_snapshot(c, s, &rows, count, at, &mut models)
 }
 fn project_snapshot(
     c: &Collection,
@@ -1655,6 +1671,7 @@ fn project_snapshot(
     rows: &crate::Snapshot<'_>,
     count: usize,
     at: i64,
+    models: &mut FsrsCache,
 ) -> Result<Head, EngineError> {
     let day = timing(&**rows, c, at)?;
     let mut p = s.presentation.lock().unwrap();
@@ -1773,7 +1790,7 @@ fn project_snapshot(
             }
             cache.accept(
                 &pending.post,
-                frozen::inputs(&**rows, &pending.post, day.next_day_at, &mut FsrsCache::default())?
+                frozen::inputs(&**rows, &pending.post, day.next_day_at, models)?
                     .preset
                     .source()
                     .id,
@@ -1805,7 +1822,6 @@ fn project_snapshot(
     for e in entries {
         let (item, _) = project_item(
             &**rows,
-            c,
             &p.queue,
             &p.overlay,
             e.id,
@@ -1815,6 +1831,7 @@ fn project_snapshot(
             day.next_day_at,
             &chooser,
             s.undo_view.as_ref(),
+            models,
         )?;
         for next in choices(&item.next_states) {
             match next.state {
