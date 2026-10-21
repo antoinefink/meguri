@@ -63,7 +63,9 @@ fn records(bytes: &[u8]) -> Vec<serde_json::Value> {
         .collect()
 }
 
-fn prepared(bytes: &[u8]) -> Vec<(u64, [i64; 9], [u8; 32], [u8; 32])> {
+type PreparedReceipt = (u64, [i64; 9], [u8; 32], [u8; 32]);
+
+fn prepared(bytes: &[u8]) -> Vec<PreparedReceipt> {
     records(bytes)
         .into_iter()
         .filter_map(|record| {
@@ -930,10 +932,10 @@ fn elapsed_crash(test_name: &str, occupied: bool) {
     let output_thread = match registry.spawn("elapsed-child-reader", meguri_engine::Qos::Default, move |_| {
         for line in std::io::BufReader::new(output).lines() {
             let line = line.unwrap();
-            if let Some((_, notice)) = line.split_once("U43ELAPSED ") {
-                if notice_tx.send(notice.to_owned()).is_err() {
-                    break;
-                }
+            if let Some((_, notice)) = line.split_once("U43ELAPSED ")
+                && notice_tx.send(notice.to_owned()).is_err()
+            {
+                break;
             }
         }
     }) {
@@ -1083,7 +1085,10 @@ fn elapsed_crash(test_name: &str, occupied: bool) {
             Some(NOW / 1000)
         );
         if let Some((_, receipt, _, post_digest)) = assignment {
-            assert_receipt_row(&collection, &receipt);
+            assert_eq!(
+                rows.row_image(Table::Revlog, &RowKey::Id(receipt[0])).unwrap().unwrap(),
+                receipt.iter().copied().map(Cell::Integer).collect::<Vec<_>>()
+            );
             assert_eq!(
                 rows.row_digest(Table::Cards, &RowKey::Id(subject.0)).unwrap(),
                 Some(post_digest)

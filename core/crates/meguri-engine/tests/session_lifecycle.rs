@@ -403,18 +403,18 @@ fn c2_start_cancels_running_optimizer_without_waiting_for_cleanup_and_refusal_do
         let notification = notifications
             .recv_timeout(expires.saturating_sub(monotonic::now()))
             .expect("optimizer completion was not delivered");
-        if let EventKind::JobFinished { id, outcome } = &notification.kind {
-            if *id == optimizer.id {
-                break outcome.clone();
-            }
+        if let EventKind::JobFinished { id, outcome } = &notification.kind
+            && *id == optimizer.id
+        {
+            break outcome.clone();
         }
     };
     let mut outcomes = vec![first_outcome];
     while let Some(notification) = notifications.try_recv() {
-        if let EventKind::JobFinished { id, outcome } = &notification.kind {
-            if *id == optimizer.id {
-                outcomes.push(outcome.clone());
-            }
+        if let EventKind::JobFinished { id, outcome } = &notification.kind
+            && *id == optimizer.id
+        {
+            outcomes.push(outcome.clone());
         }
     }
     assert_eq!(outcomes, [JobOutcome::Cancelled]);
@@ -922,10 +922,10 @@ fn c16_failed_terminal_sync_errors_and_retains_admission_and_recovery_evidence()
         assert_eq!(row, assigned_cells);
     }
     while let Some(envelope) = delivered.try_recv() {
-        if let EventKind::Extension(payload) = &envelope.kind {
-            if let Some(SessionEvent::SessionEnded { session_id }) = payload.as_any().downcast_ref() {
-                assert_ne!(*session_id, active_id);
-            }
+        if let EventKind::Extension(payload) = &envelope.kind
+            && let Some(SessionEvent::SessionEnded { session_id }) = payload.as_any().downcast_ref()
+        {
+            assert_ne!(*session_id, active_id);
         }
     }
 }
