@@ -1,11 +1,13 @@
 //! One read-only, snapshot-consistent stored-card render (render/card-render-pipeline).
 mod cache;
+mod capture;
+pub(crate) use capture::Capture;
 mod special_fields;
 mod type_answer;
 use crate::{Collection, EngineError};
 pub(crate) use cache::ParseCache;
 use meguri_model::ids::CardId;
-use meguri_storage::{ConfigValue, ReadRows, ReaderRole, Table};
+use meguri_storage::{ReadRows, ReaderRole, Table};
 pub use meguri_template::{
     av_tags::AvTag,
     card::{BlankKind, CardRender, Outcome, RenderMode},
@@ -78,28 +80,25 @@ fn render_card_inner(
     let reader = collection.reader(ReaderRole::Interactive)?;
     let snapshot = reader.snapshot()?;
     let card = snapshot.card(id)?.ok_or_else(|| missing(Table::Cards, id.0))?;
-    let note = snapshot
-        .note(card.note_id)?
-        .ok_or_else(|| missing(Table::Notes, card.note_id.0))?;
-    let kind = snapshot
-        .notetype(note.notetype_id)?
-        .ok_or_else(|| missing(Table::Notetypes, note.notetype_id.0))?;
-    let cloze = kind.config.kind == 1;
-    let template = if cloze {
-        kind.templates.first()
-    } else {
-        kind.templates.iter().find(|t| t.ord == u32::from(card.ord))
-    }
-    .ok_or_else(|| missing(Table::Templates, format!("{}:{}", kind.id.0, card.ord)))?;
-    let (comparable, question) = render_stored_in(collection, &*snapshot, &card, &note, &kind, template, mode)?;
-    let hide_play_buttons = matches!(
-        snapshot.config_value("hideAudioPlayButtons")?,
-        Some(ConfigValue::Bool(true))
-    );
-    let review_extra = match snapshot.config_value("reviewExtra")? {
-        Some(ConfigValue::String(s)) => s,
-        _ => String::new(),
-    };
+    let capture = Capture::read(&*snapshot, card, mode, platform)?;
+    drop(snapshot);
+    drop(reader);
+    render_captured(collection, &capture, observation, comparable_only)
+}
+
+pub(crate) fn render_captured(
+    collection: &Collection,
+    capture: &Capture,
+    observation: Option<&str>,
+    comparable_only: bool,
+) -> Result<RenderedCard, EngineError> {
+    let card = &capture.card;
+    let note = &capture.note;
+    let kind = &capture.kind;
+    let mode = capture.mode;
+    let platform = capture.platform;
+    let hide_play_buttons = capture.hide_play_buttons;
+    let (comparable, question) = render_with_fields(collection, &capture.fields(), kind, &capture.template, mode);
     let (question, answer, type_in) = if mode == RenderMode::Browser || comparable_only {
         (comparable.question.clone(), comparable.answer.clone(), None)
     } else {
@@ -128,7 +127,7 @@ fn render_card_inner(
             )
         };
         let (sides, descriptor) =
-            type_answer::apply(sides, &question, &note, &kind, u32::from(card.ord) + 1, observation)?;
+            type_answer::apply(sides, &question, note, kind, u32::from(card.ord) + 1, observation)?;
         (Some(sides.question), Some(sides.answer), descriptor)
     };
     let mut media_refs = std::collections::BTreeSet::new();
@@ -144,7 +143,7 @@ fn render_card_inner(
     }
     Ok(RenderedCard {
         media_refs: media_refs.into_iter().collect(),
-        card_id: id,
+        card_id: card.id,
         ordinal: u32::from(card.ord),
         mode,
         question,
@@ -152,7 +151,7 @@ fn render_card_inner(
         comparable,
         css: kind.config.css.clone(),
         hide_play_buttons,
-        review_extra,
+        review_extra: capture.review_extra.clone(),
         flag: card.flags & 7,
         marked: crate::tags::canonical::split_text(&note.tags).any(|t| t.to_lowercase() == "marked"),
         type_in,
@@ -204,6 +203,10 @@ pub(crate) fn render_stored_in<R: ReadRows + ?Sized>(
     mode: RenderMode,
 ) -> Result<(CardRender, std::sync::Arc<meguri_template::ParsedTemplate>), EngineError> {
     let fields = special_fields::build(rows, card, note, kind, template)?;
+    Ok(render_with_fields(collection, &fields, kind, template, mode))
+}
+
+fn template_text(template: &meguri_model::notetype::NotetypeTemplate, mode: RenderMode) -> (&str, &str) {
     let q = if mode == RenderMode::Browser && !template.config.q_format_browser.is_empty() {
         &template.config.q_format_browser
     } else {
@@ -214,7 +217,18 @@ pub(crate) fn render_stored_in<R: ReadRows + ?Sized>(
     } else {
         &template.config.a_format
     };
+    (q, a)
+}
+
+fn render_with_fields(
+    collection: &Collection,
+    fields: &meguri_template::FieldMap,
+    kind: &meguri_model::notetype::Notetype,
+    template: &meguri_model::notetype::NotetypeTemplate,
+    mode: RenderMode,
+) -> (CardRender, std::sync::Arc<meguri_template::ParsedTemplate>) {
+    let (q, a) = template_text(template, mode);
     let (question, answer) = collection.core.render_cache.get(kind.id, template.ord, mode, q, a);
-    let comparable = card::render(&question, &answer, &fields, kind.config.kind == 1, mode);
-    Ok((comparable, question))
+    let comparable = card::render(&question, &answer, fields, kind.config.kind == 1, mode);
+    (comparable, question)
 }

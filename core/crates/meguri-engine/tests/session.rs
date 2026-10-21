@@ -143,12 +143,11 @@ fn p11_r457_shown_card_survives_rebuild_and_p8_rebuild_occurs_in_background() {
     h.settle();
     let mut changed = false;
     while let Some(event) = stream.try_recv() {
-        if let meguri_engine::EventKind::Extension(e) = &event.kind {
-            if let Some(meguri_engine::session::SessionEvent::QueueHeadChanged { diff, .. }) = e.as_any().downcast_ref()
-            {
-                assert_eq!(diff.head.items[0].card_id, shown);
-                changed = true;
-            }
+        if let meguri_engine::EventKind::Extension(e) = &event.kind
+            && let Some(meguri_engine::session::SessionEvent::QueueHeadChanged { diff, .. }) = e.as_any().downcast_ref()
+        {
+            assert_eq!(diff.head.items[0].card_id, shown);
+            changed = true;
         }
     }
     assert!(

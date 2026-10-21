@@ -21,6 +21,7 @@ use meguri_testkit::{
         timing::Percentile,
     },
     generate::DEFAULT_NOW_MS,
+    wallclock::Stopwatch,
 };
 use std::{
     process::ExitCode,
@@ -28,7 +29,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 #[global_allocator]
 static ALLOC: PeakAlloc = PeakAlloc;
@@ -216,16 +217,16 @@ fn main() -> ExitCode {
                 })
                 .unwrap()
         };
-        let starts_at = Arc::new(Mutex::new(std::collections::VecDeque::<Instant>::new()));
+        let starts_at = Arc::new(Mutex::new(std::collections::VecDeque::<Stopwatch>::new()));
         let coverage = Arc::new(Mutex::new(Vec::new()));
         let starts_hook = starts_at.clone();
         let coverage_hook = coverage.clone();
         review
             .journal_hook_for_testing(Arc::new(move |stage| {
-                if stage == JournalStage::IntentSynced {
-                    if let Some(accepted) = starts_hook.lock().unwrap().pop_front() {
-                        coverage_hook.lock().unwrap().push(accepted.elapsed());
-                    }
+                if stage == JournalStage::IntentSynced
+                    && let Some(accepted) = starts_hook.lock().unwrap().pop_front()
+                {
+                    coverage_hook.lock().unwrap().push(accepted.elapsed());
                 }
             }))
             .unwrap();
@@ -236,7 +237,7 @@ fn main() -> ExitCode {
                 for _ in 0..n {
                     let head = review.head(id, 3).unwrap();
                     let card = &head.items[0];
-                    starts_at.lock().unwrap().push_back(Instant::now());
+                    starts_at.lock().unwrap().push_back(Stopwatch::start());
                     total += answer.run(1, |_| {
                         assert!(matches!(
                             review

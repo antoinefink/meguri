@@ -67,12 +67,11 @@ fn c11_failure_three_of_five_cancels_later_answers_and_restores_failed_head() {
     assert_eq!(h.review.head(id, 3).unwrap().items[0].card_id, third);
     let mut failed = false;
     while let Some(event) = stream.try_recv() {
-        if let meguri_engine::EventKind::Extension(e) = &event.kind {
-            if let Some(meguri_engine::session::SessionEvent::CommitFailed { card_id, .. }) = e.as_any().downcast_ref()
-            {
-                assert_eq!(*card_id, third);
-                failed = true;
-            }
+        if let meguri_engine::EventKind::Extension(e) = &event.kind
+            && let Some(meguri_engine::session::SessionEvent::CommitFailed { card_id, .. }) = e.as_any().downcast_ref()
+        {
+            assert_eq!(*card_id, third);
+            failed = true;
         }
     }
     assert!(failed, "failure must reach the existing ordered core stream");

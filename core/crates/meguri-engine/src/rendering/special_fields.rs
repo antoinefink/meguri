@@ -21,11 +21,21 @@ pub(crate) fn build<R: ReadRows + ?Sized>(
         card.deck_id
     };
     let deck = reader.deck(home)?.map(|d| d.human_name());
+    Ok(from_captured(card, note, kind, template, deck.as_deref()))
+}
+
+pub(super) fn from_captured(
+    card: &Card,
+    note: &Note,
+    kind: &Notetype,
+    template: &NotetypeTemplate,
+    deck: Option<&str>,
+) -> FieldMap {
     let tags: Vec<String> = crate::tags::canonical::split_text(&note.tags)
         .map(str::to_owned)
         .collect();
     let values: Vec<&str> = note.field_values().collect();
-    Ok(FieldMap::new(
+    FieldMap::new(
         kind.fields
             .iter()
             .map(|f| (f.name.as_str(), values.get(f.ord as usize).copied().unwrap_or(""))),
@@ -33,10 +43,10 @@ pub(crate) fn build<R: ReadRows + ?Sized>(
             ord: u32::from(card.ord),
             notetype_name: &kind.name,
             template_name: &template.name,
-            deck_name: deck.as_deref(),
+            deck_name: deck,
             flags: i64::from(card.flags),
             card_id: card.id.0,
             tags: &tags,
         },
-    ))
+    )
 }

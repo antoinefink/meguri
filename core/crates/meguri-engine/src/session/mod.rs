@@ -5,6 +5,8 @@ pub(crate) mod journal;
 mod service;
 #[cfg(feature = "test-hooks")]
 pub use journal::JournalStage;
+#[cfg(feature = "test-hooks")]
+pub use service::RenderStage;
 pub use service::{
     AnswerOutcome, CurrentChange, Head, HeadDiff, HeadItem, HomePreset, Marks, PeekResult, Refusal, ReviewService,
     SessionEvent, SessionStartHook, StartResult,

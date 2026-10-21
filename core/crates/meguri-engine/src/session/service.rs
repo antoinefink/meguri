@@ -36,7 +36,6 @@ use meguri_sched::{
     },
 };
 use meguri_storage::{Cell, ReadRows, ReaderRole, Record, RowKey, StampMode, Table};
-use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     future::Future,
@@ -75,7 +74,6 @@ pub struct HomePreset {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct HeadItem {
-    render_witness: [u8; 32],
     pub card_id: CardId,
     pub note_id: NoteId,
     pub kind: Kind,
@@ -324,7 +322,6 @@ struct Session {
     presentation: Arc<Mutex<Presentation>>,
     cache: Arc<AnswerCache>,
     journal: Arc<Journal>,
-    render_witnesses: Arc<Mutex<BTreeMap<RenderKey, [u8; 32]>>>,
     last: Head,
     last_answer: i64,
     pending: Vec<PendingAnswer>,
@@ -364,7 +361,6 @@ impl Wake for StreamWake {
     }
 }
 struct Inner {
-    render_witnesses: Arc<Mutex<BTreeMap<RenderKey, [u8; 32]>>>,
     events: crate::Subscription,
     wake: Arc<StreamWake>,
     #[cfg(feature = "test-hooks")]
@@ -408,6 +404,14 @@ impl SessionStartHook for crate::JobRegistry {
         }
     }
 }
+#[cfg(feature = "test-hooks")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderStage {
+    Captured,
+    Publishing,
+}
+#[cfg(feature = "test-hooks")]
+type RenderHook = Arc<dyn Fn(RenderStage) + Send + Sync>;
 pub struct ReviewService {
     inner: Arc<Inner>,
     threads: crate::ThreadRegistry,
@@ -415,6 +419,8 @@ pub struct ReviewService {
     worker: Mutex<Option<JoinHandle<()>>>,
     control: Mutex<()>,
     renders: AtomicU64,
+    #[cfg(feature = "test-hooks")]
+    render_hook: Mutex<Option<RenderHook>>,
 }
 impl ReviewService {
     pub fn new(engine: &Engine, queues: Arc<QueueProvider>) -> Result<Arc<Self>, EngineError> {
@@ -424,7 +430,6 @@ impl ReviewService {
             queued: AtomicBool::new(false),
         });
         let inner = Arc::new(Inner {
-            render_witnesses: Arc::new(Mutex::new(BTreeMap::new())),
             events: engine.stream().subscribe(),
             wake: wake.clone(),
             #[cfg(feature = "test-hooks")]
@@ -468,7 +473,20 @@ impl ReviewService {
             worker: Mutex::new(Some(worker)),
             control: Mutex::new(()),
             renders: AtomicU64::new(0),
+            #[cfg(feature = "test-hooks")]
+            render_hook: Mutex::new(None),
         }))
+    }
+    #[cfg(feature = "test-hooks")]
+    pub fn render_hook_for_testing(&self, hook: Option<RenderHook>) {
+        *self.render_hook.lock().unwrap() = hook;
+    }
+    #[cfg(feature = "test-hooks")]
+    fn render_checkpoint(&self, stage: RenderStage) {
+        let hook = self.render_hook.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(stage);
+        }
     }
     #[cfg(feature = "test-hooks")]
     pub fn clear_render_cache_for_testing(&self) {
@@ -565,7 +583,6 @@ impl ReviewService {
                 })),
                 cache,
                 journal: journal.clone(),
-                render_witnesses: self.inner.render_witnesses.clone(),
                 last: Head {
                     items: Vec::new(),
                     counts: Counts::default(),
@@ -632,7 +649,6 @@ impl ReviewService {
                     &chooser,
                 )?
                 .0;
-                check_render_witness(&self.inner.render_witnesses, &item)?;
                 Ok(PeekResult::Card(item))
             }
         }
@@ -668,9 +684,14 @@ impl ReviewService {
         keys: &[RenderKey],
         platform: crate::rendering::Platform,
     ) -> Result<Vec<Arc<crate::rendering::RenderedCard>>, EngineError> {
+        if platform != session_platform() {
+            return Err(invalid(
+                "render platform differs from the session's native review context",
+            ));
+        }
         let (c, _) = self.bound()?;
         let head = self.head(id, 10)?;
-        let mut result = Vec::new();
+        let mut prepared = Vec::with_capacity(keys.len());
         for key in keys {
             let card = head
                 .items
@@ -678,38 +699,62 @@ impl ReviewService {
                 .find(|h| h.render_key == *key)
                 .ok_or_else(|| invalid("render key is no longer in head"))?
                 .card_id;
-            {
-                let mut state = self.inner.state.lock().unwrap();
-                if let Some(at) = state.render.iter().position(|(k, p, _)| k == key && *p == platform) {
-                    let cached = state.render.remove(at).unwrap();
-                    result.push(cached.2.clone());
-                    state.render.push_back(cached);
-                    continue;
-                }
-            }
-            let rendered = Arc::new(crate::rendering::render_card(
-                &c,
-                card,
-                crate::rendering::RenderMode::Review,
-                platform,
-            )?);
-            // Rendering reads its own coherent snapshot. Reject a key that
-            // changed while it rendered, rather than mislabelling its payload.
-            if !self
-                .head(id, 10)?
-                .items
-                .iter()
-                .any(|h| h.card_id == card && h.render_key == *key)
-            {
+            // Capture current consumed inputs even on hits: delivery and stamps
+            // are not freshness witnesses. Release the reader before HTML work.
+            let capture = {
+                let reader = c.reader(ReaderRole::Interactive)?;
+                let rows = reader.snapshot()?;
+                let card = rows.card(card)?.ok_or_else(|| invalid("render card disappeared"))?;
+                crate::rendering::Capture::read(&*rows, card, crate::rendering::RenderMode::Review, platform)?
+            };
+            if capture.key() != *key {
                 return Err(invalid("render changed during request"));
             }
-            self.renders.fetch_add(1, Ordering::Relaxed);
-            let mut state = self.inner.state.lock().unwrap();
-            state.render.push_back((*key, platform, rendered.clone()));
-            while state.render.len() > 16 {
-                state.render.pop_front();
+            #[cfg(feature = "test-hooks")]
+            self.render_checkpoint(RenderStage::Captured);
+            let cached = {
+                let state = self.inner.state.lock().unwrap();
+                state
+                    .render
+                    .iter()
+                    .find(|(k, p, _)| k == key && *p == platform)
+                    .map(|(_, _, value)| value.clone())
+            };
+            let rendered = if let Some(cached) = cached {
+                cached
+            } else {
+                let rendered = Arc::new(crate::rendering::render_captured(&c, &capture, None, false)?);
+                self.renders.fetch_add(1, Ordering::Relaxed);
+                rendered
+            };
+            #[cfg(feature = "test-hooks")]
+            self.render_checkpoint(RenderStage::Publishing);
+            prepared.push((*key, card, rendered));
+        }
+        // Validate and publish the batch under the presentation owner, with one
+        // bounded head projection rather than one state computation per page.
+        let mut state = self.inner.state.lock().unwrap();
+        let session = state.session.as_mut().filter(|s| s.id == id).ok_or_else(no_session)?;
+        let current = project(&c, session, 10, None)?;
+        if prepared
+            .iter()
+            .any(|(key, card, _)| !current.items.iter().any(|h| h.card_id == *card && h.render_key == *key))
+        {
+            return Err(invalid("render changed during request"));
+        }
+        let mut result = Vec::with_capacity(prepared.len());
+        for (key, _, rendered) in prepared {
+            if let Some(at) = state.render.iter().position(|(k, p, _)| *k == key && *p == platform) {
+                let cached = state.render.remove(at).unwrap();
+                result.push(cached.2.clone());
+                state.render.push_back(cached);
+            } else {
+                state.render.push_back((key, platform, rendered.clone()));
+                while state.render.len() > 16 {
+                    state.render.pop_front();
+                }
+                result.push(rendered);
             }
-            result.push(rendered);
         }
         Ok(result)
     }
@@ -781,7 +826,6 @@ impl ReviewService {
             day.next_day_at,
             &chooser,
         )?;
-        check_render_witness(&self.inner.render_witnesses, &item)?;
         if supplied != item.state_token {
             drop(p);
             drop(rows);
@@ -1248,16 +1292,17 @@ fn project_item(
     }
     let mut models = FsrsCache::default();
     let inputs = frozen::inputs(rows, &card, boundary, &mut models)?;
-    let home_dr = match &inputs.home.kind.kind {
-        DeckKind::Normal(n) => n.desired_retention,
-        _ => None,
+    let (configured_preset, home_dr) = match &inputs.home.kind.kind {
+        DeckKind::Normal(n) => (DeckConfigId(n.config_id), n.desired_retention),
+        _ => return Err(invalid("non-normal home")),
     };
     let token = token::state_token(&token::StateInputs {
         card: &card,
         raw_data: raw_data(&image),
-        preset_id: inputs.preset.source().id,
-        preset_mtime: rows.deck_config(inputs.preset.source().id)?.map(|p| p.mtime),
+        preset_id: configured_preset,
+        preset_mtime: rows.deck_config(configured_preset)?.map(|p| p.mtime),
         home_retention: home_dr,
+        effective_home: token::effective_home_fingerprint(&inputs.preset, inputs.retention),
         short_term_with_steps: inputs.short_term,
         learn_ahead: inputs.ahead,
         today,
@@ -1317,48 +1362,14 @@ fn project_item(
             )
             .map_err(|_| invalid("prediction card not permitted"))?;
     }
-    let note = rows
-        .note(card.note_id)?
-        .ok_or_else(|| invalid("head note disappeared"))?;
-    let nt = rows
-        .notetype(note.notetype_id)?
-        .ok_or_else(|| invalid("head note type disappeared"))?;
+    let render = crate::rendering::Capture::read(
+        rows,
+        card.clone(),
+        crate::rendering::RenderMode::Review,
+        session_platform(),
+    )?;
     let p = inputs.preset.fields();
-    let mut witness = Sha256::new();
-    let mut part = |bytes: &[u8]| {
-        witness.update((bytes.len() as u64).to_le_bytes());
-        witness.update(bytes);
-    };
-    part(note.fields.as_bytes());
-    part(note.tags.as_bytes());
-    part(nt.name.as_bytes());
-    part(&nt.config.to_bytes());
-    for field in &nt.fields {
-        part(field.name.as_bytes());
-        part(&field.ord.to_le_bytes());
-        part(&field.config.to_bytes());
-    }
-    for template in &nt.templates {
-        part(template.name.as_bytes());
-        part(&template.ord.to_le_bytes());
-        part(&template.config.to_bytes());
-    }
-    let home = if card.original_deck_id.0 == 0 {
-        card.deck_id
-    } else {
-        card.original_deck_id
-    };
-    if let Some(deck) = rows.deck(home)? {
-        part(deck.name.as_bytes());
-    }
-    for key in ["hideAudioPlayButtons", "reviewExtra"] {
-        if let Some(value) = rows.config_value(key)? {
-            part(value.compact().as_bytes());
-        }
-    }
-    let render_witness = witness.finalize().into();
     let item = HeadItem {
-        render_witness,
         card_id: id,
         note_id: card.note_id,
         kind: if kind == Kind::InterdayLearning {
@@ -1367,11 +1378,11 @@ fn project_item(
             kind
         },
         state_token: token,
-        render_key: token::render_key(&card, note.mtime, nt.id, nt.mtime),
+        render_key: render.key(),
         next_states: states,
         predicted_next: predicted,
         flag: card.flags & 7,
-        marked: crate::tags::canonical::split_text(&note.tags).any(|t| t.eq_ignore_ascii_case("marked")),
+        marked: crate::tags::canonical::split_text(&render.note.tags).any(|t| t.to_lowercase() == "marked"),
         home_preset: HomePreset {
             id: inputs.preset.source().id,
             autoplay: !p.disable_autoplay,
@@ -1399,21 +1410,13 @@ fn project_item(
         },
     ))
 }
-/// The canonical C6 formula can collide across same-second edits or deck
-/// renames. Until the spec resolves that ambiguity, fail explicitly rather
-/// than reuse stale prepared HTML or silently change the neutral key formula.
-fn check_render_witness(witnesses: &Mutex<BTreeMap<RenderKey, [u8; 32]>>, item: &HeadItem) -> Result<(), EngineError> {
-    let mut witnesses = witnesses.lock().unwrap();
-    if witnesses
-        .get(&item.render_key)
-        .is_some_and(|before| *before != item.render_witness)
-    {
-        return Err(invalid(
-            "C6 contract ambiguity: render inputs changed without a renderKey change; spec reconciliation required",
-        ));
+// C6 permits a fixed context when peek, start and renderHead share it.
+fn session_platform() -> crate::rendering::Platform {
+    if cfg!(target_os = "ios") {
+        crate::rendering::Platform::Ios
+    } else {
+        crate::rendering::Platform::Mac
     }
-    witnesses.insert(item.render_key, item.render_witness);
-    Ok(())
 }
 fn project(c: &Collection, s: &mut Session, count: usize, at: Option<i64>) -> Result<Head, EngineError> {
     let at = at.unwrap_or_else(|| c.core.exec.clock.now_ms());
@@ -1552,7 +1555,6 @@ fn project(c: &Collection, s: &mut Session, count: usize, at: Option<i64>) -> Re
             day.next_day_at,
             &chooser,
         )?;
-        check_render_witness(&s.render_witnesses, &item)?;
         for next in choices(&item.next_states) {
             match next.state {
                 meguri_sched::states::engine::State::Learning(l)

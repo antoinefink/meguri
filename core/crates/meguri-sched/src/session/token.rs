@@ -17,6 +17,7 @@ pub struct StateInputs<'a> {
     pub preset_id: DeckConfigId,
     pub preset_mtime: Option<EpochSecs>,
     pub home_retention: Option<f32>,
+    pub effective_home: [u8; 32],
     pub short_term_with_steps: bool,
     pub learn_ahead: u32,
     pub today: u32,
@@ -58,6 +59,7 @@ pub fn state_token(input: &StateInputs<'_>) -> StateToken {
     optional(&mut hash, input.home_retention, |h, v| {
         h.update(v.to_bits().to_le_bytes())
     });
+    hash.update(input.effective_home);
     hash.update([u8::from(input.short_term_with_steps)]);
     hash.update(input.learn_ahead.to_le_bytes());
     hash.update(input.today.to_le_bytes());
@@ -69,7 +71,56 @@ pub fn state_token(input: &StateInputs<'_>) -> StateToken {
     optional(&mut hash, input.history_last_review, |h, v| h.update(v.to_le_bytes()));
     hash.finalize().into()
 }
-pub fn render_key(card: &Card, note_mtime: EpochSecs, notetype: NotetypeId, notetype_mtime: EpochSecs) -> RenderKey {
+/// C5's bounded before-acceptance projection, separate from C12's guard.
+pub fn effective_home_fingerprint(preset: &crate::model::preset::PresetView, retention: f32) -> [u8; 32] {
+    let p = preset.fields();
+    let kind = if !p.fsrs_params_6().is_empty() {
+        6u8
+    } else if !p.fsrs_params_5().is_empty() {
+        5
+    } else if !p.fsrs_params_4().is_empty() {
+        4
+    } else {
+        0
+    };
+    let params = preset.parameters();
+    let mut hash = Sha256::new();
+    hash.update(b"meguri.session.home.v1\0");
+    hash.update([
+        kind,
+        u8::from(preset.has_later_fsrs_parameters()),
+        u8::from(matches!(params.len(), 0 | 17 | 19 | 21)),
+        u8::from(params.iter().all(|p| p.is_finite())),
+        u8::from(preset.allows_short_term()),
+    ]);
+    for values in [params, p.learn_steps.as_slice(), p.relearn_steps.as_slice()] {
+        hash.update((values.len() as u64).to_le_bytes());
+        for value in values {
+            hash.update(value.to_bits().to_le_bytes());
+        }
+    }
+    for value in [retention, p.initial_ease] {
+        hash.update(value.to_bits().to_le_bytes());
+    }
+    for value in [p.maximum_review_interval, p.leech_threshold, p.cap_answer_time_to_secs] {
+        hash.update(value.to_le_bytes());
+    }
+    hash.update((preset.leech_action() as i32).to_le_bytes());
+    hash.update([
+        u8::from(p.bury_new),
+        u8::from(p.bury_reviews),
+        u8::from(p.bury_interday_learning),
+    ]);
+    hash.finalize().into()
+}
+
+pub fn render_key(
+    card: &Card,
+    note_mtime: EpochSecs,
+    notetype: NotetypeId,
+    notetype_mtime: EpochSecs,
+    inputs: &[u8; 32],
+) -> RenderKey {
     let mut hash = Sha256::new();
     hash.update(b"meguri.session.render.v1\0");
     for value in [
@@ -84,5 +135,6 @@ pub fn render_key(card: &Card, note_mtime: EpochSecs, notetype: NotetypeId, note
     ] {
         hash.update(value.to_le_bytes());
     }
+    hash.update(inputs);
     hash.finalize().into()
 }
