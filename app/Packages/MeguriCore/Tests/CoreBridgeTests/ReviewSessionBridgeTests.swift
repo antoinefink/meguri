@@ -23,9 +23,9 @@ import MeguriCoreBindings
                                 easy: answer(.new(position: 12), .days(amount: 365), "1", .years)),
               predictedNext: .init(again: -42, hard: nil, good: 43, easy: 44), flag: 7, marked: true,
               homePreset: .init(id: -61, autoplay: true, skipQuestionWhenReplayingAnswer: true,
-                                showTimer: true, stopTimerOnAnswer: false, maximumAnswerSeconds: 123,
-                                questionSeconds: 1.25, answerSeconds: 2.75, questionAction: 2, answerAction: 3,
-                                waitForAudio: true, leechAction: 1))
+                                waitForAudio: true, showTimer: true, stopTimerOnAnswer: false, maximumAnswerSeconds: 123,
+                                questionSeconds: 1.25, questionAction: 2, answerSeconds: 2.75, answerAction: 3,
+                                leechAction: 1))
     }
     static var head: MeguriCoreBindings.ReviewHead {
         .init(items: [item], counts: .init(new: 11, learning: 12, review: 13), validUntil: 1_894_701_723)
@@ -34,12 +34,12 @@ import MeguriCoreBindings
         .init(head: head, marks: [.init(added: true, restate: false, rerender: true, relabel: true)], removed: [-70, 71])
     }
     static var finished: MeguriCoreBindings.ReviewDeckStudyState {
-        .init(deck: -4, queueCounts: .init(new: 1, learning: 2, review: 3), listCounts: .init(new: 4, learning: 5, review: 6),
-              difference: .init(new: -3, learning: 3, review: -9), finished: true,
-              learningRemainingToday: 14, learningLaterToday: 15, nextLearningDue: -123, nextLearningReadyAt: -456,
-              reviewLimitReached: true, newLimitReached: false, learningRemaining: 16, secsUntilNextLearn: -17,
-              reviewRemaining: false, newRemaining: true, siblingBuried: 18, userBuried: 19,
-              tomorrow: .init(new: 7, learning: 8, review: 9), empty: false)
+        .init(deck: -4, finished: true, empty: false,
+              queueCounts: .init(new: 1, learning: 2, review: 3), listCounts: .init(new: 4, learning: 5, review: 6),
+              difference: .init(new: -3, learning: 3, review: -9), tomorrow: .init(new: 7, learning: 8, review: 9),
+              newLimitReached: false, newRemaining: true, reviewLimitReached: true, reviewRemaining: false,
+              learningRemaining: 16, learningRemainingToday: 14, learningLaterToday: 15, secsUntilNextLearn: -17,
+              nextLearningDue: -123, nextLearningReadyAt: -456, siblingBuried: 18, userBuried: 19)
     }
 
     @Test func completeHeadKeepsFourStatesPredictionsPresetAndTimeUnits() throws {
