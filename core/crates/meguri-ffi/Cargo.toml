@@ -16,6 +16,8 @@ crate-type = ["staticlib", "lib"]
 # its job registry runs jobs, its cancel token and progress sink back the
 # exported objects.
 meguri-engine.workspace = true
+meguri-host.workspace = true
+meguri-sched.workspace = true
 # The change value types and ids the `Changes` event carries (KTD2).
 meguri-model.workspace = true
 meguri-template.workspace = true
@@ -26,7 +28,7 @@ uniffi.workspace = true
 ankiweb = []
 # Test-only exports (KTD18, R1967): on for Debug and Profile, never in Release
 # or AppStore. Never on by default.
-test-hooks = []
+test-hooks = ["meguri-host/test-hooks"]
 
 [dev-dependencies]
 meguri-host = { workspace = true, features = ["test-hooks"] }

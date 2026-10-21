@@ -21,12 +21,13 @@ use crate::changes::ChangeSet;
 use crate::day_clock;
 use crate::error::CoreError;
 use crate::jobs::JobOutcome;
+use crate::review_session::*;
 use crate::runtime;
 
 /// Name of the dispatcher thread; Swift tests assert it.
 pub const DISPATCHER_THREAD_NAME: &str = "meguri-events";
 
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct CoreEvent {
     /// Strictly increasing over the process's lifetime, from 1: the engine
     /// stream's seq.
@@ -41,25 +42,78 @@ pub struct CoreEvent {
 
 // Lowered into a buffer for Swift by value; one per event, never stored.
 #[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+#[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum CoreEventKind {
+    SessionStarted {
+        session_id: u64,
+        deck_id: i64,
+    },
+    SessionEnded {
+        session_id: u64,
+    },
+    QueueHeadChanged {
+        session_id: u64,
+        diff: ReviewHeadDiff,
+    },
+    CurrentCardChanged {
+        session_id: u64,
+        card_id: i64,
+        change: ReviewCurrentChange,
+    },
+    CommitFailed {
+        session_id: u64,
+        card_id: i64,
+        error: CoreError,
+    },
+    WaitingUntil {
+        session_id: u64,
+        instant: i64,
+    },
+    Finished {
+        session_id: u64,
+        state: ReviewDeckStudyState,
+    },
+    PresetUnsupported {
+        session_id: u64,
+        preset_ids: Vec<i64>,
+    },
+    RecoveryDropped {
+        event: u64,
+        card_id: i64,
+        reason: String,
+    },
+
     /// An op committed these changes (U24, `engine/change-stream` S1); the
     /// envelope's `seq` is the op's.
-    Changes { changes: ChangeSet },
+    Changes {
+        changes: ChangeSet,
+    },
     /// The collection file was replaced and `generation` is open now
     /// (`engine/lifecycle` L8); exactly once per replacement.
-    CollectionReplaced { generation: u64 },
+    CollectionReplaced {
+        generation: u64,
+    },
     /// A job started by a `start_*` export ended (KTD9). Exactly one per job.
-    JobFinished { id: u64, outcome: JobOutcome },
+    JobFinished {
+        id: u64,
+        outcome: JobOutcome,
+    },
     /// The scheduler day changed, either way (U40, `sched/day-clock` D8),
     /// after the rollover op committed: queues and counts are stale.
-    RolledOver { old_day: u32, new_day: u32 },
+    RolledOver {
+        old_day: u32,
+        new_day: u32,
+    },
     /// The device's IANA time zone differs from the one the day clock last
     /// saw, even when the day and the offset did not change (D8).
-    TimeZoneChanged { zone_id: String },
+    TimeZoneChanged {
+        zone_id: String,
+    },
     /// The next day boundary moved (D8), epoch seconds: re-arm the day
     /// clock's timer (U51).
-    NextDayAtChanged { next_day_at: i64 },
+    NextDayAtChanged {
+        next_day_at: i64,
+    },
 }
 
 /// Implemented in Swift by `CoreEventStream`, which only yields each event
@@ -94,12 +148,21 @@ fn stream_kind(kind: CoreEventKind) -> Result<EventKind, CoreError> {
             id: JobId(id),
             outcome: outcome.into(),
         }),
-        CoreEventKind::Changes { .. }
+        CoreEventKind::SessionStarted { .. }
+        | CoreEventKind::SessionEnded { .. }
+        | CoreEventKind::QueueHeadChanged { .. }
+        | CoreEventKind::CurrentCardChanged { .. }
+        | CoreEventKind::CommitFailed { .. }
+        | CoreEventKind::WaitingUntil { .. }
+        | CoreEventKind::Finished { .. }
+        | CoreEventKind::PresetUnsupported { .. }
+        | CoreEventKind::RecoveryDropped { .. }
+        | CoreEventKind::Changes { .. }
         | CoreEventKind::CollectionReplaced { .. }
         | CoreEventKind::RolledOver { .. }
         | CoreEventKind::TimeZoneChanged { .. }
         | CoreEventKind::NextDayAtChanged { .. } => Err(CoreError::InvalidArgument {
-            message: "only the engine publishes Changes, CollectionReplaced and the day clock's events".to_owned(),
+            message: "only the engine publishes changes, lifecycle, day clock and review session events".to_owned(),
         }),
     }
 }
@@ -121,11 +184,13 @@ fn core_event(event: &Event) -> Option<CoreEvent> {
         kind @ (EventKind::RolledOver { .. }
         | EventKind::TimeZoneChanged { .. }
         | EventKind::NextDayAtChanged { .. }) => day_clock::core_event_kind(kind)?,
+        EventKind::Extension(value) => {
+            session_event_kind(value.as_any().downcast_ref::<meguri_engine::session::SessionEvent>()?)
+        }
         EventKind::Lifecycle(_)
         | EventKind::Available
         | EventKind::WriteDelay { .. }
-        | EventKind::WriteDelayEnded { .. }
-        | EventKind::Extension(_) => return None,
+        | EventKind::WriteDelayEnded { .. } => return None,
     };
     Some(CoreEvent {
         seq: event.seq.0,
@@ -163,7 +228,7 @@ impl Dispatcher {
         Ok(dispatcher)
     }
 
-    fn set_listener(&self, listener: Arc<dyn CoreEventListener>) {
+    pub(crate) fn set_listener(&self, listener: Arc<dyn CoreEventListener>) {
         *self.listener.lock().unwrap_or_else(PoisonError::into_inner) = Some(listener);
         self.attached.notify_all();
     }
@@ -501,5 +566,284 @@ mod tests {
         stream.publish(Generation(0), None, finished(1));
         assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), 1);
         assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), 2);
+    }
+}
+
+fn session_event_kind(event: &meguri_engine::session::SessionEvent) -> CoreEventKind {
+    use meguri_engine::session::SessionEvent as E;
+    match event {
+        E::SessionStarted { session_id, deck_id } => CoreEventKind::SessionStarted {
+            session_id: session_id.0,
+            deck_id: deck_id.0,
+        },
+        E::SessionEnded { session_id } => CoreEventKind::SessionEnded {
+            session_id: session_id.0,
+        },
+        E::QueueHeadChanged { session_id, diff } => CoreEventKind::QueueHeadChanged {
+            session_id: session_id.0,
+            diff: diff.clone().into(),
+        },
+        E::CurrentCardChanged {
+            session_id,
+            card_id,
+            change,
+        } => CoreEventKind::CurrentCardChanged {
+            session_id: session_id.0,
+            card_id: card_id.0,
+            change: change.clone().into(),
+        },
+        E::CommitFailed {
+            session_id,
+            card_id,
+            error,
+        } => CoreEventKind::CommitFailed {
+            session_id: session_id.0,
+            card_id: card_id.0,
+            error: error.clone().into(),
+        },
+        E::WaitingUntil { session_id, instant } => CoreEventKind::WaitingUntil {
+            session_id: session_id.0,
+            instant: *instant,
+        },
+        E::Finished { session_id, state } => CoreEventKind::Finished {
+            session_id: session_id.0,
+            state: state.clone().into(),
+        },
+        E::PresetUnsupported { session_id, preset_ids } => CoreEventKind::PresetUnsupported {
+            session_id: session_id.0,
+            preset_ids: preset_ids.iter().map(|id| id.0).collect(),
+        },
+        E::RecoveryDropped { event, card_id, reason } => CoreEventKind::RecoveryDropped {
+            event: *event,
+            card_id: card_id.0,
+            reason: reason.clone(),
+        },
+    }
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+    use crate::review_session::tests::{sample_diff, sample_finished};
+    use meguri_engine::{SessionId, session::SessionEvent as E};
+    use meguri_model::ids::{CardId, DeckConfigId, DeckId};
+    use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn all_session_events_keep_typed_payloads_envelopes_order_and_publish_protection() {
+        let stream = ChangeStream::default();
+        let threads = ThreadRegistry::new();
+        let dispatcher = Dispatcher::start(&stream, &threads).unwrap();
+        struct Recorder(mpsc::Sender<CoreEvent>);
+        impl CoreEventListener for Recorder {
+            fn on_event(&self, event: CoreEvent) {
+                self.0.send(event).unwrap();
+            }
+        }
+        let (tx, rx) = mpsc::channel();
+        dispatcher.set_listener(Arc::new(Recorder(tx)));
+        let events = vec![
+            (
+                E::SessionStarted {
+                    session_id: SessionId(91),
+                    deck_id: DeckId(-4),
+                },
+                CoreEventKind::SessionStarted {
+                    session_id: 91,
+                    deck_id: -4,
+                },
+            ),
+            (
+                E::SessionEnded {
+                    session_id: SessionId(91),
+                },
+                CoreEventKind::SessionEnded { session_id: 91 },
+            ),
+            (
+                E::QueueHeadChanged {
+                    session_id: SessionId(91),
+                    diff: sample_diff(),
+                },
+                CoreEventKind::QueueHeadChanged {
+                    session_id: 91,
+                    diff: sample_diff().into(),
+                },
+            ),
+            (
+                E::CurrentCardChanged {
+                    session_id: SessionId(91),
+                    card_id: CardId(-41),
+                    change: meguri_engine::session::CurrentChange::Eligible,
+                },
+                CoreEventKind::CurrentCardChanged {
+                    session_id: 91,
+                    card_id: -41,
+                    change: ReviewCurrentChange::Eligible,
+                },
+            ),
+            (
+                E::CurrentCardChanged {
+                    session_id: SessionId(91),
+                    card_id: CardId(-41),
+                    change: meguri_engine::session::CurrentChange::Removed,
+                },
+                CoreEventKind::CurrentCardChanged {
+                    session_id: 91,
+                    card_id: -41,
+                    change: ReviewCurrentChange::Removed,
+                },
+            ),
+            (
+                E::CurrentCardChanged {
+                    session_id: SessionId(91),
+                    card_id: CardId(-41),
+                    change: meguri_engine::session::CurrentChange::MemoryOnly,
+                },
+                CoreEventKind::CurrentCardChanged {
+                    session_id: 91,
+                    card_id: -41,
+                    change: ReviewCurrentChange::MemoryOnly,
+                },
+            ),
+            (
+                E::CommitFailed {
+                    session_id: SessionId(91),
+                    card_id: CardId(-41),
+                    error: meguri_engine::EngineError::CommitCompleted {
+                        seq: Seq(73),
+                        message: "durability follow-up".into(),
+                    },
+                },
+                CoreEventKind::CommitFailed {
+                    session_id: 91,
+                    card_id: -41,
+                    error: CoreError::CommitCompleted {
+                        seq: 73,
+                        message: "durability follow-up".into(),
+                    },
+                },
+            ),
+            (
+                E::WaitingUntil {
+                    session_id: SessionId(91),
+                    instant: -123,
+                },
+                CoreEventKind::WaitingUntil {
+                    session_id: 91,
+                    instant: -123,
+                },
+            ),
+            (
+                E::Finished {
+                    session_id: SessionId(91),
+                    state: sample_finished(),
+                },
+                CoreEventKind::Finished {
+                    session_id: 91,
+                    state: sample_finished().into(),
+                },
+            ),
+            (
+                E::PresetUnsupported {
+                    session_id: SessionId(91),
+                    preset_ids: vec![DeckConfigId(-3), DeckConfigId(7)],
+                },
+                CoreEventKind::PresetUnsupported {
+                    session_id: 91,
+                    preset_ids: vec![-3, 7],
+                },
+            ),
+            (
+                E::RecoveryDropped {
+                    event: u64::MAX,
+                    card_id: CardId(-41),
+                    reason: "stale accepted context".into(),
+                },
+                CoreEventKind::RecoveryDropped {
+                    event: u64::MAX,
+                    card_id: -41,
+                    reason: "stale accepted context".into(),
+                },
+            ),
+        ];
+        let mut expected = Vec::new();
+        for (event, kind) in events {
+            assert!(matches!(
+                stream_kind(kind.clone()),
+                Err(CoreError::InvalidArgument { .. })
+            ));
+            let seq = stream.publish(Generation(29), Some(Seq(17)), EventKind::Extension(Arc::new(event)));
+            expected.push(CoreEvent {
+                seq: seq.0,
+                generation: 29,
+                cause_seq: Some(17),
+                kind,
+            });
+        }
+        for event in expected {
+            assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), event);
+        }
+        // Unknown extensions keep the old skip behavior.
+        #[derive(Debug)]
+        struct Other;
+        impl meguri_engine::ExtensionEvent for Other {
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+        }
+        assert!(
+            core_event(&Event {
+                seq: Seq(100),
+                generation: Generation(29),
+                cause_seq: None,
+                kind: EventKind::Extension(Arc::new(Other))
+            })
+            .is_none()
+        );
+        drop(stream);
+    }
+
+    #[test]
+    fn finished_counts_preserve_signed_differences_readiness_and_buried_flags() {
+        assert_eq!(
+            ReviewDeckStudyState::from(sample_finished()),
+            ReviewDeckStudyState {
+                deck: -4,
+                queue_counts: ReviewCounts {
+                    new: 1,
+                    learning: 2,
+                    review: 3
+                },
+                list_counts: ReviewCounts {
+                    new: 4,
+                    learning: 5,
+                    review: 6
+                },
+                difference: ReviewDifference {
+                    new: -3,
+                    learning: 3,
+                    review: -9
+                },
+                finished: true,
+                learning_remaining_today: 14,
+                learning_later_today: 15,
+                next_learning_due: Some(-123),
+                next_learning_ready_at: Some(-456),
+                review_limit_reached: true,
+                new_limit_reached: false,
+                learning_remaining: 16,
+                secs_until_next_learn: -17,
+                review_remaining: false,
+                new_remaining: true,
+                sibling_buried: 18,
+                user_buried: 19,
+                tomorrow: ReviewCounts {
+                    new: 7,
+                    learning: 8,
+                    review: 9
+                },
+                empty: false,
+            }
+        );
     }
 }

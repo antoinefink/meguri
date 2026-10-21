@@ -20,6 +20,7 @@ pub mod image_occlusion;
 pub mod jobs;
 pub mod progress;
 pub mod render;
+pub mod review_session;
 mod runtime;
 #[cfg(feature = "test-hooks")]
 mod test_hooks;

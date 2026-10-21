@@ -6,4 +6,4 @@ mod open;
 pub mod wiring;
 
 pub use config::HostConfig;
-pub use open::CoreHost;
+pub use open::{CoreHost, ProcessCore};

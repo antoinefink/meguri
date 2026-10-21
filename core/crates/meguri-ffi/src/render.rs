@@ -57,6 +57,7 @@ pub struct RenderedCard {
     pub flag: u8,
     pub marked: bool,
     pub type_in: Option<TypeAnswerDescriptor>,
+    pub media_refs: Vec<String>,
 }
 impl From<RenderMode> for engine::RenderMode {
     fn from(mode: RenderMode) -> Self {
@@ -110,6 +111,7 @@ impl From<engine::RenderedCard> for RenderedCard {
             flag: card.flag,
             marked: card.marked,
             type_in: card.type_in.map(Into::into),
+            media_refs: card.media_refs,
         }
     }
 }

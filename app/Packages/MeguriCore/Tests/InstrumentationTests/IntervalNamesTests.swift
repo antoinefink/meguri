@@ -54,6 +54,7 @@ import Testing
 
     @Test func bridgeCallsAreSignpostedUnderTheirExportNamesOnly() {
         #expect(BridgeCall.all.map(\.name) == [
+            "start_session", "peek_first_card", "session_head", "refresh_session_card", "render_session_head", "answer_session", "end_session", "peek_review_undo", "undo_review", "redo_review", "flush_review_for_background",
             "core_version", "core_build_info", "set_event_listener",
             "CancelToken.new", "CancelToken.cancel", "CancelToken.isCancelled", "render_card",
             "compare_typed_answer", "card_excerpts",

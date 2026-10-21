@@ -32,6 +32,7 @@ public struct RenderedCard: Sendable, Hashable {
     public let flag: UInt8
     public let marked: Bool
     public let typeIn: TypeAnswerDescriptor?
+    public let mediaRefs: [String]
 
     init(_ value: MeguriCoreBindings.RenderedCard) {
         cardID = value.cardId
@@ -58,6 +59,7 @@ public struct RenderedCard: Sendable, Hashable {
         flag = value.flag
         marked = value.marked
         typeIn = value.typeIn.map(TypeAnswerDescriptor.init)
+        mediaRefs = value.mediaRefs
     }
     static func error(_ kind: MeguriCoreBindings.RenderErrorKind) -> CardTemplateError {
         switch kind {
