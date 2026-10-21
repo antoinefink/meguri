@@ -1,10 +1,6 @@
-# U45 adds pure next-state, label and fuzz cases. U44 owns answer cases:
-# day/legacy-timing-after-answer, fsrs/ae23-answer, fsrs/input-boundaries
-# and steps/rollover-answer. Matrix cases are generated; list the family.
-# U46 adds complete memory resolver/count cases. Mixed memory cases remain
-# pending: on-the-fly (U44), lrt-repair (U128), recompute (U49).
-# U50 adds enable-fsrs, its oracle-to-Meguri live chain (T1), and the
-# scheduler-switch family. Meguri-answer and actor-sync cases remain pending.
+# U45 supplies next states and U46 memory resolution. U44 activates complete
+# answer results below. Memory repair/recompute and actor sync remain pending
+# for their owning units; filtered study is outside Meguri's product policy.
 area: sched
 active:
   - "compat/enable-fsrs"
@@ -92,3 +88,39 @@ active:
   - "queue/order/new-gather-random-notes"
   - "queue/order/review-orders"
   - "queue/order/ties"
+  # U44: complete recorded results passed on native macOS and Linux Docker.
+  - "answer/custom-data"
+  - "answer/deck-counters"
+  - "answer/new-card-ratings"
+  - "answer/positions-normal"
+  - "answer/state-kinds"
+  - "answer/unchanged-counters"
+  - "bury/ae22-undo"
+  - "bury/answer-kinds"
+  - "bury/sibling-states"
+  - "compat/custom-scheduling-ignored"
+  - "compat/re-enable"
+  - "compat/unsupported-preset-kept"
+  - "data/answer-data"
+  - "data/answer-keeps-cd"
+  - "data/deck-counters"
+  - "data/desired-retention"
+  - "data/missing-preset"
+  - "data/preset-bounds"
+  - "data/preset-keep"
+  - "day/legacy-timing-after-answer"
+  - "fsrs/ae23-answer"
+  - "fsrs/input-boundaries"
+  - "leech/ae25-tag-only"
+  - "leech/suspend"
+  - "leech/thresholds"
+  - "leech/zero-threshold"
+  - "loadbalancer/cache-update"
+  - "loadbalancer/counted-rows"
+  - "loadbalancer/crafted-days"
+  - "loadbalancer/easy-days"
+  - "loadbalancer/plain-over-90"
+  - "loadbalancer/siblings"
+  - "memory/on-the-fly"
+  - "revlog/kept-rows"
+  - "steps/rollover-answer"
