@@ -868,7 +868,14 @@ fn copy_handoff(from: &Path, to: &Path) -> std::io::Result<()> {
         let entry = entry?;
         if matches!(
             entry.file_name().to_str(),
-            Some("meguri-media.db" | "meguri-media.db-wal" | "meguri-media.db-shm" | "media.trash" | "media.staging")
+            Some(
+                "meguri-media.db"
+                    | "meguri-media.db-wal"
+                    | "meguri-media.db-shm"
+                    | "meguri-pending-answers.jsonl"
+                    | "media.trash"
+                    | "media.staging"
+            )
         ) {
             continue;
         }
@@ -934,7 +941,17 @@ mod tests {
             b"ordinary attachment",
         )
         .unwrap();
-        for name in ["meguri-media.db", "meguri-media.db-wal", "meguri-media.db-shm"] {
+        fs::write(
+            from.path().join("collection.media/meguri-pending-answers.jsonl"),
+            b"ordinary journal-named attachment",
+        )
+        .unwrap();
+        for name in [
+            "meguri-media.db",
+            "meguri-media.db-wal",
+            "meguri-media.db-shm",
+            "meguri-pending-answers.jsonl",
+        ] {
             fs::write(from.path().join(name), b"private sync state").unwrap();
         }
         for name in ["media.trash", "media.staging"] {
@@ -946,6 +963,10 @@ mod tests {
         assert_eq!(
             fs::read(to.path().join("collection.media/meguri-media.db")).unwrap(),
             b"ordinary attachment"
+        );
+        assert_eq!(
+            fs::read(to.path().join("collection.media/meguri-pending-answers.jsonl")).unwrap(),
+            b"ordinary journal-named attachment"
         );
         assert_eq!(fs::read_dir(to.path()).unwrap().count(), 2);
     }
