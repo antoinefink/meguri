@@ -136,7 +136,7 @@ fn update(s: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
                 for field in stored.config.unknown_fields().iter() {
                     bytes.extend_from_slice(field.bytes());
                 }
-                p.config = ProtoBlob::decode(&bytes).map_err(core)?;
+                p.config = ProtoBlob::new(DeckConfigMessage::decode(&bytes).map_err(core)?);
             }
             // P5 compares actual stored content, before read bounds: an L2
             // save must persist any replacements supplied by the L1 view.

@@ -1,4 +1,5 @@
 //! H3 held-build lifetime and L2's deliberately local legacy save.
+use meguri_model::proto::{BlobMessage, deck_config::DeckConfigMessage};
 use meguri_storage::ReadRows;
 use meguri_testkit::{
     exec::{ExecError, Executor, MeguriExecutor, Session},
@@ -136,6 +137,52 @@ fn empty_and_equal_legacy_preset_saves_stamp_locally_and_keep_raw_blob() {
         assert_eq!(before["unknown"], json!([[0xA0, 0x1F, 0x87, 0x00]]));
         assert_eq!(empty["bytes"], before["bytes"]);
         assert_eq!(equal["bytes"], before["bytes"]);
+    }
+}
+
+#[test]
+fn changed_legacy_preset_saves_canonicalize_low_unknown_fields_and_keep_exact_occurrences() {
+    let areas = MeguriExecutor::AREAS
+        .into_iter()
+        .filter(|a| *a != "undo")
+        .collect::<Vec<_>>();
+    let mut registry = MeguriExecutor::area_registry(&areas);
+    registry.observation("undo_status", preset_stamp);
+    let executor = MeguriExecutor::with(registry);
+    for hosted in [false, true] {
+        let promotion = if hosted { "  - observe: [queue]\n" } else { "" };
+        let out = run(
+            &format!(
+                r#"steps:
+  - db_exec: {{sql: "UPDATE deck_config SET config=CAST(config || X'42003A004280003A8000' AS BLOB), mtime_secs=1, usn=14 WHERE id=1"}}
+{promotion}  - observe: [undo_status]
+  - advance: 3s
+  - legacy_update: {{preset: Default, patch: {{new: {{perDay: 21}}}}}}
+  - observe: [undo_status]
+"#
+            ),
+            &executor,
+        );
+        let offset = usize::from(hosted);
+        let before = &out["steps"][1 + offset]["undo_status"];
+        let saved = &out["steps"][4 + offset]["undo_status"];
+        let before_bytes: Vec<u8> = serde_json::from_value(before["bytes"].clone()).unwrap();
+        let saved_bytes: Vec<u8> = serde_json::from_value(saved["bytes"].clone()).unwrap();
+        let mut expected = DeckConfigMessage::decode(&before_bytes).unwrap();
+        assert_eq!(expected.new_per_day, 20);
+        expected.new_per_day = 21;
+        assert_eq!(saved_bytes, expected.encode(), "hosted={hosted}");
+        assert_eq!(DeckConfigMessage::decode(&saved_bytes).unwrap().new_per_day, 21);
+        assert_eq!(
+            before["unknown"],
+            json!([[0x42, 0x00], [0x3A, 0x00], [0x42, 0x80, 0x00], [0x3A, 0x80, 0x00]])
+        );
+        assert_eq!(
+            saved["unknown"],
+            json!([[0x3A, 0x00], [0x3A, 0x80, 0x00], [0x42, 0x00], [0x42, 0x80, 0x00]])
+        );
+        assert_eq!(saved["mtime"], 1_894_701_603_i64);
+        assert_eq!(saved["usn"], -1);
     }
 }
 
