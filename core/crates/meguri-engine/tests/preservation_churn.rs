@@ -17,7 +17,11 @@ use meguri_sched::{
     answer::Rating,
     states::{engine::State, fsrs_glue::FsrsCache},
 };
-use meguri_storage::{ReadRows, ReaderRole, raw::RawRows};
+use meguri_storage::{
+    ReadRows, ReaderRole,
+    raw::RawRows,
+    rows::{RowKey, Table},
+};
 use meguri_testkit::dump::preservation::{assert_changes_allowed, pending, raw_dump};
 use serde_json::Value;
 
@@ -491,6 +495,7 @@ fn two_hundred_supported_fixture_answers_over_twenty_days_preserve_foreign_data(
         r.execute_raw("SELECT * FROM config ORDER BY key", &[]).unwrap(),
         config_bytes
     );
+    drop(r);
     assert_eq!(schema(&h.collection), original_schema);
     assert_eq!(
         std::fs::read(source).unwrap(),
@@ -507,7 +512,7 @@ fn unchanged_steady_fixture_refuses_prediction_without_writes_or_repair() {
     h.collection.check_rollover().unwrap();
     let before = dump(&h.collection);
     let original_schema = schema(&h.collection);
-    {
+    let config_bytes = {
         let r = h.collection.reader(ReaderRole::Query).unwrap();
         let steady = r.deck_config(DeckConfigId(1893488400000)).unwrap().unwrap();
         assert!(steady.config.has_later_fsrs_parameters());
@@ -519,16 +524,44 @@ fn unchanged_steady_fixture_refuses_prediction_without_writes_or_repair() {
                 .iter()
                 .any(|f| f.number() == 7 && f.bytes() == [0x3a, 4, 0, 0, 0x80, 0x40])
         );
-    }
+        r.execute_raw("SELECT * FROM config ORDER BY key", &[]).unwrap()
+    };
     let mut models = FsrsCache::default();
     // c2 is new, c13 review: both keep their original Steady home preset.
     // This does not activate or relabel preservation/review/answers as passing.
-    for id in [CardId(1893488400001), CardId(1893488400012)] {
+    for (id, supported) in [
+        (CardId(1893488400001), CardId(1893488400016)),
+        (CardId(1893488400012), CardId(1893488400014)),
+    ] {
         assert!(matches!(
             answer::predict(&h.collection, id, &mut models, None),
             Err(meguri_engine::EngineError::Unsupported { feature }) if feature == "unsupported FSRS parameters"
         ));
         assert_changes_allowed(&before, &dump(&h.collection), &[]).unwrap();
+        // Obtain real U45 new/review states at this clock, then target the
+        // original Steady card without changing its row or home preset.
+        let mut request = answer::predict(&h.collection, supported, &mut models, None)
+            .unwrap()
+            .answer(Rating::Good, 1_000);
+        assert_eq!(request.answered_at.0, h.clock.now_ms());
+        request.card = id;
+        request.state_token = {
+            let rows = h.collection.reader(ReaderRole::Query).unwrap();
+            rows.row_digest(Table::Cards, &RowKey::Id(id.0)).unwrap().unwrap()
+        }; // Release Query before answer's rollover check and writer submission.
+        assert!(matches!(
+            answer::answer(&h.collection, request),
+            Err(meguri_engine::EngineError::Unsupported { feature }) if feature == "unsupported FSRS parameters"
+        ));
+        assert_changes_allowed(&before, &dump(&h.collection), &[]).unwrap();
+        {
+            let r = h.collection.reader(ReaderRole::Query).unwrap();
+            assert_eq!(
+                r.execute_raw("SELECT * FROM config ORDER BY key", &[]).unwrap(),
+                config_bytes
+            );
+        }
+        assert_eq!(schema(&h.collection), original_schema);
     }
     assert_eq!(schema(&h.collection), original_schema);
     assert_eq!(
