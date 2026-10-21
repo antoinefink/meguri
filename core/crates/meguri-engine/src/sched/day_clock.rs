@@ -54,6 +54,8 @@ pub struct DayReport {
 struct Reported {
     day: u32,
     next_day_at: i64,
+    checked_at: i64,
+    offset: meguri_model::clock::UtcOffset,
     zone: String,
 }
 
@@ -160,17 +162,39 @@ impl DayClock {
 
     /// Queue watches consult the maintained clock without scheduling an op.
     pub(super) fn queue_day_is_current(&self, today: u32, boundary: i64) -> bool {
-        self.unchanged(&self.now())
-            .is_some_and(|d| d.today == today && d.next_day_at == boundary)
+        let now = self.now();
+        self.queue_report_is_current(
+            DayReport {
+                today,
+                next_day_at: boundary,
+                rolled_over_from: None,
+            },
+            now.secs,
+            now.offset,
+            &now.zone,
+        )
     }
 
     /// D8 report validation after a queue prelude; D4 may report a boundary equal to now.
-    pub(super) fn queue_report_is_current(&self, day: DayReport, zone: &str) -> bool {
+    pub(super) fn queue_report_is_current(
+        &self,
+        day: DayReport,
+        now: i64,
+        offset: meguri_model::clock::UtcOffset,
+        zone: &str,
+    ) -> bool {
         let state = self.lock();
         state.changes == state.checked
             && !state.parked
             && state.reported.as_ref().is_some_and(|reported| {
-                reported.day == day.today && reported.next_day_at == day.next_day_at && reported.zone == zone
+                reported.day == day.today
+                    && reported.next_day_at == day.next_day_at
+                    && reported.zone == zone
+                    && (state
+                        .cache
+                        .valid_at(now, offset)
+                        .is_some_and(|cached| cached.today == day.today && cached.next_day_at == day.next_day_at)
+                        || (reported.checked_at == now && reported.next_day_at == now && reported.offset == offset))
             })
     }
 
@@ -196,6 +220,10 @@ impl DayClock {
         let reported = Reported {
             day: query.day.today,
             next_day_at: query.day.next_day_at,
+            // Queue reads may use this fresh D4 report during this second;
+            // it does not extend the reusable day cache past its boundary.
+            checked_at: now.secs,
+            offset: now.offset,
             zone: now.zone,
         };
         let this = Arc::clone(self);

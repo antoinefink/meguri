@@ -276,16 +276,130 @@ fn fresh_legacy_report_at_exact_boundary_serves_queue_and_counts() {
     let (_dir, path) = common::day::new_collection(&*clock, common::day::Timing::Legacy);
     let (engine, collection) = common::day::open(&path, clock.clone(), Ports::default());
     let day = collection.check_rollover().unwrap();
-    clock.set_now_ms(day.next_day_at * 1000);
     let provider = QueueProvider::default();
-    let queue = provider.queue(&collection, None).unwrap().value;
-    assert_eq!(queue.today, day.today.wrapping_add(1));
-    assert_eq!(queue.next_day_at, day.next_day_at);
+    let old = provider.queue(&collection, None).unwrap();
+    clock.set_now_ms(day.next_day_at * 1000);
+    let before = dump(&collection);
+    let queue = provider.queue(&collection, None).unwrap();
+    assert_eq!(queue.value.today, day.today.wrapping_add(1));
+    assert_eq!(queue.value.next_day_at, day.next_day_at);
+    assert_eq!(old.validity.action(), Action::Rebuild);
+    assert_eq!(
+        queue.validity.action(),
+        Action::None,
+        "the fresh new-day queue is current"
+    );
     assert_eq!(
         provider.deck_counts(&collection).unwrap().counts(DeckId(1)),
         Default::default()
     );
+    let report = collection.check_rollover().unwrap();
+    assert_eq!(report.today, queue.value.today);
+    assert_eq!(
+        report.next_day_at,
+        clock.now_ms() / 1000,
+        "D4's actual boundary is retained"
+    );
+    assert_eq!(
+        queue.validity.action(),
+        Action::None,
+        "later empty checks keep the fresh proof"
+    );
+    assert_eq!(
+        dump(&collection),
+        before,
+        "maintenance reserves seqs without writing empty bookkeeping"
+    );
+    clock.step_ms(999);
+    assert_eq!(
+        queue.validity.action(),
+        Action::None,
+        "the proof covers the boundary second"
+    );
+    clock.step_ms(1);
+    assert_eq!(
+        queue.validity.action(),
+        Action::Rebuild,
+        "the proof cannot cover a later second"
+    );
+    let later = provider.queue(&collection, None).unwrap();
+    assert_eq!(later.value.today, queue.value.today);
+    assert_eq!(later.value.next_day_at, day.next_day_at + 86400);
+    assert_eq!(later.validity.action(), Action::None);
+    assert_eq!(old.validity.action(), Action::Rebuild);
     engine.close().unwrap();
+}
+
+#[test]
+fn fresh_legacy_boundary_validity_checks_clock_inputs_dirty_state_and_generation() {
+    use meguri_model::clock::{FixedClock, StepClock, UtcOffset};
+
+    for change in ["offset", "zone", "raw", "marker", "timing", "generation"] {
+        let clock = Arc::new(StepClock::new(common::NOW_MS, UtcOffset::UTC, "UTC"));
+        let (_dir, path) = common::day::new_collection(&*clock, common::day::Timing::Legacy);
+        let (engine, collection) = common::day::open(&path, clock.clone(), Ports::default());
+        let boundary = collection.check_rollover().unwrap().next_day_at;
+        clock.set_now_ms(boundary * 1000);
+        let provider = QueueProvider::default();
+        let queue = provider.queue(&collection, None).unwrap();
+        assert_eq!(queue.validity.action(), Action::None, "{change}: fresh boundary proof");
+        let mut current = collection.clone();
+        // Keep the instant fixed: each invalidation must come from its
+        // clock input, dirty maintenance basis, or generation alone.
+        match change {
+            "offset" => clock.set_utc_offset(UtcOffset::from_seconds(3600).unwrap()),
+            "zone" => clock.set_zone("Etc/UTC"),
+            "raw" => collection.drop_cached_day().unwrap(),
+            "marker" | "timing" => {
+                let (key, value) = if change == "marker" {
+                    ("lastUnburied", i64::from(queue.value.today) + 1)
+                } else {
+                    ("rollover", 6)
+                };
+                collection
+                    .run(
+                        OpSpec::named("boundary clock input", OpSource::Maintenance).stamp(StampMode::Raw),
+                        move |ctx| {
+                            ctx.scope().set_config_keeping_col_mod(key, &ConfigValue::from(value))?;
+                            Ok(())
+                        },
+                    )
+                    .unwrap();
+            }
+            "generation" => {
+                let initial = FixedClock::new(common::NOW_MS, UtcOffset::UTC);
+                let (_replacement_dir, replacement) =
+                    common::day::new_collection(&initial, common::day::Timing::Legacy);
+                let slot = engine.acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+                let mut exclusive = slot.enter_exclusive(true).unwrap();
+                current = exclusive
+                    .replace(move |live| {
+                        std::fs::rename(replacement, live)
+                            .map_err(|e| meguri_engine::EngineError::Internal { message: e.to_string() })
+                    })
+                    .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(clock.now_ms(), boundary * 1000);
+        assert_eq!(
+            queue.validity.action(),
+            Action::Rebuild,
+            "{change}: old proof is invalid"
+        );
+        let fresh = provider.queue(&current, None).unwrap();
+        assert_eq!(
+            fresh.validity.action(),
+            Action::None,
+            "{change}: fresh inputs are proved"
+        );
+        if change == "generation" {
+            assert_eq!(fresh.value.today, queue.value.today);
+            assert_eq!(fresh.value.next_day_at, queue.value.next_day_at);
+            assert_ne!(fresh.stamp.generation, queue.stamp.generation);
+        }
+        engine.close().unwrap();
+    }
 }
 
 #[test]

@@ -113,14 +113,14 @@ impl QueueProvider {
         read: impl FnOnce(&crate::readers::Snapshot<'_>, &Environment) -> Result<T, EngineError>,
     ) -> Result<T, EngineError> {
         loop {
-            let seq = collection.last_seq();
             let now_ms = collection.core.exec.clock.now_ms();
             let offset = collection.core.exec.clock.utc_offset_at(now_ms);
             let zone = collection.core.exec.clock.zone_id();
             let day = collection.check_rollover()?;
-            if collection.last_seq() != seq
-                || collection.core.exec.clock.now_ms().div_euclid(1000) != now_ms.div_euclid(1000)
-            {
+            // Even an empty maintenance op reserves a seq. Pin the state
+            // after it completes, rather than rejecting our own prelude.
+            let seq = collection.last_seq();
+            if collection.core.exec.clock.now_ms().div_euclid(1000) != now_ms.div_euclid(1000) {
                 continue;
             }
             #[cfg(feature = "test-hooks")]
@@ -133,7 +133,11 @@ impl QueueProvider {
                 || collection.core.exec.clock.now_ms().div_euclid(1000) != now_ms.div_euclid(1000)
                 || collection.core.exec.clock.utc_offset_at(now_ms) != offset
                 || collection.core.exec.clock.zone_id() != zone
-                || !collection.core.exec.day_clock.queue_report_is_current(day, &zone)
+                || !collection
+                    .core
+                    .exec
+                    .day_clock
+                    .queue_report_is_current(day, now_ms.div_euclid(1000), offset, &zone)
             {
                 drop(snapshot);
                 drop(lease);
