@@ -81,7 +81,11 @@ impl AnswerCache {
     fn build_mode(collection: &Collection, scenario: bool) -> Result<Option<Arc<Self>>, EngineError> {
         Self::build_mode_inner(collection, scenario, false)
     }
-    fn build_mode_inner(collection: &Collection, scenario: bool, hold_disabled: bool) -> Result<Option<Arc<Self>>, EngineError> {
+    fn build_mode_inner(
+        collection: &Collection,
+        scenario: bool,
+        hold_disabled: bool,
+    ) -> Result<Option<Arc<Self>>, EngineError> {
         loop {
             let cache = if scenario {
                 let seq = collection.last_seq();
@@ -104,15 +108,37 @@ impl AnswerCache {
                     offset: clock.utc_offset_at(at),
                     now: at.div_euclid(1000),
                 });
-                Self::from_snapshot(collection, &rows, super::day_clock::DayReport {
-                    today: day.today, next_day_at: day.next_day_at, rolled_over_from: None,
-                }, at, true, hold_disabled)?
+                Self::from_snapshot(
+                    collection,
+                    &rows,
+                    super::day_clock::DayReport {
+                        today: day.today,
+                        next_day_at: day.next_day_at,
+                        rolled_over_from: None,
+                    },
+                    at,
+                    true,
+                    hold_disabled,
+                )?
             } else {
-                collection.core.exec.answer_caches.1.read_timed(collection, ReaderRole::Interactive, |rows, env, at| {
-                    Self::from_snapshot(collection, rows, super::day_clock::DayReport {
-                        today: env.today, next_day_at: env.next_day_at, rolled_over_from: None,
-                    }, at, false, hold_disabled)
-                })?
+                collection.core.exec.answer_caches.1.read_timed(
+                    collection,
+                    ReaderRole::Interactive,
+                    |rows, env, at| {
+                        Self::from_snapshot(
+                            collection,
+                            rows,
+                            super::day_clock::DayReport {
+                                today: env.today,
+                                next_day_at: env.next_day_at,
+                                rolled_over_from: None,
+                            },
+                            at,
+                            false,
+                            hold_disabled,
+                        )
+                    },
+                )?
             };
             // Registration raced a commit or the clock moved during the build.
             // Release the snapshot before starting another maintenance prelude.
@@ -147,8 +173,10 @@ impl AnswerCache {
             })
             .collect::<BTreeMap<_, _>>();
         let presets = if enabled {
-            rows.deck_config_rows()?.into_iter()
-                .map(|p| (p.id, p.config.easy_days_percentages.clone())).collect::<Vec<_>>()
+            rows.deck_config_rows()?
+                .into_iter()
+                .map(|p| (p.id, p.config.easy_days_percentages.clone()))
+                .collect::<Vec<_>>()
         } else {
             Vec::new()
         };
@@ -198,10 +226,17 @@ impl AnswerCache {
             .push(Arc::downgrade(&cache));
         // A commit between the snapshot and registration must not be missed.
         if collection.last_seq() != rows.seq()
-            || (!scenario && !collection.core.exec.day_clock.queue_report_is_current(
-                super::day_clock::DayReport { today, next_day_at, rolled_over_from: None },
-                at.div_euclid(1000), cache.offset, &cache.zone,
-            ))
+            || (!scenario
+                && !collection.core.exec.day_clock.queue_report_is_current(
+                    super::day_clock::DayReport {
+                        today,
+                        next_day_at,
+                        rolled_over_from: None,
+                    },
+                    at.div_euclid(1000),
+                    cache.offset,
+                    &cache.zone,
+                ))
         {
             cache.invalidate();
         }
@@ -218,8 +253,13 @@ impl AnswerCache {
     }
     pub fn is_current(&self, collection: &Collection) -> bool {
         self.bound_and_time_current(collection)
-            && (self.scenario || self.checked_second.is_none()
-                || collection.core.exec.day_clock.queue_day_is_current(self.snapshot().today, self.next_day_at()))
+            && (self.scenario
+                || self.checked_second.is_none()
+                || collection
+                    .core
+                    .exec
+                    .day_clock
+                    .queue_day_is_current(self.snapshot().today, self.next_day_at()))
     }
     fn bound_and_time_current(&self, collection: &Collection) -> bool {
         self.valid.load(Ordering::Acquire)
@@ -442,66 +482,71 @@ pub fn predict(
     models: &mut FsrsCache,
     cache: Option<Arc<AnswerCache>>,
 ) -> Result<Prediction, EngineError> {
-    collection.core.exec.answer_caches.1.read_timed(collection, ReaderRole::Interactive, |rows, env, at| {
-        let answered_at = EpochMillis(at);
-        let card = rows.card(id)?.ok_or_else(|| missing(Table::Cards, id.0))?;
-        let (preset, home) = home(&**rows, &card)?;
-        let normal = match &home.kind.kind {
-            DeckKind::Normal(n) => n,
-            _ => return Err(state_error("InFilteredDeck")),
-        };
-        let retention = DeckSched::new(Some(normal), &home.common).retention(preset.fields().desired_retention);
-        let mut history = Vec::new();
-        if card.card_type != CardType::New && card.data.memory_state.is_none() {
-            rows.visit_fsrs_histories(
-                &meguri_storage::queries::revlog_fsrs::HistorySelection::Cards(vec![id]),
-                |_, found| -> Result<(), StorageError> {
-                    history.extend_from_slice(found);
-                    Ok(())
-                },
-            )?;
-        }
-        let memory = meguri_sched::memory::resolve::on_the_fly(models, &preset, &card, &history, env.next_day_at)
+    collection
+        .core
+        .exec
+        .answer_caches
+        .1
+        .read_timed(collection, ReaderRole::Interactive, |rows, env, at| {
+            let answered_at = EpochMillis(at);
+            let card = rows.card(id)?.ok_or_else(|| missing(Table::Cards, id.0))?;
+            let (preset, home) = home(&**rows, &card)?;
+            let normal = match &home.kind.kind {
+                DeckKind::Normal(n) => n,
+                _ => return Err(state_error("InFilteredDeck")),
+            };
+            let retention = DeckSched::new(Some(normal), &home.common).retention(preset.fields().desired_retention);
+            let mut history = Vec::new();
+            if card.card_type != CardType::New && card.data.memory_state.is_none() {
+                rows.visit_fsrs_histories(
+                    &meguri_storage::queries::revlog_fsrs::HistorySelection::Cards(vec![id]),
+                    |_, found| -> Result<(), StorageError> {
+                        history.extend_from_slice(found);
+                        Ok(())
+                    },
+                )?;
+            }
+            let memory = meguri_sched::memory::resolve::on_the_fly(models, &preset, &card, &history, env.next_day_at)
+                .map_err(state_error)?;
+            let last_review_time = match card.data.last_review_secs {
+                Some(t) => Some(t),
+                None => rows.fsrs_last_review_time(id)?,
+            };
+            let cfg = SchedConfig::new(&**rows);
+            let input = StateInput {
+                card: &card,
+                preset: &preset,
+                memory_state: memory,
+                last_review_time,
+                desired_retention: retention,
+                today: env.today,
+                next_day_at: env.next_day_at,
+                now: answered_at.whole_secs().0,
+                short_term_with_steps: cfg.fsrs_short_term_with_steps()?,
+                learn_ahead: cfg.collapse_time()?,
+            };
+            let cache = cache.filter(|c| c.is_current(collection));
+            let states = if let Some(c) = &cache {
+                c.with_chooser(collection, &card, &preset, |chooser| {
+                    next_states(models, &input, chooser)
+                })
+            } else {
+                next_states(models, &input, None)
+            }
             .map_err(state_error)?;
-        let last_review_time = match card.data.last_review_secs {
-            Some(t) => Some(t),
-            None => rows.fsrs_last_review_time(id)?,
-        };
-        let cfg = SchedConfig::new(&**rows);
-        let input = StateInput {
-            card: &card,
-            preset: &preset,
-            memory_state: memory,
-            last_review_time,
-            desired_retention: retention,
-            today: env.today,
-            next_day_at: env.next_day_at,
-            now: answered_at.whole_secs().0,
-            short_term_with_steps: cfg.fsrs_short_term_with_steps()?,
-            learn_ahead: cfg.collapse_time()?,
-        };
-        let cache = cache.filter(|c| c.is_current(collection));
-        let states = if let Some(c) = &cache {
-            c.with_chooser(collection, &card, &preset, |chooser| {
-                next_states(models, &input, chooser)
+            let state_token = rows
+                .row_digest(Table::Cards, &RowKey::Id(id.0))?
+                .ok_or_else(|| missing(Table::Cards, id.0))?;
+            Ok(Prediction {
+                states,
+                card: id,
+                state_token,
+                today: env.today,
+                next_day_at: env.next_day_at,
+                answered_at,
+                cache,
             })
-        } else {
-            next_states(models, &input, None)
-        }
-        .map_err(state_error)?;
-        let state_token = rows
-            .row_digest(Table::Cards, &RowKey::Id(id.0))?
-            .ok_or_else(|| missing(Table::Cards, id.0))?;
-        Ok(Prediction {
-            states,
-            card: id,
-            state_token,
-            today: env.today,
-            next_day_at: env.next_day_at,
-            answered_at,
-            cache,
         })
-    })
 }
 
 fn home(rows: &impl ReadRows, card: &Card) -> Result<(PresetView, meguri_model::deck::Deck), EngineError> {

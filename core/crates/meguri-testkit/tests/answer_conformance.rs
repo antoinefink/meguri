@@ -91,14 +91,24 @@ fn complete_answer_families_and_standalone_dependent_regressions_match_whole_res
     // positive product result and its runtime refusal remains an error.
     let mut data_paths = Vec::new();
     cases(&root.join("scenarios/sched/data"), &mut data_paths);
-    let mixed = data_paths.iter().map(|p| scenario::load(p).unwrap())
-        .find(|s| s.scenario.id == "sched/data/positions").expect("preserved mixed positions case");
+    let mixed = data_paths
+        .iter()
+        .map(|p| scenario::load(p).unwrap())
+        .find(|s| s.scenario.id == "sched/data/positions")
+        .expect("preserved mixed positions case");
     assert_eq!(mixed.scenario.steps.len(), 19);
     assert!(mixed.scenario.tags.iter().any(|tag| tag == "needs:answer.filtered"));
     assert!(mixed.scenario.needs().ops.contains("answer.filtered"));
     assert!(!executor.capabilities().ops.contains("answer.filtered"));
-    assert_eq!(executor.missing(&mixed.scenario.needs()).ops, ["answer.filtered".to_owned()].into());
-    assert!(!paths.iter().any(|p| scenario::load(p).unwrap().scenario.id == mixed.scenario.id));
+    assert_eq!(
+        executor.missing(&mixed.scenario.needs()).ops,
+        ["answer.filtered".to_owned()].into()
+    );
+    assert!(
+        !paths
+            .iter()
+            .any(|p| scenario::load(p).unwrap().scenario.id == mixed.scenario.id)
+    );
     // The remaining two requested regressions use the live-chain and actor
     // runners (enable-fsrs-live and keys-survive-sync). Their reference legs
     // and sync providers belong to the integration harness, not Executor::run.

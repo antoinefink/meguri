@@ -2294,13 +2294,21 @@ fn declared_filtered_answer_needs_follow_answer_ownership_without_runtime_infere
     assert!(MeguriExecutor::new().missing(&untagged.needs()).is_empty());
     let tagged = parse(&format!("tags: ['needs:answer.filtered']\n{plain}"));
     assert!(tagged.needs().ops.contains("answer.filtered"));
-    assert_eq!(MeguriExecutor::new().missing(&tagged.needs()).ops, ["answer.filtered".to_owned()].into());
+    assert_eq!(
+        MeguriExecutor::new().missing(&tagged.needs()).ops,
+        ["answer.filtered".to_owned()].into()
+    );
     let metadata = parse(&format!("tags: ['unrelated:answer.filtered']\n{plain}"));
     assert_eq!(metadata.needs(), untagged.needs());
-    let no_answer = parse(&format!("tags: ['needs:answer.filtered']\n{}", plain.replace("{answer: {card: '#c1', rating: good}}", "{advance: 1s}")));
+    let no_answer = parse(&format!(
+        "tags: ['needs:answer.filtered']\n{}",
+        plain.replace("{answer: {card: '#c1', rating: good}}", "{advance: 1s}")
+    ));
     assert!(!no_answer.needs().ops.contains("answer.filtered"));
 
-    let live = parse("id: capability/live\ntags: ['needs:answer.filtered']\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsteps:\n  - answer: {card: '#c1', rating: good}\n  - handoff: meguri\n  - advance: 1s\n");
+    let live = parse(
+        "id: capability/live\ntags: ['needs:answer.filtered']\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsteps:\n  - answer: {card: '#c1', rating: good}\n  - handoff: meguri\n  - advance: 1s\n",
+    );
     assert!(live.needs_on(Side::Oracle).ops.contains("answer.filtered"));
     assert!(!live.needs_on(Side::Meguri).ops.contains("answer.filtered"));
     let mut reversed = live.clone();

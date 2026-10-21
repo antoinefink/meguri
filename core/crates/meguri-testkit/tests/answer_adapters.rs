@@ -9,14 +9,20 @@ use serde_json::{Value, json};
 fn run(body: &str, executor: &MeguriExecutor) -> Value {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("case.yaml");
-    std::fs::write(&path, format!("id: answer/adapter-probe\nclock: {{tz: UTC, start: '2030-01-15T10:00:00'}}\n{body}")).unwrap();
+    std::fs::write(
+        &path,
+        format!("id: answer/adapter-probe\nclock: {{tz: UTC, start: '2030-01-15T10:00:00'}}\n{body}"),
+    )
+    .unwrap();
     executor.run(&scenario::load(&path).unwrap()).unwrap()
 }
 
 fn witness(session: &mut Session<'_>, _: &ObservationRequest) -> Result<Value, ExecError> {
     let collection = session.engine_collection()?;
     Ok(match session.answer_cache.as_ref() {
-        Some(cache) => json!({"build": cache.identity().0, "enabled": cache.enabled(), "current": cache.is_current(&collection)}),
+        Some(cache) => {
+            json!({"build": cache.identity().0, "enabled": cache.enabled(), "current": cache.is_current(&collection)})
+        }
         None => Value::Null,
     })
 }
@@ -24,7 +30,10 @@ fn witness(session: &mut Session<'_>, _: &ObservationRequest) -> Result<Value, E
 #[test]
 fn disabled_held_build_keeps_switch_changes_and_noops_until_a_real_mutation() {
     // Replace only the observation seam; every step and queue read is real.
-    let areas = MeguriExecutor::AREAS.into_iter().filter(|a| *a != "undo").collect::<Vec<_>>();
+    let areas = MeguriExecutor::AREAS
+        .into_iter()
+        .filter(|a| *a != "undo")
+        .collect::<Vec<_>>();
     let mut registry = MeguriExecutor::area_registry(&areas);
     registry.observation("undo_status", witness);
     let executor = MeguriExecutor::with(registry);
@@ -33,7 +42,9 @@ fn disabled_held_build_keeps_switch_changes_and_noops_until_a_real_mutation() {
         "  - legacy_update: {deck: Inbox, patch: {desc: 'H3 deck witness'}}\n",
         "  - suspend: {cards: ['#c1']}\n",
     ] {
-        let out = run(&format!(r#"setup:
+        let out = run(
+            &format!(
+                r#"setup:
   config: {{fsrs: true, loadBalancerEnabled: false}}
   decks: [Inbox]
   notes: [{{notetype: Basic, deck: Inbox, fields: ['held probe', 'reverse probe']}}]
@@ -45,7 +56,10 @@ steps:
   - legacy_update: {{deck: Inbox, patch: {{}}}}
   - observe: [queue, undo_status]
 {mutation}  - observe: [queue, undo_status]
-"#), &executor);
+"#
+            ),
+            &executor,
+        );
         let steps = &out["steps"];
         let first = &steps[0]["undo_status"];
         assert_eq!(first["enabled"], false);
@@ -59,20 +73,32 @@ steps:
 }
 
 fn preset_stamp(session: &mut Session<'_>, _: &ObservationRequest) -> Result<Value, ExecError> {
-    let rows = session.storage.collection().ok_or_else(|| ExecError::new("test", "missing collection"))?.reader()?;
-    let p = rows.deck_config(meguri_model::ids::DeckConfigId(1)).map_err(|e| ExecError::new("test", e.to_string()))?.unwrap();
+    let rows = session
+        .storage
+        .collection()
+        .ok_or_else(|| ExecError::new("test", "missing collection"))?
+        .reader()?;
+    let p = rows
+        .deck_config(meguri_model::ids::DeckConfigId(1))
+        .map_err(|e| ExecError::new("test", e.to_string()))?
+        .unwrap();
     Ok(json!({"mtime": p.mtime.0, "usn": p.usn.0, "bytes": p.config.to_bytes().as_ref()}))
 }
 
 #[test]
 fn empty_and_effectively_equal_legacy_preset_saves_stamp_locally_and_keep_raw_blob() {
-    let areas = MeguriExecutor::AREAS.into_iter().filter(|a| *a != "undo").collect::<Vec<_>>();
+    let areas = MeguriExecutor::AREAS
+        .into_iter()
+        .filter(|a| *a != "undo")
+        .collect::<Vec<_>>();
     let mut registry = MeguriExecutor::area_registry(&areas);
     registry.observation("undo_status", preset_stamp);
     let executor = MeguriExecutor::with(registry);
     for hosted in [false, true] {
         let promotion = if hosted { "  - observe: [queue]\n" } else { "" };
-        let out = run(&format!(r#"steps:
+        let out = run(
+            &format!(
+                r#"steps:
   - db_exec: {{sql: "UPDATE deck_config SET config=CAST(config || X'C8018000800100' AS BLOB), mtime_secs=1, usn=14 WHERE id=1"}}
 {promotion}  - observe: [undo_status]
   - advance: 3s
@@ -81,7 +107,10 @@ fn empty_and_effectively_equal_legacy_preset_saves_stamp_locally_and_keep_raw_bl
   - advance: 2s
   - legacy_update: {{preset: Default, patch: {{new: {{perDay: 20}}}}}}
   - observe: [undo_status]
-"#), &executor);
+"#
+            ),
+            &executor,
+        );
         let offset = usize::from(hosted);
         let steps = &out["steps"];
         let before = &steps[1 + offset]["undo_status"];
@@ -102,7 +131,9 @@ fn empty_and_effectively_equal_legacy_preset_saves_stamp_locally_and_keep_raw_bl
 fn unexpected_filtered_answer_without_declaration_is_a_run_error() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("case.yaml");
-    std::fs::write(&path, r#"id: answer/unexpected-filtered
+    std::fs::write(
+        &path,
+        r#"id: answer/unexpected-filtered
 clock: {tz: UTC, start: '2030-01-15T10:00:00'}
 setup:
   config: {fsrs: true}
@@ -110,7 +141,9 @@ setup:
 steps:
   - db_exec: {sql: "UPDATE cards SET odid=1"}
   - answer: {card: '#c1', rating: good}
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     let loaded = scenario::load(&path).unwrap();
     let executor = MeguriExecutor::new();
     assert!(executor.missing(&loaded.scenario.needs()).is_empty());
@@ -122,7 +155,10 @@ steps:
 
 #[test]
 fn raw_noop_and_reopen_explicitly_release_the_disabled_build() {
-    let areas = MeguriExecutor::AREAS.into_iter().filter(|a| *a != "undo").collect::<Vec<_>>();
+    let areas = MeguriExecutor::AREAS
+        .into_iter()
+        .filter(|a| *a != "undo")
+        .collect::<Vec<_>>();
     let mut registry = MeguriExecutor::area_registry(&areas);
     registry.observation("undo_status", witness);
     let executor = MeguriExecutor::with(registry);
@@ -130,14 +166,19 @@ fn raw_noop_and_reopen_explicitly_release_the_disabled_build() {
         "  - db_exec: {sql: 'UPDATE cards SET usn=usn WHERE 0'}\n",
         "  - reopen: {}\n",
     ] {
-        let out = run(&format!(r#"setup:
+        let out = run(
+            &format!(
+                r#"setup:
   config: {{loadBalancerEnabled: false}}
 steps:
   - observe: [queue, undo_status]
   - set_config: {{key: loadBalancerEnabled, value: true}}
 {reset}  - observe: [undo_status]
   - observe: [queue, undo_status]
-"#), &executor);
+"#
+            ),
+            &executor,
+        );
         let steps = &out["steps"];
         assert_eq!(steps[0]["undo_status"]["enabled"], false);
         assert_eq!(steps[3]["undo_status"], Value::Null);

@@ -1190,7 +1190,10 @@ fn explicit_filtered_answer_part_is_pending_in_preflight_while_plain_answer_runs
         let outcome = &report.outcomes[0];
         if tagged {
             assert_eq!(outcome.status, Status::Pending);
-            assert_eq!(outcome.missing.as_ref().unwrap().ops, ["answer.filtered".to_owned()].into());
+            assert_eq!(
+                outcome.missing.as_ref().unwrap().ops,
+                ["answer.filtered".to_owned()].into()
+            );
             assert_eq!(report.to_json()["totals"]["pending"], 1);
             assert_eq!(report.to_json()["totals"]["pass"], 0);
         } else {

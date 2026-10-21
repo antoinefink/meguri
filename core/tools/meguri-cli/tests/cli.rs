@@ -84,8 +84,20 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "update_notetype.template",
         ])
     );
-    assert!(json["language"]["ops"].as_array().unwrap().iter().any(|op| op == "answer.filtered"));
-    assert!(!json["supports"]["ops"].as_array().unwrap().iter().any(|op| op == "answer.filtered"));
+    assert!(
+        json["language"]["ops"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|op| op == "answer.filtered")
+    );
+    assert!(
+        !json["supports"]["ops"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|op| op == "answer.filtered")
+    );
     // dsl.md D8: U28 bootstrap declares the new_collection capability.
     assert_eq!(
         json["supports"]["setup"],

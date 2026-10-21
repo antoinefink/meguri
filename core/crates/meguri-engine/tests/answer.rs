@@ -3,8 +3,8 @@ mod common;
 use common::*;
 use meguri_engine::{OpSource, OpSpec, UndoScope, sched::answer};
 use meguri_model::{
-    clock::Clock,
     card::{CardQueue, CardType},
+    clock::Clock,
     ids::*,
     proto::ProtoBlob,
 };
@@ -544,19 +544,42 @@ fn answer_without_cache_append_undo_removes_build_entry_and_preserves_rebuilt_ca
     review(&h, id, 1, 9999);
     let cache = answer::AnswerCache::build(&h.collection).unwrap().unwrap();
     let built = cache.snapshot();
-    assert_eq!(built.entries(DeckConfigId(1), 0).iter().filter(|e| e.card == id).count(), 1);
+    assert_eq!(
+        built
+            .entries(DeckConfigId(1), 0)
+            .iter()
+            .filter(|e| e.card == id)
+            .count(),
+        1
+    );
     let mut request = answer::predict(&h.collection, id, &mut FsrsCache::default(), Some(cache.clone()))
-        .unwrap().answer(Rating::Again, 0);
+        .unwrap()
+        .answer(Rating::Again, 0);
     request.from_queue = Some(meguri_sched::queue::Kind::Review);
     let result = answer::answer(&h.collection, request).unwrap();
     assert_eq!(result.value.metadata.cache_build, Some(cache.identity()));
-    assert_eq!(h.collection.reader(ReaderRole::Query).unwrap().card(id).unwrap().unwrap().queue, CardQueue::Learning);
+    assert_eq!(
+        h.collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .card(id)
+            .unwrap()
+            .unwrap()
+            .queue,
+        CardQueue::Learning
+    );
     assert_eq!(cache.snapshot(), built, "intraday answer appends no entry");
     let rebuilt = answer::AnswerCache::build(&h.collection).unwrap().unwrap();
     let rebuilt_value = rebuilt.snapshot();
     assert_ne!(rebuilt.identity(), cache.identity());
     h.collection.undo(UndoScope::Global).unwrap();
-    assert!(cache.snapshot().entries(DeckConfigId(1), 0).iter().all(|e| e.card != id));
+    assert!(
+        cache
+            .snapshot()
+            .entries(DeckConfigId(1), 0)
+            .iter()
+            .all(|e| e.card != id)
+    );
     assert_eq!(rebuilt.snapshot(), rebuilt_value);
     let undone = cache.snapshot();
     h.collection.redo(UndoScope::Global).unwrap();
@@ -571,7 +594,8 @@ fn grade_now_undo_and_redo_leave_its_answer_cache_untouched() {
     let cache = answer::AnswerCache::build(&h.collection).unwrap().unwrap();
     let before = cache.snapshot();
     let request = answer::predict(&h.collection, id, &mut FsrsCache::default(), Some(cache.clone()))
-        .unwrap().answer(Rating::Good, 0);
+        .unwrap()
+        .answer(Rating::Good, 0);
     assert!(request.from_queue.is_none());
     let result = answer::answer(&h.collection, request).unwrap();
     assert!(result.value.metadata.from_queue.is_none());
@@ -591,8 +615,17 @@ fn zero_time_intraday_answer_stamps_deck_without_canonicalizing_unchanged_blobs(
     answer::answer(&h.collection, p.answer(Rating::Good, 0)).unwrap();
     // Explicit default plus an overlong zero: valid, intentionally noncanonical.
     // The row already belongs to today, so another intraday answer changes no counter.
-    raw(&h, "UPDATE decks SET common=CAST(common || X'088000' AS BLOB), kind=CAST(kind || X'F0018000' AS BLOB), name='  Counter probe  ', usn=27, mtime_secs=1 WHERE id=1");
-    let deck = h.collection.reader(ReaderRole::Query).unwrap().deck(DeckId(1)).unwrap().unwrap();
+    raw(
+        &h,
+        "UPDATE decks SET common=CAST(common || X'088000' AS BLOB), kind=CAST(kind || X'F0018000' AS BLOB), name='  Counter probe  ', usn=27, mtime_secs=1 WHERE id=1",
+    );
+    let deck = h
+        .collection
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .deck(DeckId(1))
+        .unwrap()
+        .unwrap();
     let bytes = deck.common.to_bytes().into_owned();
     let kind = deck.kind.to_bytes().into_owned();
     let name = deck.name.clone();
@@ -601,7 +634,13 @@ fn zero_time_intraday_answer_stamps_deck_without_canonicalizing_unchanged_blobs(
     let p = answer::predict(&h.collection, id, &mut FsrsCache::default(), None).unwrap();
     let at = p.answered_at.whole_secs().0;
     answer::answer(&h.collection, p.answer(Rating::Again, 0)).unwrap();
-    let saved = h.collection.reader(ReaderRole::Query).unwrap().deck(DeckId(1)).unwrap().unwrap();
+    let saved = h
+        .collection
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .deck(DeckId(1))
+        .unwrap()
+        .unwrap();
     assert_eq!(saved.common.to_bytes().as_ref(), bytes);
     assert_eq!(saved.kind.to_bytes().as_ref(), kind);
     assert_eq!(saved.name, name);
@@ -609,8 +648,17 @@ fn zero_time_intraday_answer_stamps_deck_without_canonicalizing_unchanged_blobs(
     assert_ne!((saved.mtime, saved.usn), (deck.mtime, deck.usn));
     let p = answer::predict(&h.collection, id, &mut FsrsCache::default(), None).unwrap();
     answer::answer(&h.collection, p.answer(Rating::Again, 7)).unwrap();
-    let changed = h.collection.reader(ReaderRole::Query).unwrap().deck(DeckId(1)).unwrap().unwrap();
-    assert_eq!(changed.common.milliseconds_studied, saved.common.milliseconds_studied + 7);
+    let changed = h
+        .collection
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .deck(DeckId(1))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        changed.common.milliseconds_studied,
+        saved.common.milliseconds_studied + 7
+    );
     assert_ne!(changed.common.to_bytes().as_ref(), bytes);
     assert_eq!(changed.common.to_bytes().as_ref(), changed.common.encode());
     assert_eq!(changed.kind.to_bytes().as_ref(), kind);
@@ -632,7 +680,10 @@ fn blocked_answer_prediction_and_native_build_refresh_rollover_before_reading() 
             if building {
                 (None, answer::AnswerCache::build(&collection).unwrap())
             } else {
-                (Some(answer::predict(&collection, id, &mut FsrsCache::default(), None).unwrap()), None)
+                (
+                    Some(answer::predict(&collection, id, &mut FsrsCache::default(), None).unwrap()),
+                    None,
+                )
             }
         });
         assert_eq!(waiting.recv().unwrap(), ReaderRole::Interactive);
@@ -644,14 +695,24 @@ fn blocked_answer_prediction_and_native_build_refresh_rollover_before_reading() 
         assert_eq!(current.today, old.today.wrapping_add(1));
         if let Some(cache) = cache {
             assert!(cache.is_current(&h.collection));
-            assert_eq!((cache.snapshot().today, cache.next_day_at()), (current.today, current.next_day_at));
+            assert_eq!(
+                (cache.snapshot().today, cache.next_day_at()),
+                (current.today, current.next_day_at)
+            );
         }
-        let prediction = prediction.unwrap_or_else(|| answer::predict(&h.collection, id, &mut FsrsCache::default(), None).unwrap());
-        assert_eq!((prediction.today, prediction.next_day_at, prediction.answered_at.0), (current.today, current.next_day_at, at));
+        let prediction =
+            prediction.unwrap_or_else(|| answer::predict(&h.collection, id, &mut FsrsCache::default(), None).unwrap());
+        assert_eq!(
+            (prediction.today, prediction.next_day_at, prediction.answered_at.0),
+            (current.today, current.next_day_at, at)
+        );
         answer::answer(&h.collection, prediction.answer(Rating::Easy, 0)).unwrap();
         let rows = h.collection.reader(ReaderRole::Query).unwrap();
         assert_eq!(rows.col().unwrap().modified.0, at);
-        assert_eq!(rows.deck(DeckId(1)).unwrap().unwrap().common.last_day_studied, current.today);
+        assert_eq!(
+            rows.deck(DeckId(1)).unwrap().unwrap().common.last_day_studied,
+            current.today
+        );
         let card = rows.card(id).unwrap().unwrap();
         assert_eq!(card.mtime.0, at / 1000);
         assert_eq!(card.due, current.today as i32 + card.interval as i32);
@@ -663,7 +724,10 @@ fn blocked_answer_prediction_and_native_build_refresh_rollover_before_reading() 
 fn answer_readers_settle_timing_commit_before_trusting_day_or_snapshot() {
     use meguri_storage::{ConfigValue, StampMode};
     use std::{sync::mpsc, thread};
-    enum Progress { Waiting(meguri_engine::Seq), Returned }
+    enum Progress {
+        Waiting(meguri_engine::Seq),
+        Returned,
+    }
     for building in [false, true] {
         let (h, id, _) = setup();
         let initial = h.collection.check_rollover().unwrap();
@@ -676,17 +740,22 @@ fn answer_readers_settle_timing_commit_before_trusting_day_or_snapshot() {
             let _ = paused.recv();
         });
         let collection = h.collection.clone();
-        let writer = thread::spawn(move || collection.run(
-            OpSpec::named("move answer rollover", OpSource::Maintenance).stamp(StampMode::Raw),
-            |ctx| {
-                ctx.scope().set_config_keeping_col_mod("rollover", &ConfigValue::from(6_i64))?;
-                Ok(())
-            },
-        ));
+        let writer = thread::spawn(move || {
+            collection.run(
+                OpSpec::named("move answer rollover", OpSource::Maintenance).stamp(StampMode::Raw),
+                |ctx| {
+                    ctx.scope()
+                        .set_config_keeping_col_mod("rollover", &ConfigValue::from(6_i64))?;
+                    Ok(())
+                },
+            )
+        });
         let seq = published.recv().unwrap();
         let (progress, events) = mpsc::channel();
         let waiting = progress.clone();
-        h.collection.on_next_settled_wait(move |seq| { let _ = waiting.send(Progress::Waiting(seq)); });
+        h.collection.on_next_settled_wait(move |seq| {
+            let _ = waiting.send(Progress::Waiting(seq));
+        });
         let collection = h.collection.clone();
         let reader = thread::spawn(move || {
             let result = if building {
@@ -706,7 +775,10 @@ fn answer_readers_settle_timing_commit_before_trusting_day_or_snapshot() {
             let lease = h.collection.reader(ReaderRole::Interactive).unwrap();
             let snapshot = lease.snapshot().unwrap();
             assert_eq!(snapshot.seq(), seq);
-            assert_eq!(snapshot.config_value("rollover").unwrap(), Some(ConfigValue::from(6_i64)));
+            assert_eq!(
+                snapshot.config_value("rollover").unwrap(),
+                Some(ConfigValue::from(6_i64))
+            );
         }
         assert!(matches!(events.try_recv(), Err(mpsc::TryRecvError::Empty)));
         resume.send(()).unwrap();
@@ -726,28 +798,44 @@ fn fresh_legacy_boundary_cache_balances_predictions_for_only_the_checked_second(
     let old = answer::AnswerCache::build(&h.collection).unwrap().unwrap();
     assert!(old.is_current(&h.collection));
     h.clock.set_now_ms(old.next_day_at() * 1000);
-    assert!(!old.is_current(&h.collection), "yesterday's build has no checked-second proof");
+    assert!(
+        !old.is_current(&h.collection),
+        "yesterday's build has no checked-second proof"
+    );
     let day = h.collection.check_rollover().unwrap();
     assert_eq!(day.next_day_at, h.clock.now_ms() / 1000);
     let plain = answer::predict(&h.collection, id, &mut FsrsCache::default(), None).unwrap();
-    let meguri_sched::states::interval_limits::Delay::Days(plain_hard) = plain.states.hard.delay else { panic!("review delay") };
-    h.collection.run(OpSpec::named("load the plain candidate", OpSource::Maintenance), move |ctx| {
-        for _ in 0..64 {
-            let nid = ctx.scope().add_note(&note(&["cache weight probe", "day bucket"]))?;
-            let mut filler = card(nid, 0);
-            filler.card_type = CardType::Review;
-            filler.queue = CardQueue::Suspended;
-            filler.due = day.today.wrapping_add(plain_hard) as i32;
-            ctx.scope().add_card(&filler)?;
-        }
-        Ok(())
-    }).unwrap();
+    let meguri_sched::states::interval_limits::Delay::Days(plain_hard) = plain.states.hard.delay else {
+        panic!("review delay")
+    };
+    h.collection
+        .run(
+            OpSpec::named("load the plain candidate", OpSource::Maintenance),
+            move |ctx| {
+                for _ in 0..64 {
+                    let nid = ctx.scope().add_note(&note(&["cache weight probe", "day bucket"]))?;
+                    let mut filler = card(nid, 0);
+                    filler.card_type = CardType::Review;
+                    filler.queue = CardQueue::Suspended;
+                    filler.due = day.today.wrapping_add(plain_hard) as i32;
+                    ctx.scope().add_card(&filler)?;
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
     let cache = answer::AnswerCache::build(&h.collection).unwrap().unwrap();
     assert!(cache.is_current(&h.collection));
-    assert_eq!((cache.snapshot().today, cache.next_day_at()), (day.today, day.next_day_at));
+    assert_eq!(
+        (cache.snapshot().today, cache.next_day_at()),
+        (day.today, day.next_day_at)
+    );
     let balanced = answer::predict(&h.collection, id, &mut FsrsCache::default(), Some(cache.clone())).unwrap();
     assert!(balanced.cache.is_some());
-    assert_ne!(balanced.states.hard.delay, plain.states.hard.delay, "fresh boundary build must offer the real chooser");
+    assert_ne!(
+        balanced.states.hard.delay, plain.states.hard.delay,
+        "fresh boundary build must offer the real chooser"
+    );
     h.clock.step_ms(999);
     assert!(cache.is_current(&h.collection));
     h.clock.step_ms(1);

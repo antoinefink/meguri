@@ -3115,7 +3115,7 @@ impl Scenario {
                 _ if by.is_some_and(ActorName::is_meguri) => {
                     add_step_needs(&mut needs, std::slice::from_ref(step));
                     self.add_filtered_answer_need(&mut needs, std::slice::from_ref(step));
-                },
+                }
                 _ => {}
             }
         }

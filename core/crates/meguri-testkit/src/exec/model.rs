@@ -131,8 +131,8 @@ fn update(s: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
         if let Some(stored) = writer(s)?.deck_config(p.id).map_err(core)? {
             // Compare the schema-11 roundtrip of the bounded view. Equal
             // content keeps the entire raw blob, including noncanonical bytes.
-            let roundtrip = schema11::deck_config_from_json(&schema11::deck_config_to_json(&stored.for_use()))
-                .map_err(core)?;
+            let roundtrip =
+                schema11::deck_config_from_json(&schema11::deck_config_to_json(&stored.for_use())).map_err(core)?;
             if p.config.same_content(&roundtrip.config) {
                 p.config = stored.config;
             }
