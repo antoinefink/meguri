@@ -72,6 +72,25 @@ pub struct HomePreset {
     pub answer_action: i32,
     pub leech_action: i32,
 }
+impl HomePreset {
+    fn from_preset(preset: &meguri_sched::model::preset::PresetView) -> Self {
+        let p = preset.fields();
+        Self {
+            id: preset.source().id,
+            autoplay: !p.disable_autoplay,
+            skip_question_when_replaying_answer: p.skip_question_when_replaying_answer,
+            show_timer: p.show_timer,
+            stop_timer_on_answer: p.stop_timer_on_answer,
+            maximum_answer_seconds: p.cap_answer_time_to_secs,
+            question_seconds: p.seconds_to_show_question,
+            answer_seconds: p.seconds_to_show_answer,
+            question_action: p.question_action,
+            answer_action: p.answer_action,
+            wait_for_audio: p.wait_for_audio,
+            leech_action: p.leech_action,
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct HeadItem {
     pub card_id: CardId,
@@ -1618,7 +1637,6 @@ fn project_item(
             .map_err(|_| invalid("prediction card not permitted"))?;
     }
     let (render_key, note) = render_keys.key(card, |note| project_review_note(note, undo))?;
-    let p = inputs.preset.fields();
     let item = HeadItem {
         card_id: id,
         note_id: card.note_id,
@@ -1633,20 +1651,7 @@ fn project_item(
         predicted_next: predicted,
         flag: card.flags & 7,
         marked: crate::tags::canonical::split_text(&note.tags).any(|t| t.to_lowercase() == "marked"),
-        home_preset: HomePreset {
-            id: inputs.preset.source().id,
-            autoplay: !p.disable_autoplay,
-            skip_question_when_replaying_answer: p.skip_question_when_replaying_answer,
-            show_timer: p.show_timer,
-            stop_timer_on_answer: p.stop_timer_on_answer,
-            maximum_answer_seconds: p.cap_answer_time_to_secs,
-            question_seconds: p.seconds_to_show_question,
-            answer_seconds: p.seconds_to_show_answer,
-            question_action: p.question_action,
-            answer_action: p.answer_action,
-            wait_for_audio: p.wait_for_audio,
-            leech_action: p.leech_action,
-        },
+        home_preset: HomePreset::from_preset(&inputs.preset),
     };
     Ok(item)
 }
