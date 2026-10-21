@@ -292,8 +292,10 @@ fn resume_rejects_atomic_replacement_and_keeps_unretired_journal_and_admission_c
             meguri_storage::rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
         .unwrap();
-        db.query_row("SELECT count(*) FROM revlog", [], |row| row.get::<_, usize>(0))
-            .unwrap()
+        let count = db
+            .query_row("SELECT count(*) FROM revlog", [], |row| row.get::<_, i64>(0))
+            .unwrap();
+        usize::try_from(count).unwrap()
     };
     let replacement = dir.path().join("external.anki2");
     std::fs::copy(&path, &replacement).unwrap();
