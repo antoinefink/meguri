@@ -173,10 +173,10 @@ impl CoreHost {
             return Ok(());
         }
         let mut opened = self.process.opened.lock().unwrap();
-        if self.engine.collection().is_ok() {
-            if let Some(id) = self.review.active_session() {
-                self.review.end(id)?;
-            }
+        if self.engine.collection().is_ok()
+            && let Some(id) = self.review.active_session()
+        {
+            self.review.end(id)?;
         }
         self.engine.close()?;
         self.media
