@@ -260,10 +260,14 @@ mod tests {
                 .any(|e| matches!(&e.kind, CoreEventKind::Changes { changes } if changes.revlog_added.len() == 1))
         );
         host.close().unwrap();
-        assert!(matches!(
-            process.review().head(SessionId(session_id), 3),
-            Err(meguri_engine::EngineError::CollectionUnavailable { .. })
-        ));
+        assert_eq!(process.review().active_session(), None);
+        // Close ends this session; the retained handle still has the same generation.
+        assert_eq!(
+            process.review().head(SessionId(session_id), 3).unwrap_err(),
+            meguri_engine::EngineError::InvalidArgument {
+                message: "NoSession".into(),
+            }
+        );
         let reopened = process.open(config).unwrap();
         drop(host); // An already-closed host must not close its successor.
         assert!(std::ptr::eq(process.review(), reopened.review()));
