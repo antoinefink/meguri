@@ -97,10 +97,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "driver_sha256": "9b5b72a872e653e261f80ba56ab4c80cb0ed388624fe2d866307a497a123e9af",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "sched/data/positions",
-  "scenario_sha256": "050be1ea45bb8b778f4300561ad32b843d425dfe8b89c8127ea6859f25e1710a",
+  "scenario_sha256": "31e0ec7378aea706c621a3864a9e39189a27701a9d6c805f08c4434a91bd60e8",
   "tz": "UTC"
 }
