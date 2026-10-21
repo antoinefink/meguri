@@ -20,6 +20,8 @@ pub struct CollectionLocation {
     pub app_group_snapshot: String,
 }
 
+/// Trusted bounded synchronous platform values only; no core reentry, UI or async
+/// work. These reads alone may run under core locks (E-20261021T142014Z-9c3d).
 #[uniffi::export(foreign)]
 pub trait HostClock: Send + Sync {
     fn now_ms(&self) -> i64;
@@ -52,6 +54,7 @@ pub enum DiskCapacity {
     Available { bytes: u64 },
     Failed { detail: String },
 }
+/// Same bounded value-read exception as HostClock; no delivery callback is exempt.
 #[uniffi::export(foreign)]
 pub trait DiskSpaceProvider: Send + Sync {
     fn available_bytes(&self, directory: String) -> DiskCapacity;
@@ -157,6 +160,13 @@ mod tests {
                 available: 41
             }))
         );
+        assert_eq!(
+            c.require_space(42).map_err(CoreError::from),
+            Err(CoreError::InsufficientSpace {
+                required: 42,
+                available: 41
+            })
+        );
         assert!(c.require_space(41).is_ok());
         *capacity.answer.lock().unwrap() = DiskCapacity::Failed {
             detail: "capacity unavailable".into(),
@@ -167,7 +177,7 @@ mod tests {
                 detail: "capacity unavailable".into()
             }))
         );
-        assert_eq!(*capacity.paths.lock().unwrap(), vec![collection.to_str().unwrap(); 3]);
+        assert_eq!(*capacity.paths.lock().unwrap(), vec![collection.to_str().unwrap(); 4]);
         host.close().unwrap();
     }
 }

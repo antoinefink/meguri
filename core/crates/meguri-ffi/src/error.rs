@@ -4,35 +4,102 @@
 
 use std::fmt;
 
+use crate::{error_types::*, lifecycle::CollectionOpenFailure, review_session::ReviewDisabledReason};
 use meguri_engine::EngineError;
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Error)]
 pub enum CoreError {
+    Stale {
+        table: CoreTable,
+        key: String,
+    },
+    StaleGeneration {
+        planned: u64,
+        current: u64,
+    },
+    UndoUnavailable {
+        reason: ReviewDisabledReason,
+    },
+    NeedsSchemaConfirmation {
+        reasons: Vec<SchemaChangeReason>,
+    },
+    NotetypeRefused {
+        refusal: NotetypeRefusal,
+    },
+    DeckRefused {
+        refusal: DeckRefusal,
+    },
+    NoteNotFound {
+        id: i64,
+    },
+    NotFound {
+        table: CoreTable,
+        key: String,
+    },
+    InsufficientSpace {
+        required: u64,
+        available: u64,
+    },
+    Open {
+        failure: CollectionOpenFailure,
+    },
+    SuspendDeadline {
+        phase: String,
+    },
+    SessionActive,
     /// Invalid imported type-in replacement; no partial rendering is returned.
     InvalidTypeAnswerReplacement,
     /// The operation's `CancelToken` was cancelled before it finished.
     Cancelled,
     /// Another long operation holds the slot this one needs (R171).
-    Busy { running_op: String },
+    Busy {
+        running_op: String,
+    },
     /// The collection cannot take this call now, for example during an
     /// exclusive phase (KTD17).
-    Unavailable { reason: String },
+    Unavailable {
+        reason: String,
+    },
     /// Compiled out for this platform or build: the iOS stubs of the server
     /// exports (KTD9) and the AnkiWeb switch (KTD21).
-    Unsupported { feature: String },
+    Unsupported {
+        feature: String,
+    },
     /// The caller passed a value the core rejects.
-    InvalidArgument { message: String },
+    InvalidArgument {
+        message: String,
+    },
     /// A failure the caller cannot act on: a bug, or a caught panic.
-    Internal { message: String },
+    Internal {
+        message: String,
+    },
     /// The note write committed; recover attachments without repeating it.
-    MediaCommitPending { seq: u64, message: String },
+    MediaCommitPending {
+        seq: u64,
+        message: String,
+    },
     /// The write committed. Refresh its state without repeating it.
-    CommitCompleted { seq: u64, message: String },
+    CommitCompleted {
+        seq: u64,
+        message: String,
+    },
 }
 
 impl fmt::Display for CoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            CoreError::Stale { .. } => write!(f, "{self:?}"),
+            CoreError::StaleGeneration { .. } => write!(f, "{self:?}"),
+            CoreError::UndoUnavailable { .. } => write!(f, "{self:?}"),
+            CoreError::NeedsSchemaConfirmation { .. } => write!(f, "{self:?}"),
+            CoreError::NotetypeRefused { .. } => write!(f, "{self:?}"),
+            CoreError::DeckRefused { .. } => write!(f, "{self:?}"),
+            CoreError::NoteNotFound { .. } => write!(f, "{self:?}"),
+            CoreError::NotFound { .. } => write!(f, "{self:?}"),
+            CoreError::InsufficientSpace { .. } => write!(f, "{self:?}"),
+            CoreError::Open { .. } => write!(f, "{self:?}"),
+            CoreError::SuspendDeadline { .. } => write!(f, "{self:?}"),
+            CoreError::SessionActive => f.write_str("review session is active"),
             CoreError::InvalidTypeAnswerReplacement => f.write_str("invalid_type_answer_replacement"),
             CoreError::Cancelled => f.write_str("cancelled"),
             CoreError::Busy { running_op } => write!(f, "busy: {running_op} is running"),
@@ -52,43 +119,54 @@ impl fmt::Display for CoreError {
 
 impl std::error::Error for CoreError {}
 
-/// The engine's errors as Swift sees them. U37 adds variants for the op
-/// results Swift reacts to (`Stale`, `StaleGeneration`, `UndoUnavailable`,
-/// `NeedsSchemaConfirmation`, `NotetypeRefused`); until then they cross as
-/// `Unavailable`, `InvalidArgument` or `Internal`.
+/// Structured engine errors preserve actionable values across the bridge.
 impl From<EngineError> for CoreError {
     fn from(error: EngineError) -> CoreError {
         match error {
             EngineError::InvalidTypeAnswerReplacement => CoreError::InvalidTypeAnswerReplacement,
             EngineError::Cancelled => CoreError::Cancelled,
             EngineError::Busy { running_op } => CoreError::Busy { running_op },
-            EngineError::SessionActive => CoreError::Unavailable {
-                reason: "SessionActive".into(),
-            },
+            EngineError::SessionActive => CoreError::SessionActive,
             EngineError::CollectionUnavailable { reason } => CoreError::Unavailable { reason },
-            EngineError::SuspendDeadline { .. } => CoreError::Unavailable {
-                reason: error.to_string(),
-            },
+            EngineError::SuspendDeadline { phase } => CoreError::SuspendDeadline { phase },
             EngineError::MediaCommitPending { seq, message } => CoreError::MediaCommitPending { seq: seq.0, message },
             EngineError::CommitCompleted { seq, message } => CoreError::CommitCompleted { seq: seq.0, message },
-            EngineError::StaleGeneration { .. }
-            | EngineError::UndoUnavailable { .. }
-            | EngineError::NeedsSchemaConfirmation { .. } => CoreError::Unavailable {
-                reason: error.to_string(),
+            EngineError::Stale { table, key } => CoreError::Stale {
+                table: table.into(),
+                key,
             },
-            EngineError::InvalidIgnoreBeforeDate { .. }
-            | EngineError::NotFound { .. }
-            | EngineError::DeckRefused(_)
-            | EngineError::NotetypeRefused(_)
-            | EngineError::NoteNotFound { .. } => CoreError::InvalidArgument {
+            EngineError::StaleGeneration { planned, current } => CoreError::StaleGeneration {
+                planned: planned.0,
+                current: current.0,
+            },
+            EngineError::UndoUnavailable { reason } => CoreError::UndoUnavailable { reason: reason.into() },
+            EngineError::NeedsSchemaConfirmation { reasons } => CoreError::NeedsSchemaConfirmation {
+                reasons: reasons.into_iter().map(Into::into).collect(),
+            },
+            EngineError::NotetypeRefused(refusal) => CoreError::NotetypeRefused {
+                refusal: refusal.into(),
+            },
+            EngineError::DeckRefused(refusal) => CoreError::DeckRefused {
+                refusal: refusal.into(),
+            },
+            EngineError::NoteNotFound { id } => CoreError::NoteNotFound { id: id.0 },
+            EngineError::NotFound { table, key } => CoreError::NotFound {
+                table: table.into(),
+                key,
+            },
+            EngineError::Storage(meguri_storage::StorageError::InsufficientSpace { required, available }) => {
+                CoreError::InsufficientSpace { required, available }
+            }
+            EngineError::Open(failure) => CoreError::Open {
+                failure: failure.into(),
+            },
+            EngineError::InvalidIgnoreBeforeDate { .. } => CoreError::InvalidArgument {
                 message: error.to_string(),
             },
             EngineError::Unsupported { feature } => CoreError::Unsupported { feature },
             EngineError::InvalidArgument { message } => CoreError::InvalidArgument { message },
             EngineError::Internal { message } => CoreError::Internal { message },
-            EngineError::Stale { .. }
-            | EngineError::SchemaNotMarked { .. }
-            | EngineError::Open(_)
+            EngineError::SchemaNotMarked { .. }
             | EngineError::Storage(_)
             | EngineError::Media(_)
             | EngineError::Panicked { .. } => CoreError::Internal {
@@ -103,6 +181,34 @@ impl From<EngineError> for CoreError {
 impl From<CoreError> for EngineError {
     fn from(error: CoreError) -> EngineError {
         match error {
+            CoreError::Stale { table, key } => EngineError::Stale {
+                table: table.into(),
+                key,
+            },
+            CoreError::StaleGeneration { planned, current } => EngineError::StaleGeneration {
+                planned: meguri_engine::Generation(planned),
+                current: meguri_engine::Generation(current),
+            },
+            CoreError::UndoUnavailable { reason } => EngineError::UndoUnavailable { reason: reason.into() },
+            CoreError::NeedsSchemaConfirmation { reasons } => EngineError::NeedsSchemaConfirmation {
+                reasons: reasons.into_iter().map(Into::into).collect(),
+            },
+            CoreError::NotetypeRefused { refusal } => EngineError::NotetypeRefused(refusal.into()),
+            CoreError::DeckRefused { refusal } => EngineError::DeckRefused(refusal.into()),
+            CoreError::NoteNotFound { id } => EngineError::NoteNotFound {
+                id: meguri_model::ids::NoteId(id),
+            },
+            CoreError::NotFound { table, key } => EngineError::NotFound {
+                table: table.into(),
+                key,
+            },
+            CoreError::InsufficientSpace { required, available } => {
+                EngineError::Storage(meguri_storage::StorageError::InsufficientSpace { required, available })
+            }
+            CoreError::Open { failure } => EngineError::Open(failure.into()),
+            CoreError::SuspendDeadline { phase } => EngineError::SuspendDeadline { phase },
+            CoreError::SessionActive => EngineError::SessionActive,
+
             CoreError::InvalidTypeAnswerReplacement => EngineError::InvalidTypeAnswerReplacement,
             CoreError::Cancelled => EngineError::Cancelled,
             CoreError::Busy { running_op } => EngineError::Busy { running_op },
@@ -136,5 +242,11 @@ impl CoreError {
         CoreError::Internal {
             message: format!("panic: {message}"),
         }
+    }
+}
+
+impl From<meguri_storage::StorageError> for CoreError {
+    fn from(error: meguri_storage::StorageError) -> Self {
+        EngineError::from(error).into()
     }
 }

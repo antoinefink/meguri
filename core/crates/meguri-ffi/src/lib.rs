@@ -14,19 +14,28 @@ pub mod changes;
 pub mod collection;
 pub mod day_clock;
 pub mod deck_tree;
+pub mod decks;
 pub mod error;
+pub mod error_types;
 pub mod events;
 pub mod excerpts;
 pub mod fsrs_policy;
 pub mod image_occlusion;
 pub mod jobs;
 pub mod lifecycle;
+pub mod media;
+pub mod mutations;
+pub mod notes;
+pub mod notetypes;
 pub mod progress;
 pub mod render;
 pub mod review_session;
 mod runtime;
+pub mod suspend;
+pub mod tags;
 #[cfg(feature = "test-hooks")]
 mod test_hooks;
+pub mod undo;
 
 pub use cancel::CancelToken;
 pub use changes::{CardChange, ChangeKind, ChangeSet, IdChange, NameChange, NotetypeChange, OpSource};

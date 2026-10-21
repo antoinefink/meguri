@@ -200,8 +200,8 @@ extension EventTests {
             { try await Core.endSession(sessionID: 91) },
             { _ = try await Core.peekReviewUndo(scope: .session(sessionId: 91)) },
             { _ = try await Core.peekReviewUndo(scope: .global) },
-            { _ = try await Core.undoReview(scope: .session(sessionId: 91)) },
-            { _ = try await Core.redoReview(scope: .global) },
+            { _ = try await CoreUndoService().startUndo(scope: .session(sessionId: 91)) },
+            { _ = try await CoreUndoService().startRedo(scope: .global) },
             { try await Core.flushReviewForBackground() },
         ]
         for call in calls {

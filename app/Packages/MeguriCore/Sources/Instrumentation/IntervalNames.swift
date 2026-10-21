@@ -175,8 +175,6 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let answerSession = BridgeCall("answer_session")
     public static let endSession = BridgeCall("end_session")
     public static let peekReviewUndo = BridgeCall("peek_review_undo")
-    public static let undoReview = BridgeCall("undo_review")
-    public static let redoReview = BridgeCall("redo_review")
     public static let flushReviewForBackground = BridgeCall("flush_review_for_background")
 
     public static let compareTypedAnswer = BridgeCall("compare_typed_answer")
@@ -189,10 +187,85 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let cancelTokenCancel = BridgeCall("CancelToken.cancel")
     public static let cancelTokenIsCancelled = BridgeCall("CancelToken.isCancelled")
 
+    public static let deckDeletionJobResult = BridgeCall("DeckDeletionJob.result")
+    public static let addDeck = BridgeCall("add_deck")
+    public static let renameDeck = BridgeCall("rename_deck")
+    public static let moveDecks = BridgeCall("move_decks")
+    public static let collapseDecks = BridgeCall("collapse_decks")
+    public static let selectDeck = BridgeCall("select_deck")
+    public static let deckDeletionSummary = BridgeCall("deck_deletion_summary")
+    public static let startDeleteDecks = BridgeCall("start_delete_decks")
+    public static let noteDeletionJobResult = BridgeCall("NoteDeletionJob.result")
+    public static let addNote = BridgeCall("add_note")
+    public static let updateNote = BridgeCall("update_note")
+    public static let readNote = BridgeCall("read_note")
+    public static let checkNoteFields = BridgeCall("check_note_fields")
+    public static let startDeleteNotes = BridgeCall("start_delete_notes")
+    public static let notetypeNames = BridgeCall("notetype_names")
+    public static let readNotetype = BridgeCall("read_notetype")
+    public static let addNotetype = BridgeCall("add_notetype")
+    public static let addStockNotetype = BridgeCall("add_stock_notetype")
+    public static let cloneNotetype = BridgeCall("clone_notetype")
+    public static let ensureImageOcclusionNotetype = BridgeCall("ensure_image_occlusion_notetype")
+    public static let renameNotetype = BridgeCall("rename_notetype")
+    public static let setNotetypeCss = BridgeCall("set_notetype_css")
+    public static let setNotetypeFieldOptions = BridgeCall("set_notetype_field_options")
+    public static let setNotetypeTemplateOptions = BridgeCall("set_notetype_template_options")
+    public static let tagMutationJobResult = BridgeCall("TagMutationJob.result")
+    public static let tagTree = BridgeCall("tag_tree")
+    public static let flagNames = BridgeCall("flag_names")
+    public static let setTagsCollapsed = BridgeCall("set_tags_collapsed")
+    public static let renameFlag = BridgeCall("rename_flag")
+    public static let restoreFlagName = BridgeCall("restore_flag_name")
+    public static let addNoteTags = BridgeCall("add_note_tags")
+    public static let startAddNoteTags = BridgeCall("start_add_note_tags")
+    public static let removeNoteTags = BridgeCall("remove_note_tags")
+    public static let startRemoveNoteTags = BridgeCall("start_remove_note_tags")
+    public static let setCardFlag = BridgeCall("set_card_flag")
+    public static let startSetCardFlag = BridgeCall("start_set_card_flag")
+    public static let toggleCardFlag = BridgeCall("toggle_card_flag")
+    public static let startToggleCardFlag = BridgeCall("start_toggle_card_flag")
+    public static let markNotes = BridgeCall("mark_notes")
+    public static let startMarkNotes = BridgeCall("start_mark_notes")
+    public static let unmarkNotes = BridgeCall("unmark_notes")
+    public static let startUnmarkNotes = BridgeCall("start_unmark_notes")
+    public static let toggleNoteMark = BridgeCall("toggle_note_mark")
+    public static let startToggleNoteMark = BridgeCall("start_toggle_note_mark")
+    public static let startRenameTag = BridgeCall("start_rename_tag")
+    public static let startReparentTags = BridgeCall("start_reparent_tags")
+    public static let startDeleteTags = BridgeCall("start_delete_tags")
+    public static let startClearUnusedTags = BridgeCall("start_clear_unused_tags")
+    public static let addMedia = BridgeCall("add_media")
+    public static let flushForBackground = BridgeCall("flush_for_background")
+    public static let suspend = BridgeCall("suspend")
+    public static let resume = BridgeCall("resume")
+    public static let undoJobResult = BridgeCall("UndoJob.result")
+    public static let peekUndo = BridgeCall("peek_undo")
+    public static let peekRedo = BridgeCall("peek_redo")
+    public static let startUndo = BridgeCall("start_undo")
+    public static let startRedo = BridgeCall("start_redo")
+
+    public static let renameNotetypeTemplate = BridgeCall("rename_notetype_template")
+
+    public static let startAddNotes = BridgeCall("start_add_notes")
+    public static let noteAdditionJobResult = BridgeCall("NoteAdditionJob.result")
+
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
         startOpen, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, deckStudyState, deckDescriptionHtml,
-        startSession, peekFirstCard, sessionHead, refreshSessionCard, renderSessionHead, answerSession, endSession, peekReviewUndo, undoReview, redoReview, flushReviewForBackground,
+        startSession, peekFirstCard, sessionHead, refreshSessionCard, renderSessionHead, answerSession, endSession, peekReviewUndo, flushReviewForBackground,
         coreVersion, coreBuildInfo, setEventListener, cancelTokenNew, cancelTokenCancel, cancelTokenIsCancelled, renderCard, compareTypedAnswer, cardExcerpts,
+        deckDeletionJobResult, addDeck, renameDeck, moveDecks, collapseDecks,
+        selectDeck, deckDeletionSummary, startDeleteDecks, noteDeletionJobResult, addNote,
+        updateNote, readNote, checkNoteFields, startDeleteNotes, notetypeNames,
+        readNotetype, addNotetype, addStockNotetype, cloneNotetype, ensureImageOcclusionNotetype,
+        renameNotetype, setNotetypeCss, setNotetypeFieldOptions, setNotetypeTemplateOptions, tagMutationJobResult,
+        tagTree, flagNames, setTagsCollapsed, renameFlag, restoreFlagName,
+        addNoteTags, startAddNoteTags, removeNoteTags, startRemoveNoteTags, setCardFlag,
+        startSetCardFlag, toggleCardFlag, startToggleCardFlag, markNotes, startMarkNotes,
+        unmarkNotes, startUnmarkNotes, toggleNoteMark, startToggleNoteMark, startRenameTag,
+        startReparentTags, startDeleteTags, startClearUnusedTags, addMedia, flushForBackground,
+        suspend, resume, undoJobResult, peekUndo, peekRedo,
+        startUndo, startRedo, renameNotetypeTemplate, startAddNotes, noteAdditionJobResult,
     ]
 }

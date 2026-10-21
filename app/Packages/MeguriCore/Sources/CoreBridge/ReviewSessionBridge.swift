@@ -778,16 +778,6 @@ extension Core {
             ReviewUndoStatus(try MeguriCoreBindings.peekReviewUndo(scope: scope.raw))
         }
     }
-    public static func undoReview(scope: ReviewUndoScope) async throws(BridgeError) -> ReviewHead {
-        try await InteractiveLane.shared.call(.undoReview) {
-            ReviewHead(try MeguriCoreBindings.undoReview(scope: scope.raw))
-        }
-    }
-    public static func redoReview(scope: ReviewUndoScope) async throws(BridgeError) -> ReviewHead {
-        try await InteractiveLane.shared.call(.redoReview) {
-            ReviewHead(try MeguriCoreBindings.redoReview(scope: scope.raw))
-        }
-    }
     public static func flushReviewForBackground() async throws(BridgeError) {
         try await ControlLane.shared.call(.flushReviewForBackground) { try MeguriCoreBindings.flushReviewForBackground() }
     }

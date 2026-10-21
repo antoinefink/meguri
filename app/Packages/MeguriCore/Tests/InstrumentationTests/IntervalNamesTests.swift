@@ -55,10 +55,25 @@ import Testing
     @Test func bridgeCallsAreSignpostedUnderTheirExportNamesOnly() {
         #expect(BridgeCall.all.map(\.name) == [
             "start_open", "close_collection", "collection_lifecycle", "wait_collection_available", "deck_tree_with_counts", "deck_study_state", "deck_description_html",
-            "start_session", "peek_first_card", "session_head", "refresh_session_card", "render_session_head", "answer_session", "end_session", "peek_review_undo", "undo_review", "redo_review", "flush_review_for_background",
+            "start_session", "peek_first_card", "session_head", "refresh_session_card", "render_session_head", "answer_session", "end_session", "peek_review_undo", "flush_review_for_background",
             "core_version", "core_build_info", "set_event_listener",
             "CancelToken.new", "CancelToken.cancel", "CancelToken.isCancelled", "render_card",
             "compare_typed_answer", "card_excerpts",
+            "DeckDeletionJob.result", "add_deck", "rename_deck", "move_decks",
+            "collapse_decks", "select_deck", "deck_deletion_summary", "start_delete_decks",
+            "NoteDeletionJob.result", "add_note", "update_note", "read_note",
+            "check_note_fields", "start_delete_notes", "notetype_names", "read_notetype",
+            "add_notetype", "add_stock_notetype", "clone_notetype", "ensure_image_occlusion_notetype",
+            "rename_notetype", "set_notetype_css", "set_notetype_field_options", "set_notetype_template_options",
+            "TagMutationJob.result", "tag_tree", "flag_names", "set_tags_collapsed",
+            "rename_flag", "restore_flag_name", "add_note_tags", "start_add_note_tags",
+            "remove_note_tags", "start_remove_note_tags", "set_card_flag", "start_set_card_flag",
+            "toggle_card_flag", "start_toggle_card_flag", "mark_notes", "start_mark_notes",
+            "unmark_notes", "start_unmark_notes", "toggle_note_mark", "start_toggle_note_mark",
+            "start_rename_tag", "start_reparent_tags", "start_delete_tags", "start_clear_unused_tags",
+            "add_media", "flush_for_background", "suspend", "resume",
+            "UndoJob.result", "peek_undo", "peek_redo", "start_undo",
+            "start_redo", "rename_notetype_template", "start_add_notes", "NoteAdditionJob.result",
         ])
         for call in BridgeCall.all {
             #expect(call.interval.category == .bridge)

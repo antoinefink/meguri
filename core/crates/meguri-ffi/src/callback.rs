@@ -1,6 +1,9 @@
 //! Rules for calls that cross into Swift (KTD9). Swift callback
-//! implementations only yield into an `AsyncStream` continuation; they never
-//! call the core synchronously. Every foreign callback runs inside [`invoke`],
+//! delivery implementations only yield into an `AsyncStream` continuation.
+//! Only trusted, bounded synchronous HostClock/DiskSpaceProvider value reads
+//! may run under core locks (E-20261021T142014Z-9c3d); they do no UI or async
+//! work. Delivery and every other callback keep the no-lock rule. No callback
+//! may call the core synchronously. Every foreign callback runs inside [`invoke`],
 //! and every export starts with [`enter`], so in debug builds a synchronous
 //! call back into the core panics, and UniFFI hands Swift an internal error
 //! that names the export and the callback.
@@ -20,7 +23,7 @@ pub(crate) fn enter(export: &'static str) {
     {
         panic!(
             "core export `{export}` was called synchronously from the Swift callback `{callback}`; \
-             callbacks must only yield into an AsyncStream (KTD9)"
+             callbacks must never reenter the core (KTD9)"
         );
     }
 }

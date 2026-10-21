@@ -76,17 +76,22 @@ enum Jobs {
         try await CoreEventStream.shared.start()
         return try await MaintenanceLane.shared.call(name) {
             let handle = try startExport()
-            let (progress, continuation) = AsyncStream.makeStream(
-                of: CoreProgress.self, bufferingPolicy: .bufferingNewest(1))
-            try handle.progress.setListener(listener: ProgressRelay(continuation))
-            let completion = JobCompletion(progress: continuation)
-            let job = CoreJob(
-                id: JobID(rawValue: handle.id), cancelToken: CancelToken(raw: handle.cancel),
-                progress: progress, completion: completion)
-            JobRegistry.shared.register(job.id, completion)
-            return job
+            return try track(handle)
         }
     }
+    /// Called on MaintenanceLane after the event stream has subscribed.
+    static func track(_ handle: MeguriCoreBindings.JobHandle) throws -> CoreJob {
+        let (progress, continuation) = AsyncStream.makeStream(
+            of: CoreProgress.self, bufferingPolicy: .bufferingNewest(1))
+        try handle.progress.setListener(listener: ProgressRelay(continuation))
+        let completion = JobCompletion(progress: continuation)
+        let job = CoreJob(
+            id: JobID(rawValue: handle.id), cancelToken: CancelToken(raw: handle.cancel),
+            progress: progress, completion: completion)
+        JobRegistry.shared.register(job.id, completion)
+        return job
+    }
+
 }
 
 /// A one-shot result that any number of tasks can await.

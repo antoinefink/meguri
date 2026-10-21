@@ -805,16 +805,6 @@ pub fn peek_review_undo(scope: ReviewUndoScope) -> Result<ReviewUndoStatus, Core
     Ok(runtime::review()?.peek_undo(scope.into())?.into())
 }
 #[uniffi::export]
-pub fn undo_review(scope: ReviewUndoScope) -> Result<ReviewHead, CoreError> {
-    callback::enter("undo_review");
-    Ok(runtime::review()?.undo(scope.into())?.into())
-}
-#[uniffi::export]
-pub fn redo_review(scope: ReviewUndoScope) -> Result<ReviewHead, CoreError> {
-    callback::enter("redo_review");
-    Ok(runtime::review()?.redo(scope.into())?.into())
-}
-#[uniffi::export]
 pub fn flush_review_for_background() -> Result<(), CoreError> {
     callback::enter("flush_review_for_background");
     Ok(runtime::review()?.flush_for_background()?)

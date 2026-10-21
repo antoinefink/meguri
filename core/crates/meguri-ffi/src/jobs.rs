@@ -56,6 +56,14 @@ pub fn cancel_job(id: u64) -> Result<bool, CoreError> {
     Ok(runtime::engine()?.jobs().cancel(JobId(id)))
 }
 
+pub(crate) fn wrap(handle: meguri_engine::JobHandle) -> JobHandle {
+    JobHandle {
+        id: handle.id.0,
+        cancel: CancelToken::wrap(handle.cancel),
+        progress: JobProgress::wrap(handle.id.0, handle.progress),
+    }
+}
+
 /// What the job's work sees: its id, its token and its progress channel.
 #[derive(Debug)]
 pub struct JobContext {

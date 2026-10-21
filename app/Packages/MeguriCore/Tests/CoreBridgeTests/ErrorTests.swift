@@ -5,6 +5,20 @@ import Testing
 
 @Suite struct ErrorTests {
     static let cases: [(CoreError, BridgeError)] = [
+        (.Stale(table: .notetypes, key: "37"), .stale(table: .notetypes, key: "37")),
+        (.StaleGeneration(planned: 37, current: 41), .staleGeneration(planned: 37, current: 41)),
+        (.UndoUnavailable(reason: .alreadyUploaded), .undoUnavailable(reason: .alreadyUploaded)),
+        (.NeedsSchemaConfirmation(reasons: [.presetRemoved, .forceOneWay]), .needsSchemaConfirmation(reasons: [.presetRemoved, .forceOneWay])),
+        (.NotetypeRefused(refusal: .template(kind: .unknownField, template: 3, side: .back, name: "Missing", earlier: nil)),
+         .notetypeRefused(.template(kind: .unknownField, template: 3, side: .back, name: "Missing", earlier: nil))),
+        (.NotetypeRefused(refusal: .invalid(reason: .emptyFieldName(ord: 7))), .notetypeRefused(.invalid(reason: .emptyFieldName(ord: 7)))),
+        (.DeckRefused(refusal: .underDescendant), .deckRefused(.underDescendant)),
+        (.NoteNotFound(id: -37), .noteNotFound(id: -37)),
+        (.NotFound(table: .decks, key: "-41"), .notFound(table: .decks, key: "-41")),
+        (.InsufficientSpace(required: 100, available: 99), .insufficientSpace(required: 100, available: 99)),
+        (.Open(failure: .upgradeFailed(version: 11, stage: .step(step: 16), detail: "failed")), .open(.upgradeFailed(version: 11, stage: .step(16), detail: "failed"))),
+        (.SuspendDeadline(phase: "readers"), .suspendDeadline(phase: "readers")),
+        (.SessionActive, .sessionActive),
         (.InvalidTypeAnswerReplacement, .invalidTypeAnswerReplacement),
         (.Cancelled, .cancelled),
         (.Busy(runningOp: "Check Database"), .busy(runningOperation: "Check Database")),

@@ -4,6 +4,18 @@ internal import MeguriCoreBindings
 /// The errors a core call can throw, as Swift sees them (KTD9). Every
 /// CoreBridge call throws only this type.
 public enum BridgeError: Error, Sendable, Hashable {
+    case stale(table: CoreTable, key: String)
+    case staleGeneration(planned: UInt64, current: UInt64)
+    case undoUnavailable(reason: ReviewDisabledReason)
+    case needsSchemaConfirmation(reasons: [SchemaChangeReason])
+    case notetypeRefused(NotetypeRefusal)
+    case deckRefused(DeckRefusal)
+    case noteNotFound(id: Int64)
+    case notFound(table: CoreTable, key: String)
+    case insufficientSpace(required: UInt64, available: UInt64)
+    case open(CollectionOpenFailure)
+    case suspendDeadline(phase: String)
+    case sessionActive
     case invalidTypeAnswerReplacement
     /// The call's `CancelToken` was cancelled.
     case cancelled
@@ -42,6 +54,18 @@ extension BridgeError {
 
     init(_ error: MeguriCoreBindings.CoreError) {
         switch error {
+        case .Stale(let table, let key): self = .stale(table: CoreTable(table), key: key)
+        case .StaleGeneration(let planned, let current): self = .staleGeneration(planned: planned, current: current)
+        case .UndoUnavailable(let reason): self = .undoUnavailable(reason: ReviewDisabledReason(reason))
+        case .NeedsSchemaConfirmation(let reasons): self = .needsSchemaConfirmation(reasons: reasons.map(SchemaChangeReason.init))
+        case .NotetypeRefused(let refusal): self = .notetypeRefused(NotetypeRefusal(refusal))
+        case .DeckRefused(let refusal): self = .deckRefused(DeckRefusal(refusal))
+        case .NoteNotFound(let id): self = .noteNotFound(id: id)
+        case .NotFound(let table, let key): self = .notFound(table: CoreTable(table), key: key)
+        case .InsufficientSpace(let required, let available): self = .insufficientSpace(required: required, available: available)
+        case .Open(let failure): self = .open(CollectionOpenFailure(failure))
+        case .SuspendDeadline(let phase): self = .suspendDeadline(phase: phase)
+        case .SessionActive: self = .sessionActive
         case .InvalidTypeAnswerReplacement: self = .invalidTypeAnswerReplacement
         case .Cancelled: self = .cancelled
         case .Busy(let runningOp): self = .busy(runningOperation: runningOp)
