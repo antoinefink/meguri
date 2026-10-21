@@ -2,3 +2,5 @@
 area: smoke
 active:
   - runner-empty
+  # U44: newly completed cases verified on native macOS and Linux Docker.
+  - "fsrs-new-card"

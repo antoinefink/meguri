@@ -1,6 +1,6 @@
-# All ten scenarios pass the engine's tests/cardgen.rs golden tests.
-# They remain pending on the production executor until U28 deck setup and
-# bootstrap land. position/counter also needs U44 answer; position/random
-# additionally needs preset setup and legacy_update (U28/U36).
+# U44: complete position cases passed with production answers on both lanes.
 area: cardgen
-active: []
+active:
+  # U44: newly completed cases verified on native macOS and Linux Docker.
+  - "position/counter"
+  - "position/random"

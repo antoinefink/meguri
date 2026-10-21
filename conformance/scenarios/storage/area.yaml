@@ -5,3 +5,5 @@ active:
   - "open/*"
   - "upgrade/*"
   - "new-collection/*"
+  # U44: newly completed cases verified on native macOS and Linux Docker.
+  - "config/unknown-keys-survive"
