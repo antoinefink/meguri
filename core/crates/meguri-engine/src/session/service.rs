@@ -1222,6 +1222,14 @@ impl ReviewService {
         let _control = self.control.acquire();
         self.end_inner(id)
     }
+    /// Host close must refuse an occupied lifecycle before starting shutdown.
+    /// Once admitted, retain the ordinary synchronous drain/release semantics.
+    pub fn try_end_for_close(&self, id: SessionId) -> Result<(), EngineError> {
+        let _control = self.control.try_acquire().map_err(|_| EngineError::Busy {
+            running_op: "review lifecycle".into(),
+        })?;
+        self.end_inner(id)
+    }
     /// Like start_controlled: cancellation before writer admission changes no
     /// session state; after admission the drain/release must really complete.
     pub fn end_controlled(

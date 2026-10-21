@@ -223,7 +223,7 @@ impl CoreHost {
         if self.engine.collection().is_ok()
             && let Some(id) = self.review.active_session()
         {
-            self.review.end(id)?;
+            self.review.try_end_for_close(id)?;
         }
         self.engine.close()?;
         self.media

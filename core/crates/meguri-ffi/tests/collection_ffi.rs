@@ -275,7 +275,14 @@ fn exported_open_counts_review_close_reopen_upgrade_and_races() {
     assert_eq!(head.counts.new, 2);
     assert!(!head.items.is_empty());
     end_review(&rx, &mut events, session_id);
+    let review_session::ReviewStartResult::Started { session_id, .. } =
+        start_review(&rx, &mut events, tree.nodes[0].id)
+    else {
+        panic!("close fixture must start")
+    };
+    // Closing an active session must really drain and end it before success.
     lifecycle::close_collection().unwrap();
+    assert!(review_session::session_head(session_id, 3).is_err());
     assert_eq!(
         lifecycle::collection_lifecycle().unwrap(),
         CollectionLifecycle::NoCollection
@@ -986,6 +993,20 @@ fn controlled_job_regressions(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<C
             "restore never owned lifecycle"
         );
         std::thread::yield_now();
+    }
+    // Exercise the real runtime Closing reservation twice: refusal must retain
+    // this usable host and session, rather than marking either disconnected.
+    for _ in 0..2 {
+        assert_eq!(
+            prompt(lifecycle::close_collection),
+            Err(CoreError::Busy {
+                running_op: "review lifecycle".into()
+            })
+        );
+        let retained = meguri_ffi::test_hooks::collection_for_testing().unwrap();
+        assert_eq!(retained.generation(), c.generation());
+        assert_eq!(deck_tree::deck_tree_with_counts().unwrap().generation, c.generation().0);
+        assert_eq!(review_session::session_head(id, 3).unwrap(), head);
     }
     let refused = prompt(move || review_session::start_session(deck, None)).unwrap();
     let (outcome, more) = finish(rx, refused.handle.id);

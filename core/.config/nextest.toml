@@ -67,3 +67,7 @@ threads-required = 4
 [[profile.default.overrides]]
 filter = 'package(meguri-engine) and (binary(controlled_services) or binary(session_controlled))'
 threads-required = "num-test-threads"
+
+[[profile.default.overrides]]
+filter = '(package(meguri-host) and test(=close_refuses_restore_admission_and_retains_the_host_for_retry)) or (package(meguri-ffi) and binary(collection_ffi))'
+threads-required = "num-test-threads"

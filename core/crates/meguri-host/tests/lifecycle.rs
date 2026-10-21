@@ -46,6 +46,129 @@ fn open_wires_derived_and_media_and_close_releases_retained_journal_handles() {
 }
 
 #[test]
+fn close_refuses_restore_admission_and_retains_the_host_for_retry() {
+    use meguri_engine::{CancelToken, EngineError, OpSource, OpSpec, ProgressSink, UndoScope};
+    use std::{sync::mpsc, time::Duration};
+
+    struct Release(mpsc::Sender<()>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(CoreHost::open(config(dir.path())).unwrap());
+    let c = host.collection().unwrap();
+    c.run(OpSpec::named("close fixture policy", OpSource::Maintenance), |ctx| {
+        ctx.scope()
+            .set_config("fsrs", &meguri_storage::ConfigValue::Bool(true))?;
+        ctx.scope()
+            .set_config("loadBalancerEnabled", &meguri_storage::ConfigValue::Bool(false))?;
+        Ok(())
+    })
+    .unwrap();
+    let deck = meguri_engine::decks::add(&c, "Close admission".into())
+        .unwrap()
+        .value
+        .id;
+    let kind = meguri_engine::notetypes::add_stock(
+        &c,
+        meguri_engine::notetypes::StockKind::Basic,
+        Some("Close admission".into()),
+    )
+    .unwrap()
+    .value
+    .id;
+    meguri_engine::notes::add(
+        &c,
+        meguri_engine::notes::AddNote {
+            notetype_id: kind,
+            fields: vec!["close front".into(), "close back".into()],
+            tags: vec![],
+            deck_id: deck,
+            guid: None,
+            update_add_defaults: false,
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+    let meguri_engine::session::StartResult::Started { session_id, head, .. } =
+        host.review().start(deck, None).unwrap()
+    else {
+        panic!("close fixture must start")
+    };
+    let (enter, entered) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let release = Release(release);
+    let blocked = c.submit(OpSpec::named("close writer barrier", OpSource::Rollover), move |_| {
+        enter.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(10)).unwrap();
+        Ok(())
+    });
+    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    let cancel = CancelToken::new();
+    let restoring_host = host.clone();
+    let restoring_cancel = cancel.clone();
+    let restore = host
+        .engine()
+        .threads()
+        .spawn("close-test-restore", meguri_engine::Qos::Default, move |_| {
+            restoring_host
+                .review()
+                .restore_controlled(UndoScope::Global, false, restoring_cancel, ProgressSink::new())
+        })
+        .unwrap();
+    let deadline = meguri_engine::monotonic::now() + Duration::from_secs(5);
+    loop {
+        match host.review().try_pending_restore(UndoScope::Global, false) {
+            Err(EngineError::CollectionUnavailable { reason }) if reason == "review lifecycle is busy" => break,
+            Ok(None) => {}
+            other => panic!("unexpected restore admission: {other:?}"),
+        }
+        assert!(
+            meguri_engine::monotonic::now() < deadline,
+            "restore never owned lifecycle"
+        );
+        std::thread::yield_now();
+    }
+    for _ in 0..2 {
+        let closing_host = host.clone();
+        let (send, recv) = mpsc::channel();
+        let caller = host
+            .engine()
+            .threads()
+            .spawn("close-test-caller", meguri_engine::Qos::Default, move |_| {
+                let _ = send.send(closing_host.close());
+            })
+            .unwrap();
+        assert_eq!(
+            recv.recv_timeout(Duration::from_secs(1))
+                .expect("close blocked behind restore"),
+            Err(EngineError::Busy {
+                running_op: "review lifecycle".into()
+            })
+        );
+        caller.join().unwrap();
+        assert_eq!(host.collection().unwrap().generation(), c.generation());
+        assert_eq!(host.review().active_session(), Some(session_id));
+        assert_eq!(host.review().head(session_id, 3).unwrap(), head);
+        assert!(c.reader(ReaderRole::Query).unwrap().deck(deck).unwrap().is_some());
+    }
+    // Control remains callable after refusal; cancellation does not end the
+    // session, and a later successful close must actually release everything.
+    cancel.cancel();
+    drop(release);
+    blocked.wait().unwrap();
+    assert!(matches!(restore.join().unwrap(), Err(EngineError::Cancelled)));
+    assert_eq!(host.review().active_session(), Some(session_id));
+    host.close().unwrap();
+    assert_eq!(host.review().active_session(), None);
+    assert!(host.collection().is_err());
+    assert!(c.reader(ReaderRole::Query).is_err());
+    host.close().unwrap();
+}
+
+#[test]
 fn suspend_closes_media_across_clones_and_resume_reopens_the_same_store() {
     let dir = tempfile::tempdir().unwrap();
     let host = CoreHost::open(config(dir.path())).unwrap();
