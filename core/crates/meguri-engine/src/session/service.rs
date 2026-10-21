@@ -427,6 +427,8 @@ struct Inner {
     wake: Arc<StreamWake>,
     #[cfg(feature = "test-hooks")]
     fail_application: AtomicU64,
+    #[cfg(feature = "test-hooks")]
+    before_prepare_hook: Mutex<Option<BeforePrepareHook>>,
     observing: AtomicBool,
     state: Mutex<State>,
     tx: mpsc::Sender<Work>,
@@ -489,6 +491,8 @@ pub enum RenderStage {
 }
 #[cfg(feature = "test-hooks")]
 type RenderHook = Arc<dyn Fn(RenderStage) + Send + Sync>;
+#[cfg(feature = "test-hooks")]
+type BeforePrepareHook = Arc<dyn Fn() + Send + Sync>;
 /// Job restoration stays under the existing lifecycle orchestration owner.
 pub enum HistoryRestore {
     Session(Head),
@@ -555,6 +559,8 @@ impl ReviewService {
             wake: wake.clone(),
             #[cfg(feature = "test-hooks")]
             fail_application: AtomicU64::new(0),
+            #[cfg(feature = "test-hooks")]
+            before_prepare_hook: Mutex::new(None),
             observing: AtomicBool::new(false),
             state: Mutex::new(State {
                 binding: None,
@@ -626,6 +632,10 @@ impl ReviewService {
     #[cfg(feature = "test-hooks")]
     pub fn fail_application_for_testing(&self, event: u64) {
         self.inner.fail_application.store(event, Ordering::Release);
+    }
+    #[cfg(feature = "test-hooks")]
+    pub fn before_prepare_hook_for_testing(&self, hook: Option<BeforePrepareHook>) {
+        *self.inner.before_prepare_hook.lock().unwrap() = hook;
     }
     #[cfg(feature = "test-hooks")]
     pub fn fail_next_restore_projection_for_testing(&self) {
@@ -2341,9 +2351,18 @@ impl Application {
         let cancel = self.cancel.clone();
         let failed = self.failed.clone();
         let phase = self.phase.clone();
+        #[cfg(feature = "test-hooks")]
+        let before_prepare_hook = self
+            .owned
+            .upgrade()
+            .and_then(|inner| inner.before_prepare_hook.lock().unwrap().clone());
         ctx.before_commit(move || {
             if cancel.load(Ordering::Acquire) || failed.load(Ordering::Acquire) {
                 return cancelled_application(&journal, event, &phase);
+            }
+            #[cfg(feature = "test-hooks")]
+            if let Some(hook) = before_prepare_hook {
+                hook();
             }
             journal.prepare(event, receipt, generation)?;
             if cancel.load(Ordering::Acquire)

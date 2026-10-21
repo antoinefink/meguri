@@ -620,6 +620,229 @@ fn revlog_mutation(delete: bool, fail_terminal: bool) {
 }
 
 #[test]
+fn c12_prepare_loses_to_completed_undo_and_next_answer_survives_reopen() {
+    let h = Harness::new(2);
+    let (id, initial) = h.start();
+    h.settle();
+    let card = initial.items[0].card_id;
+    let before_card = card_row(&h.collection, card);
+    let before_logs = log_rows(&h.collection);
+    let (entered, entry) = mpsc::sync_channel(1);
+    let (release, gate) = mpsc::channel();
+    let gate = Mutex::new(gate);
+    h.review.before_prepare_hook_for_testing(Some(Arc::new(move || {
+        entered.send(()).unwrap();
+        gate.lock().unwrap().recv_timeout(Duration::from_secs(5)).unwrap();
+    })));
+
+    let (sync_entered, sync_entry) = mpsc::sync_channel(1);
+    let (sync_release, sync_gate) = mpsc::channel();
+    let sync_gate = Mutex::new(Some(sync_gate));
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let durable_cancelled = cancelled.clone();
+    let durable_frames = Arc::new(Mutex::new(Vec::new()));
+    let captured_frames = durable_frames.clone();
+    let file = journal(h.collection.path());
+    h.review
+        .journal_hook_for_testing(Arc::new(move |stage| {
+            if stage == JournalStage::TerminalSync
+                && let Some(gate) = sync_gate.lock().unwrap().take()
+            {
+                sync_entered.send(()).unwrap();
+                gate.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+            if stage == JournalStage::TerminalSynced {
+                let bytes = fs::read(&file).unwrap();
+                if records(&bytes).iter().any(|r| r["Terminal"]["status"] == "Cancelled") {
+                    durable_cancelled.store(true, Ordering::Release);
+                }
+                *captured_frames.lock().unwrap() = bytes;
+            }
+        }))
+        .unwrap();
+    accept(&h.review, id, &initial, Rating::Easy, NOW, 200);
+    entry.recv_timeout(Duration::from_secs(5)).unwrap();
+    let file = journal(h.collection.path());
+    let intent_records = records(&fs::read(&file).unwrap());
+    let event = intent_records
+        .iter()
+        .find_map(|r| r["Intent"]["event"].as_u64())
+        .unwrap();
+    assert!(prepared(&fs::read(&file).unwrap()).is_empty());
+
+    let (started, conflict_started) = mpsc::sync_channel(1);
+    let conflict_cancelled = cancelled.clone();
+    let expected_card = before_card.clone();
+    let expected_logs = before_logs.clone();
+    let conflict_name = "conflict after cancellation before prepare request";
+    let conflict = h
+        .collection
+        .submit(OpSpec::named(conflict_name, OpSource::Maintenance), move |ctx| {
+            assert!(conflict_cancelled.load(Ordering::Acquire));
+            assert_eq!(
+                ctx.scope().row_image(Table::Cards, &RowKey::Id(card.0))?.unwrap(),
+                expected_card
+            );
+            assert_eq!(
+                ctx.scope().ids_after(Table::Revlog, None, 100_000)?.len(),
+                expected_logs.len()
+            );
+            for (id, row) in expected_logs {
+                assert_eq!(ctx.scope().row_image(Table::Revlog, &RowKey::Id(id))?.unwrap(), row);
+            }
+            started.send(()).unwrap();
+            Ok(())
+        });
+    let review = h.review.clone();
+    let (undo_finished, undo_result) = mpsc::sync_channel(1);
+    let undo = h
+        .engine
+        .threads()
+        .spawn(
+            "test-cancel-before-prepare-undo",
+            meguri_engine::Qos::Default,
+            move |_| {
+                undo_finished.send(review.undo(UndoScope::Session(id))).unwrap();
+            },
+        )
+        .unwrap();
+    sync_entry.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(!cancelled.load(Ordering::Acquire));
+    assert!(h.collection.has_queued_op_for_testing(conflict_name));
+    assert_eq!(conflict_started.try_recv(), Err(mpsc::TryRecvError::Empty));
+    assert!(matches!(undo_result.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert_eq!(card_row(&h.collection, card), before_card);
+    assert_eq!(log_rows(&h.collection), before_logs);
+    sync_release.send(()).unwrap();
+    let restored = undo_result.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+    undo.join().unwrap();
+    assert_eq!(restored.items[0].card_id, card);
+    assert_eq!(restored.items[0].state_token, initial.items[0].state_token);
+    assert!(cancelled.load(Ordering::Acquire));
+    let cancelled_records = records(&fs::read(&file).unwrap());
+    assert!(
+        cancelled_records
+            .iter()
+            .any(|r| { r["Terminal"]["event"].as_u64() == Some(event) && r["Terminal"]["status"] == "Cancelled" })
+    );
+    assert!(prepared(&fs::read(&file).unwrap()).is_empty());
+    assert!(h.collection.has_queued_op_for_testing(conflict_name));
+    assert_eq!(conflict_started.try_recv(), Err(mpsc::TryRecvError::Empty));
+
+    // Undo has returned after real full sync while before_commit remains
+    // parked past its first cancel check. Only now submit the preparation.
+    h.review.before_prepare_hook_for_testing(None);
+    release.send(()).unwrap();
+    conflict_started.recv_timeout(Duration::from_secs(5)).unwrap();
+    conflict.wait().unwrap();
+    h.review.application_barrier_for_testing().unwrap();
+    assert!(prepared(&fs::read(&file).unwrap()).iter().all(|p| p.0 != event));
+    h.settle();
+    assert_eq!(card_row(&h.collection, card), before_card);
+    assert_eq!(log_rows(&h.collection), before_logs);
+
+    // A real next answer checks admission, preparation, COMMIT and Done on
+    // this same bound journal, against the exact normal scheduling result.
+    let head = h.review.head(id, 3).unwrap();
+    let item = &head.items[0];
+    assert_eq!(item.card_id, card);
+    let day = h.collection.today().unwrap();
+    let (expected_card, expected_log) = {
+        let rows = h.collection.reader(ReaderRole::Query).unwrap();
+        let original = rows.card(card).unwrap().unwrap();
+        let deck = rows.deck(DeckId(1)).unwrap().unwrap();
+        let preset =
+            meguri_sched::model::preset::PresetView::for_config(&*rows, meguri_model::ids::DeckConfigId(1)).unwrap();
+        let meguri_model::proto::deck::DeckKind::Normal(normal) = &deck.kind.kind else {
+            panic!("fixture deck is not normal");
+        };
+        let retention = meguri_sched::model::deck_sched::DeckSched::new(Some(normal), &deck.common)
+            .retention(preset.fields().desired_retention);
+        let planned = meguri_sched::answer::plan(
+            &original,
+            item.next_states.current,
+            &item.next_states.easy,
+            &preset,
+            retention,
+            day,
+            NOW,
+            321,
+        )
+        .unwrap();
+        let result = &planned.card;
+        let columns = [
+            result.id.0,
+            result.note_id.0,
+            result.deck_id.0,
+            i64::from(result.ord),
+            result.mtime.0,
+            i64::from(result.usn.0),
+            result.card_type.stored(),
+            result.queue.stored(),
+            i64::from(result.due),
+            i64::from(result.interval),
+            i64::from(result.ease_factor),
+            i64::from(result.reps),
+            i64::from(result.lapses),
+            i64::from(result.remaining_steps),
+            i64::from(result.original_due),
+            result.original_deck_id.0,
+            i64::from(result.flags),
+        ];
+        let mut expected_card = columns.into_iter().map(Cell::Integer).collect::<Vec<_>>();
+        expected_card.push(Cell::text(result.data.to_text()));
+        let preview = item.next_states.easy.revlog;
+        let expected_log = [
+            NOW,
+            card.0,
+            -1,
+            Rating::Easy as i64,
+            i64::from(preview.interval),
+            i64::from(preview.last_interval),
+            i64::from(preview.factor),
+            i64::from(planned.elapsed_ms),
+            i64::from(preview.kind),
+        ]
+        .into_iter()
+        .map(Cell::Integer)
+        .collect::<Vec<_>>();
+        (expected_card, expected_log)
+    };
+    accept(&h.review, id, &head, Rating::Easy, NOW, 321);
+    h.settle();
+    let mut expected_logs = before_logs;
+    expected_logs.push((NOW, expected_log));
+    assert_eq!(card_row(&h.collection, card), expected_card);
+    assert_eq!(log_rows(&h.collection), expected_logs);
+    // Settle compacts resolved events. Retain the actual synced frames from
+    // its TerminalSynced hook so Prepared/Done evidence survives compaction.
+    let final_bytes = durable_frames.lock().unwrap().clone();
+    let final_records = records(&final_bytes);
+    assert!(
+        final_records
+            .iter()
+            .all(|r| r["Prepared"]["event"].as_u64() != Some(event))
+    );
+    let receipts = prepared(&final_bytes);
+    assert_eq!(receipts.len(), 1);
+    assert_ne!(receipts[0].0, event);
+    assert!(
+        final_records
+            .iter()
+            .any(|r| { r["Terminal"]["event"].as_u64() == Some(receipts[0].0) && r["Terminal"]["status"] == "Done" })
+    );
+    let path = h.collection.path().to_owned();
+    h.engine.close().unwrap();
+    for _ in 0..2 {
+        let (engine, collection, _) =
+            session_support::open(&path, Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC")));
+        assert_eq!(card_row(&collection, card), expected_card);
+        assert_eq!(log_rows(&collection), expected_logs, "cancelled answer replayed");
+        engine.close().unwrap();
+    }
+}
+
+#[test]
 fn c12_late_prepared_ack_after_pending_undo_cannot_commit_and_cancel_precedes_conflict() {
     let h = Harness::new(2);
     let (id, initial) = h.start();

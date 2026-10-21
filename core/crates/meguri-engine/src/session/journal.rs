@@ -552,28 +552,54 @@ fn file_loop(
                         Err(_) => break,
                     }
                 }
+                let mut cancelled_prepares = vec![false; batch.len()];
+                let mut written = 0;
                 let result = (|| {
                     if let Some(e) = &state.lock().unwrap().failure {
                         return Err(e.clone());
                     }
                     for (offset, (record, _, _)) in batch.iter().enumerate() {
+                        // Live request admission, not disk-record validation:
+                        // undo may durably cancel between the writer's check
+                        // and its preparation request. An earlier cancellation
+                        // in this prefix must also be synced before refusal.
+                        if let Record::Prepared { event, .. } = record
+                            && !validated.retired
+                            && validated
+                                .events
+                                .get(event)
+                                .is_some_and(|e| e.terminal == Some(Terminal::Cancelled))
+                        {
+                            cancelled_prepares[offset] = true;
+                            continue;
+                        }
                         apply(&mut validated, record.clone())?;
-                        let bytes = encode(number + offset as u64 + 1, record)?;
+                        let bytes = encode(number + written + 1, record)?;
                         #[cfg(feature = "test-hooks")]
                         stage(&mut fault, &hook, record_stages(record)[0])?;
                         file.write_all(&bytes).map_err(error)?;
                         #[cfg(feature = "test-hooks")]
                         stage(&mut fault, &hook, record_stages(record)[1])?;
+                        written += 1;
                     }
-                    full_sync(&file)?;
+                    if written != 0 {
+                        full_sync(&file)?;
+                    }
                     let covered_at = monotonic::now();
-                    for (record, _, _) in &batch {
+                    for ((record, _, _), cancelled) in batch.iter().zip(&cancelled_prepares) {
+                        if *cancelled {
+                            continue;
+                        }
                         #[cfg(feature = "test-hooks")]
                         stage(&mut fault, &hook, record_stages(record)[2])?;
                         apply(&mut state.lock().unwrap(), record.clone())?;
                     }
-                    number += batch.len() as u64;
-                    if batch.iter().any(|(_, _, deadline)| covered_at > *deadline) {
+                    number += written;
+                    if batch
+                        .iter()
+                        .zip(&cancelled_prepares)
+                        .any(|((_, _, deadline), cancelled)| !*cancelled && covered_at > *deadline)
+                    {
                         return Err(error("acceptance durability deadline exceeded"));
                     }
                     Ok(())
@@ -583,9 +609,13 @@ fn file_loop(
                 }
                 // Every receipt in this prefix is acknowledged only after
                 // the full sync that covers its frame. Failure stays sticky.
-                for (_, reply, _) in batch {
+                for ((_, reply, _), cancelled) in batch.into_iter().zip(cancelled_prepares) {
                     if let Some(reply) = reply {
-                        let _ = reply.send(result.clone());
+                        let _ = reply.send(if result.is_ok() && cancelled {
+                            Err(EngineError::Cancelled)
+                        } else {
+                            result.clone()
+                        });
                     }
                 }
             }
@@ -723,6 +753,27 @@ mod tests {
         .unwrap();
         drop(file);
         assert!(read(&path, &header()).is_err());
+    }
+    #[test]
+    fn c12_codec_persisted_prepared_after_any_terminal_remains_invalid() {
+        for status in [Terminal::Cancelled, Terminal::Dropped, Terminal::Done] {
+            let mut frames = vec![Record::Header(header()), intent()];
+            if status == Terminal::Done {
+                frames.push(Record::Prepared {
+                    event: 1,
+                    receipt: receipt(),
+                });
+            }
+            frames.push(Record::Terminal { event: 1, status });
+            let (_dir, path) = write_frames(&frames);
+            assert!(read(&path, &header()).is_ok());
+            frames.push(Record::Prepared {
+                event: 1,
+                receipt: receipt(),
+            });
+            let (_dir, path) = write_frames(&frames);
+            assert!(read(&path, &header()).is_err());
+        }
     }
     #[test]
     fn c12_codec_unexpected_native_identity_is_retained_and_retired_identity_can_rebind() {
