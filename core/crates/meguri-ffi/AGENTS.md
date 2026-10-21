@@ -1,7 +1,8 @@
 # meguri-ffi
 
 - Every export returns `Result<_, CoreError>` (a panic in a non-throwing export crashes Swift) and starts with `callback::enter("<name>")`. Object constructors too.
-- Call into Swift only through `callback::invoke`, never while holding a lock. No async foreign traits (KTD9).
+- Call into Swift only through `callback::invoke`; no async foreign traits (KTD9). Event, progress, search and host delivery, and all other callbacks, never run while holding a lock.
+- Antoine approved only synchronous `HostClock` and `DiskSpaceProvider` value reads under core locks (`E-20261021T142014Z-9c3d`, 2026-10-21). Their trusted host implementations return bounded platform values, never reenter the core, and perform no UI or async work. Keep `callback::invoke` and reentry checks.
 - The exported surface is identical on every slice of one configuration: gate implementations with `cfg` inside a function, never an export, a signature or a record field. `build-core-xcframework.sh` compares the `uniffi_*` symbols and the bindings generated from each slice, and fails otherwise.
 - Test-only exports go in `test_hooks.rs` (feature `test-hooks`). Never add a test-only `CoreEventKind` variant: CoreBridge switches over the enum exhaustively and must compile against AppStore bindings, which have no test hooks. Test events reuse `JobFinished` with ids from 1,000,000.
 - The event dispatcher and the job registry are process-wide. Rust tests that set the event listener must tolerate other tests' events (`cargo test` runs them in one process).
