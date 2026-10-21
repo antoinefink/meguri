@@ -52,3 +52,8 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'test(=control_lane_contention_counts_toward_suspend_deadline) or test(=suspend_during_a_slow_open_returns_within_its_budget) or test(=idle_dns_pool_threads_do_not_exhaust_the_suspend_budget) or test(=a_cancelled_lookup_stays_busy_until_its_blocking_closure_ends)'
 threads-required = "num-test-threads"
+
+# U43's UI undo and journal coverage bounds need an idle test runner.
+[[profile.default.overrides]]
+filter = 'package(meguri-engine) and (test(=c15_committed_undo_returns_restored_head_during_real_200ms_sync_incoming) or test(=c12_every_acceptance_is_observed_fullsynced_while_a_later_writer_is_held))'
+threads-required = "num-test-threads"
