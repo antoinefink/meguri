@@ -100,20 +100,16 @@ struct ReviewLayout<Card: View>: View {
         VStack(spacing: 0) {
             HStack(spacing: Spacing.small) {
                 Button(action: close) {
-                    Image(systemName: "xmark")
-                        .padding(Spacing.xSmall)
+                    Label { Text("Close Review", bundle: .module) } icon: { Image(systemName: "xmark") }
+                        .labelStyle(.iconOnly)
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityAddTraits(.isButton)
                     .accessibilityLabel(Text("Close Review", bundle: .module))
+                    .help(Text("Close Review", bundle: .module))
                     .accessibilityIdentifier("review.session.close")
-                    .accessibilityAction(.default) { close() }
                 VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-                    Text("Session Progress", bundle: .module).font(.subheadline)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(verbatim: remaining).font(.body)
+                    Text(verbatim: remaining).font(.caption)
                         .fixedSize(horizontal: false, vertical: true)
                     ProgressView(value: progress)
                         .tint(.token(.progressFill))
@@ -131,41 +127,37 @@ struct ReviewLayout<Card: View>: View {
                             .accessibilityIdentifier("review.session.timer")
                     }
                 }
-                Button { undo() } label: {
-                    Image(systemName: "arrow.uturn.backward")
-                        .padding(Spacing.xSmall)
+                Button {
+                    guard canUndo else { return }
+                    undo()
+                } label: {
+                    Label { Text(verbatim: undoDescription) } icon: { Image(systemName: "arrow.uturn.backward") }
+                        .labelStyle(.iconOnly)
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityAddTraits(.isButton)
                     .accessibilityLabel(undoDescription)
                     .help(undoDescription)
                     .accessibilityIdentifier("review.session.back")
-                    .accessibilityAction(.default) {
-                        guard canUndo else { return }
-                        undo()
-                    }
                     .disabled(!canUndo)
                 if canRedo {
-                    Button { redo() } label: {
-                        Image(systemName: "arrow.uturn.forward")
-                            .padding(Spacing.xSmall)
+                    Button {
+                        guard canRedo else { return }
+                        redo()
+                    } label: {
+                        Label { Text("Redo Answer", bundle: .module) } icon: { Image(systemName: "arrow.uturn.forward") }
+                            .labelStyle(.iconOnly)
                             .frame(minWidth: 44, minHeight: 44)
                             .contentShape(Rectangle())
                     }
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityAddTraits(.isButton)
                         .accessibilityLabel(Text("Redo Answer", bundle: .module))
+                        .help(Text("Redo Answer", bundle: .module))
                         .accessibilityIdentifier("review.session.redo")
-                        .accessibilityAction(.default) {
-                            guard canRedo else { return }
-                            redo()
-                        }
                         .disabled(!canRedo)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bordered)
+            .controlSize(.large)
             .padding(.horizontal, Spacing.small)
             if let notice = notice {
                 Text(verbatim: notice).font(.callout).foregroundStyle(.token(.statusWarning))
@@ -224,6 +216,8 @@ public struct ReviewAnswerBar: View {
         .padding(Spacing.small)
         .frame(maxWidth: ContentWidth.readable)
         .frame(maxWidth: .infinity)
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(1)
     }
     @ViewBuilder private var ratings: some View {
         if dynamicTypeSize.isAccessibilitySize {
@@ -257,6 +251,7 @@ public struct ReviewAnswerBar: View {
             .multilineTextAlignment(.center)
             .foregroundStyle(.token(color))
             .frame(maxWidth: .infinity, minHeight: 44)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .buttonStyle(.bordered)
         .disabled(!enabled || phase != .answer)
