@@ -641,3 +641,14 @@ constant types and run the same first-import case. No acceptance claim.
 - Fixer `s-20261022T201813Z-fdfd892f`, base `2a424c33`, export `20261022T201837Z-92495`, checkpoint `64a205b1`.
 - Review round 2: no P0–P2 findings. Use existing neutral button tokens; keep confirmation emphasis, shortcuts, actions and guards. Bound navigation to 24 gestures and retain explicit reachability, audit and touch-target assertions. No suppressions added.
 - Current audits and new visual baselines remain pending after this paint change.
+
+### Progress accessibility frame and scroll evidence
+
+- iPhone `a11y/20261022T202045Z-94081`: FAIL, 2 tests. All states ran. Import button colours are corrected; remaining findings are recorded below.
+- Confirm: overflow/light/largest, frame `(24,2722,283,139)`. Image `2205FCC8-1691-435C-8093-308BC609F68E.png` shows the top of the sheet, with Confirm outside the window.
+- Loading text: light/dark/largest, frame `(24,225,354,869)`. Images `6DE463B8-2ADF-4B69-89A1-B39F5F5ED809.png` and `2EB4E29C-596C-4B83-BE19-EE494888D014.png` show black/white text extending below the viewport and footer.
+- Home name: typical/dark/largest, frame `(107,144,173,125)`. Image `E2C96D73-1490-4ADA-BB52-E7BCC20D0A93.png` shows white text on the dark surface.
+- Loading progress: light/dark/default, native frame `(24,350,354,4)`, hitRegion finding. This needs a real accessible frame; no hitRegion exception is added.
+- Fixer `s-20261022T202844Z-7450bf7e`, base `1a686015`; exports `20261022T202909Z-98991`, `20261022T203339Z-1758`, `20261022T203544Z-3152`. The last two change only two new reason strings after privacy scanning.
+- Checkpoint `1885005e`. Round 3: no P0/P1 or confirmed required-check defect. Full audits remain enabled; three exact contrast exceptions follow R1977 and the existing scroll-edge case. Frame, value, stage, full control visibility and token checks remain required.
+- Actual audits, token checks and visual evidence remain pending after this fix.
