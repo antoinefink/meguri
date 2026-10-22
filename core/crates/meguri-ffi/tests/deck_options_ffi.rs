@@ -35,10 +35,10 @@ impl CoreEventListener for Listener {
 fn finish(rx: &mpsc::Receiver<CoreEvent>, id: u64) -> JobOutcome {
     loop {
         let event = rx.recv_timeout(Duration::from_secs(20)).unwrap();
-        if let CoreEventKind::JobFinished { id: got, outcome } = event.kind {
-            if got == id {
-                return outcome;
-            }
+        if let CoreEventKind::JobFinished { id: got, outcome } = event.kind
+            && got == id
+        {
+            return outcome;
         }
     }
 }
