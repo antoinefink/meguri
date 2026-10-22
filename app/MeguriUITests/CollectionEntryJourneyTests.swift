@@ -44,13 +44,13 @@ import notify
         let entry = element(app, "home.collection.import")
         XCTAssertTrue(entry.waitForExistence(timeout: 20))
         try click(entry, app, bundle)
-        XCTAssertTrue(element(app, "entry.choose").waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "onboarding.collectionImport.choose").waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "collection-only .colpkg")).firstMatch.exists)
-        try click(element(app, "entry.choose"), app, bundle)
+        try click(element(app, "onboarding.collectionImport.choose"), app, bundle)
         try pick(source, app, bundle)
-        let confirm = element(app, "entry.confirm")
+        let confirm = element(app, "onboarding.collectionImport.confirm")
         XCTAssertTrue(confirm.waitForExistence(timeout: 30), app.debugDescription)
-        let entrySheet = element(app, "entry.sheet")
+        let entrySheet = element(app, "onboarding.collectionImport.sheet")
         XCTAssertTrue(entrySheet.exists)
         assertPreview(app, hasLocalCollection: hasLocalCollection)
         capture(app, "entry-preview-\(hasLocalCollection ? "replacement" : "first")")
@@ -70,7 +70,7 @@ import notify
             predicate: NSPredicate(format: "exists == false"), object: entrySheet)], timeout: 30), .completed)
         let importedDeck = app.buttons.matching(NSPredicate(format: "identifier == %@", "home.deck.row.1788249600212"))
         try waitForAdmission(importedDeck, app, bundle)
-        XCTAssertFalse(element(app, "entry.error").exists)
+        XCTAssertFalse(element(app, "onboarding.collectionImport.error").exists)
         XCTAssertFalse(element(app, "home.collection.error").exists)
         let deck = try XCTUnwrap(waitForHittable(importedDeck), app.debugDescription)
         let deckIdentifier = deck.identifier
@@ -153,24 +153,44 @@ import notify
         capturePicker(app)
         // The picker remembers folders. iPad can keep its Browse sidebar up.
         if !rememberedFile {
-            let dedicated = app.cells["RF2 Import Tests, Folder"].firstMatch
-            if !dedicated.exists {
-                let local = named(app, ["On My iPhone", "On My iPad"])
-                if !local.exists {
-                    let browseTab = app.tabBars["DOC.browsingModeTabBar"].buttons["Browse"].firstMatch
-                    XCTAssertTrue(browseTab.waitForExistence(timeout: 10), app.debugDescription)
+            let dedicated = app.descendants(matching: .any).matching(NSPredicate(
+                format: "identifier == %@ OR label == %@", "RF2 Import Tests, Folder", "RF2 Import Tests, Folder"))
+            let appFolder = app.cells.containing(NSPredicate(format: "label == %@", "Meguri"))
+            if waitForHittable(dedicated, timeout: 2) == nil {
+                let local = app.descendants(matching: .any).matching(NSPredicate(
+                    format: "label IN %@", ["On My iPhone", "On My iPad"]))
+                if !local.firstMatch.exists {
+                    let browseTab = try XCTUnwrap(waitForHittable(
+                        app.tabBars["DOC.browsingModeTabBar"].buttons.matching(NSPredicate(format: "label == %@", "Browse"))), app.debugDescription)
                     try click(browseTab, app, bundle)
+                    capturePicker(app)
                 }
-                XCTAssertTrue(local.waitForExistence(timeout: 10), app.debugDescription)
-                try click(local, app, bundle)
-                let meguri = named(app, ["Meguri"])
-                XCTAssertTrue(meguri.waitForExistence(timeout: 10), app.debugDescription)
-                try click(meguri, app, bundle)
+                let location = try XCTUnwrap(waitForHittable(local), app.debugDescription)
+                try click(location, app, bundle)
+                capturePicker(app)
+                // On My Device may open Meguri's folder directly. Only a native
+                // file cell with the exact caption can select the app folder.
+                let contents = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    dedicated.allElementsBoundByIndex.contains { $0.exists && $0.isHittable }
+                        || appFolder.allElementsBoundByIndex.contains { $0.exists && $0.isHittable }
+                }, object: nil)
+                XCTAssertEqual(XCTWaiter().wait(for: [contents], timeout: 20), .completed, app.debugDescription)
+                capturePicker(app)
+                if !dedicated.allElementsBoundByIndex.contains(where: { $0.exists && $0.isHittable }) {
+                    let meguri = try XCTUnwrap(waitForHittable(appFolder), app.debugDescription)
+                    try click(meguri, app, bundle)
+                    capturePicker(app)
+                }
             }
-            XCTAssertTrue(dedicated.waitForExistence(timeout: 10), app.debugDescription)
-            let folderImage = dedicated.images.firstMatch
-            XCTAssertTrue(folderImage.waitForExistence(timeout: 10), app.debugDescription)
-            try click(folderImage, app, bundle)
+            let folder = try XCTUnwrap(waitForHittable(dedicated), app.debugDescription)
+            capturePicker(app)
+            let folderImage = folder.images.firstMatch
+            if folderImage.waitForExistence(timeout: 10) {
+                let image = try XCTUnwrap(waitForHittable(folder.images), app.debugDescription)
+                try click(image, app, bundle)
+            } else {
+                try click(folder, app, bundle)
+            }
         }
         XCTAssertTrue(file.waitForExistence(timeout: 10), app.debugDescription)
         capturePicker(app)
@@ -181,9 +201,6 @@ import notify
             try click(file, app, bundle)
         }
         #endif
-    }
-    private func named(_ app: XCUIApplication, _ labels: [String]) -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).firstMatch
     }
     private func click(_ target: XCUIElement, _ app: XCUIApplication, _ bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
@@ -215,12 +232,12 @@ import notify
     }
     #endif
     private func assertPreview(_ app: XCUIApplication, hasLocalCollection: Bool) {
-        XCTAssertTrue(waitForText(element(app, "entry.preview.counts"), "6 notes · 11 cards · 6 reviews"))
+        XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.counts"), "6 notes · 11 cards · 6 reviews"))
         let safety = hasLocalCollection
             ? "This will replace the local collection on this device. Meguri must finish a safety backup of your current collection, including saved answers, before replacing it. If that backup fails, import stops."
             : "There is no local collection file to replace. A pre-import safety backup is not needed."
-        XCTAssertTrue(waitForText(element(app, "entry.preview.safety"), safety))
-        XCTAssertEqual(element(app, "entry.confirm").label, hasLocalCollection ? "Replace Collection" : "Import Collection")
+        XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.safety"), safety))
+        XCTAssertEqual(element(app, "onboarding.collectionImport.confirm").label, hasLocalCollection ? "Replace Collection" : "Import Collection")
     }
     private func waitForAdmission(_ query: XCUIElementQuery, _ app: XCUIApplication, _ bundle: String) throws {
         let enable = element(app, "home.policy.enable")
@@ -237,13 +254,13 @@ import notify
             XCTAssertEqual(XCTWaiter().wait(for: [admitted], timeout: 30), .completed, app.debugDescription)
         }
     }
-    private func waitForHittable(_ query: XCUIElementQuery) -> XCUIElement? {
+    private func waitForHittable(_ query: XCUIElementQuery, timeout: TimeInterval = 20) -> XCUIElement? {
         var target: XCUIElement?
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             target = query.allElementsBoundByIndex.first { $0.exists && $0.isHittable }
             return target != nil
         }, object: nil)
-        return XCTWaiter().wait(for: [ready], timeout: 20) == .completed ? target : nil
+        return XCTWaiter().wait(for: [ready], timeout: timeout) == .completed ? target : nil
     }
     private func waitForText(_ element: XCUIElement, _ expected: String) -> Bool {
         XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format:
@@ -253,6 +270,28 @@ import notify
         capture(app, "entry-system-picker")
         let hierarchy = XCTAttachment(string: app.debugDescription)
         hierarchy.name = "entry-system-picker-hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+        #if os(iOS)
+        // Files' remote provider can be absent from the app snapshot. Query
+        // only the fixture/navigation targets live, with a fixed output cap.
+        func attributes(_ target: XCUIElement) -> String {
+            guard target.exists else { return "no longer exists" }
+            return "type=\(target.elementType) id=\(target.identifier.debugDescription) label=\(target.label.debugDescription) hittable=\(target.isHittable)"
+        }
+        let targets = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier IN %@ OR label IN %@",
+            ["RF2 Import Tests, Folder", "DOC.sidebar.item.On My iPad"],
+            ["On My iPhone", "On My iPad", "Meguri", "RF2 Import Tests", "RF2 Import Tests, Folder", "review", "review.colpkg"]))
+        var rows = targets.allElementsBoundByIndex.prefix(12).map { attributes($0) }
+        let owners = app.cells.containing(NSPredicate(format: "label IN %@", ["Meguri", "review", "review.colpkg"]))
+        for owner in owners.allElementsBoundByIndex.prefix(6) {
+            rows.append("owning cell: \(attributes(owner))")
+            for image in owner.images.allElementsBoundByIndex.prefix(1) {
+                rows.append("image child: \(attributes(image))")
+            }
+        }
+        let live = XCTAttachment(string: rows.isEmpty ? "No fixture/navigation query matches" : rows.joined(separator: "\n"))
+        live.name = "entry-system-picker-live-targets"; live.lifetime = .keepAlways; add(live)
+        #endif
     }
     private func capture(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())

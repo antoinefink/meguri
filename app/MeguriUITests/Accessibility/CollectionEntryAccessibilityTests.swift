@@ -16,16 +16,16 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
         let states = try ["empty", "typical", "overflow", "error", "loading"].map { state in
             try AccessibilityAudit.runAllVariants(
                 state: state, launch: MeguriLaunch(locale: "en_US", animations: false, route: "collection/import/\(state)"),
-                waitFor: "entry.sheet", suppressions: suppressions,
+                waitFor: "onboarding.collectionImport.sheet", suppressions: suppressions,
                 supplemental: { app, variant in
                     guard state == "overflow" else {
                         return AccessibilityAudit.StateResult(state: state, findings: [], touchTargets: [])
                     }
-                    let sheet = app.descendants(matching: .any).matching(identifier: "entry.sheet").firstMatch
+                    let sheet = app.descendants(matching: .any).matching(identifier: "onboarding.collectionImport.sheet").firstMatch
                     try self.scrollToBottom(sheet.scrollViews.firstMatch, app: app, build: build)
-                    XCTAssertTrue(app.buttons["entry.confirm"].isHittable, "replacement confirmation must remain reachable after scrolling")
-                    XCTAssertEqual(app.buttons["entry.confirm"].label, "Replace Collection")
-                    XCTAssertTrue(app.buttons["entry.choose"].isHittable, "file selection must remain reachable after scrolling")
+                    XCTAssertTrue(app.buttons["onboarding.collectionImport.confirm"].isHittable, "replacement confirmation must remain reachable after scrolling")
+                    XCTAssertEqual(app.buttons["onboarding.collectionImport.confirm"].label, "Replace Collection")
+                    XCTAssertTrue(app.buttons["onboarding.collectionImport.choose"].isHittable, "file selection must remain reachable after scrolling")
                     return AccessibilityAudit.StateResult(
                         state: state,
                         findings: try AccessibilityAudit.run(app, variant: "overflow scrolled, \(variant)", suppressions: suppressions),
@@ -75,7 +75,7 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
         XCTAssertTrue(scroll.exists)
         try app.bringToFront(bundleIdentifier: try build.bundleIdentifier)
         #if os(macOS)
-        scroll.scroll(byDeltaX: 0, byDeltaY: -10_000)
+        scroll.scroll(byDeltaX: 0, deltaY: -10_000)
         #else
         // Move through the long sheet to reach its bottom controls.
         scroll.swipeUp()

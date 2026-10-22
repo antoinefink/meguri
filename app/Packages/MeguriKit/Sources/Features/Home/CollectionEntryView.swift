@@ -85,12 +85,12 @@ struct CollectionEntryContent: View {
                         VStack(alignment: .leading, spacing: Spacing.small) {
                             Text("Collection Preview").font(.headline)
                             Text("\(facts.notes) notes · \(facts.cards) cards · \(facts.reviews) reviews")
-                                .accessibilityIdentifier("entry.preview.counts")
+                                .accessibilityIdentifier("onboarding.collectionImport.preview.counts")
                             Text("Destination: this device")
                             Text(facts.replacingExisting
                                 ? "This will replace the local collection on this device. Meguri must finish a safety backup of your current collection, including saved answers, before replacing it. If that backup fails, import stops."
                                 : "There is no local collection file to replace. A pre-import safety backup is not needed.")
-                                .accessibilityIdentifier("entry.preview.safety")
+                                .accessibilityIdentifier("onboarding.collectionImport.preview.safety")
                             Button(action: actions.confirm) {
                                 Text(facts.replacingExisting ? "Replace Collection" : "Import Collection")
                                     .frame(minWidth: 44, minHeight: 44)
@@ -98,15 +98,15 @@ struct CollectionEntryContent: View {
                             }
                             .buttonStyle(.borderedProminent)
                             .keyboardShortcut(.defaultAction)
-                            .accessibilityIdentifier("entry.confirm")
+                            .accessibilityIdentifier("onboarding.collectionImport.confirm")
                         }
                         .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("entry.preview")
+                        .accessibilityIdentifier("onboarding.collectionImport.preview")
                     }
                     if let progress = presentation.progress {
                         VStack(alignment: .leading, spacing: Spacing.small) {
                             Text(verbatim: progress.title)
-                                .accessibilityIdentifier("entry.progress.stage")
+                                .accessibilityIdentifier("onboarding.collectionImport.progress.stage")
                             if let total = progress.total {
                                 ProgressView(value: Double(progress.completed), total: Double(max(1, total)))
                                     .accessibilityLabel(progress.title)
@@ -114,11 +114,11 @@ struct CollectionEntryContent: View {
                             if !presentation.canCancel { Text("Finishing activation. The new collection will remain active.") }
                         }
                         .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("entry.progress")
+                        .accessibilityIdentifier("onboarding.collectionImport.progress")
                     }
                     if let message = presentation.message {
                         Text(verbatim: message).foregroundStyle(.token(.statusError))
-                            .accessibilityIdentifier("entry.error")
+                            .accessibilityIdentifier("onboarding.collectionImport.error")
                     }
                     if presentation.candidateActive {
                         Button(action: actions.continueRecovery) {
@@ -127,7 +127,7 @@ struct CollectionEntryContent: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.bordered)
-                        .accessibilityIdentifier("entry.recover")
+                        .accessibilityIdentifier("onboarding.collectionImport.recover")
                     } else if presentation.canChoose {
                         if presentation.needsReinspection {
                             Button(action: actions.reinspect) {
@@ -136,7 +136,7 @@ struct CollectionEntryContent: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.bordered)
-                            .accessibilityIdentifier("entry.reinspect")
+                            .accessibilityIdentifier("onboarding.collectionImport.reinspect")
                         }
                         Button(action: actions.chooseFile) {
                             Text("Choose File")
@@ -144,29 +144,32 @@ struct CollectionEntryContent: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.bordered)
-                        .accessibilityIdentifier("entry.choose")
+                        .accessibilityIdentifier("onboarding.collectionImport.choose")
                     }
                 }
                 .padding(Spacing.large)
                 .frame(maxWidth: ContentWidth.readable, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
-            .navigationTitle("Import Collection")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(action: actions.dismiss) {
-                        Text(presentation.busy ? "Cancel Import" : "Cancel")
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .keyboardShortcut(.cancelAction)
-                    .disabled((presentation.busy && !presentation.canCancel) || presentation.candidateActive)
-                    .accessibilityIdentifier("entry.cancel")
+            .safeAreaInset(edge: .bottom) {
+                Button(action: actions.dismiss) {
+                    Text(presentation.busy ? "Cancel Import" : "Cancel")
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.bordered)
+                .keyboardShortcut(.cancelAction)
+                .disabled((presentation.busy && !presentation.canCancel) || presentation.candidateActive)
+                .accessibilityIdentifier("onboarding.collectionImport.cancel")
+                .padding(Spacing.large)
+                .frame(maxWidth: ContentWidth.readable, alignment: .leading)
+                .frame(maxWidth: .infinity)
+                .background(.token(.backgroundPrimary))
             }
+            .navigationTitle("Import Collection")
         }
         .interactiveDismissDisabled(presentation.busy || presentation.candidateActive)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("entry.sheet")
+        .accessibilityIdentifier("onboarding.collectionImport.sheet")
     }
 }
