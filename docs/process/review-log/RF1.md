@@ -327,3 +327,12 @@ iPhone `20261022T082856Z-22245`: all screens and variants passed.
 iPad `20261022T083354Z-28853`: all screens and variants passed.
 Mac validation remains pending. Native AX permission is a separate user step.
 No Unit acceptance. The full gate remains required.
+
+Native controls now declare the button trait after the accessibility boundary.
+Close, Back and Redo retain their actions, identifiers and hit regions.
+Mac audit `20261022T083719Z-32772` found missing roles on Close and Back.
+Actual DOM checks passed. A new audit must verify the role repair.
+iPhone `20261022T082856Z-22245` and iPad `20261022T083354Z-28853` passed.
+Native AX permission remains a user step.
+Snapshot run `20261022T083849Z-34554` failed to copy simulator plan artifacts.
+Mac renders passed. Keep this tooling failure open. No Unit acceptance.

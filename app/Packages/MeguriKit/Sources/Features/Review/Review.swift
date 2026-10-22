@@ -106,6 +106,7 @@ struct ReviewLayout<Card: View>: View {
                         .contentShape(Rectangle())
                 }
                     .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isButton)
                     .accessibilityLabel(Text("Close Review", bundle: .module))
                     .accessibilityIdentifier("review.session.close")
                 VStack(alignment: .leading, spacing: Spacing.xxSmall) {
@@ -137,6 +138,7 @@ struct ReviewLayout<Card: View>: View {
                 }
                     .disabled(!canUndo)
                     .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isButton)
                     .accessibilityLabel(undoDescription)
                     .help(undoDescription)
                     .accessibilityIdentifier("review.session.back")
@@ -148,6 +150,7 @@ struct ReviewLayout<Card: View>: View {
                             .contentShape(Rectangle())
                     }
                         .accessibilityElement(children: .ignore)
+                        .accessibilityAddTraits(.isButton)
                         .accessibilityLabel(Text("Redo Answer", bundle: .module))
                         .accessibilityIdentifier("review.session.redo")
                 }
