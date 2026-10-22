@@ -79,8 +79,7 @@ final class LocalReviewJourneyTests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         let running = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
             .first { !$0.isTerminated })
-        let application = try XCTUnwrap(AXIsProcessTrusted() ? AXUIElementCreateApplication(running.processIdentifier) : nil,
-            "Native AX lookup failed: reason=AXTrustMissing; trusted=false; pid=\(running.processIdentifier); attempts=0; windows=0; visited=0")
+        let application = AXUIElementCreateApplication(running.processIdentifier)
         let deadline = Date().addingTimeInterval(5)
         var attempts = 0, windowCount = 0, rootCount = 0, visitedCount = 0, duplicates = 0, maxDepth = 0
         var readErrors: [String: Int] = [:]
