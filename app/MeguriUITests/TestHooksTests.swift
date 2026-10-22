@@ -174,7 +174,7 @@ final class TestHooksTests: XCTestCase {
         let app = try launch(
             MeguriLaunch(
                 fixture: build.hookFixture("single-file.fixture"), now: "2030-01-15T10:00:00Z", timeZone: "Asia/Tokyo", locale: "en_US",
-                reduceMotion: true, route: "sample/sheet", extra: ["-MeguriBogus", "1"]
+                reduceMotion: true, route: "sample/sheet", extra: ["-MeguriImportSource", "/nonexistent/public.colpkg"] + ["-MeguriBogus", "1"]
             ),
             build
         )
@@ -202,7 +202,7 @@ final class TestHooksTests: XCTestCase {
         func contains(_ marker: String) -> Bool {
             binaries.contains { $0.range(of: Data(marker.utf8)) != nil }
         }
-        let swiftNames = ["TestHooks", "LaunchOptions", "FixtureInstaller", "RouteRegistry", "AppearanceOverrides", "BackgroundLaunch", "TestHookError"]
+        let swiftNames = ["TestHooks", "LaunchOptions", "FixtureInstaller", "ImportSourceInstaller", "RouteRegistry", "AppearanceOverrides", "BackgroundLaunch", "TestHookError"]
         let rustExports = "_uniffi_meguri_ffi_fn_func_test_"
         let names = files.map(\.lastPathComponent)
         if build.hasHooks {

@@ -79,6 +79,23 @@ enum Jobs {
             return try track(handle)
         }
     }
+    /// If listener setup fails after Rust started, register a terminal waiter,
+    /// explicitly cancel, and drain before returning the setup error.
+    static func trackDraining(
+        _ handle: MeguriCoreBindings.JobHandle,
+        setup: @escaping @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) }
+    ) async throws(BridgeError) -> CoreJob {
+        do throws(BridgeError) {
+            return try await MaintenanceLane.shared.call(.jobProgressSetListener) { try setup(handle) }
+        } catch {
+            let (_, continuation) = AsyncStream.makeStream(of: CoreProgress.self)
+            let completion = JobCompletion(progress: continuation)
+            JobRegistry.shared.register(JobID(rawValue: handle.id), completion)
+            try? await CancelToken(raw: handle.cancel).cancel()
+            _ = await completion.wait()
+            throw error
+        }
+    }
     /// Called on MaintenanceLane after the event stream has subscribed.
     static func track(_ handle: MeguriCoreBindings.JobHandle) throws -> CoreJob {
         let (progress, continuation) = AsyncStream.makeStream(

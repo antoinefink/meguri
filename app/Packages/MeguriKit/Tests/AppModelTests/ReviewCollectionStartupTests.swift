@@ -35,10 +35,8 @@ import Testing
             await owner.start()
             try #require(owner.state == .ready, "Real open failed: \(owner.error ?? String(describing: owner.state))")
             #expect(try await service.lifecycle() == .ready(generation: owner.generation))
-            var isDirectory: ObjCBool = false
-            let backupsExist = files.fileExists(atPath: backups.path, isDirectory: &isDirectory)
-            #expect(backupsExist)
-            #expect(isDirectory.boolValue)
+            let backupsExist = files.fileExists(atPath: backups.path)
+            #expect(!backupsExist, "Only the real backup writer creates backup directories after capacity preflight")
             #expect(!owner.decks.isEmpty)
             // Owner close flushes before releasing the real core collection.
             let closed = await owner.close()

@@ -13,6 +13,7 @@ import Testing
     @Test func parsesEveryOption() throws {
         let options = try Options(arguments: [
             "-MeguriFixture", "/tmp/fixture/collection.anki2",
+            "-MeguriImportSource", "/tmp/fixture/review.colpkg",
             "-MeguriNow", "2030-01-15T10:00:00",
             "-MeguriTimeZone", "Asia/Tokyo",
             "-MeguriLocale", "en_US",
@@ -27,6 +28,7 @@ import Testing
             "-MeguriIntegrations", "on",
             "-MeguriRoute", "review/answer",
         ])
+        #expect(options.importSource == URL(filePath: "/tmp/fixture/review.colpkg"))
         #expect(options.fixture == URL(filePath: "/tmp/fixture/collection.anki2"))
         // 10:00 in Tokyo (UTC+9) is 01:00 UTC.
         #expect(options.now == Date(timeIntervalSince1970: 1_894_669_200))
@@ -118,6 +120,7 @@ import Testing
         (["-MeguriBogus", "1"], "unknown launch option -MeguriBogus"),
         (["-MeguriRoute", "a/b", "-MeguriRoute", "c/d"], "-MeguriRoute is given twice"),
         (["-MeguriRoute"], "-MeguriRoute needs a value"),
+        (["-MeguriImportSource", "relative/review.colpkg"], "-MeguriImportSource needs an absolute path"),
         (["-MeguriFixture", "relative/collection.anki2"], "-MeguriFixture needs an absolute path"),
         (["-MeguriNow", "2030-01-15 10:00:00"], "-MeguriNow takes"),
         (["-MeguriNow", "2030-02-30T10:00:00Z"], "-MeguriNow takes"),

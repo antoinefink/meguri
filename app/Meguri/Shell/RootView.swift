@@ -120,7 +120,10 @@ struct RootView: View {
                 #endif
             }
         }
-        .onChange(of: navigation.sheet) { _, _ in updateReviewObscuration() }
+        .onChange(of: navigation.sheet) { _, _ in
+            updateReviewObscuration()
+            collection?.entry.presentationChanged()
+        }
         .onChange(of: launchSheet) { _, _ in updateReviewObscuration() }
         .onChange(of: launchAlert) { _, _ in updateReviewObscuration() }
         .onChange(of: linkRefusal != nil) { _, _ in updateReviewObscuration() }

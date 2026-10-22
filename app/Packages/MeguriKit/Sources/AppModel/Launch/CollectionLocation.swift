@@ -5,9 +5,11 @@ import Foundation
 /// hooks install fixtures here (R1963).
 nonisolated public struct CollectionLocation: Sendable, Hashable {
     public let directory: URL
+    public let backupsDirectory: URL
 
-    public init(directory: URL) {
+    public init(directory: URL, backupsDirectory: URL? = nil) {
         self.directory = directory
+        self.backupsDirectory = backupsDirectory ?? directory.deletingLastPathComponent().appending(path: "Backups", directoryHint: .isDirectory)
     }
 
     public var collectionFile: URL {
@@ -16,6 +18,12 @@ nonisolated public struct CollectionLocation: Sendable, Hashable {
 
     /// `<Application Support>/Collection/` in the app's container.
     public static var standard: CollectionLocation {
-        CollectionLocation(directory: URL.applicationSupportDirectory.appending(path: "Collection", directoryHint: .isDirectory))
+        #if os(iOS)
+        let backups = URL.documentsDirectory.appending(path: "Backups", directoryHint: .isDirectory)
+        #else
+        let backups = URL.applicationSupportDirectory.appending(path: "Backups", directoryHint: .isDirectory)
+        #endif
+        return CollectionLocation(directory: URL.applicationSupportDirectory.appending(path: "Collection", directoryHint: .isDirectory),
+                                  backupsDirectory: backups)
     }
 }

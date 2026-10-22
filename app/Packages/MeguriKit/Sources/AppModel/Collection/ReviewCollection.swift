@@ -24,6 +24,8 @@ public final class ReviewCollection {
     /// Tests may substitute the journal query; production uses CoreBridge.
     @ObservationIgnored
     public var loadMediaIndex: @MainActor () async throws -> MediaNameSnapshot
+    @ObservationIgnored
+    var makeReviewSurface: @MainActor (MediaPathResolver) -> any ReviewCardSurface = { ReviewPages(resolver: $0) }
     private var mediaRevision: UInt64 = 0
     private var mediaTask: Task<Void, Never>?
     private var mediaCloseTask: Task<Void, Never>?
@@ -44,6 +46,14 @@ public final class ReviewCollection {
     public let configuration: LaunchConfiguration
     public let navigation: AppNavigation
     private let collection: CoreCollectionService
+    private let entryService: any CollectionEntryService
+    private var entryOwner: CollectionEntryCoordinator?
+    public var entry: CollectionEntryCoordinator {
+        if let entryOwner { return entryOwner }
+        let value = CollectionEntryCoordinator(owner: self, service: entryService)
+        entryOwner = value
+        return value
+    }
     private let deckService = CoreDeckService()
     private let records: ReviewRecordStore
     private var resolver: MediaPathResolver?
@@ -54,6 +64,7 @@ public final class ReviewCollection {
     private var lifecycleTask: Task<Void, Never>?
     private var openTask: Task<Void, Never>?
     private var opening = false
+    private var preparedGeneration: UInt64?
     private var starting = false
     private var policyReadAfterSession = false
     private var pendingDeck: Int64?
@@ -61,15 +72,16 @@ public final class ReviewCollection {
     private var day: ReviewDayMonitor?
     private var recoveryDrops: [Int64] = []
 
-    public init(configuration: LaunchConfiguration, navigation: AppNavigation) {
+    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil) {
         loadMediaIndex = { @MainActor in try await CoreMediaService().trackedNames() }
         self.configuration = configuration; self.navigation = navigation
+        self.entryService = entryService ?? CoreCollectionEntryService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone))
         collection = CoreCollectionService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone))
         records = ReviewRecordStore(file: configuration.collectionLocation.directory.appending(path: "meguri-review-session.json"))
     }
 
     public func start() async {
-        guard state == .unopened || isFailed, !opening else { return }
+        guard state == .unopened || state == .noFile || isFailed, !opening else { return }
         opening = true
         let task = Task { await openCollection() }
         openTask = task
@@ -79,21 +91,30 @@ public final class ReviewCollection {
         opening = true; state = .loading; error = nil; closed = false
         defer { opening = false }
         do {
+            try await subscribe()
+            let location = try await Self.prepareOpenLocation(configuration.collectionLocation)
             guard await Self.exists(configuration.collectionLocation.collectionFile) else { state = .noFile; return }
-            try await CoreEventStream.shared.start()
-            if events == nil {
-                events = Task { [weak self] in
-                    for await event in CoreEventStream.shared.events {
-                        guard let self, !Task.isCancelled else { return }
-                        self.receive(event)
-                    }
+            try await collection.startOpen(location, randomSeed: UInt64.random(in: 0...UInt64.max)).value()
+            try await completeOpenedHost(loadRecord: true)
+        } catch { state = .failed(String(describing: error)); self.error = String(describing: error) }
+    }
+    private func subscribe() async throws {
+        try await CoreEventStream.shared.start()
+        if events == nil {
+            events = Task { [weak self] in
+                for await event in CoreEventStream.shared.events {
+                    guard let self, !Task.isCancelled else { return }
+                    self.receive(event)
                 }
             }
-            let location = try await Self.prepareOpenLocation(configuration.collectionLocation.directory)
-            try await collection.startOpen(location, randomSeed: UInt64.random(in: 0...UInt64.max)).value()
-            lifecycle = try await collection.lifecycle()
-            if case .ready(let value) = lifecycle { generation = value; state = .ready }
-            else { state = .unavailable; return }
+        }
+    }
+    /// Called only after the FFI job retains the host, for open AND first import.
+    private func completeOpenedHost(loadRecord: Bool) async throws {
+        lifecycle = try await collection.lifecycle()
+        guard case .ready(let value) = lifecycle else { state = .unavailable; return }
+        generation = value; state = .ready; error = nil; closed = false
+        if loadRecord {
             do { previousRecord = try await records.load() }
             catch { self.error = "Couldn’t read the previous session record. \(error)" }
             if var previousRecord, !recoveryDrops.isEmpty {
@@ -101,13 +122,48 @@ public final class ReviewCollection {
                 self.previousRecord = previousRecord
                 try await records.save(previousRecord, version: 1)
             }
-            recoveryDrops.removeAll()
-            day = ReviewDayMonitor(clock: configuration.clock, zone: { [configuration] in configuration.timeZone ?? .autoupdatingCurrent },
-                didCheck: { [weak self] in self?.refreshCounts(); self?.review?.requestRefresh() })
-            await day?.checkNow()
-            await readPolicy()
-            await loadCounts()
-        } catch { state = .failed(String(describing: error)); self.error = String(describing: error) }
+        }
+        recoveryDrops.removeAll()
+        day?.close()
+        day = ReviewDayMonitor(clock: configuration.clock, zone: { [configuration] in configuration.timeZone ?? .autoupdatingCurrent },
+            didCheck: { [weak self] in self?.refreshCounts(); self?.review?.requestRefresh() })
+        if foreground { await day?.checkNow() }
+        await refreshMedia()
+        await readPolicy()
+        await loadCounts()
+        preparedGeneration = generation
+    }
+    func prepareEntry() async throws -> CoreBridge.CollectionLocation {
+        try await subscribe()
+        return try await Self.prepareOpenLocation(configuration.collectionLocation)
+    }
+    var entryAllowed: Bool { !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile) }
+    func beginEntryActivation() throws {
+        guard review == nil, !starting else { throw BridgeError.sessionActive }
+        guard entryAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
+        opening = true
+        day?.pause(); countTimer?.invalidate(); countsTask?.cancel()
+    }
+    @discardableResult func finishEntryActivation(candidateActive: Bool) async -> Bool {
+        defer { opening = false }
+        do {
+            if candidateActive {
+                navigation.collectionReplaced()
+                previousRecord = nil; pendingDeck = nil; recoveryDrops.removeAll()
+                try await records.remove()
+                try await completeOpenedHost(loadRecord: false)
+            } else {
+                lifecycle = try await collection.lifecycle()
+                switch lifecycle {
+                case .ready(let next): generation = next; state = .ready
+                    if foreground { await day?.checkNow() }
+                    await loadCounts()
+                case .noCollection: state = .noFile
+                default: state = .unavailable
+                }
+            }
+            return state == .ready && error == nil
+        } catch { self.error = String(describing: error); state = .failed(String(describing: error)); return false }
     }
     private var isFailed: Bool { if case .failed = state { return true }; return false }
 
@@ -132,34 +188,46 @@ public final class ReviewCollection {
             case .failed(let reason): state = .failed(String(describing: reason))
             case .noCollection: state = .unopened
             }
-        case .nextDayAtChanged(let instant): day?.event(nextDayAt: instant)
+        case .nextDayAtChanged(let instant): if !opening { day?.event(nextDayAt: instant) }
         case .rolledOver, .timeZoneChanged: refreshCounts()
         case .changes(let changes):
             refreshCounts()
             if changes.wholeCollection || !changes.mediaAdded.isEmpty || !changes.mediaRemoved.isEmpty { scheduleMediaRefresh() }
         case .mediaArrived: scheduleMediaRefresh()
         case .collectionReplaced(let next):
+            guard preparedGeneration != next else { return }
             generation = next; day?.pause()
             invalidateMedia()
             review?.generationEnded(); review = nil; navigation.endReview()
-            navigation.dismissSheet(); policy = nil
-            Task { await mediaCloseTask?.value; await day?.checkNow(); await readPolicy(); await loadCounts() }
+            previousRecord = nil; pendingDeck = nil; policyReadAfterSession = false
+            policy = nil; decks = []; countTimer?.invalidate(); countsTask?.cancel()
+            navigation.collectionReplaced(keepingEntrySheet: opening)
+            if !opening {
+                navigation.dismissSheet()
+                entryOwner?.destinationChanged()
+                Task { [weak self] in
+                    guard let self else { return }
+                    await self.mediaCloseTask?.value
+                    guard self.generation == next, !self.closed, !self.opening else { return }
+                    await self.day?.checkNow(); await self.readPolicy(); await self.loadCounts()
+                }
+            }
         case .recoveryDropped(_, let cardID, _): recoveryDrops.append(cardID)
         case .sessionEnded:
-            if policyReadAfterSession { Task { await readPolicy() } }
+            if policyReadAfterSession, !opening { Task { await readPolicy() } }
         default: break
         }
     }
 
     public func refreshCounts() {
         countsRevision &+= 1
-        guard countsTask == nil, foreground, state == .ready else { return }
+        guard countsTask == nil, foreground, state == .ready, !opening else { return }
         countsTask = Task {
             var observed: UInt64
             repeat {
                 observed = countsRevision
                 await loadCounts()
-            } while observed != countsRevision && foreground && state == .ready
+            } while observed != countsRevision && foreground && state == .ready && !opening && !Task.isCancelled
             countsTask = nil
         }
     }
@@ -178,7 +246,7 @@ public final class ReviewCollection {
                 }
                 if let countTimer { RunLoop.main.add(countTimer, forMode: .common) }
             }
-        } catch { self.error = String(describing: error) }
+        } catch { if expected == generation, !closed { self.error = String(describing: error) } }
     }
     public func deck(_ id: Int64) -> CountedDeckNode? {
         func find(_ nodes: [CountedDeckNode]) -> CountedDeckNode? {
@@ -190,13 +258,15 @@ public final class ReviewCollection {
 
     public func readPolicy() async {
         guard !enabling else { return }
+        let expected = generation
         do {
             let status = try await Core.fsrsPolicyStatus()
+            guard expected == generation, !closed else { return }
             policy = status
             if review?.sessionID != nil {
                 policyReadAfterSession = status != .ok
             } else if status != .ok { navigation.present(.fsrsAdmission) }
-        } catch { self.error = String(describing: error) }
+        } catch { if expected == generation, !closed { self.error = String(describing: error) } }
     }
     public func enableFsrs() async {
         guard !enabling, review?.sessionID == nil else { return }
@@ -212,9 +282,9 @@ public final class ReviewCollection {
             if let deck = pendingDeck { pendingDeck = nil; Task { await startStudy(deckID: deck) } }
         } catch { self.error = String(describing: error) }
     }
-    public var canStudy: Bool { state == .ready && reviewIsActive && !resuming && !starting && review == nil && policy == .ok }
+    public var canStudy: Bool { !opening && entryOwner?.busy != true && navigation.sheet != .collectionEntry && state == .ready && reviewIsActive && !resuming && !starting && review == nil && policy == .ok }
     public func startStudy(deckID: Int64) async {
-        guard state == .ready, reviewIsActive, !resuming, !starting, review == nil else { return }
+        guard canStudy else { return }
         guard policy == .ok else { pendingDeck = deckID; await readPolicy(); return }
         starting = true
         defer { starting = false }
@@ -222,7 +292,7 @@ public final class ReviewCollection {
             previousRecord = nil // The visible Home record has now been acknowledged.
             _ = try await deckService.selectDeck(id: deckID)
             guard let resolver = await mediaResolverForReview(), reviewIsActive, state == .ready else { return }
-            let model = ReviewCoordinator(deckID: deckID, surface: ReviewPages(resolver: resolver),
+            let model = ReviewCoordinator(deckID: deckID, surface: makeReviewSurface(resolver),
                 store: records, clock: configuration.clock)
             model.onPolicyRefusal = { [weak self] in self?.pendingDeck = deckID }
             reviewVisible = true
@@ -281,8 +351,9 @@ public final class ReviewCollection {
         let previous = lifecycleTask
         lifecycleTask = Task {
             await previous?.value
+            if !active { await entryOwner?.cancelAndDrain() }
             await openTask?.value
-            guard !closed, state != .unopened, state != .noFile else { return }
+            guard !closed, state != .unopened, state != .noFile else { resuming = false; return }
             do {
                 if active {
                     let began = day?.beginResult()
@@ -315,14 +386,18 @@ public final class ReviewCollection {
         Task { await day?.checkNow() }
     }
     @discardableResult public func close() async -> Bool {
+        await entryOwner?.cancelAndDrain()
         await openTask?.value
         await lifecycleTask?.value
-        if state == .noFile || state == .unopened { return true }
+        if state == .noFile || state == .unopened {
+            closed = true; events?.cancel(); events = nil
+            return true
+        }
         if review != nil { await finishReview(); if review != nil { return false } }
         do {
             try await collection.flushForBackground()
             try await collection.close()
-            closed = true; day?.close(); countTimer?.invalidate(); countsTask?.cancel()
+            closed = true; events?.cancel(); events = nil; day?.close(); countTimer?.invalidate(); countsTask?.cancel()
             invalidateMedia(); await mediaCloseTask?.value
             state = .unopened; lifecycle = .noCollection
             return true
@@ -336,7 +411,7 @@ public final class ReviewCollection {
     }
     private func scheduleMediaRefresh() {
         mediaRevision &+= 1
-        guard foreground, state == .ready else { return }
+        guard foreground, state == .ready, !opening else { return }
         Task { await refreshMedia() }
     }
     func mediaResolverForReview() async -> MediaPathResolver? {
@@ -383,12 +458,13 @@ public final class ReviewCollection {
         snapshot.generation == generation && snapshot.root.isFileURL &&
             Data(snapshot.root.standardizedFileURL.path.utf8) == Data(root.standardizedFileURL.path.utf8)
     }
-    @concurrent private nonisolated static func prepareOpenLocation(_ directory: URL) async throws -> CoreBridge.CollectionLocation {
-        let backups = directory.deletingLastPathComponent().appending(path: "Backups", directoryHint: .isDirectory)
-        // Core canonicalizes both roots before opening; the app owns this directory.
-        try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
-        return CoreBridge.CollectionLocation(collectionDirectory: directory, backupsDirectory: backups,
-            appGroupSnapshot: directory.appending(path: "meguri-widget-unavailable.json"))
+    @concurrent private nonisolated static func prepareOpenLocation(_ location: CollectionLocation) async throws -> CoreBridge.CollectionLocation {
+        // Only the app-private destination root is prepared here. Rust preflights
+        // the combined import budget before source copy/inspection/backup writes;
+        // the real backup writer owns creation of its supplied backup parents.
+        try FileManager.default.createDirectory(at: location.directory, withIntermediateDirectories: true)
+        return CoreBridge.CollectionLocation(collectionDirectory: location.directory, backupsDirectory: location.backupsDirectory,
+            appGroupSnapshot: location.directory.appending(path: "meguri-widget-unavailable.json"))
     }
     @concurrent private nonisolated static func exists(_ url: URL) async -> Bool { FileManager.default.fileExists(atPath: url.path) }
 }

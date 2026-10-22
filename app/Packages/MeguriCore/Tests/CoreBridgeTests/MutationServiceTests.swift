@@ -12,6 +12,11 @@ private final class MutationClock: CollectionClock {
     func zoneIdentifier() -> String { onMain.withLock { $0.append(Thread.isMainThread) }; return "UTC" }
 }
 
+private final class MutationDiskCapacity: DiskSpaceProviding {
+    let bytes = Mutex<UInt64>(.max)
+    func availableBytes(at directory: URL) throws -> UInt64 { bytes.withLock { $0 } }
+}
+
 extension EventTests {
     @Test @MainActor func typedMutationsUndoMediaAndControlUseTheOpenedHostOffMain() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -24,7 +29,8 @@ extension EventTests {
                                                      appGroupSnapshot: root.appending(path: "widget.snapshot"))
         try await MaintenanceLane.shared.bootstrapCollection(location)
         let clock = MutationClock()
-        let collectionService = CoreCollectionService(clock: clock)
+        let capacity = MutationDiskCapacity()
+        let collectionService = CoreCollectionService(clock: clock, diskSpace: capacity)
         let decks = CoreDeckService(), notes = CoreNoteService(), types = CoreNotetypeService()
         let tags = CoreTagService(), undo = CoreUndoService(), media = CoreMediaService()
         do {
@@ -93,11 +99,24 @@ extension EventTests {
             #expect(safe == "attachment.png")
             #expect(try await media.addMedia(name: "ATTACHMENT.PNG", bytes: [1,2,3]) == safe)
             let beforeDelete = try await decks.deckDeletionSummary(ids: [deck.id])
-            let refused = try await decks.startDeleteDecks(ids: [deck.id])
-            guard case .failed(.unavailable) = await refused.job.outcome() else {
-                Issue.record("card deletion must refuse until U127 is wired"); try await collectionService.close(); return
+            let noteBeforeDelete = try await notes.readNote(id: note.id)
+            do {
+                capacity.bytes.withLock { $0 = 0 }
+                defer { capacity.bytes.withLock { $0 = .max } }
+                let refused = try await decks.startDeleteDecks(ids: [deck.id])
+                let outcome = await refused.job.outcome()
+                guard case .failed(.internal(let detail)) = outcome else {
+                    Issue.record("Expected deletion to stop at the real safety backup: \(outcome)")
+                    try await collectionService.close(); return
+                }
+                #expect(detail.hasPrefix("safety backup failed: "))
+                #expect(detail.contains("InsufficientSpace"))
+                #expect(detail.contains("available: 0"))
+                #expect(detail.contains("Unpublished"))
+                await #expect(throws: BridgeError.internal(detail)) { try await refused.value() }
             }
             #expect(try await decks.deckDeletionSummary(ids: [deck.id]) == beforeDelete)
+            #expect(try await notes.readNote(id: note.id) == noteBeforeDelete)
             try await collectionService.flushForBackground()
             #expect(try await collectionService.suspend(timeoutMilliseconds: 5_000) == .suspended)
             let resumed = try await collectionService.resume()

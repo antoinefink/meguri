@@ -4,6 +4,7 @@ import Foundation
 /// one `-Meguri…` option; see `TestHooks.LaunchOptions` in the app.
 struct MeguriLaunch {
     var fixture: URL?
+    var importSource: URL?
     var now: String?
     var timeZone: String?
     var locale: String?
@@ -29,6 +30,7 @@ struct MeguriLaunch {
         }
         func onOff(_ value: Bool?) -> String? { value.map { $0 ? "on" : "off" } }
         add("Fixture", fixture?.path(percentEncoded: false))
+        add("ImportSource", importSource?.path(percentEncoded: false))
         add("Now", now)
         add("TimeZone", timeZone)
         if let locale {

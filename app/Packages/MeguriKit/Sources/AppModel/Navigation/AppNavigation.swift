@@ -227,6 +227,16 @@ public final class AppNavigation {
         setPath([], for: .home)
     }
 
+    /// Drop presentation bound to the old generation. Entry keeps its progress
+    /// sheet until its FFI result confirms that the new host is retained.
+    public func collectionReplaced(keepingEntrySheet: Bool = false) {
+        endReview()
+        selectedDeck = nil; showsDeckPage = false; restoredDeckPagePending = false
+        paths.removeAll(); scrollPositions.removeAll(); featureStates.removeAll()
+        browseSearch = ""; section = .home; settingsTabSection = .settings
+        if !keepingEntrySheet || sheet != .collectionEntry { dismissSheet() }
+    }
+
     // MARK: Scroll positions (R5, R19)
 
     public func scrollPosition(for key: ScrollAnchorKey) -> ScrollPosition {

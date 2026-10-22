@@ -6,6 +6,7 @@ nonisolated public enum SheetRoute: Hashable, Identifiable, Sendable {
     /// Add (U195), with `deck` preselected when given (R48).
     case add(deck: DeckID?)
     case fsrsAdmission
+    case collectionEntry
 
     public var id: Self { self }
 }

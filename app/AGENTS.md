@@ -38,6 +38,12 @@
 - A new colour token needs a colour set with light, dark and both increased-contrast variants and a `role` naming the backgrounds it is drawn on; `ContrastTests` and `TokenCoverageTests` (`tools/mg swift-test --package MeguriKit`) check them. Increase Contrast has no public environment setter: tests resolve colours with `EnvironmentValues._colorSchemeContrast`, and `NSAppearance`'s high-contrast names do not select the catalog's high-contrast variants.
 - Reusable components go into `ComponentGallery.entries` first (route `designsystem/gallery`, identifiers `designsystem.gallery.<component>.<state>`); the gallery's VStack is deliberately not lazy so UI tests see off-screen entries.
 
+## Collection entry (RF2)
+
+- ReviewCollection owns the entry coordinator and retained-host completion above the shell switch. Ready/CollectionReplaced can precede FFI host retention; defer policy/count/media refresh until completion.
+- Source scope and synchronous NSFileCoordinator access live on CoordinatedSourceOwner’s GCD worker until Rust terminal delivery, including cancellation and tracking failure. Only Rust copies/inspects packages and creates preflighted backup parents.
+- CollectionEntryJourneyTests uses public app/Fixtures/CollectionEntry inputs and the real system picker. ImportSource installs only its dedicated Documents source; it never imports or selects a route.
+
 ## Test hooks
 
 - Launch options are `-Meguri<Name> <value>` (table in `TestHooks/LaunchOptions.swift`); UI tests build them with `MeguriUITests/Support/MeguriLaunch.swift`. A bad option replaces the UI with `testhooks.error.message`.

@@ -37,6 +37,7 @@ struct ShellFeatures {
         }
         features.sheet = { route, navigation in
             switch route {
+            case .collectionEntry: AnyView(CollectionEntryView(coordinator: collection.entry))
             case .fsrsAdmission: AnyView(FsrsAdmissionView(collection: collection))
             case .add: AnyView(SheetPlaceholder(sheet: route, navigation: navigation))
             }

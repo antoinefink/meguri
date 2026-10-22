@@ -159,6 +159,14 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public var name: String { interval.name }
     public var description: String { interval.name }
 
+    public static let startCollectionInspection = BridgeCall("start_collection_inspection")
+    public static let collectionInspectResultOutcome = BridgeCall("CollectionInspectResult.outcome")
+    public static let collectionInspectionFacts = BridgeCall("CollectionInspection.facts")
+    public static let collectionInspectionDiscard = BridgeCall("CollectionInspection.discard")
+    public static let startCollectionActivation = BridgeCall("start_collection_activation")
+    public static let collectionActivationResultOutcome = BridgeCall("CollectionActivationResult.outcome")
+    public static let jobProgressSetListener = BridgeCall("JobProgress.setListener")
+
     public static let startOpen = BridgeCall("start_open")
     public static let closeCollection = BridgeCall("close_collection")
     public static let collectionLifecycle = BridgeCall("collection_lifecycle")
@@ -284,6 +292,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
+        startCollectionInspection, collectionInspectResultOutcome, collectionInspectionFacts, collectionInspectionDiscard, startCollectionActivation, collectionActivationResultOutcome, jobProgressSetListener,
         startOpen, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, deckStudyState, deckDescriptionHtml,
         startSession, reviewSessionJobResult, peekFirstCard, sessionHead, refreshSessionCard, renderSessionHead, answerSession, endSession, peekReviewUndo, flushReviewForBackground,
         coreVersion, coreBuildInfo, setEventListener, cancelTokenNew, cancelTokenCancel, cancelTokenIsCancelled, renderCard, compareTypedAnswer, cardExcerpts,

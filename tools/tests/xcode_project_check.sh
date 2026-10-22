@@ -206,7 +206,7 @@ expect_setting() { # expect_setting <config> <sdk> <name> <expected>
 hook_markers() {
   perl -e '
     my @swift = ("TestHooks\0", "LaunchOptions\0", "FixtureInstaller\0", "RouteRegistry\0",
-      "AppearanceOverrides\0", "TestHookError\0");
+      "AppearanceOverrides\0", "ImportSourceInstaller\0", "TestHookError\0");
     my $all = "";
     for my $file (@ARGV) {
       open(my $h, "<:raw", $file) or die "$file: $!";

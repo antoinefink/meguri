@@ -22,6 +22,12 @@ public struct HomeView: View {
                         .accessibilityIdentifier("home.collection.error")
                 }
                 content
+                if collection.state == .ready || collection.state == .noFile {
+                    Button("Import Collection") { collection.entry.present() }
+                        .frame(minHeight: 44)
+                        .disabled(!collection.entry.canPresent)
+                        .accessibilityIdentifier("home.collection.import")
+                }
             }
             .padding(Spacing.medium)
             .frame(maxWidth: ContentWidth.readable, alignment: .leading)
@@ -37,7 +43,7 @@ public struct HomeView: View {
         case .unopened, .loading: LoadingStateView(Text("Opening collection…", bundle: .module))
         case .noFile:
             EmptyStateView(Text("No Collection", bundle: .module), systemImage: "rectangle.stack",
-                description: Text("There is no collection in Meguri yet. Local collection import is coming next.", bundle: .module))
+                description: Text("Import a collection-only .colpkg to study your own cards on this device.", bundle: .module))
         case .unavailable:
             LoadingStateView(Text("Collection is busy…", bundle: .module))
         case .failed(let message):

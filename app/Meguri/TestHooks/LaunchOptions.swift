@@ -10,6 +10,7 @@ extension TestHooks {
     ///
     /// | Argument | Value |
     /// |---|---|
+    /// | `-MeguriImportSource` | iOS only: absolute regular synthetic .colpkg copied to Documents/RF2 Import Tests/review.colpkg for the system picker; changes no collection or route |
     /// | `-MeguriFixture` | absolute path of a collection file (installed as `collection.anki2`) or of a collection directory (installed as the collection directory) |
     /// | `-MeguriNow` | `YYYY-MM-DDTHH:MM:SS` with `Z` or `±HH:MM`; without one, the time is local to `-MeguriTimeZone` (or the system zone) |
     /// | `-MeguriTimeZone` | IANA id, e.g. `Asia/Tokyo` |
@@ -38,6 +39,7 @@ extension TestHooks {
         }
 
         var fixture: URL?
+        var importSource: URL?
         var now: Date?
         var timeZone: TimeZone?
         var locale: Locale?
@@ -56,7 +58,7 @@ extension TestHooks {
         static let names = [
             "Fixture", "Now", "TimeZone", "Locale", "Animations", "ReduceMotion",
             "ReduceTransparency", "WindowSize", "Appearance", "AnkiConnectPort", "MigakuPort", "SizeClass",
-            "Integrations", "Route", "BackgroundLaunch",
+            "Integrations", "Route", "BackgroundLaunch", "ImportSource",
         ]
 
         init() {}
@@ -83,6 +85,10 @@ extension TestHooks {
                 index += 1
             }
 
+            if let value = values["ImportSource"] {
+                guard value.hasPrefix("/") else { throw TestHookError("-MeguriImportSource needs an absolute path") }
+                importSource = URL(filePath: value)
+            }
             if let value = values["Fixture"] {
                 guard value.hasPrefix("/") else {
                     throw TestHookError("-MeguriFixture needs an absolute path, got '\(value)'")
@@ -164,6 +170,13 @@ extension TestHooks {
                 throw TestHookError("-MeguriIntegrations applies to the Mac only")
             }
             #endif
+            if let importSource {
+                #if os(iOS)
+                try ImportSourceInstaller.install(from: importSource, bundleIdentifier: installer.bundleIdentifier)
+                #else
+                throw TestHookError("-MeguriImportSource applies to iOS only")
+                #endif
+            }
             if let fixture {
                 try installer.install(from: fixture, into: configuration.collectionLocation)
             }
@@ -259,5 +272,34 @@ extension TestHooks {
             return date
         }
     }
+    /// Source availability only. This helper never inspects or imports a package.
+    enum ImportSourceInstaller {
+        static func install(from source: URL, bundleIdentifier: String, documents: URL = .documentsDirectory) throws(TestHookError) {
+            guard bundleIdentifier.hasSuffix(".dev") else { throw TestHookError("ImportSourceInstaller requires a .dev bundle") }
+            do {
+                let values = try source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+                guard source.isFileURL, source.pathExtension.lowercased() == "colpkg",
+                      values.isRegularFile == true, values.isSymbolicLink != true else {
+                    throw TestHookError("-MeguriImportSource requires a regular public synthetic .colpkg fixture")
+                }
+                let directory = documents.appending(path: "RF2 Import Tests", directoryHint: .isDirectory)
+                let files = FileManager.default
+                if files.fileExists(atPath: directory.path) {
+                    let values = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                    guard values.isDirectory == true, values.isSymbolicLink != true else {
+                        throw TestHookError("Import test source directory must be a regular directory")
+                    }
+                } else { try files.createDirectory(at: directory, withIntermediateDirectories: true) }
+                let destination = directory.appending(path: "review.colpkg")
+                guard source.standardizedFileURL != destination.standardizedFileURL else {
+                    throw TestHookError("Import fixture source must be outside the dedicated destination")
+                }
+                if files.fileExists(atPath: destination.path) { try files.removeItem(at: destination) }
+                try files.copyItem(at: source, to: destination)
+            } catch let error as TestHookError { throw error }
+            catch { throw TestHookError("Couldn’t prepare import picker source: \(error.localizedDescription)") }
+        }
+    }
+
 }
 #endif

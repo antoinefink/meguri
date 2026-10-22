@@ -452,3 +452,69 @@ Doctor `20261022T174258Z-37251` passes: VM SSH and runtime ready, 68 GiB free.
 Rust lint `20261022T174523Z-39956` passes with the direct Result fix. This checkpoint
 integrates owned inspection/activation primitives only; native entry and the
 full RF2 integration gate remain required. Parent unit requirements stay open.
+
+## Native local entry
+
+Native component starts `4e7ad102`; implementer `s-20261022T174625Z-b54035c3`,
+clean baseline `44080ce7`. Filtered run `20261022T174640Z-41515` exports 33 files:
+typed bridge outcomes, dedicated coordinated-source lifetime, entry coordinator,
+shared native sheet/picker, initial-host startup integration, platform backup
+paths, public source-only test setup and actual picker/review/restart journeys.
+Its reported `5dab13ee` is the filtered synthetic Git baseline, not master.
+Source fixtures are copies of the existing public package. No unit acceptance.
+
+Core XCFramework `20261022T174729Z-42413` passes for Debug Mac and simulator.
+Swift bridge `20261022T180426Z-49102` compiles and runs 59 tests: 58 pass;
+legacy MutationServiceTests still expects backup-unavailable refusal. Preserve
+its refusal and unchanged-content proof using actual scoped low capacity, then
+restore capacity for the rest of that persistence test. New entry tests pass.
+Unchanged privacy `20261022T180442Z-50150` flags own prose/declarations in four
+new Swift files; rewrite full own regions without inspecting private tokens.
+No scanner, source archive, requirement or assertion exemptions are permitted.
+
+Independent native round-1 review by `/root/rf2_backend_review` reports no
+P0–P2 findings beyond those known check corrections. It checks source scope
+through terminal delivery, single-owned preview cleanup, typed active outcomes,
+retained-host refresh ordering, replacement cleanup, lock-free callbacks and
+lifecycle/picker/persistence test intent. This is static evidence only.
+Actual VM picker journeys and full RF2 gate remain required. The new import
+sheet still needs its registered visual states, a11y runs and rendered critic.
+MeguriKit `20261022T180501Z-50640` compiles without diagnostics, then the new
+missing-directory import test does not complete. Its AppModelTests child is
+stopped after several minutes without progress; the parent exits and retains a
+failed receipt with no complete test summary. This is not passing evidence.
+Other bundles progressed, including the unchanged R554 limit check, but no
+acceptance or R554 repair is inferred from this partial run. Trace the new test
+await before further checks; preserve actual import/review/persistence coverage.
+P2: the test calls startStudy without hosting its pages. It waits on
+CardPagePair.prepare, whose unpresented runtime awaits two animation frames
+before emitting settled. This model test provides no window. Add a display-only
+surface factory for the test, with unchanged production ReviewPages default and
+real core sessions, rendering, answers, records, backup and restart assertions.
+Actual rendered reviews remain mandatory in the three VM picker journeys.
+Native round-2 filtered run `20261022T181304Z-56370`, fixer
+`s-20261022T181252Z-325b97bc`, baseline `75f40a0e`, preserves the full seed.
+Only the new model test substitutes display handling; it still calls actual
+Core.renderSessionHead and checks the matching card and both rendered sides.
+Production defaults to ReviewPages. Independent review closes that P2 and finds
+no further P0–P2. The legacy deletion test now proves a real capacity refusal
+and exact content preservation before its existing persistence continuation.
+Focused Swift `20261022T181615Z-57802` passes 26 tests across both bundles.
+Kit `20261022T181649Z-59133` runs six tests: five pass, one fails. First import,
+actual answer, background, restart and a seven-review safety backup pass.
+The session-refusal setup starts its real session after inspection, so that
+session's writes make the preview stale first. Inspect after session startup
+to bind those writes, then keep the exact SessionActive refusal assertion.
+Privacy `20261022T181634Z-58830` flags only own review prose, rewritten in full;
+all product-source regions pass. No passing acceptance yet.
+Doctor `20261022T181143Z-54780` passes with VM SSH/runtime ready and 68 GiB free.
+Round-3 fixer `s-20261022T181802Z-207061ab`, baseline `e42ead0d`, exports
+`20261022T181817Z-60838`. Only the second preview moves after real session
+startup, with an added non-nil preview requirement. Exact SessionActive,
+generation, session-end and close checks remain. Independent review finds
+no P0/P1. Focused Kit `20261022T181938Z-61744` passes all six tests, including
+real first import, rendered payload/answer, background/restart and backup proof.
+Bridge/instrumentation `20261022T181615Z-57802` passes 26 tests.
+Privacy `20261022T181957Z-63202` and similarity `20261022T181954Z-62930` pass.
+This is a native-source checkpoint, not RF2 acceptance. VM picker journeys,
+registered visual/a11y evidence and full gate against `81c20757` follow.
