@@ -11,13 +11,13 @@ import Testing
         defer { try? FileManager.default.removeItem(at: directory) }
         let root = directory.appending(path: "collection.media", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try Data("asset".utf8).write(to: root.appending(path: "MiXeD.PNG"))
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = CollectionLocation(directory: directory)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
         owner.loadMediaIndex = { MediaNameSnapshot(generation: 0, root: root, names: []) }
         let resolver = try #require(await owner.mediaResolverForReview())
         await #expect(throws: (any Error).self) { try await resolver.openURLPath("/mixed.png") }
+        try Data("asset".utf8).write(to: root.appending(path: "MiXeD.PNG"))
         owner.loadMediaIndex = {
             MediaNameSnapshot(generation: 0, root: root, names: [TrackedMediaName(name: "MiXeD.PNG", caseKey: "mixed.png")])
         }
