@@ -547,3 +547,23 @@ one pass, zero failures and zero skips. This proves bundled-fixture access
 and actual core startup without a pre-existing backup directory on iOS.
 The repaired launch assertions and Mac startup check await the fresh full
 gate against the same original RF1 base. No Unit trailer or acceptance yet.
+
+Full gate `20261022T125053Z-80320` passed on clean commit `5112efbb`,
+against the original RF1 base. Its receipt is complete and merge-ready:
+no blockers, incomplete runs or queued checks. Every triggered T0 and T1
+job passed, including fresh live-oracle and oracle tests.
+Xcode check `20261022T131807Z-43581` passed. The real startup case passed
+on Mac; the unit leg had 396 passes and zero failures. Release and AppStore
+launch-hook tests passed. Mac UI `20261022T141712Z-90398` passed all suites;
+its hook subset had nine passes, one expected skip and zero failures.
+The prior gate's test defects are closed. Both simulator runtime legs passed
+209 tests. Snapshots, accessibility, performance and similarity also passed.
+
+Catch-up `20261022T143114Z-15335` passed on the same clean commit.
+Doctor `20261022T143054Z-14821` confirms the VM is running and answers SSH.
+The host has 98 GiB free. Its only warning is the locked host session; all required
+VM checks ran. No host unlock is needed for this delivery.
+RF1's automated integration is complete. Full parent units, the R554 repair,
+long-notice runtime evidence and final human design/device checks retain their
+existing ownership. This partial delivery has no Unit trailer. Own-card import
+is next under the approved review-first ordering.
