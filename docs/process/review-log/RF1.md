@@ -240,3 +240,23 @@ Image-card drive `20261022T080537Z-89843` passed all 10 steps.
 The captured answer includes the generated image and four rating controls.
 Keep failed audit `20261022T075553Z-79417`; the repair needs a new audit.
 No Unit acceptance. Safe collection entry is next; the full plan remains.
+
+Third bounded layout pass; filtered source base `fce53fcb` (original RF1 base
+`5d651707`). Actual iPad audit 2 `20261022T080826Z-95510`, after `98c105e6`,
+passed all touch-target checks and the Close/Back and Study/Show Answer contrast
+checks. Remaining failures: progress AX bounds stayed 896×4 in all four variants;
+largest-text question audits still saw hidden rating strings `<10m`, `Again`,
+`1.4mo` and contrast failures; sidebar labels were leaf names, included an
+unlabelled child, and failed contrast against dark material.
+
+Progress now has a visible title, remaining text and bar.
+Its combined element retains the current value and identifier.
+Question-side ratings use .hidden() with the same reserved layout.
+Sidebar paths join ancestor names in core order. Rows use the surface token.
+Native selection and main Home hierarchy remain.
+
+Runtime checks, critic, final review and the full gate remain required.
+Mac `20261022T081123Z-99202`: two persistence tests passed.
+The keyboard test failed: the raw AX helper could not find Back.
+Retain this failure; native keyboard proof remains open.
+No Unit acceptance. Full U152 and the remaining plan stay open.

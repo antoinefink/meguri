@@ -123,28 +123,27 @@ public struct HomeSidebarDecks: View {
     public init(collection: ReviewCollection) { self.collection = collection }
     public var body: some View {
         ForEach(Self.flatten(collection.decks), id: \.id) { deck in
-            Label {
-                Text(verbatim: deck.name)
-                    .fixedSize(horizontal: false, vertical: true)
-            } icon: {
-                Image(systemName: "rectangle.stack").accessibilityHidden(true)
-            }
+            Text(verbatim: deck.path)
             .foregroundStyle(.token(.textPrimary))
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text(verbatim: deck.name))
             .accessibilityIdentifier("home.sidebar.deck.\(deck.id)")
+            .listRowBackground(ColorToken.surface.color)
             .tag(SidebarItem.deck(DeckID(deck.id)))
         }
     }
 
-    private static func flatten(_ nodes: [CountedDeckNode]) -> [CountedDeckNode] {
-        nodes.sorted {
-            $0.name == $1.name ? $0.id < $1.id : $0.name < $1.name
-        }.flatMap { node in
-            [node] + flatten(node.children)
+    private struct Row {
+        let id: Int64
+        let path: String
+    }
+
+    private static func flatten(_ nodes: [CountedDeckNode], ancestors: [String] = []) -> [Row] {
+        nodes.flatMap { node in
+            let components = ancestors + [node.name]
+            return [Row(id: node.id, path: components.joined(separator: "::"))]
+                + flatten(node.children, ancestors: components)
         }
     }
 }

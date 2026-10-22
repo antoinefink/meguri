@@ -105,10 +105,15 @@ struct ReviewLayout<Card: View>: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(Text("Close Review", bundle: .module))
                     .accessibilityIdentifier("review.session.close")
-                ProgressView(value: progress)
-                    .tint(.token(.progressFill))
-                    .frame(minHeight: 44)
-                    .accessibilityElement(children: .ignore)
+                VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+                    Text("Session Progress", bundle: .module).font(.subheadline)
+                    Text(verbatim: remaining).font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ProgressView(value: progress)
+                        .tint(.token(.progressFill))
+                }
+                    .foregroundStyle(.token(.textPrimary))
+                    .accessibilityElement(children: .combine)
                     .accessibilityLabel(Text("Session Progress", bundle: .module))
                     .accessibilityValue(remaining)
                     .accessibilityIdentifier("review.session.progress")
@@ -172,15 +177,13 @@ public struct ReviewAnswerBar: View {
     public var body: some View {
         ZStack {
             // Kept in layout on both sides, including at large text sizes.
-            HStack(spacing: Spacing.xSmall) {
-                rating(.again, title: "Again", label: states?.again.label, color: .ratingAgain)
-                rating(.hard, title: "Hard", label: states?.hard.label, color: .textPrimary)
-                rating(.good, title: "Good", label: states?.good.label, color: .ratingGood)
-                rating(.easy, title: "Easy", label: states?.easy.label, color: .textPrimary)
+            if phase == .answer {
+                ratings.allowsHitTesting(enabled)
+            } else {
+                ratings.hidden()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
-            .opacity(phase == .answer ? 1 : 0)
-            .allowsHitTesting(phase == .answer && enabled)
-            .accessibilityHidden(phase != .answer)
             if phase == .question {
                 Button(action: reveal) {
                     Text("Show Answer", bundle: .module)
@@ -199,6 +202,14 @@ public struct ReviewAnswerBar: View {
         .padding(Spacing.small)
         .frame(maxWidth: ContentWidth.readable)
         .frame(maxWidth: .infinity)
+    }
+    private var ratings: some View {
+        HStack(spacing: Spacing.xSmall) {
+            rating(.again, title: "Again", label: states?.again.label, color: .ratingAgain)
+            rating(.hard, title: "Hard", label: states?.hard.label, color: .textPrimary)
+            rating(.good, title: "Good", label: states?.good.label, color: .ratingGood)
+            rating(.easy, title: "Easy", label: states?.easy.label, color: .textPrimary)
+        }
     }
     private func rating(_ rating: ReviewRating, title: String, label: ReviewAnswerLabel?, color: ColorToken) -> some View {
         Button { rate(rating) } label: {
