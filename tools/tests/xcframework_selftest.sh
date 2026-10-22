@@ -158,6 +158,20 @@ t_private_change_replaces_only_the_library() {
   return $rc
 }
 
+t_swift_reader_repair_is_hashed_without_changing_output_bytes() {
+  local helper="$SB/tools/scripts/repair-swift-integer-reader.py" before failed=0
+  before="$(snapshot | grep -vF "$STAMP ")"
+  cp "$helper" "$SB/.reader-repair.orig"
+  printf '\n# input hash probe\n' >>"$helper"
+  build
+  expect "exit code after editing the repair helper" "$RC" 0 &&
+    { [ "$(cargo_calls)" -gt 0 ] || { echo "editing the repair helper was a cache hit"; false; }; } &&
+    expect "output mtimes after a comment-only repair edit" "$(snapshot | grep -vF "$STAMP ")" "$before" || failed=1
+  cp "$SB/.reader-repair.orig" "$helper"
+  rm -f "$SB/.reader-repair.orig"
+  return "$failed"
+}
+
 t_xcode_device_preaction_adds_the_device_slice_and_links() {
   # What the scheme pre-action sees when building for an iOS device: Xcode's
   # build settings in the environment, including an iOS SDKROOT.
@@ -432,6 +446,7 @@ TESTS="t_builds_mac_and_sim_by_default
 t_no_change_run_skips_cargo_and_keeps_mtimes
 t_xcode_device_preaction_adds_the_device_slice_and_links
 t_private_change_replaces_only_the_library
+t_swift_reader_repair_is_hashed_without_changing_output_bytes
 t_missing_header_or_modulemap_is_rebuilt
 t_contents_of_files_with_quoted_names_are_hashed
 t_unreadable_input_fails_the_run_before_cargo

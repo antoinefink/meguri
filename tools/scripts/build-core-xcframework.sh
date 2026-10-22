@@ -30,8 +30,9 @@
 #   app/Packages/MeguriCore/Sources/MeguriCoreBindings/MeguriCoreBindings.swift
 #
 # A run hashes the content of every non-ignored file under core/, this
-# script, the configuration and the slice list. When the hash equals the
-# stamp and the outputs exist, it exits without invoking cargo. Otherwise it
+# script, its Swift reader repair, the configuration and the slice list.
+# When the hash equals the stamp and the outputs exist, it exits without
+# invoking cargo. Otherwise it
 # takes the build locks, builds each slice, checks that every slice exports
 # the same uniffi_* symbols and yields the same bindings, generates the
 # bindings from the Mac slice, creates the XCFramework in a temporary
@@ -160,8 +161,8 @@ write_report() { # write_report <status> [replaced files...]
 
 # --- Input hash -------------------------------------------------------------
 # Sets $hash: every file under core/ that git tracks or would track (new
-# files count before they are added), with its content id, plus this script
-# and the build parameters. Paths stay relative to the repo root in git's
+# files count before they are added), with its content id, plus this script,
+# its reader repair and the build parameters. Paths stay relative to the repo root in git's
 # quoting (non-ASCII names, tabs), which hash-object --stdin-paths unquotes.
 # git hash-object hashes every file in one process; shasum is a perl script
 # and too slow to start for the no-change budget, where each git start costs
@@ -179,6 +180,7 @@ compute_hash() {
     mv "$TMP/kept" "$TMP/inputs"
   fi
   echo tools/scripts/build-core-xcframework.sh >>"$TMP/inputs"
+  echo tools/scripts/repair-swift-integer-reader.py >>"$TMP/inputs"
   git -C "$ROOT" hash-object --stdin-paths <"$TMP/inputs" >"$TMP/ids"
   wc -l "$TMP/inputs" "$TMP/ids" >"$TMP/counts"
   { read -r inputs _ && read -r ids _; } <"$TMP/counts"
@@ -302,6 +304,7 @@ generate() { # generate <slice>: that slice's bindings in $TMP/gen-<slice>
   (cd "$ROOT/core" && "$bindgen" "$(lib_of "$1")" "$TMP/gen-$1" --swift-sources --headers --modulemap \
     --module-name "$FFI_MODULE" --modulemap-filename module.modulemap --metadata-no-deps 8>&- 9>&-) ||
     die "uniffi-bindgen-swift failed on the $1 slice"
+  python3 "$ROOT/tools/scripts/repair-swift-integer-reader.py" "$TMP/gen-$1/MeguriCoreBindings.swift" 8>&- 9>&-
 }
 generate mac
 

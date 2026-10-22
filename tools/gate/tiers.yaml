@@ -192,7 +192,7 @@ runs:
     tier: T0
     placement: host
     class: tooling
-    triggers: [tools/scripts/build-core-xcframework.sh, tools/tests/xcframework_selftest.sh]
+    triggers: [tools/scripts/build-core-xcframework.sh, tools/scripts/repair-swift-integer-reader.py, tools/tests/xcframework_selftest.sh]
     budget_s: 2400
   - id: image-tools-selftest
     job: image-tools-selftest
@@ -247,7 +247,7 @@ runs:
     tier: T0
     placement: host
     class: unit
-    triggers: [app/Packages/MeguriCore/, core/crates/, core/Cargo.lock, core/Cargo.toml, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/scripts/build-core-xcframework.sh, tools/mg.d/bridge.sh]
+    triggers: [app/Packages/MeguriCore/, core/crates/, core/Cargo.lock, core/Cargo.toml, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/scripts/build-core-xcframework.sh, tools/scripts/repair-swift-integer-reader.py, tools/mg.d/bridge.sh]
     budget_s: 1800
   - id: swift-test-core-profile
     job: swift-test
@@ -255,7 +255,7 @@ runs:
     tier: T0
     placement: host
     class: perf
-    triggers: [app/Packages/MeguriCore/, core/crates/, core/Cargo.lock, core/Cargo.toml, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/scripts/build-core-xcframework.sh, tools/mg.d/bridge.sh]
+    triggers: [app/Packages/MeguriCore/, core/crates/, core/Cargo.lock, core/Cargo.toml, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/scripts/build-core-xcframework.sh, tools/scripts/repair-swift-integer-reader.py, tools/mg.d/bridge.sh]
     budget_s: 1800
   - id: swift-test-kit
     job: swift-test
@@ -271,7 +271,7 @@ runs:
     tier: T0
     placement: host
     class: tooling
-    triggers: [app/, core/crates/, core/Cargo.lock, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/mg.d/app.sh, tools/scripts/build-core-xcframework.sh]
+    triggers: [app/, core/crates/, core/Cargo.lock, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/mg.d/app.sh, tools/scripts/build-core-xcframework.sh, tools/scripts/repair-swift-integer-reader.py]
     budget_s: 1800
   - id: build-app-mac
     job: build-app
@@ -279,7 +279,7 @@ runs:
     tier: T0
     placement: host
     class: tooling
-    triggers: [app/, core/crates/, core/Cargo.lock, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/mg.d/app.sh, tools/scripts/build-core-xcframework.sh]
+    triggers: [app/, core/crates/, core/Cargo.lock, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/mg.d/app.sh, tools/scripts/build-core-xcframework.sh, tools/scripts/repair-swift-integer-reader.py]
     budget_s: 1800
   - id: xcode-check
     job: xcode-check
