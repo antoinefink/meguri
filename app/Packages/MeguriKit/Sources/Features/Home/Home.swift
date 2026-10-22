@@ -49,10 +49,16 @@ public struct HomeView: View {
                     DeckCounts(counts: deck.counts)
                         .accessibilityIdentifier("home.deck.counts")
                     Button { Task { await collection.startStudy(deckID: deck.id) } } label: {
-                        Label { Text("Study Now", bundle: .module) } icon: { Image(systemName: "play.fill") }
+                        Label {
+                            Text("Study Now", bundle: .module)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: { Image(systemName: "play.fill") }
+                            .font(.headline)
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
+                    .tint(ColorToken.textPrimary.color)
+                    .controlSize(.large)
                     .disabled(!collection.canStudy)
                     .frame(maxWidth: ContentWidth.primaryAction)
                     .accessibilityIdentifier("home.deck.study")
@@ -123,6 +129,10 @@ public struct HomeSidebarDecks: View {
             } icon: {
                 Image(systemName: "rectangle.stack").accessibilityHidden(true)
             }
+            .foregroundStyle(.token(.textPrimary))
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text(verbatim: deck.name))
             .accessibilityIdentifier("home.sidebar.deck.\(deck.id)")

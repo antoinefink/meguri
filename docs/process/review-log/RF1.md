@@ -215,3 +215,28 @@ real iPad/Mac sidebar selection, full review, system audits and required gates.
 The running iPad system audit and waiting/exhaustion/restart tests have no
 claimed result here. No Unit or full-gate acceptance; safe collection entry
 and all remaining full-plan units remain required.
+
+Validation repair after review 5; filtered source base
+`1e4236b0a50d60b4a026240cbf22edede5f72321`; original RF1 base remains
+`5d651707`. Actual iPad system audit `20261022T075553Z-79417` failed on
+unsuppressed header hit regions, progress hit region and dark-default action
+contrast. Earlier sidebar contrast/clipping findings also remain recorded.
+No audit policy, tests or suppressions were changed.
+
+Close, Back and Redo keep native actions and focus.
+Their labels fill a 44-point target. Each has one accessibility element.
+The actual progress layout has a minimum 44-point height and one accessible
+element with its remaining value, Session Progress label and
+`review.session.progress` identifier. Study Now and Show Answer use the existing
+bordered/large/textPrimary pairing, headline emphasis and growing text labels.
+Flattened sidebar rows explicitly wrap/grow and use textPrimary, preserving
+full-path labels, unique deck identifiers and native List selection tags.
+HomeDeckTree and review responder/lifecycle/card focus code are unchanged.
+
+Source review completed. Runtime checks remain required.
+iPhone `20261022T080215Z-85434`: 2 passed.
+Both tests verify records after restart.
+Image-card drive `20261022T080537Z-89843` passed all 10 steps.
+The captured answer includes the generated image and four rating controls.
+Keep failed audit `20261022T075553Z-79417`; the repair needs a new audit.
+No Unit acceptance. Safe collection entry is next; the full plan remains.

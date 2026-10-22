@@ -96,13 +96,22 @@ struct ReviewLayout<Card: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: Spacing.small) {
-                Button(action: close) { Image(systemName: "xmark").frame(minWidth: 44, minHeight: 44) }
+                Button(action: close) {
+                    Image(systemName: "xmark")
+                        .padding(Spacing.xSmall)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                    .accessibilityElement(children: .ignore)
                     .accessibilityLabel(Text("Close Review", bundle: .module))
                     .accessibilityIdentifier("review.session.close")
                 ProgressView(value: progress)
                     .tint(.token(.progressFill))
+                    .frame(minHeight: 44)
+                    .accessibilityElement(children: .ignore)
                     .accessibilityLabel(Text("Session Progress", bundle: .module))
                     .accessibilityValue(remaining)
+                    .accessibilityIdentifier("review.session.progress")
                     .help(remaining)
                 if let timerText {
                     TimelineView(.periodic(from: clock.now(), by: 1)) { _ in
@@ -110,13 +119,25 @@ struct ReviewLayout<Card: View>: View {
                             .accessibilityIdentifier("review.session.timer")
                     }
                 }
-                Button { undo() } label: { Image(systemName: "arrow.uturn.backward").frame(minWidth: 44, minHeight: 44) }
+                Button { undo() } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                        .padding(Spacing.xSmall)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
                     .disabled(!canUndo)
+                    .accessibilityElement(children: .ignore)
                     .accessibilityLabel(undoDescription)
                     .help(undoDescription)
                     .accessibilityIdentifier("review.session.back")
                 if canRedo {
-                    Button { redo() } label: { Image(systemName: "arrow.uturn.forward").frame(minWidth: 44, minHeight: 44) }
+                    Button { redo() } label: {
+                        Image(systemName: "arrow.uturn.forward")
+                            .padding(Spacing.xSmall)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                        .accessibilityElement(children: .ignore)
                         .accessibilityLabel(Text("Redo Answer", bundle: .module))
                         .accessibilityIdentifier("review.session.redo")
                 }
@@ -161,8 +182,16 @@ public struct ReviewAnswerBar: View {
             .allowsHitTesting(phase == .answer && enabled)
             .accessibilityHidden(phase != .answer)
             if phase == .question {
-                Button(action: reveal) { Text("Show Answer", bundle: .module).frame(maxWidth: .infinity, minHeight: 44) }
-                    .buttonStyle(.borderedProminent)
+                Button(action: reveal) {
+                    Text("Show Answer", bundle: .module)
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                    .buttonStyle(.bordered)
+                    .tint(ColorToken.textPrimary.color)
+                    .controlSize(.large)
                     .disabled(!enabled)
                     .accessibilityIdentifier("review.session.reveal")
             }
