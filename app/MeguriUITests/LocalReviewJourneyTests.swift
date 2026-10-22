@@ -75,7 +75,14 @@ final class LocalReviewJourneyTests: XCTestCase {
         }
     }
 
-    private func focusNativeControl(_ identifier: String, in app: XCUIApplication, bundleIdentifier: String) throws -> AXUIElement {
+    private struct NativeFocusTarget {
+        let control: AXUIElement
+        let application: AXUIElement
+        let identifier: String
+        let diagnostics: String
+    }
+
+    private func focusNativeControl(_ identifier: String, in app: XCUIApplication, bundleIdentifier: String) throws -> NativeFocusTarget {
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         let running = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
             .first { !$0.isTerminated })
@@ -84,9 +91,10 @@ final class LocalReviewJourneyTests: XCTestCase {
         var attempts = 0, windowCount = 0, rootCount = 0, visitedCount = 0, duplicates = 0, maxDepth = 0
         var readErrors: [String: Int] = [:]
         var stopReason: String?
+        var matchedDiagnostics = "matchedControl=none"
         func diagnostics() -> String {
             let errors = readErrors.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value)" }.joined(separator: ",")
-            return "trusted=\(AXIsProcessTrusted()); pid=\(running.processIdentifier); attempts=\(attempts); windows=\(windowCount); roots=\(rootCount); visited=\(visitedCount); duplicates=\(duplicates); maxDepth=\(maxDepth); AXReadErrors[attribute/code:count]=[\(errors)]"
+            return "trusted=\(AXIsProcessTrusted()); pid=\(running.processIdentifier); attempts=\(attempts); windows=\(windowCount); roots=\(rootCount); visited=\(visitedCount); duplicates=\(duplicates); maxDepth=\(maxDepth); \(matchedDiagnostics); AXReadErrors[attribute/code:count]=[\(errors)]"
         }
         func read(_ node: AXUIElement, _ attribute: String) -> CFTypeRef? {
             var value: CFTypeRef?
@@ -140,7 +148,14 @@ final class LocalReviewJourneyTests: XCTestCase {
                     guard let nativeIdentifier = value as? String else {
                         stopReason = "AXUnexpectedType(AXIdentifier)"; return nil
                     }
-                    if nativeIdentifier == identifier { return node }
+                    if nativeIdentifier == identifier {
+                        let role = read(node, kAXRoleAttribute) as? String
+                        var settable = DarwinBoolean(false)
+                        let settableError = AXUIElementIsAttributeSettable(node, kAXFocusedAttribute as CFString, &settable)
+                        matchedDiagnostics = "matchedIdentifier=\(nativeIdentifier); matchedRole=\(role ?? "<unavailable>"); AXFocusedSettable=\(settable.boolValue); AXFocusedSettableError=\(settableError.rawValue)"
+                        // SwiftUI may publish the identifier on a wrapper too.
+                        if role == kAXButtonRole { return node }
+                    }
                 }
                 if let value = read(node, kAXChildrenAttribute) {
                     guard let children = value as? [AXUIElement] else {
@@ -162,17 +177,44 @@ final class LocalReviewJourneyTests: XCTestCase {
         } while true
         let control = try XCTUnwrap(found, "Native control missing: \(identifier); reason=\(stopReason ?? "AXReadinessTimeout"); \(diagnostics())")
         let focusError = AXUIElementSetAttributeValue(control, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        XCTAssertEqual(focusError, .success, "Native AX focus set error=\(focusError.rawValue); \(diagnostics())")
-        assertNativeFocus(control)
-        return control
+        let target = NativeFocusTarget(control: control, application: application, identifier: identifier,
+            diagnostics: "Native AX focus set error=\(focusError.rawValue); \(diagnostics())")
+        XCTAssertEqual(focusError, .success, target.diagnostics)
+        assertNativeFocus(target)
+        return target
     }
 
-    private func assertNativeFocus(_ control: AXUIElement) {
-        var focused: CFTypeRef?
-        let error = AXUIElementCopyAttributeValue(control, kAXFocusedAttribute as CFString, &focused)
-        let diagnostics = "Native AX focus read error=\(error.rawValue); trusted=\(AXIsProcessTrusted())"
-        XCTAssertEqual(error, .success, diagnostics)
-        XCTAssertEqual(focused as? Bool, true, diagnostics)
+    private func assertNativeFocus(_ target: NativeFocusTarget) {
+        func read(_ node: AXUIElement, _ attribute: String) -> (value: CFTypeRef?, error: AXError) {
+            var value: CFTypeRef?
+            let error = AXUIElementCopyAttributeValue(node, attribute as CFString, &value)
+            return (value, error)
+        }
+        let deadline = Date().addingTimeInterval(2)
+        var observation = ""
+        repeat {
+            let focused = read(target.control, kAXFocusedAttribute)
+            if focused.error == .success, focused.value as? Bool == true { return }
+
+            let applicationFocus = read(target.application, kAXFocusedUIElementAttribute)
+            observation = "AXFocusedError=\(focused.error.rawValue); AXFocused=\(String(describing: focused.value as? Bool)); AXFocusedUIElementError=\(applicationFocus.error.rawValue)"
+            if applicationFocus.error == .success, let value = applicationFocus.value,
+               CFGetTypeID(value) == AXUIElementGetTypeID() {
+                let nativeFocused = value as! AXUIElement
+                let identifier = read(nativeFocused, kAXIdentifierAttribute)
+                let role = read(nativeFocused, kAXRoleAttribute)
+                observation += "; focusedIdentifier=\(identifier.value as? String ?? "<unavailable>"); focusedIdentifierError=\(identifier.error.rawValue); focusedRole=\(role.value as? String ?? "<unavailable>"); focusedRoleError=\(role.error.rawValue)"
+                // Undo can replace the native button. Accept only its exact identity and role.
+                if identifier.error == .success, identifier.value as? String == target.identifier,
+                   role.error == .success, role.value as? String == kAXButtonRole { return }
+            } else {
+                observation += "; focusedIdentifier=<unavailable>; focusedRole=<unavailable>"
+            }
+            if Date() >= deadline { break }
+            // Publication readiness only: never repeat a focus write or key action.
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while true
+        XCTFail("Native keyboard focus readiness timeout; expectedIdentifier=\(target.identifier); expectedRole=\(kAXButtonRole); trusted=\(AXIsProcessTrusted()); \(observation); \(target.diagnostics)")
     }
     #endif
 
