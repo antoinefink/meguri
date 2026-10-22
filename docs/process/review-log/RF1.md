@@ -499,3 +499,21 @@ Latest smallest-phone execution `20261022T102842Z-88520` passed all 18 actions
 at the largest text size with no hierarchy issues. This covers the bounded
 notice source revision's normal review path; it does not claim long-notice
 scrolling or substitute for the pending full gate.
+
+Filtered native-test correction `de8f2863` follows standard Mac key semantics.
+Independent review found no P0/P1. Setup `20261022T104825Z-10973` passed.
+Native run `20261022T105001Z-13429` then failed a new intermediate test query:
+the native progress wrapper did not expose a String value. It had already
+established positive native focus and meaningful current-card text.
+The reviewer approved removing that redundant representation assumption,
+retaining exact card/side continuity, redo state, native activation and final
+authoritative saved-answer/deck counts. Filtered fix `cc07f151` does only that;
+its independent bounded review found no P0/P1. No product behavior changed.
+
+Consent check `20261022T105326Z-17378` passed with public AX trust.
+Its opt-in files are gone. Test `20261022T105500Z-19800` passed:
+one case, zero skipped. Initial reveal and rating keys work. Back and Close
+retain native focus after Return, with card and side unchanged. Space invokes
+undo and dismissal. The final record has one answer and the deck has three due
+cards. The keyboard finding is closed. No product key handling was added.
+Fixer session: `s-20261022T102909Z-9c19149a`. Full gate pending; no Unit claim.
