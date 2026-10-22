@@ -652,3 +652,7 @@ constant types and run the same first-import case. No acceptance claim.
 - Fixer `s-20261022T202844Z-7450bf7e`, base `1a686015`; exports `20261022T202909Z-98991`, `20261022T203339Z-1758`, `20261022T203544Z-3152`. The last two change only two new reason strings after privacy scanning.
 - Checkpoint `1885005e`. Round 3: no P0/P1 or confirmed required-check defect. Full audits remain enabled; three exact contrast exceptions follow R1977 and the existing scroll-edge case. Frame, value, stage, full control visibility and token checks remain required.
 - Actual audits, token checks and visual evidence remain pending after this fix.
+- Token checks `swift-test/20261022T203737Z-4448`: PASS, 13 tests in ContrastTests and TokenCoverageTests.
+- iPhone `a11y/20261022T203812Z-5807`: FAIL, 1 passed and 1 failed. Home passes. Import fails because progress still exposes a 4pt frame; the new explicit frame assertion catches this.
+- Fixer `s-20261022T204324Z-076f2a06`, base `d55891f8`, export `20261022T204339Z-10171`, checkpoint `a23e2791`. Independent review: no new P0/P1. Exactly one metadata line sets the accessibility shape on the existing 44pt wrapper.
+- API: https://developer.apple.com/documentation/swiftui/contentshapekinds/accessibility
