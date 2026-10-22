@@ -53,6 +53,7 @@ impl Default for EngineConfig {
 pub struct OpenConfig {
     pub clock: Arc<dyn Clock>,
     pub random: Arc<dyn RandomSource>,
+    pub publication_binding: crate::device_state::AccountBinding,
     /// The SQL functions every connection of the collection registers
     /// (`storage/open-and-connections` C5).
     pub initializers: Initializers,
@@ -75,6 +76,7 @@ impl OpenConfig {
         OpenConfig {
             clock,
             random,
+            publication_binding: crate::device_state::AccountBinding::LocalOnly,
             initializers: Initializers::default(),
             ports: Ports::default(),
             backups_directory: None,
@@ -150,6 +152,7 @@ pub(crate) struct Current {
     ports: Ports,
     _lock: meguri_storage::lockfile::CollectionLock,
     previous_clean_shutdown: bool,
+    pub(crate) reopen: Reopen,
 }
 
 impl Engine {
@@ -291,7 +294,17 @@ impl Engine {
         )
     }
 
-    fn open_raw_inner(&self, path: &Path, mut config: OpenConfig) -> Result<Collection, EngineError> {
+    fn open_raw_inner(&self, path: &Path, config: OpenConfig) -> Result<Collection, EngineError> {
+        self.open_raw_owned(path, config, None)
+    }
+
+    // Initial verified replacement keeps the same advisory lock through open.
+    pub(crate) fn open_raw_owned(
+        &self,
+        path: &Path,
+        mut config: OpenConfig,
+        retained: Option<meguri_storage::lockfile::CollectionLock>,
+    ) -> Result<Collection, EngineError> {
         // Compose here rather than in OpenConfig::new: callers can replace
         // its public initializer list. Reopen/resume keep this complete set.
         config.initializers.register(meguri_search::sqlfns::register);
@@ -301,6 +314,7 @@ impl Engine {
             let mut guard = self.lock_state();
             match guard.state {
                 LifecycleState::NoCollection | LifecycleState::Failed { .. } if guard.current.is_none() => {}
+                LifecycleState::Opening if retained.is_some() && guard.current.is_none() => {}
                 _ => {
                     return Err(EngineError::InvalidArgument {
                         message: format!("cannot open a collection: {}", guard.state.describe()),
@@ -314,7 +328,12 @@ impl Engine {
                 .parent()
                 .filter(|p| !p.as_os_str().is_empty())
                 .unwrap_or(Path::new("."));
-            let ownership = meguri_storage::lockfile::CollectionLock::acquire(directory)?;
+            let ownership = match retained {
+                Some(ownership) => ownership,
+                None => meguri_storage::lockfile::CollectionLock::acquire(directory)?,
+            };
+            crate::device_state::reconcile(path, &config.publication_binding)?;
+            crate::device_state::ensure(path, &config.publication_binding, config.random.as_ref())?;
             meguri_storage::leftovers::cleanup(directory)?;
             meguri_storage::leftovers::cleanup_media(&directory.join("collection.media"))?;
             if let Some(backups) = &config.backups_directory {
@@ -384,10 +403,12 @@ impl Engine {
         });
         exec.undo.add_restorer(Arc::new(crate::sched::answer::AnswerRestorer));
         let reopen = Reopen {
+            binding: config.publication_binding.clone(),
             clock: Arc::clone(&config.clock),
             random: Arc::clone(&config.random),
             initializers: config.initializers.clone(),
         };
+        let current_reopen = reopen.clone();
         let writer_exec = Arc::clone(&exec);
         let writer = self
             .inner
@@ -449,6 +470,7 @@ impl Engine {
         exec.set_admission(Admission::Open);
         let mut guard = self.lock_state();
         guard.current = Some(Current {
+            reopen: current_reopen,
             core: Arc::clone(&core),
             writer: Some(writer),
             ports: config.ports,
@@ -689,6 +711,28 @@ impl<'s> Exclusive<'s> {
         })
     }
 
+    pub(crate) fn verified_environment(
+        &self,
+        reason: crate::replace::ReplaceReason,
+    ) -> Result<Reopen, crate::replace::ReplaceError> {
+        let state = self.slot.engine.lock_state();
+        self.check_active(&state)?;
+        if self.slot.op != reason.long_op() {
+            return Err(crate::replace::ReplaceError::NotExclusive);
+        }
+        if reason == crate::replace::ReplaceReason::ColpkgImport
+            && self.core.exec.active_session.lock().unwrap().is_some()
+        {
+            return Err(EngineError::SessionActive.into());
+        }
+        Ok(state
+            .current
+            .as_ref()
+            .expect("active exclusive has current")
+            .reopen
+            .clone())
+    }
+
     /// The privileged handle: the only one whose ops commit during the phase.
     pub fn collection(&self) -> &Collection {
         &self.collection
@@ -706,9 +750,27 @@ impl<'s> Exclusive<'s> {
         &mut self,
         swap: impl FnOnce(&Path) -> Result<(), EngineError> + Send + 'static,
     ) -> Result<Collection, EngineError> {
+        self.replace_inner(crate::executor::writer::Swap {
+            run: Box::new(swap),
+            activated: None,
+        })
+    }
+
+    pub(crate) fn replace_tracked(
+        &mut self,
+        swap: impl FnOnce(&Path) -> Result<(), EngineError> + Send + 'static,
+        activated: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<Collection, EngineError> {
+        self.replace_inner(crate::executor::writer::Swap {
+            run: Box::new(swap),
+            activated: Some(activated),
+        })
+    }
+
+    fn replace_inner(&mut self, swap: crate::executor::writer::Swap) -> Result<Collection, EngineError> {
         let engine = &self.slot.engine;
         self.check_active(&engine.lock_state())?;
-        let replacement = generation::replace(engine, &self.core, self.privilege, Box::new(swap));
+        let replacement = generation::replace(engine, &self.core, self.privilege, swap);
         if let Some(collection) = &replacement.moved {
             self.replaced = true;
             self.collection = collection.clone();

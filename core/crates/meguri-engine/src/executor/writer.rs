@@ -72,7 +72,9 @@ pub(crate) struct WriterEnv<'w> {
 }
 
 /// What reopening the file after a swap needs (`engine/lifecycle` L8).
+#[derive(Clone)]
 pub(crate) struct Reopen {
+    pub binding: crate::device_state::AccountBinding,
     pub clock: Arc<dyn Clock>,
     pub random: Arc<dyn RandomSource>,
     pub initializers: Initializers,
@@ -712,7 +714,12 @@ pub(crate) struct NewGeneration {
 
 /// The swap of `engine/lifecycle` L8: runs with the collection path and
 /// nothing open (U124's verified replace).
-pub(crate) type Swap = Box<dyn FnOnce(&Path) -> Result<(), EngineError> + Send>;
+pub(crate) struct Swap {
+    pub run: Box<dyn FnOnce(&Path) -> Result<(), EngineError> + Send>,
+    /// Verified replacement knows exactly whether its rename succeeded. The
+    /// legacy closure keeps L8's file-change detection for arbitrary restores.
+    pub activated: Option<Arc<std::sync::atomic::AtomicBool>>,
+}
 
 /// Closes the collection, swaps the file, reopens it through the open gate
 /// and moves to the next generation.
@@ -760,6 +767,7 @@ impl TaskBody for ReplaceTask {
         // Never replace a file whose final commit/checkpoint could not be
         // made durable. Reopen the original through the same recovery path
         // as a swap that failed before touching it.
+        let Swap { run: swap, activated } = swap;
         let swapped = match closed {
             Ok(outcome) if outcome.succeeded() => {
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| swap(&shared.path)))
@@ -771,7 +779,9 @@ impl TaskBody for ReplaceTask {
         // A swap that failed after changing the file still replaced the
         // collection. Checked before the reopen (see `LiveFile::changed`).
         let changed = live.changed();
-        let replacing = swapped.is_ok() || changed;
+        let replacing = activated
+            .as_ref()
+            .map_or(swapped.is_ok() || changed, |a| a.load(Ordering::Acquire));
         if replacing {
             // The steps describe the file the swap replaced; dropped before
             // any op of the new generation, also when the reopen fails
@@ -782,6 +792,17 @@ impl TaskBody for ReplaceTask {
         let options = OpenOptions::new(reopen.clock.as_ref(), reopen.random.as_ref())
             .initializers(reopen.initializers.clone())
             .managed();
+        // A swap Err may follow rename or an atomic-sidecar directory-sync
+        // failure. Prove/finish R6 before a managed writer can mutate evidence.
+        if let Err(error) = crate::device_state::reconcile(&shared.path, &reopen.binding) {
+            let _ = reply.send(Replaced {
+                reopened: false,
+                error: Some(error.into()),
+                generation: None,
+                factory: None,
+            });
+            return;
+        }
         let replaced = match open_collection(&shared.path, &options) {
             Err(error) => Replaced {
                 reopened: false,

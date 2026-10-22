@@ -10,6 +10,38 @@ use crate::{
 };
 
 impl Reader {
+    /// P10 metadata for a live package writer: the connected main database's
+    /// path and its current database + WAL size. No read transaction is opened.
+    /// The caller holds the engine lease and preflights before staging writes.
+    pub fn live_snapshot_source(&self) -> Result<(PathBuf, u64), StorageError> {
+        if self.role() != ReaderRole::Maintenance {
+            return Err(StorageError::Mode {
+                detail: "live package snapshots require the Maintenance reader".into(),
+            });
+        }
+        if !self.conn.is_autocommit() {
+            return Err(StorageError::TransactionOpen);
+        }
+        let source = self
+            .conn
+            .path()
+            .filter(|path| !path.is_empty())
+            .ok_or_else(|| StorageError::Io {
+                detail: "live collection has no database path".into(),
+            })?;
+        let source = PathBuf::from(source);
+        let database_bytes = std::fs::metadata(&source)?.len();
+        let wal_bytes = match std::fs::metadata(sibling(&source, "-wal")) {
+            Ok(metadata) => metadata.len(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => return Err(error.into()),
+        };
+        let size = database_bytes.checked_add(wal_bytes).ok_or_else(|| StorageError::Io {
+            detail: "live collection size overflow".into(),
+        })?;
+        Ok((source, size))
+    }
+
     /// Snapshot the live collection into `snapshot.anki2` in the caller's
     /// fresh U32 staging directory. The caller has preflighted P10, holds the
     /// appropriate engine lease and keeps this directory private and stable

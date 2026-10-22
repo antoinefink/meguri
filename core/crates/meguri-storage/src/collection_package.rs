@@ -16,7 +16,7 @@ use meguri_model::{
     },
     rng::RandomSource,
     schema11::col as schema11,
-    time::EpochSecs,
+    time::{EpochMillis, EpochSecs},
     usn::Usn,
 };
 use rusqlite::{Connection, OpenFlags, params};
@@ -57,6 +57,21 @@ pub fn standalone_size(source: &Path) -> Result<u64, StandaloneSnapshotError> {
         }
     }
     Ok(std::fs::metadata(source).map_err(StorageError::from)?.len())
+}
+
+/// Read col.mod from the closed captured copy, held stable by its staging
+/// owner. Immutable opening leaves its bytes and auxiliary paths untouched.
+/// Never pass the live collection itself to this helper.
+pub fn snapshot_modified(snapshot: &Path) -> Result<EpochMillis, StandaloneSnapshotError> {
+    standalone_size(snapshot)?;
+    let read = || -> Result<EpochMillis, StorageError> {
+        let conn = Connection::open_with_flags(file_uri(snapshot, Some("mode=ro&immutable=1")), READ_ONLY)?;
+        crate::conn_init::probe(&conn).map_err(|detail| StorageError::ConnectionInit { detail })?;
+        let modified = conn.query_row("SELECT mod FROM col WHERE id = 1", [], |row| row.get(0))?;
+        conn.close().map_err(|(_, error)| StorageError::from(error))?;
+        Ok(EpochMillis(modified))
+    };
+    read().map_err(Into::into)
 }
 
 /// VACUUM reads a single consistent view. Immutable read-only opening avoids

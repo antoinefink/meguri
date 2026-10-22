@@ -42,6 +42,139 @@ impl SlotGuard {
         self.op
     }
 
+    pub(crate) fn check_verified_review(&self, reason: crate::replace::ReplaceReason) -> Result<(), EngineError> {
+        let state = self.engine.lock_state();
+        self.check_held(&state)?;
+        if reason == crate::replace::ReplaceReason::ColpkgImport
+            && state
+                .current
+                .as_ref()
+                .is_some_and(|c| c.core.exec.active_session.lock().unwrap().is_some())
+        {
+            return Err(EngineError::SessionActive);
+        }
+        Ok(())
+    }
+
+    /// Verified entry with no open collection (R2/L5). Holds ownership across
+    /// validation, recovery, swap and the ordinary L2 open. A real existing file
+    /// still requires the consumer's safety backup before invoking this seam.
+    pub fn replace_verified_initial(
+        &self,
+        live: &std::path::Path,
+        config: crate::OpenConfig,
+        stage: crate::replace::ReplacementStage,
+        reason: crate::replace::ReplaceReason,
+        change: impl FnOnce(&mut meguri_storage::WriteScope<'_>) -> Result<(), meguri_storage::StorageError>,
+    ) -> Result<Collection, crate::replace::ReplaceError> {
+        use crate::replace::ReplaceError;
+        if self.op != reason.long_op() {
+            return Err(ReplaceError::NotExclusive);
+        }
+        let prior = {
+            let _control = self.engine.inner.control_lane.lock().unwrap();
+            let mut state = self.engine.lock_state();
+            self.check_held(&state)?;
+            if state.current.is_some()
+                || !matches!(
+                    state.state,
+                    LifecycleState::NoCollection | LifecycleState::Failed { .. }
+                )
+            {
+                return Err(ReplaceError::NotExclusive);
+            }
+            let prior = state.state.clone();
+            self.engine.set_state_locked(&mut state, LifecycleState::Opening);
+            prior
+        };
+        let directory = live
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(std::path::Path::new("."));
+        let activated = std::sync::atomic::AtomicBool::new(false);
+        let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let ownership = meguri_storage::lockfile::CollectionLock::acquire(directory).map_err(EngineError::from)?;
+            crate::device_state::reconcile(live, &config.publication_binding).map_err(EngineError::from)?;
+            // Retain the existing identity before beginning the first intent.
+            crate::device_state::ensure(live, &config.publication_binding, config.random.as_ref())
+                .map_err(EngineError::from)?;
+            let mut initializers = config.initializers.clone();
+            initializers.register(meguri_search::sqlfns::register);
+            initializers.register(meguri_sched::sqlfns::register);
+            let options = meguri_storage::OpenOptions::new(config.clock.as_ref(), config.random.as_ref())
+                .initializers(initializers);
+            meguri_storage::verified_replace::prepare(
+                &stage,
+                live,
+                &options,
+                config.clock.as_ref(),
+                reason.package(),
+                change,
+            )?;
+            let swapped = crate::replace::swap(
+                live,
+                stage,
+                reason,
+                &config.publication_binding,
+                config.random.as_ref(),
+                &activated,
+            );
+            let changed = activated.load(std::sync::atomic::Ordering::Acquire);
+            crate::device_state::reconcile(live, &config.publication_binding).map_err(EngineError::from)?;
+            if swapped.is_err() && !changed {
+                return Err(ReplaceError::Staging(swapped.unwrap_err()));
+            }
+            Ok::<_, ReplaceError>((ownership, swapped.err()))
+        }))
+        .unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref()).into()));
+        let (ownership, swap_error) = match prepared {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.engine.set_state(prior);
+                return if activated.load(std::sync::atomic::Ordering::Acquire) {
+                    Err(ReplaceError::AfterActivation {
+                        generation: None,
+                        source: Box::new(error),
+                    })
+                } else {
+                    Err(error)
+                };
+            }
+        };
+        let old = self.engine.generation();
+        let announcement = self.engine.inner.stream.reserve();
+        let opened = self
+            .engine
+            .open_raw_owned(live, config, Some(ownership))
+            .map_err(|error| ReplaceError::AfterActivation {
+                generation: None,
+                source: Box::new(error.into()),
+            })?;
+        {
+            let mut state = self.engine.lock_state();
+            if let Some(holder) = state.slot.as_mut().filter(|s| s.id == self.id) {
+                holder.generation = opened.generation();
+            }
+        }
+        announcement.fill(
+            opened.generation(),
+            None,
+            crate::EventKind::CollectionReplaced {
+                generation: opened.generation(),
+            },
+        );
+        for listener in self.engine.ports().generation_listeners {
+            listener.collection_replaced(old, opened.generation());
+        }
+        match swap_error {
+            Some(error) => Err(ReplaceError::AfterActivation {
+                generation: Some(opened.generation()),
+                source: Box::new(ReplaceError::Staging(error)),
+            }),
+            None => Ok(opened),
+        }
+    }
+
     /// Enters the exclusive phase (L7); only for the replacement ops.
     pub fn enter_exclusive(&self, cancellable: bool) -> Result<Exclusive<'_>, EngineError> {
         Exclusive::enter(self, cancellable)

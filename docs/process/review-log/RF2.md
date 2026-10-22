@@ -244,3 +244,74 @@ consumer remain required; no unit or RF2 acceptance is claimed.
 The package area stays inactive; parsing does not advertise executor support.
 Live-source backup, inspection, guarded replacement, FFI and picker integration
 remain pending within RF2. No full gate or unit acceptance is claimed here.
+
+
+## Replacement, live package writer and inspection checkpoint
+
+Replacement starts at `146c87b7`, session `s-20261022T154626Z-96381939`.
+Filtered run `20261022T154710Z-65004` implements private verified staging,
+R7 stamps and persistent R6 identity/intent/activation recovery. Sidecar writes
+share a strict durable read-modify-write seam; unreadable metadata is retained.
+Focused run `20261022T162507Z-90978` passed 28 tests, zero skips. Existing
+lifecycle, exclusive, rollover, session recovery, suspension, WAL durability,
+crash consistency and atomic-file checks passed all 91 tests in
+`20261022T162649Z-91985`, zero skips.
+
+Live package writing starts at `6817c975`, session
+`s-20261022T161330Z-07cac90c`, export `20261022T161356Z-82888`.
+It publishes one bounded package from the live Maintenance-reader snapshot,
+including committed WAL data. Snapshot modification time comes from that copy.
+Focused run `20261022T162925Z-93735` passed all 27 selected tests, zero skips.
+Independent review found no P0–P2 defect in this writer. Full periodic backup
+scheduling, retention and service composition are not claimed by this component.
+
+Inspection starts at `2c6db0e3`, session `s-20261022T155441Z-633703c8`,
+export `20261022T155517Z-70627`. It validates raw ZIP directory records before
+index allocation, bounds decompression and media metadata, explicitly rejects
+unsupported media, and gates/upgrades only an owned extracted copy.
+Initial focused run `20261022T161720Z-85248` failed compilation on a count
+conversion; no test ran. Fixer `s-20261022T162153Z-ed6f7a95`, export
+`20261022T162350Z-89167`, uses checked nonnegative i64 counts. It also closes
+review findings for malformed-column error classification and scheduler-marker
+allocation before rejection. Spec-writer guidance fixes P8's probe-value cap at
+4 MiB; commit `89d4563d` records it. Real pager tests cover oversized TEXT/BLOB.
+Combined focused run `20261022T163419Z-97415` passed 90 tests, with 17 filtered.
+
+Independent reviewer `/root/rf2_backend_review` covered correctness, contract
+conformance and source separation. Round 2 closes malformed-column handling,
+checked counts and scheduler-value bounds. Two related P2 fixes remain for the
+next filtered round: reject noninteger `col.ver` without loading its payload,
+and reuse that bounded probe before generic replacement opens a candidate.
+No acceptance or full-gate claim is made before those fixes and their checks.
+
+Unchanged privacy checks rejected complete owned comments/diagnostics/test names.
+Fixer `s-20261022T163040Z-0d038a2c`, export `20261022T163107Z-95290`, preserves
+all replacement/writer behavior and changes five complete prose/name lines.
+Independent delta review confirmed unchanged predicates and assertions.
+The combined scan still flags two own lines in schema/version.rs; the next
+filtered fix replaces those complete comments without reading private matches.
+
+The VM returned to its normal desktop after the authorized dedicated-VM restart.
+Antoine supplied a screenshot; no password entry was needed. The VM is running
+headless again. Doctor `20261022T162442Z-90258` passed SSH/runtime checks with
+91 GiB available. Catch-up `20261022T161447Z-83478` passed on clean master.
+Later catch-up `20261022T162653Z-92250` refused the dirty integration tree and
+ran no tests; rerun it after this checkpoint is committed.
+
+
+Round 3 starts at `a2f19705`, fixer `s-20261022T164000Z-b4c89cdc`.
+Filtered run `20261022T164036Z-2346` reuses the complete reviewed backend seed.
+It rejects noninteger version cells from SQLite record metadata, before loading
+the value, and calls the same bounded candidate probe before generic replacement.
+Real 64-MiB TEXT/BLOB regressions verify bounded pager reads, caller non-invocation
+and unchanged candidate/live bytes. Two complete own comments were rewritten.
+Independent round-3 review closes both prior P2 findings and finds no new P0/P1.
+Format `20261022T164254Z-3635` passed. Focused run `20261022T164322Z-4159`
+passed all 86 selected tests (185 excluded by selection). Unchanged privacy
+`20261022T164339Z-4719` and similarity `20261022T164342Z-4949` passed.
+
+Lint `20261022T164451Z-5603` fails two new engine style checks: unnecessary
+unwrap after an error test and a complex closure field type. Focused compilation
+also notes one unused test import. These remain explicit cleanup for the next
+filtered provider pass. This is a WIP source checkpoint, with no Unit trailer,
+no unit acceptance and no claim that RF2's full gate has passed.

@@ -9,10 +9,13 @@ publish.workspace = true
 [dependencies]
 meguri-model.workspace = true
 meguri-storage.workspace = true
+meguri-text.workspace = true
+tempfile.workspace = true
 sha2.workspace = true
 zip.workspace = true
 zstd.workspace = true
 
 [dev-dependencies]
+meguri-storage = { workspace = true, features = ["test-hooks"] }
 tempfile.workspace = true
 meguri-model = { workspace = true, features = ["test-hooks"] }

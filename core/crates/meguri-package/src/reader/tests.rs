@@ -222,3 +222,26 @@ fn reads_zip64_end_records_and_prefix_without_unbounded_metadata() {
         matches!(check(&zip64, &expected(b"x")), Err(Error::Corrupt { detail }) if detail == "central directory entry limit")
     );
 }
+
+#[test]
+fn optional_zip64_counts_with_ordinary_classic_fields_are_bounded_before_indexing() {
+    let good = package(&[8, 3], &frame(b"x"), &frame(b""));
+    let end = good.len() - 22;
+    let mut bytes = good[..end].to_vec();
+    bytes.extend_from_slice(b"PK\x06\x06");
+    bytes.extend_from_slice(&44_u64.to_le_bytes());
+    bytes.extend_from_slice(&[45, 0, 45, 0]);
+    bytes.extend_from_slice(&[0; 8]);
+    bytes.extend_from_slice(&400_001_u64.to_le_bytes());
+    bytes.extend_from_slice(&400_001_u64.to_le_bytes());
+    bytes.extend_from_slice(&u64::from(u32_at(&good, end + 12)).to_le_bytes());
+    bytes.extend_from_slice(&u64::from(u32_at(&good, end + 16)).to_le_bytes());
+    bytes.extend_from_slice(b"PK\x06\x07");
+    bytes.extend_from_slice(&0_u32.to_le_bytes());
+    bytes.extend_from_slice(&(end as u64).to_le_bytes());
+    bytes.extend_from_slice(&1_u32.to_le_bytes());
+    bytes.extend_from_slice(&good[end..]); // ordinary classic count stays four
+    assert!(
+        matches!(check(&bytes, &expected(b"x")), Err(Error::Corrupt { detail }) if detail == "central directory entry limit")
+    );
+}

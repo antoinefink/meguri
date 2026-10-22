@@ -204,13 +204,13 @@ impl OpenedCollection {
     pub fn save_sidecar(&self, clean: bool) -> Result<(), StorageError> {
         use crate::ReadRows;
         let path = crate::atomic_file::parent(&self.path).join("meguri-sidecar.json");
-        let mut sidecar = crate::sidecar::Sidecar::load(&path)?;
         let col = self.writer.col()?;
-        sidecar.clean_shutdown = clean;
-        sidecar.last_mod = col.modified.0;
-        sidecar.last_scm = col.schema_modified.0;
-        sidecar.upgrade_in_progress = false;
-        sidecar.save(&path)
+        crate::sidecar::Sidecar::update(&path, |sidecar, _| {
+            sidecar.clean_shutdown = clean;
+            sidecar.last_mod = col.modified.0;
+            sidecar.last_scm = col.schema_modified.0;
+            sidecar.upgrade_in_progress = false;
+        })
     }
 
     /// The storage side of closing (C10), once every reader is closed: the
@@ -258,17 +258,13 @@ pub fn open_collection(path: &Path, options: &OpenOptions<'_>) -> Result<OpenedC
     // before the first write; failed upgrades deliberately leave this marker.
     let sidecar_path = crate::atomic_file::parent(path).join("meguri-sidecar.json");
     let (previous, known_previous) = if options.managed {
-        let prior = crate::sidecar::Sidecar::load_existing(&sidecar_path)
-            .map_err(|e| OpenError::Io { detail: e.to_string() })?;
-        let known = prior.is_some();
-        let mut value = prior.unwrap_or_default();
-        let previous = value.clone();
-        value.clean_shutdown = false;
-        value.upgrade_in_progress = upgrading;
-        value
-            .save(&sidecar_path)
-            .map_err(|e| OpenError::Io { detail: e.to_string() })?;
-        (previous, known)
+        crate::sidecar::Sidecar::update(&sidecar_path, |value, known| {
+            let previous = value.clone();
+            value.clean_shutdown = false;
+            value.upgrade_in_progress = upgrading;
+            (previous, known)
+        })
+        .map_err(|e| OpenError::Io { detail: e.to_string() })?
     } else {
         (crate::sidecar::Sidecar::default(), false)
     };

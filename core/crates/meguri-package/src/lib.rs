@@ -1,4 +1,7 @@
 //! Collection-only latest-format package publication (package/container P11).
+mod inspection;
+mod inspection_zip;
+mod media_map;
 mod reader;
 mod writer;
 
@@ -6,7 +9,14 @@ use meguri_model::{clock::Clock, rng::RandomSource};
 use meguri_storage::{StorageError, atomic_file::Purpose, space::SpaceProvider};
 use std::{fmt, path::Path};
 
-pub use writer::write_collection_package_from_standalone;
+pub use inspection::{
+    CollectionPackageInspectContext, InspectedCollection, StagedCollection, inspect_collection_package,
+};
+pub use meguri_storage::package_inspection::CandidateFacts as CollectionPackageFacts;
+pub use writer::{
+    LiveCollectionPackageWritten, write_collection_package_from_live, write_collection_package_from_standalone,
+};
+pub type CollectionPackageInspectError = CollectionPackageWriteError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Finalisation {
@@ -30,6 +40,8 @@ pub struct CollectionPackageWriteContext<'a> {
 pub enum CollectionPackageWriteError {
     TooNew,
     UnsupportedFormat,
+    UnsupportedMedia,
+    SchemaUnsupported { gate: meguri_storage::OpenError },
     Corrupt { detail: String },
     InsufficientSpace { needed: u64, available: u64 },
     DiskFull,

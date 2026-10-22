@@ -28,6 +28,7 @@ mod live_snapshot;
 pub mod lockfile;
 pub mod media;
 pub mod open;
+pub mod package_inspection;
 pub mod paging;
 pub mod paths;
 mod pragmas;
@@ -40,6 +41,7 @@ pub mod sidecar;
 pub mod snapshot;
 pub mod space;
 pub mod stamp;
+pub mod verified_replace;
 pub mod write_scope;
 
 pub use checkpoint::CheckpointOutcome;

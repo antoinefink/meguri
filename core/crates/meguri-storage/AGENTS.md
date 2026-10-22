@@ -29,3 +29,4 @@
 
 - `bootstrap::create` stages the entire new collection and publishes with a same-directory hard link: never replace that with an overwriting rename. The engine freezes the creation clock and supplies the rows; the storage callback runs only on the unpublished file.
 - `collection_package` writes only new files in a caller-owned U32 staging directory. Its standalone snapshot opens immutable after refusing WAL/journal siblings; never use that seam for a live collection. The P7 schema-11 placeholder is authored through the model codecs, independently of collection fixtures.
+- Sidecar consumers mutate through the shared strict locked RMW; never pair a detached load with save for independent device metadata. Partial F3 remains unclean, but unreadable JSON must survive untouched. `verified_replace` owns candidate SQL/finalisation; only operation-owned reserved staging may reach it.

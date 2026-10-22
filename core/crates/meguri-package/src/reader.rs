@@ -56,7 +56,11 @@ fn bounded_directory(file: &mut File, check: &(dyn Fn() -> bool + Sync)) -> Resu
     let mut central_end = tail_start + end as u64;
     let mut central_offset = u64::from(u32_at(&tail, end + 16));
     let mut zip64_record_offset = None;
-    if count == 0xffff || size == 0xffff_ffff || u32_at(&tail, end + 16) == 0xffff_ffff {
+    if count == 0xffff
+        || size == 0xffff_ffff
+        || u32_at(&tail, end + 16) == 0xffff_ffff
+        || (end >= 20 && &tail[end - 20..end - 16] == b"PK\x06\x07")
+    {
         if end < 20
             || &tail[end - 20..end - 16] != b"PK\x06\x07"
             || u32_at(&tail, end - 16) != 0
@@ -79,10 +83,23 @@ fn bounded_directory(file: &mut File, check: &(dyn Fn() -> bool + Sync)) -> Resu
         {
             return Err(corrupt("multi-disk ZIP64"));
         }
-        count = u64_at(&tail, record + 32);
-        size = u64_at(&tail, record + 40);
+        let zip64_count = u64_at(&tail, record + 32);
+        let zip64_size = u64_at(&tail, record + 40);
+        let zip64_offset = u64_at(&tail, record + 48);
+        if zip64_count > 400_000 {
+            return Err(corrupt("central directory entry limit"));
+        }
+        if (count != 0xffff && count != zip64_count)
+            || (u16_at(&tail, end + 8) != 0xffff && u64::from(u16_at(&tail, end + 8)) != zip64_count)
+            || (size != 0xffff_ffff && size != zip64_size)
+            || (central_offset != 0xffff_ffff && central_offset != zip64_offset)
+        {
+            return Err(corrupt("ambiguous ZIP64/classic metadata"));
+        }
+        count = zip64_count;
+        size = zip64_size;
         central_end = tail_start + record as u64;
-        central_offset = u64_at(&tail, record + 48);
+        central_offset = zip64_offset;
         zip64_record_offset = Some(u64_at(&tail, end - 12));
     } else if u64::from(u16_at(&tail, end + 8)) != count {
         return Err(corrupt("ZIP directory counts disagree"));
@@ -140,12 +157,24 @@ fn bounded_directory(file: &mut File, check: &(dyn Fn() -> bool + Sync)) -> Resu
 /// Check the limit before passing any excess bytes to a consumer. Read only
 /// up to the first byte past the bound, including when the source lies about
 /// its declared uncompressed size.
-fn bounded_read(
-    mut input: impl Read,
+pub(crate) fn bounded_read(
+    input: impl Read,
     limit: u64,
     total: &mut u64,
     check: &(dyn Fn() -> bool + Sync),
     mut consume: impl FnMut(&[u8]),
+) -> Result<u64> {
+    bounded_read_fallible(input, limit, total, check, |bytes| {
+        consume(bytes);
+        Ok(())
+    })
+}
+fn bounded_read_fallible(
+    mut input: impl Read,
+    limit: u64,
+    total: &mut u64,
+    check: &(dyn Fn() -> bool + Sync),
+    mut consume: impl FnMut(&[u8]) -> Result<()>,
 ) -> Result<u64> {
     let mut buffer = [0; 64 * 1024];
     let mut count = 0;
@@ -162,40 +191,77 @@ fn bounded_read(
         }
         count += n as u64;
         *total += n as u64;
-        consume(&buffer[..n]);
+        consume(&buffer[..n])?;
     }
 }
-fn decode_error(error: std::io::Error) -> Error {
+pub(crate) fn decode_error(error: std::io::Error) -> Error {
     if error.raw_os_error().is_some() {
         error.into()
     } else {
         corrupt(format!("entry decode/CRC: {error}"))
     }
 }
-fn decoded_limit(compressed: u64, absolute: u64) -> u64 {
+pub(crate) fn decoded_limit(compressed: u64, absolute: u64) -> u64 {
     absolute.min(compressed.saturating_mul(1000).max(RATIO_FLOOR))
 }
-fn zstd_read(
+pub(crate) fn zstd_read(
     input: impl Read,
     limit: u64,
     total: &mut u64,
     check: &(dyn Fn() -> bool + Sync),
-    consume: impl FnMut(&[u8]),
+    mut consume: impl FnMut(&[u8]),
 ) -> Result<u64> {
-    let mut input = input;
+    zstd_read_fallible(input, limit, total, check, |bytes| {
+        consume(bytes);
+        Ok(())
+    })
+}
+pub(crate) fn zstd_read_fallible(
+    input: impl Read,
+    limit: u64,
+    total: &mut u64,
+    check: &(dyn Fn() -> bool + Sync),
+    consume: impl FnMut(&[u8]) -> Result<()>,
+) -> Result<u64> {
+    // Even an arbitrarily long run of skippable frames must observe cancel
+    // while the decoder is looking for its next output byte.
+    struct CheckedInput<'a, R> {
+        input: R,
+        check: &'a (dyn Fn() -> bool + Sync),
+    }
+    impl<R: Read> Read for CheckedInput<'_, R> {
+        fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+            if (self.check)() {
+                return Err(std::io::Error::other("package read cancelled"));
+            }
+            self.input.read(bytes)
+        }
+    }
+    let mut input = CheckedInput { input, check };
     let mut magic = [0; 4];
-    input.read_exact(&mut magic).map_err(decode_error)?;
+    input
+        .read_exact(&mut magic)
+        .map_err(|error| if check() { Error::Cancelled } else { decode_error(error) })?;
     if magic != [0x28, 0xb5, 0x2f, 0xfd] && !(magic[0] & 0xf0 == 0x50 && magic[1..] == [0x2a, 0x4d, 0x18]) {
         return Err(corrupt("zstd magic"));
     }
-    let mut decoder = zstd::stream::read::Decoder::new(std::io::Cursor::new(magic).chain(input))
-        .map_err(|error| corrupt(format!("zstd header: {error}")))?;
+    let mut decoder = zstd::stream::read::Decoder::new(std::io::Cursor::new(magic).chain(input)).map_err(|error| {
+        if check() {
+            Error::Cancelled
+        } else {
+            corrupt(format!("zstd header: {error}"))
+        }
+    })?;
     decoder
         .window_log_max(27)
         .map_err(|error| corrupt(format!("zstd window: {error}")))?;
     // Decoder's default reads concatenated/skippable frames through EOF,
     // verifying checksums and rejecting trailing non-frame bytes.
-    bounded_read(&mut decoder, limit, total, check, consume)
+    let result = bounded_read_fallible(&mut decoder, limit, total, check, consume);
+    if result.is_err() {
+        cancelled(check)?;
+    }
+    result
 }
 
 pub(crate) fn verify(path: &Path, expected: &SnapshotDigest, check: &(dyn Fn() -> bool + Sync)) -> Result<()> {
@@ -271,7 +337,7 @@ pub(crate) fn verify(path: &Path, expected: &SnapshotDigest, check: &(dyn Fn() -
 }
 
 // P3's protobuf message, including bounded unknown groups (model P2).
-fn meta_version(mut bytes: &[u8]) -> Result<i32> {
+pub(crate) fn meta_version(mut bytes: &[u8]) -> Result<i32> {
     let mut version = 0;
     let mut groups = Vec::new();
     while !bytes.is_empty() {
