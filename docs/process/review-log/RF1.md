@@ -402,3 +402,21 @@ Antoine authorized VM permission setup directly, then confirmed ongoing
 permission to modify this dedicated VM. Host settings remain out of scope.
 The strict native AX focus case still requires an actual passing execution.
 No Unit acceptance or full-gate pass is claimed here.
+
+Critic `20261022T092442Z-93102` reported 22 high findings.
+Independent review reduced four notice findings to one confirmed defect.
+Eight overflow findings concern a ScrollView; still images do not prove it
+cannot scroll. Four Home findings omit the actual shell shown in drive evidence.
+Six completion findings come from bare preview content. Their transparent Mac
+images were 336 pixels high. Fix the fixture rather than infer a window defect.
+The generated ledger update failed privacy checks on its own prose. Its report
+and receipt remain intact; only that uncommitted ledger update was restored.
+No critic pass or design approval is claimed.
+
+Filtered fix `a6cacbb3`, session `s-20261022T093301Z-1df0122e`, preserves notice
+height and uses the full review layout for completion fixtures. The reviewer
+found no remaining P0/P1 in that patch. Rendered closure remains pending.
+VM helper build `20261022T093210Z-4572` failed on two SDK/compiler issues.
+The fix uses tableRows and a preconcurrency framework import.
+Run `20261022T093549Z-13025` built, but executed zero cases due to plan exclusion.
+Its nominal pass does not prove setup. Selection and result validation need fixes.
