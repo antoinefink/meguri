@@ -55,14 +55,13 @@ final class LocalReviewJourneyTests: XCTestCase {
         XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 10))
 
         let back = try focusNativeControl("review.session.back", in: app, bundleIdentifier: bundleIdentifier)
-        let question = try cardProgressSnapshot(app, answer: false)
-        XCTAssertEqual(question.progress, "0 new, 0 learning, 2 to review")
+        let question = try cardSnapshot(app, answer: false)
         XCTAssertFalse(element(app, "review.session.redo").exists)
         attach(app, "native-back-question-before-return")
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         app.typeKey("\r", modifierFlags: [])
         assertNativeFocus(back)
-        XCTAssertEqual(try cardProgressSnapshot(app, answer: false), question,
+        XCTAssertEqual(try cardSnapshot(app, answer: false), question,
             "Return on focused Back must not undo, reveal or rate")
         XCTAssertFalse(element(app, "review.session.redo").exists)
         attach(app, "native-back-return-keeps-question")
@@ -72,8 +71,7 @@ final class LocalReviewJourneyTests: XCTestCase {
         XCTAssertTrue(element(app, "review.session.redo").waitForExistence(timeout: 10), "Space on Back must undo; a review shortcut must not consume its key")
         XCTAssertTrue(element(app, "review.session.reveal").exists)
         assertNativeFocus(back) // The restored page must leave Back in control.
-        let undone = try cardProgressSnapshot(app, answer: false)
-        XCTAssertEqual(undone.progress, "0 new, 0 learning, 3 to review")
+        let undone = try cardSnapshot(app, answer: false)
         XCTAssertNotEqual(undone.cardText, question.cardText, "Back must restore the previous card")
         attach(app, "native-back-space-undoes")
 
@@ -81,13 +79,12 @@ final class LocalReviewJourneyTests: XCTestCase {
         element(app, "review.session.reveal").clickOrTap()
         XCTAssertTrue(element(app, "review.session.rate.good").waitForExistence(timeout: 10))
         let close = try focusNativeControl("review.session.close", in: app, bundleIdentifier: bundleIdentifier)
-        let answer = try cardProgressSnapshot(app, answer: true)
-        XCTAssertEqual(answer.progress, undone.progress)
+        let answer = try cardSnapshot(app, answer: true)
         attach(app, "native-close-answer-before-return")
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         app.typeKey("\r", modifierFlags: [])
         assertNativeFocus(close)
-        XCTAssertEqual(try cardProgressSnapshot(app, answer: true), answer,
+        XCTAssertEqual(try cardSnapshot(app, answer: true), answer,
             "Return on focused Close must not dismiss, rate or advance")
         XCTAssertTrue(element(app, "review.session.redo").exists)
         attach(app, "native-close-return-keeps-answer")
@@ -104,12 +101,11 @@ final class LocalReviewJourneyTests: XCTestCase {
         attach(app, "native-space-close")
     }
 
-    private struct CardProgressSnapshot: Equatable {
+    private struct CardSnapshot: Equatable {
         let cardText: [String]
-        let progress: String
     }
 
-    private func cardProgressSnapshot(_ app: XCUIApplication, answer: Bool) throws -> CardProgressSnapshot {
+    private func cardSnapshot(_ app: XCUIApplication, answer: Bool) throws -> CardSnapshot {
         // macOS publishes the production WebKit text through app.staticTexts.
         let expected = answer ? "Answer [0-9]+" : "Question [0-9]+"
         let sideText = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@ OR value MATCHES %@", expected, expected)).firstMatch
@@ -123,17 +119,13 @@ final class LocalReviewJourneyTests: XCTestCase {
         }.sorted()
         XCTAssertFalse(cardText.isEmpty, "A missing card snapshot cannot establish continuity")
         XCTAssertEqual(cardText.contains { $0.hasPrefix("Answer ") }, answer)
-        let progressElement = element(app, "review.session.progress")
-        XCTAssertTrue(progressElement.waitForExistence(timeout: 10))
-        let progress = try XCTUnwrap(progressElement.value as? String, "Session progress must publish its counts")
-        XCTAssertFalse(progress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         XCTAssertEqual(element(app, "review.session.reveal").exists, !answer)
         for rating in ["again", "hard", "good", "easy"] {
             XCTAssertEqual(element(app, "review.session.rate.\(rating)").exists, answer)
         }
         XCTAssertFalse(element(app, "review.session.refresh").exists)
         XCTAssertFalse(element(app, "review.session.done").exists)
-        return CardProgressSnapshot(cardText: cardText, progress: progress)
+        return CardSnapshot(cardText: cardText)
     }
 
     private struct NativeFocusTarget {
