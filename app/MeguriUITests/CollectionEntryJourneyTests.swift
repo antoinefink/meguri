@@ -102,6 +102,14 @@ import notify
         #else
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("h", modifierFlags: .command)
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            NSRunningApplication.runningApplications(withBundleIdentifier: bundle).contains {
+                !$0.isTerminated && $0.isHidden
+            }
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [hidden], timeout: 10), .completed)
+        app.activate()
+        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
         #endif
         try app.bringToFront(bundleIdentifier: bundle)
         let close = element(app, "review.session.close")
