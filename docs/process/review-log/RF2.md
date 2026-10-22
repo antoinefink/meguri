@@ -670,3 +670,6 @@ constant types and run the same first-import case. No acceptance claim.
 - Mac `a11y/20261022T210712Z-25128`: FAIL, 1 passed and 1 failed. Progress role, frame and label pass. The String cast fails. `ui-tree/20261022T210920Z-27250` PASS records the native progress value as 0.42.
 - Fixer `s-20261022T211009Z-98befd29`, base `3945a99d`, export `20261022T211026Z-29283`, checkpoint `d2945846`. Independent review: no findings. Mac requires a number equal to 0.42 within 0.000001; other platforms retain exact text. All other assertions remain enabled.
 - Doctor `20261022T211036Z-29620`: PASS. VM running, SSH ready, 62 GiB free.
+- Mac `a11y/20261022T211131Z-30870`: FAIL. Native progress role, frame, label and numeric value pass. The separate stage has an empty label; the captured native hierarchy records its text in value.
+- Export `20261022T211328Z-32720`, same fixer session, checkpoint `7d3ec912`: Mac checks the exact stage String value; other platforms check the exact label. Independent review: no findings. No product change.
+- Mac `a11y/20261022T211442Z-33905`: PASS, 2 tests, no skips. Five import states and Home empty/typical pass, with no unsuppressed findings or touch-target violations. Input `e303130bb922cbc5217b32125f3113197d22dfd3e169a125bf0bf17979a0eee7`.
