@@ -152,14 +152,10 @@ fn config(session: &Session<'_>, key: &str) -> Result<Option<ConfigValue>, ExecE
         .map_err(|e| ExecError::new("core_error", e.to_string()))
 }
 
-/// Q8 from the scenario clock and the collection's config, with the values
-/// this adapter cannot give yet: the day clock is U40's, and Q8 gives no
-/// value for a missing `curDeck`. A plan that reads one of them is a run
-/// error, never a search on a made-up value.
+/// Q8 from the scenario clock and config. Day values are filled on demand
+/// after planning, before execution; a missing `curDeck` remains unavailable.
 fn context(session: &Session<'_>) -> Result<(SearchContext, ContextReads), ExecError> {
-    let mut unknown = ContextReads::NONE
-        .with(ContextValue::Today)
-        .with(ContextValue::NextDayAt);
+    let mut unknown = ContextReads::NONE;
     let current_deck = match config(session, "curDeck")?.as_ref().and_then(ConfigValue::as_i64) {
         Some(id) => id,
         None => {
@@ -194,17 +190,22 @@ fn context(session: &Session<'_>) -> Result<(SearchContext, ContextReads), ExecE
 /// S1: one output per request.
 fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
     let requests = SearchRequest::from_list(list(request)?).map_err(|e| invalid(e.to_string()))?;
-    let (context, unknown) = context(session)?;
+    let (mut context, unknown) = context(session)?;
+    let mut day_supplied = false;
     let mut outputs = Vec::with_capacity(requests.len());
     for request in &requests {
         let mode = match request.kind {
             SearchKind::Cards => SearchMode::Cards,
             SearchKind::Notes => SearchMode::Notes,
         };
-        let plan = match parse(&request.query)
-            .map_err(BuildError::Search)
-            .and_then(|query| Plan::build(&query, mode, &context))
-        {
+        let query = match parse(&request.query) {
+            Ok(query) => query,
+            Err(error) => {
+                outputs.push(error_value(&error));
+                continue;
+            }
+        };
+        let mut plan = match Plan::build(&query, mode, &context) {
             Ok(plan) => plan,
             Err(BuildError::Search(error)) => {
                 outputs.push(error_value(&error));
@@ -220,6 +221,17 @@ fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Val
                 ));
             }
         };
+        if !day_supplied
+            && (plan.reads().contains(ContextValue::Today) || plan.reads().contains(ContextValue::NextDayAt))
+        {
+            let day = super::sched::day_query_now(session)?.day;
+            context.today = day.today;
+            context.next_day_at = day.next_day_at;
+            day_supplied = true;
+            // Only context changed; the same parsed query must still compile.
+            plan = Plan::build(&query, mode, &context)
+                .map_err(|e| ExecError::new("core_error", format!("search context replan: {e:?}")))?;
+        }
         if let Some(value) = plan.reads().iter().find(|v| unknown.contains(*v)) {
             return Err(ExecError::new(
                 "unsupported_observation",

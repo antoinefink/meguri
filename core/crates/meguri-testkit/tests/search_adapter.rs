@@ -144,3 +144,68 @@ fn search_without_a_collection_is_an_invalid_scenario() {
     let error = without_new_collection.run(&loaded).unwrap_err();
     assert_eq!((error.kind.as_str(), error.step), ("invalid_scenario", Some(0)));
 }
+
+// state-and-flags S1, S3: real day context, scenario time and configured
+// learn-ahead. Only one note exists among the matching cards.
+#[test]
+fn due_search_uses_requested_day_clock_scenario_now_and_configured_learn_ahead() {
+    let out = run(r#"  - db_exec: {sql: "UPDATE col SET crt=1894680000"}
+  - set_config: {key: rollover, value: 4}
+  - set_config: {key: collapseTime, value: 60}
+  - db_exec: {sql: "UPDATE cards SET queue=1, due=1894701660 WHERE id=201"}
+  - db_exec: {sql: "UPDATE cards SET queue=2, due=0 WHERE id=203"}
+  - db_exec: {sql: "INSERT INTO cards (id,nid,did,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data) VALUES (202,101,1,1,0,0,0,4,1894701661,0,0,0,0,0,0,0,0,'')"}
+  - observe:
+      - search: [{query: 'is:due'}, {query: 'is:due', kind: notes}]
+  - set_config: {key: collapseTime, value: 0}
+  - observe:
+      - search: [{query: 'is:due'}]
+  - set_clock: '2030-01-15T10:01:01'
+  - observe:
+      - search: [{query: 'is:due'}]
+  - db_exec: {sql: "UPDATE cards SET queue=2, due=1 WHERE id=201"}
+  - observe:
+      - search: [{query: 'is:due'}]
+  - set_clock: '2030-01-16T04:00:00'
+  - observe:
+      - search: [{query: 'is:due'}]
+"#);
+    let searches = out["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|step| step.get("search"))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        searches,
+        vec![
+            json!([{"ids": [201, 203]}, {"ids": [101]}]),
+            json!([{"ids": [203]}]),
+            json!([{"ids": [201, 202, 203]}]),
+            json!([{"ids": [202, 203]}]),
+            json!([{"ids": [201, 202, 203]}]),
+        ]
+    );
+}
+
+// S2-S3: a buried-only plan must not even request day maintenance. These
+// old buried rows would be unburied by a compatibility day query.
+#[test]
+fn buried_search_reads_no_day_and_preserves_cards_config_and_collection() {
+    let out = run(
+        r#"  - db_exec: {sql: "UPDATE cards SET queue=CASE id WHEN 201 THEN -2 ELSE -3 END"}
+  - db_exec: {sql: "DELETE FROM config WHERE key='lastUnburied'"}
+  - observe: [{db_dump: {tables: [cards, config, col]}}]
+  - observe:
+      - search: [{query: 'is:buried'}, {query: '-is:buried'}, {query: 'is:buried', kind: notes}]
+  - observe: [{db_dump: {tables: [cards, config, col]}}]
+"#,
+    );
+    let steps = out["steps"].as_array().unwrap();
+    let dumps = steps.iter().filter_map(|step| step.get("db_dump")).collect::<Vec<_>>();
+    assert_eq!(dumps.len(), 2);
+    assert_eq!(dumps[0], dumps[1]);
+    let searches = steps.iter().find_map(|step| step.get("search")).unwrap();
+    assert_eq!(searches, &json!([{"ids": [201, 203]}, {"ids": []}, {"ids": [101]}]));
+}

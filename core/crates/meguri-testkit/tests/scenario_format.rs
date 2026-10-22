@@ -924,7 +924,14 @@ fn deck_options_ops_follow_the_schema() {
         ("[{save_deck_options: {deck: \"\"}}]", "non-empty deck"),
         ("[{save_deck_options: {deck: A, preset: \"\"}}]", "non-empty name"),
         ("[{save_deck_options: {deck: A, preset: null}}]", "invalid type"),
-        ("[{save_deck_options: {deck: A, options: null}}]", "invalid type"),
+        (
+            "[{save_deck_options: {deck: A, options: null}}]",
+            "an op argument takes a mapping, found null",
+        ),
+        (
+            "[{save_deck_options: {deck: A, options: 7}}]",
+            "an op argument takes a mapping, found 7",
+        ),
         ("[{save_deck_options: {deck: A, colour: red}}]", "unknown field"),
         ("[{save_deck_options: {deck: A, options: {name: P}}}]", "unknown field"),
         (
@@ -939,7 +946,10 @@ fn deck_options_ops_follow_the_schema() {
             "[{save_deck_options: {deck: A, deck_desired_retention: \"0.8\"}}]",
             "invalid type",
         ),
-        ("[{save_deck_options: A}]", "invalid type"),
+        (
+            "[{save_deck_options: A}]",
+            "an op argument takes a mapping, found \"A\"",
+        ),
         ("[{observe: [ignored_before_count]}]", "does not take"),
         (
             "[{observe: [{ignored_before_count: {preset: P}}]}]",

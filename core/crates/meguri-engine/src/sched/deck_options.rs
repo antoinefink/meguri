@@ -551,7 +551,9 @@ pub fn ignored_before_count(
     let lease = collection.reader(ReaderRole::Maintenance)?;
     let rows = lease.snapshot()?;
     let p = draft.preset(key)?;
-    let mut preset = draft.materialize(p)?;
+    // M5 uses only identity and the hidden param_search, which visible edits
+    // cannot change. Do not parse unrelated, possibly invalid editor fields.
+    let mut preset = p.source.clone();
     preset.id = DeckConfigId(key);
     super::memory::ignored_before_count(
         &*rows,
@@ -757,17 +759,17 @@ where
                         }
                         _ => None,
                     };
-                    if let Some((o, n)) = lists {
-                        if let Some(left) = options::remap::remaining(card.remaining_steps, o, n) {
-                            card.remaining_steps = left;
-                            changed = true;
-                        }
+                    if let Some((o, n)) = lists
+                        && let Some(left) = options::remap::remaining(card.remaining_steps, o, n)
+                    {
+                        card.remaining_steps = left;
+                        changed = true;
                     }
                     if changed {
                         ctx.scope().put(&card)?;
                     }
                     processed += 1;
-                    if processed % 256 == 0 {
+                    if processed.is_multiple_of(256) {
                         ctx.check_cancel()?;
                         if let Some(p) = ctx.progress() {
                             p.report(processed, None);
@@ -920,10 +922,10 @@ pub fn save_preferences(
         spec = spec.progress(progress.clone());
     }
     let result = collection.run(spec, move |ctx| {
-        if let Some(hour) = change.rollover {
-            if f64::from(SchedConfig::new(ctx.scope()).rollover_hour()?) != hour {
-                sched_config::set_rollover_hour(ctx.scope(), hour as u8)?;
-            }
+        if let Some(hour) = change.rollover
+            && f64::from(SchedConfig::new(ctx.scope()).rollover_hour()?) != hour
+        {
+            sched_config::set_rollover_hour(ctx.scope(), hour as u8)?;
         }
         if let Some(minutes) = change.learn_ahead_minutes {
             let seconds = (minutes as u32) * 60;
@@ -931,10 +933,10 @@ pub fn save_preferences(
                 sched_config::set_collapse_time(ctx.scope(), seconds)?;
             }
         }
-        if let Some(value) = change.load_balancer {
-            if SchedConfig::new(ctx.scope()).load_balancer_enabled()? != value {
-                sched_config::set_load_balancer_enabled(ctx.scope(), value)?;
-            }
+        if let Some(value) = change.load_balancer
+            && SchedConfig::new(ctx.scope()).load_balancer_enabled()? != value
+        {
+            sched_config::set_load_balancer_enabled(ctx.scope(), value)?;
         }
         Ok(())
     })?;

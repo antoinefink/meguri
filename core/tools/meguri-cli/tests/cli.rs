@@ -71,6 +71,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "reparent_decks",
             "reparent_tags",
             "restore_media_trash",
+            "save_deck_options",
             "set_clock",
             "set_config",
             "set_current_deck",
@@ -78,6 +79,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "set_deck_preset",
             "set_due",
             "set_flag",
+            "set_scheduling_prefs",
             "set_tag_collapsed",
             "suspend",
             "trash_media",
@@ -163,14 +165,14 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "undo_status",
         ])
     );
-    // dsl.md D7.2: 67 ops besides observe, the actor ops of sync-ops.md, the
+    // dsl.md D7.2: 68 ops besides observe, the actor ops of sync-ops.md, the
     // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
     // set_config, undo-ops.md's undo, redo and remove_config, the eight ops
     // of tag-ops.md, browser-config-ops.md's browser_config_set, the note
     // type ops of notetype-ops.md and the deck ops of deck-ops.md, plus save_deck_options
-    // and the scheduling operations of sched-ops.md.
+    // and set_scheduling_prefs, and the scheduling operations of sched-ops.md.
     // D8 also lists the declared answer.filtered part; Meguri does not support it.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 68);
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 69);
     for op in [
         "actor",
         "sync",
@@ -183,6 +185,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         "add_deck",
         "set_deck_preset",
         "save_deck_options",
+        "set_scheduling_prefs",
         "enable_fsrs",
         "enable_v3",
         "add_notetype",

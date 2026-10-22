@@ -470,6 +470,47 @@ fn snapshot_order_use_counts_staging_removal_and_ignore_count_are_real_reads() {
     );
 }
 #[test]
+fn ignore_count_with_invalid_step_edits_keeps_stored_rows_and_staged_values() {
+    let h = common::fresh();
+    h.collection
+        .run(OpSpec::named("count setup", OpSource::Maintenance), |ctx| {
+            for id in [100, 101] {
+                let mut card = common::card(NoteId(id), 0);
+                card.id = CardId(id);
+                card.card_type = CardType::Review;
+                card.queue = CardQueue::Review;
+                ctx.scope().put(&card)?;
+            }
+            let mut log = common::revlog(CardId(100));
+            log.id = RevlogId(common::NOW_MS);
+            log.kind = meguri_model::revlog::RevlogKind::Learning;
+            ctx.scope().put(&log)?;
+            Ok(())
+        })
+        .unwrap();
+    let mut d = draft(&h, DeckId(1));
+    d.edit(Some(1), Field::LearnSteps, Value::Text("broken".into()))
+        .unwrap();
+    d.edit(Some(1), Field::RelearnSteps, Value::Text("also broken".into()))
+        .unwrap();
+    let clone = d.add("Invalid clone", true, h.clock.as_ref()).unwrap().unwrap();
+    let staged = format!("{d:?}");
+    let before = dump(&h);
+    let undo = h.collection.peek_undo(UndoScope::Global).unwrap();
+    for (key, expected) in [(1, (1, 2)), (clone, (0, 0))] {
+        let count = options::ignored_before_count(&h.collection, &d, key, "2030-01-01").unwrap();
+        assert_eq!((count.included, count.total), expected);
+    }
+    assert_eq!(format!("{d:?}"), staged);
+    assert_eq!(dump(&h), before);
+    assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), undo);
+    assert!(
+        d.validate("2030-01-15")
+            .iter()
+            .any(|issue| issue.field == Field::LearnSteps)
+    );
+}
+#[test]
 fn selecting_limit_and_retention_tabs_clears_only_more_specific_draft_values() {
     let h = common::fresh();
     let mut d = draft(&h, DeckId(1));

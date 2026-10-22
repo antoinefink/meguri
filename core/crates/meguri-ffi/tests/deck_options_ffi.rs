@@ -140,5 +140,10 @@ fn runtime_jobs_expose_snapshot_validation_staging_save_stale_and_preferences() 
     let read = start_scheduling_preferences().unwrap();
     assert_eq!(finish(&rx, read.handle.id), JobOutcome::Succeeded);
     assert_eq!(read.result.result().unwrap().unwrap().learn_ahead_minutes, 33);
-    collection::close_collection().unwrap();
+    meguri_ffi::lifecycle::close_collection().unwrap();
+    assert!(matches!(
+        meguri_ffi::lifecycle::collection_lifecycle().unwrap(),
+        meguri_ffi::lifecycle::CollectionLifecycle::NoCollection
+    ));
+    assert!(matches!(start_deck_options(1), Err(CoreError::Unavailable { .. })));
 }

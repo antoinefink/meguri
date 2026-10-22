@@ -1,8 +1,8 @@
 //! The SQL writer's pieces (`specs/search/query-model.md` Q9): bound
 //! parameters, the statement around the predicate, and each term's SQL.
 
-use crate::ast::Term;
-use crate::context::{ContextReads, SearchContext};
+use crate::ast::{CardState, Term};
+use crate::context::{ContextReads, ContextValue, SearchContext};
 use crate::error::ErrorKind;
 
 use super::{Rows, SearchMode};
@@ -63,11 +63,33 @@ pub enum TermOutcome {
 /// Q9: the term's SQL. U80 compiles the whole collection; the text terms are
 /// U81's and the name, id, state, property and history terms U82's, which
 /// replace their stubs here.
-pub fn compile_term(term: &Term, _env: &TermEnv<'_>, _params: &mut Params) -> Result<TermOutcome, ErrorKind> {
+pub fn compile_term(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermOutcome, ErrorKind> {
     Ok(match term {
         // Q2: true for every row.
         Term::WholeCollection => TermOutcome::Sql(TermSql {
             sql: "1".to_owned(),
+            slow: false,
+            reads: ContextReads::NONE,
+        }),
+        // state-and-flags S1, S3: compare stored due, never type or odue.
+        Term::State(CardState::Due) => {
+            let today = params.bind(Param::Integer(i64::from(env.ctx.today)));
+            // S3 permits saturating the upper cutoff over the whole i64 domain.
+            // Compute before SQL so SQLite cannot promote an overflow to REAL.
+            let cutoff = env.ctx.now.saturating_add(i64::from(env.ctx.learn_ahead_secs));
+            let cutoff = params.bind(Param::Integer(cutoff));
+            TermOutcome::Sql(TermSql {
+                sql: format!("(c.queue IN (2, 3) AND c.due <= {today}) OR (c.queue IN (1, 4) AND c.due <= {cutoff})"),
+                slow: false,
+                reads: ContextReads::NONE
+                    .with(ContextValue::Now)
+                    .with(ContextValue::Today)
+                    .with(ContextValue::LearnAhead),
+            })
+        }
+        // S2: this stored predicate performs no unburying or day query.
+        Term::State(CardState::Buried) => TermOutcome::Sql(TermSql {
+            sql: "c.queue IN (-2, -3)".to_owned(),
             slow: false,
             reads: ContextReads::NONE,
         }),

@@ -17,6 +17,12 @@ fn every_recorded_u49_save_scenario_and_memory_recompute_matches_all_steps() {
         "sched/options/undo-save",
         "sched/options/insertion-order-switch",
         "sched/options/missing-preset",
+        "sched/options/insertion-order-option",
+        "sched/options/deck-limits",
+        "sched/options/subtree",
+        "sched/options/remove-preset",
+        "sched/options/globals",
+        "sched/options/prefs-rollover",
         "sched/memory/recompute",
     ] {
         let loaded = scenario::load(&root.join(format!("scenarios/{id}.yaml"))).unwrap();
