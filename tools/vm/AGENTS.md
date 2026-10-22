@@ -12,3 +12,4 @@ The macOS test VM that runs every Mac XCUITest suite and Mac app-hosted check (U
 - The host cannot record the VM's screen: Mac `drive --record` in the VM samples frames in the test runner. Simulators record with `simctl io recordVideo` in the VM.
 - The VM's simulators need the pinned iOS runtime: `add-sim-runtime.sh` copies this Mac's image of it into the VM and adds it there (no download); doctor warns while it is missing. Some SpringBoards ignore appearance changes for good (seen in the VM after first boots and early restarts): after every boot the pool checks one and restarts SpringBoard until it applies them.
 - `setup-guest.sh` is the one-time provisioning, run in the VM's Terminal (it asks for the VM account's password); it changes the VM only.
+- `VMAccessibilitySetupTests` requires explicit VM opt-in via `/tmp/mg-vm-ax-enable`; never run on the host.
