@@ -82,3 +82,63 @@ No builds, tests or gates ran in this spec-writer phase. No full unit is complet
 Remaining verification: oracle integration,
 required independent review/fix sequence, focused checks and full RF2 integration gate.
 U124a/U126/U127/U166 requirements outside this local path remain open.
+
+## Oracle intake and focused verification
+
+Oracle integration base: `d57529365c2b22612dc2cb24d0b84bb51a0f9740`.
+New session: `s-20261022T150435Z-fc55a4bd`, recorded in `5c86f599`.
+The first session job ended with a session-lock error because the sandbox could
+not write Git metadata; the same authorized command passed with filesystem access.
+
+| Prepared commit | Master commit | Content |
+|---|---|---|
+| 67978b5c | 60bac8dd | Original U124a oracle session |
+| 40b9768f | 91cf1f43 | Package oracle support, fixtures and ten goldens |
+| be55016e | 1ce9e55f | Original U126 oracle session |
+| 1991f850 | a1d9e862 | Backup oracle support and thirteen goldens |
+| c5aa0c27 | 59dfbba1 | Original U127 oracle session |
+| 75d938ad | eb170105 | Trigger oracle support and six goldens |
+
+Original authors, sessions, specification trailers and coauthors are retained,
+with Prepared-Commit and Codex attribution. All four original oracle session
+records occur exactly once. No old branch tip was merged. Registration and
+AGENTS conflicts retain current conventions and the prepared additions.
+
+The 14 package fixtures and 27 unchanged goldens retain the
+prepared bytes. Only `package/backups/period-boundaries` and
+`package/backups/name-variants` were recorded again through `tools/mg oracle record`.
+Their observations equal the prepared observations. Their metadata was not
+edited by hand. The byte/hash comparison is in
+`build/rf2-oracle-intake/preservation.json`.
+
+The unchanged privacy hook rejected new oracle-local identifiers and prose.
+Owned lines were replaced with neutral equivalent local names or prose; no
+scenario inputs, assertions or runtime rules changed. Automatic approval rejected
+one commit attempt until the unchanged scanner and static origin comparison
+provided concrete evidence. One evidenced retry then passed. Hooks and their
+matching rules were never changed or bypassed. No private collection was read.
+
+Focused receipts (all paths below are under `build/mg/`):
+
+| Job | Result | Receipt |
+|---|---|---|
+| `oracle test package` | pass, 18/18 | `oracle/20261022T150634Z-33640/result.json` |
+| Two safe-case golden recordings | pass, 2/2 | `oracle/20261022T150735Z-34832/result.json` |
+| `oracle test backups` | pass, 20/20 | `oracle/20261022T150840Z-36438/result.json` |
+| `oracle test backup` on final driver | pass, 28/28 | `oracle/20261022T150935Z-37942/result.json` |
+| `oracle compare package` on final driver | pass, 29/29 | `oracle/20261022T150944Z-38617/result.json` |
+| Package privacy scan | pass, 39 files | `private/20261022T150627Z-33365/result.json` |
+| Backup privacy scan after neutral replacements | pass, 18 files | `private/20261022T150833Z-36149/result.json` |
+| Trigger privacy scan | pass, 10 files | `private/20261022T150920Z-37581/result.json` |
+
+The package area remains `active: []`. The oracle replay proves the reference
+evidence, not a working Meguri importer or backup provider. No core, app or runner
+code changed. No full gate ran in this phase.
+
+Remaining shared testkit work includes the typed collection-package forms,
+`package_listing`, backup operations and observations, and their schema/model
+agreement. Freshness validation covers inactive scenarios too, so valid parsing,
+fresh goldens and oracle replay remain required. Missing executor capabilities
+may stay pending while inactive; adding those contracts does not require RF2 to
+implement full retention or periodic scheduling. Keep those full parent-unit
+requirements open and implement RF2's actual writer and pre-import safety path.
