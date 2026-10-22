@@ -6,7 +6,7 @@ import XCTest
 /// Explicit VM provisioning only; skipped by the UI plan.
 final class VMAccessibilitySetupTests: XCTestCase {
     @MainActor
-    func testEnableRunnerAccessibility() {
+    func testEnableRunnerAccessibility() throws {
         continueAfterFailure = false
         guard CardSwapTimingGate.hypervisorPresent() == true else {
             XCTFail("Accessibility setup requires kern.hv_vmm_present == true")
@@ -66,6 +66,7 @@ final class VMAccessibilitySetupTests: XCTestCase {
                 XCTFail("Runner switch unavailable")
                 return
             }
+            try settings.bringToFront(bundleIdentifier: "com.apple.systempreferences")
             control.click()
         }
 
