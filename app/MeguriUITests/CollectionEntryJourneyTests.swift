@@ -38,7 +38,7 @@ import notify
         addTeardownBlock { @MainActor in app.terminate() }
         // Replacement may need RF1's scheduler admission before Home actions.
         if hasLocalCollection {
-            let localDeck = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.deck.row.")).firstMatch
+            let localDeck = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.deck.row."))
             try waitForAdmission(localDeck, app, bundle)
         }
         let entry = element(app, "home.collection.import")
@@ -69,7 +69,7 @@ import notify
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"), object: entrySheet)], timeout: 30), .completed)
         let importedDeck = app.buttons.matching(NSPredicate(format: "identifier == %@", "home.deck.row.1788249600212"))
-        try waitForAdmission(importedDeck.firstMatch, app, bundle)
+        try waitForAdmission(importedDeck, app, bundle)
         XCTAssertFalse(element(app, "entry.error").exists)
         XCTAssertFalse(element(app, "home.collection.error").exists)
         let deck = try XCTUnwrap(waitForHittable(importedDeck), app.debugDescription)
@@ -222,17 +222,17 @@ import notify
         XCTAssertTrue(waitForText(element(app, "entry.preview.safety"), safety))
         XCTAssertEqual(element(app, "entry.confirm").label, hasLocalCollection ? "Replace Collection" : "Import Collection")
     }
-    private func waitForAdmission(_ deck: XCUIElement, _ app: XCUIApplication, _ bundle: String) throws {
+    private func waitForAdmission(_ query: XCUIElementQuery, _ app: XCUIApplication, _ bundle: String) throws {
         let enable = element(app, "home.policy.enable")
         let policy = element(app, "home.policy.sheet")
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            enable.isHittable || (deck.isHittable && !policy.exists)
+            enable.isHittable || (query.allElementsBoundByIndex.contains { $0.exists && $0.isHittable } && !policy.exists)
         }, object: nil)
         XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 30), .completed, app.debugDescription)
         if enable.isHittable {
             try click(enable, app, bundle)
             let admitted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                !policy.exists && deck.isHittable
+                !policy.exists && query.allElementsBoundByIndex.contains { $0.exists && $0.isHittable }
             }, object: nil)
             XCTAssertEqual(XCTWaiter().wait(for: [admitted], timeout: 30), .completed, app.debugDescription)
         }

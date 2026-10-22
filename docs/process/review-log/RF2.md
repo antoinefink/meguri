@@ -592,3 +592,8 @@ constant types and run the same first-import case. No acceptance claim.
 - Fixer: `s-20261022T190619Z-c229fb33`; export `20261022T190635Z-5342`.
 - Review round 2: P2, admission uses firstMatch; use all matching hittable rows.
 - Phone: `20261022T190902Z-7787` PASS, 1 test, 0 skipped. Other platforms and visual gates pending.
+
+- Phone replacement: `20261022T191317Z-13430` PASS, 1 test, 0 skipped.
+- Query fix session: `s-20261022T191237Z-c6b9deb4`; export `20261022T191304Z-13012`.
+- Round 3: readiness P2 closed; no new P0/P1. Both predicates use all matching rows and retain policy dismissal checks.
+- iPad, Mac, snapshots, audits and integrated gate remain pending.
