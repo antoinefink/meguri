@@ -1692,6 +1692,7 @@ dependencies = [
  "meguri-engine",
  "meguri-host",
  "meguri-model",
+ "meguri-package",
  "meguri-sched",
  "meguri-storage",
  "meguri-template",

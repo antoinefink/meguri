@@ -47,3 +47,15 @@ impl HostConfig {
         self
     }
 }
+
+impl HostConfig {
+    pub fn entry_inputs(&self) -> meguri_package::entry::EntryInputs {
+        meguri_package::entry::EntryInputs {
+            collection_directory: self.collection_directory.clone(),
+            backups_directory: self.backups_directory.clone(),
+            clock: self.clock.clone(),
+            random: self.random.clone(),
+            space: self.disk_space_provider.clone(),
+        }
+    }
+}

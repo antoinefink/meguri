@@ -86,6 +86,19 @@ impl Exclusive<'_> {
         reason: ReplaceReason,
         change: impl FnOnce(&mut WriteScope<'_>) -> Result<(), StorageError>,
     ) -> Result<Collection, ReplaceError> {
+        self.replace_verified_before_commit(stage, reason, change, || Ok(()))
+    }
+
+    /// Runs `before_commit` after candidate preparation, outside core locks and
+    /// reader leases, immediately before closing the live connections for swap.
+    /// Once it succeeds, replacement and recovery run to completion.
+    pub fn replace_verified_before_commit(
+        &mut self,
+        stage: ReplacementStage,
+        reason: ReplaceReason,
+        change: impl FnOnce(&mut WriteScope<'_>) -> Result<(), StorageError>,
+        before_commit: impl FnOnce() -> Result<(), EngineError>,
+    ) -> Result<Collection, ReplaceError> {
         let environment = self.verified_environment(reason)?;
         let live = self.collection().path().to_owned();
         let options = OpenOptions::new(environment.clock.as_ref(), environment.random.as_ref())
@@ -100,6 +113,7 @@ impl Exclusive<'_> {
         )?;
         // Recheck after validation too; a closed/stale exclusive cannot swap.
         self.verified_environment(reason)?;
+        before_commit()?;
         let error = Arc::new(Mutex::new(None));
         let record = error.clone();
         let activated = Arc::new(std::sync::atomic::AtomicBool::new(false));

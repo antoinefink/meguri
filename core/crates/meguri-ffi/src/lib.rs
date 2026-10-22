@@ -12,6 +12,7 @@ mod callback;
 pub mod cancel;
 pub mod changes;
 pub mod collection;
+pub mod collection_entry;
 pub mod day_clock;
 pub mod deck_tree;
 pub mod decks;

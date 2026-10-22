@@ -81,7 +81,75 @@ impl ProcessCore {
     }
 }
 
+/// Preactivation failure returns Err. After activation, providers and ownership
+/// travel with the typed outcome even when reopening/recovery reported failure.
+pub struct InitialImportCompletion {
+    pub host: CoreHost,
+    pub outcome: Result<meguri_package::entry::Activation, meguri_package::entry::EntryError>,
+}
+impl ProcessCore {
+    pub fn import_initial(
+        &self,
+        config: HostConfig,
+        inspection: meguri_package::entry::EntryInspection,
+        slot: &meguri_engine::SlotGuard,
+        cancel: &meguri_engine::CancelToken,
+        progress: &meguri_engine::ProgressSink,
+    ) -> Result<InitialImportCompletion, meguri_package::entry::EntryError> {
+        use meguri_package::entry::EntryError;
+        // Reserve without retaining a mutex across provider or platform work.
+        {
+            let mut opened = self.opened.lock().unwrap_or_else(PoisonError::into_inner);
+            if *opened {
+                return Err(EngineError::Busy {
+                    running_op: "collection open".into(),
+                }
+                .into());
+            }
+            if config.engine.job_workers != self.job_workers {
+                return Err(EngineError::InvalidArgument {
+                    message: "process engine configuration is fixed at construction".into(),
+                }
+                .into());
+            }
+            *opened = true;
+        }
+        struct Reset<'a>(&'a ProcessCore, bool);
+        impl Drop for Reset<'_> {
+            fn drop(&mut self) {
+                if !self.1 {
+                    *self.0.opened.lock().unwrap_or_else(PoisonError::into_inner) = false;
+                }
+            }
+        }
+        let mut reset = Reset(self, false);
+        let paths = CollectionPaths::new(&config.collection_directory, &config.backups_directory)?;
+        if paths.collection() != inspection.facts().destination {
+            return Err(EntryError::StaleConfirmation);
+        }
+        let (host, _, options) = CoreHost::compose_on(self, config)?;
+        let outcome = inspection.activate_initial(slot, options, cancel, progress);
+        let activated = outcome.is_ok()
+            || matches!(
+                &outcome,
+                Err(EntryError::Replacement {
+                    error: meguri_engine::replace::ReplaceError::AfterActivation { .. },
+                    ..
+                })
+            );
+        if !activated {
+            // Prepared host cleanup never closes/waits for its own import job.
+            host.close()?;
+            return Err(outcome.expect_err("preactivation failure"));
+        }
+        *host.closed.lock().unwrap_or_else(PoisonError::into_inner) = CloseState::Active;
+        reset.1 = true;
+        Ok(InitialImportCompletion { host, outcome })
+    }
+}
+
 enum CloseState {
+    Prepared,
     Active,
     Closing,
     Closed,
@@ -105,6 +173,24 @@ impl CoreHost {
     }
 
     fn open_on(process: &ProcessCore, config: HostConfig) -> Result<Self, EngineError> {
+        let (host, paths, options) = Self::compose_on(process, config)?;
+        let result = host.engine.open_raw(&paths.collection(), options);
+        if let Err(error) = result {
+            if let Err(cleanup) = host.close() {
+                return Err(EngineError::Internal {
+                    message: format!("open failed: {error}; provider cleanup failed: {cleanup}"),
+                });
+            }
+            return Err(error);
+        }
+        *host.closed.lock().unwrap_or_else(PoisonError::into_inner) = CloseState::Active;
+        Ok(host)
+    }
+
+    fn compose_on(
+        process: &ProcessCore,
+        config: HostConfig,
+    ) -> Result<(Self, CollectionPaths, OpenConfig), EngineError> {
         wiring::validate()?;
         let paths = CollectionPaths::new(&config.collection_directory, &config.backups_directory)?;
         let engine = process.engine.clone();
@@ -122,7 +208,18 @@ impl CoreHost {
             .observer(review.clone())
             .generation_listener(review.clone())
             .suspend_participant(review.clone());
-        wiring::validate_ports(&ports)?;
+        if let Err(error) = wiring::validate_ports(&ports) {
+            let media_cleanup = media.close_until(meguri_engine::monotonic::now() + Duration::from_secs(5));
+            let derived_cleanup = derived.close();
+            if media_cleanup.is_err() || derived_cleanup.is_err() {
+                return Err(EngineError::Internal {
+                    message: format!(
+                        "port validation failed: {error}; cleanup: {media_cleanup:?}, {derived_cleanup:?}"
+                    ),
+                });
+            }
+            return Err(error);
+        }
         let backup: Arc<dyn BackupService> = Arc::new(meguri_package::ForcedBackupProvider::new(
             engine.clone(),
             paths.collection(),
@@ -137,32 +234,9 @@ impl CoreHost {
             .ports(ports)
             .backups_directory(paths.backups.clone())
             .disk_space_provider(config.disk_space_provider);
-        if let Err(error) = engine.open_raw(&paths.collection(), options) {
-            let cleanup: Vec<_> = [
-                // A failed raw open owns no live collection and already drains
-                // its writer. Calling close here would wait for the open job
-                // that is currently performing this very cleanup.
-                if engine.collection().is_ok() {
-                    engine.close()
-                } else {
-                    Ok(())
-                },
-                media.close_until(meguri_engine::monotonic::now() + Duration::from_secs(5)),
-                derived.close(),
-            ]
-            .into_iter()
-            .filter_map(Result::err)
-            .collect();
-            if !cleanup.is_empty() {
-                return Err(EngineError::Internal {
-                    message: format!("open failed: {error}; provider cleanup failed: {cleanup:?}"),
-                });
-            }
-            return Err(error);
-        }
-        Ok(Self {
+        let host = Self {
             process: process.clone(),
-            closed: Mutex::new(CloseState::Active),
+            closed: Mutex::new(CloseState::Prepared),
             engine,
             derived,
             media,
@@ -170,7 +244,8 @@ impl CoreHost {
             backup,
             queues,
             review,
-        })
+        };
+        Ok((host, paths, options))
     }
 
     pub fn engine(&self) -> &Engine {
@@ -198,7 +273,7 @@ impl CoreHost {
     }
 
     pub fn close(&self) -> Result<(), EngineError> {
-        {
+        let prepared = {
             let mut closed = self.closed.lock().unwrap_or_else(PoisonError::into_inner);
             match *closed {
                 CloseState::Closed => return Ok(()),
@@ -207,22 +282,35 @@ impl CoreHost {
                         running_op: "collection close".into(),
                     });
                 }
-                CloseState::Active => *closed = CloseState::Closing,
+                CloseState::Active => {
+                    *closed = CloseState::Closing;
+                    false
+                }
+                CloseState::Prepared => {
+                    *closed = CloseState::Closing;
+                    true
+                }
             }
-        }
-        struct Restore<'a>(&'a Mutex<CloseState>);
+        };
+        struct Restore<'a>(&'a Mutex<CloseState>, bool);
         impl Drop for Restore<'_> {
             fn drop(&mut self) {
                 let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
                 if matches!(*state, CloseState::Closing) {
-                    *state = CloseState::Active;
+                    *state = if self.1 {
+                        CloseState::Prepared
+                    } else {
+                        CloseState::Active
+                    };
                 }
             }
         }
-        let _restore = Restore(&self.closed);
+        let _restore = Restore(&self.closed, prepared);
         self.review.try_close_host(
             || {
-                self.engine.close()?;
+                if !prepared {
+                    self.engine.close()?;
+                }
                 self.media
                     .close_until(meguri_engine::monotonic::now() + Duration::from_secs(5))?;
                 self.derived.close()?;

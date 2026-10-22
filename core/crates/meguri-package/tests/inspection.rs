@@ -891,3 +891,136 @@ fn package_gate_accepts_boundary_values_and_large_unrelated_config() {
         assert_eq!(fs::read(&source).unwrap(), bytes);
     }
 }
+
+#[test]
+fn coordinated_copy_inspection_refusals_preserve_live_source_and_unrelated_staging() {
+    use meguri_engine::{CancelToken, Progress, ProgressListener, ProgressPhase, ProgressSink};
+    use std::sync::Arc;
+    struct CancelCopy(Arc<CancelToken>);
+    impl ProgressListener for CancelCopy {
+        fn on_progress(&self, p: &Progress) {
+            if p.phase == ProgressPhase::Named("copy") {
+                self.0.cancel();
+            }
+        }
+    }
+    for mode in ["media", "legacy", "invalid", "cancel", "space", "success"] {
+        let directory = tempfile::tempdir().unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let source = source_dir.path().join("selected.colpkg");
+        let mut e = entries();
+        let bytes = match mode {
+            "media" => {
+                e.push(("0", b"media bytes".to_vec()));
+                archive(&e, CompressionMethod::Stored)
+            }
+            "legacy" => {
+                e.remove(0);
+                archive(&e, CompressionMethod::Stored)
+            }
+            "invalid" => b"not a package".to_vec(),
+            _ => archive(&e, CompressionMethod::Stored),
+        };
+        fs::write(&source, &bytes).unwrap();
+        fs::write(directory.path().join("collection.anki2"), b"untouched live bytes").unwrap();
+        let unrelated = directory.path().join(".meguri-stage-unrelated");
+        fs::create_dir(&unrelated).unwrap();
+        fs::write(unrelated.join("keep"), b"owned elsewhere").unwrap();
+        let before = listing(directory.path());
+        let cancel = CancelToken::new();
+        let sink = ProgressSink::new();
+        if mode == "cancel" {
+            sink.set_listener(Arc::new(CancelCopy(cancel.clone())));
+        }
+        struct Zero;
+        impl SpaceProvider for Zero {
+            fn available_bytes(&self, _: &Path) -> Result<u64, StorageError> {
+                Ok(0)
+            }
+        }
+        let space: &dyn SpaceProvider = if mode == "space" { &Zero } else { &StatvfsSpace };
+        let result = meguri_package::copy_and_inspect_collection_package(
+            &source,
+            &CollectionPackageInspectContext {
+                collection_directory: directory.path(),
+                live_collection_size: 20,
+                reserved_space_bytes: 8 * 1024 * 1024,
+                clock: &FixedClock::new(1_894_701_600_000, UtcOffset::UTC),
+                random: &SeededRandom::new(43),
+                space,
+                is_cancelled: &|| cancel.is_cancelled(),
+            },
+            &sink,
+        );
+        match (mode, &result) {
+            ("success", Ok((inspected, _, digest))) => {
+                use sha2::{Digest, Sha256};
+                assert_eq!(*digest, <[u8; 32]>::from(Sha256::digest(&bytes)));
+                assert_eq!(inspected.facts().ver_found, 18);
+            }
+            ("media", Err(Error::UnsupportedMedia))
+            | ("legacy", Err(Error::UnsupportedFormat))
+            | ("invalid", Err(Error::Corrupt { .. }))
+            | ("cancel", Err(Error::Cancelled))
+            | ("space", Err(Error::InsufficientSpace { .. })) => {}
+            _ => panic!("unexpected copy inspection result for {mode}: {result:?}"),
+        }
+        drop(result);
+        assert_eq!(listing(directory.path()), before);
+        assert_eq!(
+            fs::read(directory.path().join("collection.anki2")).unwrap(),
+            b"untouched live bytes"
+        );
+        assert_eq!(fs::read(unrelated.join("keep")).unwrap(), b"owned elsewhere");
+        assert_eq!(fs::read(source).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn combined_copy_preflight_reserves_source_extraction_upgrade_and_backup_before_first_write() {
+    struct Empty<'a>(&'a Path);
+    impl SpaceProvider for Empty<'_> {
+        fn available_bytes(&self, directory: &Path) -> Result<u64, StorageError> {
+            assert_eq!(directory, self.0);
+            assert_eq!(listing(directory).len(), 0);
+            Ok(0)
+        }
+    }
+    let raw = fs::read(fixture("storage/schema-18.anki2")).unwrap();
+    for declared in [true, false] {
+        let mut e = entries();
+        if !declared {
+            e[1].1 = zstd::stream::encode_all(raw.as_slice(), 3).unwrap();
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let source = source_dir.path().join("input.colpkg");
+        let bytes = archive(&e, CompressionMethod::Stored);
+        fs::write(&source, &bytes).unwrap();
+        let live = 100_000_000;
+        let backup = 456;
+        let estimate = if declared {
+            raw.len() as u64
+        } else {
+            (e[1].1.len() as u64 * 4).max(live)
+        };
+        let result = meguri_package::copy_and_inspect_collection_package(
+            &source,
+            &CollectionPackageInspectContext {
+                collection_directory: dir.path(),
+                live_collection_size: live,
+                reserved_space_bytes: backup,
+                clock: &FixedClock::new(1_894_701_600_000, UtcOffset::UTC),
+                random: &SeededRandom::new(42),
+                space: &Empty(dir.path()),
+                is_cancelled: &|| false,
+            },
+            &meguri_engine::ProgressSink::new(),
+        );
+        assert!(
+            matches!(result, Err(Error::InsufficientSpace { needed, available: 0 }) if needed == estimate * 2 + bytes.len() as u64 + backup + 4 * 1024 * 1024)
+        );
+        assert_eq!(listing(dir.path()).len(), 0);
+        assert_eq!(fs::read(source).unwrap(), bytes);
+    }
+}

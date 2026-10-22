@@ -5,3 +5,5 @@
 - Inspection tokens own unpublished U32 staging. Only storage inspects collection rows; replacement consumers own R7 stamps and activation.
 
 - ForcedBackupProvider runs on its caller’s worker, with the passed Working collection for imports. Keep its Maintenance lease and serialization lane through strict sidecar recording; release before replace. RF2 never deletes a published backup.
+
+- RF2 entry tokens consume once, bind committed `Collection::last_seq` plus engine/generation, and retain their private package copy. Never expose candidate paths at FFI. Combined copy preflight reuses inspection preparation.

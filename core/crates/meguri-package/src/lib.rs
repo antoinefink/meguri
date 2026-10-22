@@ -1,5 +1,6 @@
 //! Collection-only latest-format package publication (package/container P11).
 mod backup;
+pub mod entry;
 mod inspection;
 mod inspection_zip;
 mod media_map;
@@ -13,7 +14,8 @@ use std::{fmt, path::Path};
 pub use backup::ForcedBackupProvider;
 
 pub use inspection::{
-    CollectionPackageInspectContext, InspectedCollection, StagedCollection, inspect_collection_package,
+    CollectionPackageInspectContext, InspectedCollection, StagedCollection, copy_and_inspect_collection_package,
+    inspect_collection_package,
 };
 pub use meguri_storage::package_inspection::CandidateFacts as CollectionPackageFacts;
 pub use writer::{

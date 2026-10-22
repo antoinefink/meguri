@@ -31,10 +31,10 @@ impl Runtime {
     }
 }
 
-fn runtime() -> Result<&'static Runtime, CoreError> {
-    static RUNTIME: OnceLock<Result<Runtime, CoreError>> = OnceLock::new();
+fn runtime() -> Result<&'static Arc<Runtime>, CoreError> {
+    static RUNTIME: OnceLock<Result<Arc<Runtime>, CoreError>> = OnceLock::new();
     RUNTIME
-        .get_or_init(|| Runtime::new(EngineConfig::default()))
+        .get_or_init(|| Runtime::new(EngineConfig::default()).map(Arc::new))
         .as_ref()
         .map_err(Clone::clone)
 }
@@ -67,11 +67,13 @@ enum HostState {
 }
 
 pub(crate) struct OpenReservation {
-    runtime: &'static Runtime,
+    runtime: Arc<Runtime>,
     pending: bool,
 }
 pub(crate) fn reserve_open() -> Result<OpenReservation, CoreError> {
-    let runtime = runtime()?;
+    reserve_open_on(runtime()?.clone())
+}
+fn reserve_open_on(runtime: Arc<Runtime>) -> Result<OpenReservation, CoreError> {
     let mut state = runtime.host.lock().unwrap_or_else(PoisonError::into_inner);
     if !matches!(*state, HostState::Empty) {
         return Err(CoreError::Busy {
@@ -79,9 +81,28 @@ pub(crate) fn reserve_open() -> Result<OpenReservation, CoreError> {
         });
     }
     *state = HostState::Opening;
+    drop(state);
     Ok(OpenReservation { runtime, pending: true })
 }
 impl OpenReservation {
+    pub(crate) fn import_initial(
+        mut self,
+        config: meguri_host::HostConfig,
+        inspection: meguri_package::entry::EntryInspection,
+        slot: &meguri_engine::SlotGuard,
+        cancel: &meguri_engine::CancelToken,
+        progress: &meguri_engine::ProgressSink,
+    ) -> Result<meguri_package::entry::Activation, meguri_package::entry::EntryError> {
+        let completed = self
+            .runtime
+            .process
+            .import_initial(config, inspection, slot, cancel, progress)?;
+        let host = Arc::new(completed.host);
+        // Retain first, then propagate the typed afteractivation outcome.
+        *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host);
+        self.pending = false;
+        completed.outcome
+    }
     pub(crate) fn open(mut self, config: meguri_host::HostConfig) -> Result<(), CoreError> {
         let host = Arc::new(self.runtime.process.open(config)?);
         // No fallible call between receiving the host and retaining it.
@@ -409,5 +430,103 @@ mod tests {
                 .iter()
                 .any(|e| e.kind == CoreEventKind::SessionEnded { session_id: second.0 })
         );
+    }
+
+    #[test]
+    fn initial_import_reservation_retains_actual_host_before_afteractivation_error() {
+        let root = tempfile::tempdir().unwrap();
+        let collection = root.path().join("collection");
+        std::fs::create_dir(&collection).unwrap();
+        let config = HostConfig::new(
+            collection.clone(),
+            root.path().join("backups"),
+            root.path().join("widget"),
+            Arc::new(meguri_model::clock::FixedClock::new(1_894_701_600_000, UtcOffset::UTC)),
+            Arc::new(SeededRandom::new(43)),
+            Arc::new(StatvfsSpace),
+        );
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../conformance/fixtures/storage/schema-18.anki2");
+        let source = root.path().join("input.colpkg");
+        meguri_package::write_collection_package_from_standalone(
+            &fixture,
+            &source,
+            &meguri_package::CollectionPackageWriteContext {
+                collection_directory: &collection,
+                purpose: meguri_storage::atomic_file::Purpose::Export,
+                finalisation: meguri_package::Finalisation::ExclusiveCreate,
+                clock: config.clock.as_ref(),
+                random: config.random.as_ref(),
+                space: config.disk_space_provider.as_ref(),
+                is_cancelled: &|| false,
+            },
+        )
+        .unwrap();
+        // Independent dispatcher, process engine and registry; no shared listener
+        // or static-runtime ownership can be replaced by this focused test.
+        let runtime = Arc::new(Runtime::new(config.engine.clone()).unwrap());
+        let candidate = meguri_package::entry::inspect_entry(
+            runtime.process.engine(),
+            &source,
+            &config.entry_inputs(),
+            meguri_engine::CancelToken::new(),
+            &meguri_engine::ProgressSink::new(),
+        )
+        .unwrap();
+        let reservation = reserve_open_on(runtime.clone()).unwrap();
+        let events = runtime.process.engine().stream().subscribe();
+        let (tx, rx) = mpsc::channel();
+        meguri_model::faultpoint::arm(
+            "replace.after_dir_sync",
+            meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other),
+        );
+        let handle = runtime
+            .process
+            .engine()
+            .start_job(meguri_engine::JobKind::ColpkgImport, move |job| {
+                let outcome =
+                    reservation.import_initial(config, candidate, job.slot().unwrap(), &job.cancel, &job.progress);
+                tx.send(outcome).unwrap();
+                Ok(())
+            })
+            .unwrap();
+        let outcome = rx.recv_timeout(Duration::from_secs(20)).unwrap();
+        loop {
+            if matches!(events.recv_timeout(Duration::from_secs(20)).unwrap().kind,
+                meguri_engine::EventKind::JobFinished { id, .. } if id == handle.id)
+            {
+                break;
+            }
+        }
+        meguri_model::faultpoint::disarm("replace.after_dir_sync");
+        assert!(matches!(
+            outcome,
+            Err(meguri_package::entry::EntryError::Replacement {
+                error: meguri_engine::replace::ReplaceError::AfterActivation {
+                    generation: Some(_),
+                    ..
+                },
+                ..
+            })
+        ));
+        let host = match &*runtime.host.lock().unwrap() {
+            HostState::Open(host) => host.clone(),
+            _ => panic!("live host lost"),
+        };
+        assert!(host.collection().is_ok());
+        assert!(std::ptr::eq(runtime.process.review(), host.review()));
+        assert!(reserve_open_on(runtime.clone()).is_err());
+        assert!(meguri_storage::lockfile::CollectionLock::acquire(&collection).is_err());
+        assert_eq!(
+            meguri_engine::device_state::DeviceState::for_collection(&collection.join("collection.anki2"))
+                .publication()
+                .unwrap()
+                .unwrap()
+                .decision,
+            meguri_engine::device_state::PublicationDecision::Pending
+        );
+        host.media().unwrap();
+        host.close().unwrap();
+        *runtime.host.lock().unwrap() = HostState::Empty;
     }
 }

@@ -38,11 +38,16 @@ pub(crate) struct SlotHolder {
 }
 
 impl SlotGuard {
+    /// Confirms an opaque consumer belongs to this process engine.
+    pub fn belongs_to(&self, engine: &Engine) -> bool {
+        std::sync::Arc::ptr_eq(&self.engine.inner, &engine.inner)
+    }
+
     pub fn op(&self) -> LongOp {
         self.op
     }
 
-    pub(crate) fn check_verified_review(&self, reason: crate::replace::ReplaceReason) -> Result<(), EngineError> {
+    pub fn check_verified_review(&self, reason: crate::replace::ReplaceReason) -> Result<(), EngineError> {
         let state = self.engine.lock_state();
         self.check_held(&state)?;
         if reason == crate::replace::ReplaceReason::ColpkgImport
@@ -66,6 +71,21 @@ impl SlotGuard {
         stage: crate::replace::ReplacementStage,
         reason: crate::replace::ReplaceReason,
         change: impl FnOnce(&mut meguri_storage::WriteScope<'_>) -> Result<(), meguri_storage::StorageError>,
+    ) -> Result<Collection, crate::replace::ReplaceError> {
+        self.replace_verified_initial_before_commit(live, config, stage, reason, change, || Ok(()))
+    }
+
+    /// Initial-entry counterpart of `Exclusive::replace_verified_before_commit`.
+    /// The hook runs without core locks or reader leases, before swap ownership
+    /// is retained; success starts the noncancellable swap/recovery phase.
+    pub fn replace_verified_initial_before_commit(
+        &self,
+        live: &std::path::Path,
+        config: crate::OpenConfig,
+        stage: crate::replace::ReplacementStage,
+        reason: crate::replace::ReplaceReason,
+        change: impl FnOnce(&mut meguri_storage::WriteScope<'_>) -> Result<(), meguri_storage::StorageError>,
+        before_commit: impl FnOnce() -> Result<(), EngineError>,
     ) -> Result<Collection, crate::replace::ReplaceError> {
         use crate::replace::ReplaceError;
         if self.op != reason.long_op() {
@@ -96,7 +116,9 @@ impl SlotGuard {
             meguri_model::faultpoint!("replace.initial.before_ownership")
                 .map_err(meguri_storage::StorageError::from)
                 .map_err(EngineError::from)?;
-            let ownership = meguri_storage::lockfile::CollectionLock::acquire(directory).map_err(EngineError::from)?;
+            let ownership = std::sync::Arc::new(
+                meguri_storage::lockfile::CollectionLock::acquire(directory).map_err(EngineError::from)?,
+            );
             // RF2 needs T7 for every existing entry. Check under ownership
             // before touching the sidecar or preparing the candidate.
             if reason == crate::replace::ReplaceReason::ColpkgImport {
@@ -112,9 +134,6 @@ impl SlotGuard {
                 }
             }
             crate::device_state::reconcile(live, &config.publication_binding).map_err(EngineError::from)?;
-            // Retain the existing identity before beginning the first intent.
-            crate::device_state::ensure(live, &config.publication_binding, config.random.as_ref())
-                .map_err(EngineError::from)?;
             let mut initializers = config.initializers.clone();
             initializers.register(meguri_search::sqlfns::register);
             initializers.register(meguri_sched::sqlfns::register);
@@ -128,6 +147,11 @@ impl SlotGuard {
                 reason.package(),
                 change,
             )?;
+            before_commit()?;
+            // Retain the existing identity before beginning the first intent.
+            crate::device_state::ensure(live, &config.publication_binding, config.random.as_ref())
+                .map_err(EngineError::from)?;
+            self.engine.lock_state().recovery_ownership = Some(ownership.clone());
             let swapped = crate::replace::swap(
                 live,
                 stage,
@@ -147,8 +171,18 @@ impl SlotGuard {
         let (ownership, swap_error) = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
-                self.engine.set_state(prior);
-                return if activated.load(std::sync::atomic::Ordering::Acquire) {
+                let changed = activated.load(std::sync::atomic::Ordering::Acquire);
+                if changed {
+                    self.engine.set_state(LifecycleState::Failed {
+                        reason: FailedReason::Replace {
+                            detail: error.to_string(),
+                        },
+                    });
+                } else {
+                    self.engine.lock_state().recovery_ownership = None;
+                    self.engine.set_state(prior);
+                }
+                return if changed {
                     Err(ReplaceError::AfterActivation {
                         generation: None,
                         source: Box::new(error),
@@ -160,13 +194,22 @@ impl SlotGuard {
         };
         let old = self.engine.generation();
         let announcement = self.engine.inner.stream.reserve();
-        let opened = self
-            .engine
-            .open_raw_owned(live, config, Some(ownership))
-            .map_err(|error| ReplaceError::AfterActivation {
-                generation: None,
-                source: Box::new(error.into()),
-            })?;
+        let opened = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.engine.open_raw_owned(live, config, Some(ownership))
+        }))
+        .unwrap_or_else(|payload| {
+            let error = EngineError::from_panic(payload.as_ref());
+            self.engine.set_state(LifecycleState::Failed {
+                reason: FailedReason::Replace {
+                    detail: error.to_string(),
+                },
+            });
+            Err(error)
+        })
+        .map_err(|error| ReplaceError::AfterActivation {
+            generation: None,
+            source: Box::new(error.into()),
+        })?;
         {
             let mut state = self.engine.lock_state();
             if let Some(holder) = state.slot.as_mut().filter(|s| s.id == self.id) {
@@ -181,7 +224,13 @@ impl SlotGuard {
             },
         );
         for listener in self.engine.ports().generation_listeners {
-            listener.collection_replaced(old, opened.generation());
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                listener.collection_replaced(old, opened.generation())
+            }))
+            .map_err(|payload| ReplaceError::AfterActivation {
+                generation: Some(opened.generation()),
+                source: Box::new(EngineError::from_panic(payload.as_ref()).into()),
+            })?;
         }
         match swap_error {
             Some(error) => Err(ReplaceError::AfterActivation {

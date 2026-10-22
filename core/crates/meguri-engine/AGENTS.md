@@ -44,3 +44,5 @@
 - FSRS policy (`sched/fsrs_policy.rs`): `<collection>.meguri-fsrs-seen` is device state tied to the collection place, retained across file replacement; collection removal owns its cleanup. U43 reserves/releases `PolicyState.review_active` on the writer, after checking policy and only releasing after session writes drain. Caller flags never replace that guard.
 
 - Verified replacement uses `replace_verified`; the legacy `Exclusive::replace` closure intentionally permits active sessions. Reconcile `device_state` under collection ownership before sweep or any managed reopen/day write. An `AfterActivation` error means the candidate file stands; never retry as rollback. Cloud decisions have no clear setter: manual-transfer state is separate.
+
+- Initial replacement keeps failed-reopen advisory ownership in lifecycle recovery state until explicit close. Retained initial opens skip launch staging sweeps: other live inspections own those directories.

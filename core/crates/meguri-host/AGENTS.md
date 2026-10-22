@@ -6,3 +6,5 @@
 - Raw storage conformance stays raw until an engine-owned operation promotes it. Promotion closes the old writer before CoreHost opens; see `specs/engine/host.md` H4.
 
 - HostConfig backup overrides exist only with `test-hooks`. A counted harness witness proves call order, never a production backup. Production forced safety backups use the package provider; RF2 retains every published file. U126/U127 scheduling, T7 and retention remain unaccepted. U37 must connect the FFI runtime to the host-owned engine and preserve its process-wide dispatcher/job identity; the Rust parity harness does not prove exported CoreBridge integration.
+
+- Initial import returns host plus typed activation outcome; retain that host before propagating afteractivation errors. Compose around `replace_verified_initial` once; never follow it with another open. Prepared-host cleanup must not wait for its own import job.

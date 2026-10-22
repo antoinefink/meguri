@@ -143,6 +143,8 @@ pub(crate) struct LcState {
     /// Whether `Available` was last published as true.
     pub(crate) available: bool,
     pub(crate) current: Option<Current>,
+    /// Activated initial file whose open/recovery failed: keep advisory ownership.
+    recovery_ownership: Option<Arc<meguri_storage::lockfile::CollectionLock>>,
 }
 
 /// The open collection.
@@ -150,7 +152,7 @@ pub(crate) struct Current {
     pub(crate) core: Arc<CollectionCore>,
     writer: Option<JoinHandle<()>>,
     ports: Ports,
-    _lock: meguri_storage::lockfile::CollectionLock,
+    _lock: Arc<meguri_storage::lockfile::CollectionLock>,
     previous_clean_shutdown: bool,
     pub(crate) reopen: Reopen,
 }
@@ -174,6 +176,7 @@ impl Engine {
                     slot: None,
                     available: false,
                     current: None,
+                    recovery_ownership: None,
                 }),
                 changed: Condvar::new(),
                 next_token: AtomicU64::new(1),
@@ -303,7 +306,7 @@ impl Engine {
         &self,
         path: &Path,
         mut config: OpenConfig,
-        retained: Option<meguri_storage::lockfile::CollectionLock>,
+        retained: Option<Arc<meguri_storage::lockfile::CollectionLock>>,
     ) -> Result<Collection, EngineError> {
         // Compose here rather than in OpenConfig::new: callers can replace
         // its public initializer list. Reopen/resume keep this complete set.
@@ -323,6 +326,7 @@ impl Engine {
             }
             self.set_state_locked(&mut guard, LifecycleState::Opening);
         }
+        let initial_replacement = retained.is_some();
         let ownership = (|| -> Result<_, EngineError> {
             let directory = path
                 .parent()
@@ -330,11 +334,13 @@ impl Engine {
                 .unwrap_or(Path::new("."));
             let ownership = match retained {
                 Some(ownership) => ownership,
-                None => meguri_storage::lockfile::CollectionLock::acquire(directory)?,
+                None => Arc::new(meguri_storage::lockfile::CollectionLock::acquire(directory)?),
             };
             crate::device_state::reconcile(path, &config.publication_binding)?;
             crate::device_state::ensure(path, &config.publication_binding, config.random.as_ref())?;
-            meguri_storage::leftovers::cleanup(directory)?;
+            if !initial_replacement {
+                meguri_storage::leftovers::cleanup(directory)?;
+            }
             meguri_storage::leftovers::cleanup_media(&directory.join("collection.media"))?;
             if let Some(backups) = &config.backups_directory {
                 meguri_storage::paths::CollectionPaths::new(directory, backups)?;
@@ -344,7 +350,9 @@ impl Engine {
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                     Err(e) => return Err(meguri_storage::StorageError::from(e).into()),
                     Ok(_) => {
-                        meguri_storage::leftovers::cleanup(backups)?;
+                        if !initial_replacement {
+                            meguri_storage::leftovers::cleanup(backups)?;
+                        }
                     }
                 }
             }
@@ -477,6 +485,7 @@ impl Engine {
         let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
         exec.set_admission(Admission::Open);
         let mut guard = self.lock_state();
+        guard.recovery_ownership = None;
         guard.current = Some(Current {
             reopen: current_reopen,
             core: Arc::clone(&core),
@@ -517,6 +526,7 @@ impl Engine {
         let current = {
             let mut guard = self.lock_state();
             let current = guard.current.take();
+            guard.recovery_ownership = None;
             guard.suspended = false;
             guard.suspend_flush_pending = true;
             if current.is_some() {
@@ -526,6 +536,7 @@ impl Engine {
             current
         };
         let Some(mut current) = current else {
+            self.set_state(LifecycleState::NoCollection);
             self.jobs().pause(false);
             return Ok(());
         };

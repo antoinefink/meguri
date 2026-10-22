@@ -377,3 +377,78 @@ native coordinated picker/preview, prove imported reviews/background/restart on
 all three platforms, then run the RF2 full gate against `81c20757`.
 U126/U127 and other parent units remain open; full scheduling, retention, T7 and
 prepared conformance executors are not accepted by this forced-service component.
+
+
+## Owned inspection and activation jobs
+
+Entry component starts at `55258d83`; implementer
+`s-20261022T170635Z-d68a2c78`, clean baseline `2bfd30f4`.
+Filtered run `20261022T170751Z-20216` exports package-owned entry orchestration,
+bounded coordinated-source copying, aggregate space preflight, single-use owned
+inspection handles, committed-work/generation confirmation guards, real safety
+backups and typed activation results. Host composition reuses the process core
+for first import and carries the host with postactivation failures. Recovery
+ownership persists when reopening fails. FFI uses that same registry/dispatcher
+and retains the host before reporting the activation outcome.
+
+Format `20261022T172632Z-27187` passed. Focused Docker run
+`20261022T172716Z-27831` ran 198 tests: 196 passed and two failed; the one
+ignored provider-owner check remains a dedicated milestone check. The failures
+are a legacy FFI test still expecting unavailable backup behavior and a new
+test setup uses a different file than the media service opens. Use the
+production path is storage-owned `meguri-media.db`; strict postactivation,
+lock/fence retention, close/reopen and actual-answer assertions must remain.
+
+Independent round-1 entry review by `/root/rf2_backend_review` confirms one P2:
+both flows disable cancellation before repeated validation/finalisation rather
+than at the actual swap boundary. Check both tokens after that work, preserve a
+published backup receipt on cancellation, and finish recovery after activation.
+The review lists no further P0–P2 issue.
+
+Lint `20261022T172924Z-28976` fails the large EntryError return-size check in
+four entry functions. Reduce that enum's size while keeping its variants.
+The unchanged privacy scanner flags own FFI module prose and own host-test
+prose/local bindings. Fixer `s-20261022T173106Z-3d22b442`, starting `c1017d27`,
+receives the complete 21-file seed and these findings in one filtered pass.
+It must keep the original FFI refusal proof using a real backup failure, make
+the new setup exercise an actual provider failure, and add deterministic
+cancellation tests before and after the commit boundary. No Unit acceptance.
+
+The prior provider checkpoint and session record were pushed to master.
+Catch-up `20261022T170643Z-19574` passed. Approved Meguri-only cleanup ran with
+build jobs idle, removed incremental cache only, and restored 69 to 79 GiB free.
+No other project's Docker data was touched.
+
+Entry round-2 filtered run `20261022T173127Z-30279` preserves the reviewed
+component and adds a compatible precommit hook after candidate finalisation.
+Both cancellation tokens are sampled there; only then is Committing published.
+Eight deterministic early-cancellation cases preserve destination/generation,
+and two late-cancellation cases finish activation and recovery. Callbacks can
+reenter read APIs without a lifecycle mutex or reader lease held.
+Independent delta review closes the P2 and reports no new P0–P2 finding.
+
+Format `20261022T173731Z-33255` and unchanged privacy scan
+`20261022T173832Z-34342` passed. Focused `20261022T173803Z-33729` ran 200 tests:
+Results: 199 pass, one failure. Provider ownership is checked at its milestone.
+All ten cancellation checks and the host recovery test returned PASS.
+The remaining legacy FFI assertion expects a Rust variant name in a Display
+message; the real error formatter uses its descriptive text. Correct that
+expectation while retaining the capacity/publication/no-mutation assertions.
+Lint reports only `.err().expect()` in host initial-entry handling; replace
+with the direct Result method without changing behavior. Both failures remain
+open until their focused checks pass. No Unit acceptance or integration gate.
+
+Round-3 fixer `s-20261022T174235Z-5429897a`, baseline `94fa5892`, exports
+`20261022T174246Z-36820`: exactly the Display prefix assertion and direct
+expect_err correction, with the complete reviewed seed preserved. Independent
+narrow review confirms both and finds no P0/P1. All capacity, publication and
+exact preservation assertions remain enabled. Focused Docker
+`20261022T174358Z-38103` passes all 200 selected tests; the separate milestone
+ownership check remains outside this run. Similarity against RF2 base
+`81c20757` passes (`20261022T174401Z-38370`). Privacy initially flags only own
+review prose; that full sentence is rewritten without looking up the token.
+Unchanged scan `20261022T174453Z-39444` passes all 24 staged files.
+Doctor `20261022T174258Z-37251` passes: VM SSH and runtime ready, 68 GiB free.
+Rust lint `20261022T174523Z-39956` passes with the direct Result fix. This checkpoint
+integrates owned inspection/activation primitives only; native entry and the
+full RF2 integration gate remain required. Parent unit requirements stay open.

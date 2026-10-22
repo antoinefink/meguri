@@ -41,6 +41,14 @@ impl DiskSpaceProvider for Space {
         DiskCapacity::Available { bytes: u64::MAX }
     }
 }
+struct MutableSpace(Arc<AtomicBool>);
+impl DiskSpaceProvider for MutableSpace {
+    fn available_bytes(&self, _: String) -> DiskCapacity {
+        DiskCapacity::Available {
+            bytes: if self.0.load(Ordering::SeqCst) { 0 } else { u64::MAX },
+        }
+    }
+}
 struct Listener(mpsc::Sender<CoreEvent>);
 impl CoreEventListener for Listener {
     fn on_event(&self, event: CoreEvent) {
@@ -221,7 +229,16 @@ fn exported_open_counts_review_close_reopen_upgrade_and_races() {
     fixture(&location);
     let (tx, rx) = mpsc::channel();
     set_event_listener(Arc::new(Listener(tx))).unwrap();
-    let open = || collection::start_open(location.clone(), Arc::new(Clock), Arc::new(Space), 37).unwrap();
+    let low_space = Arc::new(AtomicBool::new(false));
+    let open = || {
+        collection::start_open(
+            location.clone(),
+            Arc::new(Clock),
+            Arc::new(MutableSpace(low_space.clone())),
+            37,
+        )
+        .unwrap()
+    };
     let first = open();
     let (outcome, mut events) = finish(&rx, first.id);
     assert_eq!(outcome, JobOutcome::Succeeded);
@@ -261,7 +278,7 @@ fn exported_open_counts_review_close_reopen_upgrade_and_races() {
         deck_tree::deck_study_state(tree.nodes[0].id).unwrap().queue_counts.new,
         2
     );
-    let persisted = typed_surface(&rx, &mut events, tree.nodes[1].id);
+    let persisted = typed_surface(&rx, &mut events, tree.nodes[1].id, &low_space);
     let review_session::ReviewStartResult::Started {
         session_id,
         generation,
@@ -453,7 +470,12 @@ fn changes_empty(changes: &meguri_ffi::changes::ChangeSet) -> bool {
 }
 
 // Runs within the single process-runtime test above, using only real exports.
-fn typed_surface(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>, zoo: i64) -> (i64, i64) {
+fn typed_surface(
+    rx: &mpsc::Receiver<CoreEvent>,
+    events: &mut Vec<CoreEvent>,
+    zoo: i64,
+    low_space: &AtomicBool,
+) -> (i64, i64) {
     use meguri_ffi::{decks, mutations::MutationSummary, notes, notetypes, suspend, tags, undo};
     use review_session::{ReviewUndoScope as Scope, ReviewUndoStatus as Status};
     let mut summaries: Vec<MutationSummary> = Vec::new();
@@ -730,17 +752,30 @@ fn typed_surface(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>, zo
     .unwrap();
     tags::mark_notes(vec![imported.id]).unwrap();
     tags::set_card_flag(vec![card.card_id], 3).unwrap();
+    let note_before = notes::read_note(note.id).unwrap();
+    let decks_before = deck_tree::deck_tree_with_counts().unwrap();
+    let deletion_before = decks::deck_deletion_summary(vec![deck.id]).unwrap();
+    assert_eq!(deletion_before.cards, 1);
+    // Refuse deletion through the real safety provider's capacity preflight.
+    low_space.store(true, Ordering::SeqCst);
     let deletion = decks::start_delete_decks(vec![deck.id]).unwrap();
     let (outcome, more) = finish(rx, deletion.handle.id);
+    low_space.store(false, Ordering::SeqCst);
     events.extend(more);
-    assert!(matches!(
-        outcome,
-        JobOutcome::Failed {
-            error: CoreError::Unavailable { .. }
-        }
-    ));
+    let JobOutcome::Failed {
+        error: CoreError::Internal { message },
+    } = outcome
+    else {
+        panic!("the real safety backup must fail before deletion")
+    };
+    assert!(message.contains("safety backup failed: "));
+    assert!(message.contains("InsufficientSpace"));
+    assert!(message.contains("available: 0"));
+    assert!(message.contains("Unpublished"));
     assert!(deletion.result.result().unwrap().is_none());
-    assert_eq!(decks::deck_deletion_summary(vec![deck.id]).unwrap().cards, 1);
+    assert_eq!(decks::deck_deletion_summary(vec![deck.id]).unwrap(), deletion_before);
+    assert_eq!(deck_tree::deck_tree_with_counts().unwrap(), decks_before);
+    assert_eq!(notes::read_note(note.id).unwrap(), note_before);
     assert_eq!(notes::read_note(note.id).unwrap().guid, "surface-guid");
     assert_eq!(
         meguri_ffi::media::add_media("Surface.PNG".into(), vec![1, 2, 3]).unwrap(),

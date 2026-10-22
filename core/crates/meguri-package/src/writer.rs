@@ -232,7 +232,7 @@ fn publish_snapshot(
 }
 
 // Capacity must be checked before creating missing backup parents.
-fn existing_directory(mut path: &Path) -> Result<PathBuf> {
+pub(crate) fn existing_directory(mut path: &Path) -> Result<PathBuf> {
     loop {
         match std::fs::metadata(path) {
             Ok(metadata) if metadata.is_dir() => return Ok(path.to_owned()),

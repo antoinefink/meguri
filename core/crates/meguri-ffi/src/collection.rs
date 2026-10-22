@@ -29,7 +29,7 @@ pub trait HostClock: Send + Sync {
     fn zone_id(&self) -> String;
 }
 
-struct ForeignClock(Arc<dyn HostClock>);
+pub(crate) struct ForeignClock(pub(crate) Arc<dyn HostClock>);
 impl std::fmt::Debug for ForeignClock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("ForeignClock")
@@ -59,7 +59,7 @@ pub enum DiskCapacity {
 pub trait DiskSpaceProvider: Send + Sync {
     fn available_bytes(&self, directory: String) -> DiskCapacity;
 }
-struct ForeignSpace(Arc<dyn DiskSpaceProvider>);
+pub(crate) struct ForeignSpace(pub(crate) Arc<dyn DiskSpaceProvider>);
 impl meguri_engine::DiskSpaceProvider for ForeignSpace {
     fn available_bytes(&self, directory: &Path) -> Result<u64, StorageError> {
         let directory = directory.to_str().ok_or_else(|| StorageError::Io {
