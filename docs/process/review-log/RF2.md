@@ -667,3 +667,6 @@ constant types and run the same first-import case. No acceptance claim.
 - Native ProgressView replaces the ignored wrapper. Frame, native role, label, exact value and separate stage assertions stay enabled. Five exact sheet fixtures use a plain backdrop through TestHooks.Root; production entry and real picker journeys retain their existing root.
 - Seven exact contrast reasons record the iPad offscreen cases. Existing token pair checks cover those colours. No nil finding, role or hit-target exception is added. The full audits and bounded control visibility checks remain enabled.
 - Current audits and visual comparison remain pending. No acceptance claim.
+- Mac `a11y/20261022T210712Z-25128`: FAIL, 1 passed and 1 failed. Progress role, frame and label pass. The String cast fails. `ui-tree/20261022T210920Z-27250` PASS records the native progress value as 0.42.
+- Fixer `s-20261022T211009Z-98befd29`, base `3945a99d`, export `20261022T211026Z-29283`, checkpoint `d2945846`. Independent review: no findings. Mac requires a number equal to 0.42 within 0.000001; other platforms retain exact text. All other assertions remain enabled.
+- Doctor `20261022T211036Z-29620`: PASS. VM running, SSH ready, 62 GiB free.
