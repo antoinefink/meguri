@@ -236,10 +236,14 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let startReparentTags = BridgeCall("start_reparent_tags")
     public static let startDeleteTags = BridgeCall("start_delete_tags")
     public static let startClearUnusedTags = BridgeCall("start_clear_unused_tags")
+    public static let trackedMediaNames = BridgeCall("tracked_media_names")
     public static let addMedia = BridgeCall("add_media")
     public static let flushForBackground = BridgeCall("flush_for_background")
     public static let suspend = BridgeCall("suspend")
     public static let resume = BridgeCall("resume")
+    public static let checkRollover = BridgeCall("check_rollover")
+    public static let fsrsPolicyStatus = BridgeCall("fsrs_policy_status")
+    public static let enableFsrs = BridgeCall("enable_fsrs")
     public static let undoJobResult = BridgeCall("UndoJob.result")
     public static let peekUndo = BridgeCall("peek_undo")
     public static let peekRedo = BridgeCall("peek_redo")
@@ -292,8 +296,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         addNoteTags, startAddNoteTags, removeNoteTags, startRemoveNoteTags, setCardFlag,
         startSetCardFlag, toggleCardFlag, startToggleCardFlag, markNotes, startMarkNotes,
         unmarkNotes, startUnmarkNotes, toggleNoteMark, startToggleNoteMark, startRenameTag,
-        startReparentTags, startDeleteTags, startClearUnusedTags, addMedia, flushForBackground,
-        suspend, resume, undoJobResult, peekUndo, peekRedo,
+        startReparentTags, startDeleteTags, startClearUnusedTags, addMedia, trackedMediaNames, flushForBackground,
+        suspend, resume, checkRollover, fsrsPolicyStatus, enableFsrs, undoJobResult, peekUndo, peekRedo,
         tryPendingReviewRestore, deckRenameJobResult, deckMoveJobResult, deckCollapseJobResult, startUndo, startRedo, startAddNotes, noteAdditionJobResult,
         parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,
         deckOptionsEditorSnapshot, deckOptionsEditorEdit, deckOptionsEditorValidate, parseOptionSteps, formatOptionSteps, startDeckOptions, startSaveDeckOptions, startOptionIgnoreCount, startSchedulingPreferences, startSaveSchedulingPreferences, deckOptionsReadJobResult, deckOptionsSaveJobResult, optionIgnoreCountJobResult, schedulingPreferencesJobResult, schedulingPreferencesSaveJobResult, validateSchedulingPreferences,

@@ -71,7 +71,7 @@ import Testing
             "toggle_card_flag", "start_toggle_card_flag", "mark_notes", "start_mark_notes",
             "unmark_notes", "start_unmark_notes", "toggle_note_mark", "start_toggle_note_mark",
             "start_rename_tag", "start_reparent_tags", "start_delete_tags", "start_clear_unused_tags",
-            "add_media", "flush_for_background", "suspend", "resume",
+            "add_media", "tracked_media_names", "flush_for_background", "suspend", "resume", "check_rollover", "fsrs_policy_status", "enable_fsrs",
             "UndoJob.result", "peek_undo", "peek_redo", "try_pending_review_restore",
             "DeckRenameJob.result", "DeckMoveJob.result", "DeckCollapseJob.result", "start_undo", "start_redo", "start_add_notes", "NoteAdditionJob.result",
             "parse_due_days", "start_sched_op", "SchedOpJob.result", "start_buried_kinds", "BuriedKindsJob.result",
