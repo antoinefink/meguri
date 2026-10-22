@@ -132,7 +132,7 @@ final class VMAccessibilitySetupTests: XCTestCase {
             reportSetupFailure(settings, "Expected the unique Go To Folder text field in the picker; no path entered")
             return false
         }
-        let field = folderPicker.textFields.element(boundBy: 0)
+        let field = folderPicker.textFields.matching(identifier: "PathTextField").element(boundBy: 0)
         guard click(field, in: settings, description: "Go To Folder text field") else { return false }
         guard bringSettingsForward(settings) else { return false }
         field.typeKey("a", modifierFlags: .command)
@@ -160,11 +160,9 @@ final class VMAccessibilitySetupTests: XCTestCase {
 
     @MainActor
     private func isGoToFolder(_ picker: XCUIElement) -> Bool {
-        let names = ["Go to the folder:", "Go to Folder:", "Go to Folder"]
-        let exactName = NSPredicate(format: "label IN %@ OR value IN %@", names, names)
-        return picker.textFields.count == 1 && picker.secureTextFields.count == 0
-            && (names.contains(picker.label) || picker.staticTexts.matching(exactName).count == 1
-                || picker.textFields.matching(exactName).count == 1)
+        picker.elementType == .sheet && picker.identifier == "GoToWindow"
+            && picker.textFields.count == 1 && picker.secureTextFields.count == 0
+            && picker.textFields.matching(identifier: "PathTextField").count == 1
     }
 
     @MainActor
