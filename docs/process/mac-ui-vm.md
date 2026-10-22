@@ -2,6 +2,14 @@
 
 Antoine decided on 2026-10-15 that Mac UI-driving suites run in a macOS virtual machine on this Mac. Before, they ran on the real screen, at most once an hour. Plan unit U8b implements the change. The same day he extended it: everything that would disturb his Mac runs in the VM, as soon and as often as useful. Plan unit U8c moves the simulators there. This page records provisioning and subsequent verification. The 2026-10-19 supplement below moves the remaining Mac app-hosted checks into the VM.
 
+## Recovery permission (2026-10-22)
+
+The orchestrator may stop that VM once no test is running and start it with
+`/Volumes/T9/meguri-vm/bin/tart run meguri-mac --no-graphics` in the background.
+Use `tools/mg doctor` to check readiness, then `tools/mg catch-up` for queued
+checks. Keep the VM running headlessly. This permission covers the Meguri test
+VM; it does not change the host-screen or other-project data rules.
+
 ## The VM
 
 - Tool: Tart 2.32.1 (Cirrus Labs, Developer ID signed and notarized), installed at `/Volumes/T9/meguri-vm/bin/tart-2.32.1/`. The wrapper `/Volumes/T9/meguri-vm/bin/tart` sets `TART_HOME=/Volumes/T9/meguri-vm/tart-home`, so every VM file lives on the external T9 drive (APFS, USB 10 Gb/s).
