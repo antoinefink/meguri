@@ -1728,6 +1728,13 @@ dependencies = [
 [[package]]
 name = "meguri-package"
 version = "0.0.0"
+dependencies = [
+ "meguri-model",
+ "meguri-storage",
+ "tempfile",
+ "zip",
+ "zstd",
+]
 
 [[package]]
 name = "meguri-sched"

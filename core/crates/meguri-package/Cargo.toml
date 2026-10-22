@@ -5,3 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[dependencies]
+meguri-model.workspace = true
+meguri-storage.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+zip.workspace = true
+zstd.workspace = true

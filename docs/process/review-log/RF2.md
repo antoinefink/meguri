@@ -142,3 +142,18 @@ fresh goldens and oracle replay remain required. Missing executor capabilities
 may stay pending while inactive; adding those contracts does not require RF2 to
 implement full retention or periodic scheduling. Keep those full parent-unit
 requirements open and implement RF2's actual writer and pre-import safety path.
+
+## Writer red checkpoint
+
+Implementer session: `s-20261022T151201Z-48f16d8b` (record `4ac5cd29`).
+Filtered run `20261022T151243Z-41150` exported a small standalone writer API
+and one independent archive-layout test. Its source snapshot was clean master.
+Docker run `20261022T151638Z-44478` compiled and ran exactly that test:
+zero passes, one expected failure, zero skips. It reached the production writer
+with the valid public fixture and failed because the writer returns `Unavailable`.
+Both source-byte preservation assertions passed before that failure.
+Archive-layout assertions have not yet executed; they await the real writer.
+Cargo updated only the package's dependency edges in the existing lockfile.
+This is an intentional test-first WIP checkpoint, not passing implementation
+evidence or Unit acceptance. The next continuation implements the writer and
+storage-owned helpers, then must make this same test pass without weakening it.
