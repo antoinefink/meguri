@@ -334,5 +334,26 @@ Mac audit `20261022T083719Z-32772` found missing roles on Close and Back.
 Actual DOM checks passed. A new audit must verify the role repair.
 iPhone `20261022T082856Z-22245` and iPad `20261022T083354Z-28853` passed.
 Native AX permission remains a user step.
-Snapshot run `20261022T083849Z-34554` failed to copy simulator plan artifacts.
-Mac renders passed. Keep this tooling failure open. No Unit acceptance.
+Correction: snapshot run `20261022T083849Z-34554` selected zero images because
+bare subject filters did not match full subject/state/cell paths. Mac's 71
+passes were tests, not renders. Retain this failed receipt as a syntax/selection
+error; no image coverage or tooling bug is claimed. Reviewer-confirmed globs for
+both filter and record are `home.deckList/*`, `review.question/*`,
+`review.answer/*`, `review.congratulations/*`. A valid-selection run is pending.
+
+Round 6 actual validation fix; filtered starting commit `e84f6cf08b9f49271593ad50c7324a0978076d46`;
+original RF1 base remains `5d651707`. Actual Mac audit
+`20261022T084150Z-40457`, after `447f5c58`, confirms button roles and 44-point
+targets, plus real Question/Answer DOM checks in both variants. It still reports
+unsuppressed ActionMissing on Close/Back (type button 9, 44×44): the ignore
+boundary lost the native press action. Close/Back/Redo now expose standard
+SwiftUI default accessibility actions invoking the existing close/undo/redo
+closures. Back/Redo actions guard canUndo/canRedo; disabled follows the full
+accessibility modifiers to cover the semantic wrapper and native button.
+Labels, IDs, help, button traits, hit geometry and native keyboard actions remain.
+
+One bounded source consistency pass only; no builds/tests/commits. iPhone
+`20261022T082856Z-22245` and iPad `20261022T083354Z-28853` passed all four
+screens and variants before this fix; the shared press bindings need runtime
+verification. New Mac action proof and the full gate remain pending. Raw native
+AX -25211/user permission is independently open. No Unit acceptance.

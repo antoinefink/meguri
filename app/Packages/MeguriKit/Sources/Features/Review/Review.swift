@@ -109,6 +109,7 @@ struct ReviewLayout<Card: View>: View {
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel(Text("Close Review", bundle: .module))
                     .accessibilityIdentifier("review.session.close")
+                    .accessibilityAction(.default) { close() }
                 VStack(alignment: .leading, spacing: Spacing.xxSmall) {
                     Text("Session Progress", bundle: .module).font(.subheadline)
                         .fixedSize(horizontal: false, vertical: true)
@@ -136,12 +137,16 @@ struct ReviewLayout<Card: View>: View {
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
-                    .disabled(!canUndo)
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel(undoDescription)
                     .help(undoDescription)
                     .accessibilityIdentifier("review.session.back")
+                    .accessibilityAction(.default) {
+                        guard canUndo else { return }
+                        undo()
+                    }
+                    .disabled(!canUndo)
                 if canRedo {
                     Button { redo() } label: {
                         Image(systemName: "arrow.uturn.forward")
@@ -153,6 +158,11 @@ struct ReviewLayout<Card: View>: View {
                         .accessibilityAddTraits(.isButton)
                         .accessibilityLabel(Text("Redo Answer", bundle: .module))
                         .accessibilityIdentifier("review.session.redo")
+                        .accessibilityAction(.default) {
+                            guard canRedo else { return }
+                            redo()
+                        }
+                        .disabled(!canRedo)
                 }
             }
             .buttonStyle(.plain)
