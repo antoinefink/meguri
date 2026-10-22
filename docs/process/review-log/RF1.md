@@ -420,3 +420,50 @@ VM helper build `20261022T093210Z-4572` failed on two SDK/compiler issues.
 The fix uses tableRows and a preconcurrency framework import.
 Run `20261022T093549Z-13025` built, but executed zero cases due to plan exclusion.
 Its nominal pass does not prove setup. Selection and result validation need fixes.
+
+Follow-up result validation rejects zero passing tests, invalid counts and failed
+outcomes. Focused Docker checks passed: three new cases in
+`20261022T094042Z-21303`, then all 27 selected UI dispatch/result cases in
+`20261022T095029Z-34684`.
+
+VM setup attempts remain failed evidence, not application failures or grants:
+`20261022T094042Z-21488` could not identify the runner row;
+`20261022T094710Z-29439` raced a broad indexed row query;
+`20261022T094956Z-33013` reached the OS administrator dialog.
+Native exact-name queries replaced the indexed search. Antoine explicitly
+authorized entering the dedicated VM credential and modifying this VM.
+`20261022T101411Z-69285` authenticated successfully, but the helper failed to
+recognize the application picker. Its controls use native identifiers and empty
+labels. `d4bdfb7b` corrects those identifiers. A real public-AX trust check and
+strict keyboard execution remain required; no credential belongs in this log.
+
+The initial notice expansion exposed a second viewport problem at the largest
+text size. Filtered fix `8a99a47d`, session `s-20261022T100053Z-8c899035`,
+caps the scrolling notice at 40 percent of the middle region and reserves the
+remaining space for the card. Header and rating controls remain separate.
+Review matrix `20261022T101801Z-73748` passed all 90 selected cells. Only the
+four expected phone error images changed; the other 86 were identical.
+Images are committed in `093a7ced`. Independent visual review confirmed readable
+cards, separate ratings and stable question/answer control space. The visual P1
+is closed; actual scrolling of a long notice still needs runtime proof.
+
+Completion fixtures now render the full opaque review layout, waiting/finished
+content and actions. Their 20 updated images are committed in `f8383519`.
+The earlier focused render `20261022T095115Z-36875` covered 40 error/completion
+cells, not 90. Four intermediate phone error captures were superseded by the
+bounded notice fix; their original evidence is retained under ignored build data.
+
+Real-screen accessibility suites passed every selected screen and variant:
+Mac `20261022T095435Z-46345`, iPhone `20261022T095547Z-49079`,
+iPad `20261022T095836Z-53073`. These precede the bounded middle-region change;
+they are not claimed as matching the newest source digest. The RF1 full gate
+against `5d6517071681878d6ad7fd6f22cfa587961cf230` remains pending.
+No Unit acceptance or final design approval is claimed.
+
+VM setup `20261022T102547Z-84593` passed one selected test with no skips,
+including actual public accessibility trust. Temporary VM setup files were
+removed immediately afterwards. Strict keyboard run `20261022T102715Z-86277`
+then failed: trust was true and the focus write succeeded, but the immediate
+AXFocused read returned noValue (-25212). Initial reveal/rating shortcuts passed
+before that assertion. Native control focus and activation remain open; the
+reviewer is checking this bounded failure before any source change.
