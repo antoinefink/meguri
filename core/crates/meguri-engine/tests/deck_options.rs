@@ -1,8 +1,7 @@
 //! U49 transactions on real storage and the real scheduler memory path.
 mod common;
 use meguri_engine::{
-    EngineError, OpSource, OpSpec, StampMode, UndoScope, deck_config, decks, sched::deck_options as options,
-    tags::RunOptions,
+    EngineError, OpSource, OpSpec, UndoScope, deck_config, decks, sched::deck_options as options, tags::RunOptions,
 };
 use meguri_model::{
     card::{CardQueue, CardType},
@@ -13,7 +12,7 @@ use meguri_model::{
     usn::Usn,
 };
 use meguri_sched::options::{Field, Value};
-use meguri_storage::{ReadRows, ReaderRole};
+use meguri_storage::{ReadRows, ReaderRole, StampMode, StoredConfig};
 fn draft(h: &common::Harness, deck: DeckId) -> options::Draft {
     options::Draft::new(options::snapshot(&h.collection, deck).unwrap())
 }
@@ -364,7 +363,7 @@ fn preferences_validate_supplied_fields_and_reject_empty_requests_without_mutati
     assert_eq!(dump(&h), before);
     assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), undo);
 }
-fn preference_row(h: &common::Harness, key: &str) -> Option<ConfigEntry> {
+fn preference_row(h: &common::Harness, key: &str) -> Option<StoredConfig> {
     h.collection
         .reader(ReaderRole::Query)
         .unwrap()
