@@ -183,7 +183,7 @@ mg_ui_test__report() {
     return 0
   fi
   summary="$(
-    if [ "${3:-}" = physical ]; then set -o pipefail; fi
+    set -o pipefail
     xcrun xcresulttool get test-results summary --path "$prefix.xcresult" 2>/dev/null |
     jq -c '{passed: .passedTests, failed: .failedTests, skipped: .skippedTests, outcome: .result}')" || summary=""
   if [ "${3:-}" = physical ]; then
@@ -224,6 +224,16 @@ mg_ui_test__report() {
             if ($s | contains("/")) then .id == $s else (.id | split("/")[0]) == $s end))' <<<"$cases" >/dev/null; then
       mg_failure physical-device-results "every physical selector must have a passed test method"
       [ "$result" -eq 2 ] || result=1
+    fi
+  elif [ "$result" -eq 0 ]; then
+    if ! jq -se 'length == 1 and (.[0] | type == "object" and all(.passed, .failed, .skipped;
+        type == "number" and . >= 0 and . == floor))' <<<"$summary" >/dev/null 2>&1; then
+      mg_failure ui-test-results "UI tests require a readable summary with integer test counts"
+      summary=""
+      result=2
+    elif ! jq -e '.outcome == "Passed" and .passed > 0 and .failed == 0' <<<"$summary" >/dev/null; then
+      mg_failure ui-test-results "UI tests require a Passed outcome, at least one passed test and zero failed tests"
+      result=1
     fi
   fi
   if [ -n "$summary" ]; then

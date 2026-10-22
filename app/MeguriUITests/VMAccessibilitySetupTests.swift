@@ -3,10 +3,13 @@ import AppKit
 @preconcurrency import ApplicationServices
 import XCTest
 
-/// Explicit VM provisioning only; skipped by the UI plan.
+/// Explicit VM provisioning only; skipped at runtime without the opt-in marker.
 final class VMAccessibilitySetupTests: XCTestCase {
     @MainActor
     func testEnableRunnerAccessibility() throws {
+        guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-ax-enable") else {
+            throw XCTSkip("VM setup opt-in absent")
+        }
         continueAfterFailure = false
         guard CardSwapTimingGate.hypervisorPresent() == true else {
             XCTFail("Accessibility setup requires kern.hv_vmm_present == true")
@@ -14,10 +17,6 @@ final class VMAccessibilitySetupTests: XCTestCase {
         }
         guard NSUserName() == "meguri" else {
             XCTFail("Accessibility setup requires the dedicated VM's meguri account")
-            return
-        }
-        guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-ax-enable") else {
-            XCTFail("VM setup marker absent")
             return
         }
         if AXIsProcessTrusted() { return }

@@ -411,3 +411,52 @@ test_tree() {
   called "^vm-test .* UI iphonesimulator id=$SIM Debug -only-testing:MeguriUITests/MediaTests/testAudio$"
   not_called '^(host-lease|plutil)|^xcrun xcdevice|^xcodebuild test-without-building|allowProvisioningUpdates|--slices|MEGURI_SIGNING=team'
 }
+
+@test "explicit simulator UI suites reject zero tests, all skips, failures and unknown outcomes despite exit zero" {
+  local summary
+  for summary in '{"result":"Passed","passedTests":0,"failedTests":0,"skippedTests":0}' \
+      '{"result":"Passed","passedTests":0,"failedTests":0,"skippedTests":2}' \
+      '{"result":"Passed","passedTests":2,"failedTests":1,"skippedTests":0}' \
+      '{"result":"Failed","passedTests":2,"failedTests":0,"skippedTests":0}' \
+      '{"result":"Unknown","passedTests":2,"failedTests":0,"skippedTests":0}' \
+      '{"passedTests":2,"failedTests":0,"skippedTests":0}'; do
+    printf '%s\n' "$summary" >"$FX_SUMMARY"
+    mg ui-test --platform iphone --device "$SIM" --suite MediaTests
+    [ "$status" -eq 1 ]
+    [ "$(field .status)" = fail ]
+    [ "$(field '.failures[0].id')" = ui-test-results ]
+  done
+}
+
+@test "explicit simulator UI suites require readable nonnegative integer counts" {
+  local summary
+  for summary in '' 'not JSON' '{}' \
+      '{"result":"Passed","passedTests":"2","failedTests":0,"skippedTests":0}' \
+      '{"result":"Passed","passedTests":2.5,"failedTests":0,"skippedTests":0}' \
+      '{"result":"Passed","passedTests":2,"failedTests":-1,"skippedTests":0}' \
+      '{"result":"Passed","passedTests":2,"failedTests":0,"skippedTests":null}' \
+      '{"result":"Passed","passedTests":2,"failedTests":0}' \
+      '{"result":"Passed","passedTests":2,"failedTests":0,"skippedTests":0} {"result":"Passed","passedTests":2,"failedTests":0,"skippedTests":0}'; do
+    printf '%s\n' "$summary" >"$FX_SUMMARY"
+    mg ui-test --platform iphone --device "$SIM" --suite MediaTests
+    [ "$status" -eq 2 ]
+    [ "$(field .status)" = error ]
+    [ "$(field '.failures[0].id')" = ui-test-results ]
+  done
+  echo '{"result":"Passed","passedTests":2,"failedTests":0,"skippedTests":0}' >"$FX_SUMMARY"
+  FX_SUMMARY_RC=1 mg ui-test --platform iphone --device "$SIM" --suite MediaTests
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+}
+
+@test "explicit simulator UI suites pass with actual passed tests and allow partial skips" {
+  local skipped
+  for skipped in 0 1; do
+    jq -n --argjson skipped "$skipped" \
+      '{result:"Passed",passedTests:2,failedTests:0,skippedTests:$skipped}' >"$FX_SUMMARY"
+    mg ui-test --platform iphone --device "$SIM" --suite MediaTests
+    [ "$status" -eq 0 ]
+    [ "$(field .status)" = pass ]
+    [ "$(field '.summary | "\(.passed) \(.failed) \(.skipped)"')" = "2 0 $skipped" ]
+  done
+}

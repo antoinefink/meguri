@@ -23,8 +23,7 @@
         "CardSwapTimingGateTests",
         "CardSwapTimingSpikeTests",
         "PerfTestCaseTests",
-        "SmokePerfTests",
-        "VMAccessibilitySetupTests"
+        "SmokePerfTests"
       ],
       "target" : {
         "containerPath" : "container:Meguri.xcodeproj",
