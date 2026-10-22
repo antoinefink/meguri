@@ -14,6 +14,8 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 ## Tooling
 
 - Work directly on `master` in the main checkout; do not create branches or worktrees. Resume prepared work without redoing it. Record each unit's starting commit and review/fix log. Commit WIP with co-author attribution; push only `master`, never force. `tools/mg merge` is not required (Antoine, 2026-10-18).
+- Antoine (2026-10-22): implement working reviews next. Follow `docs/process/review-first-delivery.md` for execution order. Keep all milestone gates and complete the full plan.
+
 - Verification (updated goal, 2026-10-20): keep focused tests, independent review, separate commits and provenance/privacy/similarity checks per unit. Batch at most 20 units changing only Rust internals between full gates; run earlier for milestones, Swift/FFI, shared schemas, sync contracts, tooling or meaningful integration risk. Record the batch base and covered units; resolve failures before the next batch or required boundary. Final suites and human evidence remain mandatory. See `docs/process/tiers.md`.
 
 - Interim exception (Antoine, 2026-10-21): only the recorded R554 audio failure may remain red until U69, with every other required check passing. Preserve the failed gate, enabled test and limits; obtain skipped T1 separately. M1R and final acceptance still require the fix. Exact scope: `docs/process/tiers.md`, approval `E-20261021T134124Z-a07a`.
