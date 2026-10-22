@@ -187,6 +187,8 @@ class SaveDeckOptions(unittest.TestCase):
             ({"deck": "A", "deck_desired_retention": "0.8"}, "invalid_scenario"),
             ({"deck": "A", "options": {"insertion_order": "due"}}, "invalid_scenario"),
             ({"deck": "A", "options": {"insertion_order": 0}}, "invalid_scenario"),
+            ({"deck": "A", "options": {"insertion_order": []}}, "invalid_scenario"),
+            ({"deck": "A", "options": {"insertion_order": {}}}, "invalid_scenario"),
             ({"deck": "A", "limits": [30]}, "invalid_scenario"),
             ({"deck": "A", "limits": {"new_limit": 30}}, "invalid_scenario"),
             ({"deck": "A", "limits": {"new": 10000}}, "invalid_scenario"),

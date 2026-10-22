@@ -83,7 +83,7 @@ def _ease(v: Any) -> float:
 def _insertion_order(v: Any) -> int:
     # NewCardInsertOrder: DUE (sequential) 0, RANDOM 1.
     orders = {"sequential": 0, "random": 1}
-    if v not in orders:
+    if not isinstance(v, str) or v not in orders:
         raise invalid("insertion_order is sequential or random")
     return orders[v]
 
