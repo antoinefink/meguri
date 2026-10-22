@@ -1,6 +1,6 @@
 #if os(macOS)
 import AppKit
-import ApplicationServices
+@preconcurrency import ApplicationServices
 import XCTest
 
 /// Explicit VM provisioning only; skipped by the UI plan.
@@ -38,7 +38,7 @@ final class VMAccessibilitySetupTests: XCTestCase {
         // Allow the pane a bounded time to populate, without navigating other settings.
         _ = settings.staticTexts.matching(exactName).firstMatch.waitForExistence(timeout: 10)
         capture(settings, phase: "before")
-        let rows = settings.descendants(matching: .row).allElementsBoundByIndex.filter { row in
+        let rows = settings.tableRows.allElementsBoundByIndex.filter { row in
             runnerNames.contains(row.label) || row.staticTexts.matching(exactName).count == 1
         }
         guard rows.count == 1 else {

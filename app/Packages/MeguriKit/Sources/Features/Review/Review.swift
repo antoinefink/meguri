@@ -108,6 +108,8 @@ struct ReviewLayout<Card: View>: View {
             if let notice = notice {
                 Text(verbatim: notice).font(.callout).foregroundStyle(.token(.statusWarning))
                     .padding(Spacing.small)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
                     .accessibilityIdentifier("review.session.notice")
             }
             card().frame(maxWidth: .infinity, maxHeight: .infinity)
