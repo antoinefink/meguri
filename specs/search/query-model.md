@@ -108,7 +108,7 @@ Searching never calls scheduling or engine code (KTD2). Every outside value a qu
 | ignore accents | config `ignoreAccentsInSearch` (false when missing) | plain text, `sc:`, `w:` |
 | fold mode | `Unicode` in the product; `AsciiCompat` only with the `test-hooks` Rust feature (U91) | the U81 text terms (`case-folding.md`) |
 
-The U81 and U82 specs are the authority on what each term reads; this table is the union U80 must carry. The plan records, for each term, which of these values it read, so that caches (U90) key on exactly those. The whole collection, NOT, AND, OR and groups read none.
+`search/state-and-flags#S1–S3` defines the due and buried leaves, including their exact context dependencies. The U81 and U82 specs are the authority on what each term reads; this table is the union U80 must carry. The plan records, for each term, which of these values it read, so that caches (U90) key on exactly those. The whole collection, NOT, AND, OR and groups read none.
 
 ## Q9. The plan
 
