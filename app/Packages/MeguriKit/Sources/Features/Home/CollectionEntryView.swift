@@ -117,6 +117,7 @@ struct CollectionEntryContent: View {
                                 } else { ProgressView() }
                             }
                             .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(.accessibility, Rectangle())
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel(progress.title)
                             .accessibilityValue(Text(progress.total.map { "\(progress.completed) of \($0)" } ?? "In progress"))
