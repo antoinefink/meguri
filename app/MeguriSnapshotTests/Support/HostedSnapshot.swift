@@ -96,6 +96,7 @@ struct SnapshotRun: Sendable {
         self.baselines = baselines
         self.key = key
         self.inventory = inventory
+        initializePlanOutput()
     }
 
     init(environment: [String: String]) {
@@ -116,6 +117,25 @@ struct SnapshotRun: Sendable {
         key = environment["MEGURI_SNAPSHOT_KEY"] ?? Self.defaultKey(environment)
         baselines = Self.baselineRoot.appending(path: key, directoryHint: .isDirectory)
         inventory = environment["MEGURI_INVENTORY_JSON"].map { URL(filePath: $0) }
+        initializePlanOutput()
+    }
+
+    /// Suite discovery initializes the run even when a target has no test cases.
+    /// An empty plan is an artifact too; existing rows must survive later runs.
+    private func initializePlanOutput() {
+        guard mode == .plan else { return }
+        do {
+            try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+            let plan = output.appending(path: "plan.jsonl")
+            do {
+                try Data().write(to: plan, options: .withoutOverwriting)
+            } catch let error as CocoaError where error.code == .fileWriteFileExists {
+                let handle = try FileHandle(forWritingTo: plan)
+                try handle.close()
+            }
+        } catch {
+            Issue.record("could not initialize plan.jsonl in \(output.path): \(error)")
+        }
     }
 
     /// `<model>-<OS build>` of this simulator or Mac.

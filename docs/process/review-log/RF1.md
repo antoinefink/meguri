@@ -357,3 +357,16 @@ One bounded source consistency pass only; no builds/tests/commits. iPhone
 screens and variants before this fix; the shared press bindings need runtime
 verification. New Mac action proof and the full gate remain pending. Raw native
 AX -25211/user permission is independently open. No Unit acceptance.
+
+Snapshot planner fix: session `s-20261022T085214Z-0964537f`.
+Run `20261022T084430Z-44116` recorded 140 cells; small-target plan output was absent.
+The small target has no selected key variants. Existing PNGs: `d3288846`.
+Plan initialization now creates an empty file and preserves existing rows.
+IO errors remain failures. A wholly empty selection fails the job.
+Tests cover empty plans, append preservation, IO errors, unknown selection,
+deferred cells and a queued VM. Focused execution remains pending.
+Mac audit `20261022T084951Z-52240` passed all four screens and both variants.
+Small-phone drive `20261022T085341Z-56302`: 18 actions passed; 29 issues.
+Its largest-text capture shows overlapping rating labels and a nested button.
+That actual layout finding remains open. Native AX permission is separate.
+No Unit acceptance. The full gate remains pending.

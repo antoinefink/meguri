@@ -37,6 +37,21 @@ import Testing
         )
     }
 
+    private func planRun(at output: URL, fromEnvironment: Bool) -> SnapshotRun {
+        if fromEnvironment {
+            return SnapshotRun(environment: [
+                "MEGURI_SNAPSHOT_MODE": "plan", "MEGURI_SNAPSHOT_OUT": output.path,
+                "MEGURI_SNAPSHOT_FILTER": "test.swatch/*",
+                "MEGURI_SNAPSHOT_TARGET": SnapshotRun.current.target.rawValue,
+                "MEGURI_SNAPSHOT_GROUP": SnapshotRun.current.group, "MEGURI_SNAPSHOT_KEY": "test",
+            ])
+        }
+        return SnapshotRun(
+            mode: .plan, filters: ["test.swatch/*"], group: SnapshotRun.current.group,
+            output: output, baselines: directory.appending(path: "baselines"), key: "test"
+        )
+    }
+
     private func results(_ mode: SnapshotRun.Mode) throws -> [[String: Any]] {
         let text = try String(contentsOf: directory.appending(path: "out-\(mode.rawValue)/results.jsonl"), encoding: .utf8)
         return try text.split(separator: "\n").map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any] }
@@ -159,6 +174,48 @@ import Testing
         #expect(lines.count == 2)
         #expect(lines.last?.contains("\"deferred\"") == true)
         #expect(!FileManager.default.fileExists(atPath: directory.appending(path: "out-plan/results.jsonl").path))
+    }
+
+    @Test(arguments: [false, true])
+    func aPlanWithNoTestCasesStillHasAnEmptyArtifact(fromEnvironment: Bool) throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let plan = planRun(at: directory.appending(path: "empty-plan"), fromEnvironment: fromEnvironment)
+        // No snapshot assertion runs, as when a selected parameterized suite has zero cases.
+        #expect(try Data(contentsOf: plan.output.appending(path: "plan.jsonl")).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: plan.output.appending(path: "results.jsonl").path))
+    }
+
+    @Test func restartingAPlanPreservesItsRowsAndStillAppendsSelectedCells() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let first = planRun(at: directory.appending(path: "out-plan"), fromEnvironment: false)
+        assertTextSnapshot("unused", subject: "test.swatch", state: "typical", cell: cell, run: first)
+        let artifact = first.output.appending(path: "plan.jsonl")
+        let before = try Data(contentsOf: artifact)
+        #expect(!before.isEmpty)
+        let resumed = planRun(at: first.output, fromEnvironment: true)
+        #expect(try Data(contentsOf: artifact) == before)
+        assertTextSnapshot("unused", subject: "test.swatch", state: "other", cell: cell, run: resumed)
+        let rows = try String(contentsOf: artifact, encoding: .utf8).split(separator: "\n").map {
+            try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any]
+        }
+        #expect(rows.compactMap { $0["name"] as? String } == [
+            "test.swatch/typical/\(cell.name)", "test.swatch/other/\(cell.name)",
+        ])
+        #expect(!FileManager.default.fileExists(atPath: first.output.appending(path: "results.jsonl").path))
+    }
+
+    @Test(arguments: [false, true])
+    func aPlanStartupIOFailureIsReported(fromEnvironment: Bool) throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let blocked = directory.appending(path: "file-instead-of-directory")
+        try Data("keep".utf8).write(to: blocked)
+        withKnownIssue {
+            _ = planRun(at: blocked, fromEnvironment: fromEnvironment)
+        } matching: { issue in
+            issue.description.contains("could not initialize plan.jsonl")
+        }
+        #expect(try Data(contentsOf: blocked) == Data("keep".utf8))
     }
 }
 #endif

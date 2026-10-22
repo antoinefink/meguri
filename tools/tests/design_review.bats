@@ -154,12 +154,19 @@ mg_snapshots__xcodebuild() {
     esac
   done
   echo "fake snapshot run mode=$mode dest=$dest suites=$suites target=$target group=$group" >>"$STUB_LOG"
+  if [ "${FX_QUEUE_MAC:-}" = 1 ] && [ "$dest" = "platform=macOS,arch=arm64" ]; then
+    mg__mac_vm_queued "fake VM unavailable after simulator results" mac
+    return 2
+  fi
   guest="$FX_GUEST_FS$dir"
   mkdir -p "$guest" "$out.xcresult"
   echo "fake VM output $dir" >>"$STUB_LOG"
   echo "xcodebuild log" >"$out.log"
   if [ "$mode" = plan ]; then
-    [ -z "${FX_PLAN:-}" ] || cp "$FX_PLAN" "$guest/plan.jsonl"
+    : >"$guest/plan.jsonl"
+    fx="${FX_PLAN:-}"
+    [ -z "${FX_PLAN_DIR:-}" ] || [ ! -f "$FX_PLAN_DIR/$target.jsonl" ] || fx="$FX_PLAN_DIR/$target.jsonl"
+    [ -z "$fx" ] || cp "$fx" "$guest/plan.jsonl"
     mg_sim_fetch "$out"
     return
   fi
@@ -322,6 +329,72 @@ probe_fixture() {
   [ -f "$SB/build/mg/snapshots/$(field .run_id)/iphone-small/rt0-rm0-t50/results.jsonl" ]
   # The registry: where the matrix registers each screen.
   [ "$(field -c '.artifacts[] | select(.kind == "registry") | .path' | xargs jq -c '.screens["home.deckList"].platforms')" = '["iphone","mac"]' ]
+}
+
+capture_probe_fixture() {
+  probe_fixture
+  jq -c '.status = "captured"' "$FX_RESULTS" >"$FX_RESULTS.tmp"
+  mv "$FX_RESULTS.tmp" "$FX_RESULTS"
+}
+
+@test "a valid empty target plan preserves the selected cells from the other target" {
+  capture_probe_fixture
+  export FX_PLAN_DIR="$BATS_TEST_TMPDIR/plans" FX_RESULTS_DIR="$BATS_TEST_TMPDIR/by-target"
+  mkdir -p "$FX_PLAN_DIR" "$FX_RESULTS_DIR"
+  echo '{"name":"home.deckList/typical/light-standard-iphoneLarge","group":"rt0-rm0-t50"}' >"$FX_PLAN_DIR/iphone.jsonl"
+  : >"$FX_PLAN_DIR/iphone-small.jsonl"
+  cp "$FX_RESULTS" "$FX_RESULTS_DIR/iphone-rt0-rm0-t50.jsonl"
+  result_line home.deckList/typical/light-standard-iphoneLarge pass >>"$FX_RESULTS_DIR/iphone-rt0-rm0-t50.jsonl"
+  mg snapshots --platform iphone --filter 'home.deckList/*'
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field '.failures | length')" -eq 0 ]
+  [ "$(field .summary.total)" -eq 1 ]
+  local out="$SB/build/mg/snapshots/$(field .run_id)"
+  [ -f "$out/iphone-small/plan/plan.jsonl" ]
+  [ ! -s "$out/iphone-small/plan/plan.jsonl" ]
+  cmp "$FX_PLAN_DIR/iphone.jsonl" "$out/iphone/plan/plan.jsonl"
+  [ "$(jq -s '[.[] | select(.status == "pass")] | length' "$out/results.jsonl")" -eq 1 ]
+  called 'mode=verify dest=id=FAKE-iphone-small suites=all target=iphone-small'
+}
+
+@test "a wholly unknown snapshot filter fails with empty results or capture-only probes" {
+  export FX_RESULTS="$BATS_TEST_TMPDIR/results.jsonl"
+  : >"$FX_RESULTS"
+  mg snapshots --platform mac --filter 'unknown.subject/*'
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[].id] | join(" ")')" = empty-selection ]
+  [ "$(field .summary.total)" -eq 0 ]
+
+  capture_probe_fixture
+  mg snapshots --platform iphone --filter 'unknown.subject/*'
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[].id] | join(" ")')" = empty-selection ]
+  [ "$(field .details.counts.captured)" -eq 2 ]
+  [ "$(field .summary.total)" -eq 0 ]
+}
+
+@test "selected deferred cells remain valid without rendered images" {
+  export FX_RESULTS="$BATS_TEST_TMPDIR/results.jsonl"
+  result_line home.deckList/typical/light-standard-macDefault deferred >"$FX_RESULTS"
+  mg snapshots --platform mac --filter 'home.deckList/*'
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .summary.total)" -eq 1 ]
+  [ "$(field .summary.skipped)" -eq 1 ]
+  [ "$(field '.failures | length')" -eq 0 ]
+}
+
+@test "capture-only simulator output remains queued when the Mac run is unavailable" {
+  capture_probe_fixture
+  FX_QUEUE_MAC=1 mg snapshots --platform iphone,mac --filter 'home.deckList/*'
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field .summary.total)" -eq 0 ]
+  [ "$(field '.failures | length')" -eq 0 ]
 }
 
 # bats test_tags=gate

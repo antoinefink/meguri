@@ -472,6 +472,10 @@ mg_snapshots__finish() {
   mg_count passed "$(jq -s '[.[] | select(.status == "pass" or .status == "recorded")] | length' "$results")"
   mg_count failed "$(jq -s '[.[] | select(.status == "fail" or .status == "new")] | length' "$results")"
   mg_count skipped "$(jq -s '[.[] | select(.status == "deferred")] | length' "$results")"
+  if [ "$n" -eq 0 ] && [ "$MG_SNAP_BROKEN" = 0 ] && [ "$MG_QUEUED_PARTS" = '[]' ]; then
+    mg_failure empty-selection "no snapshot cells selected (capture-only probes do not count); check the subject/state/cell filters" \
+      "tools/mg snapshots --filter 'home.deckList/*'"
+  fi
   if [ "$MG_SNAP_BROKEN" != 0 ]; then
     mg_status error
   elif [ -s "$MG_STATE/failures.jsonl" ]; then
