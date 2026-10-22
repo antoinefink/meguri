@@ -133,19 +133,48 @@ import notify
     private func pick(_ source: URL, _ app: XCUIApplication, _ bundle: String) throws {
         #if os(macOS)
         // Native Open panel, no file URL or app-private import route.
-        let open = app.buttons["Open"].firstMatch
-        XCTAssertTrue(open.waitForExistence(timeout: 10))
+        let panel = app.sheets.matching(identifier: "open-panel").firstMatch
+        guard panel.waitForExistence(timeout: 10) else {
+            capturePicker(app)
+            XCTFail("Expected the native open-panel sheet")
+            return
+        }
         capturePicker(app)
+        guard FileManager.default.fileExists(atPath: source.path) else {
+            capturePicker(app)
+            XCTFail("Public collection package is missing from the VM at \(source.path)")
+            return
+        }
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("g", modifierFlags: [.command, .shift])
-        let path = app.textFields.firstMatch
-        XCTAssertTrue(path.waitForExistence(timeout: 10))
+        let goToFolder = panel.sheets.matching(identifier: "GoToWindow").firstMatch
+        let path = goToFolder.textFields.matching(identifier: "PathTextField").firstMatch
+        guard goToFolder.waitForExistence(timeout: 10), path.waitForExistence(timeout: 10) else {
+            capturePicker(app)
+            XCTFail("Expected GoToWindow with its PathTextField in the native Open panel")
+            return
+        }
         try click(path, app, bundle)
         try app.bringToFront(bundleIdentifier: bundle)
-        path.typeText(source.path)
+        path.typeKey("a", modifierFlags: .command)
         try app.bringToFront(bundleIdentifier: bundle)
-        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
-        XCTAssertTrue(open.waitForExistence(timeout: 10))
+        path.typeText(source.path)
+        guard path.value as? String == source.path else {
+            capturePicker(app)
+            XCTFail("Go To Folder did not contain the exact public collection package path")
+            return
+        }
+        try app.bringToFront(bundleIdentifier: bundle)
+        path.typeKey(.return, modifierFlags: [])
+        let open = panel.buttons.matching(identifier: "OKButton").firstMatch
+        let resolved = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !goToFolder.exists && open.exists && open.isEnabled && open.isHittable
+        }, object: nil)
+        guard XCTWaiter().wait(for: [resolved], timeout: 10) == .completed else {
+            capturePicker(app)
+            XCTFail("Public collection package path did not resolve to an enabled, hittable native Open button with GoToWindow dismissed")
+            return
+        }
         try click(open, app, bundle)
         #else
         let labels = ["review", "review.colpkg"]
