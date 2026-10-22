@@ -303,3 +303,16 @@ is unproven. Integrator must regression-audit iPhone and iPad after this change;
 prior iPad audit `20261022T081605Z-5320` passed every screen/variant. Preserve
 the reported iPhone/Mac persistence passes (two each). No Unit acceptance;
 full gate remains pending.
+
+Round 6 P1 narrow isolation; filtered starting commit
+`1f14ff593cf8efa83ed0ede92949ea554fda8e50`; original RF1 base `5d651707`.
+Removed the Mac card-only SwiftUI wrapper and all its AX modifiers. Show Answer
+now belongs to ReviewLayout's existing containing session group; only the card
+identifier is set natively on the unchanged pair.container. Native children,
+focus/keyboard/lifecycle code, iOS actions and adaptive rating layout remain.
+Retain actual Mac failure `20261022T082500Z-16034` and production-renderer control
+pass `20261022T082719Z-20345` (one test, zero skips). Public AX read
+`20261022T082611Z-18318` reports API disabled (-25211), trust false; user permission
+is pending. Strict real DOM/hit assertions remain unchanged. One bounded source
+consistency pass only; no builds/tests/commits. iPhone audit 2 remains running;
+prior iPad pass predates the phone layout change. No Unit or full-gate acceptance.

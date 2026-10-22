@@ -21,12 +21,7 @@ public struct ReviewView: View {
             ZStack {
                 if let pair = model.pair {
                     #if os(macOS)
-                    ZStack {
-                        ReviewCardHost(model: model, pair: pair, close: close)
-                    }
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("review.session.card")
-                        .accessibilityAction(named: Text("Show Answer", bundle: .module)) { model.reveal() }
+                    ReviewCardHost(model: model, pair: pair, close: close)
                         .opacity(model.phase == .question || model.phase == .answer || model.phase == .transition ? 1 : 0)
                     #else
                     ReviewCardHost(model: model, pair: pair, close: close)
@@ -170,6 +165,9 @@ struct ReviewLayout<Card: View>: View {
         .background(.token(.backgroundPrimary))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review.session.screen")
+        #if os(macOS)
+        .accessibilityAction(named: Text("Show Answer", bundle: .module)) { reveal() }
+        #endif
     }
 }
 

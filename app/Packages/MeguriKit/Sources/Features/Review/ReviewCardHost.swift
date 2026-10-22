@@ -89,6 +89,7 @@ extension ReviewCardHost: NSViewControllerRepresentable {
     }
     private func attach(to host: Host) {
         // Expose WebKit through the same direct container boundary as the behavior host.
+        pair.container.setAccessibilityIdentifier("review.session.card")
         if !host.isViewLoaded || host.view !== pair.container {
             pair.container.removeFromSuperview()
             host.view = pair.container
