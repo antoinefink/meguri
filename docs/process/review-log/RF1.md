@@ -517,3 +517,33 @@ retain native focus after Return, with card and side unchanged. Space invokes
 undo and dismissal. The final record has one answer and the deck has three due
 cards. The keyboard finding is closed. No product key handling was added.
 Fixer session: `s-20261022T102909Z-9c19149a`. Full gate pending; no Unit claim.
+
+Gate `20261022T105624Z-21882` was cancelled during static checks because the
+note commit had failed and the checkout was dirty. It is not passing evidence.
+Clean gate `20261022T105721Z-30203` ran on `a2607df0`, against the original
+RF1 base `5d6517071681878d6ad7fd6f22cfa587961cf230`. It failed Xcode checks
+and the Mac hook subset. T1 did not run; no gate acceptance is claimed.
+Every other triggered T0 check passed, including all three navigation/card
+UI suites, 209 runtime tests on each simulator, snapshots, accessibility,
+performance and similarity. The Mac driver and scripted journeys also passed.
+
+Xcode check `20261022T113143Z-4870` found an absent public startup fixture
+in the VM and two obsolete Home queries in Release/AppStore hook tests.
+Mac UI `20261022T123557Z-65397` found the same obsolete query in the window
+size test. The actual startup failure was NSCocoa260 at fixture loading;
+the unrelated system messages in the summary were not the cause.
+
+Filtered repairs `20261022T120648Z-39196` and `20261022T115823Z-25626`
+became commits `586ca518` and `36cce901`. Fixer session:
+`s-20261022T102909Z-9c19149a`. Independent bounded review found no P0/P1.
+The first resource attempt exported nothing and was discarded.
+The public fixture copy is byte-identical to its existing source and belongs
+only to the test target. Real startup, lifecycle, backup and byte-preservation
+assertions remain. Hook tests query actual Home and reject both error states.
+Neither repair changes product behavior or skips a test.
+
+Focused VM run `20261022T124638Z-76368` passed the real startup case:
+one pass, zero failures and zero skips. This proves bundled-fixture access
+and actual core startup without a pre-existing backup directory on iOS.
+The repaired launch assertions and Mac startup check await the fresh full
+gate against the same original RF1 base. No Unit trailer or acceptance yet.
