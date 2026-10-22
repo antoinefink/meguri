@@ -8,9 +8,7 @@ import Testing
 @Suite(.serialized) struct ReviewCollectionStartupTests {
     @Test func freshInstallOpensExistingCollectionWithoutBackups() async throws {
         let files = FileManager.default
-        let source = URL(filePath: #filePath).deletingLastPathComponent()
-            .appending(path: "../../../../../conformance/fixtures/storage/schema-18.anki2")
-            .standardizedFileURL
+        let source = try #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2"))
         let original = try Data(contentsOf: source)
         let root = files.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
         defer { try? files.removeItem(at: root) }
