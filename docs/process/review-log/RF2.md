@@ -597,3 +597,16 @@ constant types and run the same first-import case. No acceptance claim.
 - Query fix session: `s-20261022T191237Z-c6b9deb4`; export `20261022T191304Z-13012`.
 - Round 3: readiness P2 closed; no new P0/P1. Both predicates use all matching rows and retain policy dismissal checks.
 - iPad, Mac, snapshots, audits and integrated gate remain pending.
+
+### Platform checks and accessibility correction
+
+- iPad `20261022T191544Z-16449`: FAIL, 2 cases, picker targeting.
+- Probe `drive/20261022T191901Z-19587`: FAIL; picker screenshot is retained. Exported hierarchy omits provider elements; app identifiers also fail format checks.
+- Mac `20261022T192232Z-23557`: FAIL at build; incorrect scroll argument label.
+- Picker fixer: `s-20261022T192221Z-1e3b2410`, base `eb1538f1`, export `20261022T192241Z-24451`.
+- UI fixer: `s-20261022T192618Z-51eb35e6`, base `de9b1a95`, export `20261022T192631Z-26918`.
+- Review: no P0–P2 findings; production actions and test assertions remain intact.
+- Actual iPad Cancel was 36pt in the toolbar. Footer measurement and current platform runs remain pending.
+- Source privacy PASS; checkpoint `81cd44ab`. No unit acceptance.
+- iPad first-import `20261022T192905Z-28896`: FAIL before selection; remote AX query interrupted inside the short folder wait.
+- Doctor `20261022T193004Z-30943`: VM ready; 59 GiB free.
