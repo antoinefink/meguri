@@ -392,3 +392,13 @@ Mac `20261022T090951Z-76478`, iPhone `20261022T091101Z-78124`,
 iPad `20261022T091337Z-80854`.
 Current source: `b8340cfb`. New baseline capture, critic and full gate remain.
 Native AX focus permission is a separate open user step. No Unit acceptance.
+
+Final matrix `20261022T091701Z-83713` passed all 140 selected cells:
+56 iPhone, 56 iPad and 28 Mac. Updated images are committed in `d8202f38`.
+The small target has no selected key variants; its actual largest-text review
+is covered by drive `20261022T090714Z-72607`, not a claimed matrix render.
+The independent critic is checking these captures and the final audit receipts.
+Antoine authorized VM permission setup directly, then confirmed ongoing
+permission to modify this dedicated VM. Host settings remain out of scope.
+The strict native AX focus case still requires an actual passing execution.
+No Unit acceptance or full-gate pass is claimed here.
