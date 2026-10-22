@@ -114,7 +114,7 @@ final class TestHooksTests: XCTestCase {
             let message = app.staticTexts["testhooks.error.message"]
             XCTAssert(message.waitForExistence(timeout: 15), "no hook error for \(options.arguments)")
             XCTAssert(text(app, "testhooks.error.message").contains(expected), "'\(text(app, "testhooks.error.message"))' lacks '\(expected)'")
-            XCTAssertFalse(app.descendants(matching: .any)["shell.placeholder.home"].exists, "the app ran despite the hook error")
+            XCTAssertFalse(app.descendants(matching: .any)["home.collection.screen"].exists, "the app ran despite the hook error")
             app.terminate()
         }
     }
@@ -123,7 +123,7 @@ final class TestHooksTests: XCTestCase {
         #if os(macOS)
         let build = try requireHooks()
         let app = try launch(MeguriLaunch(animations: false, windowSize: "1000x700"), build)
-        XCTAssert(app.descendants(matching: .any)["shell.placeholder.home"].waitForExistence(timeout: 15))
+        XCTAssert(app.descendants(matching: .any)["home.collection.screen"].waitForExistence(timeout: 15))
         let window = app.windows.firstMatch
         let resized = expectation(for: NSPredicate { _, _ in abs(window.frame.width - 1000) < 1 }, evaluatedWith: nil)
         wait(for: [resized], timeout: 10)
@@ -178,9 +178,11 @@ final class TestHooksTests: XCTestCase {
             ),
             build
         )
-        XCTAssert(app.descendants(matching: .any)["shell.placeholder.home"].waitForExistence(timeout: 15), "the app did not open on Home")
+        XCTAssert(app.descendants(matching: .any)["home.collection.screen"].waitForExistence(timeout: 15), "the app did not open on Home")
         XCTAssertFalse(app.staticTexts["sample.sheet.title"].waitForExistence(timeout: 3), "a Release-style build followed -MeguriRoute")
         XCTAssertFalse(app.staticTexts["testhooks.error.message"].exists, "a Release-style build parsed the launch options")
+        XCTAssertFalse(app.descendants(matching: .any)["home.collection.error"].firstMatch.exists, "a Release-style build applied the hook fixture")
+        XCTAssertFalse(app.descendants(matching: .any)["home.collection.retry"].firstMatch.exists, "a Release-style build applied the hook fixture and failed Home")
     }
 
     // MARK: Every build
