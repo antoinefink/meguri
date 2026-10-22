@@ -656,3 +656,14 @@ constant types and run the same first-import case. No acceptance claim.
 - iPhone `a11y/20261022T203812Z-5807`: FAIL, 1 passed and 1 failed. Home passes. Import fails because progress still exposes a 4pt frame; the new explicit frame assertion catches this.
 - Fixer `s-20261022T204324Z-076f2a06`, base `d55891f8`, export `20261022T204339Z-10171`, checkpoint `a23e2791`. Independent review: no new P0/P1. Exactly one metadata line sets the accessibility shape on the existing 44pt wrapper.
 - API: https://developer.apple.com/documentation/swiftui/contentshapekinds/accessibility
+
+### Native progress and import sheet audit
+
+- Input `97dc60529b232a17e8bc1f63f07f3d64547920340577a401c30a18d2ab5b85e1`: iPhone `a11y/20261022T204506Z-11473` PASS, 2 tests, no skips. All five import states and scoped Home empty/typical checks pass.
+- iPad `a11y/20261022T205058Z-15571`: FAIL. Home passes. Import fails. Progress frame and value checks pass. The failed receipt retains the findings.
+- Mac `a11y/20261022T205633Z-18860`: FAIL, 1 passed and 1 failed. The wrapper exposes an Other element with an empty value. The required value assertion catches it. Backdrop text also fails contrast. Home passes.
+- Base `4ec4a77f`; fixer `s-20261022T210101Z-3842fce5`; exports `20261022T210123Z-21883` and `20261022T210558Z-24055`; checkpoint `0a6adb6b`.
+- Independent review caught a Route/String type mismatch in the first export. The second export changes only the switch to `route?.path`. Review confirms the defect is closed, with no further P0/P1 or confirmed required-check defects.
+- Native ProgressView replaces the ignored wrapper. Frame, native role, label, exact value and separate stage assertions stay enabled. Five exact sheet fixtures use a plain backdrop through TestHooks.Root; production entry and real picker journeys retain their existing root.
+- Seven exact contrast reasons record the iPad offscreen cases. Existing token pair checks cover those colours. No nil finding, role or hit-target exception is added. The full audits and bounded control visibility checks remain enabled.
+- Current audits and visual comparison remain pending. No acceptance claim.
