@@ -18,21 +18,38 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
                 state: state, launch: MeguriLaunch(locale: "en_US", animations: false, route: "collection/import/\(state)"),
                 waitFor: "onboarding.collectionImport.content", suppressions: suppressions,
                 supplemental: { app, variant in
+                    if state == "loading" {
+                        let value = app.descendants(matching: .any)
+                            .matching(identifier: "onboarding.collectionImport.progress.value").firstMatch
+                        XCTAssertTrue(value.exists)
+                        XCTAssertGreaterThanOrEqual(value.frame.width, 44)
+                        XCTAssertGreaterThanOrEqual(value.frame.height, 44)
+                        XCTAssertEqual(value.label, "Copying collection…")
+                        XCTAssertEqual(value.value as? String, "42 of 100")
+                        XCTAssertEqual(app.staticTexts["onboarding.collectionImport.progress.stage"].label, "Copying collection…")
+                    }
                     guard state == "overflow" else {
                         return AccessibilityAudit.StateResult(state: state, findings: [], touchTargets: [])
                     }
                     let content = app.descendants(matching: .any).matching(identifier: "onboarding.collectionImport.content").firstMatch
+                    var findings: [AuditFinding] = []
+                    var touchTargets: [TouchTargetViolation] = []
                     try self.scrollToRequiredControls(content, app: app, build: build, identifiers: [
                         "onboarding.collectionImport.confirm", "onboarding.collectionImport.choose"
-                    ])
-                    XCTAssertTrue(app.buttons["onboarding.collectionImport.confirm"].isHittable, "replacement confirmation must remain reachable after scrolling")
+                    ]) { visible in
+                        let viewport = content.frame.intersection(app.windows.firstMatch.frame)
+                        for identifier in visible {
+                            let control = app.buttons[identifier]
+                            XCTAssertTrue(control.isHittable, "\(identifier) must remain reachable after scrolling")
+                            XCTAssertTrue(viewport.contains(control.frame), "\(identifier)'s entire frame must fit the scroll viewport")
+                        }
+                        findings += try AccessibilityAudit.run(
+                            app, variant: "overflow scrolled (\(visible.joined(separator: ", "))), \(variant)", suppressions: suppressions
+                        )
+                        touchTargets += try TouchTargets.violations(in: app)
+                    }
                     XCTAssertEqual(app.buttons["onboarding.collectionImport.confirm"].label, "Replace Collection")
-                    XCTAssertTrue(app.buttons["onboarding.collectionImport.choose"].isHittable, "file selection must remain reachable after scrolling")
-                    return AccessibilityAudit.StateResult(
-                        state: state,
-                        findings: try AccessibilityAudit.run(app, variant: "overflow scrolled, \(variant)", suppressions: suppressions),
-                        touchTargets: try TouchTargets.violations(in: app)
-                    )
+                    return AccessibilityAudit.StateResult(state: state, findings: findings, touchTargets: touchTargets)
                 }
             )
         }
@@ -75,20 +92,44 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
     }
 
     private func scrollToRequiredControls(_ scroll: XCUIElement, app: XCUIApplication, build: BuildUnderTest,
-                                          identifiers: [String]) throws {
+                                          identifiers: [String], onVisible: (([String]) throws -> Void)? = nil) throws {
         XCTAssertTrue(scroll.exists)
         try app.bringToFront(bundleIdentifier: try build.bundleIdentifier)
         let controls = identifiers.map { app.buttons[$0] }
-        #if os(macOS)
-        scroll.scroll(byDeltaX: 0, deltaY: -10_000)
-        if controls.allSatisfy({ $0.exists && $0.isHittable }) { return }
-        #else
+        var checked: Set<Int> = []
+        var individually = false
         for gesture in 0...24 {
-            if controls.allSatisfy({ $0.exists && $0.isHittable }) { return }
+            let viewport = scroll.frame.intersection(app.windows.firstMatch.frame)
+            guard !viewport.isEmpty, controls.allSatisfy({ $0.exists }) else { break }
+            let frames = controls.map(\.frame)
+            let required = frames.reduce(CGRect.null) { $0.union($1) }
+            let visible = controls.indices.filter {
+                !frames[$0].isEmpty && viewport.contains(frames[$0]) && controls[$0].isHittable
+            }
+            if visible.count == controls.count {
+                try onVisible?(identifiers)
+                return
+            }
+            // When the controls cannot share a viewport, retain a full audit at
+            // each reachable control rather than accepting partial visibility.
+            individually = individually || required.height > viewport.height || required.width > viewport.width
+            if individually {
+                let newlyVisible = visible.filter { !checked.contains($0) }
+                if !newlyVisible.isEmpty {
+                    try onVisible?(newlyVisible.map { identifiers[$0] })
+                    checked.formUnion(newlyVisible)
+                }
+                if checked.count == controls.count { return }
+            }
             guard gesture < 24 else { break }
-            scroll.swipeUp()
+            let target = individually ? frames[controls.indices.first { !checked.contains($0) }!] : required
+            let towardsBottom = target.maxY > viewport.maxY
+            #if os(macOS)
+            scroll.scroll(byDeltaX: 0, deltaY: (towardsBottom ? -1 : 1) * viewport.height / 2)
+            #else
+            if towardsBottom { scroll.swipeUp() } else { scroll.swipeDown() }
+            #endif
         }
-        #endif
-        XCTFail("Required controls must exist and be hittable after bounded scrolling: \(identifiers)\n\(app.debugDescription)")
+        XCTFail("Every required control must be fully inside the scroll viewport and hittable after at most 24 gestures: \(identifiers)\n\(app.debugDescription)")
     }
 }

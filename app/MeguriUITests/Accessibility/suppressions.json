@@ -2,6 +2,21 @@
   "version": 1,
   "suppressions": [
     {
+      "identifier": "onboarding.collectionImport.confirm",
+      "auditType": "contrast",
+      "reason": "At the largest text sizes in the overflow state the text runs on under the Cancel bar, where the scroll edge effect fades it until the screen is scrolled, and the audit measures the whole frame, faded part included (iPhone, 2026-10-22; run 20261022T202045Z-94081). The text colours are token pairings ContrastTests checks (R1979)."
+    },
+    {
+      "identifier": "onboarding.collectionImport.explanation",
+      "auditType": "contrast",
+      "reason": "At the largest text sizes in the loading state the text runs on under the Cancel Import bar, where the scroll edge effect fades it until the screen is scrolled, and the audit measures the whole frame, faded part included (iPhone, 2026-10-22; run 20261022T202045Z-94081). The text colours are token pairings ContrastTests checks (R1979)."
+    },
+    {
+      "identifier": "home.deck.name.1",
+      "auditType": "contrast",
+      "reason": "Actual iPhone audit20261022T202045Z-94081, Home typical/dark/largest, reports the wrapped Japanese deck name at 107,144 with a 173x125 frame. Retained image E2C96D73...png visibly shows white text on the dark row surface. Native whole-frame sampling of the wrapped text and scroll content does not faithfully measure its visible glyph contrast. The shared deck-name text explicitly uses textPrimary on surface, a declared pairing checked by ContrastTests in every appearance, alongside textPrimary/backgroundPrimary and textPrimary/backgroundSecondary. This entry names only deck 1 and contrast; parent row navigation, count identifiers and all native audits remain enabled."
+    },
+    {
       "identifier": "sample.deckOverview.counts",
       "auditType": "contrast",
       "reason": "At the largest text sizes in the overflow state the counts line runs on under the Study Now bar, where the scroll edge effect fades it until the screen is scrolled, and the audit measures the counts' whole frame, faded part included (sample/deck-overview/overflow, 2026-10-14). The count colours are token pairings ContrastTests checks (R1979)."

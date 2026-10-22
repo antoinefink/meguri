@@ -81,6 +81,8 @@ struct CollectionEntryContent: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.large) {
                     Text("Import a latest-format, collection-only .colpkg file. Packages containing media and older formats are not supported yet. No account or network connection is needed.")
+                        .foregroundStyle(.token(.textPrimary))
+                        .accessibilityIdentifier("onboarding.collectionImport.explanation")
                     if let facts = presentation.facts {
                         VStack(alignment: .leading, spacing: Spacing.small) {
                             Text("Collection Preview").font(.headline)
@@ -109,10 +111,16 @@ struct CollectionEntryContent: View {
                         VStack(alignment: .leading, spacing: Spacing.small) {
                             Text(verbatim: progress.title)
                                 .accessibilityIdentifier("onboarding.collectionImport.progress.stage")
-                            if let total = progress.total {
-                                ProgressView(value: Double(progress.completed), total: Double(max(1, total)))
-                                    .accessibilityLabel(progress.title)
-                            } else { ProgressView().accessibilityLabel(progress.title) }
+                            VStack {
+                                if let total = progress.total {
+                                    ProgressView(value: Double(progress.completed), total: Double(max(1, total)))
+                                } else { ProgressView() }
+                            }
+                            .frame(minWidth: 44, minHeight: 44)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(progress.title)
+                            .accessibilityValue(Text(progress.total.map { "\(progress.completed) of \($0)" } ?? "In progress"))
+                            .accessibilityIdentifier("onboarding.collectionImport.progress.value")
                             if !presentation.canCancel { Text("Finishing activation. The new collection will remain active.") }
                         }
                         .accessibilityElement(children: .contain)

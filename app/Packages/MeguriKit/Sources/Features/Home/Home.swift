@@ -114,6 +114,8 @@ public struct HomeDeckTree: View {
                         VStack(alignment: .leading, spacing: Spacing.xSmall) {
                             Text(verbatim: node.name.components(separatedBy: "::").last ?? node.name)
                                 .font(.headline).fixedSize(horizontal: false, vertical: true)
+                                .foregroundStyle(.token(.textPrimary))
+                                .accessibilityIdentifier("home.deck.name.\(node.id)")
                             DeckCounts(counts: node.counts)
                                 .accessibilityIdentifier("home.deck.rowCounts.\(node.id)")
                         }
