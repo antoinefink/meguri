@@ -22,3 +22,25 @@ leaves every other `config` row as it was; a second forced backup in one
 opening is skipped even after the clock moved; the name follows the worker's
 zone (Tokyo, New York, UTC); the copy of a backup imports with Anki's
 collection package import.
+
+## The backup op (U127)
+
+`backup {force}` (`driver/ops/backups.py`, meanings
+`specs/conformance/backup-trigger-ops.md` H1 and H3) makes the same call as
+`force_backup` with the scenario's force flag, through the same helper: the
+name is the one regular file the call added, and a backup Anki reports made
+with no file added is `invalid_scenario`. It differs only where Anki makes no
+backup, which it records as a null name instead of an error. The rules that
+decide it are Anki's, read for `oracle/provenance/backup-triggers.md`. No code
+was copied.
+
+| Anki file | Read for |
+|---|---|
+| `pylib/anki/collection.py` (`create_backup`) | the force flag skips only the interval check; the boolean is false whenever no backup was made, a forced one with no change included |
+
+Probed in the oracle image (`driver/tests/test_backup_triggers.py` and the
+goldens of `conformance/scenarios/package/backup-triggers/`): a new collection
+with no backups folder gets a periodic backup; a fresh foreign file blocks a
+periodic backup and not a forced one; with no change both flags give null in
+one opening; `backup` and `force_backup` steps mix in one opening and each
+sets the reference; retention runs within the step for both flags.

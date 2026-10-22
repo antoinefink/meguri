@@ -1,0 +1,27 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "backup": {
+          "name": null
+        }
+      },
+      {
+        "backup_files": ["notes.txt"]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "e01d587b728bc8d87c1d8c1636d6627a5075e9a4b30424383e9d7f29060b4507",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/backup-triggers/foreign-entry",
+  "scenario_sha256": "65287a113d4c499d95303e71f35904a2354a67252965ae9890cf7fa7e2184e79",
+  "tz": "UTC"
+}

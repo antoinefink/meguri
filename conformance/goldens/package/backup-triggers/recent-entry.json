@@ -1,0 +1,44 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "backup": {
+          "name": null
+        }
+      },
+      {
+        "backup": {
+          "name": "backup-2030-01-15-10.00.00.colpkg"
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "backup": {
+          "name": null
+        }
+      },
+      {
+        "backup_files": ["backup-2029-06-01-12.00.00.colpkg", "backup-2030-01-15-10.00.00.colpkg"]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "e01d587b728bc8d87c1d8c1636d6627a5075e9a4b30424383e9d7f29060b4507",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/backup-triggers/recent-entry",
+  "scenario_sha256": "5b59064999de822471fe2923fdb2c01ba6806a8430d4c8d548d2864bbe34ba02",
+  "tz": "UTC"
+}

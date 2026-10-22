@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Backups (specs/conformance/backup-ops.md F1-F7).
+"""Backups (specs/conformance/backup-ops.md F1-F7) and the backup trigger op
+(specs/conformance/backup-trigger-ops.md H1).
 
 The scenario's backups folder is <session dir>/backups (F1): the first op that
 needs it creates it, and Session.hand_off copies it with the session directory.
@@ -20,13 +21,21 @@ force_backup {} | {copy_as} -> {name} (F3). Anki's collection backup into the
     seeded name, which F7 forbids: invalid_scenario.
 save_backup_settings {daily, weekly, monthly, minimum_interval_mins} -> none
     (F4). Anki's preferences save carrying only the backup group.
+backup {force: bool} -> {name | null} (backup-trigger-ops.md H1). Anki's
+    collection backup into the folder with that force flag, waiting for its
+    thread. name is the one regular file the call added, null when Anki made no
+    backup (create_backup false: unchanged since this opening's last backup or,
+    unforced, an entry younger than the minimum interval). A backup Anki reports
+    made with no file added replaced a file of its name, which H3 forbids:
+    invalid_scenario.
 backup_files (observation) -> [name] (F5): the folder's regular files, sorted
     by UTF-8 bytes; [] while no op has created the folder.
 backup_settings (observation) -> {daily, weekly, monthly, minimum_interval_mins}
     (F6): the backup group of Anki's preferences.
 
 F7 allows one force_backup until the next collection load (start, open,
-reopen, import, handoff), checked before any collection.
+reopen, import, handoff), checked before any collection; backup steps do not
+count (backup-trigger-ops.md H3).
 """
 
 from __future__ import annotations
@@ -157,12 +166,23 @@ def limits(args: Any) -> dict[str, int]:
     return {key: args[key] for key in LIMITS}
 
 
-_ARG_CHECKS = {"add_backup_files": files_to_add, "force_backup": _copy_as, "save_backup_settings": limits}
+def _force(args: Any) -> bool:
+    if not isinstance(args, dict) or set(args) != {"force"} or not isinstance(args["force"], bool):
+        raise invalid("backup takes {force: true|false}")
+    return args["force"]
+
+
+_ARG_CHECKS = {
+    "add_backup_files": files_to_add,
+    "force_backup": _copy_as,
+    "save_backup_settings": limits,
+    "backup": _force,
+}
 
 
 @scenario_check
 def check_backup_steps(scenario: dict) -> None:
-    """F2-F4 arguments, and F7: one force_backup per opening."""
+    """F2-F4 and H1 arguments, and F7: one force_backup per opening."""
     since_opening = 0
     for index, step in enumerate(scenario.get("steps", [])):
         ((name, args),) = step.items()
@@ -193,24 +213,37 @@ def add_backup_files(session, args):
             pass
 
 
+def _create_backup(session, force: bool, op_name: str, rule: str) -> str | None:
+    """Anki's collection backup into the folder, waited for: the one regular
+    file it added, or None when Anki made no backup."""
+    path = _folder(session)
+    before = set(_regular_files(path))
+    created = session.col.create_backup(backup_folder=path, force=force, wait_for_completion=True)
+    if not created:
+        return None
+    added = sorted(set(_regular_files(path)) - before)
+    if not added:
+        raise invalid(f"the backup added no file: it took the name of a seeded file ({rule})")
+    if len(added) != 1:
+        raise DriverError("internal_error", op=op_name, detail=f"the backup added {len(added)} files")
+    return added[0]
+
+
 @op("force_backup")
 def force_backup(session, args):
     copy_as = _copy_as(args)
-    path = _folder(session)
-    before = set(_regular_files(path))
-    created = session.col.create_backup(backup_folder=path, force=True, wait_for_completion=True)
-    if not created:
+    name = _create_backup(session, True, "force_backup", "backup-ops.md F7")
+    if name is None:
         raise DriverError("anki_error", op="force_backup",
                           detail="Anki skipped the backup: the collection has not changed since this opening's last one")
-    added = sorted(set(_regular_files(path)) - before)
-    if not added:
-        raise invalid("the backup added no file: it took the name of a seeded file (backup-ops.md F7)")
-    if len(added) != 1:
-        raise DriverError("internal_error", op="force_backup", detail=f"the backup added {len(added)} files")
-    name = added[0]
     if copy_as is not None:
-        shutil.copyfile(os.path.join(path, name), os.path.join(session.dir, copy_as))
+        shutil.copyfile(os.path.join(folder_path(session), name), os.path.join(session.dir, copy_as))
     return {"name": name}
+
+
+@op("backup")
+def backup(session, args):
+    return {"name": _create_backup(session, _force(args), "backup", "backup-trigger-ops.md H3")}
 
 
 @op("save_backup_settings")
