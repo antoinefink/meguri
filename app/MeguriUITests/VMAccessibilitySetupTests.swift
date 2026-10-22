@@ -37,17 +37,17 @@ final class VMAccessibilitySetupTests: XCTestCase {
         // Allow the pane a bounded time to populate, without navigating other settings.
         _ = settings.staticTexts.matching(exactName).firstMatch.waitForExistence(timeout: 10)
         capture(settings, phase: "before")
-        var rows = runnerRows(settings, names: runnerNames, predicate: exactName)
+        var rows = runnerRows(settings, predicate: exactName)
         if rows.isEmpty {
             guard addCurrentRunner(settings) else { return }
             let appeared = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                !self.runnerRows(settings, names: runnerNames, predicate: exactName).isEmpty
+                !self.runnerRows(settings, predicate: exactName).isEmpty
             }, object: nil)
             guard XCTWaiter().wait(for: [appeared], timeout: 10) == .completed else {
                 fail(settings, "The exact runner row did not appear after Add; no permission was toggled")
                 return
             }
-            rows = runnerRows(settings, names: runnerNames, predicate: exactName)
+            rows = runnerRows(settings, predicate: exactName)
         }
         guard rows.count == 1 else {
             fail(settings, "Expected exactly one MeguriUITests runner row, found \(rows.count). Inspect Settings hierarchy; no permission was toggled")
@@ -81,11 +81,9 @@ final class VMAccessibilitySetupTests: XCTestCase {
     }
 
     @MainActor
-    private func runnerRows(_ settings: XCUIApplication, names: [String], predicate: NSPredicate) -> [XCUIElement] {
-        (settings.outlineRows.allElementsBoundByIndex + settings.tableRows.allElementsBoundByIndex).filter { row in
-            names.contains(row.label) || (row.value as? String).map(names.contains) == true
-                || row.staticTexts.matching(predicate).count == 1
-        }
+    private func runnerRows(_ settings: XCUIApplication, predicate: NSPredicate) -> [XCUIElement] {
+        settings.outlineRows.containing(predicate).allElementsBoundByIndex
+            + settings.tableRows.containing(predicate).allElementsBoundByIndex
     }
 
     @MainActor
