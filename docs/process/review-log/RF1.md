@@ -382,3 +382,13 @@ Selftest `20261022T090050Z-65301`: 13 passed, one failed on that fixture.
 Native planner run `20261022T090420Z-69184` passed.
 Existing review baselines need new captures. All audits must cover the new UI.
 No Unit acceptance. Native AX permission and the full gate remain open.
+
+Actual viewport fix verified: small-phone drive `20261022T090714Z-72607`.
+All 18 actions passed, zero hierarchy issues. The reviewer inspected question
+and answer captures: readable card content and separate rating rows. P1 closed.
+Focused Docker planner checks `20261022T090719Z-73422`: 14 passed.
+Final real-screen audits passed every screen and variant:
+Mac `20261022T090951Z-76478`, iPhone `20261022T091101Z-78124`,
+iPad `20261022T091337Z-80854`.
+Current source: `b8340cfb`. New baseline capture, critic and full gate remain.
+Native AX focus permission is a separate open user step. No Unit acceptance.
