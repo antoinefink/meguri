@@ -189,3 +189,11 @@ Use tools/mg a11y with this suite on each platform. All audit variants apply.
 The suite uses the existing system audit and target helpers. Results are pending.
 The integrator removed two optional comments after the privacy hook rejected them.
 Swift test statements are unchanged. No Unit acceptance.
+
+
+Review 5: separate waiting and exhausted session checks.
+Failure retained: UI test `20261022T074304Z-63305`.
+The new tests require waiting after four ratings plus undo, and Done after
+four Easy answers on a fresh collection. Both verify records and counts after
+an unseeded restart. Shared Mac inputs use the existing activation helper.
+Fix session: `s-20261022T075202Z-cdf77908`. Execution remains pending.

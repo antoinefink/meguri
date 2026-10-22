@@ -103,74 +103,157 @@ final class LocalReviewJourneyTests: XCTestCase {
     }
     #endif
 
-    func testStudyRevealFourRatingsUndoFinishAndRestart() throws {
-        let build = try BuildUnderTest.current()
-        guard build.hasHooks else { throw XCTSkip("generated fixtures require a hook build") }
-        #if os(macOS)
-        guard try build.bundleIdentifier.hasSuffix(".dev") else { throw XCTSkip("development container required") }
-        #endif
-        let fixture = build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1")
-        let app = XCUIApplication()
-        continueAfterFailure = false
-        app.launchArguments = MeguriLaunch(fixture: fixture, now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris",
-            locale: "en_US", animations: false).arguments
-        app.launch()
-        addTeardownBlock { @MainActor in app.terminate() }
-        let enable = element(app, "home.policy.enable")
-        if enable.waitForExistence(timeout: 5) { enable.clickOrTap() }
-        let deck = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "home.deck.row.", "Cards")).firstMatch
-        XCTAssertTrue(deck.waitForExistence(timeout: 20), "Generate local-review with tools/mg fixtures local-review --seed 1")
-        deck.clickOrTap()
-        let study = element(app, "home.deck.study")
-        XCTAssertTrue(study.waitForExistence(timeout: 10))
-        study.clickOrTap()
+    func testStudyRevealFourRatingsUndoWaitAndRestart() throws {
+        let (app, bundleIdentifier) = try startFreshReview()
         for rating in ["again", "hard", "good", "easy"] {
-            reveal(app)
+            try reveal(app, bundleIdentifier: bundleIdentifier)
             for name in ["again", "hard", "good", "easy"] {
                 let button = element(app, "review.session.rate.\(name)")
                 XCTAssertTrue(button.exists)
                 XCTAssertTrue(button.label.contains(","), "rating must include its actual interval")
             }
-            element(app, "review.session.rate.\(rating)").clickOrTap()
+            try click(element(app, "review.session.rate.\(rating)"), in: app, bundleIdentifier: bundleIdentifier)
         }
         let back = element(app, "review.session.back")
         XCTAssertTrue(back.waitForExistence(timeout: 10))
         XCTAssertTrue(back.isEnabled)
-        back.clickOrTap()
+        try click(back, in: app, bundleIdentifier: bundleIdentifier)
         XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 10))
-        // Drain remaining/requeued fixture cards using actual core outcomes.
+        XCTAssertTrue(element(app, "review.session.redo").exists)
+        var answers = 3 // Four ratings, less the undone Easy.
         for _ in 0..<20 {
-            if element(app, "review.session.done").exists { break }
-            if element(app, "review.session.refresh").exists { break }
-            reveal(app)
-            element(app, "review.session.rate.easy").clickOrTap()
+            let state = reviewState(app)
+            if state == "review.session.refresh" { break }
+            guard state == "review.session.reveal" else {
+                attach(app, "waiting-unexpected-state")
+                XCTFail("Expected a question or waiting for learning, got \(state)")
+                return
+            }
+            try reveal(app, bundleIdentifier: bundleIdentifier)
+            try click(element(app, "review.session.rate.easy"), in: app, bundleIdentifier: bundleIdentifier)
+            answers += 1
         }
-        XCTAssertTrue(element(app, "review.session.done").waitForExistence(timeout: 10), "text fixture did not exhaust")
-        element(app, "review.session.done").clickOrTap()
-        let recorded = element(app, "home.session.recorded")
-        XCTAssertTrue(recorded.waitForExistence(timeout: 10))
-        let before = recorded.label
-        attach(app, "review-completed")
-        app.terminate()
-        // Deliberately no -MeguriFixture here: installing again destroys proof.
-        app.launchArguments = MeguriLaunch(now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false).arguments
-        app.launch()
-        XCTAssertTrue(recorded.waitForExistence(timeout: 20))
-        XCTAssertEqual(recorded.label, before)
-        // Hook launches start at Home; inspect this deck's detail counts again.
-        XCTAssertTrue(deck.waitForExistence(timeout: 10))
-        deck.clickOrTap()
-        XCTAssertTrue(study.waitForExistence(timeout: 10))
-        let persistedCounts = element(app, "home.deck.counts")
-        XCTAssertTrue(persistedCounts.waitForExistence(timeout: 10))
-        XCTAssertTrue(persistedCounts.label.contains("0 due"), "answers were not preserved after process restart")
-        attach(app, "review-restarted")
+        let waiting = element(app, "review.session.refresh").waitForExistence(timeout: 10)
+        attach(app, "review-waiting-for-learning")
+        XCTAssertTrue(waiting, "Again at the pinned clock must leave learning waiting, not exhausted")
+        XCTAssertTrue(waitingTitle(app).exists)
+        XCTAssertFalse(element(app, "review.session.done").exists)
+        // Close the waiting session through its real control, without advancing time.
+        try click(element(app, "review.session.close"), in: app, bundleIdentifier: bundleIdentifier)
+        try assertSavedAndRestart(app, bundleIdentifier: bundleIdentifier, answers: answers, evidence: "waiting")
     }
-    private func reveal(_ app: XCUIApplication) {
+
+    func testAllEasyExhaustionAndRestart() throws {
+        let (app, bundleIdentifier) = try startFreshReview()
+        var answers = 0
+        for _ in 0..<20 {
+            let state = reviewState(app)
+            if state == "review.session.done" { break }
+            guard state == "review.session.reveal" else {
+                attach(app, "exhaustion-unexpected-state")
+                XCTFail("All-Easy must reach exhaustion, got \(state)")
+                return
+            }
+            try reveal(app, bundleIdentifier: bundleIdentifier)
+            try click(element(app, "review.session.rate.easy"), in: app, bundleIdentifier: bundleIdentifier)
+            answers += 1
+        }
+        let exhausted = element(app, "review.session.done").waitForExistence(timeout: 10)
+        attach(app, "review-all-easy-exhausted")
+        XCTAssertTrue(exhausted, "all-Easy text fixture did not exhaust within the safety cap")
+        XCTAssertFalse(element(app, "review.session.refresh").exists)
+        XCTAssertFalse(waitingTitle(app).exists)
+        XCTAssertEqual(answers, 4, "each of the four due text cards must be answered exactly once")
+        try click(element(app, "review.session.done"), in: app, bundleIdentifier: bundleIdentifier)
+        try assertSavedAndRestart(app, bundleIdentifier: bundleIdentifier, answers: answers, evidence: "exhausted")
+    }
+
+    private func startFreshReview() throws -> (XCUIApplication, String) {
+        let build = try BuildUnderTest.current()
+        guard build.hasHooks else { throw XCTSkip("generated fixtures require a hook build") }
+        let bundleIdentifier = try build.bundleIdentifier
+        guard bundleIdentifier.hasSuffix(".dev") else { throw XCTSkip("development container required") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = launchArguments(fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"))
+        app.launch()
+        addTeardownBlock { @MainActor in app.terminate() }
+        let enable = element(app, "home.policy.enable")
+        if enable.waitForExistence(timeout: 5) {
+            try click(enable, in: app, bundleIdentifier: bundleIdentifier)
+        }
+        try openDeck(app, bundleIdentifier: bundleIdentifier)
+        let freshCounts = waitForText(element(app, "home.deck.counts"), "0 new · 0 learning · 4 due")
+        if !freshCounts { attach(app, "review-fresh-counts") }
+        XCTAssertTrue(freshCounts, "first launch must seed four due text cards")
+        try click(element(app, "home.deck.study"), in: app, bundleIdentifier: bundleIdentifier)
+        return (app, bundleIdentifier)
+    }
+
+    private func assertSavedAndRestart(_ app: XCUIApplication, bundleIdentifier: String, answers: Int, evidence: String) throws {
+        assertSavedOutcome(app, answers: answers, evidence: "\(evidence)-closed")
+        app.terminate()
+        // No fixture and no study input: reuse the database without replaying answers.
+        app.launchArguments = launchArguments()
+        app.launch()
+        XCTAssertTrue(element(app, "home.session.recorded").waitForExistence(timeout: 20))
+        try openDeck(app, bundleIdentifier: bundleIdentifier)
+        assertSavedOutcome(app, answers: answers, evidence: "\(evidence)-restarted")
+    }
+
+    private func assertSavedOutcome(_ app: XCUIApplication, answers: Int, evidence: String) {
+        let recorded = waitForText(element(app, "home.session.recorded"), "\(answers) answers recorded")
+        // Home can appear before finishReview's asynchronous owner refresh applies.
+        // Later-today learning is outside these counts; only the waiting case
+        // must show the separate Waiting for Learning state before Close.
+        let counts = waitForText(element(app, "home.deck.counts"), "0 new · 0 learning · 0 due")
+        attach(app, "review-\(evidence)")
+        XCTAssertTrue(recorded, "saved record must contain exactly the accepted, non-undone answers")
+        XCTAssertTrue(counts, "authoritative deck counts must reflect the reviews before and after restart")
+        XCTAssertFalse(element(app, "home.collection.error").exists)
+    }
+
+    private func launchArguments(fixture: URL? = nil) -> [String] {
+        MeguriLaunch(fixture: fixture, now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris",
+            locale: "en_US", animations: false).arguments
+    }
+
+    private func openDeck(_ app: XCUIApplication, bundleIdentifier: String) throws {
+        let deck = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "home.deck.row.", "Cards")).firstMatch
+        XCTAssertTrue(deck.waitForExistence(timeout: 20), "Generate and stage local-review-1 in the VM before this suite")
+        try click(deck, in: app, bundleIdentifier: bundleIdentifier)
+        XCTAssertTrue(element(app, "home.deck.study").waitForExistence(timeout: 10))
+    }
+
+    private func reviewState(_ app: XCUIApplication) -> String {
+        let ready = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@",
+            ["review.session.reveal", "review.session.refresh", "review.session.done"])).firstMatch
+        let appeared = ready.waitForExistence(timeout: 10)
+        if !appeared { attach(app, "review-state-timeout") }
+        XCTAssertTrue(appeared, "review must settle on a question, waiting or exhaustion")
+        return ready.identifier
+    }
+
+    private func reveal(_ app: XCUIApplication, bundleIdentifier: String) throws {
         let button = element(app, "review.session.reveal")
         XCTAssertTrue(button.waitForExistence(timeout: 10))
-        button.clickOrTap()
+        try click(button, in: app, bundleIdentifier: bundleIdentifier)
         XCTAssertTrue(element(app, "review.session.rate.good").waitForExistence(timeout: 10))
+    }
+
+    private func click(_ target: XCUIElement, in app: XCUIApplication, bundleIdentifier: String) throws {
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        target.clickOrTap()
+    }
+
+    private func waitingTitle(_ app: XCUIApplication) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@",
+            "Waiting for Learning", "Waiting for Learning")).firstMatch
+    }
+
+    private func waitForText(_ element: XCUIElement, _ text: String) -> Bool {
+        let predicate = NSPredicate(format: "exists == true AND (label == %@ OR value == %@)", text, text)
+        return XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: 20) == .completed
     }
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
     private func attach(_ app: XCUIApplication, _ name: String) {
