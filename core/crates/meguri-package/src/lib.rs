@@ -1,66 +1,80 @@
-//! `.apkg` and `.colpkg` import and export, and backups (writer, retention,
-//! restore).
+//! Collection-only latest-format package publication (package/container P11).
+mod reader;
+mod writer;
 
-use std::fmt;
-use std::path::Path;
+use meguri_model::{clock::Clock, rng::RandomSource};
+use meguri_storage::{StorageError, atomic_file::Purpose, space::SpaceProvider};
+use std::{fmt, path::Path};
 
-use meguri_model::clock::Clock;
-use meguri_model::rng::RandomSource;
-use meguri_storage::atomic_file::Purpose;
-use meguri_storage::space::SpaceProvider;
+pub use writer::write_collection_package_from_standalone;
 
-/// Publication rule selected by the caller (package/container P11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Finalisation {
     ExclusiveCreate,
     Replace,
 }
 
-/// Operation context for a collection-only package write.
+/// The caller owns source stability and cancellation until publication.
 pub struct CollectionPackageWriteContext<'a> {
-    /// Parent for the operation-owned U32 staging directory (P9).
     pub collection_directory: &'a Path,
-    /// U32 temporary-file purpose: Backup for backups, Export for exports.
+    /// Backup for backups; Export for exports.
     pub purpose: Purpose,
     pub finalisation: Finalisation,
     pub clock: &'a dyn Clock,
     pub random: &'a dyn RandomSource,
-    /// P10 preflights both staging and output before any writes.
     pub space: &'a dyn SpaceProvider,
-    /// Cancellation is honoured until publication (P11).
     pub is_cancelled: &'a (dyn Fn() -> bool + Sync),
 }
 
-/// The writer is not implemented at this red-test checkpoint.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CollectionPackageWriteError {
-    Unavailable,
+    TooNew,
+    UnsupportedFormat,
+    Corrupt { detail: String },
+    InsufficientSpace { needed: u64, available: u64 },
+    DiskFull,
+    SourceNotFinalised,
+    DestinationExists,
+    Cancelled,
+    Io { detail: String },
 }
-
 impl fmt::Display for CollectionPackageWriteError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unavailable => f.write_str("collection-only package writer is unavailable"),
+        write!(f, "{self:?}")
+    }
+}
+impl std::error::Error for CollectionPackageWriteError {}
+
+type Error = CollectionPackageWriteError;
+type Result<T> = std::result::Result<T, Error>;
+
+impl From<StorageError> for Error {
+    fn from(error: StorageError) -> Self {
+        match error {
+            StorageError::InsufficientSpace { .. } => Self::DiskFull,
+            StorageError::DestinationExists => Self::DestinationExists,
+            other => Self::Io {
+                detail: other.to_string(),
+            },
         }
     }
 }
-
-impl std::error::Error for CollectionPackageWriteError {}
-
-/// Publish a latest-format collection-only package from a caller-verified,
-/// closed standalone collection (package/container P9–P11).
-///
-/// The caller keeps the source stable for the operation. A source with a WAL
-/// or journal sibling must be refused. Snapshot and placeholder creation
-/// belong to storage; the source must remain unchanged.
-///
-/// Currently returns `Unavailable` without reading, writing or consuming
-/// injected time or randomness. The production continuation supplies the
-/// storage seams and the complete P13 error set.
-pub fn write_collection_package_from_standalone(
-    _source: &Path,
-    _destination: &Path,
-    _context: &CollectionPackageWriteContext<'_>,
-) -> Result<(), CollectionPackageWriteError> {
-    Err(CollectionPackageWriteError::Unavailable)
+impl From<std::io::Error> for Error {
+    fn from(error: std::io::Error) -> Self {
+        StorageError::from(error).into()
+    }
+}
+impl From<zip::result::ZipError> for Error {
+    fn from(error: zip::result::ZipError) -> Self {
+        match error {
+            zip::result::ZipError::Io(error) => error.into(),
+            other => corrupt(other.to_string()),
+        }
+    }
+}
+fn corrupt(detail: impl Into<String>) -> Error {
+    Error::Corrupt { detail: detail.into() }
+}
+fn cancelled(check: &(dyn Fn() -> bool + Sync)) -> Result<()> {
+    if check() { Err(Error::Cancelled) } else { Ok(()) }
 }

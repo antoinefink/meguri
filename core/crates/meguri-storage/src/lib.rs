@@ -11,6 +11,7 @@ pub mod bootstrap;
 pub mod bulk;
 pub mod checkpoint;
 pub mod collation;
+pub mod collection_package;
 pub mod conn_init;
 pub mod connections;
 #[cfg(feature = "test-hooks")]

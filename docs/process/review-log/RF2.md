@@ -157,3 +157,44 @@ Cargo updated only the package's dependency edges in the existing lockfile.
 This is an intentional test-first WIP checkpoint, not passing implementation
 evidence or Unit acceptance. The next continuation implements the writer and
 storage-owned helpers, then must make this same test pass without weakening it.
+
+## Standalone writer and schema-model components
+
+Filtered writer run `20261022T151953Z-47043`, session
+`s-20261022T151201Z-48f16d8b`, exported the real standalone writer and narrow
+storage snapshot/placeholder APIs. The original proof assertions remain.
+Filtered parsing run `20261022T152651Z-53627`, session
+`s-20261022T152628Z-f2bde0e5`, exported only testkit scenario models and tests.
+Both passed boundary probes; the integrator inspected and applied their
+disjoint patches. Neither run claims compilation or runtime verification.
+
+Docker format run `20261022T154220Z-60172` passed. Focused Docker test run
+`20261022T154246Z-60574` passed all 53 selected tests, with zero skips.
+This includes the original four-entry archive proof, source preservation,
+destination collision, cancellation, atomic fault paths, storage snapshots,
+placeholder contents and prepared-scenario parsing/hash checks.
+
+Bounded-verifier run `20261022T154332Z-61486` passed all seven tests, zero skips.
+Independent backend review by `/root/rf2_backend_review` found no confirmed
+P0–P2 finding in this component. It covered correctness, plan conformance,
+source separation, bounded verification, storage-owned SQL and truthful
+unsupported executor requirements. An unconfirmed ZIP64 precedence question
+is retained for the general inspection reader; it is not a review finding.
+
+The unchanged privacy hook rejected owned comments, diagnostics and identifiers.
+Fixer session `s-20261022T154449Z-17e43054` received the complete preserved patch
+through the filtered seed mechanism. Runs `20261022T154542Z-63118` and
+`20261022T154959Z-67568` replaced complete owned lines and consistent local
+references without changing inputs, expected values, branches or assertions.
+No private token was read or inferred. No hook or scanner rule changed.
+The first unchanged scan still rejected one test name; the second correction
+changes only that identifier. Focused run `20261022T154906Z-66543` passed all
+16 writer/storage/verifier tests after the first corrections, zero skips.
+
+Parser commit: `0c22e574`. Unchanged goldens-check run
+`20261022T154556Z-63776` passed all 679 freshness checks and validated 1,477
+schema files with zero errors. No golden changed.
+
+The package area stays inactive; parsing does not advertise executor support.
+Live-source backup, inspection, guarded replacement, FFI and picker integration
+remain pending within RF2. No full gate or unit acceptance is claimed here.
