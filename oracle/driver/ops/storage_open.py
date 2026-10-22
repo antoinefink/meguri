@@ -35,14 +35,22 @@ from ..errors import DriverError, Rejected, invalid
 from ..registry import op
 
 SIDECARS = ("-wal", "-shm", "-journal")
-_SEGMENT = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+# fullmatch: `$` also matches before a final newline.
+_SEGMENT = re.compile(r"[a-z0-9][a-z0-9._-]*")
 _REFUSALS = (("kind: FileTooOld", "file_too_old"), ("kind: FileTooNew", "file_too_new"))
 
 
-def fixture_path(rel) -> str:
+def fixture_rel(rel, suffixes: tuple[str, ...] = (".anki2",), what: str = "open fixture") -> str:
+    """rel when it is a fixture path of lower-case segments ending in one of
+    `suffixes` (storage-ops.md P1.1, package-ops.md E2.1), else invalid_scenario."""
+    if not isinstance(rel, str) or not rel.endswith(suffixes) or not all(_SEGMENT.fullmatch(s) for s in rel.split("/")):
+        raise invalid(f"{what} is a relative path of lower-case segments ending in {' or '.join(suffixes)}")
+    return rel
+
+
+def fixture_path(rel, suffixes: tuple[str, ...] = (".anki2",), what: str = "open fixture") -> str:
     """The fixture file below ORACLE_FIXTURES, or fixture_error."""
-    if not isinstance(rel, str) or not rel.endswith(".anki2") or not all(_SEGMENT.match(s) for s in rel.split("/")):
-        raise invalid("open fixture is a relative path of lower-case segments ending in .anki2")
+    fixture_rel(rel, suffixes, what)
     root = os.environ.get("ORACLE_FIXTURES")
     if not root:
         raise DriverError("fixture_error", detail="start the worker with ORACLE_FIXTURES=<conformance/fixtures>")

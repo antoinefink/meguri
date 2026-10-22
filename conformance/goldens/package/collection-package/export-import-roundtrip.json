@@ -1,0 +1,1835 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "timing": {
+          "days_elapsed": 1232,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1788249600233": {
+              "data": "{}",
+              "did": 1788249600254,
+              "due": -100000,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600233,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249600,
+              "nid": 1788249600233,
+              "odid": 1788249600212,
+              "odue": 1,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600238": {
+              "data": "{\"pos\":2,\"lrt\":1788681600}",
+              "did": 1788249600212,
+              "due": 24,
+              "factor": 2650,
+              "flags": 0,
+              "id": 1788249600238,
+              "ivl": 19,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788249600238,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 2,
+              "reps": 2,
+              "type": 2,
+              "usn": -1
+            },
+            "1788249600239": {
+              "data": "{}",
+              "did": 1788249600212,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600239,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249600,
+              "nid": 1788249600238,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600240": {
+              "data": "{\"pos\":3,\"lrt\":1788681600}",
+              "did": 1788249600212,
+              "due": 1788682232,
+              "factor": 1400,
+              "flags": 0,
+              "id": 1788249600240,
+              "ivl": 1,
+              "lapses": 1,
+              "left": 1,
+              "mod": 1788681600,
+              "nid": 1788249600240,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 1,
+              "reps": 2,
+              "type": 3,
+              "usn": -1
+            },
+            "1788249600241": {
+              "data": "{}",
+              "did": 1788249600212,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600241,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249600,
+              "nid": 1788249600240,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600243": {
+              "data": "{\"pos\":4,\"lrt\":1788681600}",
+              "did": 1788249600212,
+              "due": 1788681662,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600243,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 2,
+              "mod": 1788681600,
+              "nid": 1788249600243,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 1,
+              "reps": 1,
+              "type": 1,
+              "usn": -1
+            },
+            "1788249600244": {
+              "data": "{}",
+              "did": 1788249600212,
+              "due": 4,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600244,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249600,
+              "nid": 1788249600243,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600245": {
+              "data": "{}",
+              "did": 1788249600214,
+              "due": 5,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600245,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788249600245,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": -1,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600246": {
+              "data": "{}",
+              "did": 1788249600214,
+              "due": 5,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600246,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788249600245,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600247": {
+              "data": "{\"pos\":6,\"lrt\":1788681600}",
+              "did": 1788249600214,
+              "due": 1788682552,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600247,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1,
+              "mod": 1788681600,
+              "nid": 1788249600247,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 1,
+              "reps": 1,
+              "type": 1,
+              "usn": -1
+            },
+            "1788249600248": {
+              "data": "{}",
+              "did": 1788249600214,
+              "due": 6,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600248,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249600,
+              "nid": 1788249600247,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1788235200,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1788681600013,
+              "models": "",
+              "scm": 1788249600208,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "config": {
+            "_deck_1788249600212_lastNotetype": {
+              "KEY": "_deck_1788249600212_lastNotetype",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4f0225d7a91b9e90fc42f6b14244dd110ab326f1a5e4f453adcf2c61f4f941ac"
+              }
+            },
+            "_deck_1788249600214_lastNotetype": {
+              "KEY": "_deck_1788249600214_lastNotetype",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4f0225d7a91b9e90fc42f6b14244dd110ab326f1a5e4f453adcf2c61f4f941ac"
+              }
+            },
+            "_nt_1788249600186_lastDeck": {
+              "KEY": "_nt_1788249600186_lastDeck",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "8680d5ce27d1e0df70711f913b70b9a978f5e8cce07f24d0f7a5aea9c0bcfe93"
+              }
+            },
+            "_nt_1788249600189_lastDeck": {
+              "KEY": "_nt_1788249600189_lastDeck",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "8680d5ce27d1e0df70711f913b70b9a978f5e8cce07f24d0f7a5aea9c0bcfe93"
+              }
+            },
+            "activeDecks": {
+              "KEY": "activeDecks",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "080a9ed428559ef602668b4c00f114f1a11c3f6b02a435f0bdc154578e4d7f22"
+              }
+            },
+            "addToCur": {
+              "KEY": "addToCur",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "collapseTime": {
+              "KEY": "collapseTime",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "15197cf7214b58e67cae565e573ffd9aa44bcb81f8ee5d7185dfe8da0a16ef43"
+              }
+            },
+            "creationOffset": {
+              "KEY": "creationOffset",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "curDeck": {
+              "KEY": "curDeck",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "5263f71e201b62d6c2bac0ada0e93a3714d401f3721a08f75af1558b5152582c"
+              }
+            },
+            "curModel": {
+              "KEY": "curModel",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4f0225d7a91b9e90fc42f6b14244dd110ab326f1a5e4f453adcf2c61f4f941ac"
+              }
+            },
+            "dayLearnFirst": {
+              "KEY": "dayLearnFirst",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "dueCounts": {
+              "KEY": "dueCounts",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "estTimes": {
+              "KEY": "estTimes",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "lastUnburied": {
+              "KEY": "lastUnburied",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "b6602f58690ca41488e97cd28153671356747c951c55541b6c8d8b8493eb7143"
+              }
+            },
+            "meguriFixture": {
+              "KEY": "meguriFixture",
+              "mtime_secs": 1788681600,
+              "usn": 0,
+              "val": {
+                "sha256": "241399751c39cc872fc2ade0d23dd37ae426649594e336609f58a0d95d0774c6"
+              }
+            },
+            "newSpread": {
+              "KEY": "newSpread",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "nextPos": {
+              "KEY": "nextPos",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "2c624232cdd221771294dfbb310aca000a0df6ac8b66b696d90ef06fdefb64a3"
+              }
+            },
+            "rollover": {
+              "KEY": "rollover",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+              }
+            },
+            "sched2021": {
+              "KEY": "sched2021",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "schedVer": {
+              "KEY": "schedVer",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+              }
+            },
+            "sortBackwards": {
+              "KEY": "sortBackwards",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "sortType": {
+              "KEY": "sortType",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "1c19b6eac0880ca94f71879df838392e837aef4738f4d1000e15e48e65df61dc"
+              }
+            },
+            "timeLim": {
+              "KEY": "timeLim",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            }
+          },
+          "deck_config": {
+            "1": {
+              "config": {
+                "sha256": "b2d3a13378af8601b372cc76113debc42f7b2c4c669788ee98c3705a7af51d94"
+              },
+              "id": 1,
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1788249600216": {
+              "config": {
+                "sha256": "a1b45bccdbfa09f5b50f37ac4fa13afe6bf7caf35052922095273fd18fdf6f7b"
+              },
+              "id": 1788249600216,
+              "mtime_secs": 1788249600,
+              "name": "Slow",
+              "usn": -1
+            }
+          },
+          "decks": {
+            "1": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1788249600212": {
+              "common": {
+                "sha256": "47b3724ef74041b2267ad2316760d12e080edaa4abdf21bc3db4025bfc87d3cc"
+              },
+              "id": 1788249600212,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1788681600,
+              "name": "Lang",
+              "usn": -1
+            },
+            "1788249600214": {
+              "common": {
+                "sha256": "046a4bafdcdbdaf0773ccf7a7b1b5911b0cf38fad9e7a1bb0656914adecca648"
+              },
+              "id": 1788249600214,
+              "kind": {
+                "sha256": "5c28a3f77d7e646525461a540941f38d5ed58192c1f847eb0931acc51c5aaacb"
+              },
+              "mtime_secs": 1788681600,
+              "name": "Lang\u001fVerbs",
+              "usn": -1
+            },
+            "1788249600254": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1788249600254,
+              "kind": {
+                "sha256": "7dd0ceeaaabbf338d1361d5b0c6728a0bcf00352206668646abe87fd20207911"
+              },
+              "mtime_secs": 1788249600,
+              "name": "Cram",
+              "usn": -1
+            }
+          },
+          "fields": {
+            "1788249600186,0": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Front",
+              "ntid": 1788249600186,
+              "ord": 0
+            },
+            "1788249600186,1": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Back",
+              "ntid": 1788249600186,
+              "ord": 1
+            },
+            "1788249600189,0": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Text",
+              "ntid": 1788249600189,
+              "ord": 0
+            },
+            "1788249600189,1": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Extra",
+              "ntid": 1788249600189,
+              "ord": 1
+            }
+          },
+          "graves": {
+            "1788249600249,0": {
+              "oid": 1788249600249,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600249,1": {
+              "oid": 1788249600249,
+              "type": 1,
+              "usn": -1
+            },
+            "1788249600250,0": {
+              "oid": 1788249600250,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600252,2": {
+              "oid": 1788249600252,
+              "type": 2,
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1788249600233": {
+              "csum": 424129645,
+              "data": "",
+              "flags": 0,
+              "flds": "Water boils at {{c1::one hundred}} degrees.\u001fat sea level",
+              "guid": "#random",
+              "id": 1788249600233,
+              "mid": 1788249600189,
+              "mod": 1788249600,
+              "sfld": "Water boils at {{c1::one hundred}} degrees.",
+              "tags": "",
+              "usn": -1
+            },
+            "1788249600238": {
+              "csum": 150726050,
+              "data": "",
+              "flags": 0,
+              "flds": "river\u001frio",
+              "guid": "#random",
+              "id": 1788249600238,
+              "mid": 1788249600186,
+              "mod": 1788249600,
+              "sfld": "river",
+              "tags": " vocab ",
+              "usn": -1
+            },
+            "1788249600240": {
+              "csum": 799119387,
+              "data": "",
+              "flags": 0,
+              "flds": "bridge\u001fpuente",
+              "guid": "#random",
+              "id": 1788249600240,
+              "mid": 1788249600186,
+              "mod": 1788249600,
+              "sfld": "bridge",
+              "tags": " Mixed_Case vocab ",
+              "usn": -1
+            },
+            "1788249600243": {
+              "csum": 3477142104,
+              "data": "",
+              "flags": 0,
+              "flds": "{{c1::Rain}} falls and {{c2::snow}} drifts.\u001fweather",
+              "guid": "#random",
+              "id": 1788249600243,
+              "mid": 1788249600189,
+              "mod": 1788249600,
+              "sfld": "{{c1::Rain}} falls and {{c2::snow}} drifts.",
+              "tags": " Mixed_Case ",
+              "usn": -1
+            },
+            "1788249600245": {
+              "csum": 2134748564,
+              "data": "",
+              "flags": 0,
+              "flds": "to walk\u001fandar",
+              "guid": "#random",
+              "id": 1788249600245,
+              "mid": 1788249600186,
+              "mod": 1788249600,
+              "sfld": "to walk",
+              "tags": " vocab::verbs ",
+              "usn": -1
+            },
+            "1788249600247": {
+              "csum": 1028815596,
+              "data": "",
+              "flags": 0,
+              "flds": "to read\u001fleer",
+              "guid": "#random",
+              "id": 1788249600247,
+              "mid": 1788249600186,
+              "mod": 1788249600,
+              "sfld": "to read",
+              "tags": " Mixed_Case vocab::verbs ",
+              "usn": -1
+            }
+          },
+          "notetypes": {
+            "1788249600186": {
+              "config": {
+                "sha256": "aa2bf5e932f07d61ee9465949b9ced405a82d4bc22a10cd83c6c7616749e963a"
+              },
+              "id": 1788249600186,
+              "mtime_secs": 1788249600,
+              "name": "Pair",
+              "usn": -1
+            },
+            "1788249600189": {
+              "config": {
+                "sha256": "366bea9324134b1a1f7a05749aca8c2b8258ac3b711360f1ef83e8e9027c4983"
+              },
+              "id": 1788249600189,
+              "mtime_secs": 1788249600,
+              "name": "Gap",
+              "usn": -1
+            }
+          },
+          "revlog": {
+            "1788249660000": {
+              "cid": 1788249600238,
+              "ease": 4,
+              "factor": 2500,
+              "id": 1788249660000,
+              "ivl": 5,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249660002": {
+              "cid": 1788249600240,
+              "ease": 4,
+              "factor": 2500,
+              "id": 1788249660002,
+              "ivl": 3,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600000": {
+              "cid": 1788249600238,
+              "ease": 4,
+              "factor": 2650,
+              "id": 1788681600000,
+              "ivl": 19,
+              "lastIvl": 5,
+              "time": 0,
+              "type": 1,
+              "usn": -1
+            },
+            "1788681600002": {
+              "cid": 1788249600240,
+              "ease": 1,
+              "factor": 2300,
+              "id": 1788681600002,
+              "ivl": -600,
+              "lastIvl": 3,
+              "time": 0,
+              "type": 1,
+              "usn": -1
+            },
+            "1788681600003": {
+              "cid": 1788249600243,
+              "ease": 1,
+              "factor": 0,
+              "id": 1788681600003,
+              "ivl": -60,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600006": {
+              "cid": 1788249600247,
+              "ease": 3,
+              "factor": 0,
+              "id": 1788681600006,
+              "ivl": -900,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "tags": {
+            "Mixed_Case": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "Mixed_Case",
+              "usn": -1
+            },
+            "vocab": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "vocab",
+              "usn": -1
+            },
+            "vocab::verbs": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "vocab::verbs",
+              "usn": -1
+            }
+          },
+          "templates": {
+            "1788249600186,0": {
+              "config": {
+                "sha256": "abae9d6381e851c0cf683d36509fa2743f5d4c464d7254c04cab17b486a63fe6"
+              },
+              "mtime_secs": 0,
+              "name": "Forward",
+              "ntid": 1788249600186,
+              "ord": 0,
+              "usn": 0
+            },
+            "1788249600186,1": {
+              "config": {
+                "sha256": "0792625ba2a222ce5b1ed47a7054427ac84c2069680de06f7ecf7468aa35195c"
+              },
+              "mtime_secs": 0,
+              "name": "Reverse",
+              "ntid": 1788249600186,
+              "ord": 1,
+              "usn": 0
+            },
+            "1788249600189,0": {
+              "config": {
+                "sha256": "367d461984fc1e36c9d2f2b0c0bee2dbc9990fb304a9140e308dd3d7ac8b59a3"
+              },
+              "mtime_secs": 0,
+              "name": "Gap",
+              "ntid": 1788249600189,
+              "ord": 0,
+              "usn": 0
+            }
+          }
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 1232,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "package_listing": {
+          "entries": [
+            {
+              "method": 0,
+              "name": "meta"
+            },
+            {
+              "method": 0,
+              "name": "collection.anki21b"
+            },
+            {
+              "method": 0,
+              "name": "collection.anki2"
+            },
+            {
+              "method": 0,
+              "name": "media"
+            }
+          ],
+          "meta_version": 3,
+          "sqlite": {
+            "collection.anki2": {
+              "cards": 1,
+              "journal": "rollback",
+              "notes": 1,
+              "opens": true,
+              "revlog": 0,
+              "ver": 11
+            }
+          }
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 1232,
+          "next_day_at": 1894766400,
+          "now": 1894701660,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1788249600233": {
+              "data": "{}",
+              "did": 1788249600254,
+              "due": -100000,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600233,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249600,
+              "nid": 1788249600233,
+              "odid": 1788249600212,
+              "odue": 1,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600238": {
+              "data": "{\"pos\":2,\"lrt\":1788681600}",
+              "did": 1788249600212,
+              "due": 24,
+              "factor": 2650,
+              "flags": 0,
+              "id": 1788249600238,
+              "ivl": 19,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788249600238,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 2,
+              "reps": 2,
+              "type": 2,
+              "usn": -1
+            },
+            "1788249600239": {
+              "data": "{}",
+              "did": 1788249600212,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600239,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249600,
+              "nid": 1788249600238,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600240": {
+              "data": "{\"pos\":3,\"lrt\":1788681600}",
+              "did": 1788249600212,
+              "due": 1788682232,
+              "factor": 1400,
+              "flags": 0,
+              "id": 1788249600240,
+              "ivl": 1,
+              "lapses": 1,
+              "left": 1,
+              "mod": 1788681600,
+              "nid": 1788249600240,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 1,
+              "reps": 2,
+              "type": 3,
+              "usn": -1
+            },
+            "1788249600241": {
+              "data": "{}",
+              "did": 1788249600212,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600241,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249600,
+              "nid": 1788249600240,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600243": {
+              "data": "{\"pos\":4,\"lrt\":1788681600}",
+              "did": 1788249600212,
+              "due": 1788681662,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600243,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 2,
+              "mod": 1788681600,
+              "nid": 1788249600243,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 1,
+              "reps": 1,
+              "type": 1,
+              "usn": -1
+            },
+            "1788249600244": {
+              "data": "{}",
+              "did": 1788249600212,
+              "due": 4,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600244,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249600,
+              "nid": 1788249600243,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600245": {
+              "data": "{}",
+              "did": 1788249600214,
+              "due": 5,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600245,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788249600245,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": -1,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600246": {
+              "data": "{}",
+              "did": 1788249600214,
+              "due": 5,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600246,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788249600245,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600247": {
+              "data": "{\"pos\":6,\"lrt\":1788681600}",
+              "did": 1788249600214,
+              "due": 1788682552,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600247,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1,
+              "mod": 1788681600,
+              "nid": 1788249600247,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 1,
+              "reps": 1,
+              "type": 1,
+              "usn": -1
+            },
+            "1788249600248": {
+              "data": "{}",
+              "did": 1788249600214,
+              "due": 6,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600248,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249600,
+              "nid": 1788249600247,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1788235200,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894701660000,
+              "models": "",
+              "scm": 1894701660000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "config": {
+            "_deck_1788249600212_lastNotetype": {
+              "KEY": "_deck_1788249600212_lastNotetype",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4f0225d7a91b9e90fc42f6b14244dd110ab326f1a5e4f453adcf2c61f4f941ac"
+              }
+            },
+            "_deck_1788249600214_lastNotetype": {
+              "KEY": "_deck_1788249600214_lastNotetype",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4f0225d7a91b9e90fc42f6b14244dd110ab326f1a5e4f453adcf2c61f4f941ac"
+              }
+            },
+            "_nt_1788249600186_lastDeck": {
+              "KEY": "_nt_1788249600186_lastDeck",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "8680d5ce27d1e0df70711f913b70b9a978f5e8cce07f24d0f7a5aea9c0bcfe93"
+              }
+            },
+            "_nt_1788249600189_lastDeck": {
+              "KEY": "_nt_1788249600189_lastDeck",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "8680d5ce27d1e0df70711f913b70b9a978f5e8cce07f24d0f7a5aea9c0bcfe93"
+              }
+            },
+            "activeDecks": {
+              "KEY": "activeDecks",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "080a9ed428559ef602668b4c00f114f1a11c3f6b02a435f0bdc154578e4d7f22"
+              }
+            },
+            "addToCur": {
+              "KEY": "addToCur",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "collapseTime": {
+              "KEY": "collapseTime",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "15197cf7214b58e67cae565e573ffd9aa44bcb81f8ee5d7185dfe8da0a16ef43"
+              }
+            },
+            "creationOffset": {
+              "KEY": "creationOffset",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "curDeck": {
+              "KEY": "curDeck",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "5263f71e201b62d6c2bac0ada0e93a3714d401f3721a08f75af1558b5152582c"
+              }
+            },
+            "curModel": {
+              "KEY": "curModel",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4f0225d7a91b9e90fc42f6b14244dd110ab326f1a5e4f453adcf2c61f4f941ac"
+              }
+            },
+            "dayLearnFirst": {
+              "KEY": "dayLearnFirst",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "dueCounts": {
+              "KEY": "dueCounts",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "estTimes": {
+              "KEY": "estTimes",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "lastUnburied": {
+              "KEY": "lastUnburied",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "b6602f58690ca41488e97cd28153671356747c951c55541b6c8d8b8493eb7143"
+              }
+            },
+            "meguriFixture": {
+              "KEY": "meguriFixture",
+              "mtime_secs": 1788681600,
+              "usn": 0,
+              "val": {
+                "sha256": "241399751c39cc872fc2ade0d23dd37ae426649594e336609f58a0d95d0774c6"
+              }
+            },
+            "newSpread": {
+              "KEY": "newSpread",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "nextPos": {
+              "KEY": "nextPos",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "2c624232cdd221771294dfbb310aca000a0df6ac8b66b696d90ef06fdefb64a3"
+              }
+            },
+            "rollover": {
+              "KEY": "rollover",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+              }
+            },
+            "sched2021": {
+              "KEY": "sched2021",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "schedVer": {
+              "KEY": "schedVer",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+              }
+            },
+            "sortBackwards": {
+              "KEY": "sortBackwards",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "sortType": {
+              "KEY": "sortType",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "1c19b6eac0880ca94f71879df838392e837aef4738f4d1000e15e48e65df61dc"
+              }
+            },
+            "timeLim": {
+              "KEY": "timeLim",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            }
+          },
+          "deck_config": {
+            "1": {
+              "config": {
+                "sha256": "b2d3a13378af8601b372cc76113debc42f7b2c4c669788ee98c3705a7af51d94"
+              },
+              "id": 1,
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1788249600216": {
+              "config": {
+                "sha256": "a1b45bccdbfa09f5b50f37ac4fa13afe6bf7caf35052922095273fd18fdf6f7b"
+              },
+              "id": 1788249600216,
+              "mtime_secs": 1788249600,
+              "name": "Slow",
+              "usn": -1
+            }
+          },
+          "decks": {
+            "1": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1788249600212": {
+              "common": {
+                "sha256": "47b3724ef74041b2267ad2316760d12e080edaa4abdf21bc3db4025bfc87d3cc"
+              },
+              "id": 1788249600212,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1788681600,
+              "name": "Lang",
+              "usn": -1
+            },
+            "1788249600214": {
+              "common": {
+                "sha256": "046a4bafdcdbdaf0773ccf7a7b1b5911b0cf38fad9e7a1bb0656914adecca648"
+              },
+              "id": 1788249600214,
+              "kind": {
+                "sha256": "5c28a3f77d7e646525461a540941f38d5ed58192c1f847eb0931acc51c5aaacb"
+              },
+              "mtime_secs": 1788681600,
+              "name": "Lang\u001fVerbs",
+              "usn": -1
+            },
+            "1788249600254": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1788249600254,
+              "kind": {
+                "sha256": "7dd0ceeaaabbf338d1361d5b0c6728a0bcf00352206668646abe87fd20207911"
+              },
+              "mtime_secs": 1788249600,
+              "name": "Cram",
+              "usn": -1
+            }
+          },
+          "fields": {
+            "1788249600186,0": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Front",
+              "ntid": 1788249600186,
+              "ord": 0
+            },
+            "1788249600186,1": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Back",
+              "ntid": 1788249600186,
+              "ord": 1
+            },
+            "1788249600189,0": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Text",
+              "ntid": 1788249600189,
+              "ord": 0
+            },
+            "1788249600189,1": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Extra",
+              "ntid": 1788249600189,
+              "ord": 1
+            }
+          },
+          "graves": {
+            "1788249600249,0": {
+              "oid": 1788249600249,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600249,1": {
+              "oid": 1788249600249,
+              "type": 1,
+              "usn": -1
+            },
+            "1788249600250,0": {
+              "oid": 1788249600250,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600252,2": {
+              "oid": 1788249600252,
+              "type": 2,
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1788249600233": {
+              "csum": 424129645,
+              "data": "",
+              "flags": 0,
+              "flds": "Water boils at {{c1::one hundred}} degrees.\u001fat sea level",
+              "guid": "#random",
+              "id": 1788249600233,
+              "mid": 1788249600189,
+              "mod": 1788249600,
+              "sfld": "Water boils at {{c1::one hundred}} degrees.",
+              "tags": "",
+              "usn": -1
+            },
+            "1788249600238": {
+              "csum": 150726050,
+              "data": "",
+              "flags": 0,
+              "flds": "river\u001frio",
+              "guid": "#random",
+              "id": 1788249600238,
+              "mid": 1788249600186,
+              "mod": 1788249600,
+              "sfld": "river",
+              "tags": " vocab ",
+              "usn": -1
+            },
+            "1788249600240": {
+              "csum": 799119387,
+              "data": "",
+              "flags": 0,
+              "flds": "bridge\u001fpuente",
+              "guid": "#random",
+              "id": 1788249600240,
+              "mid": 1788249600186,
+              "mod": 1788249600,
+              "sfld": "bridge",
+              "tags": " Mixed_Case vocab ",
+              "usn": -1
+            },
+            "1788249600243": {
+              "csum": 3477142104,
+              "data": "",
+              "flags": 0,
+              "flds": "{{c1::Rain}} falls and {{c2::snow}} drifts.\u001fweather",
+              "guid": "#random",
+              "id": 1788249600243,
+              "mid": 1788249600189,
+              "mod": 1788249600,
+              "sfld": "{{c1::Rain}} falls and {{c2::snow}} drifts.",
+              "tags": " Mixed_Case ",
+              "usn": -1
+            },
+            "1788249600245": {
+              "csum": 2134748564,
+              "data": "",
+              "flags": 0,
+              "flds": "to walk\u001fandar",
+              "guid": "#random",
+              "id": 1788249600245,
+              "mid": 1788249600186,
+              "mod": 1788249600,
+              "sfld": "to walk",
+              "tags": " vocab::verbs ",
+              "usn": -1
+            },
+            "1788249600247": {
+              "csum": 1028815596,
+              "data": "",
+              "flags": 0,
+              "flds": "to read\u001fleer",
+              "guid": "#random",
+              "id": 1788249600247,
+              "mid": 1788249600186,
+              "mod": 1788249600,
+              "sfld": "to read",
+              "tags": " Mixed_Case vocab::verbs ",
+              "usn": -1
+            }
+          },
+          "notetypes": {
+            "1788249600186": {
+              "config": {
+                "sha256": "aa2bf5e932f07d61ee9465949b9ced405a82d4bc22a10cd83c6c7616749e963a"
+              },
+              "id": 1788249600186,
+              "mtime_secs": 1788249600,
+              "name": "Pair",
+              "usn": -1
+            },
+            "1788249600189": {
+              "config": {
+                "sha256": "366bea9324134b1a1f7a05749aca8c2b8258ac3b711360f1ef83e8e9027c4983"
+              },
+              "id": 1788249600189,
+              "mtime_secs": 1788249600,
+              "name": "Gap",
+              "usn": -1
+            }
+          },
+          "revlog": {
+            "1788249660000": {
+              "cid": 1788249600238,
+              "ease": 4,
+              "factor": 2500,
+              "id": 1788249660000,
+              "ivl": 5,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249660002": {
+              "cid": 1788249600240,
+              "ease": 4,
+              "factor": 2500,
+              "id": 1788249660002,
+              "ivl": 3,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600000": {
+              "cid": 1788249600238,
+              "ease": 4,
+              "factor": 2650,
+              "id": 1788681600000,
+              "ivl": 19,
+              "lastIvl": 5,
+              "time": 0,
+              "type": 1,
+              "usn": -1
+            },
+            "1788681600002": {
+              "cid": 1788249600240,
+              "ease": 1,
+              "factor": 2300,
+              "id": 1788681600002,
+              "ivl": -600,
+              "lastIvl": 3,
+              "time": 0,
+              "type": 1,
+              "usn": -1
+            },
+            "1788681600003": {
+              "cid": 1788249600243,
+              "ease": 1,
+              "factor": 0,
+              "id": 1788681600003,
+              "ivl": -60,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600006": {
+              "cid": 1788249600247,
+              "ease": 3,
+              "factor": 0,
+              "id": 1788681600006,
+              "ivl": -900,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "tags": {
+            "Mixed_Case": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "Mixed_Case",
+              "usn": -1
+            },
+            "vocab": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "vocab",
+              "usn": -1
+            },
+            "vocab::verbs": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "vocab::verbs",
+              "usn": -1
+            }
+          },
+          "templates": {
+            "1788249600186,0": {
+              "config": {
+                "sha256": "abae9d6381e851c0cf683d36509fa2743f5d4c464d7254c04cab17b486a63fe6"
+              },
+              "mtime_secs": 0,
+              "name": "Forward",
+              "ntid": 1788249600186,
+              "ord": 0,
+              "usn": 0
+            },
+            "1788249600186,1": {
+              "config": {
+                "sha256": "0792625ba2a222ce5b1ed47a7054427ac84c2069680de06f7ecf7468aa35195c"
+              },
+              "mtime_secs": 0,
+              "name": "Reverse",
+              "ntid": 1788249600186,
+              "ord": 1,
+              "usn": 0
+            },
+            "1788249600189,0": {
+              "config": {
+                "sha256": "367d461984fc1e36c9d2f2b0c0bee2dbc9990fb304a9140e308dd3d7ac8b59a3"
+              },
+              "mtime_secs": 0,
+              "name": "Gap",
+              "ntid": 1788249600189,
+              "ord": 0,
+              "usn": 0
+            }
+          }
+        },
+        "schema_objects": [
+          {
+            "name": "idx_cards_odid",
+            "sql": "CREATE INDEX idx_cards_odid ON cards (odid) WHERE odid != 0",
+            "tbl_name": "cards",
+            "type": "index"
+          },
+          {
+            "name": "idx_decks_name",
+            "sql": "CREATE UNIQUE INDEX idx_decks_name ON decks (name)",
+            "tbl_name": "decks",
+            "type": "index"
+          },
+          {
+            "name": "idx_fields_name_ntid",
+            "sql": "CREATE UNIQUE INDEX idx_fields_name_ntid ON fields (name, ntid)",
+            "tbl_name": "fields",
+            "type": "index"
+          },
+          {
+            "name": "idx_graves_pending",
+            "sql": "CREATE INDEX idx_graves_pending ON graves (usn)",
+            "tbl_name": "graves",
+            "type": "index"
+          },
+          {
+            "name": "idx_notes_mid",
+            "sql": "CREATE INDEX idx_notes_mid ON notes (mid)",
+            "tbl_name": "notes",
+            "type": "index"
+          },
+          {
+            "name": "idx_notetypes_name",
+            "sql": "CREATE UNIQUE INDEX idx_notetypes_name ON notetypes (name)",
+            "tbl_name": "notetypes",
+            "type": "index"
+          },
+          {
+            "name": "idx_notetypes_usn",
+            "sql": "CREATE INDEX idx_notetypes_usn ON notetypes (usn)",
+            "tbl_name": "notetypes",
+            "type": "index"
+          },
+          {
+            "name": "idx_templates_name_ntid",
+            "sql": "CREATE UNIQUE INDEX idx_templates_name_ntid ON templates (name, ntid)",
+            "tbl_name": "templates",
+            "type": "index"
+          },
+          {
+            "name": "idx_templates_usn",
+            "sql": "CREATE INDEX idx_templates_usn ON templates (usn)",
+            "tbl_name": "templates",
+            "type": "index"
+          },
+          {
+            "name": "ix_cards_nid",
+            "sql": "CREATE INDEX ix_cards_nid ON cards (nid)",
+            "tbl_name": "cards",
+            "type": "index"
+          },
+          {
+            "name": "ix_cards_sched",
+            "sql": "CREATE INDEX ix_cards_sched ON cards (did, queue, due)",
+            "tbl_name": "cards",
+            "type": "index"
+          },
+          {
+            "name": "ix_cards_usn",
+            "sql": "CREATE INDEX ix_cards_usn ON cards (usn)",
+            "tbl_name": "cards",
+            "type": "index"
+          },
+          {
+            "name": "ix_notes_csum",
+            "sql": "CREATE INDEX ix_notes_csum ON notes (csum)",
+            "tbl_name": "notes",
+            "type": "index"
+          },
+          {
+            "name": "ix_notes_usn",
+            "sql": "CREATE INDEX ix_notes_usn ON notes (usn)",
+            "tbl_name": "notes",
+            "type": "index"
+          },
+          {
+            "name": "ix_revlog_cid",
+            "sql": "CREATE INDEX ix_revlog_cid ON revlog (cid)",
+            "tbl_name": "revlog",
+            "type": "index"
+          },
+          {
+            "name": "ix_revlog_usn",
+            "sql": "CREATE INDEX ix_revlog_usn ON revlog (usn)",
+            "tbl_name": "revlog",
+            "type": "index"
+          },
+          {
+            "name": "cards",
+            "sql": "CREATE TABLE cards ( id integer PRIMARY KEY, nid integer NOT NULL, did integer NOT NULL, ord integer NOT NULL, mod integer NOT NULL, usn integer NOT NULL, type integer NOT NULL, queue integer NOT NULL, due integer NOT NULL, ivl integer NOT NULL, factor integer NOT NULL, reps integer NOT NULL, lapses integer NOT NULL, left integer NOT NULL, odue integer NOT NULL, odid integer NOT NULL, flags integer NOT NULL, data text NOT NULL )",
+            "tbl_name": "cards",
+            "type": "table"
+          },
+          {
+            "name": "col",
+            "sql": "CREATE TABLE col ( id integer PRIMARY KEY, crt integer NOT NULL, mod integer NOT NULL, scm integer NOT NULL, ver integer NOT NULL, dty integer NOT NULL, usn integer NOT NULL, ls integer NOT NULL, conf text NOT NULL, models text NOT NULL, decks text NOT NULL, dconf text NOT NULL, tags text NOT NULL )",
+            "tbl_name": "col",
+            "type": "table"
+          },
+          {
+            "name": "config",
+            "sql": "CREATE TABLE config ( KEY text NOT NULL PRIMARY KEY, usn integer NOT NULL, mtime_secs integer NOT NULL, val blob NOT NULL ) without rowid",
+            "tbl_name": "config",
+            "type": "table"
+          },
+          {
+            "name": "deck_config",
+            "sql": "CREATE TABLE deck_config ( id integer PRIMARY KEY NOT NULL, name text NOT NULL COLLATE unicase, mtime_secs integer NOT NULL, usn integer NOT NULL, config blob NOT NULL )",
+            "tbl_name": "deck_config",
+            "type": "table"
+          },
+          {
+            "name": "decks",
+            "sql": "CREATE TABLE decks ( id integer PRIMARY KEY NOT NULL, name text NOT NULL COLLATE unicase, mtime_secs integer NOT NULL, usn integer NOT NULL, common blob NOT NULL, kind blob NOT NULL )",
+            "tbl_name": "decks",
+            "type": "table"
+          },
+          {
+            "name": "fields",
+            "sql": "CREATE TABLE fields ( ntid integer NOT NULL, ord integer NOT NULL, name text NOT NULL COLLATE unicase, config blob NOT NULL, PRIMARY KEY (ntid, ord) ) without rowid",
+            "tbl_name": "fields",
+            "type": "table"
+          },
+          {
+            "name": "graves",
+            "sql": "CREATE TABLE graves ( oid integer NOT NULL, type integer NOT NULL, usn integer NOT NULL, PRIMARY KEY (oid, type) ) WITHOUT ROWID",
+            "tbl_name": "graves",
+            "type": "table"
+          },
+          {
+            "name": "notes",
+            "sql": "CREATE TABLE notes ( id integer PRIMARY KEY, guid text NOT NULL, mid integer NOT NULL, mod integer NOT NULL, usn integer NOT NULL, tags text NOT NULL, flds text NOT NULL, sfld integer NOT NULL, csum integer NOT NULL, flags integer NOT NULL, data text NOT NULL )",
+            "tbl_name": "notes",
+            "type": "table"
+          },
+          {
+            "name": "notetypes",
+            "sql": "CREATE TABLE notetypes ( id integer NOT NULL PRIMARY KEY, name text NOT NULL COLLATE unicase, mtime_secs integer NOT NULL, usn integer NOT NULL, config blob NOT NULL )",
+            "tbl_name": "notetypes",
+            "type": "table"
+          },
+          {
+            "name": "revlog",
+            "sql": "CREATE TABLE revlog ( id integer PRIMARY KEY, cid integer NOT NULL, usn integer NOT NULL, ease integer NOT NULL, ivl integer NOT NULL, lastIvl integer NOT NULL, factor integer NOT NULL, time integer NOT NULL, type integer NOT NULL )",
+            "tbl_name": "revlog",
+            "type": "table"
+          },
+          {
+            "name": "sqlite_stat1",
+            "sql": "CREATE TABLE sqlite_stat1(tbl,idx,stat)",
+            "tbl_name": "sqlite_stat1",
+            "type": "table"
+          },
+          {
+            "name": "sqlite_stat4",
+            "sql": "CREATE TABLE sqlite_stat4(tbl,idx,neq,nlt,ndlt,sample)",
+            "tbl_name": "sqlite_stat4",
+            "type": "table"
+          },
+          {
+            "name": "tags",
+            "sql": "CREATE TABLE tags ( tag text NOT NULL PRIMARY KEY COLLATE unicase, usn integer NOT NULL, collapsed boolean NOT NULL, config blob NULL ) without rowid",
+            "tbl_name": "tags",
+            "type": "table"
+          },
+          {
+            "name": "templates",
+            "sql": "CREATE TABLE templates ( ntid integer NOT NULL, ord integer NOT NULL, name text NOT NULL COLLATE unicase, mtime_secs integer NOT NULL, usn integer NOT NULL, config blob NOT NULL, PRIMARY KEY (ntid, ord) ) without rowid",
+            "tbl_name": "templates",
+            "type": "table"
+          }
+        ]
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["ok"]
+          ]
+        }
+      },
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 0,
+          "cards_without_note": 0,
+          "cards_without_template": 0,
+          "decks_missing": 0,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 0,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 0,
+          "revlog_properties": 0
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "4bcf7b6917db94651332072ece435c081512f72a7f2408504d1cb894e0a36e3c",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/collection-package/export-import-roundtrip",
+  "scenario_sha256": "90c4b3c4ef70ffaba3b6f14b4b29a844c1ebd304dd49ae489060d9cf30ec570e",
+  "tz": "UTC"
+}

@@ -1,0 +1,32 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "timing": {
+          "days_elapsed": 1232,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "import": {
+          "error": "corrupt"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "4bcf7b6917db94651332072ece435c081512f72a7f2408504d1cb894e0a36e3c",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/collection-package/missing-media-map",
+  "scenario_sha256": "73a4c4f4a56c5fd0b15a8c0992602fbaa27d9d4cf02ab0d84c6f3c16f4e7c037",
+  "tz": "UTC"
+}

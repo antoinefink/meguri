@@ -5,6 +5,7 @@ from . import (  # noqa: F401
     browser,
     clock,
     collection,
+    colpkg,
     deck_options,
     decks,
     fsrs_policy,

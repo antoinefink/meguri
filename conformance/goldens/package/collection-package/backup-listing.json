@@ -1,0 +1,52 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "package_listing": {
+          "entries": [
+            {
+              "method": 0,
+              "name": "meta"
+            },
+            {
+              "method": 0,
+              "name": "collection.anki21b"
+            },
+            {
+              "method": 0,
+              "name": "collection.anki2"
+            },
+            {
+              "method": 0,
+              "name": "media"
+            }
+          ],
+          "meta_version": 3,
+          "sqlite": {
+            "collection.anki2": {
+              "cards": 11,
+              "journal": "rollback",
+              "notes": 6,
+              "opens": true,
+              "revlog": 6,
+              "ver": 11
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "4bcf7b6917db94651332072ece435c081512f72a7f2408504d1cb894e0a36e3c",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/collection-package/backup-listing",
+  "scenario_sha256": "cc4eeff40008965b82ff0037ea1457735238e9e34f70f19d9459e6ac0763e32c",
+  "tz": "UTC"
+}

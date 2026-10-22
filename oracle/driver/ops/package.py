@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Legacy packages (model-ops.md L6, L7).
+"""Legacy packages (model-ops.md L6, L7) and the export op's forms.
 
-export (op), the legacy package form only: {format: "apkg", name, legacy: true}
-    -> {notes: <count>}
+export (op): the legacy package form {format: "apkg", name, legacy: true}
+    -> {notes: <count>}; the collection package form {format: "colpkg", name}
+    -> none (package-ops.md E1, ops/colpkg.py)
 package_col (observation): {name, columns: [ver | conf | models | decks | dconf | tags]}
     -> {<column>: value}
 
-export writes the whole collection (limit none) with Anki's package exporter,
-scheduling and presets in, media out, in the legacy layout, to
+The legacy form writes the whole collection (limit none) with Anki's package
+exporter, scheduling and presets in, media out, in the legacy layout, to
 <session dir>/<name>: Session.hand_off copies that directory, so the package
 crosses a handoff. The other export forms are the package area's drafts
 (dsl.md D7.2): a scenario that uses one fails with unsupported_op before any
@@ -41,6 +42,7 @@ from google.protobuf.message import DecodeError
 
 from ..errors import DriverError, invalid
 from ..registry import observation, op, scenario_check
+from . import colpkg
 
 # conformance/schema/scenario.schema.json package_name; fullmatch, since `$`
 # also matches before a final newline.
@@ -56,8 +58,13 @@ def _package_name(value: Any, what: str) -> str:
     return value
 
 
-def _legacy_export_name(args: Any) -> str:
-    """The file name of the legacy form; unsupported_op for a draft form."""
+def _export_form(args: Any) -> tuple[str, str]:
+    """('legacy' | 'colpkg', file name) of a form the driver has;
+    unsupported_op for a draft form."""
+    if isinstance(args, dict) and args.get("format") == "colpkg" and "legacy" not in args:
+        if set(args) != {"format", "name"}:
+            raise invalid("the collection package export form is exactly {format: colpkg, name}")
+        return "colpkg", colpkg.colpkg_name(args["name"], "export name")
     if isinstance(args, dict) and "legacy" not in args:
         raise DriverError("unsupported_op", op="export")
     if (
@@ -67,7 +74,7 @@ def _legacy_export_name(args: Any) -> str:
         or args["legacy"] is not True
     ):
         raise invalid("the legacy export form is exactly {format: apkg, name, legacy: true}")
-    return _package_name(args["name"], "export name")
+    return "legacy", _package_name(args["name"], "export name")
 
 
 @scenario_check
@@ -76,7 +83,7 @@ def check_export_steps(scenario: dict) -> None:
         ((name, args),) = step.items()
         if name == "export":
             try:
-                _legacy_export_name(args)
+                _export_form(args)
             except DriverError as exc:
                 exc.fields.setdefault("step", index)
                 raise
@@ -84,7 +91,10 @@ def check_export_steps(scenario: dict) -> None:
 
 @op("export")
 def export(session, args):
-    name = _legacy_export_name(args)
+    form, name = _export_form(args)
+    if form == "colpkg":
+        colpkg.export(session, name)
+        return None
     options = ExportAnkiPackageOptions(with_scheduling=True, with_deck_configs=True, with_media=False, legacy=True)
     notes = session.col.export_anki_package(out_path=os.path.join(session.dir, name), options=options, limit=None)
     return {"notes": notes}
