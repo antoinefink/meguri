@@ -140,3 +140,33 @@ Review 3, P0/P1 scope: two P1 findings. App startup omits the backups directory
 required by the core; prepare that directory before open. Three test helper
 calls need `Self.head`. Keep a fresh-install regression through the real core.
 Keyboard fixes passed source review; real keyboard and visual evidence remain.
+
+Fix round 3 retains RF1 base `5d6517071681878d6ad7fd6f22cfa587961cf230`.
+The filtered fixer prepares the resolved sibling Backups directory off the main
+actor after the existing collection-file check and before real startOpen.
+Filesystem failures still reach the owner's failed state; no collection is
+created or replaced, and core path canonicalization/separation checks remain.
+All three instance test calls now use `Self.head`; assertions and fixture
+initialization are preserved, including the prior mutating-assertion fix.
+
+Added headless `ReviewCollectionStartupTests`: copy the public synthetic
+schema-18 fixture through an untouched export into a private temporary
+Application Support/Collection, leave Backups absent, and call the production
+owner startup. It requires real core readiness, deck reads and Backups creation,
+then owner flush/close and noCollection; error cleanup also attempts core
+flush/close. Source fixture and export bytes must remain intact. No fixture
+globals, private files, fake open or UI are used. The suite needs the real Mac
+core bindings/XCFramework supplied by swift-test; these are absent in this
+filtered runner, so no initialization or runtime success is claimed.
+
+One targeted source consistency pass completed. No builds/tests, commits,
+branches or worktrees were run/created. Integrator verification, sequentially:
+
+```sh
+tools/mg swift-test --package MeguriKit -- --filter 'ReviewCollectionStartupTests|ReviewCoordinatorTests|ReviewNativeFocusTests|ReviewMediaBindingTests|ReviewDayMonitorTests'
+tools/mg ui-test --platform iphone --suite LocalReviewJourneyTests
+```
+
+Keep all failed receipts above. Actual iPhone Home/card visuals, native keyboard
+proof and required boundary/privacy/provenance/similarity gates remain pending.
+No Unit acceptance; minimal safe collection entry and the full plan remain.

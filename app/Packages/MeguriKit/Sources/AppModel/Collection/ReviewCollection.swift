@@ -89,10 +89,7 @@ public final class ReviewCollection {
                     }
                 }
             }
-            let directory = configuration.collectionLocation.directory
-            let location = CoreBridge.CollectionLocation(collectionDirectory: directory,
-                backupsDirectory: directory.deletingLastPathComponent().appending(path: "Backups"),
-                appGroupSnapshot: directory.appending(path: "meguri-widget-unavailable.json"))
+            let location = try await Self.prepareOpenLocation(configuration.collectionLocation.directory)
             try await collection.startOpen(location, randomSeed: UInt64.random(in: 0...UInt64.max)).value()
             lifecycle = try await collection.lifecycle()
             if case .ready(let value) = lifecycle { generation = value; state = .ready }
@@ -385,6 +382,13 @@ public final class ReviewCollection {
     static func acceptsMedia(_ snapshot: MediaNameSnapshot, generation: UInt64, root: URL) -> Bool {
         snapshot.generation == generation && snapshot.root.isFileURL &&
             Data(snapshot.root.standardizedFileURL.path.utf8) == Data(root.standardizedFileURL.path.utf8)
+    }
+    @concurrent private nonisolated static func prepareOpenLocation(_ directory: URL) async throws -> CoreBridge.CollectionLocation {
+        let backups = directory.deletingLastPathComponent().appending(path: "Backups", directoryHint: .isDirectory)
+        // Core canonicalizes both roots before opening; the app owns this directory.
+        try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
+        return CoreBridge.CollectionLocation(collectionDirectory: directory, backupsDirectory: backups,
+            appGroupSnapshot: directory.appending(path: "meguri-widget-unavailable.json"))
     }
     @concurrent private nonisolated static func exists(_ url: URL) async -> Bool { FileManager.default.fileExists(atPath: url.path) }
 }
