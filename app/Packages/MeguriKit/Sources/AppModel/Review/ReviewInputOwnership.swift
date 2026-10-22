@@ -23,7 +23,7 @@ public enum ReviewInputOwnership {
               window.windowScene?.activationState == .foregroundActive else { return false }
         // Full Keyboard Access can focus a native button without changing the
         // responder. That focus takes priority over a retained WebKit responder.
-        if let item = UIFocusSystem(for: container)?.focusedItem {
+        if let item = UIFocusSystem.focusSystem(for: container)?.focusedItem {
             guard let focused = item as? UIView, contains(focused, in: container) else { return false }
         }
         func responder(in view: UIView) -> UIView? {
@@ -48,7 +48,7 @@ public enum ReviewInputOwnership {
         #else
         guard let window = container.window, window.isKeyWindow,
               window.windowScene?.activationState == .foregroundActive else { return nil }
-        if let item = UIFocusSystem(for: container)?.focusedItem {
+        if let item = UIFocusSystem.focusSystem(for: container)?.focusedItem {
             guard let view = item as? UIView, contains(view, in: container) else { return true }
         }
         func outsideResponder(in view: UIView) -> Bool {

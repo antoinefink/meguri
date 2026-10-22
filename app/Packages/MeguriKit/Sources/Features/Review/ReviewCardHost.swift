@@ -62,8 +62,11 @@ extension ReviewCardHost: NSViewRepresentable {
         context.coordinator.focusObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didUpdateNotification, object: nil, queue: .main
         ) { [weak host, weak pair] note in
+            guard let updatedWindow = note.object as? NSWindow else { return }
+            let updatedWindowID = ObjectIdentifier(updatedWindow)
             MainActor.assumeIsolated {
-                guard let host, let pair, let window = note.object as? NSWindow, window === host.window else { return }
+                guard let host, let pair, let window = host.window,
+                      ObjectIdentifier(window) == updatedWindowID else { return }
                 (model.surface as? ReviewPages)?.establishInitialFocus()
                 let owned = !model.paused && ReviewInputOwnership.cardFocused(in: pair.current.webView)
                 if pair.ownsKeyboardFocus != owned { pair.ownsKeyboardFocus = owned }
