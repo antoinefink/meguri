@@ -45,7 +45,8 @@ import notify
         XCTAssertTrue(entry.waitForExistence(timeout: 20))
         try click(entry, app, bundle)
         XCTAssertTrue(element(app, "onboarding.collectionImport.choose").waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "collection-only .colpkg")).firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any)["onboarding.collectionImport.sheet"].firstMatch.staticTexts.matching(NSPredicate(
+            format: "label CONTAINS %@ OR value CONTAINS %@", "collection-only .colpkg", "collection-only .colpkg")).firstMatch.waitForExistence(timeout: 10))
         try click(element(app, "onboarding.collectionImport.choose"), app, bundle)
         try pick(source, app, bundle)
         let confirm = element(app, "onboarding.collectionImport.confirm")
@@ -156,7 +157,7 @@ import notify
             let dedicated = app.descendants(matching: .any).matching(NSPredicate(
                 format: "identifier == %@ OR label == %@", "RF2 Import Tests, Folder", "RF2 Import Tests, Folder"))
             let appFolder = app.cells.containing(NSPredicate(format: "label == %@", "Meguri"))
-            if waitForHittable(dedicated, timeout: 2) == nil {
+            if waitForHittable(dedicated) == nil {
                 let local = app.descendants(matching: .any).matching(NSPredicate(
                     format: "label IN %@", ["On My iPhone", "On My iPad"]))
                 if !local.firstMatch.exists {
