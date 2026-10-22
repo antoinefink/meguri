@@ -412,3 +412,33 @@ fn media_post_commit_storage_error_never_rolls_back_committed_attachments() {
         b"committed bytes"
     );
 }
+
+#[test]
+fn tracked_names_bind_root_and_generation_and_refuse_inactive_handles() {
+    let h = Harness::open();
+    let media = MediaService::open(&h.collection, h.clock.clone()).unwrap();
+    media.add("bound.png", b"journal snapshot").unwrap();
+    let snapshot = media.tracked_names().unwrap();
+    assert_eq!(snapshot.generation, h.collection.generation().0);
+    assert_eq!(snapshot.root, h.path.parent().unwrap().join("collection.media"));
+    assert_eq!(snapshot.names[0].name, "bound.png");
+    assert_eq!(snapshot.names[0].case_key, "bound.png");
+    h.engine.suspend(std::time::Duration::from_secs(2)).unwrap();
+    assert!(media.tracked_names().is_err());
+    h.engine.resume().unwrap();
+    assert_eq!(media.tracked_names().unwrap(), snapshot);
+    let replacement = h.dir.path().join("replacement.anki2");
+    fs::copy(common::fixture("schema-18.anki2"), &replacement).unwrap();
+    let slot = h.engine.acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+    let mut exclusive = slot.enter_exclusive(true).unwrap();
+    exclusive
+        .replace(move |live| {
+            fs::rename(&replacement, live).map_err(|e| EngineError::Internal { message: e.to_string() })
+        })
+        .unwrap();
+    drop(exclusive);
+    drop(slot);
+    assert!(media.tracked_names().is_err());
+    h.engine.close().unwrap();
+    assert!(media.tracked_names().is_err());
+}

@@ -18,7 +18,23 @@ pub(crate) struct MediaState {
     store: MediaStore,
     jobs: MediaJobLock,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MediaNameSnapshot {
+    pub generation: u64,
+    pub root: std::path::PathBuf,
+    pub names: Vec<meguri_storage::media::TrackedMediaName>,
+}
 impl MediaService {
+    pub fn tracked_names(&self) -> Result<MediaNameSnapshot, EngineError> {
+        // Keep the admitted lease until the journal and binding are captured.
+        let _reader = self.collection.operation_reader(ReaderRole::Query)?;
+        Ok(MediaNameSnapshot {
+            generation: self.collection.generation().0,
+            root: self.state.store.media_dir().to_path_buf(),
+            names: self.state.store.tracked_names().map_err(error)?,
+        })
+    }
+
     pub fn open(collection: &Collection, clock: Arc<dyn Clock>) -> Result<Self, EngineError> {
         let _reader = collection.operation_reader(ReaderRole::Query)?;
         let mut bound = collection
@@ -52,7 +68,15 @@ impl MediaService {
     /// Editor attachments outside a note transaction commit immediately.
     pub fn add(&self, name: &str, bytes: &[u8]) -> Result<String, EngineError> {
         let _reader = self.collection.operation_reader(ReaderRole::Query)?;
-        self.state.store.add(name, bytes).map_err(error)
+        let stored = self.state.store.add(name, bytes).map_err(error)?;
+        self.collection.core.exec.stream.publish(
+            self.collection.generation(),
+            None,
+            EventKind::Extension(Arc::new(MediaArrived {
+                names: vec![stored.clone()],
+            })),
+        );
+        Ok(stored)
     }
     pub fn begin_staging(&self) -> Result<StagedOp, EngineError> {
         let _reader = self.collection.operation_reader(ReaderRole::Query)?;

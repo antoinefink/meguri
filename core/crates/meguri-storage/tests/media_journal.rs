@@ -49,3 +49,40 @@ fn media_journal_acknowledgement_cannot_hide_a_newer_local_change() {
     assert!(store.acknowledge(&new.name, new.change_counter).unwrap());
     assert!(store.pending().unwrap().is_empty());
 }
+
+#[test]
+fn tracked_names_preserve_journal_bytes_filter_nonlive_and_never_scan() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+    // Write journal rows directly to prove the query returns stored keys,
+    // including canonically equivalent but byte-distinct spellings.
+    let db = Connection::open(dir.path().join("meguri-media.db")).unwrap();
+    for (name, key, live, pending) in [
+        ("É.PNG", "é.png", true, false),
+        ("E\u{301}.PNG", "e\u{301}.png", true, false),
+        ("removed.png", "removed.png", false, false),
+        ("waiting.png", "waiting.png", true, true),
+        ("missing.png", "stored-key", true, false),
+    ] {
+        db.execute(
+            "INSERT INTO media VALUES(?1,?2,NULL,0,0,0,?3,0,1,?4)",
+            rusqlite::params![name, key, live, pending],
+        )
+        .unwrap();
+    }
+    let before = store.diagnostics();
+    let names = store.tracked_names().unwrap();
+    assert_eq!(names.len(), 3);
+    for (name, key) in [
+        ("É.PNG", "é.png"),
+        ("E\u{301}.PNG", "e\u{301}.png"),
+        ("missing.png", "stored-key"),
+    ] {
+        assert!(names.iter().any(|entry| entry.name == name && entry.case_key == key));
+    }
+    // Missing on disk remains a safe resolver miss; querying never repairs,
+    // enumerates, hashes or admits pending downloads as available names.
+    assert_eq!(store.diagnostics(), before);
+    assert!(store.try_close().unwrap());
+    assert!(store.tracked_names().is_err());
+}

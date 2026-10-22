@@ -5,7 +5,7 @@ mod journal_db;
 mod staging;
 mod trash;
 
-pub use journal_db::{MediaEntry, PendingChange};
+pub use journal_db::{MediaEntry, PendingChange, TrackedMediaName};
 use meguri_model::clock::Clock;
 use rusqlite::Connection;
 pub use staging::{NoteReference, RecoveryReport, StagedOp};
@@ -198,6 +198,10 @@ impl MediaStore {
             "UPDATE media SET dirty=0 WHERE name=?1 AND change_counter=?2 AND dirty=1",
             rusqlite::params![name, journal_db::sqlite_integer(counter)?],
         )? != 0)
+    }
+    /// One journal guard covers the entire query; no filesystem work.
+    pub fn tracked_names(&self) -> Result<Vec<TrackedMediaName>> {
+        journal_db::tracked_names(&*self.db()?)
     }
     pub fn entries(&self) -> Result<Vec<MediaEntry>> {
         journal_db::entries(&*self.db()?)

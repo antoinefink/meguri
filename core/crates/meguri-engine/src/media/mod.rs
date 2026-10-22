@@ -5,7 +5,7 @@ mod service;
 
 pub use events::MediaArrived;
 pub use lock::{MediaJobKind, MediaJobLease};
-pub use service::MediaService;
+pub use service::{MediaNameSnapshot, MediaService};
 pub(crate) use service::{MediaState, PendingMedia};
 
 pub(crate) fn error(error: meguri_storage::media::MediaError) -> crate::EngineError {

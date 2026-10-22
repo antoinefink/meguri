@@ -48,6 +48,9 @@ pub enum CoreEventKind {
         state: crate::lifecycle::CollectionLifecycle,
     },
     Available,
+    MediaArrived {
+        names: Vec<String>,
+    },
     SessionStarted {
         session_id: u64,
         deck_id: i64,
@@ -153,6 +156,7 @@ fn stream_kind(kind: CoreEventKind) -> Result<EventKind, CoreError> {
             outcome: outcome.into(),
         }),
         CoreEventKind::Lifecycle { .. }
+        | CoreEventKind::MediaArrived { .. }
         | CoreEventKind::Available
         | CoreEventKind::SessionStarted { .. }
         | CoreEventKind::SessionEnded { .. }
@@ -191,7 +195,13 @@ fn core_event(event: &Event) -> Option<CoreEvent> {
         | EventKind::TimeZoneChanged { .. }
         | EventKind::NextDayAtChanged { .. }) => day_clock::core_event_kind(kind)?,
         EventKind::Extension(value) => {
-            session_event_kind(value.as_any().downcast_ref::<meguri_engine::session::SessionEvent>()?)
+            if let Some(media) = value.as_any().downcast_ref::<meguri_engine::media::MediaArrived>() {
+                CoreEventKind::MediaArrived {
+                    names: media.names.clone(),
+                }
+            } else {
+                session_event_kind(value.as_any().downcast_ref::<meguri_engine::session::SessionEvent>()?)
+            }
         }
         EventKind::Lifecycle(state) => CoreEventKind::Lifecycle {
             state: state.clone().into(),
@@ -808,6 +818,20 @@ mod review_tests {
             .is_none()
         );
         drop(stream);
+    }
+
+    #[test]
+    fn media_arrival_keeps_collection_generation_and_exact_names() {
+        let names = vec!["É.PNG".into(), "E\u{301}.PNG".into()];
+        let event = core_event(&Event {
+            seq: Seq(101),
+            generation: Generation(7),
+            cause_seq: None,
+            kind: EventKind::Extension(Arc::new(meguri_engine::media::MediaArrived { names: names.clone() })),
+        })
+        .unwrap();
+        assert_eq!(event.generation, 7);
+        assert_eq!(event.kind, CoreEventKind::MediaArrived { names });
     }
 
     #[test]

@@ -108,6 +108,23 @@ pub(super) fn entries(db: &Connection) -> Result<Vec<MediaEntry>> {
         .query_map([], row)?
         .collect::<std::result::Result<Vec<_>, _>>()?)
 }
+/// Spelling and case key are journal bytes, not reconstructed by clients.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrackedMediaName {
+    pub name: String,
+    pub case_key: String,
+}
+pub(super) fn tracked_names(db: &Connection) -> Result<Vec<TrackedMediaName>> {
+    Ok(db
+        .prepare("SELECT name,case_key FROM media WHERE live=1 AND pending_download=0 ORDER BY name")?
+        .query_map([], |row| {
+            Ok(TrackedMediaName {
+                name: row.get(0)?,
+                case_key: row.get(1)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?)
+}
 pub(super) fn save(db: &mut Connection, value: &MediaEntry) -> Result<()> {
     let tx = db.savepoint()?;
     tx.execute("UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='counter'", [])?;
