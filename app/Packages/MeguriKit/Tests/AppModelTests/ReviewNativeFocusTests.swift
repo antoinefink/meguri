@@ -37,21 +37,28 @@ import UIKit
 
     @Test func initialFocusWaitsForPresentationAttachmentAndActiveInputThenResolvesOnce() {
         var focus = ReviewInitialFocus()
-        #expect(!focus.claim(presented: false, active: true, nativeInputOwned: false))
-        #expect(!focus.claim(presented: true, active: true, nativeInputOwned: nil))
-        #expect(!focus.claim(presented: true, active: false, nativeInputOwned: false))
+        let claimBeforePresentation = focus.claim(presented: false, active: true, nativeInputOwned: false)
+        #expect(!claimBeforePresentation)
+        let claimBeforeAttachment = focus.claim(presented: true, active: true, nativeInputOwned: nil)
+        #expect(!claimBeforeAttachment)
+        let claimWhileInactive = focus.claim(presented: true, active: false, nativeInputOwned: false)
+        #expect(!claimWhileInactive)
         #expect(!focus.resolved)
-        #expect(focus.claim(presented: true, active: true, nativeInputOwned: false))
+        let initialClaim = focus.claim(presented: true, active: true, nativeInputOwned: false)
+        #expect(initialClaim)
         #expect(focus.resolved)
         // Subsequent cards, resumes and layout attachment cannot reacquire focus.
-        #expect(!focus.claim(presented: true, active: true, nativeInputOwned: false))
+        let subsequentClaim = focus.claim(presented: true, active: true, nativeInputOwned: false)
+        #expect(!subsequentClaim)
     }
 
     @Test func nativeInputOwnerResolvesInitialFocusWithoutStealingIt() {
         var focus = ReviewInitialFocus()
-        #expect(!focus.claim(presented: true, active: true, nativeInputOwned: true))
+        let nativeOwnerClaim = focus.claim(presented: true, active: true, nativeInputOwned: true)
+        #expect(!nativeOwnerClaim)
         #expect(focus.resolved)
-        #expect(!focus.claim(presented: true, active: true, nativeInputOwned: false))
+        let subsequentClaim = focus.claim(presented: true, active: true, nativeInputOwned: false)
+        #expect(!subsequentClaim)
         #expect(ReviewInputOwnership.admits(cardFocused: true, editing: false, paused: false, repeated: false))
         #expect(!ReviewInputOwnership.admits(cardFocused: true, editing: true, paused: false, repeated: false))
         #expect(!ReviewInputOwnership.admits(cardFocused: true, editing: false, paused: true, repeated: false))
