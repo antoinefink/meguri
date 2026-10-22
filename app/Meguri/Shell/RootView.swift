@@ -14,6 +14,8 @@ struct RootView: View {
     let navigation: AppNavigation
     let features: ShellFeatures
     let uiStateStore: UIStateStore
+    let collection: ReviewCollection?
+    @Environment(\.scenePhase) private var scenePhase
     @State private var launchSheet: Bool
     @State private var launchAlert: Bool
     @State private var linkRefusal: DeepLinkRefusal?
@@ -23,7 +25,8 @@ struct RootView: View {
     @Environment(\.openWindow) private var openWindow
     #endif
 
-    init(configuration: LaunchConfiguration, navigation: AppNavigation, features: ShellFeatures, uiStateStore: UIStateStore) {
+    init(configuration: LaunchConfiguration, navigation: AppNavigation, features: ShellFeatures, uiStateStore: UIStateStore, collection: ReviewCollection? = nil) {
+        self.collection = collection
         self.configuration = configuration
         self.navigation = navigation
         self.features = features
@@ -85,6 +88,11 @@ struct RootView: View {
         }
         .onAppear {
             navigation.adoptLaunchLayout(layout)
+            collection?.setSceneActive(scenePhase == .active)
+            updateReviewObscuration()
+            #if os(macOS)
+            collection?.setApplicationActive(NSApp.isActive && !NSApp.isHidden)
+            #endif
             #if os(macOS)
             AppDelegate.openMainWindow = { [openWindow] in openWindow(id: WindowMetrics.mainWindowID) }
             #endif
@@ -100,7 +108,29 @@ struct RootView: View {
         }
         .frame(minWidth: WindowMetrics.minimum.width, minHeight: WindowMetrics.minimum.height)
         #endif
+        .task { await collection?.start() }
+        .onChange(of: scenePhase) { _, phase in
+            collection?.setSceneActive(phase == .active)
+            if phase == .active { collection?.setForeground(true) }
+            else if phase == .background {
+                #if os(iOS)
+                ReviewBackgroundLease.begin(collection)
+                #else
+                collection?.setForeground(false)
+                #endif
+            }
+        }
+        .onChange(of: navigation.sheet) { _, _ in updateReviewObscuration() }
+        .onChange(of: launchSheet) { _, _ in updateReviewObscuration() }
+        .onChange(of: launchAlert) { _, _ in updateReviewObscuration() }
+        .onChange(of: linkRefusal != nil) { _, _ in updateReviewObscuration() }
+        .onChange(of: navigation.review?.id) { _, _ in collection?.navigationChanged() }
+        .modifier(ReviewLifecycle(collection: collection))
         .modifier(LaunchEnvironment(configuration: configuration))
+    }
+
+    private func updateReviewObscuration() {
+        collection?.setReviewObscured(navigation.sheet != nil || launchSheet || launchAlert || linkRefusal != nil)
     }
 
     /// A launch route's screen, shown in place of the shell.

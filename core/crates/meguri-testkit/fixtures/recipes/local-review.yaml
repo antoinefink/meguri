@@ -1,0 +1,14 @@
+# RF1 real-shell fixture: text-only cards also exercise the explicit refusal
+# boundary while U31's tracked media snapshot has no public FFI attachment.
+recipe: local-review
+description: "Four due text cards for local review, undo and process restart."
+now: "2030-01-15T10:00:00+01:00"
+decks:
+  - name: "Local Review::Cards"
+    new: 0
+    learning: 0
+    due: 4
+    later: 0
+    tags: ["local-review"]
+    fields: ["Question {n}", "Answer {n}"]
+    media: {images: 0, sounds: 0}

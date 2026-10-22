@@ -1,0 +1,146 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "%@ new · %@ learning · %@ due": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ new · %@ learning · %@ due"
+          }
+        }
+      }
+    },
+    "%lld answers recorded": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld answers recorded"
+          }
+        }
+      }
+    },
+    "%llu of %llu cards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%llu of %llu cards"
+          }
+        }
+      }
+    },
+    "Collection is busy…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collection is busy…"
+          }
+        }
+      }
+    },
+    "Couldn’t Open Collection": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t Open Collection"
+          }
+        }
+      }
+    },
+    "Enable FSRS": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable FSRS"
+          }
+        }
+      }
+    },
+    "No Collection": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Collection"
+          }
+        }
+      }
+    },
+    "No Decks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Decks"
+          }
+        }
+      }
+    },
+    "Opening collection…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening collection…"
+          }
+        }
+      }
+    },
+    "Previous Session": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous Session"
+          }
+        }
+      }
+    },
+    "Study Now": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Study Now"
+          }
+        }
+      }
+    },
+    "Study with FSRS": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Study with FSRS"
+          }
+        }
+      }
+    },
+    "There is no collection in Meguri yet. Local collection import is coming next.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "There is no collection in Meguri yet. Local collection import is coming next."
+          }
+        }
+      }
+    },
+    "This collection has no decks to study.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This collection has no decks to study."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

@@ -10,6 +10,14 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Whether an integration is enabled. The integrations controller (U144)
     /// sets it; the test hooks set it from `-MeguriIntegrations`.
+    static var closeCollection: (() async -> Bool)?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let close = Self.closeCollection else { return .terminateNow }
+        Task { sender.reply(toApplicationShouldTerminate: await close()) }
+        return .terminateLater
+    }
+
     static var keepsRunningWithoutWindow = false
     /// Opens the main window; the root view hands over SwiftUI's
     /// `openWindow` action, which outlives the window.

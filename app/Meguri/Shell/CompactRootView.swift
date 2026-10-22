@@ -16,7 +16,7 @@ struct CompactRootView: View {
         // The setter also runs when the selected tab is tapped again: that
         // pops its stack, then scrolls its root to the top (R19).
         TabView(selection: Binding(get: { navigation.compactTab }, set: { navigation.selectTab($0) })) {
-            ForEach(CompactTab.allCases, id: \.self) { tab in
+            ForEach(CompactTab.allCases.filter { features.availableSections.contains($0.section) }, id: \.self) { tab in
                 Tab(value: tab) {
                     stack(tab)
                 } label: {

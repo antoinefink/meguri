@@ -42,9 +42,11 @@ let package = Package(
         .target(
             name: "AppModel",
             dependencies: [
+                "CardRendering",
                 .product(name: "CoreBridge", package: "MeguriCore"),
                 .product(name: "Instrumentation", package: "MeguriCore"),
             ],
+            exclude: ["Review/AGENTS.md"],
             swiftSettings: settings
         ),
         .target(
@@ -71,7 +73,7 @@ let package = Package(
         .target(name: "HeatmapKit", swiftSettings: settings),
         .testTarget(
             name: "AppModelTests",
-            dependencies: ["AppModel", .product(name: "Instrumentation", package: "MeguriCore")],
+            dependencies: ["AppModel", "CardRendering", .product(name: "CoreBridge", package: "MeguriCore"), .product(name: "Instrumentation", package: "MeguriCore")],
             swiftSettings: settings
         ),
         .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"], swiftSettings: settings),
@@ -89,8 +91,9 @@ let package = Package(
     ] + features.map { name in
         .target(
             name: name,
-            dependencies: ["AppModel", "DesignSystem"],
+            dependencies: ["AppModel", "DesignSystem"] + (name == "Review" ? ["CardRendering"] : []) + (["Home", "Review"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []),
             path: "Sources/Features/\(name)",
+            resources: ["Home", "Review"].contains(name) ? [.process("Resources")] : [],
             swiftSettings: settings
         )
     }

@@ -1,5 +1,7 @@
 import AppModel
 import DesignSystem
+import Home
+import Review
 import SwiftUI
 
 /// What the shell hosts in each of its slots (KTD10): section roots, the
@@ -10,6 +12,7 @@ import SwiftUI
 /// Note Types U200, Add U195, the collection's decks U151/U152). Snapshot
 /// fixtures and test-hook routes pass their own.
 struct ShellFeatures {
+    var availableSections: [AppSection] = AppSection.sidebar
     var sectionRoot: (AppSection, AppNavigation) -> AnyView
     var deckPage: (DeckID, AppNavigation) -> AnyView
     /// The rows of the sidebar's "Decks" group, each tagged
@@ -18,6 +21,29 @@ struct ShellFeatures {
     var review: (ReviewPresentation, AppNavigation) -> AnyView
     var sheet: (SheetRoute, AppNavigation) -> AnyView
     var deckExists: (DeckID) async -> Bool
+
+    /// Real features share the app-owned collection; unbound standard remains
+    /// available to isolated shell fixtures that replace every review slot.
+    static func standard(collection: ReviewCollection) -> ShellFeatures {
+        var features = standard
+        features.availableSections = [.home]
+        features.sectionRoot = { _, _ in AnyView(HomeView(collection: collection)) }
+        features.deckPage = { deck, _ in AnyView(HomeView(collection: collection, deckID: deck.rawValue)) }
+        features.sidebarDecks = { _ in AnyView(HomeSidebarDecks(collection: collection)) }
+        features.review = { presentation, _ in
+            if let model = presentation.session as? ReviewCoordinator {
+                AnyView(ReviewView(model: model, visibilityChanged: collection.setReviewVisible) { Task { await collection.finishReview() } })
+            } else { AnyView(EmptyView()) }
+        }
+        features.sheet = { route, navigation in
+            switch route {
+            case .fsrsAdmission: AnyView(FsrsAdmissionView(collection: collection))
+            case .add: AnyView(SheetPlaceholder(sheet: route, navigation: navigation))
+            }
+        }
+        features.deckExists = { collection.deck($0.rawValue) != nil }
+        return features
+    }
 
     static var standard: ShellFeatures {
         ShellFeatures(

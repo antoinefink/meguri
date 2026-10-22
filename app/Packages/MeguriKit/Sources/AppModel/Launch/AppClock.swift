@@ -6,21 +6,25 @@ import SwiftUI
 /// stop the clock at a fixed instant (R1963).
 nonisolated public struct AppClock: Sendable {
     private let source: @Sendable () -> Date
+    public let isFixed: Bool
 
     public init(_ source: @escaping @Sendable () -> Date) {
         self.source = source
+        isFixed = false
     }
 
     public func now() -> Date {
         source()
     }
 
+    private init(instant: Date) { source = { instant }; isFixed = true }
+
     /// The wall clock.
     public static let system = AppClock { Date() }
 
     /// A clock that stays at `instant`.
     public static func fixed(_ instant: Date) -> AppClock {
-        AppClock { instant }
+        AppClock(instant: instant)
     }
 }
 

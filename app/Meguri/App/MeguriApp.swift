@@ -19,6 +19,7 @@ struct MeguriApp: App {
     #endif
     private let configuration: LaunchConfiguration
     private let features: ShellFeatures
+    private let collection: ReviewCollection?
     private let uiStateStore: UIStateStore
     /// Above the layout switch, for the app's whole run (KTD10).
     @State private var navigation: AppNavigation
@@ -51,6 +52,20 @@ struct MeguriApp: App {
         #if MEGURI_TEST_HOOKS
         hooks.start(navigation)
         #endif
+        var startsProduction = configuration.initialPresentation == nil && ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
+        #if MEGURI_TEST_HOOKS
+        startsProduction = startsProduction && hooks.shell == nil && hooks.error == nil && hooks.options.route == nil
+        #endif
+        let collection = startsProduction ? ReviewCollection(configuration: configuration, navigation: navigation) : nil
+        if let collection {
+            features = .standard(collection: collection)
+            // Preserve navigation/window restoration while unavailable areas stay absent.
+            navigation.show(.home)
+            #if os(macOS)
+            AppDelegate.closeCollection = { await collection.close() }
+            #endif
+        }
+        self.collection = collection
         self.configuration = configuration
         self.features = features
         self.uiStateStore = uiStateStore
@@ -81,10 +96,10 @@ struct MeguriApp: App {
     @ViewBuilder private var root: some View {
         #if MEGURI_TEST_HOOKS
         TestHooks.Root(session: hooks, navigation: navigation) {
-            RootView(configuration: configuration, navigation: navigation, features: features, uiStateStore: uiStateStore)
+            RootView(configuration: configuration, navigation: navigation, features: features, uiStateStore: uiStateStore, collection: collection)
         }
         #else
-        RootView(configuration: configuration, navigation: navigation, features: features, uiStateStore: uiStateStore)
+        RootView(configuration: configuration, navigation: navigation, features: features, uiStateStore: uiStateStore, collection: collection)
         #endif
     }
 }

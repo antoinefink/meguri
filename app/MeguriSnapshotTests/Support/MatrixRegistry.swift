@@ -1,5 +1,7 @@
 #if MEGURI_TEST_HOOKS
 import DesignSystem
+import Home
+import Review
 import SwiftUI
 import Testing
 
@@ -55,6 +57,10 @@ struct SnapshotCase: Sendable, CustomTestStringConvertible {
 @MainActor
 enum MatrixRegistry {
     static let screens: [ScreenRegistration] = [
+        ScreenRegistration(type: HomeDeckListPreview.self) { _, _ in .keyVariants },
+        ScreenRegistration(type: ReviewQuestionPreview.self) { _, _ in .keyVariants },
+        ScreenRegistration(type: ReviewAnswerPreview.self) { _, _ in .keyVariants },
+        ScreenRegistration(type: ReviewFinishedPreview.self) { _, _ in .keyVariants },
         // The sample screen shows the pairwise set and its settings groups
         // with its overflow state on the iPhone; key variants elsewhere keep
         // its baselines small.

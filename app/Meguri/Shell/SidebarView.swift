@@ -14,7 +14,7 @@ struct SidebarView: View {
             if let item { navigation.select(item) }
         })) {
             Section {
-                ForEach(AppSection.sidebar, id: \.self) { section in
+                ForEach(features.availableSections, id: \.self) { section in
                     Label {
                         // Rows grow with the text size rather than cut it.
                         Text(section.title)
