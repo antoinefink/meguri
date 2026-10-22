@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ProcessPoolExecutor
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -80,6 +81,42 @@ def check_item(task: tuple[str, dict]) -> list[dict]:
     return errors
 
 
+def check_reference_resolution(tasks: list[tuple[str, dict]]) -> list[dict]:
+    """D9.4 resolution uses paths, exact relative ids and D9.1's two globs."""
+    ids = set()
+    for rel, _ in tasks:
+        if schema_for(rel) == "scenario":
+            for suffix in (".yaml", ".yml", ".json"):
+                if rel.endswith(suffix):
+                    ids.add(rel[len("scenarios/"):-len(suffix)])
+                    break
+    errors = []
+    for rel, item in tasks:
+        if schema_for(rel) != "area" or "error" in item:
+            continue
+        area = item.get("value")
+        # Shape errors are already reported by the strict area schema.
+        if not isinstance(area, dict) or not isinstance(area.get("reference", {}), dict):
+            continue
+        prefix = rel[len("scenarios/"):].rsplit("/", 1)[0]
+        active = area.get("active", [])
+        active = active if isinstance(active, list) else []
+        for name in area.get("reference", {}):
+            full = prefix + "/" + name
+            message = None
+            if name.endswith((".yaml", ".yml", ".json")):
+                message = f"reference {name!r} must have no suffix"
+            elif full not in ids:
+                message = f"reference {name!r} names no scenario"
+            elif any(isinstance(pattern, str) and re.fullmatch(
+                    re.escape(pattern).replace(r"\*", ".*").replace(r"\?", "."), name)
+                    for pattern in active):
+                message = f"reference {name!r} also matches active"
+            if message:
+                errors.append({"file": rel, "message": message})
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--cli", required=True)
@@ -122,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
                                      initializer=init_validators, initargs=(schemas,)) as workers:
                 for item_errors in workers.map(check_item, tasks):
                     errors.extend(item_errors)
+        errors.extend(check_reference_resolution(tasks))
     for e in errors:
         print(f"schema: {e['file']}: {e['message']}", file=sys.stderr)
     print(f"schema: {len(files)} files, {len(errors)} errors", file=sys.stderr)

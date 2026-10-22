@@ -472,8 +472,11 @@ impl MeguriExecutor {
                     .get(name)
                     .ok_or_else(|| ExecError::new("unsupported_op", format!("no adapter for op {name}")))?;
                 let result = (adapter.run)(session, other);
-                if (result.is_err()
-                    || matches!(&result, Ok(OpResult::Rejected("changed_externally")))
+                // A failed undo/redo leaves its held presentation intact;
+                // successful scheduling restores invalidate in undo::restore.
+                let failed = !matches!(other, Step::Undo(_) | Step::Redo(_))
+                    && (result.is_err() || matches!(&result, Ok(OpResult::Rejected("changed_externally"))));
+                if (failed
                     || matches!(other, Step::Reopen(_))
                     || matches!(other,Step::DbExec(args) if !args.sql.trim_start().to_ascii_lowercase().starts_with("select")))
                     && let Some(held) = session.held_queue.take()
@@ -781,5 +784,101 @@ mod host_tests {
         assert_eq!(collection.peek_undo(UndoScope::Global).unwrap(), undo);
         assert!(session.storage.take_changes().is_empty());
         assert_eq!(session.storage.backup_calls(), 0);
+    }
+
+    #[test]
+    fn unavailable_and_failed_restores_preserve_held_owners_and_cached_day() {
+        use meguri_engine::executor::op::OpSpec;
+        use meguri_engine::undo::{entry::StepKind, names};
+        use meguri_model::{changes::OpSource, clock::UtcOffset};
+        use meguri_storage::ConfigValue;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("restore.yaml");
+        std::fs::write(
+            &path,
+            "id: undo/restore\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsteps: [{undo: {}}, {redo: {}}]\n",
+        )
+        .unwrap();
+        let loaded = crate::scenario::load(&path).unwrap();
+        let executor = MeguriExecutor::new();
+        let mut session = executor.session(&loaded, None).unwrap();
+        executor.new_collection(&mut session).unwrap();
+        let collection = session.engine_collection().unwrap();
+        session.held_queue = Some(meguri_engine::session::held::HeldQueue::build(&collection, None).unwrap());
+        super::super::sched::day_query_now(&mut session).unwrap();
+        let day = session.day.valid_at(session.clock.now_secs(), UtcOffset::UTC);
+        assert!(day.is_some());
+        let owner = Arc::downgrade(&session.held_queue.as_ref().unwrap().cache());
+        for (step, error) in loaded.scenario.steps.iter().zip(["nothing_to_undo", "nothing_to_redo"]) {
+            assert_eq!(
+                executor.step(&mut session, step).unwrap(),
+                json!({(step.name()): {"error": error}})
+            );
+            assert!(session.held_queue.is_some() && owner.upgrade().is_some());
+            assert_eq!(session.day.valid_at(session.clock.now_secs(), UtcOffset::UTC), day);
+        }
+        // The named step is still visible to peek, but its saved row no longer
+        // matches. This exercises the failed restore after a successful peek.
+        collection
+            .run(
+                OpSpec::named("record", OpSource::UserUndoable).undo_step(names::SUSPEND, StepKind::Other),
+                |ctx| {
+                    ctx.scope().set_config("restore-test", &ConfigValue::Integer(1))?;
+                    Ok(())
+                },
+            )
+            .unwrap();
+        collection
+            .run(
+                OpSpec::named("outside-history", OpSource::UserNonUndoable).skip_undo(),
+                |ctx| {
+                    ctx.scope().set_config("restore-test", &ConfigValue::Integer(2))?;
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            collection.peek_undo(UndoScope::Global).unwrap().name(),
+            Some(names::SUSPEND)
+        );
+        assert_eq!(
+            executor.step(&mut session, &loaded.scenario.steps[0]).unwrap(),
+            json!({"undo": {"error": "changed_externally"}})
+        );
+        assert!(session.held_queue.is_some() && owner.upgrade().is_some());
+        assert_eq!(session.day.valid_at(session.clock.now_secs(), UtcOffset::UTC), day);
+    }
+
+    #[test]
+    fn flags_tags_and_same_card_count_edits_keep_held_owners_through_undo_and_redo() {
+        use meguri_model::clock::UtcOffset;
+        for op in [
+            "set_flag: {cards: ['#c1'], flag: 2}",
+            "add_note_tags: {notes: ['#n1'], tags: example}",
+            "edit_note: {note: '#n1', fields: [changed, back]}",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("other.yaml");
+            std::fs::write(&path, format!("id: undo/other\nclock: {{tz: UTC, start: '2030-01-15T10:00:00'}}\nsetup:\n  notes: [{{notetype: Basic, fields: [front, back]}}]\nsteps:\n  - observe: [queue]\n  - {op}\n  - undo: {{}}\n  - redo: {{}}\n")).unwrap();
+            let loaded = crate::scenario::load(&path).unwrap();
+            let executor = MeguriExecutor::new();
+            let mut session = executor.session(&loaded, None).unwrap();
+            executor.new_collection(&mut session).unwrap();
+            executor.run_setup(&mut session).unwrap();
+            executor.step(&mut session, &loaded.scenario.steps[0]).unwrap();
+            super::super::sched::day_query_now(&mut session).unwrap();
+            let day = session.day.valid_at(session.clock.now_secs(), UtcOffset::UTC);
+            assert!(day.is_some());
+            let owner = Arc::downgrade(&session.held_queue.as_ref().unwrap().cache());
+            for step in &loaded.scenario.steps[1..] {
+                executor.step(&mut session, step).unwrap();
+                assert!(
+                    session.held_queue.is_some() && owner.upgrade().is_some(),
+                    "{op}: {}",
+                    step.name()
+                );
+                assert_eq!(session.day.valid_at(session.clock.now_secs(), UtcOffset::UTC), day);
+            }
+        }
     }
 }

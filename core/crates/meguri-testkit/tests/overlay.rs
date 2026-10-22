@@ -759,3 +759,45 @@ fn apple_overlay_belongs_to_the_fp_libm_boundary_entry_only() {
         assert!(error.contains("apple_overlay"), "{error}");
     }
 }
+
+#[test]
+fn references_still_require_fresh_valid_overlays_in_the_native_lane() {
+    let dir = tree();
+    let root = dir.path();
+    copy(root, SMOKE);
+    write(
+        root,
+        "scenarios/smoke/area.yaml",
+        "area: smoke\nreference:\n  fsrs-new-card:\n    reason: Scope example.\n    spec: conformance/dsl#D9.4\n",
+    );
+    write_overlay(root, SMOKE, good_flip());
+    // Different observations would fail if Meguri were called.
+    let executor = Canned(json!({"steps": []}));
+    let native = suite(root, Platform::MacOs).run(&[], &executor, "native");
+    assert_eq!(native.outcomes[0].status, Status::Reference, "{}", native.render_text());
+    assert_eq!(native.totals()["pass"], 0);
+    let path = root.join(format!("goldens-apple/{SMOKE}.json"));
+    let mut overlay = read_json(&path);
+    overlay["scenario_sha256"] = json!("0".repeat(64));
+    write(root, &format!("goldens-apple/{SMOKE}.json"), &overlay.to_string());
+    assert_eq!(
+        suite(root, Platform::MacOs).run(&[], &executor, "native").outcomes[0].status,
+        Status::Stale
+    );
+    assert!(
+        !suite(root, Platform::Linux)
+            .goldens_check(&GoldensCheck::default())
+            .unwrap()
+            .ok()
+    );
+    write(root, &format!("goldens-apple/{SMOKE}.json"), "{}");
+    let native = suite(root, Platform::MacOs).run(&[], &executor, "native");
+    assert_eq!(native.outcomes[0].status, Status::Invalid);
+    assert!(native.outcomes[0].reference.is_some());
+    assert!(
+        !suite(root, Platform::Linux)
+            .goldens_check(&GoldensCheck::default())
+            .unwrap()
+            .ok()
+    );
+}

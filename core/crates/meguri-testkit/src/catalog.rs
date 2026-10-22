@@ -10,7 +10,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::exec::Executor;
-use crate::suite::{OraclePin, Outcome, Status, Suite};
+use crate::suite::{OraclePin, Outcome, Reference, Status, Suite};
 
 #[derive(Debug, Clone)]
 pub struct CatalogError(String);
@@ -250,8 +250,17 @@ impl LiveReport {
     fn status(&self, id: &str, t0: &Outcome) -> Status {
         match self.scenarios.get(id) {
             Some((t1, Some(sha)))
+                if t0.status == Status::Reference && t0.scenario_sha256.as_deref() == Some(sha.as_str()) =>
+            {
+                match t1 {
+                    Status::Pass | Status::Pending | Status::Live | Status::Reference => Status::Reference,
+                    _ => *t1,
+                }
+            }
+            Some((t1, Some(sha)))
                 if t0.live
                     && matches!(t0.status, Status::Live | Status::Pending)
+                    && *t1 != Status::Reference
                     && t0.scenario_sha256.as_deref() == Some(sha.as_str()) =>
             {
                 *t1
@@ -277,6 +286,7 @@ pub struct RowReport {
     pub classification: String,
     pub status: String,
     pub scenario_statuses: BTreeMap<String, String>,
+    pub references: BTreeMap<String, Reference>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -296,7 +306,7 @@ pub struct HarvestReport {
 }
 
 /// Worst first: a row's status is the first of these among its scenarios.
-const SEVERITY: [Status; 8] = [
+const SEVERITY: [Status; 9] = [
     Status::Invalid,
     Status::Error,
     Status::Fail,
@@ -304,6 +314,7 @@ const SEVERITY: [Status; 8] = [
     Status::Missing,
     Status::Pending,
     Status::Live,
+    Status::Reference,
     Status::Pass,
 ];
 
@@ -368,6 +379,11 @@ pub fn harvest_report(catalog: &Catalog, suite: &Suite, executor: &dyn Executor,
         let summary = report.by_classification.entry(row.classification.clone()).or_default();
         summary.rows += 1;
         *summary.statuses.entry(status.clone()).or_default() += 1;
+        let references = row
+            .scenarios
+            .iter()
+            .filter_map(|id| suite.reference(id).cloned().map(|reference| (id.clone(), reference)))
+            .collect();
         report.rows.push(RowReport {
             harvest_id: row.harvest_id.clone(),
             language: row.language.clone(),
@@ -376,13 +392,23 @@ pub fn harvest_report(catalog: &Catalog, suite: &Suite, executor: &dyn Executor,
             classification: row.classification.clone(),
             status,
             scenario_statuses,
+            references,
         });
     }
     report
 }
 
-const ROW_STATUSES: [&str; 9] = [
-    "pass", "fail", "error", "pending", "stale", "missing", "invalid", "live", "unlinked",
+const ROW_STATUSES: [&str; 10] = [
+    "pass",
+    "fail",
+    "error",
+    "pending",
+    "stale",
+    "missing",
+    "invalid",
+    "live",
+    "reference",
+    "unlinked",
 ];
 
 impl HarvestReport {
@@ -405,6 +431,7 @@ impl HarvestReport {
                 "classification": r.classification,
                 "status": r.status,
                 "scenario_statuses": r.scenario_statuses,
+                "reference": r.references,
             })).collect::<Vec<_>>(),
         })
     }
@@ -461,7 +488,10 @@ impl HarvestReport {
             let scenarios: Vec<String> = r
                 .scenario_statuses
                 .iter()
-                .map(|(id, s)| format!("{id} ({s})"))
+                .map(|(id, s)| match r.references.get(id) {
+                    Some(reference) => format!("{id} ({s}; {}: {})", reference.spec, reference.reason),
+                    None => format!("{id} ({s})"),
+                })
                 .collect();
             md.push_str(&format!(
                 "| {} | {} | {} | {} | {} | {} | {} |\n",

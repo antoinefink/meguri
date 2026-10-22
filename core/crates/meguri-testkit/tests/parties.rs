@@ -547,3 +547,37 @@ fn a_meguri_actor_scenario_is_pending_in_t1_while_meguri_cannot_play_actors() {
     assert_eq!(outcome.status, Status::Fail);
     assert!(outcome.message.contains("no longer reproduces"), "{}", outcome.message);
 }
+
+#[test]
+fn a_reference_replays_on_the_worker_without_running_any_meguri_actor() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    take_seen();
+    let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+    write(
+        dir.path(),
+        "scenarios/sync/area.yaml",
+        "area: sync\nreference:\n  mixed:\n    reason: Scope example.\n    spec: conformance/dsl#D9.4\n",
+    );
+    let log = dir.path().join("requests.jsonl");
+    let suite = Suite::open(dir.path()).unwrap();
+    let meguri = meguri_actor(sync, dump);
+    let report = t1(&suite, &oracle(&log, &[]), &meguri, None);
+    assert_eq!(only(&report).status, Status::Reference, "{}", report.render_text());
+    assert_eq!(report.totals()["pass"], 0);
+    assert_eq!(report.totals()["reference"], 1);
+    assert!(take_seen().is_empty(), "Meguri must never run reference actors");
+    let all = requests(&log);
+    let begins: Vec<_> = all.iter().filter(|r| r["cmd"] == "begin").collect();
+    assert_eq!(begins.len(), 1);
+    assert!(begins[0].get("caller_actors").is_none());
+    let report = t1(
+        &suite,
+        &oracle(&log, &["FAIL_BEGIN=server_start".to_owned()]),
+        &meguri,
+        None,
+    );
+    assert_eq!(only(&report).status, Status::Error);
+    assert_eq!(report.failures().len(), 1);
+    assert_eq!(report.totals()["reference"], 0);
+    assert!(only(&report).reference.is_some());
+}

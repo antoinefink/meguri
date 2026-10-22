@@ -8,7 +8,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::diff::{self, CompareOptions, Difference, pointer};
@@ -111,6 +111,16 @@ struct Area {
     area: String,
     #[serde(default)]
     active: Vec<String>,
+    #[serde(default)]
+    reference: BTreeMap<String, Reference>,
+}
+
+/// An out-of-band reference declaration (D9.4), retained even on failures.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Reference {
+    pub reason: String,
+    pub spec: String,
 }
 
 /// A golden file (D11).
@@ -160,6 +170,7 @@ pub enum Status {
     Invalid,
     Missing,
     Stale,
+    Reference,
     Pending,
     Live,
     Error,
@@ -168,10 +179,11 @@ pub enum Status {
 }
 
 impl Status {
-    pub const ALL: [Status; 8] = [
+    pub const ALL: [Status; 9] = [
         Status::Invalid,
         Status::Missing,
         Status::Stale,
+        Status::Reference,
         Status::Pending,
         Status::Live,
         Status::Error,
@@ -185,6 +197,7 @@ impl Status {
             Status::Live => "live",
             Status::Missing => "missing",
             Status::Stale => "stale",
+            Status::Reference => "reference",
             Status::Pending => "pending",
             Status::Error => "error",
             Status::Fail => "fail",
@@ -212,6 +225,7 @@ pub struct Outcome {
     pub path: PathBuf,
     pub area: String,
     pub active: bool,
+    pub reference: Option<Reference>,
     /// It has handoff steps (D9).
     pub live: bool,
     /// The hash of the scenario text this outcome is for (D3); `None` when
@@ -236,6 +250,7 @@ impl Outcome {
             path: file.path.clone(),
             area: file.area.clone(),
             active,
+            reference: None,
             live: false,
             scenario_sha256: None,
             status: Status::Pass,
@@ -258,7 +273,8 @@ impl Outcome {
     /// T0: invalid always fails; an active scenario fails unless it passes or
     /// (live scenarios, which only T1 runs) is `live`.
     pub fn fails_t0(&self) -> bool {
-        self.status == Status::Invalid || (self.active && !matches!(self.status, Status::Pass | Status::Live))
+        self.status == Status::Invalid
+            || (self.active && !matches!(self.status, Status::Pass | Status::Live | Status::Reference))
     }
 
     /// T1: anything but a pass or a pending live scenario fails, active or
@@ -266,7 +282,7 @@ impl Outcome {
     /// pending fails when active.
     pub fn fails_t1(&self) -> bool {
         match self.status {
-            Status::Pass => false,
+            Status::Pass | Status::Reference => false,
             Status::Pending => self.active,
             _ => true,
         }
@@ -291,6 +307,9 @@ impl Outcome {
             (Status::Pass, _) => format!("{}: pass{active}\n", self.scenario),
             (status, _) => format!("{}: {}{active}: {}\n", self.scenario, status.as_str(), self.message),
         };
+        if let Some(reference) = &self.reference {
+            text.push_str(&format!("  reference: {} ({})\n", reference.reason, reference.spec));
+        }
         for d in self.differences.iter().take(SHOWN_DIFFERENCES) {
             text.push_str(&format!(
                 "  {}: expected {}, actual {}\n",
@@ -506,6 +525,22 @@ impl Suite {
             .map(|w| w[0].rel.clone())
             .collect::<BTreeSet<_>>();
 
+        for (rel, area) in areas.values() {
+            for id in area.reference.keys() {
+                let full = format!("{}/{id}", area.area);
+                if !files.iter().any(|file| file.rel == full) {
+                    return Err(suite_error(format!(
+                        "scenarios/{rel}: reference {id:?} names no scenario"
+                    )));
+                }
+                if area.active.iter().any(|pattern| pointer::glob(pattern, id)) {
+                    return Err(suite_error(format!(
+                        "scenarios/{rel}: reference {id:?} also matches active"
+                    )));
+                }
+            }
+        }
+
         let goldens_dir = root.join("goldens");
         let goldens = walk(&goldens_dir)?
             .iter()
@@ -672,6 +707,26 @@ impl Suite {
             .is_some_and(|a| a.active.iter().any(|p| pointer::glob(&format!("{area}/{p}"), rel)))
     }
 
+    fn outcome(&self, file: &ScenarioFile) -> Outcome {
+        let mut outcome = Outcome::new(file, self.is_active(&file.rel));
+        outcome.reference = self.reference(&file.rel).cloned();
+        outcome
+    }
+
+    /// Declaration at a file path, also used by CLI exec/diff (D9.4).
+    pub fn reference_at_path(&self, path: &Path) -> Option<&Reference> {
+        let path = path.canonicalize().ok()?;
+        let rel = relative(self.canonical_scenarios.as_deref()?, &path);
+        let index = *self.by_relative_path.get(&rel)?;
+        self.reference(&self.files[index].rel)
+    }
+
+    /// Exact declaration resolution, relative to the area's directory (D9.4).
+    pub fn reference(&self, rel: &str) -> Option<&Reference> {
+        let (area, id) = rel.split_once('/')?;
+        self.areas.get(area)?.reference.get(id)
+    }
+
     fn golden_path(&self, rel: &str) -> PathBuf {
         self.root.join("goldens").join(format!("{rel}.json"))
     }
@@ -679,8 +734,7 @@ impl Suite {
     /// The scenario's file, metadata and golden checks, before any run; the
     /// outcome so far (active, live, hash) for the run to finish.
     fn prepare(&self, file: &ScenarioFile) -> Result<(LoadedScenario, Golden, Outcome), Box<Outcome>> {
-        let active = self.is_active(&file.rel);
-        let outcome = Outcome::new(file, active);
+        let outcome = self.outcome(file);
         if self.duplicates.contains(&file.rel) {
             return Err(Box::new(outcome.with(
                 Status::Invalid,
@@ -785,7 +839,7 @@ impl Suite {
 
     /// The T0 status of one scenario with Meguri's executor (D10).
     pub fn check(&self, file: &ScenarioFile, meguri: &dyn Executor) -> Outcome {
-        guarded(file, self.is_active(&file.rel), || self.check_t0(file, meguri))
+        guarded(self.outcome(file), || self.check_t0(file, meguri))
     }
 
     fn check_t0(&self, file: &ScenarioFile, meguri: &dyn Executor) -> Outcome {
@@ -793,6 +847,15 @@ impl Suite {
             Ok(prepared) => prepared,
             Err(outcome) => return *outcome,
         };
+        // A reference still validates overlays before receiving its status.
+        if outcome.reference.is_some() {
+            if self.platform == Platform::MacOs
+                && let Err(outcome) = self.overlay_for(&file.rel, &loaded, &golden, &outcome)
+            {
+                return *outcome;
+            }
+            return outcome.with(Status::Reference, "validated oracle reference");
+        }
         let scenario = &loaded.scenario;
         let needs = if scenario.has_actors() {
             scenario.needs_of_meguri_actors()
@@ -836,7 +899,7 @@ impl Suite {
     /// golden (no deviations: they describe Meguri), and a live scenario then
     /// runs as a chain with Meguri, compared with the same golden.
     pub fn check_live(&self, file: &ScenarioFile, live: &LiveRun<'_>) -> Outcome {
-        let mut outcome = guarded(file, self.is_active(&file.rel), || self.check_t1(file, live));
+        let mut outcome = guarded(self.outcome(file), || self.check_t1(file, live));
         outcome.repro = match outcome.status {
             Status::Missing | Status::Stale => outcome.repro,
             _ => format!("tools/mg conformance --live {}", file.rel),
@@ -849,6 +912,12 @@ impl Suite {
             Ok(prepared) => prepared,
             Err(outcome) => return *outcome,
         };
+        if outcome.reference.is_some()
+            && self.platform == Platform::MacOs
+            && let Err(outcome) = self.overlay_for(&file.rel, &loaded, &golden, &outcome)
+        {
+            return *outcome;
+        }
         if loaded.scenario.has_actors() {
             return self.check_t1_actors(outcome, &loaded, &golden, live);
         }
@@ -864,7 +933,13 @@ impl Suite {
             ),
             Err(e) => return outcome.with(Status::Error, format!("oracle: {e}")),
         };
-        if drift.status != Status::Pass || !outcome.live {
+        if drift.status != Status::Pass {
+            return drift;
+        }
+        if outcome.reference.is_some() {
+            return drift.with(Status::Reference, "oracle replay matches the reference golden");
+        }
+        if !outcome.live {
             return drift;
         }
         let missing = live.meguri.missing(&loaded.scenario.needs_on(Side::Meguri));
@@ -919,7 +994,13 @@ impl Suite {
             Err(e) => return outcome.with(Status::Error, format!("oracle replay: {e}")),
         };
         let scenario = &loaded.scenario;
-        if replay.status != Status::Pass || !scenario.actors().iter().any(ActorName::is_meguri) {
+        if replay.status != Status::Pass {
+            return replay;
+        }
+        if outcome.reference.is_some() {
+            return replay.with(Status::Reference, "oracle replay matches the reference golden");
+        }
+        if !scenario.actors().iter().any(ActorName::is_meguri) {
             return replay;
         }
         let missing = live.meguri.missing(&scenario.needs_of_meguri_actors());
@@ -1005,7 +1086,7 @@ impl Suite {
             .zip(&files)
             .map(|(slot, file)| {
                 slot.unwrap_or_else(|| {
-                    Outcome::new(file, self.is_active(&file.rel))
+                    self.outcome(file)
                         .with(Status::Error, "the runner lost this scenario's result")
                 })
             })
@@ -1262,14 +1343,14 @@ impl Suite {
 
 /// Runs a check; a panic in an executor or adapter becomes this scenario's
 /// `error` instead of unwinding the runner thread with every result it held.
-fn guarded(file: &ScenarioFile, active: bool, check: impl FnOnce() -> Outcome) -> Outcome {
+fn guarded(outcome: Outcome, check: impl FnOnce() -> Outcome) -> Outcome {
     catch_unwind(AssertUnwindSafe(check)).unwrap_or_else(|panic| {
         let message = panic
             .downcast_ref::<&str>()
             .map(|s| (*s).to_owned())
             .or_else(|| panic.downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "a panic without a message".to_owned());
-        Outcome::new(file, active).with(Status::Error, format!("panicked: {message}"))
+        outcome.with(Status::Error, format!("panicked: {message}"))
     })
 }
 
@@ -1300,6 +1381,42 @@ fn selects(filter: &str, file: &ScenarioFile) -> bool {
 fn read_area(path: &Path, rel: &str) -> Result<Area, SuiteError> {
     let text = std::fs::read_to_string(path).map_err(|e| suite_error(format!("reading {rel}: {e}")))?;
     let value = scenario::parse_yaml(&text).map_err(|e| suite_error(format!("scenarios/{rel}: {e}")))?;
+    let bad = |why: &str| suite_error(format!("scenarios/{rel}: {why}"));
+    if !value.is_object() {
+        return Err(bad("area metadata must be an object"));
+    }
+    if let Some(reference) = value.get("reference") {
+        let entries = reference
+            .as_object()
+            .ok_or_else(|| bad("reference must be an object"))?;
+        let id = regex::Regex::new(r"^[a-z0-9._-]+(/[a-z0-9._-]+)*$").expect("fixed reference id pattern");
+        let spec =
+            regex::Regex::new(r"^[a-z0-9._-]+/[a-z0-9._-]+#[A-Z]+[0-9]+(\.[0-9]+)*$").expect("fixed spec pattern");
+        for (name, entry) in entries {
+            if !id.is_match(name) || scenario::SUFFIXES.iter().any(|suffix| name.ends_with(*suffix)) {
+                return Err(bad(
+                    "reference keys must be exact relative ids without suffixes or patterns",
+                ));
+            }
+            let entry = entry
+                .as_object()
+                .ok_or_else(|| bad("reference declaration must be an object"))?;
+            let reason = entry
+                .get("reason")
+                .and_then(Value::as_str)
+                .ok_or_else(|| bad("reference needs a string reason"))?;
+            if reason.trim().is_empty() || reason.contains(['\r', '\n']) {
+                return Err(bad("reference reason must be a nonempty single line"));
+            }
+            if !entry
+                .get("spec")
+                .and_then(Value::as_str)
+                .is_some_and(|s| spec.is_match(s))
+            {
+                return Err(bad("reference spec must name a neutral spec id and section"));
+            }
+        }
+    }
     let area: Area = serde_json::from_value(value).map_err(|e| suite_error(format!("scenarios/{rel}: {e}")))?;
     let dir = rel.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
     if dir != area.area {

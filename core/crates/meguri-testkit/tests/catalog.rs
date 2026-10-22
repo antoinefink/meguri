@@ -280,3 +280,44 @@ fn the_committed_catalog_is_valid() {
     let report = catalog::harvest_report(&catalog, &suite, &MeguriExecutor::new(), &no_live());
     assert!(report.problems.is_empty(), "{:?}", report.problems);
 }
+
+#[test]
+fn reference_status_survives_prior_pass_report() {
+    let dir = tree();
+    let root = dir.path();
+    write(
+        root,
+        "scenarios/preservation/area.yaml",
+        "area: preservation\nreference:\n  filtered-deck-sync:\n    reason: Scope example.\n    spec: conformance/dsl#D9.4\n",
+    );
+    let suite = Suite::open(root).unwrap();
+    let catalog = Catalog::parse(&format!(
+        "{HEADER}h0123456789ab,python,tag,sched,preservation-only,Independent product proof required,{ID},done\n"
+    ))
+    .unwrap();
+    let sha = sha_of(root);
+    for (status, expected) in [
+        ("pass", "reference"),
+        ("pending", "reference"),
+        ("reference", "reference"),
+        ("error", "error"),
+        ("fail", "fail"),
+    ] {
+        let live = LiveReport::parse(&t1_report(LOCK, &[(ID, status, &sha)]), &suite.pin).unwrap();
+        let report = catalog::harvest_report(&catalog, &suite, &MeguriExecutor::new(), &live);
+        assert_eq!(report.rows[0].status, expected);
+        assert_eq!(report.rows[0].classification, "preservation-only");
+        assert_eq!(report.rows[0].scenario_statuses[ID], expected);
+        assert!(
+            !report.by_classification["preservation-only"]
+                .statuses
+                .contains_key("pass")
+        );
+        assert_eq!(
+            report.to_json()["rows"][0]["reference"][ID],
+            json!({
+                "reason": "Scope example.", "spec": "conformance/dsl#D9.4"
+            })
+        );
+    }
+}

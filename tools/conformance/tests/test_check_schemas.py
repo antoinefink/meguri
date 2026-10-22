@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The parallel validator must retain every serial diagnostic in file order."""
 import json
+import importlib.util
 from pathlib import Path
 import subprocess
 import sys
@@ -50,6 +51,31 @@ class SchemaChecks(unittest.TestCase):
             self.assertIn('invalid fixture', reports[0]['errors'][0]['message'])
             self.assertIn('integer', reports[0]['errors'][1]['message'])
             self.assertIn('required', reports[0]['errors'][2]['message'])
+
+    def test_reference_declarations_are_strict_and_resolve_before_execution(self):
+        spec = importlib.util.spec_from_file_location("schema_checks", SCRIPT)
+        checks = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checks)
+        schema = json.loads((SCRIPT.parents[2] / "conformance/schema/area.schema.json").read_text())
+        validate = checks.Draft202012Validator(schema)
+        declaration = {"reason": "Scope example.", "spec": "conformance/dsl#D9.4"}
+        metadata = {"area": "example", "reference": {"nested/case": declaration}}
+        self.assertEqual(list(validate.iter_errors(metadata)), [])
+        files = [("scenarios/example/nested/case.yaml", {"value": {}}),
+                 ("scenarios/example/ordinary.json", {"value": {}})]
+        def resolve(area):
+            return checks.check_reference_resolution(files + [("scenarios/example/area.yml", {"value": area})])
+        self.assertEqual(resolve(metadata), [])
+        self.assertIn("names no scenario", resolve({"reference": {"unknown": declaration}})[0]["message"])
+        self.assertIn("also matches active", resolve(dict(metadata, active=["nested/*"]))[0]["message"])
+        self.assertIn("also matches active", resolve(dict(metadata, active=["nested/ca?e"]))[0]["message"])
+        self.assertEqual(resolve(dict(metadata, active=["ordinary", "nested/[case]"])), [])
+        for reference in [None, [], {"nested/*": declaration}, {"nested/case": {}},
+                          {"nested/case": dict(declaration, extra=True)},
+                          {"nested/case": dict(declaration, reason=" ")},
+                          {"nested/case": dict(declaration, reason="two\nlines")},
+                          {"nested/case": dict(declaration, spec="R704")}]:
+            self.assertTrue(list(validate.iter_errors(dict(metadata, reference=reference))), reference)
 
     def test_worker_count_must_be_positive(self):
         out = subprocess.run([sys.executable, '-B', '-I', str(SCRIPT), '--cli', 'unused',

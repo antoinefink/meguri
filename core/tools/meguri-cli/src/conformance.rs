@@ -240,6 +240,12 @@ fn single_scenario(options: &Options) -> Result<PathBuf, String> {
 
 fn exec(options: &Options) -> Result<i32, String> {
     let path = single_scenario(options)?;
+    let suite = open_suite(options)?;
+    if suite.reference_at_path(&path).is_some() && !options.live {
+        let outcome = suite.check_path(&path, &MeguriExecutor::fixture_harness());
+        eprint!("{}", outcome.render_text());
+        return Ok(i32::from(outcome.status != Status::Reference));
+    }
     let loaded = scenario::load(&path).map_err(|e| e.to_string())?;
     if loaded.scenario.has_actors() && !options.live {
         eprintln!("{}: {}", loaded.scenario.id, ACTOR_SCENARIO);
@@ -275,7 +281,25 @@ fn diff(options: &Options) -> Result<i32, String> {
     if !options.live {
         let outcome = suite.check_path(&path, &meguri);
         print!("{}", outcome.render_text());
-        return Ok(i32::from(outcome.status != Status::Pass));
+        return Ok(i32::from(!matches!(outcome.status, Status::Pass | Status::Reference)));
+    }
+    if suite.reference_at_path(&path).is_some() {
+        let oracle = oracle(options)?.expecting(suite.pin.clone());
+        let live = LiveRun {
+            oracle: &oracle,
+            meguri: &meguri,
+            handoff_root: options.handoff_dir.as_deref(),
+            meguri_edge: None,
+        };
+        let file = suite
+            .discover(&[])
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|file| file.path.canonicalize().ok() == path.canonicalize().ok())
+            .ok_or("reference scenario is outside the suite")?;
+        let outcome = suite.check_live(&file, &live);
+        print!("{}", outcome.render_text());
+        return Ok(i32::from(outcome.status != Status::Reference));
     }
     // Meguri against the live oracle, no golden involved.
     let loaded = scenario::load(&path).map_err(|e| e.to_string())?;

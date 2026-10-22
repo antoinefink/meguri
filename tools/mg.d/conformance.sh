@@ -179,8 +179,9 @@ mg_conformance() {
     mg_count total "$(jq '.scenarios | length' "$first")"
     mg_count passed "$(jq '[.scenarios[] | select(.status == "pass")] | length' "$first")"
     mg_count failed "$(jq '[.scenarios[] | select(.fails)] | length' "$first")"
-    mg_count skipped "$(jq '[.scenarios[] | select(.status != "pass" and (.fails | not))] | length' "$first")"
+    mg_count skipped "$(jq '[.scenarios[] | select(.status != "pass" and .status != "reference" and (.fails | not))] | length' "$first")"
     mg_count pending "$(jq '.totals.pending' "$first")"
+    mg_count reference "$(jq '.totals.reference // 0' "$first")"
   fi
   local summary
   summary="$(printf '%s' "$MG_CONF_LANES" | jq -sr 'add // {} | to_entries

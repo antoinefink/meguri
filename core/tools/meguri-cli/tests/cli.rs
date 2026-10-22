@@ -40,6 +40,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "advance",
             "answer",
             "browser_config_set",
+            "bury",
             "clear_unused_tags",
             "clone_notetype",
             "clone_preset",
@@ -48,10 +49,13 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "delete_notes",
             "delete_tags",
             "edit_note",
+            "empty_filtered",
             "empty_media_trash",
             "enable_fsrs",
             "enable_v3",
             "ensure_io_notetype",
+            "forget",
+            "grade_now",
             "handoff",
             "legacy_update",
             "media_outside",
@@ -72,10 +76,14 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "set_current_deck",
             "set_deck_collapsed",
             "set_deck_preset",
+            "set_due",
             "set_flag",
             "set_tag_collapsed",
+            "suspend",
             "trash_media",
+            "unbury_deck",
             "undo",
+            "unsuspend",
             "update_notetype",
             "update_notetype.css",
             "update_notetype.field_options",
@@ -318,6 +326,22 @@ fn diff_and_run_compare_with_the_goldens() {
         .map(|s| s["scenario"].as_str().unwrap())
         .collect();
     assert_eq!(json["totals"]["pass"], passing.len());
+    assert_eq!(json["totals"]["reference"], 2);
+    let references: Vec<&Value> = scenarios.iter().filter(|s| s["status"] == "reference").collect();
+    assert_eq!(
+        references
+            .iter()
+            .map(|s| s["scenario"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["preservation/recipe/kitchen-sink", "preservation/review/answers"]
+    );
+    for reference in references {
+        assert_eq!(reference["active"], false);
+        assert_eq!(reference["fails"], false);
+        assert!(!reference["reference"]["reason"].as_str().unwrap().is_empty());
+        assert_eq!(reference["reference"]["spec"], "conformance/normalized-dump#N10");
+        assert!(text(&out.stderr).contains(reference["reference"]["reason"].as_str().unwrap()));
+    }
     // The scenarios Meguri has adapters for: the empty runner and the text
     // area (meguri-text, U20), all of whose 53 scenarios are active.
     assert!(passing.contains(&"smoke/runner-empty"), "{passing:?}");
@@ -660,4 +684,50 @@ fn exec_sends_actor_scenarios_to_the_parties_executor() {
         "{}",
         text(&out.stderr)
     );
+}
+
+#[test]
+fn explicit_reference_selection_never_runs_meguri_and_worker_failures_still_fail() {
+    let dir = tree();
+    let root = dir.path();
+    std::fs::write(
+        root.join("scenarios/smoke/area.yaml"),
+        "area: smoke\nreference:\n  timing-tz-utc:\n    reason: Scope example.\n    spec: conformance/dsl#D9.4\n",
+    )
+    .unwrap();
+    let path = root.join("scenarios/smoke/timing-tz-utc.yaml");
+    for command in ["exec", "diff"] {
+        let out = cli(&[
+            "conformance",
+            command,
+            "--conformance",
+            root.to_str().unwrap(),
+            path.to_str().unwrap(),
+        ]);
+        assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+        let report = text(&out.stdout) + &text(&out.stderr);
+        assert!(report.contains("reference"), "{report}");
+        assert!(report.contains("Scope example. (conformance/dsl#D9.4)"));
+        assert!(!report.contains("timing-tz-utc: pass"));
+    }
+    let golden: Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("goldens/smoke/timing-tz-utc.json")).unwrap()).unwrap();
+    let observed = golden["observations"].to_string();
+    for (observations, lock, expected, code) in [
+        (observed.as_str(), LOCK.to_owned(), "reference", 0),
+        ("{\"steps\":[]}", LOCK.to_owned(), "fail", 1),
+        (observed.as_str(), "0".repeat(64), "error", 1),
+    ] {
+        let cmd = worker(root, observations, &lock);
+        let (actual_code, json) = run_live(root, &cmd);
+        assert_eq!(actual_code, Some(code), "{json}");
+        assert_eq!(json["scenarios"][0]["status"], expected);
+        assert_eq!(json["totals"]["pass"], 0);
+        assert_eq!(
+            json["scenarios"][0]["reference"],
+            serde_json::json!({
+                "reason": "Scope example.", "spec": "conformance/dsl#D9.4"
+            })
+        );
+    }
 }

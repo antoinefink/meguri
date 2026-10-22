@@ -132,6 +132,9 @@ fn outcome_json(o: &Outcome, tier: Tier) -> Value {
         "repro": o.repro,
     });
     let map = out.as_object_mut().expect("an object");
+    if let Some(reference) = &o.reference {
+        map.insert("reference".to_owned(), json!(reference));
+    }
     if let Some(sha) = &o.scenario_sha256 {
         map.insert("scenario_sha256".to_owned(), json!(sha));
     }

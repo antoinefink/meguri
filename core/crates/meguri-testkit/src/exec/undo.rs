@@ -20,8 +20,6 @@ fn restore(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError
         _ => return Err(core("expected undo or redo")),
     };
     let collection = session.engine_collection()?;
-    session.held_queue = None;
-    session.day.clear();
     let empty = if undo { "nothing_to_undo" } else { "nothing_to_redo" };
     let peek = if undo {
         collection.peek_undo(UndoScope::Global)
@@ -38,7 +36,25 @@ fn restore(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError
         collection.redo(UndoScope::Global)
     };
     match result {
-        Ok(_) => Ok(OpResult::Done),
+        Ok(restored) => {
+            use meguri_engine::undo::{entry::StepKind, names};
+            if restored.value.kind != StepKind::Answer
+                && matches!(
+                    restored.value.name,
+                    names::BURY
+                        | names::SUSPEND
+                        | names::UNBURY_UNSUSPEND
+                        | names::SET_DUE_DATE
+                        | names::RESET_CARD
+                        | names::GRADE_NOW
+                        | names::EMPTY
+                )
+            {
+                session.held_queue = None;
+                session.day.clear();
+            }
+            Ok(OpResult::Done)
+        }
         Err(EngineError::UndoUnavailable {
             reason: DisabledReason::ChangedExternally,
         }) => Ok(OpResult::Rejected("changed_externally")),

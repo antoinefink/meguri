@@ -1201,3 +1201,170 @@ fn explicit_filtered_answer_part_is_pending_in_preflight_while_plain_answer_runs
         }
     }
 }
+
+const REFERENCE_METADATA: &str = "area: smoke\nreference:\n  timing-tz-utc:\n    reason: Recorded scope example.\n    spec: conformance/normalized-dump#N10\n";
+
+struct NeverExecute;
+impl Executor for NeverExecute {
+    fn name(&self) -> &str {
+        "must-not-execute"
+    }
+    fn missing(&self, _: &Needs) -> Needs {
+        panic!("reference queried capabilities")
+    }
+    fn run(&self, _: &LoadedScenario) -> Result<Value, ExecError> {
+        panic!("reference executed")
+    }
+}
+
+#[test]
+fn reference_metadata_report() {
+    use meguri_testkit::suite::Platform;
+    let dir = tree();
+    let root = dir.path();
+    copy_smoke(root, "timing-tz-utc");
+    copy_smoke(root, "runner-empty");
+    write(root, "scenarios/smoke/area.yaml", REFERENCE_METADATA);
+    for platform in [Platform::Linux, Platform::MacOs] {
+        let suite = Suite::open(root).unwrap().on_platform(platform);
+        assert!(suite.goldens_check(&GoldensCheck::default()).unwrap().ok());
+        let report = suite.run(&["smoke/timing-tz-utc".to_owned()], &NeverExecute, "test");
+        let outcome = &report.outcomes[0];
+        assert_eq!(outcome.status, Status::Reference, "{}", report.render_text());
+        assert!(!outcome.fails_t0() && !outcome.fails_t1());
+        assert!(!outcome.active);
+        assert_eq!(report.totals()["reference"], 1);
+        assert_eq!(report.totals()["pass"], 0);
+        assert_eq!(report.totals()["pending"], 0);
+        let json = report.to_json();
+        assert_eq!(
+            json["scenarios"][0]["reference"],
+            json!({
+                "reason": "Recorded scope example.", "spec": "conformance/normalized-dump#N10"
+            })
+        );
+        assert!(
+            report
+                .render_text()
+                .contains("Recorded scope example. (conformance/normalized-dump#N10)")
+        );
+        // Inactive still executes and differs; only the exact declaration is exempt.
+        let all = suite.run(&[], &Canned(json!({"steps": [{}]})), "test");
+        assert_eq!(all.totals()["reference"], 1);
+        assert_eq!(all.totals()["fail"], 1);
+        assert_eq!(all.totals()["pass"], 0);
+        assert!(all.outcomes.iter().all(|o| !o.active));
+    }
+}
+
+#[test]
+fn malformed_unknown_and_active_overlapping_reference_declarations_are_rejected() {
+    let dir = tree();
+    let root = dir.path();
+    copy_smoke(root, "timing-tz-utc");
+    let value = "{reason: Scope example., spec: conformance/normalized-dump#N10}";
+    let declarations = [
+        format!("reference: {{unknown: {value}}}"),
+        format!("active: ['timing-*']\nreference: {{timing-tz-utc: {value}}}"),
+        format!("active: ['timing-??-utc']\nreference: {{timing-tz-utc: {value}}}"),
+        format!("reference: {{'timing-*': {value}}}"),
+        format!("reference: {{'timing-tz-utc.yaml': {value}}}"),
+        format!("reference: {{'../smoke/timing-tz-utc': {value}}}"),
+        "reference: null".to_owned(),
+        "reference: []".to_owned(),
+        "reference: {timing-tz-utc: null}".to_owned(),
+        "reference: {timing-tz-utc: ['Scope example.', conformance/normalized-dump#N10]}".to_owned(),
+        "reference: {timing-tz-utc: {reason: ' ', spec: conformance/normalized-dump#N10}}".to_owned(),
+        "reference: {timing-tz-utc: {reason: \"a\\nb\", spec: conformance/normalized-dump#N10}}".to_owned(),
+        "reference: {timing-tz-utc: {reason: Scope example., spec: R704}}".to_owned(),
+        "reference: {timing-tz-utc: {reason: Scope example., spec: conformance/normalized-dump}}".to_owned(),
+        "reference: {timing-tz-utc: {reason: Scope example., spec: conformance/normalized-dump#N10, extra: true}}"
+            .to_owned(),
+        "reference: {timing-tz-utc: {reason: Scope example.}}".to_owned(),
+        "reference: {timing-tz-utc: {spec: conformance/normalized-dump#N10}}".to_owned(),
+    ];
+    for declaration in declarations {
+        write(
+            root,
+            "scenarios/smoke/area.yaml",
+            &format!("area: smoke\n{declaration}\n"),
+        );
+        assert!(Suite::open(root).is_err(), "accepted {declaration}");
+    }
+}
+
+#[test]
+fn reference_scope_never_hides_invalid_missing_or_stale_inputs() {
+    let dir = tree();
+    let root = dir.path();
+    copy_smoke(root, "timing-tz-utc");
+    write(root, "scenarios/smoke/area.yaml", REFERENCE_METADATA);
+    let path = root.join("goldens/smoke/timing-tz-utc.json");
+    let golden = fs::read_to_string(&path).unwrap();
+    for (text, expected) in [
+        (None, Status::Missing),
+        (Some("{}".to_owned()), Status::Invalid),
+        (Some(golden.replace(LOCK, &"0".repeat(64))), Status::Stale),
+    ] {
+        match text {
+            Some(text) => fs::write(&path, text).unwrap(),
+            None => fs::remove_file(&path).unwrap(),
+        }
+        let suite = Suite::open(root).unwrap();
+        let report = suite.run(&[], &NeverExecute, "test");
+        assert_eq!(report.outcomes[0].status, expected);
+        assert!(report.outcomes[0].reference.is_some());
+        assert_eq!(report.totals()["reference"], 0);
+        assert!(!suite.goldens_check(&GoldensCheck::default()).unwrap().ok());
+        let live = suite.run_live(&[], &t1(&Broken, &MeguriExecutor::new()), "test");
+        assert_eq!(live.outcomes[0].status, expected);
+        assert_eq!(live.failures().len(), 1);
+        fs::write(&path, &golden).unwrap();
+    }
+    let scenario_path = root.join("scenarios/smoke/timing-tz-utc.yaml");
+    let original = fs::read_to_string(&scenario_path).unwrap();
+    fs::write(&scenario_path, original + "\ndescription: changed input\n").unwrap();
+    let suite = Suite::open(root).unwrap();
+    assert_eq!(suite.run(&[], &NeverExecute, "test").outcomes[0].status, Status::Stale);
+    fs::write(&scenario_path, "id: smoke/timing-tz-utc\nsteps: []\n").unwrap();
+    let suite = Suite::open(root).unwrap();
+    let report = suite.run(&[], &NeverExecute, "test");
+    assert_eq!(report.outcomes[0].status, Status::Invalid);
+    assert_eq!(report.failures().len(), 1);
+    assert!(report.outcomes[0].reference.is_some());
+}
+
+#[test]
+fn reference_requires_matching_oracle_replay_with_no_deviation_or_meguri_chain() {
+    let dir = tree();
+    let root = dir.path();
+    // A generic live reference must replay, but never require Meguri's missing handoff adapters.
+    write(
+        root,
+        "scenarios/smoke/reference-chain.yaml",
+        "id: smoke/reference-chain\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsteps: [{advance: 1d}, {handoff: meguri}, {observe: [timing]}]\n",
+    );
+    let observed = json!({"steps": [{}, {}, {"timing": {"now": 1}}]});
+    golden_for(root, "smoke/reference-chain", observed.clone());
+    write(
+        root,
+        "scenarios/smoke/area.yaml",
+        &REFERENCE_METADATA.replace("timing-tz-utc", "reference-chain"),
+    );
+    let suite = Suite::open(root).unwrap();
+    let meguri = MeguriExecutor::with(MeguriExecutor::area_registry(&[]));
+    let faithful = Canned(observed);
+    let mismatched = Canned(json!({"steps": []}));
+    for (oracle, status) in [
+        (&faithful as &dyn SegmentExecutor, Status::Reference),
+        (&mismatched as &dyn SegmentExecutor, Status::Fail),
+        (&Broken as &dyn SegmentExecutor, Status::Error),
+    ] {
+        let report = suite.run_live(&[], &t1(oracle, &meguri), "test");
+        assert_eq!(report.outcomes[0].status, status, "{}", report.render_text());
+        assert_eq!(report.totals()["pass"], 0);
+        assert_eq!(report.totals()["reference"], usize::from(status == Status::Reference));
+        assert_eq!(report.failures().len(), usize::from(status != Status::Reference));
+        assert!(report.to_json()["scenarios"][0]["reference"].is_object());
+    }
+}

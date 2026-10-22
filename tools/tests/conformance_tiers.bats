@@ -29,8 +29,8 @@ EOF
   cat >"$SB/tools/mg.d/zz-conformance-fixture.sh" <<'EOF'
 fixture_report() {
   jq -n --arg tier "$1" --arg status "$3" \
-    '{tier:$tier, totals:{pending:0, ($status):1}, failed:(if $status=="pass" then 0 else 1 end), wall_ms:1,
-      scenarios:[{scenario:"smoke/fixture", status:$status, fails:($status!="pass"), message:"fixture", repro:"fixture"}]}' >"$2"
+    '{tier:$tier, totals:{pending:0, reference:0, ($status):1}, failed:(if ($status=="pass" or $status=="reference") then 0 else 1 end), wall_ms:1,
+      scenarios:[{scenario:"smoke/fixture", status:$status, fails:($status!="pass" and $status!="reference"), message:"fixture", repro:"fixture"}]}' >"$2"
 }
 mg_conf__docker_ok() { echo docker-check >>"$CALLS"; }
 mg_conf__record_stale() { echo freshness >>"$CALLS"; }
@@ -148,4 +148,12 @@ assert t1['args'] == ['--live-only', '--lane', 'native']
 assert all(any(path.startswith(trigger) for trigger in t0['triggers']) for path in t1['filters'])
 PY
   [ "$status" -eq 0 ]
+}
+
+@test "conformance reports references separately from product success and skipped work" {
+  export LIVE_STATUS=reference
+  mg conformance --live-only --lane native
+  [ "$status" -eq 0 ]
+  jq -e '.summary.total==1 and .summary.passed==0 and .summary.failed==0 and .summary.skipped==0 and .summary.reference==1 and .summary.pending==0 and .details.lanes.live.totals.reference==1' "$result"
+  python3 "$SB/tools/tests/validate_result.py" "$result"
 }
