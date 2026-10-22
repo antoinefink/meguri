@@ -182,3 +182,10 @@ Focused suite `20261022T073556Z-52769`: 18 passed.
 Drive `20261022T073306Z-46810`: real question rendered; identifier checks failed.
 Keep these receipts. Answer, undo, restart and other platforms still need proof.
 Root aliases also need a separate portability check. No Unit acceptance.
+
+
+Added LocalReviewAccessibilityTests for real Home, deck, question and answer.
+Use tools/mg a11y with this suite on each platform. All audit variants apply.
+The suite uses the existing system audit and target helpers. Results are pending.
+The integrator removed two optional comments after the privacy hook rejected them.
+Swift test statements are unchanged. No Unit acceptance.
