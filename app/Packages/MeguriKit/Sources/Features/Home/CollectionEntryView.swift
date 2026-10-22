@@ -173,6 +173,7 @@ struct CollectionEntryContent: View {
                 .frame(maxWidth: .infinity)
             }
             .accessibilityIdentifier("onboarding.collectionImport.content")
+            .background(.token(.backgroundPrimary))
             .safeAreaInset(edge: .bottom) {
                 Button(action: actions.dismiss) {
                     Text(presentation.busy ? "Cancel Import" : "Cancel")
