@@ -445,6 +445,8 @@ extension TestHooks {
         /// Overrides the trait on the scene's windows: the scene's own
         /// override does not reach SwiftUI's size class on an iPhone.
         static func force(_ sizeClass: UIUserInterfaceSizeClass, on scene: UIWindowScene) {
+            let window = scene.windows.first { $0.isKeyWindow }
+            let before = window?.traitCollection.horizontalSizeClass
             forced = sizeClass
             for window in scene.windows {
                 window.traitOverrides.horizontalSizeClass = sizeClass
@@ -452,6 +454,18 @@ extension TestHooks {
                 window.setNeedsLayout()
                 window.layoutIfNeeded()
             }
+            // Acknowledge the applied traits after layout, never the requested
+            // override. The high/low words contain the actual before/after values.
+            guard let before, let after = window?.traitCollection.horizontalSizeClass,
+                  after == sizeClass,
+                  scene.windows.allSatisfy({ $0.traitCollection.horizontalSizeClass == after }) else { return }
+            let appliedName = "\(Bundle.main.bundleIdentifier ?? "").testhooks.sizeClassApplied"
+            var token = NOTIFY_TOKEN_INVALID
+            guard notify_register_check(appliedName, &token) == NOTIFY_STATUS_OK else { return }
+            defer { notify_cancel(token) }
+            let state = UInt64(before.rawValue) << 32 | UInt64(after.rawValue)
+            guard notify_set_state(token, state) == NOTIFY_STATUS_OK else { return }
+            notify_post(appliedName)
         }
 
         static func current(on scene: UIWindowScene) -> UIUserInterfaceSizeClass {

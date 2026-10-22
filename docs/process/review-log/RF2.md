@@ -563,3 +563,19 @@ loads real decks. The test then clicks an offscreen duplicate after its layout
 probe. Reviewer diagnosis: restore the layout, require sheet dismissal and
 choose an actionable deck. Reuse that deck ID after relaunch. Keep all answer
 and durability checks. This checkpoint does not accept RF2.
+
+### Further picker verification
+
+Base `4244d099`.
+Fixer sessions: `s-20261022T184525Z-61b624a8`,
+`s-20261022T184942Z-6696df7e`, `s-20261022T185243Z-019a2140`.
+Exports: `20261022T184607Z-85989`, `20261022T184954Z-89384`,
+`20261022T185256Z-91455`.
+Review requested a generic AX query, applied-trait acknowledgments and an
+exact deck-page identifier. Those changes are present; round 3 reports no
+P0/P1. The test now chooses public deck `1788249600212` for normal study.
+A newly added comment failed privacy scanning and was removed in full.
+Product-source scan then passes. No test assertion was removed.
+`ui-test/20261022T185400Z-92699`: FAIL during compilation, before VM execution.
+Three notification status assertions compare UInt32 to Int32. Correct the
+constant types and run the same first-import case. No acceptance claim.

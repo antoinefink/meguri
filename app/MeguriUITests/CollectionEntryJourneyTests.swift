@@ -48,32 +48,42 @@ import notify
         try pick(source, app, bundle)
         let confirm = element(app, "entry.confirm")
         XCTAssertTrue(confirm.waitForExistence(timeout: 30), app.debugDescription)
+        let entrySheet = element(app, "entry.sheet")
+        XCTAssertTrue(entrySheet.exists)
+        assertPreview(app, hasLocalCollection: hasLocalCollection)
         capture(app, "entry-preview-\(hasLocalCollection ? "replacement" : "first")")
-        XCTAssertTrue(text(element(app, "entry.preview.counts")).contains("6 notes · 11 cards · 6 reviews"))
-        let safety = text(element(app, "entry.preview.safety"))
-        XCTAssertTrue(safety.contains(hasLocalCollection ? "safety backup" : "no local collection file"))
-        XCTAssertEqual(confirm.label, hasLocalCollection ? "Replace Collection" : "Import Collection")
         #if os(iOS)
-        notify_post("\(bundle).testhooks.toggleSizeClass")
-        XCTAssertTrue(element(app, "entry.preview.counts").waitForExistence(timeout: 10))
-        XCTAssertTrue(text(element(app, "entry.preview.counts")).contains("6 notes · 11 cards · 6 reviews"))
+        let adapted = try toggleSizeClass(bundle)
+        assertPreview(app, hasLocalCollection: hasLocalCollection)
         capture(app, "entry-preview-adapted")
+        let restored = try toggleSizeClass(bundle)
+        XCTAssertEqual(restored.before, adapted.after)
+        XCTAssertEqual(restored.after, adapted.before)
+        assertPreview(app, hasLocalCollection: hasLocalCollection)
+        capture(app, "entry-preview-restored")
         #endif
         try click(confirm, app, bundle)
         // Real activation dismisses entry. FSRS policy is the production gate.
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: entrySheet)], timeout: 30), .completed)
         let policyOrDeck = app.descendants(matching: .any).matching(NSPredicate(format:
             "identifier == %@ OR identifier BEGINSWITH %@", "home.policy.enable", "home.deck.row.")).firstMatch
         XCTAssertTrue(policyOrDeck.waitForExistence(timeout: 30), app.debugDescription)
         if enable.exists { try click(enable, app, bundle) }
         XCTAssertFalse(element(app, "entry.error").exists)
         XCTAssertFalse(element(app, "home.collection.error").exists)
-        let deck = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.deck.row.")).firstMatch
-        XCTAssertTrue(deck.waitForExistence(timeout: 20))
+        let deck = try XCTUnwrap(waitForHittable(app.buttons.matching(NSPredicate(
+            format: "identifier == %@", "home.deck.row.1788249600212"))))
+        let deckIdentifier = deck.identifier
+        let deckID = try XCTUnwrap(Int64(deckIdentifier.dropFirst("home.deck.row.".count)))
+        let deckPage = element(app, "home.deck.page.\(deckID)")
         capture(app, "entry-real-decks")
         try click(deck, app, bundle)
-        let study = element(app, "home.deck.study")
+        XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
+        let study = deckPage.descendants(matching: .any)["home.deck.study"].firstMatch
         XCTAssertTrue(study.waitForExistence(timeout: 10))
-        let before = text(element(app, "home.deck.counts"))
+        let counts = deckPage.descendants(matching: .any)["home.deck.counts"].firstMatch
+        let before = text(counts)
         try click(study, app, bundle)
         let reveal = element(app, "review.session.reveal")
         XCTAssertTrue(reveal.waitForExistence(timeout: 20), "Public package must provide a real reviewable card: \(app.debugDescription)")
@@ -98,17 +108,24 @@ import notify
         XCTAssertTrue(close.waitForExistence(timeout: 20))
         try click(close, app, bundle)
         XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
-        let after = text(element(app, "home.deck.counts"))
+        XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
+        let after = text(counts)
         capture(app, "entry-saved-answer")
         app.terminate()
         // Reopen the installed collection without fixture/source/route setup.
         app.launchArguments = MeguriLaunch(now: "2030-01-15T10:00:00Z", timeZone: "UTC", locale: "en_US", animations: false).arguments
         app.launch()
         XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
-        let restartedDeck = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.deck.row.")).firstMatch
-        XCTAssertTrue(restartedDeck.waitForExistence(timeout: 20))
-        try click(restartedDeck, app, bundle)
-        XCTAssertTrue(waitForText(element(app, "home.deck.counts"), after))
+        let retainedDeck = app.buttons[deckIdentifier].firstMatch
+        let restartReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (deckPage.exists && study.isHittable) || (retainedDeck.exists && retainedDeck.isHittable)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [restartReady], timeout: 20), .completed)
+        if !(deckPage.exists && study.isHittable) {
+            try click(retainedDeck, app, bundle)
+        }
+        XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForText(counts, after))
         XCTAssertFalse(element(app, "home.collection.error").exists)
         capture(app, "entry-restart-durable-answer")
         XCTAssertFalse(before.isEmpty)
@@ -175,6 +192,45 @@ import notify
     }
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
     private func text(_ element: XCUIElement) -> String { (element.value as? String).flatMap { $0.isEmpty ? nil : $0 } ?? element.label }
+    #if os(iOS)
+    private func toggleSizeClass(_ bundle: String) throws -> (before: UIUserInterfaceSizeClass, after: UIUserInterfaceSizeClass) {
+        var token = NOTIFY_TOKEN_INVALID
+        XCTAssertEqual(notify_register_check("\(bundle).testhooks.sizeClassApplied", &token), NOTIFY_STATUS_OK)
+        defer { notify_cancel(token) }
+        // Consume registration's initial signal before requesting a transition.
+        var changed: Int32 = 0
+        XCTAssertEqual(notify_check(token, &changed), NOTIFY_STATUS_OK)
+        var state: UInt64 = 0
+        let applied = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            var changed: Int32 = 0
+            guard notify_check(token, &changed) == NOTIFY_STATUS_OK, changed != 0 else { return false }
+            return notify_get_state(token, &state) == NOTIFY_STATUS_OK
+        }, object: nil)
+        XCTAssertEqual(notify_post("\(bundle).testhooks.toggleSizeClass"), NOTIFY_STATUS_OK)
+        XCTAssertEqual(XCTWaiter().wait(for: [applied], timeout: 10), .completed, "No applied window size-class transition")
+        let before = try XCTUnwrap(UIUserInterfaceSizeClass(rawValue: Int(state >> 32)))
+        let after = try XCTUnwrap(UIUserInterfaceSizeClass(rawValue: Int(state & 0xffff_ffff)))
+        XCTAssertTrue(before == .compact || before == .regular)
+        XCTAssertEqual(after, before == .compact ? .regular : .compact)
+        return (before, after)
+    }
+    #endif
+    private func assertPreview(_ app: XCUIApplication, hasLocalCollection: Bool) {
+        XCTAssertTrue(waitForText(element(app, "entry.preview.counts"), "6 notes · 11 cards · 6 reviews"))
+        let safety = hasLocalCollection
+            ? "This will replace the local collection on this device. Meguri must finish a safety backup of your current collection, including saved answers, before replacing it. If that backup fails, import stops."
+            : "There is no local collection file to replace. A pre-import safety backup is not needed."
+        XCTAssertTrue(waitForText(element(app, "entry.preview.safety"), safety))
+        XCTAssertEqual(element(app, "entry.confirm").label, hasLocalCollection ? "Replace Collection" : "Import Collection")
+    }
+    private func waitForHittable(_ query: XCUIElementQuery) -> XCUIElement? {
+        var target: XCUIElement?
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            target = query.allElementsBoundByIndex.first { $0.exists && $0.isHittable }
+            return target != nil
+        }, object: nil)
+        return XCTWaiter().wait(for: [ready], timeout: 20) == .completed ? target : nil
+    }
     private func waitForText(_ element: XCUIElement, _ expected: String) -> Bool {
         XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format:
             "exists == true AND (label == %@ OR value == %@)", expected, expected), object: element)], timeout: 20) == .completed

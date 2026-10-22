@@ -73,6 +73,8 @@ public struct HomeView: View {
                     .frame(maxWidth: ContentWidth.primaryAction)
                     .accessibilityIdentifier("home.deck.study")
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("home.deck.page.\(deck.id)")
             } else if collection.decks.isEmpty {
                 EmptyStateView(Text("No Decks", bundle: .module), systemImage: "rectangle.stack",
                     description: Text("This collection has no decks to study.", bundle: .module))
