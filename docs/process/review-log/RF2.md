@@ -631,3 +631,5 @@ constant types and run the same first-import case. No acceptance claim.
 - Fixer `s-20261022T200143Z-4d88d210`, base `588e0623`, export `20261022T200209Z-70307`; checkpoint `55996c55`. Independent review: no P0–P2. No test assertions removed.
 - Doctor `20261022T195606Z-64405`: PASS; VM answers; 63 GiB free.
 - Mac first import `ui-test/20261022T200319Z-71476`: PASS, 1 test, no skips. Native picker, real answer, hide/resume and restart checks pass.
+- Mac replacement `ui-test/20261022T200459Z-73519`: PASS, 1 test, no skips. Both picker journeys now pass on all three platforms.
+- Catch-up `20261022T200513Z-74897`: PASS.
