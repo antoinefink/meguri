@@ -782,7 +782,7 @@ pub(crate) fn apply_in(
         request.elapsed_ms,
     )
     .map_err(|e| invalid(e.to_string()))?;
-    let cache = request.cache.filter(|c| c.is_current(&bound));
+    let cache = request.cache.filter(|c| c.is_current(bound));
     let mut meta = AnswerMetadata {
         card: card.id,
         from_queue: request.from_queue,
