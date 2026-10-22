@@ -402,9 +402,9 @@ fn rollover_only_preferences_materialize_defaults_and_undo_restores_each_previou
     )
     .unwrap();
     assert_eq!(saved.undo.as_ref().unwrap().name, "Preferences");
-    assert_eq!(preference_row(&h, "collapseTime").unwrap().value, b"1200");
-    assert_eq!(preference_row(&h, "loadBalancerEnabled").unwrap().value, b"true");
-    assert_eq!(preference_row(&h, "rollover").unwrap().value, b"6");
+    assert_eq!(preference_row(&h, "collapseTime").unwrap().entry.value, b"1200");
+    assert_eq!(preference_row(&h, "loadBalancerEnabled").unwrap().entry.value, b"true");
+    assert_eq!(preference_row(&h, "rollover").unwrap().entry.value, b"6");
     let materialized = dump(&h);
     h.clock.step_ms(60000);
     options::save_preferences(
@@ -416,7 +416,7 @@ fn rollover_only_preferences_materialize_defaults_and_undo_restores_each_previou
         &Default::default(),
     )
     .unwrap();
-    assert_eq!(preference_row(&h, "loadBalancerEnabled").unwrap().value, b"false");
+    assert_eq!(preference_row(&h, "loadBalancerEnabled").unwrap().entry.value, b"false");
     let disabled = dump(&h);
     h.collection.undo(UndoScope::Global).unwrap();
     assert_eq!(dump(&h), materialized);
@@ -460,8 +460,8 @@ fn preferences_keep_omitted_seconds_exact_and_convert_explicit_minutes() {
             &Default::default(),
         )
         .unwrap();
-        assert_eq!(preference_row(&h, "collapseTime").unwrap().value, expected);
-        assert_eq!(preference_row(&h, "loadBalancerEnabled").unwrap().value, b"false");
+        assert_eq!(preference_row(&h, "collapseTime").unwrap().entry.value, expected);
+        assert_eq!(preference_row(&h, "loadBalancerEnabled").unwrap().entry.value, b"false");
         h.collection.undo(UndoScope::Global).unwrap();
         assert_eq!(dump(&h), before);
     }
@@ -520,8 +520,8 @@ fn preferences_explicit_defaults_insert_missing_rows_without_materializing_rollo
         &Default::default(),
     )
     .unwrap();
-    assert_eq!(preference_row(&h, "collapseTime").unwrap().value, b"1200");
-    assert_eq!(preference_row(&h, "loadBalancerEnabled").unwrap().value, b"true");
+    assert_eq!(preference_row(&h, "collapseTime").unwrap().entry.value, b"1200");
+    assert_eq!(preference_row(&h, "loadBalancerEnabled").unwrap().entry.value, b"true");
     assert_eq!(preference_row(&h, "rollover"), None);
     h.collection.undo(UndoScope::Global).unwrap();
     assert_eq!(dump(&h), before);
