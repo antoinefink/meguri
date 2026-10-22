@@ -96,6 +96,7 @@ struct ReviewLayout<Card: View>: View {
     var timerText: (() -> String)? = nil
     @Environment(\.appClock) var clock
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var noticeContentHeight: CGFloat?
     @ViewBuilder let card: () -> Card
     var body: some View {
         VStack(spacing: 0) {
@@ -105,14 +106,23 @@ struct ReviewLayout<Card: View>: View {
                 .padding(.horizontal, Spacing.small)
                 .fixedSize(horizontal: false, vertical: true)
                 .layoutPriority(1)
-            if let notice = notice {
-                Text(verbatim: notice).font(.callout).foregroundStyle(.token(.statusWarning))
-                    .padding(Spacing.small)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .layoutPriority(1)
-                    .accessibilityIdentifier("review.session.notice")
+            GeometryReader { middle in
+                VStack(spacing: 0) {
+                    if let notice {
+                        let noticeLimit = max(0, middle.size.height) * 0.4
+                        ScrollView(.vertical) {
+                            Text(verbatim: notice).font(.callout).foregroundStyle(.token(.statusWarning))
+                                .padding(Spacing.small)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { noticeContentHeight = $0 }
+                                .accessibilityIdentifier("review.session.notice")
+                        }
+                        .scrollIndicators(.visible)
+                        .frame(height: min(noticeContentHeight ?? noticeLimit, noticeLimit))
+                    }
+                    card().frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
-            card().frame(maxWidth: .infinity, maxHeight: .infinity)
             ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
         }
         .background(.token(.backgroundPrimary))

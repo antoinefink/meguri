@@ -1,10 +1,13 @@
 #if os(macOS)
 import AppKit
 @preconcurrency import ApplicationServices
+import Darwin
 import XCTest
 
 /// Explicit VM provisioning only; skipped at runtime without the opt-in marker.
 final class VMAccessibilitySetupTests: XCTestCase {
+    @MainActor private var vmConsentValue: String?
+
     @MainActor
     func testEnableRunnerAccessibility() throws {
         guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-ax-enable") else {
@@ -25,10 +28,16 @@ final class VMAccessibilitySetupTests: XCTestCase {
         if AXIsProcessTrustedWithOptions(options) { return }
 
         let settings = XCUIApplication(bundleIdentifier: "com.apple.systempreferences")
-        defer { capture(settings, phase: "final") }
+        defer {
+            if settings.state != .notRunning {
+                attachSetupEvidence(settings, stage: "final")
+                settings.terminate()
+            }
+            vmConsentValue = nil
+        }
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
         guard NSWorkspace.shared.open(url), settings.wait(for: .runningForeground, timeout: 10) else {
-            fail(settings, "Could not open Settings Accessibility privacy pane; inspect the VM attachments")
+            reportSetupFailure(settings, "Could not open Settings Accessibility privacy pane; inspect the VM attachments")
             return
         }
 
@@ -36,7 +45,8 @@ final class VMAccessibilitySetupTests: XCTestCase {
         let exactName = NSPredicate(format: "label IN %@ OR value IN %@", runnerNames, runnerNames)
         // Allow the pane a bounded time to populate, without navigating other settings.
         _ = settings.staticTexts.matching(exactName).firstMatch.waitForExistence(timeout: 10)
-        capture(settings, phase: "before")
+        guard authorizeSettingsIfNeeded(settings) else { return }
+        attachSetupEvidence(settings, stage: "before")
         var rows = runnerRows(settings, predicate: exactName)
         if rows.isEmpty {
             guard addCurrentRunner(settings) else { return }
@@ -44,18 +54,18 @@ final class VMAccessibilitySetupTests: XCTestCase {
                 !self.runnerRows(settings, predicate: exactName).isEmpty
             }, object: nil)
             guard XCTWaiter().wait(for: [appeared], timeout: 10) == .completed else {
-                fail(settings, "The exact runner row did not appear after Add; no permission was toggled")
+                reportSetupFailure(settings, "The exact runner row did not appear after Add; no permission was toggled")
                 return
             }
             rows = runnerRows(settings, predicate: exactName)
         }
         guard rows.count == 1 else {
-            fail(settings, "Expected exactly one MeguriUITests runner row, found \(rows.count). Inspect Settings hierarchy; no permission was toggled")
+            reportSetupFailure(settings, "Expected exactly one MeguriUITests runner row, found \(rows.count). Inspect Settings hierarchy; no permission was toggled")
             return
         }
         let controls = rows[0].switches.allElementsBoundByIndex + rows[0].checkBoxes.allElementsBoundByIndex
         guard controls.count == 1 else {
-            fail(settings, "Expected one switch/checkbox in the exact runner row, found \(controls.count); inspect Settings hierarchy")
+            reportSetupFailure(settings, "Expected one switch/checkbox in the exact runner row, found \(controls.count); inspect Settings hierarchy")
             return
         }
         let control = controls[0]
@@ -66,7 +76,7 @@ final class VMAccessibilitySetupTests: XCTestCase {
         case let value as String where value == "0" || value == "1":
             enabled = value == "1"
         default:
-            fail(settings, "Runner permission control has an unknown value: \(String(describing: control.value)); no click performed")
+            reportSetupFailure(settings, "Runner permission control has an unknown value: \(String(describing: control.value)); no click performed")
             return
         }
         if !enabled {
@@ -75,7 +85,7 @@ final class VMAccessibilitySetupTests: XCTestCase {
 
         let trusted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in AXIsProcessTrusted() }, object: nil)
         guard XCTWaiter().wait(for: [trusted], timeout: 15) == .completed else {
-            fail(settings, "Runner AX trust is still false. Inspect VM Settings attachments; credentials may require manual VM authorization, or the runner may need relaunching. Remove the authorization marker after setup")
+            reportSetupFailure(settings, "Runner AX trust is still false. Inspect VM Settings attachments; credentials may require manual VM authorization, or the runner may need relaunching. Remove the authorization marker after setup")
             return
         }
     }
@@ -92,15 +102,23 @@ final class VMAccessibilitySetupTests: XCTestCase {
         guard runnerURL.isFileURL, runnerURL.pathExtension == "app",
               Bundle.main.bundleIdentifier == "com.antoinefink.meguri.dev.uitests.xctrunner",
               Bundle(url: runnerURL)?.bundleIdentifier == "com.antoinefink.meguri.dev.uitests.xctrunner" else {
-            fail(settings, "Refusing Add: Bundle.main is not the expected runner .app")
+            reportSetupFailure(settings, "Refusing Add: Bundle.main is not the expected runner .app")
             return false
         }
-        let addButtons = settings.buttons.matching(NSPredicate(format: "label == %@", "Add"))
-        guard addButtons.count == 1 else {
-            fail(settings, "Expected exactly one Settings Add button, found \(addButtons.count)")
-            return false
+        // Authorizing a stale Settings sheet can already have opened the original Add picker.
+        if settings.descendants(matching: .sheet).count > 0 || settings.descendants(matching: .dialog).count > 0 {
+            guard let picker = pickerContainer(settings), isAppPicker(picker) else {
+                reportSetupFailure(settings, "Expected one normal app picker before resuming Add")
+                return false
+            }
+        } else {
+            let addButtons = settings.buttons.matching(NSPredicate(format: "label == %@", "Add"))
+            guard addButtons.count == 1 else {
+                reportSetupFailure(settings, "Expected exactly one Settings Add button, found \(addButtons.count)")
+                return false
+            }
+            guard click(addButtons.element(boundBy: 0), in: settings, description: "Settings Add") else { return false }
         }
-        guard click(addButtons.element(boundBy: 0), in: settings, description: "Settings Add") else { return false }
         guard waitForPicker(settings) != nil else { return false }
         guard bringSettingsForward(settings) else { return false }
         settings.typeKey("g", modifierFlags: [.command, .shift])
@@ -111,7 +129,7 @@ final class VMAccessibilitySetupTests: XCTestCase {
         }, object: nil)
         guard XCTWaiter().wait(for: [goToFolder], timeout: 5) == .completed,
               let folderPicker = pickerContainer(settings), isGoToFolder(folderPicker) else {
-            fail(settings, "Expected the unique Go To Folder text field in the picker; no path entered")
+            reportSetupFailure(settings, "Expected the unique Go To Folder text field in the picker; no path entered")
             return false
         }
         let field = folderPicker.textFields.element(boundBy: 0)
@@ -121,7 +139,7 @@ final class VMAccessibilitySetupTests: XCTestCase {
         guard bringSettingsForward(settings) else { return false }
         field.typeText(runnerURL.path)
         guard field.value as? String == runnerURL.path else {
-            fail(settings, "Go To Folder did not contain the exact current runner bundle path")
+            reportSetupFailure(settings, "Go To Folder did not contain the exact current runner bundle path")
             return false
         }
         guard bringSettingsForward(settings) else { return false }
@@ -135,7 +153,7 @@ final class VMAccessibilitySetupTests: XCTestCase {
         }, object: nil)
         guard XCTWaiter().wait(for: [resolved], timeout: 5) == .completed,
               let picker = pickerContainer(settings), isAppPicker(picker) else {
-            fail(settings, "Runner path did not resolve to a picker with one Open/Add control; inspect picker/auth UI")
+            reportSetupFailure(settings, "Runner path did not resolve to a picker with one Open/Add control; inspect picker/auth UI")
             return false
         }
         return click(picker.buttons.matching(chooseName).element(boundBy: 0), in: settings, description: "runner picker Open/Add")
@@ -171,21 +189,119 @@ final class VMAccessibilitySetupTests: XCTestCase {
     @MainActor
     private func waitForPicker(_ settings: XCUIApplication) -> XCUIElement? {
         let appeared = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            if self.hasAuthorizationPrompt(settings) { return true }
             guard let picker = self.pickerContainer(settings) else { return false }
             return self.isAppPicker(picker)
         }, object: nil)
-        guard XCTWaiter().wait(for: [appeared], timeout: 5) == .completed,
+        guard XCTWaiter().wait(for: [appeared], timeout: 5) == .completed else {
+            reportSetupFailure(settings, "Expected one normal app picker sheet/dialog after Settings Add")
+            return nil
+        }
+        guard authorizeSettingsIfNeeded(settings) else { return nil }
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard let picker = self.pickerContainer(settings) else { return false }
+            return self.isAppPicker(picker)
+        }, object: nil)
+        guard XCTWaiter().wait(for: [ready], timeout: 5) == .completed,
               let picker = pickerContainer(settings), isAppPicker(picker) else {
-            fail(settings, "Expected one normal app picker sheet/dialog after Settings Add")
+            reportSetupFailure(settings, "Expected one normal app picker sheet/dialog after Settings authorization")
             return nil
         }
         return picker
     }
 
     @MainActor
+    private func hasAuthorizationPrompt(_ settings: XCUIApplication) -> Bool {
+        settings.secureTextFields.count > 0
+            || settings.buttons.matching(NSPredicate(format: "label == %@", "Modify Settings")).count > 0
+    }
+
+    @MainActor
+    private func isSettingsAuthorization(_ sheet: XCUIElement) -> Bool {
+        guard sheet.elementType == .sheet, sheet.textFields.count == 1, sheet.secureTextFields.count == 1 else { return false }
+        let username = sheet.textFields.element(boundBy: 0)
+        guard username.placeholderValue == "Username", let account = username.value as? String,
+              account.caseInsensitiveCompare(NSUserName()) == .orderedSame else { return false }
+        return sheet.secureTextFields.element(boundBy: 0).label == "Password"
+            && sheet.buttons.matching(NSPredicate(format: "label == %@", "Modify Settings")).count == 1
+            && sheet.buttons.matching(NSPredicate(format: "label == %@", "Cancel")).count == 1
+            && sheet.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", "Privacy & Security is trying to modify your system settings.", "Privacy & Security is trying to modify your system settings.")).count == 1
+    }
+
+    @MainActor
+    private func authorizeSettingsIfNeeded(_ settings: XCUIApplication) -> Bool {
+        guard hasAuthorizationPrompt(settings) else { return true }
+        // Repeat the provisioning boundary here, before any credential-file access or input.
+        guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-ax-enable"),
+              CardSwapTimingGate.hypervisorPresent() == true, NSUserName() == "meguri",
+              let sheet = pickerContainer(settings), isSettingsAuthorization(sheet),
+              settings.secureTextFields.count == 1,
+              settings.buttons.matching(NSPredicate(format: "label == %@", "Modify Settings")).count == 1 else {
+            reportSetupFailure(settings, "Refusing unexpected or ambiguous Settings authorization UI")
+            return false
+        }
+        let passwordField = sheet.secureTextFields.element(boundBy: 0)
+        guard click(passwordField, in: settings, description: "Settings secure password field"),
+              bringSettingsForward(settings) else { return false }
+        guard let password = readVMConsentValue() else {
+            reportSetupFailure(settings, "VM authorization credential is unavailable or invalid")
+            return false
+        }
+        vmConsentValue = password
+        passwordField.typeKey("a", modifierFlags: .command)
+        let pasted: Bool = {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            defer { pasteboard.clearContents() }
+            guard pasteboard.setString(password, forType: .string) else { return false }
+            passwordField.typeKey("v", modifierFlags: .command)
+            return true
+        }()
+        guard pasted, isSettingsAuthorization(sheet) else {
+            reportSetupFailure(settings, "Could not fill the expected Settings secure field")
+            return false
+        }
+        let modify = sheet.buttons.matching(NSPredicate(format: "label == %@", "Modify Settings")).element(boundBy: 0)
+        guard click(modify, in: settings, description: "Settings authorization Modify Settings") else { return false }
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard !self.hasAuthorizationPrompt(settings) else { return false }
+            if settings.descendants(matching: .sheet).count == 0 && settings.descendants(matching: .dialog).count == 0 { return true }
+            guard let picker = self.pickerContainer(settings) else { return false }
+            return self.isAppPicker(picker)
+        }, object: nil)
+        guard XCTWaiter().wait(for: [dismissed], timeout: 10) == .completed else {
+            reportSetupFailure(settings, "Settings authorization was refused, ambiguous, or did not complete")
+            return false
+        }
+        return true
+    }
+
+    /// Open without following links; validate the opened file rather than its path metadata.
+    private func readVMConsentValue() -> String? {
+        let descriptor = Darwin.open("/tmp/mg-vm-ax-password", O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard descriptor >= 0 else { return nil }
+        defer { Darwin.close(descriptor) }
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0,
+              metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+              metadata.st_uid == getuid(), metadata.st_mode & 0o077 == 0,
+              metadata.st_nlink == 1, metadata.st_size > 0, metadata.st_size <= 4096 else { return nil }
+        var bytes = [UInt8](repeating: 0, count: Int(metadata.st_size) + 1)
+        let count = bytes.withUnsafeMutableBytes { Darwin.read(descriptor, $0.baseAddress, $0.count) }
+        guard count == Int(metadata.st_size), let decoded = String(bytes: bytes.prefix(count), encoding: .utf8) else { return nil }
+        var password = decoded
+        if password.hasSuffix("\n") {
+            password.removeLast()
+            if password.hasSuffix("\r") { password.removeLast() }
+        }
+        guard !password.isEmpty, !password.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return nil }
+        return password
+    }
+
+    @MainActor
     private func click(_ element: XCUIElement, in settings: XCUIApplication, description: String) -> Bool {
         guard element.isEnabled, element.isHittable else {
-            fail(settings, "Unavailable \(description); inspect picker/auth UI")
+            reportSetupFailure(settings, "Unavailable \(description); inspect picker/auth UI")
             return false
         }
         guard bringSettingsForward(settings) else { return false }
@@ -199,28 +315,39 @@ final class VMAccessibilitySetupTests: XCTestCase {
             try settings.bringToFront(bundleIdentifier: "com.apple.systempreferences")
             return true
         } catch {
-            fail(settings, "Could not bring Settings forward: \(error)")
+            reportSetupFailure(settings, "Could not bring Settings forward")
             return false
         }
     }
 
     @MainActor
-    private func fail(_ settings: XCUIApplication, _ message: String, file: StaticString = #filePath, line: UInt = #line) {
-        // XCTFail may unwind immediately with continueAfterFailure=false, before defer runs.
-        capture(settings, phase: "failure")
-        XCTFail(message, file: file, line: line)
+    private func reportSetupFailure(_ settings: XCUIApplication, _ reason: String, file: StaticString = #filePath, line: UInt = #line) {
+        // Save evidence and close Settings before XCTest can stop this case.
+        attachSetupEvidence(settings, stage: "failure")
+        if settings.state != .notRunning { settings.terminate() }
+        XCTFail(safeDiagnostic(reason), file: file, line: line)
     }
 
     @MainActor
-    private func capture(_ settings: XCUIApplication, phase: String) {
-        let hierarchy = XCTAttachment(string: settings.debugDescription)
-        hierarchy.name = "VM Accessibility Settings hierarchy (\(phase))"
-        hierarchy.lifetime = .keepAlways
-        add(hierarchy)
-        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        screenshot.name = "VM Accessibility Settings screenshot (\(phase))"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+    private func attachSetupEvidence(_ settings: XCUIApplication, stage: String) {
+        let outline = XCTAttachment(string: safeDiagnostic(settings.debugDescription))
+        outline.name = "VM setup tree: \(stage)"
+        outline.lifetime = .keepAlways
+        add(outline)
+        // Loading the credential permanently ends pixel capture for this run.
+        guard vmConsentValue == nil else { return }
+        let pixels = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        pixels.name = "VM setup image: \(stage)"
+        pixels.lifetime = .keepAlways
+        add(pixels)
+    }
+
+    @MainActor
+    private func safeDiagnostic(_ message: String) -> String {
+        guard let vmConsentValue else { return message }
+        let maskedLiteral = String(String(decoding: try! JSONEncoder().encode(vmConsentValue), as: UTF8.self).dropFirst().dropLast())
+        return message.replacingOccurrences(of: maskedLiteral, with: "[MASKED]")
+            .replacingOccurrences(of: vmConsentValue, with: "[MASKED]")
     }
 }
 #endif
