@@ -686,3 +686,12 @@ constant types and run the same first-import case. No acceptance claim.
 - Mac recording `snapshots/20261022T213851Z-59408`: PASS, 30 selected import cases, 195 outside the filter. Root inspected the light loading image: body is solid white and text is legible. Input `05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53`. Fresh audits and comparison remain pending.
 - Independent review: no findings. The Mac images pass.
 - Final source input `05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53`: Mac `a11y/20261022T214006Z-61863`, iPad `a11y/20261022T214125Z-64004`, iPhone `a11y/20261022T214624Z-67053` all PASS, each 2 tests and no skips. Five import states and scoped Home empty/typical checks pass. No unsuppressed findings or touch-target violations.
+- Final comparison `snapshots/20261022T215132Z-70068`: PASS, 225 selected cases, 0 failures, 490 outside the filter. Input matches the three final passing audits. Design review and full integration gate remain pending.
+
+### Critic result
+
+- Critic `20261022T215823Z-82548`, session `s-20261022T215826Z-fa23f249`: WARN. Report retains 24 high, 16 medium and 2 low issues. Both screens remain unverified. The ledger retains the findings; no visual acceptance is claimed.
+- Independent triage: twenty high entries concern native import-title truncation at AX4/AX5. Keep the full title and use the native inline title on iOS, then inspect those cells and obtain a fresh critic check. Full accessibility labels do not waive visible truncation. This remains open in U166.
+- Four Home high entries concern absent sidebar/title/toolbar in standalone leaf previews. Production supplies the existing shell; native journeys exercise it. Record that context or render the existing shell in future evidence. Do not duplicate a sidebar inside Home content. Complete U152 remains open.
+- Medium findings remain tasks for the full Home/import UI work. Keep the actual report, the passing focused checks and matching source receipts. R1985 keeps screens out of verified; the full integration gate may run without claiming complete Home or visual acceptance.
+- The local review path is functional. File export and explicit server transfers remain the next delivery priority. No Unit acceptance is claimed for these partial UI units.

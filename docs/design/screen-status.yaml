@@ -28,8 +28,339 @@ screens:
     status: sketch
     fix_rounds: 0
   home.deckList:
-    status: sketch
+    status: built
     fix_rounds: 0
+    platforms:
+    - iphone
+    - ipad
+    - mac
+    evidence:
+      lint:
+        run: 20261022T215133Z-70326
+        status: pass
+      iphone:
+        snapshots:
+          run: 20261022T215132Z-70068
+          commit: 2c240d53744cc7e7331db048f6ecf3e255ce676e
+          status: pass
+          digest: 21915659150d84d4757f26e002435317aed08c6146a43af2ef616c2a72669891
+          input: 05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53
+        a11y:
+          run: 20261022T214624Z-67053
+          status: pass
+          commit: 2c240d53744cc7e7331db048f6ecf3e255ce676e
+          input: 05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53
+          states:
+            empty: pass
+            typical: pass
+        critic:
+          run: 20261022T215823Z-82548
+          session: s-20261022T215826Z-fa23f249
+          commit: b3886a641d00a29c63f28d7d98898b595b3b1923
+          status: pass
+          high: 0
+          medium: 6
+          low: 1
+          dropped: 0
+          date: '2026-10-22T22:02:47Z'
+      ipad:
+        snapshots:
+          run: 20261022T215132Z-70068
+          commit: 2c240d53744cc7e7331db048f6ecf3e255ce676e
+          status: pass
+          digest: 6338a2d2438c42bc41a00806b134b399422a51f798a75df3dd9ee2a4387d1161
+          input: 05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53
+        a11y:
+          run: 20261022T214125Z-64004
+          status: pass
+          commit: 2c240d53744cc7e7331db048f6ecf3e255ce676e
+          input: 05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53
+          states:
+            empty: pass
+            typical: pass
+        critic:
+          run: 20261022T215823Z-82548
+          session: s-20261022T215826Z-fa23f249
+          commit: b3886a641d00a29c63f28d7d98898b595b3b1923
+          status: fail
+          high: 2
+          medium: 1
+          low: 0
+          dropped: 0
+          date: '2026-10-22T22:02:47Z'
+      mac:
+        snapshots:
+          run: 20261022T215132Z-70068
+          commit: 2c240d53744cc7e7331db048f6ecf3e255ce676e
+          status: pass
+          digest: cad8a80eeb5f1d497c68311ba2993e58fa39b1e262e5fec62bd58cad6983e8ab
+          input: 05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53
+        a11y:
+          run: 20261022T214006Z-61863
+          status: pass
+          commit: 9edc5a3322bd7628dd7fc3d344cb1396b8e3d37c
+          input: 05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53
+          states:
+            empty: pass
+            typical: pass
+        critic:
+          run: 20261022T215823Z-82548
+          session: s-20261022T215826Z-fa23f249
+          commit: b3886a641d00a29c63f28d7d98898b595b3b1923
+          status: fail
+          high: 2
+          medium: 1
+          low: 0
+          dropped: 0
+          date: '2026-10-22T22:02:47Z'
+    issues:
+    - platform: ipad
+      state: typical
+      variant: light-standard-ipadRegular
+      rule: platform-adaptivity
+      severity: high
+      region:
+        x: 414
+        y: 97
+        width: 1228
+        height: 470
+      summary: On regular-width iPad the deck list is the phone layout centred in the window, with no
+        sidebar, title or toolbar, and most of the screen empty.
+      image: screens/home.deckList/typical/light-standard-ipadRegular.png
+      run: 20261022T215823Z-82548
+    - platform: ipad
+      state: typical
+      variant: dark-ax5-ipadRegular
+      rule: platform-adaptivity
+      severity: high
+      region:
+        x: 424
+        y: 95
+        width: 1222
+        height: 1080
+      summary: The iPad layout is a stretched phone column with no sidebar or split view.
+      image: screens/home.deckList/typical/dark-ax5-ipadRegular.png
+      run: 20261022T215823Z-82548
+    - platform: mac
+      state: typical
+      variant: light-standard-macDefault
+      rule: platform-adaptivity
+      severity: high
+      region:
+        x: 566
+        y: 24
+        width: 1228
+        height: 436
+      summary: The Mac window shows the phone layout centred, with no source-list sidebar, toolbar or
+        window title, and the Import action as an in-content button.
+      image: screens/home.deckList/typical/light-standard-macDefault.png
+      run: 20261022T215823Z-82548
+    - platform: mac
+      state: typical
+      variant: dark-standard-macDefault
+      rule: platform-adaptivity
+      severity: high
+      region:
+        x: 566
+        y: 24
+        width: 1228
+        height: 436
+      summary: The Mac layout is a centred phone column with no sidebar or toolbar.
+      image: screens/home.deckList/typical/dark-standard-macDefault.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: typical
+      variant: light-standard-iphoneLarge
+      rule: type-hierarchy
+      severity: medium
+      region:
+        x: 0
+        y: 0
+        width: 880
+        height: 170
+      summary: The home screen has no title, studied-today line or sync button, so there is no clear reading
+        order. The top of the screen is an empty band.
+      image: screens/home.deckList/typical/light-standard-iphoneLarge.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: typical
+      variant: light-standard-iphoneLarge
+      rule: platform-system-components
+      severity: medium
+      region:
+        x: 30
+        y: 150
+        width: 820
+        height: 320
+      summary: "Light rows have no list background or separators. Dark rows are separate cards. Use the same system list style in both appearances."
+      image: screens/home.deckList/typical/light-standard-iphoneLarge.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: typical
+      variant: dark-standard-iphoneLarge
+      rule: platform-system-components
+      severity: medium
+      region:
+        x: 30
+        y: 155
+        width: 820
+        height: 310
+      summary: Each deck row is a separate rounded card, and the child deck's card is shifted right instead
+        of indented inside one list. This doesn't match the list-counts pattern or the light-mode rendering.
+      image: screens/home.deckList/typical/dark-standard-iphoneLarge.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: typical
+      variant: light-standard-iphoneLarge
+      rule: platform-idioms
+      severity: medium
+      region:
+        x: 30
+        y: 508
+        width: 312
+        height: 118
+      summary: '''Import Collection'' is a grey capsule floating in the content under the list. It belongs
+        in the toolbar or as a list action.'
+      image: screens/home.deckList/typical/light-standard-iphoneLarge.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: empty
+      variant: light-standard-iphoneLarge
+      rule: layout-alignment
+      severity: medium
+      region:
+        x: 30
+        y: 190
+        width: 730
+        height: 555
+      summary: In the empty state the icon, title and message are centred, but the Import Collection button
+        is left-aligned far below them. The error state centres its button.
+      image: screens/home.deckList/empty/light-standard-iphoneLarge.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: empty
+      variant: dark-ax5-iphoneLarge
+      rule: layout-alignment
+      severity: medium
+      region:
+        x: 30
+        y: 200
+        width: 800
+        height: 1330
+      summary: Centred empty-state text is followed by a left-aligned Import button, so the block has
+        two alignment lines.
+      image: screens/home.deckList/empty/dark-ax5-iphoneLarge.png
+      run: 20261022T215823Z-82548
+    - platform: ipad
+      state: empty
+      variant: light-standard-ipadRegular
+      rule: layout-alignment
+      severity: medium
+      region:
+        x: 420
+        y: 130
+        width: 1150
+        height: 560
+      summary: On iPad the empty-state message is centred, while its action button sits at the left edge
+        of the column.
+      image: screens/home.deckList/empty/light-standard-ipadRegular.png
+      run: 20261022T215823Z-82548
+    - platform: mac
+      state: empty
+      variant: dark-standard-macDefault
+      rule: layout-alignment
+      severity: medium
+      region:
+        x: 570
+        y: 70
+        width: 1000
+        height: 510
+      summary: On the Mac the empty-state content is centred, but its button is left-aligned below.
+      image: screens/home.deckList/empty/dark-standard-macDefault.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: overflow
+      variant: dark-ax5-iphoneLarge
+      rule: type-hierarchy
+      severity: low
+      region:
+        x: 210
+        y: 330
+        width: 350
+        height: 560
+      summary: At AX5 the counts wrap between each number and its label ('12,345' / 'new · 2' / 'learning
+        ·'), which makes them hard to scan. Each count should stay with its label.
+      image: screens/home.deckList/overflow/dark-ax5-iphoneLarge.png
+      run: 20261022T215823Z-82548
+    tasks:
+    - rule: type-hierarchy
+      state: typical
+      variant: light-standard-iphoneLarge
+      summary: The home screen has no title, studied-today line or sync button, so there is no clear reading
+        order. The top of the screen is an empty band.
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: platform-system-components
+      state: typical
+      variant: light-standard-iphoneLarge
+      summary: "Light rows have no list background or separators. Dark rows are separate cards. Use the same system list style in both appearances."
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: platform-system-components
+      state: typical
+      variant: dark-standard-iphoneLarge
+      summary: Each deck row is a separate rounded card, and the child deck's card is shifted right instead
+        of indented inside one list. This doesn't match the list-counts pattern or the light-mode rendering.
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: platform-idioms
+      state: typical
+      variant: light-standard-iphoneLarge
+      summary: '''Import Collection'' is a grey capsule floating in the content under the list. It belongs
+        in the toolbar or as a list action.'
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: layout-alignment
+      state: empty
+      variant: light-standard-iphoneLarge
+      summary: In the empty state the icon, title and message are centred, but the Import Collection button
+        is left-aligned far below them. The error state centres its button.
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: layout-alignment
+      state: empty
+      variant: dark-ax5-iphoneLarge
+      summary: Centred empty-state text is followed by a left-aligned Import button, so the block has
+        two alignment lines.
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: layout-alignment
+      state: empty
+      variant: light-standard-ipadRegular
+      summary: On iPad the empty-state message is centred, while its action button sits at the left edge
+        of the column.
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: layout-alignment
+      state: empty
+      variant: dark-standard-macDefault
+      summary: On the Mac the empty-state content is centred, but its button is left-aligned below.
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    history:
+    - date: '2026-10-22T22:02:47Z'
+      from: sketch
+      to: built
+      by: tools/mg critic
+      reason: critic run 20261022T215823Z-82548 graded its snapshots
   home.deckPage:
     status: sketch
     fix_rounds: 0
@@ -139,5 +470,560 @@ screens:
     status: sketch
     fix_rounds: 0
   onboarding.collectionImport:
-    status: sketch
+    status: built
     fix_rounds: 0
+    platforms:
+    - iphone
+    - ipad
+    - mac
+    evidence:
+      lint:
+        run: 20261022T215133Z-70326
+        status: pass
+      iphone:
+        snapshots:
+          run: 20261022T215132Z-70068
+          commit: 2c240d53744cc7e7331db048f6ecf3e255ce676e
+          status: pass
+          digest: 63327859ae28b4e76198d3ee59d05ae16b844e8f1d6a81bbc7238603e88b1924
+          input: 05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53
+        a11y:
+          run: 20261022T214624Z-67053
+          status: pass
+          commit: 2c240d53744cc7e7331db048f6ecf3e255ce676e
+          input: 05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53
+          states:
+            empty: pass
+            error: pass
+            loading: pass
+            overflow: pass
+            typical: pass
+        critic:
+          run: 20261022T215823Z-82548
+          session: s-20261022T215826Z-fa23f249
+          commit: b3886a641d00a29c63f28d7d98898b595b3b1923
+          status: fail
+          high: 20
+          medium: 3
+          low: 1
+          dropped: 0
+          date: '2026-10-22T22:02:47Z'
+      ipad:
+        snapshots:
+          run: 20261022T215132Z-70068
+          commit: 2c240d53744cc7e7331db048f6ecf3e255ce676e
+          status: pass
+          digest: b3d2b3f1c6e03b17ed7e834af744e8824d57831b65aee27e355f473185e470b1
+          input: 05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53
+        a11y:
+          run: 20261022T214125Z-64004
+          status: pass
+          commit: 2c240d53744cc7e7331db048f6ecf3e255ce676e
+          input: 05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53
+          states:
+            empty: pass
+            error: pass
+            loading: pass
+            overflow: pass
+            typical: pass
+        critic:
+          run: 20261022T215823Z-82548
+          session: s-20261022T215826Z-fa23f249
+          commit: b3886a641d00a29c63f28d7d98898b595b3b1923
+          status: pass
+          high: 0
+          medium: 2
+          low: 0
+          dropped: 0
+          date: '2026-10-22T22:02:47Z'
+      mac:
+        snapshots:
+          run: 20261022T215132Z-70068
+          commit: 2c240d53744cc7e7331db048f6ecf3e255ce676e
+          status: pass
+          digest: 1ccafb5d1a6bad5c5860c31a53423cde30c67ebc85b26e83c15fcb87b05b6376
+          input: 05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53
+        a11y:
+          run: 20261022T214006Z-61863
+          status: pass
+          commit: 9edc5a3322bd7628dd7fc3d344cb1396b8e3d37c
+          input: 05559d8728298676125a12690ce31cb2f977c8961cca4d9f6ada6b6788e17a53
+          states:
+            empty: pass
+            error: pass
+            loading: pass
+            overflow: pass
+            typical: pass
+        critic:
+          run: 20261022T215823Z-82548
+          session: s-20261022T215826Z-fa23f249
+          commit: b3886a641d00a29c63f28d7d98898b595b3b1923
+          status: pass
+          high: 0
+          medium: 3
+          low: 0
+          dropped: 0
+          date: '2026-10-22T22:02:47Z'
+    issues:
+    - platform: iphone
+      state: typical
+      variant: dark-ax5-iphoneSmall
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 680
+        height: 120
+      summary: The screen title is cut to 'Import Coll…' at AX5 on the small iPhone. It should wrap onto
+        two lines.
+      image: screens/onboarding.collectionImport/typical/dark-ax5-iphoneSmall.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: empty
+      variant: dark-ax5-iphoneSmall
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 680
+        height: 120
+      summary: The screen title is cut with an ellipsis at AX5 on the small iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/empty/dark-ax5-iphoneSmall.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: loading
+      variant: dark-ax5-iphoneSmall
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 680
+        height: 120
+      summary: The screen title is cut to 'Import Coll…' at AX5 on the small iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/loading/dark-ax5-iphoneSmall.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: error
+      variant: dark-ax5-iphoneSmall
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 680
+        height: 120
+      summary: The screen title is cut with an ellipsis at AX5 on the small iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/error/dark-ax5-iphoneSmall.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: overflow
+      variant: dark-ax5-iphoneSmall
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 680
+        height: 120
+      summary: The screen title is cut with an ellipsis at AX5 on the small iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/overflow/dark-ax5-iphoneSmall.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: typical
+      variant: light-ax4-iphoneSmall+hc+tmax
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 700
+        height: 120
+      summary: The screen title is cut to 'Import Colle…' at AX4 on the small iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/typical/light-ax4-iphoneSmall+hc+tmax.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: empty
+      variant: light-ax4-iphoneSmall+hc+tmax
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 700
+        height: 120
+      summary: The screen title is cut to 'Import Colle…' at AX4 on the small iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/empty/light-ax4-iphoneSmall+hc+tmax.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: loading
+      variant: light-ax4-iphoneSmall+hc+tmax
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 700
+        height: 120
+      summary: The screen title is cut with an ellipsis at AX4 on the small iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/loading/light-ax4-iphoneSmall+hc+tmax.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: error
+      variant: light-ax4-iphoneSmall+hc+tmax
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 700
+        height: 120
+      summary: The screen title is cut with an ellipsis at AX4 on the small iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/error/light-ax4-iphoneSmall+hc+tmax.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: overflow
+      variant: light-ax4-iphoneSmall+hc+tmax
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 700
+        height: 120
+      summary: The screen title is cut to 'Import Colle…' at AX4 on the small iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/overflow/light-ax4-iphoneSmall+hc+tmax.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: typical
+      variant: dark-ax5-iphoneLarge+hc+tmin
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 245
+        width: 800
+        height: 120
+      summary: The screen title is cut with an ellipsis at AX5 on the large iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/typical/dark-ax5-iphoneLarge+hc+tmin.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: empty
+      variant: dark-ax5-iphoneLarge+hc+tmin
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 245
+        width: 800
+        height: 120
+      summary: The screen title is cut with an ellipsis at AX5 on the large iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/empty/dark-ax5-iphoneLarge+hc+tmin.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: loading
+      variant: dark-ax5-iphoneLarge+hc+tmin
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 245
+        width: 800
+        height: 120
+      summary: The screen title is cut with an ellipsis at AX5 on the large iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/loading/dark-ax5-iphoneLarge+hc+tmin.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: error
+      variant: dark-ax5-iphoneLarge+hc+tmin
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 245
+        width: 800
+        height: 120
+      summary: The screen title is cut to 'Import Collec…' at AX5 on the large iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/error/dark-ax5-iphoneLarge+hc+tmin.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: overflow
+      variant: dark-ax5-iphoneLarge+hc+tmin
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 245
+        width: 800
+        height: 120
+      summary: The screen title is cut with an ellipsis at AX5 on the large iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/overflow/dark-ax5-iphoneLarge+hc+tmin.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: typical
+      variant: light-ax4-iphoneLarge+hc+rt+rm+tmin
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 245
+        width: 790
+        height: 120
+      summary: The screen title is cut to 'Import Collect…' at AX4 on the large iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/typical/light-ax4-iphoneLarge+hc+rt+rm+tmin.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: empty
+      variant: light-ax4-iphoneLarge+hc+rt+rm+tmin
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 245
+        width: 790
+        height: 120
+      summary: The screen title is cut with an ellipsis at AX4 on the large iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/empty/light-ax4-iphoneLarge+hc+rt+rm+tmin.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: loading
+      variant: light-ax4-iphoneLarge+hc+rt+rm+tmin
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 245
+        width: 790
+        height: 120
+      summary: The screen title is cut with an ellipsis at AX4 on the large iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/loading/light-ax4-iphoneLarge+hc+rt+rm+tmin.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: error
+      variant: light-ax4-iphoneLarge+hc+rt+rm+tmin
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 245
+        width: 790
+        height: 120
+      summary: The screen title is cut with an ellipsis at AX4 on the large iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/error/light-ax4-iphoneLarge+hc+rt+rm+tmin.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: overflow
+      variant: light-ax4-iphoneLarge+hc+rt+rm+tmin
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 245
+        width: 790
+        height: 120
+      summary: The screen title is cut with an ellipsis at AX4 on the large iPhone. It should wrap.
+      image: screens/onboarding.collectionImport/overflow/light-ax4-iphoneLarge+hc+rt+rm+tmin.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: typical
+      variant: light-standard-iphoneLarge+rt
+      rule: platform-system-components
+      severity: medium
+      region:
+        x: 0
+        y: 0
+        width: 880
+        height: 1800
+      summary: The import flow does not follow the sheet-form pattern. The bar at the top is empty, and
+        Cancel is a grey capsule pinned at the bottom left instead of a Cancel item in the sheet's toolbar
+        beside a confirm action.
+      image: screens/onboarding.collectionImport/typical/light-standard-iphoneLarge+rt.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: overflow
+      variant: light-standard-iphoneLarge+rt
+      rule: type-hierarchy
+      severity: medium
+      region:
+        x: 48
+        y: 1040
+        width: 345
+        height: 280
+      summary: The destructive 'Replace Collection' action looks almost the same as 'Choose File' and
+        'Cancel'. It needs prominent, destructive styling so the irreversible step stands out.
+      image: screens/onboarding.collectionImport/overflow/light-standard-iphoneLarge+rt.png
+      run: 20261022T215823Z-82548
+    - platform: ipad
+      state: typical
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      rule: layout-alignment
+      severity: medium
+      region:
+        x: 30
+        y: 170
+        width: 1630
+        height: 940
+      summary: On regular-width iPad the title hugs the window's left edge, while the body, preview and
+        buttons sit in a centred column far to the right. The two don't share an alignment line.
+      image: screens/onboarding.collectionImport/typical/light-standard-ipadRegular+rt+rm+tmax.png
+      run: 20261022T215823Z-82548
+    - platform: ipad
+      state: overflow
+      variant: dark-ax5-ipadRegular+tmin
+      rule: layout-alignment
+      severity: medium
+      region:
+        x: 30
+        y: 180
+        width: 1630
+        height: 1400
+      summary: The title is left-aligned to the window edge, while the content column starts much further
+        in.
+      image: screens/onboarding.collectionImport/overflow/dark-ax5-ipadRegular+tmin.png
+      run: 20261022T215823Z-82548
+    - platform: mac
+      state: typical
+      variant: light-standard-macDefault
+      rule: platform-idioms
+      severity: medium
+      region:
+        x: 588
+        y: 0
+        width: 1170
+        height: 1522
+      summary: 'The Mac layout is the iPhone stack: no title, buttons stacked vertically, Cancel at the
+        bottom left, and no default (accent) button. A Mac sheet puts Cancel and the default action together
+        at the bottom right.'
+      image: screens/onboarding.collectionImport/typical/light-standard-macDefault.png
+      run: 20261022T215823Z-82548
+    - platform: mac
+      state: typical
+      variant: dark-standard-macMinimum
+      rule: platform-idioms
+      severity: medium
+      region:
+        x: 208
+        y: 0
+        width: 1170
+        height: 1075
+      summary: The Mac sheet has no title and no default button. Its actions are stacked left-aligned,
+        with Cancel isolated at the bottom left.
+      image: screens/onboarding.collectionImport/typical/dark-standard-macMinimum.png
+      run: 20261022T215823Z-82548
+    - platform: mac
+      state: error
+      variant: dark-standard-macLarge+hc
+      rule: platform-idioms
+      severity: medium
+      region:
+        x: 1008
+        y: 48
+        width: 1168
+        height: 1888
+      summary: In a large Mac window the content is a narrow, untitled column with stacked buttons, and
+        Cancel sits about 1,800 px below them. That is a phone layout, not a Mac dialog.
+      image: screens/onboarding.collectionImport/error/dark-standard-macLarge+hc.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: typical
+      variant: light-xxxLarge-iphoneSmall+rt+rm
+      rule: glass-legibility
+      severity: medium
+      region:
+        x: 40
+        y: 1340
+        width: 320
+        height: 240
+      summary: Scrolling content is cut off hard against the pinned Cancel footer with no scroll edge
+        treatment, so the 'Choose File' button reads as a broken control.
+      image: screens/onboarding.collectionImport/typical/light-xxxLarge-iphoneSmall+rt+rm.png
+      run: 20261022T215823Z-82548
+    - platform: iphone
+      state: typical
+      variant: light-standard-iphoneLarge+rt
+      rule: copy-plain
+      severity: low
+      region:
+        x: 48
+        y: 385
+        width: 790
+        height: 170
+      summary: The intro paragraph is long and technical ('latest-format, collection-only .colpkg', 'pre-import
+        safety backup') and repeats in every state. It pushes the actions down at large text sizes.
+      image: screens/onboarding.collectionImport/typical/light-standard-iphoneLarge+rt.png
+      run: 20261022T215823Z-82548
+    tasks:
+    - rule: platform-system-components
+      state: typical
+      variant: light-standard-iphoneLarge+rt
+      summary: The import flow does not follow the sheet-form pattern. The bar at the top is empty, and
+        Cancel is a grey capsule pinned at the bottom left instead of a Cancel item in the sheet's toolbar
+        beside a confirm action.
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: type-hierarchy
+      state: overflow
+      variant: light-standard-iphoneLarge+rt
+      summary: The destructive 'Replace Collection' action looks almost the same as 'Choose File' and
+        'Cancel'. It needs prominent, destructive styling so the irreversible step stands out.
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: layout-alignment
+      state: typical
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      summary: On regular-width iPad the title hugs the window's left edge, while the body, preview and
+        buttons sit in a centred column far to the right. The two don't share an alignment line.
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: layout-alignment
+      state: overflow
+      variant: dark-ax5-ipadRegular+tmin
+      summary: The title is left-aligned to the window edge, while the content column starts much further
+        in.
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: platform-idioms
+      state: typical
+      variant: light-standard-macDefault
+      summary: 'The Mac layout is the iPhone stack: no title, buttons stacked vertically, Cancel at the
+        bottom left, and no default (accent) button. A Mac sheet puts Cancel and the default action together
+        at the bottom right.'
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: platform-idioms
+      state: typical
+      variant: dark-standard-macMinimum
+      summary: The Mac sheet has no title and no default button. Its actions are stacked left-aligned,
+        with Cancel isolated at the bottom left.
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: platform-idioms
+      state: error
+      variant: dark-standard-macLarge+hc
+      summary: In a large Mac window the content is a narrow, untitled column with stacked buttons, and
+        Cancel sits about 1,800 px below them. That is a phone layout, not a Mac dialog.
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    - rule: glass-legibility
+      state: typical
+      variant: light-xxxLarge-iphoneSmall+rt+rm
+      summary: Scrolling content is cut off hard against the pinned Cancel footer with no scroll edge
+        treatment, so the 'Choose File' button reads as a broken control.
+      from: 20261022T215823Z-82548
+      open: true
+      since: 20261022T215823Z-82548
+    history:
+    - date: '2026-10-22T22:02:47Z'
+      from: sketch
+      to: built
+      by: tools/mg critic
+      reason: critic run 20261022T215823Z-82548 graded its snapshots
