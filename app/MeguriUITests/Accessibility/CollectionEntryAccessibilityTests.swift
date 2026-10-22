@@ -32,7 +32,11 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
                         #else
                         XCTAssertEqual(value.value as? String, "42 of 100")
                         #endif
+                        #if os(macOS)
+                        XCTAssertEqual(app.staticTexts["onboarding.collectionImport.progress.stage"].value as? String, "Copying collection…")
+                        #else
                         XCTAssertEqual(app.staticTexts["onboarding.collectionImport.progress.stage"].label, "Copying collection…")
+                        #endif
                     }
                     guard state == "overflow" else {
                         return AccessibilityAudit.StateResult(state: state, findings: [], touchTargets: [])
