@@ -316,3 +316,14 @@ pass `20261022T082719Z-20345` (one test, zero skips). Public AX read
 is pending. Strict real DOM/hit assertions remain unchanged. One bounded source
 consistency pass only; no builds/tests/commits. iPhone audit 2 remains running;
 prior iPad pass predates the phone layout change. No Unit or full-gate acceptance.
+
+Round 6: the reviewer withdrew the production accessibility finding.
+Later Mac captures contain actual static text values with empty labels.
+The test now matches label or value with the same exact fixture patterns.
+DOM existence, hittability and all audit assertions remain required.
+Keep failed audits `20261022T081410Z-2897`, `20261022T082500Z-16034`
+and `20261022T083209Z-26869`; the test queried the wrong property.
+iPhone `20261022T082856Z-22245`: all screens and variants passed.
+iPad `20261022T083354Z-28853`: all screens and variants passed.
+Mac validation remains pending. Native AX permission is a separate user step.
+No Unit acceptance. The full gate remains required.

@@ -65,7 +65,7 @@ final class LocalReviewAccessibilityTests: XCTestCase {
             #else
             let cardTexts = app.webViews.staticTexts
             #endif
-            let question = cardTexts.matching(NSPredicate(format: "label MATCHES %@", "Question [0-9]+")).firstMatch
+            let question = cardTexts.matching(NSPredicate(format: "label MATCHES %@ OR value MATCHES %@", "Question [0-9]+", "Question [0-9]+")).firstMatch
             try require(question, "rendered question, \(variant)")
             try wait("question ready, \(variant)") { reveal.isEnabled && reveal.isHittable && question.isHittable }
             results["review.question", default: []].append(try audit(app, variant: variant, suppressions: suppressions))
@@ -74,7 +74,7 @@ final class LocalReviewAccessibilityTests: XCTestCase {
             reveal.clickOrTap()
             let good = element(app, "review.session.rate.good")
             try require(good, "answer controls, \(variant)")
-            let answer = cardTexts.matching(NSPredicate(format: "label MATCHES %@", "Answer [0-9]+")).firstMatch
+            let answer = cardTexts.matching(NSPredicate(format: "label MATCHES %@ OR value MATCHES %@", "Answer [0-9]+", "Answer [0-9]+")).firstMatch
             try require(answer, "rendered answer, \(variant)")
             try wait("answer ready, \(variant)") { good.isEnabled && good.isHittable && answer.isHittable }
             results["review.answer", default: []].append(try audit(app, variant: variant, suppressions: suppressions))
