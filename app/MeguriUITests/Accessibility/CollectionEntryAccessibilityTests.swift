@@ -22,6 +22,7 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
                         let value = app.descendants(matching: .any)
                             .matching(identifier: "onboarding.collectionImport.progress.value").firstMatch
                         XCTAssertTrue(value.exists)
+                        XCTAssertEqual(value.elementType, .progressIndicator)
                         XCTAssertGreaterThanOrEqual(value.frame.width, 44)
                         XCTAssertGreaterThanOrEqual(value.frame.height, 44)
                         XCTAssertEqual(value.label, "Copying collection…")

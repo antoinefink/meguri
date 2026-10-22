@@ -2,6 +2,41 @@
   "version": 1,
   "suppressions": [
     {
+      "identifier": "onboarding.collectionImport.preview.heading",
+      "auditType": "contrast",
+      "reason": "At the largest text size in iPad run 20261022T205058Z-15571 the preview heading is offscreen. The scroll-edge whole-frame limitation applies (R1977); textPrimary/backgroundPrimary is a declared pair checked by ContrastTests (R1979)."
+    },
+    {
+      "identifier": "onboarding.collectionImport.preview.destination",
+      "auditType": "contrast",
+      "reason": "At the largest text size in iPad run 20261022T205058Z-15571 the destination line is offscreen. The scroll-edge whole-frame limitation applies (R1977); textPrimary/backgroundPrimary is a declared pair checked by ContrastTests (R1979)."
+    },
+    {
+      "identifier": "onboarding.collectionImport.preview.counts",
+      "auditType": "contrast",
+      "reason": "At the largest text size in iPad run 20261022T205058Z-15571 the counts line is offscreen. The scroll-edge whole-frame limitation applies (R1977); textPrimary/backgroundPrimary is a declared pair checked by ContrastTests (R1979)."
+    },
+    {
+      "identifier": "onboarding.collectionImport.preview.safety",
+      "auditType": "contrast",
+      "reason": "At the largest text size in iPad run 20261022T205058Z-15571 the safety text is offscreen. The scroll-edge whole-frame limitation applies (R1977); textPrimary/backgroundPrimary is a declared pair checked by ContrastTests (R1979)."
+    },
+    {
+      "identifier": "onboarding.collectionImport.error",
+      "auditType": "contrast",
+      "reason": "At the largest text size in iPad run 20261022T205058Z-15571 the error text is offscreen. The scroll-edge whole-frame limitation applies (R1977); statusError/backgroundPrimary is a declared pair checked by ContrastTests (R1979)."
+    },
+    {
+      "identifier": "onboarding.collectionImport.progress.stage",
+      "auditType": "contrast",
+      "reason": "At the largest text size in iPad run 20261022T205058Z-15571 the stage text is offscreen. The scroll-edge whole-frame limitation applies (R1977); textPrimary/backgroundPrimary is a declared pair checked by ContrastTests (R1979)."
+    },
+    {
+      "identifier": "onboarding.collectionImport.choose",
+      "auditType": "contrast",
+      "reason": "At the largest text size in iPad run 20261022T205058Z-15571 the Choose File text is offscreen. The scroll-edge whole-frame limitation applies (R1977); textPrimary/backgroundPrimary is a declared pair checked by ContrastTests (R1979)."
+    },
+    {
       "identifier": "onboarding.collectionImport.confirm",
       "auditType": "contrast",
       "reason": "At the largest text sizes in the overflow state the text runs on under the Cancel bar, where the scroll edge effect fades it until the screen is scrolled, and the audit measures the whole frame, faded part included (iPhone, 2026-10-22; run 20261022T202045Z-94081). The text colours are token pairings ContrastTests checks (R1979)."

@@ -86,9 +86,11 @@ struct CollectionEntryContent: View {
                     if let facts = presentation.facts {
                         VStack(alignment: .leading, spacing: Spacing.small) {
                             Text("Collection Preview").font(.headline)
+                                .accessibilityIdentifier("onboarding.collectionImport.preview.heading")
                             Text("\(facts.notes) notes · \(facts.cards) cards · \(facts.reviews) reviews")
                                 .accessibilityIdentifier("onboarding.collectionImport.preview.counts")
                             Text("Destination: this device")
+                                .accessibilityIdentifier("onboarding.collectionImport.preview.destination")
                             Text(facts.replacingExisting
                                 ? "This will replace the local collection on this device. Meguri must finish a safety backup of your current collection, including saved answers, before replacing it. If that backup fails, import stops."
                                 : "There is no local collection file to replace. A pre-import safety backup is not needed.")
@@ -104,25 +106,29 @@ struct CollectionEntryContent: View {
                             .keyboardShortcut(.defaultAction)
                             .accessibilityIdentifier("onboarding.collectionImport.confirm")
                         }
+                        .foregroundStyle(.token(.textPrimary))
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("onboarding.collectionImport.preview")
                     }
                     if let progress = presentation.progress {
                         VStack(alignment: .leading, spacing: Spacing.small) {
                             Text(verbatim: progress.title)
+                                .foregroundStyle(.token(.textPrimary))
                                 .accessibilityIdentifier("onboarding.collectionImport.progress.stage")
-                            VStack {
+                            Group {
                                 if let total = progress.total {
                                     ProgressView(value: Double(progress.completed), total: Double(max(1, total)))
                                 } else { ProgressView() }
                             }
                             .frame(minWidth: 44, minHeight: 44)
                             .contentShape(.accessibility, Rectangle())
-                            .accessibilityElement(children: .ignore)
                             .accessibilityLabel(progress.title)
                             .accessibilityValue(Text(progress.total.map { "\(progress.completed) of \($0)" } ?? "In progress"))
                             .accessibilityIdentifier("onboarding.collectionImport.progress.value")
-                            if !presentation.canCancel { Text("Finishing activation. The new collection will remain active.") }
+                            if !presentation.canCancel {
+                                Text("Finishing activation. The new collection will remain active.")
+                                    .foregroundStyle(.token(.textPrimary))
+                            }
                         }
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("onboarding.collectionImport.progress")
@@ -153,6 +159,7 @@ struct CollectionEntryContent: View {
                         }
                         Button(action: actions.chooseFile) {
                             Text("Choose File")
+                                .foregroundStyle(.token(.textPrimary))
                                 .frame(minWidth: 44, minHeight: 44)
                                 .contentShape(Rectangle())
                         }

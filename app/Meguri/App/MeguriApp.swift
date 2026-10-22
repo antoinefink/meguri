@@ -95,7 +95,7 @@ struct MeguriApp: App {
 
     @ViewBuilder private var root: some View {
         #if MEGURI_TEST_HOOKS
-        TestHooks.Root(session: hooks, navigation: navigation) {
+        TestHooks.Root(session: hooks, configuration: configuration, navigation: navigation) {
             RootView(configuration: configuration, navigation: navigation, features: features, uiStateStore: uiStateStore, collection: collection)
         }
         #else

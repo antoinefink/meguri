@@ -62,8 +62,21 @@ enum TestHooks {
     /// the navigation state probe.
     struct Root<Content: View>: View {
         let session: Session
+        let configuration: LaunchConfiguration
         let navigation: AppNavigation
         @ViewBuilder let content: () -> Content
+        @State private var importSheetPresented = true
+
+        private var collectionImportContent: AnyView? {
+            guard configuration.initialPresentation?.style == .sheet else { return nil }
+            switch session.options.route?.path {
+            case "collection/import/empty", "collection/import/typical", "collection/import/overflow",
+                 "collection/import/error", "collection/import/loading":
+                return configuration.initialPresentation?.content
+            default:
+                return nil
+            }
+        }
 
         var body: some View {
             if let error = session.error {
@@ -74,7 +87,23 @@ enum TestHooks {
                 // hierarchy check or a screenshot needs, nothing scrolls
                 // under it, and the iPhone's overlaid sidebar leaves it be.
                 VStack(spacing: 0) {
-                    content()
+                    if let collectionImportContent {
+                        // Audit the prepared import sheet without unrelated,
+                        // dimmed shell labels behind its native presentation.
+                        ColorToken.backgroundPrimary.color
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .ignoresSafeArea()
+                            #if os(macOS)
+                            .frame(minWidth: WindowMetrics.minimum.width, minHeight: WindowMetrics.minimum.height)
+                            #endif
+                            .sheet(isPresented: $importSheetPresented) {
+                                collectionImportContent
+                                    .modifier(LaunchEnvironment(configuration: configuration))
+                            }
+                            .modifier(LaunchEnvironment(configuration: configuration))
+                    } else {
+                        content()
+                    }
                     if session.shell?.probe == true {
                         ShellStateProbe(navigation: navigation)
                     }
