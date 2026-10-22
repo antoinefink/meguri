@@ -633,3 +633,11 @@ constant types and run the same first-import case. No acceptance claim.
 - Mac first import `ui-test/20261022T200319Z-71476`: PASS, 1 test, no skips. Native picker, real answer, hide/resume and restart checks pass.
 - Mac replacement `ui-test/20261022T200459Z-73519`: PASS, 1 test, no skips. Both picker journeys now pass on all three platforms.
 - Catch-up `20261022T200513Z-74897`: PASS.
+
+### Contrast and large-text audit
+
+- Visual comparison `snapshots/20261022T200637Z-75874`: PASS, 225 selected cases, 0 failures, 490 deferred entries outside the filter. Input digest `947cc48f6457f3fb77c860f006cdf3cfcd7c52dafa2b1e26f88fd26950355f6a`.
+- iPhone `a11y/20261022T201355Z-88814`: FAIL, 2 tests. Import/Home button contrast fails; two fixed swipes do not reach overflow confirmation at the largest text size. Preserve the failed receipt. Error/loading variants remain unverified in this run.
+- Fixer `s-20261022T201813Z-fdfd892f`, base `2a424c33`, export `20261022T201837Z-92495`, checkpoint `64a205b1`.
+- Review round 2: no P0–P2 findings. Use existing neutral button tokens; keep confirmation emphasis, shortcuts, actions and guards. Bound navigation to 24 gestures and retain explicit reachability, audit and touch-target assertions. No suppressions added.
+- Current audits and new visual baselines remain pending after this paint change.
