@@ -12,6 +12,7 @@ pub mod states;
 pub mod timing;
 
 pub mod counts;
+pub mod options;
 pub mod queue;
 pub mod session;
 pub mod sqlfns;

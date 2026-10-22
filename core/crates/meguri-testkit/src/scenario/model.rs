@@ -958,7 +958,10 @@ pub enum Step {
     UpdatePreset(DraftArgs),
     /// deck-options-ops.md E1: the deck options screen's Save (boxed: the
     /// largest arguments by far).
+    #[serde(deserialize_with = "op_mapping")]
     SaveDeckOptions(Box<SaveDeckOptionsArgs>),
+    #[serde(deserialize_with = "op_mapping")]
+    SetSchedulingPrefs(SchedulingPrefsArgs),
     /// fsrs-policy-ops.md F2.
     EnableFsrs(NoArgs),
     /// fsrs-policy-ops.md F3.
@@ -1040,7 +1043,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 68] = [
+    pub const NAMES: [&'static str; 69] = [
         "advance",
         "set_clock",
         "add_note",
@@ -1077,6 +1080,7 @@ impl Step {
         "reposition",
         "update_preset",
         "save_deck_options",
+        "set_scheduling_prefs",
         "enable_fsrs",
         "enable_v3",
         "legacy_update",
@@ -1153,6 +1157,7 @@ impl Step {
             Step::Reposition(_) => "reposition",
             Step::UpdatePreset(_) => "update_preset",
             Step::SaveDeckOptions(_) => "save_deck_options",
+            Step::SetSchedulingPrefs(_) => "set_scheduling_prefs",
             Step::EnableFsrs(_) => "enable_fsrs",
             Step::EnableV3(_) => "enable_v3",
             Step::LegacyUpdate(_) => "legacy_update",
@@ -1530,12 +1535,20 @@ pub struct SaveDeckOptionsArgs {
     #[serde(default, deserialize_with = "present")]
     pub preset: Option<String>,
     /// New values for that preset's options; the others keep theirs.
-    #[serde(default, deserialize_with = "present")]
+    #[serde(default, deserialize_with = "present_mapping")]
     pub options: Option<DeckOptionsChange>,
     /// The deck's own desired retention: `None` (missing) keeps it,
     /// `Some(None)` (null) removes it, `Some(Some(r))` sets it.
     #[serde(default, deserialize_with = "present")]
     pub deck_desired_retention: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "present_mapping")]
+    pub limits: Option<DeckOptionsLimits>,
+    #[serde(default, deserialize_with = "present_mapping")]
+    pub globals: Option<DeckOptionsGlobals>,
+    #[serde(default, deserialize_with = "present")]
+    pub remove: Option<Vec<String>>,
+    #[serde(default)]
+    pub subtree: bool,
 }
 
 /// The options a `save_deck_options` step changes (deck-options-ops.md E1):
@@ -1590,6 +1603,8 @@ pub struct DeckOptionsChange {
     pub historical_retention: Option<f64>,
     #[serde(default, deserialize_with = "present")]
     pub ignore_reviews_before: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub insertion_order: Option<InsertionOrder>,
 }
 
 /// `bury` and `suspend: {cards} | {notes}` (sched-ops.md J2, J3): exactly
@@ -3382,4 +3397,41 @@ pub struct MediaFill {
 #[serde(deny_unknown_fields)]
 pub struct MediaNames {
     pub names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InsertionOrder {
+    Sequential,
+    Random,
+}
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeckOptionsLimits {
+    #[serde(default, deserialize_with = "present")]
+    pub new: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "present")]
+    pub review: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "present")]
+    pub new_today: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "present")]
+    pub review_today: Option<Option<i64>>,
+}
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeckOptionsGlobals {
+    #[serde(default, deserialize_with = "present")]
+    pub new_cards_ignore_review_limit: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub apply_all_parent_limits: Option<bool>,
+}
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SchedulingPrefsArgs {
+    #[serde(default, deserialize_with = "present")]
+    pub rollover: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
+    pub learn_ahead_minutes: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
+    pub load_balancer: Option<bool>,
 }

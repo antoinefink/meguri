@@ -24,6 +24,7 @@ use crate::scenario::{FsrsNextInput, FsrsNextRequest, LogicalRef, ObservationArg
 
 /// Registers the `fsrs_next` and `timing` kinds and the `reopen` op.
 pub(super) fn register(registry: &mut Registry) {
+    super::deck_options::register(registry);
     registry.op("answer", answer_op);
     for name in ["bury", "suspend", "unsuspend", "unbury_deck", "forget", "grade_now"] {
         registry.op(name, manual_op);

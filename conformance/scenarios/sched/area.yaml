@@ -124,3 +124,10 @@ active:
   - "memory/on-the-fly"
   - "revlog/kept-rows"
   - "steps/rollover-answer"
+  # U49: real draft/save adapters; complete frozen comparisons have a focused suite.
+  - "options/remap-steps"
+  - "options/undo-save"
+  - "options/insertion-order-switch"
+  - "options/missing-preset"
+  - "options/live-save"
+  - "memory/recompute"

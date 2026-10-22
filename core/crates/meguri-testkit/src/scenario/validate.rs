@@ -98,6 +98,16 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         if let Step::SaveDeckOptions(args) = step {
             save_deck_options(args).map_err(at)?;
         }
+        if let Step::SetSchedulingPrefs(a) = step {
+            if a.rollover.is_none() && a.learn_ahead_minutes.is_none() && a.load_balancer.is_none() {
+                return Err(at(FormatError::new("set_scheduling_prefs needs a setting")));
+            }
+            if a.rollover.is_some_and(|v| !(0..=23).contains(&v))
+                || a.learn_ahead_minutes.is_some_and(|v| !(0..=999).contains(&v))
+            {
+                return Err(at(FormatError::new("scheduling preference out of range")));
+            }
+        }
         notetype_op(step).map_err(at)?;
         record_op(step).map_err(at)?;
         deck_op(step).map_err(at)?;
@@ -474,6 +484,23 @@ fn save_deck_options(args: &SaveDeckOptionsArgs) -> Result<(), FormatError> {
     }
     if args.preset.as_ref().is_some_and(String::is_empty) {
         return Err(FormatError::new("save_deck_options preset is a non-empty name"));
+    }
+    if let Some(limits) = &args.limits {
+        for value in [limits.new, limits.review, limits.new_today, limits.review_today]
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            if !(0..=9999).contains(&value) {
+                return Err(FormatError::new("deck limit out of range"));
+            }
+        }
+    }
+    if let Some(names) = &args.remove {
+        let unique = names.iter().collect::<BTreeSet<_>>();
+        if names.is_empty() || unique.len() != names.len() || names.iter().any(String::is_empty) {
+            return Err(FormatError::new("remove needs distinct nonempty preset names"));
+        }
     }
     Ok(())
 }

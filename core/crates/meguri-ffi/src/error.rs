@@ -9,6 +9,9 @@ use meguri_engine::EngineError;
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Error)]
 pub enum CoreError {
+    DeckOptionsInvalid {
+        issues: Vec<crate::deck_options::OptionIssue>,
+    },
     SchedOpRefused {
         refusal: crate::sched_ops::SchedOpRefusal,
     },
@@ -91,6 +94,7 @@ pub enum CoreError {
 impl fmt::Display for CoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            CoreError::DeckOptionsInvalid { .. } => write!(f, "{self:?}"),
             CoreError::SchedOpRefused { .. } => write!(f, "{self:?}"),
             CoreError::Stale { .. } => write!(f, "{self:?}"),
             CoreError::StaleGeneration { .. } => write!(f, "{self:?}"),
@@ -127,6 +131,9 @@ impl std::error::Error for CoreError {}
 impl From<EngineError> for CoreError {
     fn from(error: EngineError) -> CoreError {
         match error {
+            EngineError::DeckOptionsInvalid(issues) => CoreError::DeckOptionsInvalid {
+                issues: issues.into_iter().map(Into::into).collect(),
+            },
             EngineError::SchedOp(reason) => CoreError::SchedOpRefused { refusal: reason.into() },
             EngineError::InvalidTypeAnswerReplacement => CoreError::InvalidTypeAnswerReplacement,
             EngineError::Cancelled => CoreError::Cancelled,
@@ -186,6 +193,9 @@ impl From<EngineError> for CoreError {
 impl From<CoreError> for EngineError {
     fn from(error: CoreError) -> EngineError {
         match error {
+            CoreError::DeckOptionsInvalid { issues } => {
+                EngineError::DeckOptionsInvalid(issues.into_iter().map(Into::into).collect())
+            }
             CoreError::SchedOpRefused { refusal } => EngineError::SchedOp(refusal.into()),
             CoreError::Stale { table, key } => EngineError::Stale {
                 table: table.into(),

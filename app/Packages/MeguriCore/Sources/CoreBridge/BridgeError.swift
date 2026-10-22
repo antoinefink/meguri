@@ -4,6 +4,7 @@ internal import MeguriCoreBindings
 /// The errors a core call can throw, as Swift sees them (KTD9). Every
 /// CoreBridge call throws only this type.
 public enum BridgeError: Error, Sendable, Hashable {
+    case deckOptionsInvalid([OptionIssue])
     case stale(table: CoreTable, key: String)
     case staleGeneration(planned: UInt64, current: UInt64)
     case undoUnavailable(reason: ReviewDisabledReason)
@@ -55,6 +56,7 @@ extension BridgeError {
 
     init(_ error: MeguriCoreBindings.CoreError) {
         switch error {
+        case .DeckOptionsInvalid(let issues): self = .deckOptionsInvalid(issues.map(OptionIssue.init))
         case .Stale(let table, let key): self = .stale(table: CoreTable(table), key: key)
         case .StaleGeneration(let planned, let current): self = .staleGeneration(planned: planned, current: current)
         case .UndoUnavailable(let reason): self = .undoUnavailable(reason: ReviewDisabledReason(reason))

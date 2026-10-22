@@ -7,6 +7,7 @@
 mod browser;
 mod cards;
 pub mod clock;
+mod deck_options;
 mod decks;
 mod host_audit;
 pub mod live;

@@ -75,6 +75,7 @@ import Testing
             "UndoJob.result", "peek_undo", "peek_redo", "try_pending_review_restore",
             "DeckRenameJob.result", "DeckMoveJob.result", "DeckCollapseJob.result", "start_undo", "start_redo", "start_add_notes", "NoteAdditionJob.result",
             "parse_due_days", "start_sched_op", "SchedOpJob.result", "start_buried_kinds", "BuriedKindsJob.result",
+            "DeckOptionsEditor.snapshot", "DeckOptionsEditor.edit", "DeckOptionsEditor.validate", "parse_option_steps", "format_option_steps", "start_deck_options", "start_save_deck_options", "start_option_ignore_count", "start_scheduling_preferences", "start_save_scheduling_preferences", "DeckOptionsReadJob.result", "DeckOptionsSaveJob.result", "OptionIgnoreCountJob.result", "SchedulingPreferencesJob.result", "SchedulingPreferencesSaveJob.result", "validate_scheduling_preferences",
         ])
         for call in BridgeCall.all {
             #expect(call.interval.category == .bridge)

@@ -260,6 +260,24 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let startBuriedKinds = BridgeCall("start_buried_kinds")
     public static let buriedKindsJobResult = BridgeCall("BuriedKindsJob.result")
 
+    public static let deckOptionsEditorSnapshot = BridgeCall("DeckOptionsEditor.snapshot")
+    public static let deckOptionsEditorEdit = BridgeCall("DeckOptionsEditor.edit")
+    public static let deckOptionsEditorValidate = BridgeCall("DeckOptionsEditor.validate")
+    public static let parseOptionSteps = BridgeCall("parse_option_steps")
+    public static let formatOptionSteps = BridgeCall("format_option_steps")
+    public static let startDeckOptions = BridgeCall("start_deck_options")
+    public static let startSaveDeckOptions = BridgeCall("start_save_deck_options")
+    public static let startOptionIgnoreCount = BridgeCall("start_option_ignore_count")
+    public static let startSchedulingPreferences = BridgeCall("start_scheduling_preferences")
+    public static let startSaveSchedulingPreferences = BridgeCall("start_save_scheduling_preferences")
+    public static let deckOptionsReadJobResult = BridgeCall("DeckOptionsReadJob.result")
+    public static let deckOptionsSaveJobResult = BridgeCall("DeckOptionsSaveJob.result")
+    public static let optionIgnoreCountJobResult = BridgeCall("OptionIgnoreCountJob.result")
+    public static let schedulingPreferencesJobResult = BridgeCall("SchedulingPreferencesJob.result")
+    public static let schedulingPreferencesSaveJobResult = BridgeCall("SchedulingPreferencesSaveJob.result")
+
+    public static let validateSchedulingPreferences = BridgeCall("validate_scheduling_preferences")
+
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
         startOpen, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, deckStudyState, deckDescriptionHtml,
@@ -278,5 +296,6 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         suspend, resume, undoJobResult, peekUndo, peekRedo,
         tryPendingReviewRestore, deckRenameJobResult, deckMoveJobResult, deckCollapseJobResult, startUndo, startRedo, startAddNotes, noteAdditionJobResult,
         parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,
+        deckOptionsEditorSnapshot, deckOptionsEditorEdit, deckOptionsEditorValidate, parseOptionSteps, formatOptionSteps, startDeckOptions, startSaveDeckOptions, startOptionIgnoreCount, startSchedulingPreferences, startSaveSchedulingPreferences, deckOptionsReadJobResult, deckOptionsSaveJobResult, optionIgnoreCountJobResult, schedulingPreferencesJobResult, schedulingPreferencesSaveJobResult, validateSchedulingPreferences,
     ]
 }

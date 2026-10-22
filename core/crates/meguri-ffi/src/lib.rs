@@ -128,3 +128,5 @@ mod tests {
         assert_eq!(info.debug_assertions, cfg!(debug_assertions));
     }
 }
+
+pub mod deck_options;

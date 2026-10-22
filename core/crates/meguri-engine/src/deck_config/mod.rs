@@ -70,3 +70,10 @@ pub fn menu_name(
         candidate.to_owned()
     })
 }
+
+/// P4 factory for staged options; no ids allocated and no write yet.
+pub fn added_defaults() -> DeckConfig {
+    let mut preset = defaults();
+    preset.config.set_fsrs_params_6(ops::FSRS6.to_vec());
+    preset
+}
