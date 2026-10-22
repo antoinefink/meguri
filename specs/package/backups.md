@@ -232,3 +232,6 @@ Lists what Restore can offer (R1637, U127, U133a), without opening any file.
 | 150k cards: at most 2 s, peak memory recorded | `core/crates/meguri-package/benches/backup.rs` |
 
 Goldens: every `package/backups` scenario has one, recorded by the oracle with the ops and observations of `specs/conformance/backup-ops.md` (F2 to F6). They agree with every expected value in B2.3, B3, B5.3 and B6. Three goldens hold Anki's side of a deviation, and the deviation gives Meguri's: `name-variants` and `dst-gap-name` (B2.3, B3), `limits-write-unknown-member` (B6.2). The scenarios fail goldens-check and the T0 run until U126's adapter declares the ops and kinds and the testkit's scenario model reads them (`backup-ops` F8).
+
+RF2 evidence note: prepared goldens remain on the evidence branch until serial oracle integration.
+The cases `package/backups/period-boundaries` and `package/backups/name-variants` require scoped regeneration after neutral metadata changes. Their input values and assertions remain unchanged.

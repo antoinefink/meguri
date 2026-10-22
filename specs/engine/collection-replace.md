@@ -1,22 +1,22 @@
 # Verified collection replace
 
 Spec: engine/collection-replace
-Requirements: R2004 (replace primitive), R2005, R1489, R1548 (the pause signal; U113 and U107 enforce it), R1638 (data side); supports R1543, R1626, R2003, R2010, R2019, and R1478, R1479, R1482, R2013, R2016 through the open gate
+Requirements: R2004 (replace primitive), R2005, R1489, R1548 (publication decision; U113/U114 resolve it), R2051, R2056, R2066, R1638 (data side); supports R1543, R1626, R2003, R2010, R2019, and R1478, R1479, R1482, R2013, R2016 through the open gate
 Anki: 26.09.3 for R7 (what a replacement from a collection package stamps); every other section is Meguri design
 Scenarios: conformance/scenarios/package/collection-package/ (R7); tests in `core/crates/meguri-engine/tests/replace.rs`
 
-The only way Meguri swaps the collection file for another file: a full download or upload (U109), a restore (U127) and a `.colpkg` import (U124). The primitive checks the incoming file with the open gate and the integrity check, applies the change its reason calls for, makes the file self-contained, and swaps it in during the exclusive phase as the swap step of `engine/lifecycle#L8`. It also keeps the device-only state that replacements and the sync pause need (R6). Reading and inspecting packages is `package/container`.
+The only way Meguri swaps the collection file for another file: a full download or upload (U109), a restore (U127) and a `.colpkg` import (U124). The primitive checks the incoming file with the open gate and the integrity check, applies the change its reason calls for, makes the file self-contained, and swaps it in during the exclusive phase as the swap step of `engine/lifecycle#L8`. It also keeps the device-only replacement and publication recovery state (R6). Reading and inspecting packages is `package/container`.
 
 ## R1. Reasons
 
-| Reason | Caller | The staged file comes from | Change before the swap (R3 step 3) | Sync pause (R6) |
+| Reason | Caller | The staged file comes from | Change before the swap (R3 step 3) | Publication recovery (R6) |
 |---|---|---|---|---|
 | `Restore` | U127 | inspecting a backup (`package/container#P12`) | the primitive's package stamps: `scm` and `mod` set to the replace instant (R7) | set |
-| `ColpkgImport` | U124 | inspecting a `.colpkg` | the package stamps, then any change U124 passes | set |
-| `FullDownload` | U109 | the server's file, streamed into staging | U109's change: `ls` = `mod` (R1543) | untouched |
-| `FullUpload` | U109 | the file U109 transformed and uploaded | none (U109 changed it before the upload) | untouched |
+| `ColpkgImport` | U166 minimal caller; U124 full flow | inspecting a `.colpkg` | the package stamps, then any change U124 passes | set |
+| `FullDownload` | U109 | the server's file, streamed into staging | U109's change: `ls` = `mod` (R1543) | preserve the cloud decision; manual policy remains separate |
+| `FullUpload` | U109 | the file U109 transformed and uploaded | none (U109 changed it before the upload) | preserve the cloud decision; manual policy remains separate |
 
-The package stamps are Anki's behavior (R7), so the primitive applies them itself for both package reasons; U127 passes no change, and U124 passes only what its own spec adds. `ColpkgImport` exists in the type from this unit on; its caller lands with U124.
+The package stamps are Anki's behavior (R7), so the primitive applies them itself for both package reasons; U127 passes no change, and U124 passes only what its own spec adds. `ColpkgImport` exists in the type from this unit on; U166 supplies its minimal collection-only caller; U124 supplies the full flow.
 
 ## R2. Input
 
@@ -50,61 +50,102 @@ The result is one self-contained file: everything committed is in it, and it nee
 Runs as the swap of `engine/lifecycle#L8` (step 2), after L8 step 1 has set the phase to `Replacing` and closed every connection to the live collection: every reader (U107's snapshot reader and its stage attachment and the derived-store attachments included, after their read transactions end), then the writer with its checkpoint (`storage/open-and-connections#C10`).
 
 1. The live `collection.anki2-wal` must be absent or empty (0 bytes). If not, nothing is changed and the replace fails with `LiveWalNotEmpty`: L8 reopens the old file and keeps the generation.
-2. For `Restore` and `ColpkgImport`, record the sync pause (R6.2).
+2. For `Restore` and `ColpkgImport`, durably record the replacement intent and publication fence (R6.2).
 3. Remove the live `collection.anki2-shm` and `collection.anki2-wal`. They hold nothing (step 1); a stale `-wal` left next to the new file would be applied to it by SQLite.
 4. Rename the staged file over `collection.anki2`: one `rename`, on one file system.
 5. A full sync of the collection directory.
 6. Remove the staging directory (best effort; the leftover sweep removes what a kill leaves, `package/container#P9`).
 
-Then L8 steps 3 to 5 run as written there: the open through the gate, the undo history cleared, the generation plus one, `CollectionReplaced{generation}` published once, the day clock restarted, readers reopened lazily, and every `GenerationListener` told, so the derived store binds to the new file and rebuilds (R1489, `storage/derived-store`). With no collection open before, R5 has no live file to check, and step 4 creates `collection.anki2`.
+Complete R6.3 durable activation before opening any writer. Then L8 steps 3 to 5 run as written there: the open through the gate, the undo history cleared, the generation plus one, `CollectionReplaced{generation}` published once, the day clock restarted, readers reopened lazily, and every `GenerationListener` told, so the derived store binds to the new file and rebuilds (R1489, `storage/derived-store`). With no collection open before, R5 has no live file to check, and step 4 creates `collection.anki2`.
 
 That reopen is not an external change (R1453). U32's open compares the file's `mod` and `scm` with the last values it saw (`storage/durability-and-files#F3`), and a replaced file always differs. At L8's reopen the replace itself is the change, and L8 step 4 already handles it. So that reopen reports no external change: no `ChangedExternally` undo clear and no whole-collection change set besides `CollectionReplaced`. The sidecar's last-seen `mod` and `scm` become the new file's, as at any open. At a relaunch after a kill, the ordinary open check applies.
 
-## R6. Device-only state (R1548, R2010, R2019)
+## R6. Device-only state and replacement recovery (R1548, R2010, R2051, R2056)
 
-### R6.1 Where it lives
+### R6.1 Durable identities and decisions
 
-One member `deviceState` of U32's sidecar `meguri-sidecar.json` in the collection directory (KTD12). It is never synced and never written into the collection (R1468), and there is no other copy. It is written through U32's atomic sidecar write (temporary file, full sync, rename). U32's own members (`storage/durability-and-files#F3`) share the file, and each writer rewrites the whole file. So every sidecar write, U32's and this accessor's, reads, changes and saves the file under one in-process lock: neither can lose the other's members. A missing or unreadable member reads as the defaults below; the pause flag then reads as off, which is safe because a replaced collection carries a new `scm` (R7), so its next sync is a one-way sync anyway.
+Keep `deviceState` in U32's `meguri-sidecar.json`. It is app-private, never synced and never stored in collection rows.
+All sidecar writers share one lock and preserve other members. Publish changes through U32's durable atomic write.
 
-| Field | Default | Written by | Read by |
-|---|---|---|---|
-| `oneWayChoicePending`: the automatic-sync pause | false | R6.2 (set), U109 (cleared after a user-started one-way sync succeeds) | U113's gate, U107 |
-| `pendingScm`: the `scm` of the collection the pause belongs to | none | R6.2 | R6.3 |
-| `pauseBeforeReplace`: the pause flag and `pendingScm` as they were before a replace still in progress | none | R6.2 | R6.3 |
-| last backup: the `col.mod` it holds, its time, its file name | none | U126, U127 | U127 ("changed since the last backup"), U132 |
-| last Check Database: time and result | none | U128 | U132 |
-| last optimize: time | none | U132, U109 after an upload | U132 |
-| last quick check: time and whether it passed | none | U132 | U132 |
-| server counts of the last failed sanity check | none | U107 | U109 (and cleared by it after a one-way sync succeeds) |
+A publication generation is a persistent opaque identity, independent of the process's lifecycle generation counter.
+Give the existing local collection an identity before its first replacement. An import or restore gets a fresh identity.
+Bind each publication decision to its collection identity and account identity. Include the app configuration and cloud environment when connected.
+An explicit unbound account means local-only.
+Local-only use needs no Apple account or network. Connecting later must not reinterpret an unbound decision as permission to upload.
 
-Member names inside `deviceState` are the implementer's. The accessor (`maintenance/device_state.rs`) gives typed reads and writes of each field.
+`cloudPublicationPending` means publication requires an explicit decision. It blocks sending; it does not prevent local review.
+Keep legacy `oneWayChoicePending` and its manual-transfer state separate. Neither `scm` nor a successful Anki transfer resolves the cloud decision.
+Only U113/U114 may resolve it after the explicit cloud/local choice and their required recovery checks.
+Keep old-generation queued work isolated; no callback, retry or restart may apply it as work for the replacement generation.
 
-### R6.2 Around a replacement
+Retain these other prepared device fields and their consumers:
 
-- `Restore` and `ColpkgImport`, at R5 step 2, in one sidecar write: `pauseBeforeReplace` = the current flag and `pendingScm`; then `oneWayChoicePending` = true and `pendingScm` = the staged file's `scm` (after R3 and R4). The write is durable before the rename, so a kill after the rename cannot lose the pause.
-- When the replace fails or is cancelled before the rename: the flag and `pendingScm` go back to `pauseBeforeReplace`, which is then removed. A pause that an earlier restore set therefore survives a failed second restore.
-- After a successful swap and reopen: `pauseBeforeReplace` is removed.
-- `FullDownload` and `FullUpload` leave all three fields alone; U109 clears the flag and the stored sanity counts once the one-way sync the user started has succeeded.
+| Value | Writer and consumer |
+|---|---|
+| Last backup: snapshot `col.mod`, instant and file name | U126/U127; U127 change check and U132 |
+| Last Check Database: instant and result | U128; U132 |
+| Last optimize instant | U132/U109; U132 |
+| Last quick check: instant and pass/fail | U132 |
+| Last failed manual-transfer sanity counts | U107; U109 clears them after successful manual one-way transfer |
 
-### R6.3 At open
+Their accessor owns no CloudKit transport, record format, account discovery or network work.
 
-When the collection opens and `pauseBeforeReplace` is present (a kill interrupted a replacement):
+### R6.2 Before activation
 
-- the live `scm` equals `pendingScm`: the swap happened; keep the flag on and remove `pauseBeforeReplace`;
-- otherwise the swap never happened: restore the flag and `pendingScm` from `pauseBeforeReplace` and remove it.
+Restore and ColpkgImport use this handshake after validation/finalisation and after all live writes drain.
+An in-progress replacement blocks publication for both the old and candidate generations.
 
-When the flag is on with no `pauseBeforeReplace` and the live `scm` differs from `pendingScm`, a one-way sync replaced the collection after the pause was set: clear the flag. If a replaced collection's new `scm` happened to equal the old one (a clock set back), the pause stays on although the swap failed; the user's next one-way sync lifts it.
+The durable intent records:
+
+- an operation identity and replacement reason;
+- the old and candidate publication identities, with the captured account binding;
+- the old generation's complete prior publication decision, including an already-pending decision;
+- identities of the closed old and final candidate files: byte length plus a streaming SHA-256 digest;
+- explicit absence when no old collection file exists, and the intent's current phase.
+
+Compute these file identities after final checkpoints and connection closure. No writer may mutate either file before the swap.
+Persist the intent and candidate pending fence before renaming. A failed durable write prevents the rename.
+The candidate identity includes its final R7 stamps. Equal timestamps never imply equal generation identities.
+Use the ordinary R5 atomic swap and directory sync.
+
+### R6.3 After activation and on reopen
+
+After the rename and directory sync, durably mark the candidate generation active and pending before opening any new writer.
+Then reopen through the existing lifecycle. Record the final decision before removing the intent.
+A post-rename failure still leaves the candidate active and fenced; an error alone does not prove the old collection survived.
+
+At startup reconcile an unfinished intent before opening the collection or running any mutating day check:
+
+| Proven state | Durable result |
+|---|---|
+| Intent phase; only old file identity matches, including recorded absence | Restore the old identity and its exact prior decision, then remove the intent |
+| Intent phase; only candidate file identity matches | Activate the candidate identity with publication pending, then complete the intent |
+| Durable activation exists | Retain the target generation and its fence. Later writes may change the database hash. |
+| Both match, neither matches, or metadata is unreadable | Block publication. Keep the journal for recovery. |
+
+A known pre-rename cancel or failure restores the prior decision only after proving the old file remains live.
+Prior-clear returns to clear; prior-pending remains pending. The captured account binding must still match.
+An account mismatch or uncertain binding keeps publication paused. It never transfers authorization to another account.
+Ambiguity may allow validated local review, but never automatic publication or silent replacement of recovery evidence.
+Legacy manual-transfer bookkeeping follows its own contract. A manual transfer cannot remove this fence.
+
+### R6.4 Scope and verification
+
+RF2 implements this local durable boundary only. Future CloudKit integration must use it, not replace it with a disposable cache.
+Test old clear/pending states, no old file, account mismatch, identical timestamps, identical file bytes, unreadable metadata,
+and kills before intent, after intent, after rename, after directory sync and after durable activation.
+Prove old queued work stays isolated and a later manual transfer cannot resolve a pending cloud decision.
 
 ## R7. What a replacement from a collection package stamps (Anki 26.9.3)
 
 - Anki's restore of a backup and its `.colpkg` import are one operation. On its copy of the incoming collection, after the copy has opened (upgraded when older) and before the swap, it sets `col.scm` and `col.mod` to the current time in epoch milliseconds. Nothing else in the file changes: no `usn`, no `ls`, no row of any other table.
-- The new `scm`, with the new `mod`, makes the next sync with the server a one-way sync that the user must choose (`sync/meta-status#M3`, R1548; Anki also turns automatic sync off until it restarts).
+- The stamps retain manual Anki-transfer compatibility. They do not identify a publication generation or resolve R6 recovery.
 - Meguri's primitive makes the same change for `Restore` and `ColpkgImport` (R3 step 3), with one instant for both columns. Under a scenario's frozen clock both equal the scenario's current instant in milliseconds.
 - Scenarios: `package/collection-package/restore-backup`, `upgrade-on-import` and the import half of `export-import-roundtrip` observe the stamped `col` row in `db_dump` (`specs/conformance/package-ops.md` E2).
 
 ## R8. Failures and kills
 
-- **Before the rename** (R3, R4 and R5 steps 1 to 3): the old collection file, its generation and every handle stay as they were; the staging directory is removed (or swept at the next launch after a kill); the pause is as R6.2 and R6.3 say. R3 and R4 run before L8's `Replacing` step, so a refused file never closes the live collection.
+- **Before the rename** (R3, R4 and R5 steps 1 to 3): the old collection file, its generation and every handle stay as they were; the staging directory is removed (or swept at the next launch after a kill); publication recovery follows R6.2 and R6.3. R3 and R4 run before L8's `Replacing` step, so a refused file never closes the live collection.
 - **After the rename**: the new file stands. After a kill, the next launch opens it, and it passes the integrity check (R2003, the restore analogue of AE86).
 - A failed open after the swap: L8 sets `Failed{reason}`.
 - Fault points (U21's `faultpoint!`, cataloged by U250): `replace.after_check` (after R3), `replace.after_finalise` (after R4), `replace.after_pause_recorded` (R5 step 2), `replace.after_live_wal_removed` (R5 step 3), `replace.after_rename` (R5 step 4) and `replace.after_dir_sync` (R5 step 5).
@@ -129,11 +170,11 @@ The lifecycle's own errors (`CollectionUnavailable`, `StaleGeneration`, `engine/
 | What | Where |
 |---|---|
 | `Restore` of the backup fixture: the dump equals the oracle's restore of it | `package/collection-package/restore-backup` (Meguri's `import` adapter runs inspect, then this primitive with `Restore`) |
-| After a `Restore`: `CollectionReplaced(generation + 1)` once, older readers closed and their handles failing with `StaleGeneration`, the derived store rebuilding, `oneWayChoicePending` on with `pendingScm` equal to the new `scm` | `core/crates/meguri-engine/tests/replace.rs` |
+| After a `Restore`: `CollectionReplaced(generation + 1)` once, older readers closed and their handles failing with `StaleGeneration`, the derived store rebuilding, the candidate publication identity active and `cloudPublicationPending` true | `core/crates/meguri-engine/tests/replace.rs` |
 | After a `Restore` and after a `FullDownload`: no external change reported at the reopen (no `ChangedExternally`, no whole-collection change set besides `CollectionReplaced`), the sidecar's last-seen `mod` and `scm` are the new file's, and U32's sidecar members and `deviceState` are both still present | same file |
-| Kill at `replace.after_pause_recorded` (and every fault point before it): the relaunch opens the old file unchanged (SHA-256), the pause is back to its value before the replace; a cancel before the rename does the same at once | same file |
-| A pause from an earlier restore survives a second restore killed before its rename | same file |
-| Kill at `replace.after_rename` and `replace.after_dir_sync`: the relaunch opens the new file, `integrity_check` `ok`, the pause on | same file |
+| Kill at `replace.after_pause_recorded` (and every fault point before it): the relaunch opens the old file unchanged (SHA-256), the prior publication decision is restored only after the old file identity is proven; a cancel before the rename does the same at once | same file |
+| An already-pending publication decision survives a later replacement killed before its rename | same file |
+| Kill at `replace.after_rename` and `replace.after_dir_sync`: the relaunch opens the new file, `integrity_check` `ok`, publication pending | same file |
 | `FullDownload` with a truncated staged file: `StagingCorrupt` (or the gate's `Corrupt`), the old collection unchanged; U109 reuses this fixture | same file |
 | `FullDownload` with a schema-11 staged file: upgraded on the staged copy; a kill right after the rename reopens a schema-18 collection | same file |
 | A non-empty live `-wal` injected before the swap: `LiveWalNotEmpty`; the old collection opens and passes `integrity_check` | same file |
