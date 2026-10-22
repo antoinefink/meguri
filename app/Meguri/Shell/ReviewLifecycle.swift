@@ -2,6 +2,7 @@ import AppModel
 import SwiftUI
 #if os(macOS)
 import AppKit
+import CardRendering
 #else
 import UIKit
 #endif

@@ -132,6 +132,7 @@ struct ReviewLayout<Card: View>: View {
             ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
         }
         .background(.token(.backgroundPrimary))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review.session.screen")
     }
 }

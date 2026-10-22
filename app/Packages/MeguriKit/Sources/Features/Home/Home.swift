@@ -47,6 +47,7 @@ public struct HomeView: View {
             if let deckID, let deck = collection.deck(deckID) {
                 VStack(alignment: .leading, spacing: Spacing.large) {
                     DeckCounts(counts: deck.counts)
+                        .accessibilityIdentifier("home.deck.counts")
                     Button { Task { await collection.startStudy(deckID: deck.id) } } label: {
                         Label { Text("Study Now", bundle: .module) } icon: { Image(systemName: "play.fill") }
                             .frame(maxWidth: .infinity, minHeight: 44)
@@ -81,6 +82,7 @@ public struct HomeDeckTree: View {
                             Text(verbatim: node.name.components(separatedBy: "::").last ?? node.name)
                                 .font(.headline).fixedSize(horizontal: false, vertical: true)
                             DeckCounts(counts: node.counts)
+                                .accessibilityIdentifier("home.deck.rowCounts.\(node.id)")
                         }
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.forward").accessibilityHidden(true)
@@ -107,7 +109,6 @@ public struct DeckCounts: View {
     public var body: some View {
         Text("\(Text(counts.new, format: .number).foregroundStyle(.token(.countNew))) new · \(Text(counts.learning, format: .number).foregroundStyle(.token(.countLearn))) learning · \(Text(counts.review, format: .number).foregroundStyle(.token(.countDue))) due", bundle: .module)
             .font(.subheadline)
-            .accessibilityIdentifier("home.deck.counts")
     }
 }
 

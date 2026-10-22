@@ -157,8 +157,12 @@ final class LocalReviewJourneyTests: XCTestCase {
         app.launch()
         XCTAssertTrue(recorded.waitForExistence(timeout: 20))
         XCTAssertEqual(recorded.label, before)
+        // Hook launches start at Home; inspect this deck's detail counts again.
+        XCTAssertTrue(deck.waitForExistence(timeout: 10))
+        deck.clickOrTap()
+        XCTAssertTrue(study.waitForExistence(timeout: 10))
         let persistedCounts = element(app, "home.deck.counts")
-        XCTAssertTrue(persistedCounts.exists)
+        XCTAssertTrue(persistedCounts.waitForExistence(timeout: 10))
         XCTAssertTrue(persistedCounts.label.contains("0 due"), "answers were not preserved after process restart")
         attach(app, "review-restarted")
     }

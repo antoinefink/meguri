@@ -170,3 +170,15 @@ tools/mg ui-test --platform iphone --suite LocalReviewJourneyTests
 Keep all failed receipts above. Actual iPhone Home/card visuals, native keyboard
 proof and required boundary/privacy/provenance/similarity gates remain pending.
 No Unit acceptance; minimal safe collection entry and the full plan remain.
+
+
+Review 4: P1 accessibility identifier propagation.
+The captured iPhone question is legible. Required control identifiers are absent.
+The patch contains the review accessibility group and scopes Home row counts.
+It retains the detail counts identifier used after restart.
+Mac build `20261022T073633Z-54476` requires an explicit CardRendering import.
+Fix session: `s-20261022T073806Z-9aa3e97b`.
+Focused suite `20261022T073556Z-52769`: 18 passed.
+Drive `20261022T073306Z-46810`: real question rendered; identifier checks failed.
+Keep these receipts. Answer, undo, restart and other platforms still need proof.
+Root aliases also need a separate portability check. No Unit acceptance.
