@@ -698,7 +698,7 @@ exec '"$(command -v tar)"' "$@"'
   mg a11y --platform mac
   [ "$(field .status)" = pass ]
   [ "$(field .details.mac_vm.name)" = meguri-mac-2 ]
-  [ "$(field .details.mac_vm.lease.waited_s)" = 0 ]
+  ! grep -q 'VM lease: waiting for the VM' <<<"$stderr"
   touch "$BATS_TEST_TMPDIR/first-done"
   wait "$first"
   [ "$(jq -r .details.mac_vm.name "$(tail -n 1 "$BATS_TEST_TMPDIR/first.out")")" = meguri-mac ]
