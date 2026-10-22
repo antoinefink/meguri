@@ -622,3 +622,12 @@ constant types and run the same first-import case. No acceptance claim.
 - Independent review: no P0–P2 findings. No test assertions removed.
 - iPad replacement `ui-test/20261022T195209Z-59405`: PASS, 1 test, no skips.
 - Snapshot recording `20261022T193457Z-36824`: PASS; 203 selected baselines committed in `06a8efca`. Comparison and audits remain pending. This is recording evidence only.
+
+### Mac picker and resume checks
+
+- `ui-test/20261022T195518Z-62512`: FAIL after path entry. The content identifier and intro check pass. The native GoToWindow remains open; the test clicks a disabled Open button.
+- Fixer `s-20261022T195738Z-d420578e`, base `2107c882`, export `20261022T195758Z-65945`; checkpoint `588e0623`. Independent review: no P0–P2.
+- `ui-test/20261022T195930Z-67219`: FAIL after a real imported answer. Picker selection, preview, activation and review pass. The test hides the app, then reads a window before activating it.
+- Fixer `s-20261022T200143Z-4d88d210`, base `588e0623`, export `20261022T200209Z-70307`; checkpoint `55996c55`. Independent review: no P0–P2. No test assertions removed.
+- Doctor `20261022T195606Z-64405`: PASS; VM answers; 63 GiB free.
+- Mac first import `ui-test/20261022T200319Z-71476`: PASS, 1 test, no skips. Native picker, real answer, hide/resume and restart checks pass.
