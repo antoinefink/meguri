@@ -909,6 +909,11 @@ pub fn save_preferences(
     change: PreferencesChange,
     options: &RunOptions,
 ) -> Result<OpResult<()>, EngineError> {
+    if change.rollover.is_none() && change.learn_ahead_minutes.is_none() && change.load_balancer.is_none() {
+        return Err(EngineError::InvalidArgument {
+            message: "at least one scheduling preference is required".into(),
+        });
+    }
     let issues = validate_preferences(&change);
     if !issues.is_empty() {
         return Err(EngineError::DeckOptionsInvalid(issues));
@@ -922,22 +927,25 @@ pub fn save_preferences(
         spec = spec.progress(progress.clone());
     }
     let result = collection.run(spec, move |ctx| {
-        if let Some(hour) = change.rollover
-            && f64::from(SchedConfig::new(ctx.scope()).rollover_hour()?) != hour
-        {
-            sched_config::set_rollover_hour(ctx.scope(), hour as u8)?;
+        let (old_hour, seconds, load_balancer) = {
+            let config = SchedConfig::new(ctx.scope());
+            (
+                config.rollover_hour()?,
+                config.collapse_time()?,
+                config.load_balancer_enabled()?,
+            )
+        };
+        let hour = change.rollover.map(|hour| hour as u8).unwrap_or(old_hour);
+        let seconds = change
+            .learn_ahead_minutes
+            .map(|minutes| (minutes as u32) * 60)
+            .unwrap_or(seconds);
+        let load_balancer = change.load_balancer.unwrap_or(load_balancer);
+        if hour != old_hour {
+            sched_config::set_rollover_hour(ctx.scope(), hour)?;
         }
-        if let Some(minutes) = change.learn_ahead_minutes {
-            let seconds = (minutes as u32) * 60;
-            if SchedConfig::new(ctx.scope()).collapse_time()? != seconds {
-                sched_config::set_collapse_time(ctx.scope(), seconds)?;
-            }
-        }
-        if let Some(value) = change.load_balancer
-            && SchedConfig::new(ctx.scope()).load_balancer_enabled()? != value
-        {
-            sched_config::set_load_balancer_enabled(ctx.scope(), value)?;
-        }
+        sched_config::set_collapse_time(ctx.scope(), seconds)?;
+        sched_config::set_load_balancer_enabled(ctx.scope(), load_balancer)?;
         Ok(())
     })?;
     // U40 invalidates from the committed change set. Wait for its automatic

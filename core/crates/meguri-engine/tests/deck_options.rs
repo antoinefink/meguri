@@ -1,12 +1,16 @@
 //! U49 transactions on real storage and the real scheduler memory path.
 mod common;
 use meguri_engine::{
-    EngineError, OpSource, OpSpec, UndoScope, deck_config, decks, sched::deck_options as options, tags::RunOptions,
+    EngineError, OpSource, OpSpec, StampMode, UndoScope, deck_config, decks, sched::deck_options as options,
+    tags::RunOptions,
 };
 use meguri_model::{
     card::{CardQueue, CardType},
+    config::ConfigEntry,
     ids::{CardId, DeckConfigId, DeckId, NoteId, RevlogId},
     proto::deck::{DayLimit, DeckKind},
+    time::EpochSecs,
+    usn::Usn,
 };
 use meguri_sched::options::{Field, Value};
 use meguri_storage::{ReadRows, ReaderRole};
@@ -339,7 +343,7 @@ fn cancelled_write_and_failed_extension_roll_back_presets_decks_cards_and_histor
     assert_eq!(dump(&h), before);
 }
 #[test]
-fn preferences_validate_first_and_are_one_step_without_adding_default_keys() {
+fn preferences_validate_supplied_fields_and_reject_empty_requests_without_mutation() {
     let h = common::fresh();
     let before = dump(&h);
     let bad = options::PreferencesChange {
@@ -352,27 +356,174 @@ fn preferences_validate_first_and_are_one_step_without_adding_default_keys() {
         Err(EngineError::DeckOptionsInvalid(_))
     ));
     assert_eq!(dump(&h), before);
-    options::save_preferences(
+    let undo = h.collection.peek_undo(UndoScope::Global).unwrap();
+    assert!(matches!(
+        options::save_preferences(&h.collection, Default::default(), &Default::default()),
+        Err(EngineError::InvalidArgument { .. })
+    ));
+    assert_eq!(dump(&h), before);
+    assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), undo);
+}
+fn preference_row(h: &common::Harness, key: &str) -> Option<ConfigEntry> {
+    h.collection
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .config_entry(key)
+        .unwrap()
+}
+fn preferences_without_rows() -> common::Harness {
+    let h = common::fresh();
+    h.collection
+        .run(
+            OpSpec::named("preferences absent setup", OpSource::Maintenance),
+            |ctx| {
+                for key in ["rollover", "collapseTime", "loadBalancerEnabled"] {
+                    ctx.scope().remove_config(key)?;
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+    h
+}
+#[test]
+fn rollover_only_preferences_materialize_defaults_and_undo_restores_each_previous_state() {
+    let h = preferences_without_rows();
+    for key in ["rollover", "collapseTime", "loadBalancerEnabled"] {
+        assert_eq!(preference_row(&h, key), None);
+    }
+    let before = dump(&h);
+    let saved = options::save_preferences(
         &h.collection,
         options::PreferencesChange {
-            load_balancer: Some(true),
+            rollover: Some(6.),
             ..Default::default()
         },
         &Default::default(),
     )
     .unwrap();
-    assert_eq!(dump(&h), before);
+    assert_eq!(saved.undo.as_ref().unwrap().name, "Preferences");
+    assert_eq!(preference_row(&h, "collapseTime").unwrap().value, b"1200");
+    assert_eq!(preference_row(&h, "loadBalancerEnabled").unwrap().value, b"true");
+    assert_eq!(preference_row(&h, "rollover").unwrap().value, b"6");
+    let materialized = dump(&h);
+    h.clock.step_ms(60000);
     options::save_preferences(
         &h.collection,
         options::PreferencesChange {
-            learn_ahead_minutes: Some(33.),
             load_balancer: Some(false),
             ..Default::default()
         },
         &Default::default(),
     )
     .unwrap();
-    assert_eq!(options::preferences(&h.collection).unwrap().learn_ahead_minutes, 33);
+    assert_eq!(preference_row(&h, "loadBalancerEnabled").unwrap().value, b"false");
+    let disabled = dump(&h);
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(dump(&h), materialized);
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(dump(&h), before);
+    h.collection.redo(UndoScope::Global).unwrap();
+    assert_eq!(dump(&h), materialized);
+    h.collection.redo(UndoScope::Global).unwrap();
+    assert_eq!(dump(&h), disabled);
+}
+#[test]
+fn preferences_keep_omitted_seconds_exact_and_convert_explicit_minutes() {
+    let h = common::fresh();
+    h.collection
+        .run(OpSpec::named("learn ahead setup", OpSource::Maintenance), |ctx| {
+            ctx.scope()
+                .set_config("collapseTime", &meguri_storage::ConfigValue::from(333u64))?;
+            Ok(())
+        })
+        .unwrap();
+    let seconds = preference_row(&h, "collapseTime");
+    options::save_preferences(
+        &h.collection,
+        options::PreferencesChange {
+            load_balancer: Some(false),
+            ..Default::default()
+        },
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(preference_row(&h, "collapseTime"), seconds);
+    assert_eq!(options::preferences(&h.collection).unwrap().learn_ahead_minutes, 5);
+    for (minutes, expected) in [(0., b"0".as_slice()), (33., b"1980"), (999., b"59940")] {
+        let before = dump(&h);
+        options::save_preferences(
+            &h.collection,
+            options::PreferencesChange {
+                learn_ahead_minutes: Some(minutes),
+                ..Default::default()
+            },
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(preference_row(&h, "collapseTime").unwrap().value, expected);
+        assert_eq!(preference_row(&h, "loadBalancerEnabled").unwrap().value, b"false");
+        h.collection.undo(UndoScope::Global).unwrap();
+        assert_eq!(dump(&h), before);
+    }
+}
+#[test]
+fn preferences_equal_stored_rows_keep_raw_bytes_stamps_and_missing_rollover() {
+    let h = common::fresh();
+    h.collection
+        .run(
+            OpSpec::named("preferences raw setup", OpSource::Maintenance).stamp(StampMode::Raw),
+            |ctx| {
+                for (key, value) in [("collapseTime", " 1200 \n"), ("loadBalancerEnabled", " true \n")] {
+                    ctx.scope().put_config_entry(&ConfigEntry {
+                        key: key.into(),
+                        usn: Usn(17),
+                        mtime: EpochSecs(123),
+                        value: value.as_bytes().to_vec(),
+                    })?;
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+    let before = dump(&h);
+    let undo = h.collection.peek_undo(UndoScope::Global).unwrap();
+    h.clock.step_ms(60000);
+    for change in [
+        options::PreferencesChange {
+            rollover: Some(4.),
+            ..Default::default()
+        },
+        options::PreferencesChange {
+            learn_ahead_minutes: Some(20.),
+            load_balancer: Some(true),
+            ..Default::default()
+        },
+    ] {
+        let result = options::save_preferences(&h.collection, change, &Default::default()).unwrap();
+        assert!(result.undo.is_none());
+        assert_eq!(dump(&h), before);
+        assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), undo);
+        assert_eq!(preference_row(&h, "rollover"), None);
+    }
+}
+#[test]
+fn preferences_explicit_defaults_insert_missing_rows_without_materializing_rollover() {
+    let h = preferences_without_rows();
+    let before = dump(&h);
+    options::save_preferences(
+        &h.collection,
+        options::PreferencesChange {
+            rollover: Some(4.),
+            learn_ahead_minutes: Some(20.),
+            load_balancer: Some(true),
+        },
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(preference_row(&h, "collapseTime").unwrap().value, b"1200");
+    assert_eq!(preference_row(&h, "loadBalancerEnabled").unwrap().value, b"true");
+    assert_eq!(preference_row(&h, "rollover"), None);
     h.collection.undo(UndoScope::Global).unwrap();
     assert_eq!(dump(&h), before);
 }

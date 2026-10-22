@@ -61,7 +61,7 @@ fn save(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     draft.select(selected).map_err(core)?;
     for key in removals {
         if key == 1 {
-            return Ok(OpResult::Rejected("default_preset".into()));
+            return Ok(OpResult::Rejected("default_preset"));
         }
         draft.remove(key, true).map_err(core)?;
     }
