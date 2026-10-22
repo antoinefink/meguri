@@ -38,10 +38,10 @@ struct ReviewCardHost {
 }
 
 #if os(macOS)
-extension ReviewCardHost: NSViewRepresentable {
-    final class Host: NSView {
+extension ReviewCardHost: NSViewControllerRepresentable {
+    final class Host: NSViewController {
         var attached: (() -> Void)?
-        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); attached?() }
+        override func viewDidAppear() { super.viewDidAppear(); attached?() }
     }
     final class Coordinator {
         var monitor: Any?
@@ -52,10 +52,10 @@ extension ReviewCardHost: NSViewRepresentable {
         }
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
-    func makeNSView(context: Context) -> Host {
+    func makeNSViewController(context: Context) -> Host {
         let host = Host()
         host.attached = { [weak host, weak model] in
-            (model?.surface as? ReviewPages)?.presenter.window = host?.window
+            (model?.surface as? ReviewPages)?.presenter.window = host?.view.window
             (model?.surface as? ReviewPages)?.establishInitialFocus()
         }
         attach(to: host)
@@ -65,7 +65,7 @@ extension ReviewCardHost: NSViewRepresentable {
             guard let updatedWindow = note.object as? NSWindow else { return }
             let updatedWindowID = ObjectIdentifier(updatedWindow)
             MainActor.assumeIsolated {
-                guard let host, let pair, let window = host.window,
+                guard let host, let pair, let window = host.view.window,
                       ObjectIdentifier(window) == updatedWindowID else { return }
                 (model.surface as? ReviewPages)?.establishInitialFocus()
                 let owned = !model.paused && ReviewInputOwnership.cardFocused(in: pair.current.webView)
@@ -73,7 +73,7 @@ extension ReviewCardHost: NSViewRepresentable {
             }
         }
         context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak host] event in
-            guard let host, host.window != nil, event.window === host.window,
+            guard let host, host.view.window != nil, event.window === host.view.window,
                   ReviewInputOwnership.cardFocused(in: pair.current.webView) else { return event }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard flags.isDisjoint(with: [.option, .control]) else { return event }
@@ -82,19 +82,18 @@ extension ReviewCardHost: NSViewRepresentable {
         }
         return host
     }
-    func updateNSView(_ host: Host, context: Context) { attach(to: host) }
-    static func dismantleNSView(_ host: Host, coordinator: Coordinator) {
+    func updateNSViewController(_ host: Host, context: Context) { attach(to: host) }
+    static func dismantleNSViewController(_ host: Host, coordinator: Coordinator) {
         if let monitor = coordinator.monitor { NSEvent.removeMonitor(monitor); coordinator.monitor = nil }
         if let observer = coordinator.focusObserver { NotificationCenter.default.removeObserver(observer); coordinator.focusObserver = nil }
     }
     private func attach(to host: Host) {
-        if pair.container.superview !== host {
+        // Expose WebKit through the same direct container boundary as the behavior host.
+        if !host.isViewLoaded || host.view !== pair.container {
             pair.container.removeFromSuperview()
-            pair.container.frame = host.bounds
-            pair.container.autoresizingMask = [.width, .height]
-            host.addSubview(pair.container)
+            host.view = pair.container
         }
-        (model.surface as? ReviewPages)?.presenter.window = host.window
+        (model.surface as? ReviewPages)?.presenter.window = host.view.window
         (model.surface as? ReviewPages)?.establishInitialFocus()
     }
 }

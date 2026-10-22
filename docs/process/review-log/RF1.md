@@ -271,3 +271,19 @@ Round 6: P1 Mac card content is absent from accessibility.
 The visible question has no text descendant in the native tree.
 Fix the host boundary and verify actual question and answer text.
 Other P0/P1 findings: none. No Unit acceptance; the full gate is pending.
+
+Round 6 host correction; filtered starting commit
+`62570d0c0ea016df1780035efca804edb5573dde`; original RF1 base `5d651707`.
+Mac now hosts the existing pair.container directly in NSViewControllerRepresentable,
+matching the behavior route. The reveal action and card identifier belong to a
+SwiftUI containing group. Appearance supplies the window attachment callback;
+window-update observation, guarded one-time focus, key monitor and cleanup remain.
+iOS retains its custom action and magicTap. Shared pair wiring is unchanged.
+Mac readiness queries use app.staticTexts, preserving the real Question/Answer
+number patterns and hittability checks; iOS keeps its WebView query.
+
+One source consistency pass only; no builds, tests or commits in this runner.
+Retain failed Mac drive `20261022T075302Z-76344` and audit
+`20261022T081410Z-2897`. Actual Mac DOM audit, native keyboard checks, iPhone
+audit and full gate remain with the integrator. No runtime result or Unit
+acceptance is claimed; full U152 and the remaining plan stay open.

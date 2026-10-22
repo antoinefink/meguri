@@ -20,13 +20,21 @@ public struct ReviewView: View {
             timerText: model.item?.homePreset.showTimer == true ? { model.timerText } : nil) {
             ZStack {
                 if let pair = model.pair {
+                    #if os(macOS)
+                    ZStack {
+                        ReviewCardHost(model: model, pair: pair, close: close)
+                    }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("review.session.card")
+                        .accessibilityAction(named: Text("Show Answer", bundle: .module)) { model.reveal() }
+                        .opacity(model.phase == .question || model.phase == .answer || model.phase == .transition ? 1 : 0)
+                    #else
                     ReviewCardHost(model: model, pair: pair, close: close)
                         .accessibilityIdentifier("review.session.card")
                         .accessibilityAction(named: Text("Show Answer", bundle: .module)) { model.reveal() }
-                        #if os(iOS)
                         .accessibilityAction(.magicTap) { model.reveal() }
-                        #endif
                         .opacity(model.phase == .question || model.phase == .answer || model.phase == .transition ? 1 : 0)
+                    #endif
                 }
                 stateContent
             }
