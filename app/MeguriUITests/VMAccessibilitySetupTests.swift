@@ -145,18 +145,17 @@ final class VMAccessibilitySetupTests: XCTestCase {
         guard bringSettingsForward(settings) else { return false }
         field.typeKey(.return, modifierFlags: [])
 
-        let chooseName = NSPredicate(format: "label IN %@", ["Open", "Add"])
         let resolved = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             guard let picker = self.pickerContainer(settings) else { return false }
             return self.isAppPicker(picker) && !self.isGoToFolder(picker)
-                && picker.buttons.matching(chooseName).element(boundBy: 0).isEnabled
+                && picker.buttons.matching(identifier: "OKButton").element(boundBy: 0).isEnabled
         }, object: nil)
         guard XCTWaiter().wait(for: [resolved], timeout: 5) == .completed,
               let picker = pickerContainer(settings), isAppPicker(picker) else {
             reportSetupFailure(settings, "Runner path did not resolve to a picker with one Open/Add control; inspect picker/auth UI")
             return false
         }
-        return click(picker.buttons.matching(chooseName).element(boundBy: 0), in: settings, description: "runner picker Open/Add")
+        return click(picker.buttons.matching(identifier: "OKButton").element(boundBy: 0), in: settings, description: "runner picker Open/Add")
     }
 
     @MainActor
@@ -171,8 +170,8 @@ final class VMAccessibilitySetupTests: XCTestCase {
     @MainActor
     private func isAppPicker(_ picker: XCUIElement) -> Bool {
         picker.secureTextFields.count == 0
-            && picker.buttons.matching(NSPredicate(format: "label IN %@", ["Open", "Add"])).count == 1
-            && picker.buttons.matching(NSPredicate(format: "label == %@", "Cancel")).count == 1
+            && picker.buttons.matching(identifier: "OKButton").count == 1
+            && picker.buttons.matching(identifier: "CancelButton").count == 1
     }
 
     /// Use the innermost sheet/dialog, refusing multiple independent picker or auth surfaces.
