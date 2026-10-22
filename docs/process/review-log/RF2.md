@@ -610,3 +610,15 @@ constant types and run the same first-import case. No acceptance claim.
 - Source privacy PASS; checkpoint `81cd44ab`. No unit acceptance.
 - iPad first-import `20261022T192905Z-28896`: FAIL before selection; remote AX query interrupted inside the short folder wait.
 - Doctor `20261022T193004Z-30943`: VM ready; 59 GiB free.
+
+### Native text and picker readiness
+
+- Fixers: `s-20261022T193127Z-d5555937`, `s-20261022T193359Z-a956e22c`.
+- Checkpoint `d8b3dd8a`: scoped text checks accept native label or value; folder readiness uses the existing 20s bound. Independent review: no P0–P2.
+- iPad first import `ui-test/20261022T194801Z-55067`: PASS, 1 test, no skips.
+- Mac `ui-test/20261022T193041Z-31689` and `20261022T194503Z-52454`: FAIL at the intro check. The latter hierarchy proves the NavigationStack root identifier is absent.
+- Root fix base: `06a8efca701321ce9ab76ab16781a0aca664d366`.
+- Fixer `s-20261022T194939Z-a90de3f4`; export `cleanroom/20261022T195156Z-58960`.
+- Independent review: no P0–P2 findings. No test assertions removed.
+- iPad replacement `ui-test/20261022T195209Z-59405`: PASS, 1 test, no skips.
+- Snapshot recording `20261022T193457Z-36824`: PASS; 203 selected baselines committed in `06a8efca`. Comparison and audits remain pending. This is recording evidence only.

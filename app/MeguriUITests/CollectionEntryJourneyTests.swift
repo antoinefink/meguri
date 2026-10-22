@@ -45,14 +45,14 @@ import notify
         XCTAssertTrue(entry.waitForExistence(timeout: 20))
         try click(entry, app, bundle)
         XCTAssertTrue(element(app, "onboarding.collectionImport.choose").waitForExistence(timeout: 10))
-        XCTAssertTrue(app.descendants(matching: .any)["onboarding.collectionImport.sheet"].firstMatch.staticTexts.matching(NSPredicate(
+        XCTAssertTrue(app.descendants(matching: .any)["onboarding.collectionImport.content"].firstMatch.staticTexts.matching(NSPredicate(
             format: "label CONTAINS %@ OR value CONTAINS %@", "collection-only .colpkg", "collection-only .colpkg")).firstMatch.waitForExistence(timeout: 10))
         try click(element(app, "onboarding.collectionImport.choose"), app, bundle)
         try pick(source, app, bundle)
         let confirm = element(app, "onboarding.collectionImport.confirm")
         XCTAssertTrue(confirm.waitForExistence(timeout: 30), app.debugDescription)
-        let entrySheet = element(app, "onboarding.collectionImport.sheet")
-        XCTAssertTrue(entrySheet.exists)
+        let entryContent = element(app, "onboarding.collectionImport.content")
+        XCTAssertTrue(entryContent.exists)
         assertPreview(app, hasLocalCollection: hasLocalCollection)
         capture(app, "entry-preview-\(hasLocalCollection ? "replacement" : "first")")
         #if os(iOS)
@@ -68,7 +68,7 @@ import notify
         try click(confirm, app, bundle)
         // Real activation dismisses entry. FSRS policy is the production gate.
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"), object: entrySheet)], timeout: 30), .completed)
+            predicate: NSPredicate(format: "exists == false"), object: entryContent)], timeout: 30), .completed)
         let importedDeck = app.buttons.matching(NSPredicate(format: "identifier == %@", "home.deck.row.1788249600212"))
         try waitForAdmission(importedDeck, app, bundle)
         XCTAssertFalse(element(app, "onboarding.collectionImport.error").exists)

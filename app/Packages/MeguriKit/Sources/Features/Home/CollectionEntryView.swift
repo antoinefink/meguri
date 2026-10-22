@@ -151,6 +151,7 @@ struct CollectionEntryContent: View {
                 .frame(maxWidth: ContentWidth.readable, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
+            .accessibilityIdentifier("onboarding.collectionImport.content")
             .safeAreaInset(edge: .bottom) {
                 Button(action: actions.dismiss) {
                     Text(presentation.busy ? "Cancel Import" : "Cancel")
@@ -169,7 +170,5 @@ struct CollectionEntryContent: View {
             .navigationTitle("Import Collection")
         }
         .interactiveDismissDisabled(presentation.busy || presentation.candidateActive)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("onboarding.collectionImport.sheet")
     }
 }

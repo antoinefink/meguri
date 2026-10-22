@@ -16,13 +16,13 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
         let states = try ["empty", "typical", "overflow", "error", "loading"].map { state in
             try AccessibilityAudit.runAllVariants(
                 state: state, launch: MeguriLaunch(locale: "en_US", animations: false, route: "collection/import/\(state)"),
-                waitFor: "onboarding.collectionImport.sheet", suppressions: suppressions,
+                waitFor: "onboarding.collectionImport.content", suppressions: suppressions,
                 supplemental: { app, variant in
                     guard state == "overflow" else {
                         return AccessibilityAudit.StateResult(state: state, findings: [], touchTargets: [])
                     }
-                    let sheet = app.descendants(matching: .any).matching(identifier: "onboarding.collectionImport.sheet").firstMatch
-                    try self.scrollToBottom(sheet.scrollViews.firstMatch, app: app, build: build)
+                    let content = app.descendants(matching: .any).matching(identifier: "onboarding.collectionImport.content").firstMatch
+                    try self.scrollToBottom(content, app: app, build: build)
                     XCTAssertTrue(app.buttons["onboarding.collectionImport.confirm"].isHittable, "replacement confirmation must remain reachable after scrolling")
                     XCTAssertEqual(app.buttons["onboarding.collectionImport.confirm"].label, "Replace Collection")
                     XCTAssertTrue(app.buttons["onboarding.collectionImport.choose"].isHittable, "file selection must remain reachable after scrolling")
