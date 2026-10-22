@@ -115,12 +115,14 @@ struct ReviewLayout<Card: View>: View {
                     .accessibilityIdentifier("review.session.close")
                 VStack(alignment: .leading, spacing: Spacing.xxSmall) {
                     Text("Session Progress", bundle: .module).font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(verbatim: remaining).font(.body)
                         .fixedSize(horizontal: false, vertical: true)
                     ProgressView(value: progress)
                         .tint(.token(.progressFill))
                 }
                     .foregroundStyle(.token(.textPrimary))
+                    .layoutPriority(1)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(Text("Session Progress", bundle: .module))
                     .accessibilityValue(remaining)
@@ -173,6 +175,7 @@ struct ReviewLayout<Card: View>: View {
 
 /// One reserved bottom region on both sides; controls never resize the card.
 public struct ReviewAnswerBar: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     public let phase: ReviewCoordinator.Phase
     public let states: ReviewSchedulingStates?
     public let enabled: Bool
@@ -211,20 +214,36 @@ public struct ReviewAnswerBar: View {
         .frame(maxWidth: ContentWidth.readable)
         .frame(maxWidth: .infinity)
     }
-    private var ratings: some View {
-        HStack(spacing: Spacing.xSmall) {
-            rating(.again, title: "Again", label: states?.again.label, color: .ratingAgain)
-            rating(.hard, title: "Hard", label: states?.hard.label, color: .textPrimary)
-            rating(.good, title: "Good", label: states?.good.label, color: .ratingGood)
-            rating(.easy, title: "Easy", label: states?.easy.label, color: .textPrimary)
+    @ViewBuilder private var ratings: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(spacing: Spacing.xSmall) {
+                HStack(spacing: Spacing.xSmall) {
+                    rating(.again, title: "Again", label: states?.again.label, color: .ratingAgain)
+                    rating(.hard, title: "Hard", label: states?.hard.label, color: .textPrimary)
+                }
+                HStack(spacing: Spacing.xSmall) {
+                    rating(.good, title: "Good", label: states?.good.label, color: .ratingGood)
+                    rating(.easy, title: "Easy", label: states?.easy.label, color: .textPrimary)
+                }
+            }
+        } else {
+            HStack(spacing: Spacing.xSmall) {
+                rating(.again, title: "Again", label: states?.again.label, color: .ratingAgain)
+                rating(.hard, title: "Hard", label: states?.hard.label, color: .textPrimary)
+                rating(.good, title: "Good", label: states?.good.label, color: .ratingGood)
+                rating(.easy, title: "Easy", label: states?.easy.label, color: .textPrimary)
+            }
         }
     }
     private func rating(_ rating: ReviewRating, title: String, label: ReviewAnswerLabel?, color: ColorToken) -> some View {
         Button { rate(rating) } label: {
             VStack(spacing: Spacing.xxSmall) {
                 Text(verbatim: label.map(Self.interval) ?? "—").font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(LocalizedStringKey(title), bundle: .module).font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .multilineTextAlignment(.center)
             .foregroundStyle(.token(color))
             .frame(maxWidth: .infinity, minHeight: 44)
         }

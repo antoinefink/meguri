@@ -287,3 +287,19 @@ Retain failed Mac drive `20261022T075302Z-76344` and audit
 `20261022T081410Z-2897`. Actual Mac DOM audit, native keyboard checks, iPhone
 audit and full gate remain with the integrator. No runtime result or Unit
 acceptance is claimed; full U152 and the remaining plan stay open.
+
+Final review 6 validation fix; filtered starting commit `44d41ead61e4c8fbe307d8eaa7f89f589d069a7e`;
+original RF1 base remains `5d651707`. Retain iPhone audit
+`20261022T082123Z-11802`: Home/deck passed all variants; review question/answer
+failed native progress-title and rating-text clipping. Review.swift now uses
+two equal-width rating rows (Again/Hard, Good/Easy) at accessibility text sizes,
+with four columns otherwise. Interval/name text and the native progress title
+grow vertically. Existing native buttons, IDs, actions, gates, real progress,
+44-point header targets and hidden question-side rating reservation remain.
+Mac host fix `4d8f4fe6` is unchanged; audit `59893` has no result claimed here.
+
+One source consistency pass only; no builds, tests or commits. Runtime behavior
+is unproven. Integrator must regression-audit iPhone and iPad after this change;
+prior iPad audit `20261022T081605Z-5320` passed every screen/variant. Preserve
+the reported iPhone/Mac persistence passes (two each). No Unit acceptance;
+full gate remains pending.
