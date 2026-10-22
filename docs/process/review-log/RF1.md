@@ -120,3 +120,23 @@ The commit hook still rejects new Swift lines. The next filtered pass owns them.
 Committed RF1 components: Rust media `9abfea4c`; Swift bridge `704eba7d`.
 These are WIP. No Unit acceptance. Both commits are pushed to origin master.
 Native journeys, renders and the full gate remain pending.
+
+Further validation:
+
+| Run | Result |
+|---|---|
+| swift-test 20261022T070738Z-24755 | 8 bridge tests passed |
+| fixtures 20261022T070859Z-27593 | Four-card collection generated |
+| swift-test 20261022T070856Z-26846 | Mac notification capture failed compilation |
+| build-app 20261022T070956Z-28534 | Deprecated iOS focus calls failed compilation |
+| swift-test 20261022T071332Z-32246 | Mutating test assertions failed compilation |
+| drive 20261022T071421Z-33396 | iPhone build passed; collection open failed |
+| swift-test 20261022T071717Z-37608 | Three static helper calls failed compilation |
+
+Platform fixes: `c50f8693`. Assertion fix: `5ee8ecb6`.
+The iPhone capture shows the error state. It proves no successful card display.
+
+Review 3, P0/P1 scope: two P1 findings. App startup omits the backups directory
+required by the core; prepare that directory before open. Three test helper
+calls need `Self.head`. Keep a fresh-install regression through the real core.
+Keyboard fixes passed source review; real keyboard and visual evidence remain.
