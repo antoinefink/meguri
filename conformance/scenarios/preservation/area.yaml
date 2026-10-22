@@ -2,13 +2,20 @@
 # normalized-dump.md N10. Each scenario becomes active in the change that
 # lands what Meguri's executor needs for it (N10's table): fixture/open and
 # churn/* with U36's adapters (adopt, raw db_dump, reopen, legacy_json),
-# edit/* with U27's edit_note, review/* with U44's answer, render/* with
+# edit/* with U27's edit_note, render/* with
 # U62's template card cases, sync/* with U107's sync adapter (T1),
-# notetype/* with U34's update_notetype edits (N11.7). The recipe is the
-# oracle's: Meguri runs it only once every op it uses exists.
+# notetype/* with U34's update_notetype edits (N11.7). The recipe and the
+# unsupported-preset answer reference keep their N10 scope (dsl.md D9.4).
 area: preservation
 active:
   - fixture/open
   - churn/*
   - edit/*
   - render/*
+reference:
+  recipe/kitchen-sink:
+    reason: Oracle recipe documenting the preservation fixture.
+    spec: conformance/normalized-dump#N10
+  review/answers:
+    reason: Preserved unsupported-preset reference; Meguri must refuse study under R704.
+    spec: conformance/normalized-dump#N10

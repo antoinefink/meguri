@@ -265,24 +265,44 @@ A scenario with `actors` is live: several clients, each with its own collection,
 - **Runs.** The parties executor runs it in T1: first the oracle plays every actor (the replay), then Meguri plays the Meguri actors (the mixed run), each compared with the golden (`sync-ops.md` S10.3).
 - **Capabilities.** What the Meguri actors use (`sync-ops.md` S10.2); nothing when it has no Meguri actor.
 
+### D9.4 Reference scope
+
+An area may retain an oracle recipe or observation whose execution is outside Meguri's documented contract. Declare it in `area.yaml`, outside the hashed scenario:
+
+```yaml
+reference:
+  recipe/example:
+    reason: Oracle recipe documenting a fixture.
+    spec: conformance/normalized-dump#N10
+```
+
+- Each `reference` key is one exact scenario id relative to its area, without a suffix. Patterns are not allowed. Each value has exactly `reason` (a nonempty single line) and `spec` (the neutral spec id and section establishing its scope).
+- A declaration naming no scenario, or a scenario also matched by `active`, is invalid area metadata. Check these declarations during schema and freshness validation.
+- Reference scope is a documented distinction, not unfinished implementation. A missing adapter remains `pending`; an unexpected execution failure remains `error`. Never infer reference scope from an id, SQL, capability absence or runtime error.
+- Meguri never executes a reference scenario, including an explicit selection of its id. Oracle recording, freshness checks and T1 replay remain required. Inputs, goldens and comparison rules do not change.
+- Count each `reference` separately from successes. It proves none of Meguri's requirements or matrix dimensions and cannot meet release acceptance. Existing obligations require independent passing evidence.
+
 ## D10. Status of a scenario
 
 The runner gives each scenario exactly one status, checking in this order:
 
 | Status | When | Fails T0 | Fails T1 |
 |---|---|---|---|
-| `invalid` | the file does not parse, violates the schema (the runner checks what `scenario.schema.json` requires, not only `goldens-check`), or its id does not match its path; on macOS also when the scenario's overlay fails its schema or the `fp-libm-boundary` class (`float-determinism.md` F7.4, F8) | always | always |
+| `invalid` | the file does not parse, violates the schema (the runner checks what `scenario.schema.json` requires, not only `goldens-check`), its id does not match its path, or area metadata is invalid (D9.4); on macOS also when the scenario's overlay fails its schema or the `fp-libm-boundary` class (`float-determinism.md` F7.4, F8) | always | always |
 | `missing` | no golden | if active | always |
 | `stale` | the golden's `scenario_sha256` differs from the scenario's hash, or its `oracle.lock_sha256` differs from the current pin (`conformance/oracle.json`); on macOS also when the scenario's overlay is stale or orphaned (`float-determinism.md` F7.3) | if active | always |
+| `reference` | valid and fresh, explicitly declared under D9.4; in T1, only after its mandatory oracle replay matches | never | never |
 | `pending` | Meguri lacks a setup section, op or observation kind the scenario uses, or the new collection it starts from (D8) (for a live scenario: what its own segments use, D9.2, or what its Meguri actors use, D9.3) | if active | if active |
 | `live` | T0 only: a live scenario Meguri could join; T0 does not run it | never | (not in T1) |
 | `error` | an executor failed while running it (a panic in an adapter included) | if active | always |
 | `fail` | observations differ from the golden after comparison rules and deviations | if active | always |
 | `pass` | observations match | never | never |
 
-- **T0** (`tools/mg conformance`, and the `conformance` test binary under `tools/mg core-test`) runs every scenario that is not live against its golden with Meguri's executor, natively on macOS and in the Linux dev container. It fails when any scenario is `invalid` or any active scenario is neither `pass` nor `live`. Other statuses are listed in the report.
+- **T0** (`tools/mg conformance`, and the `conformance` test binary under `tools/mg core-test`) runs every scenario that is neither live nor reference against its golden with Meguri's executor, natively on macOS and in the Linux dev container. It fails when any scenario is `invalid` or any active scenario is neither `pass` nor `live`. Other statuses are listed in the report.
 - **Freshness** (`tools/mg goldens-check`) fails when any scenario is `invalid`, `missing` or `stale`, when a golden has no scenario, when an `area.yaml` entry matches nothing, when an overlay in `conformance/goldens-apple/` is invalid, stale, orphaned or holds an entry outside the `fp-libm-boundary` class (`float-determinism.md` F7.4), or when a pin in `conformance/oracle.json` differs from its lock file (`lock_sha256` from `oracle/requirements.lock`, `macos_lock_sha256` from `oracle/macos/requirements-macos.lock`; checked where `oracle/` is present). These checks run on every platform. With a base revision it also lists every golden value that changed since that revision (golden, pointer, value before and after), grouped by area and observation kind (the review step of an oracle bump, R1874); the text shows the first 20 per group and the `--report` JSON all of them.
 - **T1** (`tools/mg conformance --live`) first re-records missing and stale goldens through `tools/mg oracle record` (the only writer of goldens), then runs T0, then runs every selected scenario on live oracle workers: the oracle replays it against its golden with no deviation applied (deviations describe Meguri, D13), and a live scenario whose replay passes then runs as a chain (D9.2), or as a mixed run of an actor scenario (D9.3), and is compared with the same golden, deviations applied. Workers must answer the pinned `anki_version` and `lock_sha256` and all run the same driver, or the run is an `error`. Any scenario that is not `pass`, active or not, fails T1, except a `pending` one that is not active: an oracle that no longer reproduces its golden is drift to fix before anything else.
+
+Reference scope adds one T1 exception: after a successful oracle replay, report `reference` and run no Meguri segment or actor. A reference's replay error or difference remains `error` or `fail` and fails T1. It never becomes `reference` by catching that failure. All ordinary invalid, missing, stale and overlay checks still apply before reference status. `--live-only` retains its refusal of missing or stale goldens without refreshing them.
 
 ## D11. Goldens
 
@@ -313,11 +333,14 @@ For every scenario that is not `pass`, the runner reports (R1888):
 - the scenario id and status;
 - for `fail`: the index of the first step whose output differs and the differences as JSON pointers into the observations (`/steps/3/next_states/#c1/good/scheduled_days`), each with its expected and actual value (`<absent>` for a missing member), the first 20 in pointer order plus the total count;
 - for `pending`: the missing setup sections, ops and observation kinds;
+- for `reference`: its declared `reason` and `spec` (D9.4);
 - for `stale`: which hash differs and the command that fixes it (`tools/mg oracle record <id>` for a scenario change, `tools/mg oracle bump <version>` for the oracle pin);
 - for a T1 `fail` or `error`, whether the oracle's replay or the live chain differed;
 - a one-line repro command, `tools/mg conformance <id>` (`tools/mg conformance --live <id>` for T1 and live scenarios).
 
 `meguri-cli conformance run --report <file>` writes the same as JSON: `{runner, tier: t0|t1, executor, lane, oracle_pin, wall_ms, totals, failed, scenarios: [{scenario, path, area, active, live, status, fails, message, repro, scenario_sha256?, first_divergence?, diffs?, diff_count?, missing?, deviations_applied?, overlay_applied?}]}`, where `fails` follows the report's tier and `scenario_sha256` is the hash of the scenario text the status is for (absent when the file did not load); a T1 run adds the workers' `oracle` metadata. On macOS, `overlay_applied` is the number of overlay entries applied to the scenario's expected values (present when it has an overlay), and `totals` gains `overlay_applied` (entries) and `overlay_scenarios` (scenarios with at least one); the text report adds `overlays: <entries> values in <scenarios> scenarios` (`float-determinism.md` F9).
+
+For a declared reference, the scenario report also carries `reference: {reason, spec}`, including when validation or oracle replay fails. Text and JSON reports count `reference` statuses separately in `totals.reference`; they never add them to pass counts. Missing, stale, invalid and replay failures retain their own status counts.
 
 ## D13. Known deviations
 
@@ -358,6 +381,7 @@ Every behavior test in Anki at the pinned tag is inventoried (R1877–R1882). Th
 - `done` requires a classification other than `unclassified`, and linked scenarios unless the classification is `out-of-scope` or `not-applicable`. `unclassified` rows are `open`.
 - The catalog holds no Anki file names, paths or test names. The link from a harvest id to the Anki test lives only on the spec side, in `oracle/harvest/links.csv` (R1881).
 - Expected results of harvested scenarios come from the oracle, never from Anki's assertions (R1878).
+- A D9.4 reference declaration does not change a harvested row's classification or close its product coverage. U246 reports reference results separately; required behavior still needs successful Meguri proof.
 - Supplementary rows come from `tools/mg harvest-inventory --supplementary` (a checkout of Anki's main branch): tests whose language, file and name the tag does not have. Their spec writer classifies whether the behavior exists at the tag (in scope or preservation only when it does, not applicable otherwise). They stay through re-inventories at the tag, and become `tag` rows with the same id once a bump's release has them. They are not in the counts at the tag.
 - `tools/mg harvest-report` writes the coverage report: the counts at the tag per language (supplementary rows apart), rows per language and classification, and for each classification the statuses of the linked scenarios (pass, fail, pending and the rest of D10). A linked scenario's status is its T0 status; for a live scenario, its T1 status when a `tools/mg conformance --live` report is given (`--live-report`), since only T1 runs it. The report must have run at the current oracle pin (`oracle_pin`; another pin is an error), and its status counts only while T0 finds the scenario valid with a fresh golden (`live` or `pending`) and the report ran the scenario's current text (same `scenario_sha256`); otherwise the T0 status stands, so a scenario that is `invalid`, `missing` or `stale` never shows an older T1 pass. Every row appears with its classification or `unclassified`. Where `oracle/harvest/links.csv` is readable, it also checks that no catalog value contains an Anki file name or test name, that each row's source matches links.csv, and that links.csv was inventoried at the oracle pin's release.
 - On an oracle bump, new or changed tests at the new tag are inventoried in the same change (R1882): `tools/mg harvest-report` fails until `tools/mg harvest-inventory` has run at the new release. `links.csv` keeps a SHA-256 of each test's source (`body_sha256`; Rust: from `#[test]` to the end of the function, Python: the function or method with its decorators, TypeScript: the test call), never its text. A re-inventory lists every test whose source changed under `changed since <old tag>` and sets its row's status back to `open`, keeping its id, classification, reason and scenarios, so its spec writer reviews it; a row the inventory classifies by path alone (`desktop`, `tooling`) keeps its status.

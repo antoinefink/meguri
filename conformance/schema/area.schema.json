@@ -13,6 +13,20 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
       "uniqueItems": true
+    },
+    "reference": {
+      "description": "D9.4 names individual recorded cases, supplies an explanation and cites a contract section. Entries must exist and cannot also be active.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9._-]+(/[a-z0-9._-]+)*$" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["reason", "spec"],
+        "additionalProperties": false,
+        "properties": {
+          "reason": { "type": "string", "pattern": "^[^\\r\\n]*[^\\s][^\\r\\n]*$", "description": "A nonempty single-line explanation of the reference's scope." },
+          "spec": { "type": "string", "pattern": "^[a-z0-9._-]+/[a-z0-9._-]+#[A-Z]+[0-9]+(\\.[0-9]+)*$", "description": "The neutral spec id and section establishing the scope." }
+        }
+      }
     }
   }
 }

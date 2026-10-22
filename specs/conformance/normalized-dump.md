@@ -192,7 +192,7 @@ The recipe holds the template texts; `preservation/render/every-card` repeats th
 | `preservation/churn/reopen-ten` | R2016, R2017: ten reopens write nothing | `open`, `reopen`, `schema_objects`, raw `db_dump` | U36 | recorded |
 | `preservation/churn/relaunch` | AE66 (the part Anki shares), R1586, R1590: 100 reopens over eight idle days leave nothing pending | `open`, `reopen`, `advance`, `db_exec`, raw `db_dump` | U36 (U137 adds the integration path, N11.6) | recorded |
 | `preservation/edit/unrelated-note` | AE83 (local part), R322, R323, R1483 to R1486: a note edit changes that note only | `open`, `adopt`, `edit_note`, raw `db_dump` | U36 with U27's `edit_note` | recorded |
-| `preservation/review/answers` | R582: 200 answers write no config key | `open`, `adopt`, `answer`, `advance`, raw `db_dump` | U43, U44 | recorded |
+| `preservation/review/answers` | R582: 200 reference answers write no config key; unsupported in Meguri | `open`, `adopt`, `answer`, `advance`, raw `db_dump` | reference only; supported proofs: U43, U44 | recorded |
 | `preservation/render/every-card` | R583: rendering every card changes nothing | `open`, `adopt`, `template` card cases, raw `db_dump` | U60, U62 | recorded |
 | `preservation/sync/filtered-deck` | AE83: filtered decks, their cards and type 3 entries survive a trip through Meguri and a sync | actor `meguri`, `sync`, `edit_note`, `db_dump` | U107, U117 (T1) | recorded |
 | `preservation/notetype/structure-changes` | R1485, R2017: a field add, a field rename and a template add change only what they change (N11.7) | `open`, `adopt`, `update_notetype` with the edits `add_field`, `rename_field` and `add_template` (`notetype-ops.md` T10.1), `db_exec`, raw and plain `db_dump`, `notetype_structure` | U34 | recorded |
@@ -208,7 +208,9 @@ What the oracle does in each, confirmed by running each scenario's steps after t
 
 `preservation/review/answers` records 200 reference answers on ten cards of the fixture's Steady preset. That preset has the later-list markers of `sched/fsrs-transitions#T13`; Meguri must refuse its answers under `sched/fsrs-policy#U4`. Preserve this complete reference input and golden; it is not a successful Meguri study case. U44 must prove R582 and `sched/fsrs-policy#K3` step 1 with 200 real answers, including rollover, on supported-home cards while preserving the fixture's opaque and unsupported data. U43 separately supplies N11.1's session API proof on supported-home fixtures. U246 reports the original reference's scope separately from those successful supported proofs.
 
-`area.yaml` lists a scenario as active in the change that lands what Meguri needs for it (`dsl.md` D9.1).
+Under `dsl.md` D9.4, `preservation/recipe/kitchen-sink` and `preservation/review/answers` are reference cases in area metadata. Keep their source documents and expected observations unchanged. Validate both for freshness and replay both on the oracle in T1. Neither establishes Meguri compatibility; N11.1 and `sched/fsrs-policy#K3` still require successful supported-card tests.
+
+For the other scenarios, `area.yaml` lists a scenario as active in the change that lands what Meguri needs for it (`dsl.md` D9.1).
 
 U36 also runs on Meguri's executor, with its `legacy_json`, `legacy_update` and `blob_decode` adapters and `db_exec`, the model scenarios `model/proto/` and `model/schema11/` (all but `apkg-notetypes`) and `render/template/legacy-req` (`model-ops.md` L1, L2, L4; `render-ops.md` Q3); their specs are unchanged.
 

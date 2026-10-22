@@ -1,6 +1,10 @@
 # Interface names the conformance specs use (specs/README-format.md once U2
 # lands): card and review-log columns, scheduling-state protobuf fields and
 # collection config keys that observations and scenarios carry.
+# Reference scope metadata and report status (dsl.md D9.4, D10, D12).
+reference
+reason
+spec
 nid
 did
 ord
