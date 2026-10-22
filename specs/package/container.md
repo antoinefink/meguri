@@ -126,6 +126,7 @@ Meguri's own limits (Anki 26.9.3 has none). Each is checked while reading; the r
 |---|---|---|
 | entries in the central directory | 400,000 | `Corrupt` |
 | bytes read from `meta` | 64 KiB | `Corrupt` |
+| each scheduler/config value examined by the candidate open probe: schema-11 `col.conf`, or modern `config.val` for key `schedVer` | 4 MiB (4,194,304 bytes), inclusive | `Corrupt` |
 | decoded bytes of `media` | 64 MiB | `Corrupt` |
 | decoded bytes of `collection.anki21b` | 8 GiB | `Corrupt` |
 | decoded bytes of `collection.anki21b` and of `media`, each | the larger of 16 MiB and 1,000 times the entry's compressed size | `Corrupt` |
@@ -135,6 +136,24 @@ Meguri's own limits (Anki 26.9.3 has none). Each is checked while reading; the r
 - Reasons: real collections compress about 3 to 10 times, so 1,000 times is far above any real file; 8 GiB is many times the largest collection a sync server accepts (300 MiB decoded by default, `sync/transport`). The central directory costs the zip library a few hundred bytes per entry, so 400,000 entries stay near 120 MB, under R1852's 300 MB.
 - A 1 KiB collection entry may therefore decode to at most 16 MiB. A crafted 1 KiB frame can expand to about 40 MiB, which this limit stops.
 - Streaming: the collection entry is decoded in fixed-size chunks straight into its staging file and is never held in memory whole. `meta` and `media` may be held in memory up to their limits. Peak memory while reading does not grow with the collection's size.
+
+Check each probed scheduler/config value's stored byte length before copying,
+decoding or parsing it. The check must not materialize an oversized value,
+including inside SQLite. Count bytes, not text characters. Apply this bound
+before the ordinary candidate probe for both legacy and modern representations.
+Existing handling of missing values, storage classes and invalid content stays.
+Large unrelated config values are outside this probe-value bound.
+
+This is a Meguri resource-safety limit, independent of the 8 GiB decoded
+collection limit. A structurally valid collection exceeding this marker limit
+is refused. R1852 still applies to total process memory. Refusal removes only
+operation staging and preserves the selected source and live collection; it
+must not reach replacement or safety-backup execution.
+
+Focused tests cover both representations at the inclusive boundary and one
+byte above it, large TEXT and BLOB values, unaffected unrelated config,
+existing malformed/missing markers, and bounded memory for a large streamed
+candidate whose marker exceeds the limit.
 
 ## P9. Staging and temporary files
 
