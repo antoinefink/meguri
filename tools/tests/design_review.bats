@@ -155,6 +155,7 @@ mg_snapshots__xcodebuild() {
   done
   echo "fake snapshot run mode=$mode dest=$dest suites=$suites target=$target group=$group" >>"$STUB_LOG"
   if [ "${FX_QUEUE_MAC:-}" = 1 ] && [ "$dest" = "platform=macOS,arch=arm64" ]; then
+    MG_MAC_VM_REASON="fake VM unavailable after simulator results"
     mg__mac_vm_queued "fake VM unavailable after simulator results" mac
     return 2
   fi

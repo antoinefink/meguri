@@ -95,70 +95,16 @@ struct ReviewLayout<Card: View>: View {
     let rate: (ReviewRating) -> Void
     var timerText: (() -> String)? = nil
     @Environment(\.appClock) var clock
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ViewBuilder let card: () -> Card
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: Spacing.small) {
-                Button(action: close) {
-                    Label { Text("Close Review", bundle: .module) } icon: { Image(systemName: "xmark") }
-                        .labelStyle(.iconOnly)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                    .accessibilityLabel(Text("Close Review", bundle: .module))
-                    .help(Text("Close Review", bundle: .module))
-                    .accessibilityIdentifier("review.session.close")
-                VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-                    Text(verbatim: remaining).font(.caption)
-                        .fixedSize(horizontal: false, vertical: true)
-                    ProgressView(value: progress)
-                        .tint(.token(.progressFill))
-                }
-                    .foregroundStyle(.token(.textPrimary))
-                    .layoutPriority(1)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel(Text("Session Progress", bundle: .module))
-                    .accessibilityValue(remaining)
-                    .accessibilityIdentifier("review.session.progress")
-                    .help(remaining)
-                if let timerText {
-                    TimelineView(.periodic(from: clock.now(), by: 1)) { _ in
-                        Text(verbatim: timerText()).monospacedDigit().font(.caption)
-                            .accessibilityIdentifier("review.session.timer")
-                    }
-                }
-                Button {
-                    guard canUndo else { return }
-                    undo()
-                } label: {
-                    Label { Text(verbatim: undoDescription) } icon: { Image(systemName: "arrow.uturn.backward") }
-                        .labelStyle(.iconOnly)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                    .accessibilityLabel(undoDescription)
-                    .help(undoDescription)
-                    .accessibilityIdentifier("review.session.back")
-                    .disabled(!canUndo)
-                if canRedo {
-                    Button {
-                        guard canRedo else { return }
-                        redo()
-                    } label: {
-                        Label { Text("Redo Answer", bundle: .module) } icon: { Image(systemName: "arrow.uturn.forward") }
-                            .labelStyle(.iconOnly)
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                        .accessibilityLabel(Text("Redo Answer", bundle: .module))
-                        .help(Text("Redo Answer", bundle: .module))
-                        .accessibilityIdentifier("review.session.redo")
-                        .disabled(!canRedo)
-                }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .padding(.horizontal, Spacing.small)
+            header
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .padding(.horizontal, Spacing.small)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
             if let notice = notice {
                 Text(verbatim: notice).font(.callout).foregroundStyle(.token(.statusWarning))
                     .padding(Spacing.small)
@@ -174,6 +120,96 @@ struct ReviewLayout<Card: View>: View {
         .accessibilityAction(named: Text("Show Answer", bundle: .module)) { reveal() }
         #endif
     }
+    @ViewBuilder private var header: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(spacing: Spacing.xxSmall) {
+                HStack(spacing: Spacing.small) {
+                    closeButton
+                    Spacer(minLength: Spacing.small)
+                    timer
+                    backButton
+                    redoButton
+                }
+                sessionProgress
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            HStack(spacing: Spacing.small) {
+                closeButton
+                sessionProgress
+                timer
+                backButton
+                redoButton
+            }
+        }
+    }
+    private var closeButton: some View {
+        Button(action: close) {
+            Label { Text("Close Review", bundle: .module) } icon: { Image(systemName: "xmark") }
+                .labelStyle(.iconOnly)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel(Text("Close Review", bundle: .module))
+        .help(Text("Close Review", bundle: .module))
+        .accessibilityIdentifier("review.session.close")
+    }
+    private var sessionProgress: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            Text(verbatim: remaining).font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+            ProgressView(value: progress)
+                .tint(.token(.progressFill))
+        }
+        .foregroundStyle(.token(.textPrimary))
+        .layoutPriority(1)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("Session Progress", bundle: .module))
+        .accessibilityValue(remaining)
+        .accessibilityIdentifier("review.session.progress")
+        .help(remaining)
+    }
+    @ViewBuilder private var timer: some View {
+        if let timerText {
+            TimelineView(.periodic(from: clock.now(), by: 1)) { _ in
+                Text(verbatim: timerText()).monospacedDigit().font(.caption)
+                    .accessibilityIdentifier("review.session.timer")
+            }
+        }
+    }
+    private var backButton: some View {
+        Button {
+            guard canUndo else { return }
+            undo()
+        } label: {
+            Label { Text(verbatim: undoDescription) } icon: { Image(systemName: "arrow.uturn.backward") }
+                .labelStyle(.iconOnly)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel(undoDescription)
+        .help(undoDescription)
+        .accessibilityIdentifier("review.session.back")
+        .disabled(!canUndo)
+    }
+    @ViewBuilder private var redoButton: some View {
+        if canRedo {
+            Button {
+                guard canRedo else { return }
+                redo()
+            } label: {
+                Label { Text("Redo Answer", bundle: .module) } icon: { Image(systemName: "arrow.uturn.forward") }
+                    .labelStyle(.iconOnly)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel(Text("Redo Answer", bundle: .module))
+            .help(Text("Redo Answer", bundle: .module))
+            .accessibilityIdentifier("review.session.redo")
+            .disabled(!canRedo)
+        }
+    }
+
 }
 
 /// One reserved bottom region on both sides; controls never resize the card.
@@ -222,14 +258,10 @@ public struct ReviewAnswerBar: View {
     @ViewBuilder private var ratings: some View {
         if dynamicTypeSize.isAccessibilitySize {
             VStack(spacing: Spacing.xSmall) {
-                HStack(spacing: Spacing.xSmall) {
-                    rating(.again, title: "Again", label: states?.again.label, color: .ratingAgain)
-                    rating(.hard, title: "Hard", label: states?.hard.label, color: .textPrimary)
-                }
-                HStack(spacing: Spacing.xSmall) {
-                    rating(.good, title: "Good", label: states?.good.label, color: .ratingGood)
-                    rating(.easy, title: "Easy", label: states?.easy.label, color: .textPrimary)
-                }
+                rating(.again, title: "Again", label: states?.again.label, color: .ratingAgain)
+                rating(.hard, title: "Hard", label: states?.hard.label, color: .textPrimary)
+                rating(.good, title: "Good", label: states?.good.label, color: .ratingGood)
+                rating(.easy, title: "Easy", label: states?.easy.label, color: .textPrimary)
             }
         } else {
             HStack(spacing: Spacing.xSmall) {
@@ -242,13 +274,25 @@ public struct ReviewAnswerBar: View {
     }
     private func rating(_ rating: ReviewRating, title: String, label: ReviewAnswerLabel?, color: ColorToken) -> some View {
         Button { rate(rating) } label: {
-            VStack(spacing: Spacing.xxSmall) {
-                Text(verbatim: label.map(Self.interval) ?? "—").font(.headline)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(LocalizedStringKey(title), bundle: .module).font(.caption)
-                    .fixedSize(horizontal: false, vertical: true)
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    HStack(spacing: Spacing.small) {
+                        Text(verbatim: label.map(Self.interval) ?? "—").font(.headline)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: Spacing.small)
+                        Text(LocalizedStringKey(title), bundle: .module).font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    VStack(spacing: Spacing.xxSmall) {
+                        Text(verbatim: label.map(Self.interval) ?? "—").font(.headline)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(LocalizedStringKey(title), bundle: .module).font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .multilineTextAlignment(.center)
+                }
             }
-            .multilineTextAlignment(.center)
             .foregroundStyle(.token(color))
             .frame(maxWidth: .infinity, minHeight: 44)
             .fixedSize(horizontal: false, vertical: true)

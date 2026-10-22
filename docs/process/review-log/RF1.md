@@ -370,3 +370,15 @@ Small-phone drive `20261022T085341Z-56302`: 18 actions passed; 29 issues.
 Its largest-text capture shows overlapping rating labels and a nested button.
 That actual layout finding remains open. Native AX permission is separate.
 No Unit acceptance. The full gate remains pending.
+
+Viewport repair: session `s-20261022T090340Z-dd61f004`.
+Drive `20261022T090043Z-64494` passed 18 actions with zero hierarchy issues.
+Its capture still showed too little card space. Keep that P1 open until verified.
+At accessibility sizes, progress now follows the control row.
+Four full-width rating rows retain intervals, names and native actions.
+Question and answer still reserve the same control height.
+The queued-VM fixture now sets its required reason before calling the helper.
+Selftest `20261022T090050Z-65301`: 13 passed, one failed on that fixture.
+Native planner run `20261022T090420Z-69184` passed.
+Existing review baselines need new captures. All audits must cover the new UI.
+No Unit acceptance. Native AX permission and the full gate remain open.
