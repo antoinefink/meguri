@@ -26,7 +26,12 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
                         XCTAssertGreaterThanOrEqual(value.frame.width, 44)
                         XCTAssertGreaterThanOrEqual(value.frame.height, 44)
                         XCTAssertEqual(value.label, "Copying collection…")
+                        #if os(macOS)
+                        let fraction = try XCTUnwrap(value.value as? NSNumber)
+                        XCTAssertEqual(fraction.doubleValue, 0.42, accuracy: 0.000001)
+                        #else
                         XCTAssertEqual(value.value as? String, "42 of 100")
+                        #endif
                         XCTAssertEqual(app.staticTexts["onboarding.collectionImport.progress.stage"].label, "Copying collection…")
                     }
                     guard state == "overflow" else {
