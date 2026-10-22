@@ -260,3 +260,14 @@ Mac `20261022T081123Z-99202`: two persistence tests passed.
 The keyboard test failed: the raw AX helper could not find Back.
 Retain this failure; native keyboard proof remains open.
 No Unit acceptance. Full U152 and the remaining plan stay open.
+
+Native AX helper fix: session `s-20261022T081539Z-a4262b3f`.
+It checks trust and searches public window roots by exact identifier.
+The walk has identity and depth bounds. Failures report AX error codes.
+Keyboard activation and native focus assertions remain required.
+Mac failure `20261022T081123Z-99202` is retained. New verification is pending.
+iPad audit `20261022T081605Z-5320`: all four screens pass all variants.
+Round 6: P1 Mac card content is absent from accessibility.
+The visible question has no text descendant in the native tree.
+Fix the host boundary and verify actual question and answer text.
+Other P0/P1 findings: none. No Unit acceptance; the full gate is pending.

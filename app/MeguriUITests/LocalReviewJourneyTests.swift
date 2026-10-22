@@ -79,27 +79,101 @@ final class LocalReviewJourneyTests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         let running = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
             .first { !$0.isTerminated })
-        let application = AXUIElementCreateApplication(running.processIdentifier)
-        func find(_ node: AXUIElement) -> AXUIElement? {
+        let application = try XCTUnwrap(AXIsProcessTrusted() ? AXUIElementCreateApplication(running.processIdentifier) : nil,
+            "Native AX lookup failed: reason=AXTrustMissing; trusted=false; pid=\(running.processIdentifier); attempts=0; windows=0; visited=0")
+        let deadline = Date().addingTimeInterval(5)
+        var attempts = 0, windowCount = 0, rootCount = 0, visitedCount = 0, duplicates = 0, maxDepth = 0
+        var readErrors: [String: Int] = [:]
+        var stopReason: String?
+        func diagnostics() -> String {
+            let errors = readErrors.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value)" }.joined(separator: ",")
+            return "trusted=\(AXIsProcessTrusted()); pid=\(running.processIdentifier); attempts=\(attempts); windows=\(windowCount); roots=\(rootCount); visited=\(visitedCount); duplicates=\(duplicates); maxDepth=\(maxDepth); AXReadErrors[attribute/code:count]=[\(errors)]"
+        }
+        func read(_ node: AXUIElement, _ attribute: String) -> CFTypeRef? {
             var value: CFTypeRef?
-            if AXUIElementCopyAttributeValue(node, kAXIdentifierAttribute as CFString, &value) == .success,
-               value as? String == identifier { return node }
-            var children: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &children) == .success,
-                  let nodes = children as? [AXUIElement] else { return nil }
-            for child in nodes { if let found = find(child) { return found } }
+            let error = AXUIElementCopyAttributeValue(node, attribute as CFString, &value)
+            guard error == .success else {
+                readErrors["\(attribute)/\(error.rawValue)", default: 0] += 1
+                switch error {
+                case .attributeUnsupported, .noValue, .cannotComplete, .invalidUIElement: break
+                default: stopReason = "AXReadError(\(error.rawValue))"
+                }
+                return nil
+            }
+            if value == nil { stopReason = "AXSuccessWithoutValue(\(attribute))" }
+            return value
+        }
+        func findInWindows() -> AXUIElement? {
+            windowCount = 0; rootCount = 0; visitedCount = 0; duplicates = 0; maxDepth = 0
+            var roots: [AXUIElement] = []
+            if let value = read(application, kAXWindowsAttribute) {
+                guard let windows = value as? [AXUIElement] else {
+                    stopReason = "AXUnexpectedType(AXWindows)"; return nil
+                }
+                windowCount = windows.count
+                roots.append(contentsOf: windows)
+            }
+            // These public window roots may become available before AXWindows.
+            for attribute in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+                if let value = read(application, attribute) {
+                    guard CFGetTypeID(value) == AXUIElementGetTypeID() else {
+                        stopReason = "AXUnexpectedType(\(attribute))"; return nil
+                    }
+                    roots.append(value as! AXUIElement)
+                }
+            }
+            rootCount = roots.count
+            var pending = roots.reversed().map { ($0, 0) }
+            var visited: [CFHashCode: [AXUIElement]] = [:]
+            while let (node, depth) = pending.popLast(), stopReason == nil {
+                let hash = CFHash(node)
+                if visited[hash, default: []].contains(where: { CFEqual($0, node) }) {
+                    duplicates += 1
+                    continue
+                }
+                guard visitedCount < 4096, depth <= 64 else {
+                    stopReason = "AXWalkLimit"; return nil
+                }
+                visited[hash, default: []].append(node)
+                visitedCount += 1
+                maxDepth = max(maxDepth, depth)
+                if let value = read(node, kAXIdentifierAttribute) {
+                    guard let nativeIdentifier = value as? String else {
+                        stopReason = "AXUnexpectedType(AXIdentifier)"; return nil
+                    }
+                    if nativeIdentifier == identifier { return node }
+                }
+                if let value = read(node, kAXChildrenAttribute) {
+                    guard let children = value as? [AXUIElement] else {
+                        stopReason = "AXUnexpectedType(AXChildren)"; return nil
+                    }
+                    pending.append(contentsOf: children.reversed().map { ($0, depth + 1) })
+                }
+            }
             return nil
         }
-        let control = try XCTUnwrap(find(application), "Native control missing: \(identifier)")
-        XCTAssertEqual(AXUIElementSetAttributeValue(control, kAXFocusedAttribute as CFString, kCFBooleanTrue), .success)
+        var found: AXUIElement?
+        repeat {
+            attempts += 1
+            found = findInWindows()
+            if found != nil || stopReason != nil || Date() >= deadline { break }
+            // Wait only for window/control publication or transient AX reads.
+            // Focus writes and keyboard actions are never retried.
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while true
+        let control = try XCTUnwrap(found, "Native control missing: \(identifier); reason=\(stopReason ?? "AXReadinessTimeout"); \(diagnostics())")
+        let focusError = AXUIElementSetAttributeValue(control, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        XCTAssertEqual(focusError, .success, "Native AX focus set error=\(focusError.rawValue); \(diagnostics())")
         assertNativeFocus(control)
         return control
     }
 
     private func assertNativeFocus(_ control: AXUIElement) {
         var focused: CFTypeRef?
-        XCTAssertEqual(AXUIElementCopyAttributeValue(control, kAXFocusedAttribute as CFString, &focused), .success)
-        XCTAssertEqual(focused as? Bool, true)
+        let error = AXUIElementCopyAttributeValue(control, kAXFocusedAttribute as CFString, &focused)
+        let diagnostics = "Native AX focus read error=\(error.rawValue); trusted=\(AXIsProcessTrusted())"
+        XCTAssertEqual(error, .success, diagnostics)
+        XCTAssertEqual(focused as? Bool, true, diagnostics)
     }
     #endif
 
