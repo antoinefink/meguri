@@ -268,6 +268,16 @@ fn opens(s: &Scenario) -> Result<(), FormatError> {
 }
 
 fn draft(op: &str, args: &DraftArgs) -> Result<(), FormatError> {
+    if args.0.get("format").and_then(Value::as_str) == Some("colpkg") {
+        match op {
+            "import" => return super::CollectionPackageImportArgs::from_mapping(&args.0).map(drop),
+            // Preserve the separate legacy-export diagnostic below.
+            "export" if !args.0.contains_key("legacy") => {
+                return super::CollectionPackageExportArgs::from_mapping(&args.0).map(drop);
+            }
+            _ => {}
+        }
+    }
     let Some((_, spec)) = DRAFT_ARGS.iter().find(|(name, _)| *name == op) else {
         return Ok(());
     };
@@ -609,6 +619,7 @@ fn once_per_step(requests: &[super::model::ObservationRequest]) -> Result<(), Fo
         ObservationKind::CardExtractors,
         ObservationKind::CardExcerpts,
         ObservationKind::IgnoredBeforeCount,
+        ObservationKind::PackageListing,
     ] {
         if requests.iter().filter(|r| r.kind == kind).count() > 1 {
             return Err(FormatError::new(format!(
@@ -627,6 +638,9 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
     let uint = |v: &Value| v.is_u64();
     let only = |keys: &[&str]| map.keys().all(|k| keys.contains(&k.as_str()));
     match kind {
+        ObservationKind::PackageListing => {
+            super::PackageListingRequest::from_mapping(map)?;
+        }
         ObservationKind::CardExtractors => {
             super::CardExtractorsRequest::from_mapping(map)?;
         }

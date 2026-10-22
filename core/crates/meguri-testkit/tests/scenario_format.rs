@@ -325,6 +325,8 @@ fn schema_draft_requirements() -> Vec<(String, Vec<String>, Vec<String>)> {
             .unwrap();
     let mut out = Vec::new();
     for (op, def) in schema["$defs"]["step"]["properties"].as_object().unwrap() {
+        // A fixed form may leave the other forms draft (`import.colpkg`).
+        let def = def.get("else").unwrap_or(def);
         let parts: Vec<&Value> = match def.get("allOf") {
             Some(all) => all.as_array().unwrap().iter().collect(),
             None if def.get("$ref") == Some(&json!("#/$defs/draft_args")) => vec![def],
@@ -837,7 +839,7 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
     let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
     assert!(parsed.needs().observations.contains("blob_decode"));
     // model-ops.md L6 and L7; other export forms stay draft and open.
-    let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{export: {format: apkg, name: Note_types-2.v1.apkg, legacy: true}}, {export: {format: colpkg, name: out.colpkg, media: true}}, {observe: [{package_col: {name: Note_types-2.v1.apkg, columns: [ver, conf, models, decks, dconf, tags]}}]}]\n";
+    let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{export: {format: apkg, name: Note_types-2.v1.apkg, legacy: true}}, {export: {format: apkg, name: out.apkg, media: true}}, {observe: [{package_col: {name: Note_types-2.v1.apkg, columns: [ver, conf, models, decks, dconf, tags]}}]}]\n";
     let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
     let needs = parsed.needs();
     assert!(needs.ops.contains("export") && needs.observations.contains("package_col"));
@@ -2529,4 +2531,197 @@ steps:
             .to_string();
         assert!(err.contains(why), "{bad}: {err}");
     }
+}
+
+#[test]
+fn prepared_package_contracts_load_with_their_recorded_hashes() {
+    let mut files = Vec::new();
+    scenario_files(&conformance_dir().join("scenarios/package"), "package", &mut files);
+    assert_eq!(files.len(), 29);
+    for (path, id) in files {
+        let loaded = scenario::load(&path).unwrap_or_else(|e| panic!("{id}: {e}"));
+        assert_eq!(loaded.scenario.id, id);
+        assert_eq!(loaded.sha256, golden_hash(&id), "{id}");
+    }
+}
+
+#[test]
+fn package_forms_enforce_sources_names_and_capability_parts() {
+    let with_steps = |steps: Value| {
+        scenario::Scenario::from_value(&json!({
+            "id": "area/package", "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"},
+            "steps": steps
+        }))
+    };
+    let open = json!({"open": {"fixture": "storage/schema-18.anki2"}});
+    for source in [
+        json!({"name": "A-1.colpkg"}),
+        json!({"fixture": "package/backup/standard.colpkg"}),
+    ] {
+        let mut args = source;
+        args["format"] = json!("colpkg");
+        let parsed = with_steps(json!([open, {"import": args.clone()}])).unwrap();
+        assert!(parsed.needs().ops.contains("import.colpkg"));
+        let typed = scenario::CollectionPackageImportArgs::from_mapping(args.as_object().unwrap()).unwrap();
+        assert_eq!(serde_json::to_value(typed).unwrap(), args);
+    }
+    let export = json!({"format": "colpkg", "name": "A-1.colpkg"});
+    let typed = scenario::CollectionPackageExportArgs::from_mapping(export.as_object().unwrap()).unwrap();
+    assert_eq!(serde_json::to_value(typed).unwrap(), export);
+    let parsed = with_steps(json!([{"export": export}])).unwrap();
+    assert!(parsed.needs().ops.contains("export.colpkg"));
+    for args in [
+        json!({"format": "colpkg"}),
+        json!({"format": "colpkg", "name": "x.colpkg", "fixture": "package/x.colpkg"}),
+        json!({"format": "colpkg", "name": null}),
+        json!({"format": "colpkg", "name": "x.apkg"}),
+        json!({"format": "colpkg", "fixture": "../x.colpkg"}),
+        json!({"format": "colpkg", "fixture": "package/X.colpkg"}),
+        json!({"format": "colpkg", "name": "../x.colpkg"}),
+        json!({"format": "colpkg", "name": "x.colpkg", "media": true}),
+    ] {
+        assert!(
+            with_steps(json!([open, {"import": args.clone()}])).is_err(),
+            "import {args}"
+        );
+    }
+    for args in [
+        json!({"format": "colpkg", "name": "x.apkg"}),
+        json!({"format": "colpkg", "name": "_x.colpkg"}),
+        json!({"format": "colpkg", "name": "x.colpkg", "media": true}),
+    ] {
+        assert!(model_accepts(json!({"export": args})).is_err());
+    }
+    let import = json!({"import": {"format": "colpkg", "name": "x.colpkg"}});
+    assert!(with_steps(json!([import])).is_err());
+    assert!(with_steps(json!([open, {"add_note": {"notetype": "Pair"}}, import])).is_err());
+    assert!(with_steps(json!([open, import, {"observe": ["card(#c1)"]}])).is_err());
+    let mut setup = json!({"id": "area/package", "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"},
+        "steps": [open, import]});
+    setup["setup"] = json!({});
+    assert!(scenario::Scenario::from_value(&setup).is_err());
+    // Other forms keep their draft keys and argument rules.
+    assert!(model_accepts(json!({"import": {"fixture": "draft.apkg", "future": true}})).is_ok());
+    assert!(model_accepts(json!({"export": {"format": "apkg", "name": "draft.apkg", "future": true}})).is_ok());
+}
+
+#[test]
+fn backup_contracts_preserve_defaults_and_reject_malformed_inputs() {
+    let value = json!({"id": "area/backup", "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"},
+        "steps": [{"force_backup": {}}, {"backup": {"force": false}}]});
+    let parsed = scenario::Scenario::from_value(&value).unwrap();
+    let Step::ForceBackup(force) = &parsed.steps[0] else {
+        panic!("force_backup")
+    };
+    assert_eq!(force.copy_as, None);
+    assert_eq!(serde_json::to_value(force).unwrap(), json!({}));
+    let Step::Backup(backup) = &parsed.steps[1] else {
+        panic!("backup")
+    };
+    assert!(!backup.force);
+    assert_eq!(serde_json::to_value(backup).unwrap(), json!({"force": false}));
+    for step in [
+        json!({"force_backup": {"copy_as": "copy.colpkg"}}),
+        json!({"add_backup_files": {"names": ["foreign file", "é", "a\\b"]}}),
+        json!({"add_backup_files": {"series": {"from": "2030-01-01T00:00:00", "until": "2030-01-01T05:33:19", "every": "1s"}}}),
+        json!({"save_backup_settings": {"daily": 0, "weekly": 4294967295_u64, "monthly": 1, "minimum_interval_mins": 30}}),
+    ] {
+        assert!(model_accepts(step.clone()).is_ok(), "{step}");
+    }
+    for step in [
+        json!({"backup": {}}),
+        json!({"backup": {"force": null}}),
+        json!({"backup": {"force": 0}}),
+        json!({"backup": [false]}),
+        json!({"backup": {"force": true, "future": true}}),
+        json!({"force_backup": {"copy_as": null}}),
+        json!({"force_backup": []}),
+        json!({"force_backup": {"copy_as": "x.apkg"}}),
+        json!({"force_backup": {"copy_as": "x.colpkg", "future": true}}),
+        json!({"save_backup_settings": {"daily": 0, "weekly": 0, "monthly": 0}}),
+        json!({"save_backup_settings": {"daily": -1, "weekly": 0, "monthly": 0, "minimum_interval_mins": 0}}),
+        json!({"save_backup_settings": {"daily": 4294967296_u64, "weekly": 0, "monthly": 0, "minimum_interval_mins": 0}}),
+        json!({"save_backup_settings": [0, 0, 0, 0]}),
+        json!({"add_backup_files": {}}),
+        json!({"add_backup_files": {"names": []}}),
+        json!({"add_backup_files": {"names": ["x", "x"]}}),
+        json!({"add_backup_files": {"names": [".meguri-work"]}}),
+        json!({"add_backup_files": {"names": ["."]}}),
+        json!({"add_backup_files": {"names": [".."]}}),
+        json!({"add_backup_files": {"names": ["a/b"]}}),
+        json!({"add_backup_files": {"names": ["a\u{0}b"]}}),
+        json!({"add_backup_files": {"names": ["é".repeat(128)]}}),
+        json!({"add_backup_files": {"names": ["x"], "series": {"from": "2030-01-01T00:00:00", "until": "2030-01-01T00:00:00", "every": "1s"}}}),
+    ] {
+        assert!(model_accepts(step.clone()).is_err(), "accepted {step}");
+    }
+    for (from, until, every) in [
+        ("2030-01-01T00:00:00", "2030-01-01T05:33:20", "1s"), // 20,001 files
+        ("2030-01-02T00:00:00", "2030-01-01T00:00:00", "1h"),
+        ("2030-01-01T00:00:00", "2030-01-01T00:00:00", "0s"),
+        ("2030-02-30T00:00:00", "2030-03-01T00:00:00", "1h"),
+        ("2030-01-01T00:00:00Z", "2030-01-02T00:00:00", "1h"),
+    ] {
+        assert!(
+            model_accepts(json!({"add_backup_files": {"series": {"from": from, "until": until, "every": every}}}))
+                .is_err()
+        );
+    }
+    let mut twice = value;
+    twice["steps"] = json!([{"force_backup": {}}, {"backup": {"force": true}}, {"force_backup": {}}]);
+    assert!(scenario::Scenario::from_value(&twice).is_err());
+    for reset in [json!({"reopen": {}}), json!({"handoff": "oracle"})] {
+        twice["steps"] = json!([{"force_backup": {}}, reset, {"force_backup": {}}]);
+        assert!(scenario::Scenario::from_value(&twice).is_ok());
+    }
+}
+
+#[test]
+fn package_observation_requests_follow_the_committed_schema() {
+    let schema: Value =
+        scenario::parse_json(&fs::read_to_string(conformance_dir().join("schema/scenario.schema.json")).unwrap())
+            .unwrap();
+    let kinds = schema["$defs"]["observation_request"]["anyOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|v| v.get("properties"))
+        .unwrap();
+    for kind in ["package_listing", "backup_files", "backup_settings"] {
+        assert!(!kinds[kind].is_null());
+        assert!(scenario::ObservationKind::from_name(kind).is_some());
+    }
+    for request in [
+        json!("backup_files"),
+        json!({"backup_files": null}),
+        json!("backup_settings"),
+        json!({"backup_settings": null}),
+        json!({"package_listing": {"name": "A.apkg"}}),
+        json!({"package_listing": {"fixture": "package/backup/standard.colpkg"}}),
+    ] {
+        assert!(
+            model_accepts(json!({"observe": [request.clone()]})).is_ok(),
+            "{request}"
+        );
+    }
+    for request in [
+        json!("package_listing"),
+        json!({"package_listing": null}),
+        json!({"package_listing": {}}),
+        json!({"package_listing": {"name": null}}),
+        json!({"package_listing": {"name": "../x.apkg"}}),
+        json!({"package_listing": {"fixture": "package/X.colpkg"}}),
+        json!({"package_listing": {"fixture": "package/x.zip"}}),
+        json!({"package_listing": {"name": "x.apkg", "fixture": "package/x.apkg"}}),
+        json!({"package_listing": {"name": "x.apkg", "future": true}}),
+        json!({"backup_files": {}}),
+        json!({"backup_settings": {}}),
+    ] {
+        assert!(
+            model_accepts(json!({"observe": [request.clone()]})).is_err(),
+            "accepted {request}"
+        );
+    }
+    let request = json!({"package_listing": {"name": "x.apkg"}});
+    assert!(model_accepts(json!({"observe": [request, request]})).is_err());
 }

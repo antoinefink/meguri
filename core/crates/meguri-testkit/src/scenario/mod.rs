@@ -4,6 +4,7 @@
 mod card_extractors;
 mod image_occlusion;
 mod model;
+mod package;
 mod type_answer;
 mod validate;
 mod yaml;
@@ -17,6 +18,7 @@ use sha2::{Digest, Sha256};
 pub use card_extractors::{CardExtractorInput, CardExtractorsRequest, ExtractorValue};
 pub use image_occlusion::ImageOcclusionRequest;
 pub use model::*;
+pub use package::*;
 pub use type_answer::{ReviewHtmlCase, TypeAnswerFunction, TypeAnswerRequest};
 pub use validate::draft_requirements;
 

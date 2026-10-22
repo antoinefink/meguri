@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::FormatError;
+use super::{AddBackupFilesArgs, BackupArgs, ForceBackupArgs, SaveBackupSettingsArgs};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -133,7 +134,7 @@ fn mapping<'de, D: Deserializer<'de>>(deserializer: D, what: &str) -> Result<Map
 /// An op argument read through its mapping, for a variant's or a member's
 /// `deserialize_with`: serde's derived struct alone would also read the list
 /// of its values, which the schema forbids.
-fn op_mapping<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+pub(super) fn op_mapping<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
     T: de::DeserializeOwned,
@@ -985,6 +986,16 @@ pub enum Step {
     BuildFiltered(DraftArgs),
     Import(DraftArgs),
     Export(DraftArgs),
+    /// backup-ops.md F2-F4 and backup-trigger-ops.md H1. Parsing only;
+    /// capabilities remain unavailable until real adapters register them.
+    #[serde(deserialize_with = "op_mapping")]
+    AddBackupFiles(AddBackupFilesArgs),
+    #[serde(deserialize_with = "op_mapping")]
+    ForceBackup(ForceBackupArgs),
+    #[serde(deserialize_with = "op_mapping")]
+    SaveBackupSettings(SaveBackupSettingsArgs),
+    #[serde(deserialize_with = "op_mapping")]
+    Backup(BackupArgs),
     /// collection-check.md K10: Anki's Check Database, its K5 counts.
     CheckDb(NoArgs),
     /// record-ops.md W1.
@@ -1043,7 +1054,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 69] = [
+    pub const NAMES: [&'static str; 73] = [
         "advance",
         "set_clock",
         "add_note",
@@ -1092,6 +1103,10 @@ impl Step {
         "build_filtered",
         "import",
         "export",
+        "add_backup_files",
+        "force_backup",
+        "save_backup_settings",
+        "backup",
         "check_db",
         "db_exec",
         "adopt",
@@ -1169,6 +1184,10 @@ impl Step {
             Step::BuildFiltered(_) => "build_filtered",
             Step::Import(_) => "import",
             Step::Export(_) => "export",
+            Step::AddBackupFiles(_) => "add_backup_files",
+            Step::ForceBackup(_) => "force_backup",
+            Step::SaveBackupSettings(_) => "save_backup_settings",
+            Step::Backup(_) => "backup",
             Step::CheckDb(_) => "check_db",
             Step::DbExec(_) => "db_exec",
             Step::Adopt(_) => "adopt",
@@ -1220,7 +1239,7 @@ impl Step {
 /// An optional member that is present: its value, never null. With
 /// `#[serde(default)]` a missing member stays `None`; serde alone would read
 /// an explicit null as missing, which the schema forbids for these members.
-fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+pub(super) fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
@@ -1968,6 +1987,11 @@ pub enum ObservationKind {
     LegacyJson,
     BlobDecode,
     PackageCol,
+    /// package-ops.md E3.
+    PackageListing,
+    /// backup-ops.md F5, F6.
+    BackupFiles,
+    BackupSettings,
     Text,
     /// undo-ops.md V2.
     UndoStatus,
@@ -2005,7 +2029,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 42] = [
+    pub const ALL: [ObservationKind; 45] = [
         ObservationKind::TypeAnswer,
         ObservationKind::ReviewHtml,
         ObservationKind::MediaDir,
@@ -2039,6 +2063,9 @@ impl ObservationKind {
         ObservationKind::LegacyJson,
         ObservationKind::BlobDecode,
         ObservationKind::PackageCol,
+        ObservationKind::PackageListing,
+        ObservationKind::BackupFiles,
+        ObservationKind::BackupSettings,
         ObservationKind::Text,
         ObservationKind::UndoStatus,
         ObservationKind::Cloze,
@@ -2085,6 +2112,9 @@ impl ObservationKind {
             ObservationKind::LegacyJson => "legacy_json",
             ObservationKind::BlobDecode => "blob_decode",
             ObservationKind::PackageCol => "package_col",
+            ObservationKind::PackageListing => "package_listing",
+            ObservationKind::BackupFiles => "backup_files",
+            ObservationKind::BackupSettings => "backup_settings",
             ObservationKind::Text => "text",
             ObservationKind::UndoStatus => "undo_status",
             ObservationKind::Cloze => "cloze",
@@ -2118,7 +2148,9 @@ impl ObservationKind {
             | ObservationKind::SchemaObjects
             | ObservationKind::UndoStatus
             | ObservationKind::TagTree
-            | ObservationKind::BrowserConfig => ArgShape::None,
+            | ObservationKind::BrowserConfig
+            | ObservationKind::BackupFiles
+            | ObservationKind::BackupSettings => ArgShape::None,
             ObservationKind::Card
             | ObservationKind::Revlog
             | ObservationKind::NextStates
@@ -2131,6 +2163,7 @@ impl ObservationKind {
             | ObservationKind::LegacyJson
             | ObservationKind::BlobDecode
             | ObservationKind::PackageCol
+            | ObservationKind::PackageListing
             | ObservationKind::Template
             | ObservationKind::FieldsCheck
             | ObservationKind::Text
@@ -3156,6 +3189,7 @@ impl Scenario {
     pub fn from_value(value: &Value) -> Result<Scenario, FormatError> {
         let scenario = Scenario::deserialize(value).map_err(|e| FormatError::new(e.to_string()))?;
         super::validate::scenario(&scenario)?;
+        super::package::scenario(&scenario, value)?;
         Ok(scenario)
     }
 
@@ -3364,6 +3398,14 @@ fn add_step_needs(needs: &mut Needs, steps: &[Step]) {
             Step::UpdateNotetype(args) => {
                 needs.ops.insert(step.name().to_owned());
                 needs.ops.extend(args.edits.iter().map(NotetypeEdit::capability));
+            }
+            Step::Export(args) | Step::Import(args) => {
+                needs.ops.insert(step.name().to_owned());
+                if args.0.get("format").and_then(Value::as_str) == Some("colpkg") {
+                    needs.ops.insert(format!("{}.colpkg", step.name()));
+                } else if matches!(step, Step::Export(_)) && args.0.get("legacy") == Some(&Value::Bool(true)) {
+                    needs.ops.insert("export.apkg_legacy".to_owned());
+                }
             }
             other => {
                 needs.ops.insert(other.name().to_owned());
