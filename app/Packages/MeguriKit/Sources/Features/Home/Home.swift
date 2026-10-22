@@ -116,15 +116,27 @@ public struct HomeSidebarDecks: View {
     public let collection: ReviewCollection
     public init(collection: ReviewCollection) { self.collection = collection }
     public var body: some View {
-        OutlineGroup(collection.decks, id: \.id, children: \.outlineChildren) { deck in
-            Label(deck.name.components(separatedBy: "::").last ?? deck.name, systemImage: "rectangle.stack")
-                .tag(SidebarItem.deck(DeckID(deck.id)))
-                .accessibilityIdentifier("home.sidebar.deck.\(deck.id)")
+        ForEach(Self.flatten(collection.decks), id: \.id) { deck in
+            Label {
+                Text(verbatim: deck.name)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "rectangle.stack").accessibilityHidden(true)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(verbatim: deck.name))
+            .accessibilityIdentifier("home.sidebar.deck.\(deck.id)")
+            .tag(SidebarItem.deck(DeckID(deck.id)))
         }
     }
-}
-private extension CountedDeckNode {
-    var outlineChildren: [CountedDeckNode]? { children.isEmpty ? nil : children }
+
+    private static func flatten(_ nodes: [CountedDeckNode]) -> [CountedDeckNode] {
+        nodes.sorted {
+            $0.name == $1.name ? $0.id < $1.id : $0.name < $1.name
+        }.flatMap { node in
+            [node] + flatten(node.children)
+        }
+    }
 }
 
 public struct FsrsAdmissionView: View {

@@ -197,3 +197,21 @@ The new tests require waiting after four ratings plus undo, and Done after
 four Easy answers on a fresh collection. Both verify records and counts after
 an unseeded restart. Shared Mac inputs use the existing activation helper.
 Fix session: `s-20261022T075202Z-cdf77908`. Execution remains pending.
+
+Sidebar integration fix after review 5, filtered source base `a294c4eb`;
+original RF1 base remains `5d651707`. Replaced only HomeSidebarDecks' outline
+with native List rows, sorted by full name and ID among siblings and flattened
+parent before child. Every returned deck keeps its full verbatim path and
+SidebarItem.deck tag. Each row has one named accessibility element and deck ID;
+the decorative SF Symbol is hidden and child elements are ignored. The existing
+List selection owner and HomeDeckTree are unchanged. No disclosure controls are
+added; full U152 collapsible sidebar work remains unfinished.
+
+One source/selection/accessibility consistency pass only; no local builds,
+tests or commits. iPad `20261022T074942Z-71349` and Mac
+`20261022T075302Z-76344` completed all 18 real review actions, but their sidebar
+hierarchy checks failed. The integrator must verify the replacement through
+real iPad/Mac sidebar selection, full review, system audits and required gates.
+The running iPad system audit and waiting/exhaustion/restart tests have no
+claimed result here. No Unit or full-gate acceptance; safe collection entry
+and all remaining full-plan units remain required.
