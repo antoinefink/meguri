@@ -1,0 +1,27 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "force_backup": {
+          "name": "backup-2030-01-15-10.00.00.colpkg"
+        }
+      },
+      {
+        "backup_files": ["backup-2029-01-31-23.00.00.colpkg", "backup-2029-02-28-23.00.00.colpkg", "backup-2029-03-31-23.00.00.colpkg", "backup-2029-04-30-23.00.00.colpkg", "backup-2029-05-31-23.00.00.colpkg", "backup-2029-06-30-23.00.00.colpkg", "backup-2029-07-31-23.00.00.colpkg", "backup-2029-08-31-23.00.00.colpkg", "backup-2029-09-30-23.00.00.colpkg", "backup-2029-10-28-23.00.00.colpkg", "backup-2029-11-04-23.00.00.colpkg", "backup-2029-11-11-23.00.00.colpkg", "backup-2029-11-18-23.00.00.colpkg", "backup-2029-11-25-23.00.00.colpkg", "backup-2029-12-02-23.00.00.colpkg", "backup-2029-12-09-23.00.00.colpkg", "backup-2029-12-16-23.00.00.colpkg", "backup-2029-12-23-23.00.00.colpkg", "backup-2029-12-30-23.00.00.colpkg", "backup-2030-01-02-23.00.00.colpkg", "backup-2030-01-03-23.00.00.colpkg", "backup-2030-01-04-23.00.00.colpkg", "backup-2030-01-05-23.00.00.colpkg", "backup-2030-01-06-23.00.00.colpkg", "backup-2030-01-07-23.00.00.colpkg", "backup-2030-01-08-23.00.00.colpkg", "backup-2030-01-09-23.00.00.colpkg", "backup-2030-01-10-23.00.00.colpkg", "backup-2030-01-11-23.00.00.colpkg", "backup-2030-01-12-23.00.00.colpkg", "backup-2030-01-13-23.00.00.colpkg", "backup-2030-01-14-00.00.00.colpkg", "backup-2030-01-14-01.00.00.colpkg", "backup-2030-01-14-02.00.00.colpkg", "backup-2030-01-14-03.00.00.colpkg", "backup-2030-01-14-04.00.00.colpkg", "backup-2030-01-14-05.00.00.colpkg", "backup-2030-01-14-06.00.00.colpkg", "backup-2030-01-14-07.00.00.colpkg", "backup-2030-01-14-08.00.00.colpkg", "backup-2030-01-14-09.00.00.colpkg", "backup-2030-01-14-10.00.00.colpkg", "backup-2030-01-14-11.00.00.colpkg", "backup-2030-01-14-12.00.00.colpkg", "backup-2030-01-14-13.00.00.colpkg", "backup-2030-01-14-14.00.00.colpkg", "backup-2030-01-14-15.00.00.colpkg", "backup-2030-01-14-16.00.00.colpkg", "backup-2030-01-14-17.00.00.colpkg", "backup-2030-01-14-18.00.00.colpkg", "backup-2030-01-14-19.00.00.colpkg", "backup-2030-01-14-20.00.00.colpkg", "backup-2030-01-14-21.00.00.colpkg", "backup-2030-01-14-22.00.00.colpkg", "backup-2030-01-14-23.00.00.colpkg", "backup-2030-01-15-00.00.00.colpkg", "backup-2030-01-15-01.00.00.colpkg", "backup-2030-01-15-02.00.00.colpkg", "backup-2030-01-15-03.00.00.colpkg", "backup-2030-01-15-04.00.00.colpkg", "backup-2030-01-15-05.00.00.colpkg", "backup-2030-01-15-06.00.00.colpkg", "backup-2030-01-15-07.00.00.colpkg", "backup-2030-01-15-08.00.00.colpkg", "backup-2030-01-15-09.00.00.colpkg", "backup-2030-01-15-10.00.00.colpkg"]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "a2e4dd6c95edb1aa1e26440933939f5a8147490c4bfd35ea05c5385b9f4d4c36",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/backups/retention-hourly-400-days",
+  "scenario_sha256": "4a59a52564d88f50e430a6de4188ce18b12336c490f7ce89037afeccc4ab8e22",
+  "tz": "UTC"
+}

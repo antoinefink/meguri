@@ -1,0 +1,27 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "force_backup": {
+          "name": "backup-2030-01-15-10.00.00.colpkg"
+        }
+      },
+      {
+        "backup_files": ["backup-2029-12-20-12.00.00.colpkg", "backup-2030-01-06-12.00.00.colpkg", "backup-2030-01-12-20.00.00.colpkg", "backup-2030-01-14-09.00.00.colpkg", "backup-2030-01-15-10.00.00.colpkg"]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "e9a29068ffbd01d98e9048c3f00f5fd44a64e2f911a4ec324111c4a4b7316c4f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/backups/period-boundaries",
+  "scenario_sha256": "cad96c109c372ec6342b63a3abd2f2e88c43d8ab095de444f4277fa5a9c6e2ef",
+  "tz": "UTC"
+}

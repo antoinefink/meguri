@@ -1,0 +1,213 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 5,
+          "minimum_interval_mins": 60,
+          "monthly": 3,
+          "weekly": 4
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 4294967295,
+          "minimum_interval_mins": 0,
+          "monthly": 0,
+          "weekly": 0
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 6,
+          "minimum_interval_mins": 15,
+          "monthly": 4,
+          "weekly": 5
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {},
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "backup_settings": {
+          "daily": 7,
+          "minimum_interval_mins": 60,
+          "monthly": 3,
+          "weekly": 4
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "backup_settings": {
+          "daily": 12,
+          "minimum_interval_mins": 30,
+          "monthly": 9,
+          "weekly": 10
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "a2e4dd6c95edb1aa1e26440933939f5a8147490c4bfd35ea05c5385b9f4d4c36",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/backups/limits-read",
+  "scenario_sha256": "85d639faadf06dbd83f3577c26917f6e934f35a0c62087c435cdd9269853a327",
+  "tz": "UTC"
+}

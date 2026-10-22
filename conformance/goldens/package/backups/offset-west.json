@@ -1,0 +1,27 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T20:00:00Z"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "force_backup": {
+          "name": "backup-2030-01-15-15.00.00.colpkg"
+        }
+      },
+      {
+        "backup_files": ["backup-2030-01-11-12.00.00.colpkg", "backup-2030-01-12-12.00.00.colpkg", "backup-2030-01-13-12.00.00.colpkg", "backup-2030-01-14-12.00.00.colpkg", "backup-2030-01-15-12.00.00.colpkg", "backup-2030-01-15-15.00.00.colpkg"]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "a2e4dd6c95edb1aa1e26440933939f5a8147490c4bfd35ea05c5385b9f4d4c36",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/backups/offset-west",
+  "scenario_sha256": "ea6a2a0ad1d2f31d3f2334b02c5598430659a8e388f2b0848994c0992e0cbb9d",
+  "tz": "America/New_York"
+}

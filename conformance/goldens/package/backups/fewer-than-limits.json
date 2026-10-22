@@ -1,0 +1,27 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "force_backup": {
+          "name": "backup-2030-01-15-10.00.00.colpkg"
+        }
+      },
+      {
+        "backup_files": ["backup-2027-05-05-05.05.05.colpkg", "backup-2029-03-03-21.45.00.colpkg", "backup-2029-11-01-07.15.00.colpkg", "backup-2029-12-25-18.30.00.colpkg", "backup-2030-01-08-08.00.00.colpkg", "backup-2030-01-13-12.00.00.colpkg", "backup-2030-01-14-23.59.59.colpkg", "backup-2030-01-15-00.00.00.colpkg", "backup-2030-01-15-10.00.00.colpkg"]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "a2e4dd6c95edb1aa1e26440933939f5a8147490c4bfd35ea05c5385b9f4d4c36",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/backups/fewer-than-limits",
+  "scenario_sha256": "1b0a37894d2e41a194168ee03ae7542284d32d285dd9b9bdfb9bf14b23938866",
+  "tz": "UTC"
+}

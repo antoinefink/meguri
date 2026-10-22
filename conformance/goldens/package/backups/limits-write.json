@@ -1,0 +1,88 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["{\"daily\":3,\"weekly\":2,\"monthly\":1,\"minimum_interval_mins\":45}", "blob", -1, 1894701600]
+          ]
+        }
+      },
+      {
+        "backup_settings": {
+          "daily": 3,
+          "minimum_interval_mins": 45,
+          "monthly": 1,
+          "weekly": 2
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["{\"daily\":3,\"weekly\":2,\"monthly\":1,\"minimum_interval_mins\":45}", -1, 1894701600]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["{\"daily\":0,\"weekly\":0,\"monthly\":0,\"minimum_interval_mins\":0}", -1, 1894701720]
+          ]
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["{\"daily\":8,\"weekly\":6,\"monthly\":5,\"minimum_interval_mins\":20}", -1, 1894701780]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["{\"daily\":1,\"weekly\":1,\"monthly\":1,\"minimum_interval_mins\":10}"]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["{\"daily\":2,\"weekly\":2,\"monthly\":2,\"minimum_interval_mins\":5}"]
+          ]
+        }
+      },
+      {
+        "backup_settings": {
+          "daily": 2,
+          "minimum_interval_mins": 5,
+          "monthly": 2,
+          "weekly": 2
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "a2e4dd6c95edb1aa1e26440933939f5a8147490c4bfd35ea05c5385b9f4d4c36",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/backups/limits-write",
+  "scenario_sha256": "9e18b8fc4768315cfbb3c6521867d268bf7ed28fb8e43f867bf0366bb96cc43f",
+  "tz": "UTC"
+}
