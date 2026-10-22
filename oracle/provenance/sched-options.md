@@ -29,3 +29,14 @@ Oracle-maintainer hints for the awaiting driver work (spec side only):
 
 - `save_deck_options` extensions map onto the same update request: `remove` to the removed config ids (the backend refuses id 1 with an invalid-input error: record `default_preset`), `subtree` to the apply-to-children mode, `globals` to the two request booleans, `options.insertion_order` to the config's insert order, `limits` onto the limits read from the screen after clearing each Today-only value whose active flag is false (E1's rule for a missing one).
 - `set_scheduling_prefs`: read the preferences, change scheduling `rollover` and `learn_ahead_secs` (minutes × 60) and reviewing `load_balancer_enabled`, and save the scheduling and reviewing parts in one preferences save, which is the "Preferences" undo step.
+
+## Scheduling preference row completion clarification
+
+Tag: 26.09.3. Sections: deck-options O10; deck-options-ops E4.
+
+| Source | Read for |
+|---|---|
+| `rslib/src/preferences.rs` | Effective settings; duration and boolean writes; rollover condition |
+| `rslib/src/scheduler/mod.rs` | Effective rollover fallback |
+
+The conformance request is a partial edit of a complete save. Omitted learn-ahead and load-balancer values are retained from the read and submitted to setters; omission does not suppress their writes. A missing load-balancer row is therefore present with true after the first rollover-only preference save. A later false save's undo restores that true row. Rollover remains conditional on a changed effective hour. The empty-request rejection remains the existing Meguri scenario/API rule.

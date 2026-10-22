@@ -50,7 +50,8 @@ The scenario ops and the observation kind that the memory-state (U46) and deck o
 - **Effect.** The scheduling settings' save with these values, everything else the settings hold kept as read, as one undoable step named "Preferences" (`undo-ops.md` V4 `preferences`): `rollover` is stored as given, `collapseTime` as the minutes × 60, `loadBalancerEnabled` as the boolean (`sched/deck-options#O10`). A changed `rollover` takes effect at once: the next day query computes the day with the new hour (`sched/day-clock#D6`, `#D13`).
 - **Output**: none (`{}`). No rejections.
 - **Oracle.** Anki's preferences are read, the three values replaced (the learn-ahead limit in seconds) and saved back with Anki's preferences save, which drops the cached day when the hour changes. That save also writes the other keys of the scheduling and reviewing settings with the values read, adding the missing ones.
-- **Meguri.** The adapter runs U49's scheduling preferences op (`sched/deck-options#O10`), which writes only the three keys.
+- **Meguri.** The adapter runs U49's complete scheduling preferences save (`sched/deck-options#O10`). Read the three effective settings, replace the supplied fields and save the completed settings. Omitted `collapseTime` and `loadBalancerEnabled` still pass through C4, materializing missing defaults; an omitted learn-ahead duration keeps its exact seconds. Write rollover only when its effective hour changes. Other preference keys remain untouched. An empty argument is invalid under this op's argument schema; it is not a core save invocation.
+- **Undo example.** A rollover-only save can insert the default `loadBalancerEnabled: true` row. A later save to false followed by undo restores the stored true row, not absence. If the first save itself is undone while its undo entry remains available, its inserted row becomes absent again.
 
 ## E5. Writing deck options scenarios
 
