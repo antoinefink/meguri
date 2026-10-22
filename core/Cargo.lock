@@ -1707,6 +1707,7 @@ version = "0.0.0"
 dependencies = [
  "meguri-engine",
  "meguri-model",
+ "meguri-package",
  "meguri-sched",
  "meguri-storage",
  "serde_json",
@@ -1729,9 +1730,11 @@ dependencies = [
 name = "meguri-package"
 version = "0.0.0"
 dependencies = [
+ "meguri-engine",
  "meguri-model",
  "meguri-storage",
  "meguri-text",
+ "serde_json",
  "sha2",
  "tempfile",
  "zip",

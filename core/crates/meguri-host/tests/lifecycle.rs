@@ -512,9 +512,13 @@ fn an_open_failure_releases_workers_and_the_collection_ownership_lock() {
 }
 
 #[test]
-fn an_unavailable_backup_refuses_a_real_deck_deletion_before_mutation() {
+fn a_real_backup_capacity_failure_refuses_a_real_deck_deletion_before_mutation() {
     let dir = tempfile::tempdir().unwrap();
-    let host = CoreHost::open(config(dir.path())).unwrap();
+    let gate = Arc::new(BackupCapacity::default());
+    let mut inputs = config(dir.path());
+    inputs.disk_space_provider = gate.clone();
+    let host = CoreHost::open(inputs).unwrap();
+    gate.low.store(true, std::sync::atomic::Ordering::SeqCst);
     let collection = host.collection().unwrap();
     let id = meguri_engine::decks::add(&collection, "Backup refusal".into())
         .unwrap()
@@ -791,7 +795,7 @@ fn resume_rejects_atomic_replacement_and_keeps_unretired_journal_and_admission_c
 }
 
 #[test]
-fn real_deck_counts_provider_is_wired_observes_writes_and_keeps_backup_unavailable() {
+fn real_deck_counts_and_forced_backup_providers_are_wired() {
     let dir = tempfile::tempdir().unwrap();
     let host = CoreHost::open(config(dir.path())).unwrap();
     let c = host.collection().unwrap();
@@ -806,6 +810,485 @@ fn real_deck_counts_provider_is_wired_observes_writes_and_keeps_backup_unavailab
     let tree = host.queues().deck_counts(&c).unwrap();
     assert!(tree.nodes.iter().any(|n| n.name == "U41 provider"));
     meguri_host::wiring::require(meguri_engine::ports::ServicePort::DeckCounts).unwrap();
-    assert!(host.backup().before_deck_delete().is_err());
+    host.backup().before_deck_delete().unwrap();
+    assert_eq!(std::fs::read_dir(dir.path().join("backups")).unwrap().count(), 1);
+    host.close().unwrap();
+}
+
+#[derive(Default)]
+struct BackupCapacity {
+    low: std::sync::atomic::AtomicBool,
+}
+impl meguri_storage::space::SpaceProvider for BackupCapacity {
+    fn available_bytes(&self, _: &Path) -> Result<u64, meguri_storage::StorageError> {
+        Ok(if self.low.load(std::sync::atomic::Ordering::SeqCst) {
+            0
+        } else {
+            u64::MAX
+        })
+    }
+}
+
+fn backup_receipt(host: &CoreHost) -> meguri_engine::ports::BackupReceipt {
+    host.backup()
+        .before_colpkg_import(&host.collection().unwrap(), &meguri_engine::CancelToken::default())
+        .unwrap()
+}
+fn inspect_backup(host: &CoreHost, name: &str) -> meguri_package::InspectedCollection {
+    let c = host.collection().unwrap();
+    let clock = StepClock::new(1_894_701_600_000, UtcOffset::UTC, "UTC");
+    let random = SeededRandom::new(721);
+    meguri_package::inspect_collection_package(
+        &c.path().parent().unwrap().parent().unwrap().join("backups").join(name),
+        &meguri_package::CollectionPackageInspectContext {
+            collection_directory: c.path().parent().unwrap(),
+            live_collection_size: 0,
+            reserved_space_bytes: 0,
+            clock: &clock,
+            random: &random,
+            space: &StatvfsSpace,
+            is_cancelled: &|| false,
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn production_forced_backup_recovers_a_committed_old_wal_answer_and_releases_before_replace() {
+    use meguri_engine::{
+        JobKind, OpSource, OpSpec,
+        session::{AnswerOutcome, StartResult},
+    };
+    use meguri_model::time::EpochMillis;
+    use meguri_sched::answer::Rating;
+    use std::{sync::mpsc, time::Duration};
+
+    let dir = tempfile::tempdir().unwrap();
+    let host = CoreHost::open(config(dir.path())).unwrap();
+    let c = host.collection().unwrap();
+    c.run(OpSpec::named("synthetic review policy", OpSource::Maintenance), |ctx| {
+        ctx.scope()
+            .set_config("fsrs", &meguri_storage::ConfigValue::Bool(true))?;
+        ctx.scope()
+            .set_config("loadBalancerEnabled", &meguri_storage::ConfigValue::Bool(false))?;
+        Ok(())
+    })
+    .unwrap();
+    let deck = meguri_engine::decks::add(&c, "Safety old answer".into())
+        .unwrap()
+        .value
+        .id;
+    let kind = meguri_engine::notetypes::add_stock(
+        &c,
+        meguri_engine::notetypes::StockKind::Basic,
+        Some("Safety old answer".into()),
+    )
+    .unwrap()
+    .value
+    .id;
+    meguri_engine::notes::add(
+        &c,
+        meguri_engine::notes::AddNote {
+            notetype_id: kind,
+            fields: vec!["safety front".into(), "safety back".into()],
+            tags: vec![],
+            deck_id: deck,
+            guid: None,
+            update_add_defaults: false,
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+    // Pin a real read of the main file before the answer, so its committed
+    // bytes remain in WAL rather than relying on checkpoint timing.
+    let old_reader = c.reader(ReaderRole::Sync).unwrap();
+    let old_snapshot = old_reader.snapshot().unwrap();
+    let old_reviews = old_snapshot
+        .execute_raw("SELECT * FROM revlog ORDER BY id", &[])
+        .unwrap();
+    let StartResult::Started { session_id, head, .. } = host.review().start(deck, None).unwrap() else {
+        panic!("synthetic review must start");
+    };
+    let card = &head.items[0];
+    assert!(matches!(
+        host.review()
+            .answer(
+                session_id,
+                card.card_id,
+                Rating::Easy,
+                card.state_token,
+                EpochMillis(1_894_701_600_000),
+                100
+            )
+            .unwrap(),
+        AnswerOutcome::Accepted { .. }
+    ));
+    host.review().end(session_id).unwrap();
+    let reviews = c
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .execute_raw("SELECT * FROM revlog ORDER BY id", &[])
+        .unwrap();
+    assert_eq!(reviews.rows.len(), old_reviews.rows.len() + 1);
+    assert_eq!(
+        old_snapshot
+            .execute_raw("SELECT * FROM revlog ORDER BY id", &[])
+            .unwrap(),
+        old_reviews
+    );
+    assert!(
+        std::fs::metadata(c.path().with_file_name("collection.anki2-wal"))
+            .unwrap()
+            .len()
+            > 32
+    );
+    drop(old_snapshot);
+    drop(old_reader); // exclusive drain must not wait on our test's reader.
+    let expected_mod = c.reader(ReaderRole::Query).unwrap().col().unwrap().modified;
+    let provider = host.backup();
+    let candidate = meguri_engine::replace::ReplacementStage::new(c.path().parent().unwrap()).unwrap();
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance/fixtures/storage/schema-18.anki2"),
+        candidate.path(),
+    )
+    .unwrap();
+    let (send, recv) = mpsc::channel();
+    host.engine()
+        .start_job(JobKind::ColpkgImport, move |ctx| {
+            let result = (|| {
+                let mut exclusive = ctx.slot().unwrap().enter_exclusive(true)?;
+                let privileged = exclusive.collection();
+                let receipt = provider.before_colpkg_import(privileged, &ctx.cancel)?;
+                ctx.cancel.check()?;
+                let next = exclusive
+                    .replace_verified(candidate, meguri_engine::replace::ReplaceReason::ColpkgImport, |_| {
+                        Ok(())
+                    })
+                    .map_err(|error| meguri_engine::EngineError::Internal {
+                        message: error.to_string(),
+                    })?;
+                Ok((receipt, next.generation()))
+            })();
+            send.send(result.clone()).unwrap();
+            result.map(|_| ())
+        })
+        .unwrap();
+    let (receipt, generation) = recv
+        .recv_timeout(Duration::from_secs(20))
+        .expect("backup lease leaked into replace")
+        .unwrap();
+    assert_eq!(generation.0, c.generation().0 + 1);
+    assert_eq!(receipt.snapshot_modified, expected_mod);
+    let captured = inspect_backup(&host, &receipt.name);
+    let clock = StepClock::new(1_894_701_600_000, UtcOffset::UTC, "UTC");
+    let random = SeededRandom::new(721);
+    let db = meguri_storage::open_collection(
+        &captured.collection_path(),
+        &meguri_storage::OpenOptions::new(&clock, &random),
+    )
+    .unwrap();
+    let read = db.open_reader(ReaderRole::Query).unwrap();
+    assert_eq!(
+        read.execute_raw("SELECT * FROM revlog ORDER BY id", &[]).unwrap(),
+        reviews
+    );
+    assert_eq!(read.col().unwrap().modified, receipt.snapshot_modified);
+    assert_eq!(
+        std::fs::metadata(dir.path().join("backups").join(&receipt.name))
+            .unwrap()
+            .len(),
+        receipt.size_bytes
+    );
+    let document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("collection/meguri-sidecar.json")).unwrap()).unwrap();
+    assert_eq!(
+        document["deviceState"]["lastBackup"]["snapshotMod"],
+        receipt.snapshot_modified.0
+    );
+    assert_eq!(document["deviceState"]["lastBackup"]["name"], receipt.name);
+    drop(read);
+    db.close().unwrap();
+    host.close().unwrap();
+}
+
+#[test]
+fn forced_empty_unchanged_backups_keep_every_file_and_preserve_r6_and_unknown_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut inputs = config(dir.path());
+    // Use an empty public schema fixture, rather than relying on zero cards
+    // to mean there is no collection file.
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance/fixtures/storage/schema-18.anki2"),
+        inputs.collection_directory.join("collection.anki2"),
+    )
+    .unwrap();
+    inputs.backups_directory = dir.path().join("missing/parents/backups");
+    let host = CoreHost::open(inputs).unwrap();
+    let c = host.collection().unwrap();
+    c.run(
+        meguri_engine::OpSpec::named("empty synthetic backup fixture", meguri_engine::OpSource::Maintenance),
+        |ctx| {
+            let scope = ctx.scope();
+            for row in scope.revlog_after(None, 10_000)? {
+                scope.remove_revlog(row.id)?;
+            }
+            for row in scope.cards_after(None, 10_000)? {
+                scope.remove_card(row.id)?;
+            }
+            for row in scope.notes_after(None, 10_000)? {
+                scope.remove_note(row.id)?;
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(
+        c.reader(ReaderRole::Query)
+            .unwrap()
+            .cards_after(None, 1)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        c.reader(ReaderRole::Query)
+            .unwrap()
+            .notes_after(None, 1)
+            .unwrap()
+            .is_empty()
+    );
+    let path = c.path().parent().unwrap().join("meguri-sidecar.json");
+    meguri_storage::sidecar::update_document(&path, |doc| {
+        doc.insert("foreignRoot".into(), serde_json::json!({"keep": [1, "two"]}));
+        let state = doc.get_mut("deviceState").unwrap().as_object_mut().unwrap();
+        let active = state.get_mut("active").unwrap();
+        active["decision"] = "Pending".into();
+        active["futureIdentityMember"] = serde_json::json!(["opaque"]);
+        state.insert("oneWayChoicePending".into(), true.into());
+        state.insert("futureState".into(), serde_json::json!({"nested": 92}));
+        state.insert("lastBackup".into(), serde_json::json!({"futureBackup": "preserve"}));
+        Ok(())
+    })
+    .unwrap();
+    let before: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let first = backup_receipt(&host);
+    let second = backup_receipt(&host);
+    assert_ne!(first.name, second.name);
+    assert_eq!(first.instant, second.instant);
+    assert_eq!(first.snapshot_modified, second.snapshot_modified);
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("missing/parents/backups"))
+            .unwrap()
+            .count(),
+        2
+    );
+    let mut after: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(after["deviceState"]["lastBackup"]["futureBackup"], "preserve");
+    after["deviceState"]["lastBackup"] = before["deviceState"]["lastBackup"].clone();
+    assert_eq!(after, before);
+    host.close().unwrap();
+}
+
+#[test]
+fn forced_capacity_and_cancel_failures_preserve_live_and_do_not_create_backup_parents() {
+    use std::sync::atomic::Ordering;
+    for cancelled in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let space = Arc::new(BackupCapacity::default());
+        let mut inputs = config(dir.path());
+        inputs.disk_space_provider = space.clone();
+        inputs.backups_directory = dir.path().join("missing/backup");
+        let host = CoreHost::open(inputs).unwrap();
+        let c = host.collection().unwrap();
+        let files = [
+            c.path().to_owned(),
+            c.path().with_file_name("collection.anki2-wal"),
+            c.path().with_file_name("meguri-sidecar.json"),
+        ];
+        let bytes: Vec<_> = files.iter().map(|p| std::fs::read(p).unwrap()).collect();
+        let cancel = meguri_engine::CancelToken::default();
+        if cancelled {
+            cancel.cancel();
+        } else {
+            space.low.store(true, Ordering::SeqCst);
+        }
+        let error = host.backup().before_colpkg_import(&c, &cancel).unwrap_err();
+        let meguri_engine::EngineError::SafetyBackupFailed(failure) = error else {
+            panic!("typed safety failure")
+        };
+        assert_eq!(
+            failure.publication,
+            meguri_engine::ports::BackupPublication::Unpublished
+        );
+        assert!(matches!(
+            (cancelled, failure.cause),
+            (true, meguri_engine::ports::BackupFailureCause::Cancelled)
+                | (
+                    false,
+                    meguri_engine::ports::BackupFailureCause::InsufficientSpace { available: 0, .. }
+                )
+        ));
+        assert!(!dir.path().join("missing").exists());
+        for (path, expected) in files.iter().zip(bytes) {
+            assert_eq!(std::fs::read(path).unwrap(), expected);
+        }
+        // The original live writer is still usable after refusal.
+        meguri_engine::decks::add(&c, "after refusal".into()).unwrap();
+        space.low.store(false, Ordering::SeqCst);
+        host.close().unwrap();
+    }
+}
+
+#[test]
+fn missing_or_unreadable_backup_metadata_retains_the_durable_file_and_refuses_import() {
+    for missing in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let host = CoreHost::open(config(dir.path())).unwrap();
+        let c = host.collection().unwrap();
+        let sidecar = c.path().with_file_name("meguri-sidecar.json");
+        let original = std::fs::read(&sidecar).unwrap();
+        if missing {
+            std::fs::remove_file(&sidecar).unwrap();
+        } else {
+            std::fs::write(&sidecar, b"{broken metadata").unwrap();
+        }
+        let before = std::fs::read(c.path()).unwrap();
+        let error = host
+            .backup()
+            .before_colpkg_import(&c, &meguri_engine::CancelToken::default())
+            .unwrap_err();
+        let meguri_engine::EngineError::SafetyBackupFailed(failure) = error else {
+            panic!("typed metadata failure")
+        };
+        let meguri_engine::ports::BackupPublication::Durable(receipt) = failure.publication else {
+            panic!("published file must be reported")
+        };
+        assert!(dir.path().join("backups").join(&receipt.name).is_file());
+        assert_eq!(std::fs::read(c.path()).unwrap(), before);
+        if missing {
+            assert!(!sidecar.exists());
+        } else {
+            assert_eq!(std::fs::read(&sidecar).unwrap(), b"{broken metadata");
+        }
+        let captured = inspect_backup(&host, &receipt.name);
+        assert!(captured.collection_path().is_file(), "retained backup is recoverable");
+        // Repair synthetic corruption solely to release the test host cleanly.
+        std::fs::write(&sidecar, original).unwrap();
+        host.close().unwrap();
+    }
+}
+
+#[test]
+fn all_61_occupied_backup_names_refuse_before_snapshot_or_capacity_checks() {
+    let dir = tempfile::tempdir().unwrap();
+    let space = Arc::new(BackupCapacity::default());
+    let mut inputs = config(dir.path());
+    inputs.disk_space_provider = space.clone();
+    let host = CoreHost::open(inputs).unwrap();
+    let folder = dir.path().join("backups");
+    std::os::unix::fs::symlink("absent", folder.join("backup-2030-01-15-10.00.00.colpkg")).unwrap();
+    for second in 1..=60 {
+        let name = format!("backup-2030-01-15-10.{:02}.{:02}.colpkg", second / 60, second % 60);
+        std::fs::write(folder.join(name), b"occupied sentinel").unwrap();
+    }
+    space.low.store(true, std::sync::atomic::Ordering::SeqCst);
+    let c = host.collection().unwrap();
+    let before = std::fs::read(c.path().with_file_name("meguri-sidecar.json")).unwrap();
+    let error = host
+        .backup()
+        .before_colpkg_import(&c, &meguri_engine::CancelToken::default())
+        .unwrap_err();
+    let meguri_engine::EngineError::SafetyBackupFailed(failure) = error else {
+        panic!("typed collision")
+    };
+    assert_eq!(
+        failure.cause,
+        meguri_engine::ports::BackupFailureCause::DestinationExists
+    );
+    assert_eq!(
+        failure.publication,
+        meguri_engine::ports::BackupPublication::Unpublished
+    );
+    assert_eq!(std::fs::read_dir(folder).unwrap().count(), 61);
+    assert_eq!(
+        std::fs::read(c.path().with_file_name("meguri-sidecar.json")).unwrap(),
+        before
+    );
+    space.low.store(false, std::sync::atomic::Ordering::SeqCst);
+    host.close().unwrap();
+}
+
+#[test]
+fn publication_name_races_are_bounded_to_three_real_snapshots_without_overwrite() {
+    use meguri_model::faultpoint::{self, Fault};
+    use std::sync::{Mutex, OnceLock};
+    struct Race {
+        folder: std::path::PathBuf,
+        attempt: usize,
+    }
+    static RACE: OnceLock<Mutex<Option<Race>>> = OnceLock::new();
+    fn occupy() {
+        let mut guard = RACE.get().unwrap().lock().unwrap();
+        let race = guard.as_mut().unwrap();
+        let name = format!("backup-2030-01-15-10.00.{:02}.colpkg", race.attempt);
+        std::fs::write(race.folder.join(name), b"racing writer sentinel").unwrap();
+        race.attempt += 1;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let host = CoreHost::open(config(dir.path())).unwrap();
+    *RACE.get_or_init(|| Mutex::new(None)).lock().unwrap() = Some(Race {
+        folder: dir.path().join("backups"),
+        attempt: 0,
+    });
+    faultpoint::arm("storage.backup.before_rename", Fault::Callback(occupy));
+    let error = host
+        .backup()
+        .before_colpkg_import(&host.collection().unwrap(), &meguri_engine::CancelToken::default())
+        .unwrap_err();
+    faultpoint::disarm("storage.backup.before_rename");
+    let meguri_engine::EngineError::SafetyBackupFailed(failure) = error else {
+        panic!("typed collision")
+    };
+    assert_eq!(
+        failure.cause,
+        meguri_engine::ports::BackupFailureCause::DestinationExists
+    );
+    assert_eq!(RACE.get().unwrap().lock().unwrap().as_ref().unwrap().attempt, 3);
+    assert_eq!(std::fs::read_dir(dir.path().join("backups")).unwrap().count(), 3);
+    for entry in std::fs::read_dir(dir.path().join("backups")).unwrap() {
+        assert_eq!(std::fs::read(entry.unwrap().path()).unwrap(), b"racing writer sentinel");
+    }
+    let document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("collection/meguri-sidecar.json")).unwrap()).unwrap();
+    assert!(document["deviceState"].get("lastBackup").is_none());
+    host.close().unwrap();
+}
+
+#[test]
+fn late_cancellation_retains_publication_and_records_the_captured_reference() {
+    use meguri_model::faultpoint::{self, Fault};
+    use std::sync::{Mutex, OnceLock};
+    static TOKEN: OnceLock<Mutex<Option<Arc<meguri_engine::CancelToken>>>> = OnceLock::new();
+    fn cancel_after_rename() {
+        TOKEN.get().unwrap().lock().unwrap().as_ref().unwrap().cancel();
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let host = CoreHost::open(config(dir.path())).unwrap();
+    let cancel = meguri_engine::CancelToken::new();
+    *TOKEN.get_or_init(|| Mutex::new(None)).lock().unwrap() = Some(cancel.clone());
+    faultpoint::arm("storage.atomic.after_rename", Fault::Callback(cancel_after_rename));
+    let receipt = host
+        .backup()
+        .before_colpkg_import(&host.collection().unwrap(), &cancel)
+        .unwrap();
+    faultpoint::disarm("storage.atomic.after_rename");
+    assert!(cancel.is_cancelled());
+    assert!(dir.path().join("backups").join(&receipt.name).is_file());
+    let document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("collection/meguri-sidecar.json")).unwrap()).unwrap();
+    assert_eq!(document["deviceState"]["lastBackup"]["name"], receipt.name);
+    assert_eq!(
+        document["deviceState"]["lastBackup"]["snapshotMod"],
+        receipt.snapshot_modified.0
+    );
     host.close().unwrap();
 }

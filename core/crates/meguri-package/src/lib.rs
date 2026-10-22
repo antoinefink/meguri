@@ -1,4 +1,5 @@
 //! Collection-only latest-format package publication (package/container P11).
+mod backup;
 mod inspection;
 mod inspection_zip;
 mod media_map;
@@ -8,6 +9,8 @@ mod writer;
 use meguri_model::{clock::Clock, rng::RandomSource};
 use meguri_storage::{StorageError, atomic_file::Purpose, space::SpaceProvider};
 use std::{fmt, path::Path};
+
+pub use backup::ForcedBackupProvider;
 
 pub use inspection::{
     CollectionPackageInspectContext, InspectedCollection, StagedCollection, inspect_collection_package,

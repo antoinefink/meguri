@@ -3,7 +3,7 @@ mod common;
 mod session_support;
 use common::{Harness, NOW_MS};
 use meguri_engine::{
-    Engine, EngineConfig, EngineError, EventKind, Generation, LongOp, OpSource, OpSpec,
+    Engine, EngineConfig, EngineError, EventKind, Generation, LongOp, OpSource,
     device_state::{AccountBinding, DeviceState, Publication, PublicationDecision},
     replace::{ReplaceError, ReplaceReason, ReplacementStage, StagingError},
 };
@@ -267,7 +267,7 @@ fn post_rename_errors_are_honest_and_fenced_before_writer_reopens() {
         if !matches!(h.engine.state(), meguri_engine::LifecycleState::Failed { .. }) {
             let current = exclusive.collection();
             assert_ne!(current.generation(), h.collection.generation());
-            assert_eq!(marker(&current), 722);
+            assert_eq!(marker(current), 722);
             assert_eq!(publication(&h.path).decision, PublicationDecision::Pending);
         }
         drop(exclusive);
@@ -850,4 +850,112 @@ fn import_rechecks_session_started_during_participant_flush() {
     ));
     assert!(review.active_session().is_some());
     assert_eq!(engine.generation(), generation);
+}
+
+#[test]
+fn initial_import_with_an_unopened_existing_collection_fails_closed_until_t7() {
+    for dangling in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("collection.anki2");
+        if dangling {
+            std::os::unix::fs::symlink("missing-collection", &live).unwrap();
+        } else {
+            fs::write(&live, b"synthetic damaged collection").unwrap();
+        }
+        let engine = Engine::new(EngineConfig::default()).unwrap();
+        let slot = engine.acquire_slot(LongOp::ColpkgImport).unwrap();
+        let candidate = stage(dir.path(), "schema-18.anki2");
+        let result = slot.replace_verified_initial(
+            &live,
+            config(binding(), 23),
+            candidate,
+            ReplaceReason::ColpkgImport,
+            |_| panic!("T7 refusal must precede candidate changes"),
+        );
+        assert!(matches!(
+            result,
+            Err(ReplaceError::Lifecycle(EngineError::Unsupported { .. }))
+        ));
+        if dangling {
+            assert!(live.symlink_metadata().unwrap().file_type().is_symlink());
+        } else {
+            assert_eq!(fs::read(&live).unwrap(), b"synthetic damaged collection");
+        }
+        assert!(!dir.path().join("meguri-sidecar.json").exists());
+    }
+}
+
+static INITIAL_IMPORT_DESTINATION: Mutex<Option<(PathBuf, bool)>> = Mutex::new(None);
+
+fn create_destination_before_initial_ownership() {
+    let destination = INITIAL_IMPORT_DESTINATION.lock().unwrap();
+    let (live, dangling) = destination.as_ref().unwrap();
+    let _ownership = meguri_storage::lockfile::CollectionLock::acquire(live.parent().unwrap()).unwrap();
+    assert_eq!(
+        live.symlink_metadata().unwrap_err().kind(),
+        std::io::ErrorKind::NotFound
+    );
+    if *dangling {
+        std::os::unix::fs::symlink("missing-collection", live).unwrap();
+    } else {
+        fs::write(live, b"collection created before import ownership").unwrap();
+    }
+}
+
+#[test]
+fn initial_import_rechecks_absence_under_ownership_before_any_mutation() {
+    for dangling in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("collection.anki2");
+        let sidecar = dir.path().join("meguri-sidecar.json");
+        let sidecar_bytes = b"existing sidecar evidence";
+        fs::write(&sidecar, sidecar_bytes).unwrap();
+        let engine = Engine::new(EngineConfig::default()).unwrap();
+        let slot = engine.acquire_slot(LongOp::ColpkgImport).unwrap();
+        let prior = engine.state();
+        let generation = engine.generation();
+        let candidate = stage(dir.path(), "schema-18.anki2");
+        let candidate_bytes = fs::read(candidate.path()).unwrap();
+        // Keep the inode readable after the refused stage is cleaned up.
+        let mut candidate_file = fs::File::open(candidate.path()).unwrap();
+        assert_eq!(
+            live.symlink_metadata().unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        *INITIAL_IMPORT_DESTINATION.lock().unwrap() = Some((live.clone(), dangling));
+        faultpoint::arm(
+            "replace.initial.before_ownership",
+            Fault::Callback(create_destination_before_initial_ownership),
+        );
+        let mut caller_ran = false;
+        let result = slot.replace_verified_initial(
+            &live,
+            config(binding(), 23),
+            candidate,
+            ReplaceReason::ColpkgImport,
+            |_| {
+                caller_ran = true;
+                Ok(())
+            },
+        );
+        faultpoint::disarm_all();
+        *INITIAL_IMPORT_DESTINATION.lock().unwrap() = None;
+        assert!(matches!(
+            result,
+            Err(ReplaceError::Lifecycle(EngineError::Unsupported { .. }))
+        ));
+        assert!(!caller_ran);
+        assert_eq!(engine.generation(), generation);
+        assert_eq!(engine.state(), prior);
+        if dangling {
+            assert!(live.symlink_metadata().unwrap().file_type().is_symlink());
+            assert_eq!(fs::read_link(&live).unwrap(), Path::new("missing-collection"));
+        } else {
+            assert_eq!(fs::read(&live).unwrap(), b"collection created before import ownership");
+        }
+        assert_eq!(fs::read(&sidecar).unwrap(), sidecar_bytes);
+        let mut candidate_after = Vec::new();
+        std::io::Read::read_to_end(&mut candidate_file, &mut candidate_after).unwrap();
+        assert_eq!(candidate_after, candidate_bytes);
+    }
 }

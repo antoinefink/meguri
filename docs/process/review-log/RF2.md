@@ -315,3 +315,65 @@ unwrap after an error test and a complex closure field type. Focused compilation
 also notes one unused test import. These remain explicit cleanup for the next
 filtered provider pass. This is a WIP source checkpoint, with no Unit trailer,
 no unit acceptance and no claim that RF2's full gate has passed.
+
+
+## Forced safety-backup service integration
+
+Provider component starts at `d70c214f`; source session
+`s-20261022T164558Z-d8420230`, clean baseline `6ca02e97`.
+Filtered run `20261022T164613Z-7405` implements the real package-owned forced
+backup provider and production host binding. It uses the existing single live
+snapshot writer, no-clobber backup names, capacity checks before directory/file
+writes, and strict last-backup sidecar updates. Receipt/error types retain
+publication state. The caller passes exclusive Working's privileged collection.
+Published files are retained; periodic scheduling, retention and T7 remain open.
+Unopened existing imports are refused until their required safety copy exists.
+
+Format `20261022T165836Z-12154` passed. Initial focused selection
+`20261022T165904Z-12690` rejected a nonexistent test binary and ran no tests.
+Corrected selection `20261022T165924Z-13282` failed compilation: a new host test
+uses RawRows.len rather than RawRows.rows.len. No tests ran. Lint
+`20261022T170025Z-13951` confirms that test error and one needless borrow;
+the two earlier engine style errors are corrected without suppression.
+Unchanged privacy scan flags only one complete own comment in backup.rs.
+
+Independent round-1 provider review by `/root/rf2_backend_review` finds one P1:
+the initial-import path checked destination absence before ownership, leaving
+a window for a new file to appear without a safety backup. The fix must check
+under CollectionLock before metadata/candidate mutation and prove preservation
+at that boundary. No other confirmed P0–P2 finding in this component.
+Fixer `s-20261022T170117Z-7921357e`, starting `c7063683`, receives the complete
+preserved 22-file seed plus exactly that finding, the test/lint corrections and
+the whole-comment privacy correction. No unit or full-gate acceptance is claimed.
+
+Catch-up `20261022T164600Z-7066` passed after the backend checkpoint was clean.
+Doctor `20261022T165111Z-9502` passed: VM SSH/runtime remain available and
+83 GiB is free. The dedicated VM stays headless.
+
+
+Provider round-2 filtered run `20261022T170129Z-14846` moves the existence
+check under retained CollectionLock, before reconciliation or candidate writes.
+A deterministic pre-ownership callback creates a file or dangling link under
+brief cooperating ownership. Both cases refuse import with unchanged live,
+sidecar and candidate bytes, no caller mutation, and unchanged generation/state.
+It also corrects the exact row-count expression, needless borrow and complete
+own comment. No test assertion or scanner rule was weakened.
+Independent delta review closes the P1 and finds no new P0–P2 finding.
+
+Format `20261022T170326Z-16121` passed. Focused Docker run
+`20261022T170350Z-16729` passed all 89 selected tests. The one ignored check is
+`meguri-host::ports::milestone_provider_owners`, intentionally run by
+its dedicated milestone job. This component receipt grants no milestone acceptance.
+The passing tests prove a recoverable committed-WAL-answer backup and release
+of its reader before replacement, forced empty/unchanged publications, all
+61 occupied names, capacity/cancellation preservation, durable-file retention
+when metadata fails, and R6/unknown metadata preservation.
+Unchanged privacy `20261022T170354Z-16985`, full Rust lint
+`20261022T170509Z-17673` and similarity `20261022T170512Z-17905` passed.
+This closes the earlier two engine style failures and unused import as well.
+
+RF2 next: expose owned source-copy/inspection and activation jobs, connect the
+native coordinated picker/preview, prove imported reviews/background/restart on
+all three platforms, then run the RF2 full gate against `81c20757`.
+U126/U127 and other parent units remain open; full scheduling, retention, T7 and
+prepared conformance executors are not accepted by this forced-service component.

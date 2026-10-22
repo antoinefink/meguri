@@ -13,7 +13,13 @@ pub struct Binding {
     pub roles: &'static [PortKind],
 }
 
-pub const PROVIDED: [Binding; 4] = [
+pub const PROVIDED: [Binding; 5] = [
+    Binding {
+        port: ServicePort::Backup,
+        name: "forced-safety-backup",
+        unit: "U127",
+        roles: &[], // Synchronous service port, no lifecycle registrations.
+    },
     Binding {
         port: ServicePort::Review,
         name: "review-session",

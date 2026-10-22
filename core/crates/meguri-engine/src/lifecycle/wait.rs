@@ -93,7 +93,24 @@ impl SlotGuard {
             .unwrap_or(std::path::Path::new("."));
         let activated = std::sync::atomic::AtomicBool::new(false);
         let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            meguri_model::faultpoint!("replace.initial.before_ownership")
+                .map_err(meguri_storage::StorageError::from)
+                .map_err(EngineError::from)?;
             let ownership = meguri_storage::lockfile::CollectionLock::acquire(directory).map_err(EngineError::from)?;
+            // RF2 needs T7 for every existing entry. Check under ownership
+            // before touching the sidecar or preparing the candidate.
+            if reason == crate::replace::ReplaceReason::ColpkgImport {
+                match live.symlink_metadata() {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Ok(_) => {
+                        return Err(EngineError::Unsupported {
+                            feature: "pre-import safety backup of an unopened collection (T7)".into(),
+                        }
+                        .into());
+                    }
+                    Err(e) => return Err(EngineError::from(meguri_storage::StorageError::from(e)).into()),
+                }
+            }
             crate::device_state::reconcile(live, &config.publication_binding).map_err(EngineError::from)?;
             // Retain the existing identity before beginning the first intent.
             crate::device_state::ensure(live, &config.publication_binding, config.random.as_ref())
@@ -121,10 +138,10 @@ impl SlotGuard {
             );
             let changed = activated.load(std::sync::atomic::Ordering::Acquire);
             crate::device_state::reconcile(live, &config.publication_binding).map_err(EngineError::from)?;
-            if swapped.is_err() && !changed {
-                return Err(ReplaceError::Staging(swapped.unwrap_err()));
+            match swapped {
+                Err(error) if !changed => Err(ReplaceError::Staging(error)),
+                outcome => Ok::<_, ReplaceError>((ownership, outcome.err())),
             }
-            Ok::<_, ReplaceError>((ownership, swapped.err()))
         }))
         .unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref()).into()));
         let (ownership, swap_error) = match prepared {

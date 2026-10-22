@@ -714,8 +714,10 @@ pub(crate) struct NewGeneration {
 
 /// The swap of `engine/lifecycle` L8: runs with the collection path and
 /// nothing open (U124's verified replace).
+type SwapRun = Box<dyn FnOnce(&Path) -> Result<(), EngineError> + Send>;
+
 pub(crate) struct Swap {
-    pub run: Box<dyn FnOnce(&Path) -> Result<(), EngineError> + Send>,
+    pub run: SwapRun,
     /// Verified replacement knows exactly whether its rename succeeded. The
     /// legacy closure keeps L8's file-change detection for arbitrary restores.
     pub activated: Option<Arc<std::sync::atomic::AtomicBool>>,

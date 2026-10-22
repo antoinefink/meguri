@@ -7,11 +7,13 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+meguri-engine.workspace = true
 meguri-model.workspace = true
 meguri-storage.workspace = true
 meguri-text.workspace = true
 tempfile.workspace = true
 sha2.workspace = true
+serde_json.workspace = true
 zip.workspace = true
 zstd.workspace = true
 

@@ -7,6 +7,7 @@ use meguri_model::{clock::Clock, rng::RandomSource};
 #[derive(Clone)]
 pub struct HostConfig {
     pub collection_directory: PathBuf,
+    /// May be missing; the forced writer preflights its existing ancestor before creation.
     pub backups_directory: PathBuf,
     pub app_group_snapshot: PathBuf,
     pub clock: Arc<dyn Clock>,

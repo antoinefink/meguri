@@ -79,6 +79,7 @@ pub enum EngineError {
     /// The open gate refused or failed (`storage/open-and-connections` C8).
     Open(OpenError),
     Storage(StorageError),
+    SafetyBackupFailed(Box<crate::ports::SafetyBackupFailure>),
     Media(meguri_storage::media::MediaError),
     /// The write committed and its changes were published. Never repeat it.
     CommitCompleted {
@@ -185,6 +186,7 @@ impl fmt::Display for EngineError {
             EngineError::NotetypeRefused(refusal) => write!(f, "note type refused: {refusal}"),
             EngineError::Open(error) => write!(f, "open: {error}"),
             EngineError::Storage(error) => write!(f, "storage: {error}"),
+            EngineError::SafetyBackupFailed(failure) => write!(f, "safety backup failed: {failure:?}"),
             EngineError::Media(error) => write!(f, "media: {error}"),
             EngineError::CommitCompleted { seq, message } => {
                 write!(f, "operation {} committed; post-commit failure: {message}", seq.0)

@@ -124,7 +124,11 @@ fn check_exclusive_destination(destination: &Path, finalisation: Finalisation) -
     Ok(())
 }
 
-fn preflight_publication(size: u64, destination: &Path, context: &CollectionPackageWriteContext<'_>) -> Result<()> {
+pub(crate) fn preflight_publication(
+    size: u64,
+    destination: &Path,
+    context: &CollectionPackageWriteContext<'_>,
+) -> Result<()> {
     let needed = size
         .checked_mul(2)
         .and_then(|n| n.checked_add(4 * 1024 * 1024))
@@ -136,7 +140,7 @@ fn preflight_publication(size: u64, destination: &Path, context: &CollectionPack
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     preflight(context, context.collection_directory, needed)?;
-    preflight(context, parent, needed)
+    preflight(context, &existing_directory(parent)?, needed)
 }
 
 fn publish_snapshot(
@@ -225,4 +229,25 @@ fn publish_snapshot(
         return Err(error);
     }
     published.map_err(Into::into)
+}
+
+// Capacity must be checked before creating missing backup parents.
+fn existing_directory(mut path: &Path) -> Result<PathBuf> {
+    loop {
+        match std::fs::metadata(path) {
+            Ok(metadata) if metadata.is_dir() => return Ok(path.to_owned()),
+            Ok(_) => {
+                return Err(Error::Io {
+                    detail: "package parent is not a directory".into(),
+                });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                path = path
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .unwrap_or(Path::new("."));
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
 }

@@ -16,7 +16,11 @@ fn every_semantic_binding_has_one_provider_and_pending_features_refuse() {
     }
     for binding in wiring::PROVIDED {
         wiring::require(binding.port).unwrap();
-        assert!(!binding.roles.is_empty());
+        if binding.port == ServicePort::Backup {
+            assert!(binding.roles.is_empty(), "backup is an explicit synchronous service");
+        } else {
+            assert!(!binding.roles.is_empty());
+        }
     }
     assert!(wiring::validate_ports(&Ports::new()).is_err());
 }

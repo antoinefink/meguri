@@ -174,6 +174,63 @@ pub use meguri_storage::space::SpaceProvider as DiskSpaceProvider;
 /// failure prevents the deletion. meguri-host supplies the package service.
 pub trait BackupService: Send + Sync {
     fn before_deck_delete(&self) -> Result<(), EngineError>;
+
+    /// Called on the import worker after exclusive drain, with Working's
+    /// privileged collection. Implementations release every reader before return.
+    /// Old test witnesses deliberately do not acknowledge this new operation.
+    fn before_colpkg_import(
+        &self,
+        _collection: &Collection,
+        _cancel: &crate::CancelToken,
+    ) -> Result<BackupReceipt, EngineError> {
+        Err(EngineError::CollectionUnavailable {
+            reason: "forced pre-import backup provider is unavailable".into(),
+        })
+    }
+}
+
+/// A durably published package whose device reference was durably recorded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackupReceipt {
+    pub name: String,
+    pub size_bytes: u64,
+    pub instant: meguri_model::time::EpochMillis,
+    pub snapshot_modified: meguri_model::time::EpochMillis,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BackupPublication {
+    Unpublished,
+    /// Publication returned an I/O error; the name may already be visible.
+    Uncertain {
+        name: String,
+        instant: meguri_model::time::EpochMillis,
+    },
+    /// The file is durable; recording device metadata failed or was uncertain.
+    Durable(BackupReceipt),
+}
+
+/// Engine-owned causes: package is above engine in the dependency graph.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BackupFailureCause {
+    Engine(Box<EngineError>),
+    TooNew,
+    UnsupportedFormat,
+    UnsupportedMedia,
+    SchemaUnsupported { gate: meguri_storage::OpenError },
+    Corrupt { detail: String },
+    InsufficientSpace { needed: u64, available: u64 },
+    DiskFull,
+    SourceNotFinalised,
+    DestinationExists,
+    Cancelled,
+    Io { detail: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SafetyBackupFailure {
+    pub cause: BackupFailureCause,
+    pub publication: BackupPublication,
 }
 
 /// Semantic bindings owned by the composition root. Several bindings may

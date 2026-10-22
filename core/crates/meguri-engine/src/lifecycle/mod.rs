@@ -338,7 +338,15 @@ impl Engine {
             meguri_storage::leftovers::cleanup_media(&directory.join("collection.media"))?;
             if let Some(backups) = &config.backups_directory {
                 meguri_storage::paths::CollectionPaths::new(directory, backups)?;
-                meguri_storage::leftovers::cleanup(backups)?;
+                // The user may remove Backups in Files. Its forced writer
+                // preflights capacity before recreating missing parents.
+                match backups.symlink_metadata() {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(meguri_storage::StorageError::from(e).into()),
+                    Ok(_) => {
+                        meguri_storage::leftovers::cleanup(backups)?;
+                    }
+                }
             }
             Ok(ownership)
         })();

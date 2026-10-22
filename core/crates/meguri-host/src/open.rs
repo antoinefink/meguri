@@ -4,9 +4,8 @@ use std::{
 };
 
 use meguri_engine::{
-    Collection, DerivedHost, Engine, EngineConfig, EngineError, OpenConfig, Ports,
-    media::MediaService,
-    ports::{BackupService, ServicePort},
+    Collection, DerivedHost, Engine, EngineConfig, EngineError, OpenConfig, Ports, media::MediaService,
+    ports::BackupService,
 };
 use meguri_model::clock::Clock;
 use meguri_storage::paths::CollectionPaths;
@@ -124,6 +123,16 @@ impl CoreHost {
             .generation_listener(review.clone())
             .suspend_participant(review.clone());
         wiring::validate_ports(&ports)?;
+        let backup: Arc<dyn BackupService> = Arc::new(meguri_package::ForcedBackupProvider::new(
+            engine.clone(),
+            paths.collection(),
+            paths.backups.clone(),
+            config.clock.clone(),
+            config.random.clone(),
+            config.disk_space_provider.clone(),
+        ));
+        #[cfg(feature = "test-hooks")]
+        let backup = config.test_backup.unwrap_or(backup);
         let options = OpenConfig::new(config.clock.clone(), config.random)
             .ports(ports)
             .backups_directory(paths.backups.clone())
@@ -151,15 +160,6 @@ impl CoreHost {
             }
             return Err(error);
         }
-        let backup = wiring::pending::PENDING
-            .iter()
-            .find(|(port, _)| *port == ServicePort::Backup)
-            .map(|(_, unavailable)| Arc::new(*unavailable) as Arc<dyn BackupService>)
-            .ok_or_else(|| EngineError::Internal {
-                message: "backup provider is not wired".into(),
-            })?;
-        #[cfg(feature = "test-hooks")]
-        let backup = config.test_backup.unwrap_or(backup);
         Ok(Self {
             process: process.clone(),
             closed: Mutex::new(CloseState::Active),

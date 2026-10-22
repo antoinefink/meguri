@@ -179,6 +179,7 @@ impl From<EngineError> for CoreError {
             EngineError::InvalidArgument { message } => CoreError::InvalidArgument { message },
             EngineError::Internal { message } => CoreError::Internal { message },
             EngineError::SchemaNotMarked { .. }
+            | EngineError::SafetyBackupFailed(_)
             | EngineError::Storage(_)
             | EngineError::Media(_)
             | EngineError::Panicked { .. } => CoreError::Internal {
