@@ -52,6 +52,7 @@ extension TestHooks {
             ShellRoutes.register(in: &registry)
             SpikeRoutes.register(in: &registry)
             CardBehaviorRoutes.register(in: &registry)
+            CollectionEntryRoutes.register(in: &registry)
             return registry
         }
 

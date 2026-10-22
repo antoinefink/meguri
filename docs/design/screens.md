@@ -8,7 +8,7 @@ States come from the five-state vocabulary: empty, typical, overflow, error, loa
 Signature screens use the full snapshot covering set and get a variant pick (R1972, R1988);
 the others use the pairwise set (U252).
 
-40 screens, 8 signature.
+41 screens, 8 signature.
 
 ## shell
 
@@ -25,8 +25,10 @@ the others use the pairwise set (U252).
 | Screen | Id | Units | Platforms | States | Variants | References |
 |---|---|---|---|---|---|---|
 | Welcome | `onboarding.welcome` | U166 | iphone, ipad, mac | typical, error | pairwise set | `onboarding` |
+| Import Collection | `onboarding.collectionImport` | U166 | iphone, ipad, mac | empty, typical, overflow, error, loading | pairwise set | `sheet-form` |
 
 - `onboarding.welcome`: First launch, opening or creating a collection and the sync choice.
+- `onboarding.collectionImport`: Choose a latest-format collection-only .colpkg, confirm inspected counts and local replacement safety, and follow cancellable import progress or a typed failure.
 
 ## home
 

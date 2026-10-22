@@ -579,3 +579,16 @@ Product-source scan then passes. No test assertion was removed.
 `ui-test/20261022T185400Z-92699`: FAIL during compilation, before VM execution.
 Three notification status assertions compare UInt32 to Int32. Correct the
 constant types and run the same first-import case. No acceptance claim.
+
+### RF2 visual registration checkpoint
+
+- Base: `3de1daab`.
+- Implementer: `s-20261022T185502Z-7544e0ac`; export `20261022T185517Z-95157`.
+- Review round 1: no P0–P2. Shared live/fixture presentation and Home actions.
+- Design docs: `20261022T190233Z-98278` FAIL; `20261022T190311Z-98855` PASS after U166 unit metadata correction.
+- Similarity: `20261022T190405Z-2280` PASS.
+- Phone: `20261022T190327Z-99228` FAIL after activation, before Study.
+- Actual AX: FSRS parent identifier overrides the Enable button identifier.
+- Fixer: `s-20261022T190619Z-c229fb33`; export `20261022T190635Z-5342`.
+- Review round 2: P2, admission uses firstMatch; use all matching hittable rows.
+- Phone: `20261022T190902Z-7787` PASS, 1 test, 0 skipped. Other platforms and visual gates pending.

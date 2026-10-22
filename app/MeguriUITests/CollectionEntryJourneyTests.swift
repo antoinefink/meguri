@@ -37,8 +37,10 @@ import notify
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
         // Replacement may need RF1's scheduler admission before Home actions.
-        let enable = element(app, "home.policy.enable")
-        if hasLocalCollection && enable.waitForExistence(timeout: 5) { try click(enable, app, bundle) }
+        if hasLocalCollection {
+            let localDeck = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.deck.row.")).firstMatch
+            try waitForAdmission(localDeck, app, bundle)
+        }
         let entry = element(app, "home.collection.import")
         XCTAssertTrue(entry.waitForExistence(timeout: 20))
         try click(entry, app, bundle)
@@ -66,14 +68,11 @@ import notify
         // Real activation dismisses entry. FSRS policy is the production gate.
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"), object: entrySheet)], timeout: 30), .completed)
-        let policyOrDeck = app.descendants(matching: .any).matching(NSPredicate(format:
-            "identifier == %@ OR identifier BEGINSWITH %@", "home.policy.enable", "home.deck.row.")).firstMatch
-        XCTAssertTrue(policyOrDeck.waitForExistence(timeout: 30), app.debugDescription)
-        if enable.exists { try click(enable, app, bundle) }
+        let importedDeck = app.buttons.matching(NSPredicate(format: "identifier == %@", "home.deck.row.1788249600212"))
+        try waitForAdmission(importedDeck.firstMatch, app, bundle)
         XCTAssertFalse(element(app, "entry.error").exists)
         XCTAssertFalse(element(app, "home.collection.error").exists)
-        let deck = try XCTUnwrap(waitForHittable(app.buttons.matching(NSPredicate(
-            format: "identifier == %@", "home.deck.row.1788249600212"))))
+        let deck = try XCTUnwrap(waitForHittable(importedDeck), app.debugDescription)
         let deckIdentifier = deck.identifier
         let deckID = try XCTUnwrap(Int64(deckIdentifier.dropFirst("home.deck.row.".count)))
         let deckPage = element(app, "home.deck.page.\(deckID)")
@@ -195,18 +194,18 @@ import notify
     #if os(iOS)
     private func toggleSizeClass(_ bundle: String) throws -> (before: UIUserInterfaceSizeClass, after: UIUserInterfaceSizeClass) {
         var token = NOTIFY_TOKEN_INVALID
-        XCTAssertEqual(notify_register_check("\(bundle).testhooks.sizeClassApplied", &token), NOTIFY_STATUS_OK)
+        XCTAssertEqual(notify_register_check("\(bundle).testhooks.sizeClassApplied", &token), UInt32(NOTIFY_STATUS_OK))
         defer { notify_cancel(token) }
         // Consume registration's initial signal before requesting a transition.
         var changed: Int32 = 0
-        XCTAssertEqual(notify_check(token, &changed), NOTIFY_STATUS_OK)
+        XCTAssertEqual(notify_check(token, &changed), UInt32(NOTIFY_STATUS_OK))
         var state: UInt64 = 0
         let applied = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             var changed: Int32 = 0
             guard notify_check(token, &changed) == NOTIFY_STATUS_OK, changed != 0 else { return false }
             return notify_get_state(token, &state) == NOTIFY_STATUS_OK
         }, object: nil)
-        XCTAssertEqual(notify_post("\(bundle).testhooks.toggleSizeClass"), NOTIFY_STATUS_OK)
+        XCTAssertEqual(notify_post("\(bundle).testhooks.toggleSizeClass"), UInt32(NOTIFY_STATUS_OK))
         XCTAssertEqual(XCTWaiter().wait(for: [applied], timeout: 10), .completed, "No applied window size-class transition")
         let before = try XCTUnwrap(UIUserInterfaceSizeClass(rawValue: Int(state >> 32)))
         let after = try XCTUnwrap(UIUserInterfaceSizeClass(rawValue: Int(state & 0xffff_ffff)))
@@ -222,6 +221,21 @@ import notify
             : "There is no local collection file to replace. A pre-import safety backup is not needed."
         XCTAssertTrue(waitForText(element(app, "entry.preview.safety"), safety))
         XCTAssertEqual(element(app, "entry.confirm").label, hasLocalCollection ? "Replace Collection" : "Import Collection")
+    }
+    private func waitForAdmission(_ deck: XCUIElement, _ app: XCUIApplication, _ bundle: String) throws {
+        let enable = element(app, "home.policy.enable")
+        let policy = element(app, "home.policy.sheet")
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            enable.isHittable || (deck.isHittable && !policy.exists)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 30), .completed, app.debugDescription)
+        if enable.isHittable {
+            try click(enable, app, bundle)
+            let admitted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                !policy.exists && deck.isHittable
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter().wait(for: [admitted], timeout: 30), .completed, app.debugDescription)
+        }
     }
     private func waitForHittable(_ query: XCUIElementQuery) -> XCUIElement? {
         var target: XCUIElement?

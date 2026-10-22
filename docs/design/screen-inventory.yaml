@@ -52,6 +52,16 @@ screens:
     references: [onboarding]
     purpose: First launch, opening or creating a collection and the sync choice.
 
+  - id: onboarding.collectionImport
+    title: Import Collection
+    units: [U166]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [empty, typical, overflow, error, loading]
+    variants: pairwise
+    references: [sheet-form]
+    purpose: Choose a latest-format collection-only .colpkg, confirm inspected counts and local replacement safety, and follow cancellable import progress or a typed failure.
+
   - id: home.deckList
     title: Home and deck list
     units: [U152]

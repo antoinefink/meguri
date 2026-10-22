@@ -23,14 +23,7 @@ public struct HomeView: View {
                 }
                 content
                 if collection.state == .ready || collection.state == .noFile {
-                    Button { collection.entry.present() } label: {
-                        Text("Import Collection")
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!collection.entry.canPresent)
-                    .accessibilityIdentifier("home.collection.import")
+                    HomeCollectionImportButton(canPresent: collection.entry.canPresent) { collection.entry.present() }
                 }
             }
             .padding(Spacing.medium)
@@ -46,8 +39,7 @@ public struct HomeView: View {
         switch collection.state {
         case .unopened, .loading: LoadingStateView(Text("Opening collection…", bundle: .module))
         case .noFile:
-            EmptyStateView(Text("No Collection", bundle: .module), systemImage: "rectangle.stack",
-                description: Text("Import a collection-only .colpkg to study your own cards on this device.", bundle: .module))
+            HomeCollectionEmptyContent()
         case .unavailable:
             LoadingStateView(Text("Collection is busy…", bundle: .module))
         case .failed(let message):
@@ -82,6 +74,28 @@ public struct HomeView: View {
                 HomeDeckTree(nodes: collection.decks) { id in collection.navigation.openDeckPage(DeckID(id)) }
             }
         }
+    }
+}
+
+struct HomeCollectionEmptyContent: View {
+    var body: some View {
+        EmptyStateView(Text("No Collection", bundle: .module), systemImage: "rectangle.stack",
+            description: Text("Import a collection-only .colpkg to study your own cards on this device.", bundle: .module))
+    }
+}
+
+struct HomeCollectionImportButton: View {
+    let canPresent: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Text("Import Collection")
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .disabled(!canPresent)
+        .accessibilityIdentifier("home.collection.import")
     }
 }
 
@@ -187,6 +201,7 @@ public struct FsrsAdmissionView: View {
         .padding(Spacing.large)
         .frame(maxWidth: ContentWidth.readable)
         .interactiveDismissDisabled()
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home.policy.sheet")
     }
 }

@@ -7,12 +7,15 @@ public enum HomeDeckListPreview: PreviewStates {
     public static var previewFixtures: [PreviewFixture] {
         PreviewState.allCases.map { state in PreviewFixture(state) {
             ScrollView {
-                Group {
+                VStack(alignment: .leading, spacing: Spacing.large) {
                     switch state {
-                    case .empty: EmptyStateView(Text(verbatim: "No Collection"), systemImage: "rectangle.stack", description: Text(verbatim: "There is no collection in Meguri yet. Local collection import is coming next."))
+                    case .empty: HomeCollectionEmptyContent()
                     case .loading: LoadingStateView(Text(verbatim: "Opening collection…"))
                     case .error: ErrorStateView(Text(verbatim: "Couldn’t Open Collection"), message: Text(verbatim: "The collection is open in another program."), retryIdentifier: "home.collection.retry", retry: {})
                     case .typical, .overflow: HomeDeckTree(nodes: nodes(overflow: state == .overflow), select: { _ in })
+                    }
+                    if state == .empty || state == .typical || state == .overflow {
+                        HomeCollectionImportButton(canPresent: true, action: {})
                     }
                 }
                 .padding(Spacing.medium)
@@ -20,6 +23,9 @@ public enum HomeDeckListPreview: PreviewStates {
                 .frame(maxWidth: .infinity)
             }
             .background(.token(.backgroundPrimary))
+            .navigationTitle(Text("Decks", bundle: .module))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("home.collection.screen")
         } }
     }
     private static func nodes(overflow: Bool) -> [CountedDeckNode] {

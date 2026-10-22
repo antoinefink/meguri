@@ -138,3 +138,6 @@ screens:
   widget.heatmap:
     status: sketch
     fix_rounds: 0
+  onboarding.collectionImport:
+    status: sketch
+    fix_rounds: 0
