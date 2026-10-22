@@ -467,3 +467,35 @@ then failed: trust was true and the focus write succeeded, but the immediate
 AXFocused read returned noValue (-25212). Initial reveal/rating shortcuts passed
 before that assertion. Native control focus and activation remain open; the
 reviewer is checking this bounded failure before any source change.
+
+Filtered test-only fix `b2f1dc2e`, session `s-20261022T102909Z-9c19149a`,
+requires the native button role and waits for positive public focus evidence
+after one focus write. Missing AX values alone cannot pass. Independent bounded
+review found no P0/P1. Run `20261022T103203Z-94663` stopped earlier with
+trust false: the rebuilt runner no longer matched its previous permission.
+Setup `20261022T103333Z-96887` retained a stale enabled row without actual trust.
+The integrator reset Accessibility for the exact test-runner bundle in the VM,
+not the whole service. The VM's Keyboard Navigation setting changed from off
+to on. These are authorized dedicated-VM changes, not host changes.
+
+Setup `20261022T103448Z-98831` reached the path picker but failed its label-based
+guard. The masked hierarchy identifies the native GoToWindow sheet and sole
+PathTextField. Filtered fix `96626a3b` uses those exact identifiers, retaining
+path, secure-field and authorization guards. Independent review found no P0/P1.
+Fresh setup `20261022T103809Z-3051` passed its actual trust test with zero skips.
+All temporary authorization files were removed after each attempt.
+
+Native run `20261022T103938Z-5320` established positive native button focus and
+completed the Space iteration, including Back, retained focus and Close.
+It then stalled at the Return-to-undo expectation for over three minutes;
+the integrator sent SIGTERM. Its receipt is cancelled/incomplete, not passing.
+Independent review confirmed that expectation exceeds the platform contract:
+Space activates a focused standard button; Return activates the default button.
+RF1 does not require custom Return activation of focused Back/Close.
+The bounded test repair will retain Space activation and verify that Return
+preserves exact native ownership and review state. No product key remapping.
+
+Latest smallest-phone execution `20261022T102842Z-88520` passed all 18 actions
+at the largest text size with no hierarchy issues. This covers the bounded
+notice source revision's normal review path; it does not claim long-notice
+scrolling or substitute for the pending full gate.
