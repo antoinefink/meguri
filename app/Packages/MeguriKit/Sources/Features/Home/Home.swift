@@ -94,6 +94,7 @@ struct HomeCollectionImportButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.bordered)
+        .tint(ColorToken.textPrimary.color)
         .disabled(!canPresent)
         .accessibilityIdentifier("home.collection.import")
     }

@@ -22,7 +22,9 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
                         return AccessibilityAudit.StateResult(state: state, findings: [], touchTargets: [])
                     }
                     let content = app.descendants(matching: .any).matching(identifier: "onboarding.collectionImport.content").firstMatch
-                    try self.scrollToBottom(content, app: app, build: build)
+                    try self.scrollToRequiredControls(content, app: app, build: build, identifiers: [
+                        "onboarding.collectionImport.confirm", "onboarding.collectionImport.choose"
+                    ])
                     XCTAssertTrue(app.buttons["onboarding.collectionImport.confirm"].isHittable, "replacement confirmation must remain reachable after scrolling")
                     XCTAssertEqual(app.buttons["onboarding.collectionImport.confirm"].label, "Replace Collection")
                     XCTAssertTrue(app.buttons["onboarding.collectionImport.choose"].isHittable, "file selection must remain reachable after scrolling")
@@ -57,7 +59,8 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
                 state: state, launch: MeguriLaunch(locale: "en_US", animations: false, route: "home/deck-list/\(state)"),
                 waitFor: "home.collection.screen", suppressions: suppressions,
                 ready: { app in
-                    try self.scrollToBottom(app.scrollViews.firstMatch, app: app, build: build)
+                    try self.scrollToRequiredControls(app.scrollViews.firstMatch, app: app, build: build,
+                                                      identifiers: ["home.collection.import"])
                     let action = app.buttons["home.collection.import"]
                     XCTAssertTrue(action.isHittable)
                     XCTAssertEqual(action.label, "Import Collection")
@@ -71,15 +74,21 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
         }
     }
 
-    private func scrollToBottom(_ scroll: XCUIElement, app: XCUIApplication, build: BuildUnderTest) throws {
+    private func scrollToRequiredControls(_ scroll: XCUIElement, app: XCUIApplication, build: BuildUnderTest,
+                                          identifiers: [String]) throws {
         XCTAssertTrue(scroll.exists)
         try app.bringToFront(bundleIdentifier: try build.bundleIdentifier)
+        let controls = identifiers.map { app.buttons[$0] }
         #if os(macOS)
         scroll.scroll(byDeltaX: 0, deltaY: -10_000)
+        if controls.allSatisfy({ $0.exists && $0.isHittable }) { return }
         #else
-        // Move through the long sheet to reach its bottom controls.
-        scroll.swipeUp()
-        scroll.swipeUp()
+        for gesture in 0...24 {
+            if controls.allSatisfy({ $0.exists && $0.isHittable }) { return }
+            guard gesture < 24 else { break }
+            scroll.swipeUp()
+        }
         #endif
+        XCTFail("Required controls must exist and be hittable after bounded scrolling: \(identifiers)\n\(app.debugDescription)")
     }
 }

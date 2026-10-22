@@ -93,10 +93,12 @@ struct CollectionEntryContent: View {
                                 .accessibilityIdentifier("onboarding.collectionImport.preview.safety")
                             Button(action: actions.confirm) {
                                 Text(facts.replacingExisting ? "Replace Collection" : "Import Collection")
+                                    .font(.headline)
                                     .frame(minWidth: 44, minHeight: 44)
                                     .contentShape(Rectangle())
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.bordered)
+                            .tint(ColorToken.textPrimary.color)
                             .keyboardShortcut(.defaultAction)
                             .accessibilityIdentifier("onboarding.collectionImport.confirm")
                         }
@@ -127,6 +129,7 @@ struct CollectionEntryContent: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.bordered)
+                        .tint(ColorToken.textPrimary.color)
                         .accessibilityIdentifier("onboarding.collectionImport.recover")
                     } else if presentation.canChoose {
                         if presentation.needsReinspection {
@@ -136,6 +139,7 @@ struct CollectionEntryContent: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.bordered)
+                            .tint(ColorToken.textPrimary.color)
                             .accessibilityIdentifier("onboarding.collectionImport.reinspect")
                         }
                         Button(action: actions.chooseFile) {
@@ -144,6 +148,7 @@ struct CollectionEntryContent: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.bordered)
+                        .tint(ColorToken.textPrimary.color)
                         .accessibilityIdentifier("onboarding.collectionImport.choose")
                     }
                 }
@@ -159,6 +164,7 @@ struct CollectionEntryContent: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.bordered)
+                .tint(ColorToken.textPrimary.color)
                 .keyboardShortcut(.cancelAction)
                 .disabled((presentation.busy && !presentation.canCancel) || presentation.candidateActive)
                 .accessibilityIdentifier("onboarding.collectionImport.cancel")
