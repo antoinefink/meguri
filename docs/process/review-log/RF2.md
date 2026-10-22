@@ -518,3 +518,35 @@ Bridge/instrumentation `20261022T181615Z-57802` passes 26 tests.
 Privacy `20261022T181957Z-63202` and similarity `20261022T181954Z-62930` pass.
 This is a native-source checkpoint, not RF2 acceptance. VM picker journeys,
 registered visual/a11y evidence and full gate against `81c20757` follow.
+
+## Actual picker checks
+
+Native checkpoint `84c9365b` is pushed to origin/master.
+Catch-up receipt: `20261022T182037Z-63859`, PASS. The first phone run
+`20261022T182044Z-64184` builds, then both cases fail at the test's local-storage
+navigation step. They reach the actual system picker. The captured hierarchy
+shows Recents and the system Browse tab (`DOC.browsingModeTabBar`), while the
+test used immediate existence checks before the picker finished loading.
+Wait for that observed system control, navigate once, then keep the same actual
+file/preview/import/review/background/restart assertions. Preserve this red run.
+Picker readiness fixer `s-20261022T182522Z-3b76f2fb`, filtered
+`20261022T182551Z-68350`, adds a bounded wait for the observed Browse tab.
+Independent review closes that source finding. Second iPhone run
+`20261022T182833Z-69792` reaches Browse, local storage and Meguri, then both
+cases tap the folder caption without entering it. The hierarchy retains the
+parent and shows `RF2 Import Tests, Folder` with a visible image child. Target
+that cell/image, keep the actual file selection and preview assertions, and
+preserve the failed run. No import or persistence success is inferred yet.
+The user selected a self-hosted Anki-compatible server for the expanded first
+usable build; `review-first-delivery.md` records manual server import/export
+and file transfers next after the local-review checkpoint. Full goal unchanged.
+Picker cell fixer `s-20261022T183201Z-0e8ee227`, filtered
+`20261022T183218Z-74140`, targets native folder/file images once. Privacy
+`20261022T183329Z-75836` passes. Independent review closes that targeting issue.
+Third iPhone run `20261022T183324Z-75019` selects the real source and shows its
+verified six-note, eleven-card, six-review preview. Both tests then fail because
+SwiftUI propagates the parent preview identifier onto every child, including
+the controls below it. Add a native accessibility container for this group.
+Actual AX frames also prove undersized Home/entry actions; move target sizing
+into their actionable labels and verify in the following VM/a11y checks.
+The phone result remains FAIL until both complete journeys pass.

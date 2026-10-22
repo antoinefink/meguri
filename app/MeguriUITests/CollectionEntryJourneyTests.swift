@@ -131,19 +131,19 @@ import notify
         XCTAssertTrue(open.waitForExistence(timeout: 10))
         try click(open, app, bundle)
         #else
-        let file = named(app, ["review", "review.colpkg"])
+        let labels = ["review", "review.colpkg"]
+        let file = app.cells.containing(NSPredicate(format: "label IN %@", labels)).firstMatch
         let rememberedFile = file.waitForExistence(timeout: 2)
         capturePicker(app)
         // The picker remembers folders. iPad can keep its Browse sidebar up.
         if !rememberedFile {
-            let dedicated = named(app, ["RF2 Import Tests"])
+            let dedicated = app.cells["RF2 Import Tests, Folder"].firstMatch
             if !dedicated.exists {
-                let browse = app.buttons["Browse"].firstMatch
-                if browse.exists { try click(browse, app, bundle) }
                 let local = named(app, ["On My iPhone", "On My iPad"])
                 if !local.exists {
-                    let browseTab = app.tabBars.buttons["Browse"].firstMatch
-                    if browseTab.exists { try click(browseTab, app, bundle) }
+                    let browseTab = app.tabBars["DOC.browsingModeTabBar"].buttons["Browse"].firstMatch
+                    XCTAssertTrue(browseTab.waitForExistence(timeout: 10), app.debugDescription)
+                    try click(browseTab, app, bundle)
                 }
                 XCTAssertTrue(local.waitForExistence(timeout: 10), app.debugDescription)
                 try click(local, app, bundle)
@@ -152,11 +152,18 @@ import notify
                 try click(meguri, app, bundle)
             }
             XCTAssertTrue(dedicated.waitForExistence(timeout: 10), app.debugDescription)
-            try click(dedicated, app, bundle)
+            let folderImage = dedicated.images.firstMatch
+            XCTAssertTrue(folderImage.waitForExistence(timeout: 10), app.debugDescription)
+            try click(folderImage, app, bundle)
         }
         XCTAssertTrue(file.waitForExistence(timeout: 10), app.debugDescription)
         capturePicker(app)
-        try click(file, app, bundle)
+        let thumbnail = file.images.firstMatch
+        if thumbnail.waitForExistence(timeout: 2) {
+            try click(thumbnail, app, bundle)
+        } else {
+            try click(file, app, bundle)
+        }
         #endif
     }
     private func named(_ app: XCUIApplication, _ labels: [String]) -> XCUIElement {

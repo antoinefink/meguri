@@ -21,8 +21,22 @@ Build one local review path over the existing production core and renderer:
 6. Provide a supported way to bring a local collection into the app. Keep the
    source intact and verify the copied/imported collection before use.
 
-CloudKit, collection management, editing, statistics and advanced review tools
-follow this path. No sync or Apple-account setup is needed to prove local review.
+Local review is the first intermediate checkpoint. Antoine expanded the first
+usable build on 2026-10-22 to include file import/export and explicit manual
+Import from Anki / Export to Anki through an Anki-compatible server. Prioritize
+those transfers immediately after safe local entry and reviews, before the
+remaining editing, statistics and advanced review features. Reuse prepared work.
+
+The existing sync design remains: routine Meguri sync uses CloudKit; Anki server
+access is an explicit Settings transfer with preview, confirmation, safety backup
+and the specified cooldown. Antoine chose a self-hosted Anki-compatible server
+for the first usable version on 2026-10-22. Provide endpoint configuration and
+explicit import/export in every build; test with the local official server rig.
+No automated AnkiWeb contact is permitted. The routine-sync design is unchanged.
+CloudKit requirements and all milestone gates remain.
+
+No sync or Apple-account setup is needed to prove the local-review checkpoint.
+The expanded first-version scope requires its transfer checks before acceptance.
 Unavailable features remain absent from the user flow.
 
 ## Execution
