@@ -21,12 +21,16 @@ public struct CollectionEntryView: View {
                                 ? "This will replace the local collection on this device. Meguri must finish a safety backup of your current collection, including saved answers, before replacing it. If that backup fails, import stops."
                                 : "There is no local collection file to replace. A pre-import safety backup is not needed.")
                                 .accessibilityIdentifier("entry.preview.safety")
-                            Button(facts.replacingExisting ? "Replace Collection" : "Import Collection") { coordinator.confirm() }
-                                .buttonStyle(.borderedProminent)
-                                .keyboardShortcut(.defaultAction)
-                                .frame(minHeight: 44)
-                                .accessibilityIdentifier("entry.confirm")
+                            Button { coordinator.confirm() } label: {
+                                Text(facts.replacingExisting ? "Replace Collection" : "Import Collection")
+                                    .frame(minWidth: 44, minHeight: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .keyboardShortcut(.defaultAction)
+                            .accessibilityIdentifier("entry.confirm")
                         }
+                        .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("entry.preview")
                     }
                     if coordinator.busy {
@@ -39,6 +43,7 @@ public struct CollectionEntryView: View {
                             } else { ProgressView().accessibilityLabel(coordinator.progressTitle) }
                             if !coordinator.canCancel { Text("Finishing activation. The new collection will remain active.") }
                         }
+                        .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("entry.progress")
                     }
                     if let message = coordinator.message {
@@ -46,15 +51,30 @@ public struct CollectionEntryView: View {
                             .accessibilityIdentifier("entry.error")
                     }
                     if coordinator.failure?.candidateActive == true {
-                        Button("Continue Recovery") { Task { await coordinator.continueAfterActivation() } }
-                            .frame(minHeight: 44).accessibilityIdentifier("entry.recover")
+                        Button { Task { await coordinator.continueAfterActivation() } } label: {
+                            Text("Continue Recovery")
+                                .frame(minWidth: 44, minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("entry.recover")
                     } else if coordinator.canChoose {
                         if coordinator.needsReinspection {
-                            Button("Inspect Again") { coordinator.reinspect() }
-                                .frame(minHeight: 44).accessibilityIdentifier("entry.reinspect")
+                            Button { coordinator.reinspect() } label: {
+                                Text("Inspect Again")
+                                    .frame(minWidth: 44, minHeight: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("entry.reinspect")
                         }
-                        Button("Choose File") { coordinator.chooseFile() }
-                            .frame(minHeight: 44).accessibilityIdentifier("entry.choose")
+                        Button { coordinator.chooseFile() } label: {
+                            Text("Choose File")
+                                .frame(minWidth: 44, minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("entry.choose")
                     }
                 }
                 .padding(Spacing.large)
@@ -64,10 +84,14 @@ public struct CollectionEntryView: View {
             .navigationTitle("Import Collection")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(coordinator.busy ? "Cancel Import" : "Cancel") { Task { await coordinator.dismiss() } }
-                        .keyboardShortcut(.cancelAction)
-                        .disabled((coordinator.busy && !coordinator.canCancel) || coordinator.failure?.candidateActive == true)
-                        .accessibilityIdentifier("entry.cancel")
+                    Button { Task { await coordinator.dismiss() } } label: {
+                        Text(coordinator.busy ? "Cancel Import" : "Cancel")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled((coordinator.busy && !coordinator.canCancel) || coordinator.failure?.candidateActive == true)
+                    .accessibilityIdentifier("entry.cancel")
                 }
             }
         }

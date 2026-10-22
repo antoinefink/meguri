@@ -23,10 +23,14 @@ public struct HomeView: View {
                 }
                 content
                 if collection.state == .ready || collection.state == .noFile {
-                    Button("Import Collection") { collection.entry.present() }
-                        .frame(minHeight: 44)
-                        .disabled(!collection.entry.canPresent)
-                        .accessibilityIdentifier("home.collection.import")
+                    Button { collection.entry.present() } label: {
+                        Text("Import Collection")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!collection.entry.canPresent)
+                    .accessibilityIdentifier("home.collection.import")
                 }
             }
             .padding(Spacing.medium)

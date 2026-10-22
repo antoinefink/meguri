@@ -550,3 +550,16 @@ the controls below it. Add a native accessibility container for this group.
 Actual AX frames also prove undersized Home/entry actions; move target sizing
 into their actionable labels and verify in the following VM/a11y checks.
 The phone result remains FAIL until both complete journeys pass.
+### Preview controls and real activation
+
+Fixer: `s-20261022T183714Z-73879246`; base: `34e1b6cc`.
+Filtered output: `20261022T183732Z-79309`.
+The two Swift files preserve distinct child IDs and place minimum sizing
+inside button labels. Independent review reports zero P0–P2 findings.
+Privacy receipt: `20261022T183906Z-81262`, PASS.
+Phone receipt: `20261022T183902Z-80351`, FAIL, two cases.
+The picker opens the package; facts and confirmation checks pass; activation
+loads real decks. The test then clicks an offscreen duplicate after its layout
+probe. Reviewer diagnosis: restore the layout, require sheet dismissal and
+choose an actionable deck. Reuse that deck ID after relaunch. Keep all answer
+and durability checks. This checkpoint does not accept RF2.
