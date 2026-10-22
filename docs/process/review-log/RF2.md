@@ -673,3 +673,12 @@ constant types and run the same first-import case. No acceptance claim.
 - Mac `a11y/20261022T211131Z-30870`: FAIL. Native progress role, frame, label and numeric value pass. The separate stage has an empty label; the captured native hierarchy records its text in value.
 - Export `20261022T211328Z-32720`, same fixer session, checkpoint `7d3ec912`: Mac checks the exact stage String value; other platforms check the exact label. Independent review: no findings. No product change.
 - Mac `a11y/20261022T211442Z-33905`: PASS, 2 tests, no skips. Five import states and Home empty/typical pass, with no unsuppressed findings or touch-target violations. Input `e303130bb922cbc5217b32125f3113197d22dfd3e169a125bf0bf17979a0eee7`.
+- iPad `a11y/20261022T211640Z-35753`: PASS, 2 tests, no skips. Five import states at both sizes and appearances, plus scoped Home empty/typical checks. No unsuppressed findings or touch-target violations.
+- iPhone `a11y/20261022T212147Z-38907`: PASS, 2 tests, no skips. The same state coverage passes, with no unsuppressed findings or touch-target violations.
+- All three audits use input `e303130bb922cbc5217b32125f3113197d22dfd3e169a125bf0bf17979a0eee7`. Mac uses native text sizing; phone and iPad include the largest accessibility size. Home coverage here concerns the import control in empty/typical states; complete U152 acceptance remains open.
+
+### Visual baseline review
+
+- Recording `snapshots/20261022T212653Z-42308`: PASS, 225 selected cases, 490 outside the filter. Input matches the three passing audits. This is recording evidence, not comparison acceptance.
+- Independent visual review finds a required artifact defect in the Mac import images: the scroll body is transparent while the footer is opaque. The real native sheet remains legible. Home is opaque; phone and iPad frames show no new P0/P1.
+- Preserve this recording as WIP. Add the existing primary-background token to the shared import scroll body. Re-record affected Mac cells, verify legibility, then obtain fresh audit and visual receipts. No palette or layout redesign.
