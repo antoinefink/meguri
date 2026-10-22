@@ -70,6 +70,12 @@ fn snapshot(source: &Path, destination: &Path) -> Result<(), StorageError> {
     crate::conn_init::probe(&conn).map_err(|detail| StorageError::ConnectionInit { detail })?;
     conn.execute("VACUUM main INTO ?1", [file_uri(destination, None)])?;
     conn.close().map_err(|(_, error)| StorageError::from(error))?;
+    finalise_snapshot(destination)
+}
+
+/// Finalise only an unpublished snapshot owned by the caller's staging
+/// directory, never a source collection or a published destination.
+pub(crate) fn finalise_snapshot(destination: &Path) -> Result<(), StorageError> {
     // VACUUM may produce rollback mode. SQLite owns this conversion and the
     // final checkpoint/close; never patch the header of a database by hand.
     let copy = Connection::open_with_flags(destination, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
@@ -80,13 +86,22 @@ fn snapshot(source: &Path, destination: &Path) -> Result<(), StorageError> {
             detail: "snapshot did not enter WAL mode".into(),
         });
     }
-    copy.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?;
+    let busy: i64 = copy.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))?;
+    if busy != 0 {
+        return Err(StorageError::Io {
+            detail: "snapshot checkpoint was busy".into(),
+        });
+    }
     copy.close().map_err(|(_, error)| StorageError::from(error))?;
     for suffix in ["-wal", "-shm", "-journal"] {
-        if sibling(destination, suffix).symlink_metadata().is_ok() {
-            return Err(StorageError::Io {
-                detail: "snapshot retained a SQLite auxiliary file".into(),
-            });
+        match sibling(destination, suffix).symlink_metadata() {
+            Ok(_) => {
+                return Err(StorageError::Io {
+                    detail: "snapshot retained a SQLite auxiliary file".into(),
+                });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
         }
     }
     Ok(())

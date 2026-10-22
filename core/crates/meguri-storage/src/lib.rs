@@ -24,6 +24,7 @@ pub mod ids;
 pub mod integrity;
 pub mod journal;
 pub mod leftovers;
+mod live_snapshot;
 pub mod lockfile;
 pub mod media;
 pub mod open;

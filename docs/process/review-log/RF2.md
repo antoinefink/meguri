@@ -210,6 +210,37 @@ Their source ownership is disjoint, apart from additive exports/dependency
 edges that integration must reconcile. Neither is accepted before focused
 checks and independent review.
 
+## Live safety-backup snapshot seam
+
+Starting source commit: `89a10998`. Implementer session
+`s-20261022T160015Z-02e9d4b0`; filtered run `20261022T160036Z-74758`.
+`Reader::snapshot_live` uses only the Maintenance reader outside a transaction,
+claims a new file in caller-owned U32 staging, runs VACUUM on that live reader
+and finalises the snapshot to WAL format without adjacent SQLite state files.
+It never closes or checkpoints the live collection. Snapshot finalisation is
+shared with the standalone writer and now checks checkpoint busy status.
+
+Format `20261022T160349Z-76643` passed. Focused Docker run
+`20261022T160359Z-76943` passed all 14 tests, zero skips. The new tests prove
+that committed WAL answers enter the snapshot while a sync reader retains
+its earlier view; the live source, WAL, sidecar and writer remain usable.
+They also cover wrong roles, an existing transaction, output collisions and links.
+Independent review by `/root/rf2_backend_review` found no confirmed P0–P2 defect.
+
+The unchanged privacy scan rejected new owned prose/identifiers and an arbitrary
+test sentinel. Fixer session `s-20261022T160600Z-967041be` used preserved seed
+patches in `20261022T160616Z-78553` and `20261022T160958Z-80280`.
+Complete comments/identifiers were replaced. The arbitrary sentinel's matching
+write and exact-read assertion both use the same three synthetic bytes.
+All paths, loops, error expectations, preservation checks and behavior remain.
+Independent delta review confirmed no weakened property or new P0–P2 finding.
+No private token was read or inferred, and no hook/scanner rule changed.
+Final unchanged privacy scan `20261022T161137Z-81265` passed.
+Final focused Docker run `20261022T161141Z-81505` passed all 14 tests, zero skips.
+
+This is the storage seam only. Real package backup composition and the import
+consumer remain required; no unit or RF2 acceptance is claimed.
+
 The package area stays inactive; parsing does not advertise executor support.
 Live-source backup, inspection, guarded replacement, FFI and picker integration
 remain pending within RF2. No full gate or unit acceptance is claimed here.
