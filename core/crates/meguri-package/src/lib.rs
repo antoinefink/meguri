@@ -1,5 +1,7 @@
 //! Collection-only latest-format package publication (package/container P11).
 mod backup;
+mod server_copy;
+pub use server_copy::{PublishedServerCopy, ServerCopyKind, preserve_server_copy};
 pub mod entry;
 mod inspection;
 mod inspection_zip;

@@ -89,7 +89,20 @@ pub fn check_device(stage: &ReplacementStage, live: &Path) -> Result<(), Replace
             return Err(ReplaceError::StagingNotFinalised);
         }
     }
+    check_directory(stage, live)?;
     if candidate.dev() != fs::metadata(crate::atomic_file::parent(live))?.dev() {
+        return Err(ReplaceError::CrossDevice);
+    }
+    if crate::open::is_open(&stage.path()) {
+        return Err(ReplaceError::StagingNotFinalised);
+    }
+    Ok(())
+}
+
+/// Also usable before the snapshot creates the candidate.
+pub(crate) fn check_directory(stage: &ReplacementStage, live: &Path) -> Result<(), ReplaceError> {
+    use std::os::unix::fs::MetadataExt;
+    if fs::metadata(stage.directory())?.dev() != fs::metadata(crate::atomic_file::parent(live))?.dev() {
         return Err(ReplaceError::CrossDevice);
     }
     if stage.directory().parent().map(Path::canonicalize).transpose()?
@@ -99,9 +112,6 @@ pub fn check_device(stage: &ReplacementStage, live: &Path) -> Result<(), Replace
             detail: "candidate must be in collection-owned staging".into(),
         }
         .into());
-    }
-    if crate::open::is_open(&stage.path()) {
-        return Err(ReplaceError::StagingNotFinalised);
     }
     Ok(())
 }
@@ -114,6 +124,28 @@ pub fn prepare(
     package_stamps: bool,
     change: impl FnOnce(&mut WriteScope<'_>) -> Result<(), StorageError>,
 ) -> Result<(), ReplaceError> {
+    let preparation = if package_stamps {
+        Preparation::Package
+    } else {
+        Preparation::AsGiven
+    };
+    prepare_inner(stage, live, options, clock, preparation, change)
+}
+
+pub(crate) enum Preparation {
+    AsGiven,
+    Package,
+    FullUpload,
+}
+
+pub(crate) fn prepare_inner(
+    stage: &ReplacementStage,
+    live: &Path,
+    options: &OpenOptions<'_>,
+    clock: &dyn Clock,
+    preparation: Preparation,
+    change: impl FnOnce(&mut WriteScope<'_>) -> Result<(), StorageError>,
+) -> Result<(), ReplaceError> {
     check_device(stage, live)?;
     let path = stage.path();
     package_inspection::probe_candidate(&path).map_err(candidate_error)?;
@@ -124,11 +156,16 @@ pub fn prepare(
     // Freeze once, including all caller Local stamps if it explicitly uses now.
     let now = clock.now_ms();
     let frozen = FixedClock::new(now, clock.utc_offset_at(now));
+    let mode = if matches!(preparation, Preparation::FullUpload) {
+        StampMode::CallerSupplied
+    } else {
+        StampMode::Raw
+    };
     let mut scope = opened
         .writer()
-        .begin_write(StampMode::Raw, &frozen, None)
+        .begin_write(mode, &frozen, None)
         .map_err(ReplaceError::CallerChangeFailed)?;
-    if package_stamps {
+    if matches!(preparation, Preparation::Package) {
         let mut col = scope.col().map_err(ReplaceError::CallerChangeFailed)?;
         col.modified = EpochMillis(now);
         col.schema_modified = EpochMillis(now);
@@ -140,6 +177,15 @@ pub fn prepare(
         return Err(ReplaceError::CallerChangeFailed(error));
     }
     meguri_model::faultpoint!("replace.after_check")?;
+    if matches!(preparation, Preparation::FullUpload) {
+        // O6.2: statistics must describe the transformed rows, and pages
+        // freed by clearing graves must be reclaimed before finalisation.
+        opened
+            .writer()
+            .conn
+            .execute_batch("VACUUM; ANALYZE;")
+            .map_err(StorageError::from)?;
+    }
     if !opened.writer().checkpoint()?.succeeded() {
         return Err(ReplaceError::StagingNotFinalised);
     }
@@ -186,7 +232,7 @@ fn candidate_error(error: CandidateError) -> ReplaceError {
         }),
     }
 }
-fn healthy(conn: &crate::rusqlite::Connection) -> Result<bool, StorageError> {
+pub(crate) fn healthy(conn: &crate::rusqlite::Connection) -> Result<bool, StorageError> {
     let result = (|| -> Result<Vec<String>, crate::rusqlite::Error> {
         let mut stmt = conn.prepare("PRAGMA main.integrity_check")?;
         stmt.query_map([], |r| r.get::<_, String>(0))?.collect()

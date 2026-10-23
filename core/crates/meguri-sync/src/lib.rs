@@ -20,6 +20,8 @@ pub mod error;
 pub mod identity;
 pub mod job;
 pub mod login;
+pub mod oneway;
+pub mod policy;
 pub mod status;
 pub mod transport;
 pub mod wire;

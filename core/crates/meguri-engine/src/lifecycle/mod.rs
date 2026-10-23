@@ -593,6 +593,11 @@ impl Engine {
         if kind == JobKind::Open {
             self.jobs().pause(false);
         }
+        if kind == JobKind::MediaSync && self.slot_holder() == Some(LongOp::OneWaySync) {
+            return Err(EngineError::Busy {
+                running_op: LongOp::OneWaySync.name().into(),
+            });
+        }
         let slot = match kind.long_op() {
             Some(op) => Some(self.acquire_slot(op)?),
             None => None,

@@ -1707,14 +1707,19 @@ dependencies = [
 name = "meguri-host"
 version = "0.0.0"
 dependencies = [
+ "bytes",
  "meguri-engine",
  "meguri-model",
  "meguri-package",
  "meguri-sched",
  "meguri-storage",
+ "meguri-sync",
+ "meguri-testkit",
  "serde_json",
+ "sha2",
  "tempfile",
  "tracing",
+ "zstd",
 ]
 
 [[package]]
@@ -1737,6 +1742,7 @@ dependencies = [
  "meguri-storage",
  "meguri-text",
  "serde_json",
+ "sha1",
  "sha2",
  "tempfile",
  "zip",
@@ -1806,12 +1812,15 @@ dependencies = [
  "futures-core",
  "meguri-engine",
  "meguri-model",
+ "meguri-package",
  "meguri-storage",
  "meguri-testkit",
  "reqwest",
  "rustls",
  "serde",
  "serde_json",
+ "sha1",
+ "sha2",
  "tempfile",
  "tokio",
  "url",

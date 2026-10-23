@@ -105,6 +105,18 @@ The formatted code is preserved for the fixer in the owned stash
 No commit hook, check or acceptance boundary was bypassed. Focused tests and
 the full gate remain pending until these findings are resolved.
 
+Fixer session `s-20261023T100422Z-89ddfab6`, run `20261023T100541Z-93375`:
+both findings are fixed in source. The second review found no P0–P2 issues.
+The live file uses mode 0600; the saved file uses 0400. Initial Import recovery
+now checks ownership and current file state. Tests cover errors and process
+exit before the rename, with the imported cloud decision still pending.
+Format and privacy checks passed, including `20261023T101319Z-98773`.
+Compile result `20261023T101316Z-98513` reports E0117 in the test transport and
+an unused_parens warning. The tests have not run. Fix these checks while
+keeping the existing test cases and assertions. No acceptance is claimed.
+Server rig `20261023T100850Z-95458` passed eight setup checks. Free disk space
+is now over 250 GB after the backup snapshot was removed.
+
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,
 focused server/native evidence and the required full gate remain open.

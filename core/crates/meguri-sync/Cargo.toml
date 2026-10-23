@@ -27,6 +27,9 @@ meguri-model.workspace = true
 # The col row and config rows a check and a sync read (meta-status.md M1,
 # wire-format.md W6.4).
 meguri-storage.workspace = true
+meguri-package.workspace = true
+sha2.workspace = true
+sha1.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 serde.workspace = true

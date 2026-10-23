@@ -40,6 +40,37 @@ impl ProcessCore {
             opened: Arc::new(Mutex::new(false)),
         })
     }
+    /// Explicit recovery/import entry. Returns a live provider host even if
+    /// opening the existing file failed; callers show engine.state(). No request
+    /// is made here. Initial activation reuses these providers exactly once.
+    pub fn open_for_manual_import(&self, config: HostConfig) -> Result<CoreHost, EngineError> {
+        {
+            let mut opened = self.opened.lock().unwrap_or_else(PoisonError::into_inner);
+            if *opened || config.engine.job_workers != self.job_workers {
+                return Err(EngineError::Busy {
+                    running_op: "process collection".into(),
+                });
+            }
+            *opened = true;
+        }
+        struct Reset<'a>(&'a ProcessCore, bool);
+        impl Drop for Reset<'_> {
+            fn drop(&mut self) {
+                if !self.1 {
+                    *self.0.opened.lock().unwrap_or_else(PoisonError::into_inner) = false;
+                }
+            }
+        }
+        let mut reset = Reset(self, false);
+        let (host, paths, options) = CoreHost::compose_on(self, config)?;
+        // Active means host-owned lifecycle, including NoCollection/Failed.
+        *host.closed.lock().unwrap_or_else(PoisonError::into_inner) = CloseState::Active;
+        if paths.collection().symlink_metadata().is_ok() {
+            let _ = host.engine.open_raw(&paths.collection(), options);
+        }
+        reset.1 = true;
+        Ok(host)
+    }
     pub fn engine(&self) -> &Engine {
         &self.engine
     }
@@ -156,6 +187,7 @@ enum CloseState {
 }
 
 pub struct CoreHost {
+    pub(crate) manual_transfers: meguri_sync::oneway::ManualTransfers,
     pub(crate) export: crate::collection_export::ExportInputs,
     process: ProcessCore,
     closed: Mutex<CloseState>,
@@ -232,11 +264,24 @@ impl CoreHost {
         let export = crate::collection_export::ExportInputs::new(&config);
         #[cfg(feature = "test-hooks")]
         let backup = config.test_backup.unwrap_or(backup);
-        let options = OpenConfig::new(config.clock.clone(), config.random)
+        let mut options = OpenConfig::new(config.clock.clone(), config.random.clone())
             .ports(ports)
             .backups_directory(paths.backups.clone())
-            .disk_space_provider(config.disk_space_provider);
+            .disk_space_provider(config.disk_space_provider.clone());
+        options.publication_binding = config.publication_binding.clone();
+        let manual_transfers = meguri_sync::oneway::ManualTransfers::new(meguri_sync::oneway::TransferInputs {
+            engine: engine.clone(),
+            collection_directory: config.collection_directory.clone(),
+            backups_directory: config.backups_directory.clone(),
+            state_directory: config.manual_transfer_directory.clone(),
+            clock: config.clock.clone(),
+            random: config.random.clone(),
+            space: config.disk_space_provider.clone(),
+            backup: backup.clone(),
+            initial_open: options.clone(),
+        });
         let host = Self {
+            manual_transfers,
             export,
             process: process.clone(),
             closed: Mutex::new(CloseState::Prepared),

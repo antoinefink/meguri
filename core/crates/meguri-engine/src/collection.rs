@@ -39,6 +39,15 @@ pub struct Collection {
     pub(crate) privilege: Option<Privilege>,
 }
 
+/// Local work guard, independent of SQLite timestamps. `pending` includes
+/// admitted/parked work that has not committed yet. Never a remote revision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TransferAdmission {
+    pub admitted: u64,
+    pub committed: u64,
+    pub pending: bool,
+}
+
 impl fmt::Debug for Collection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Collection")
@@ -50,6 +59,10 @@ impl fmt::Debug for Collection {
 }
 
 impl Collection {
+    pub fn transfer_admission(&self) -> Result<TransferAdmission, EngineError> {
+        self.check_current()?;
+        self.core.exec.transfer_admission(self.privilege)
+    }
     /// Observe queue admission without taking the writer, for gated tests.
     #[cfg(feature = "test-hooks")]
     pub fn has_queued_op_for_testing(&self, name: &str) -> bool {

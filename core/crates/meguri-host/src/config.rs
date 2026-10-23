@@ -10,6 +10,10 @@ pub struct HostConfig {
     /// May be missing; the forced writer preflights its existing ancestor before creation.
     pub backups_directory: PathBuf,
     pub app_group_snapshot: PathBuf,
+    /// Installation-private stable root, shared across endpoints/accounts and
+    /// collections. Never choose a disposable/staging directory here.
+    pub manual_transfer_directory: PathBuf,
+    pub publication_binding: meguri_engine::device_state::AccountBinding,
     pub clock: Arc<dyn Clock>,
     pub random: Arc<dyn RandomSource>,
     pub disk_space_provider: Arc<dyn DiskSpaceProvider>,
@@ -27,7 +31,13 @@ impl HostConfig {
         random: Arc<dyn RandomSource>,
         disk_space_provider: Arc<dyn DiskSpaceProvider>,
     ) -> Self {
+        let manual_transfer_directory = collection_directory
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("ManualTransfers");
         Self {
+            manual_transfer_directory,
+            publication_binding: meguri_engine::device_state::AccountBinding::LocalOnly,
             collection_directory,
             backups_directory,
             app_group_snapshot,

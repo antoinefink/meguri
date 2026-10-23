@@ -74,6 +74,7 @@ pub(crate) struct ExecShared {
 }
 
 struct QueueState {
+    admitted: u64,
     queues: Queues,
     parked: Vec<Task>,
     admission: Admission,
@@ -108,6 +109,7 @@ impl ExecShared {
             #[cfg(feature = "test-hooks")]
             durability_events: Mutex::default(),
             queue: Mutex::new(QueueState {
+                admitted: 0,
                 queues: Queues::default(),
                 parked: Vec::new(),
                 admission,
@@ -205,11 +207,13 @@ impl ExecShared {
                 }
                 _ => match queue.admission.decide(task.meta.privilege, task.meta.park) {
                     Decision::Queue => {
+                        queue.admitted = queue.admitted.saturating_add(1);
                         queue.queues.push(task);
                         self.wake.notify_one();
                         None
                     }
                     Decision::Park => {
+                        queue.admitted = queue.admitted.saturating_add(1);
                         queue.parked.push(task);
                         None
                     }
@@ -264,6 +268,22 @@ impl ExecShared {
             Decision::Refuse(error) => Err(error),
             _ => Err(EngineError::unavailable("the collection cannot admit sidecar work")),
         }
+    }
+
+    pub(crate) fn transfer_admission(
+        &self,
+        privilege: Option<Privilege>,
+    ) -> Result<crate::collection::TransferAdmission, EngineError> {
+        let queue = self.lock_queue();
+        match queue.admission.decide(privilege, false) {
+            Decision::Queue if !queue.stop && queue.admitted != u64::MAX => {}
+            _ => return Err(EngineError::unavailable("transfer admission is closed")),
+        }
+        Ok(crate::collection::TransferAdmission {
+            admitted: queue.admitted,
+            committed: self.last_seq().0,
+            pending: queue.running || !queue.queues.is_empty() || !queue.parked.is_empty(),
+        })
     }
 
     /// Sleeps indefinitely when clean, or until the pending WAL flush is due.

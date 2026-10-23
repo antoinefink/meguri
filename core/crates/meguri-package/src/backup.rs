@@ -138,6 +138,108 @@ impl ForcedBackupProvider {
 }
 
 impl BackupService for ForcedBackupProvider {
+    fn before_manual_transfer(
+        &self,
+        collection: Option<&Collection>,
+        cancel: &CancelToken,
+    ) -> Result<meguri_engine::ports::TransferBackup, EngineError> {
+        use meguri_engine::ports::TransferBackup;
+        if let Some(collection) = collection {
+            match self.force(collection, cancel) {
+                Ok(receipt) => return Ok(TransferBackup::Collection(receipt)),
+                Err(EngineError::SafetyBackupFailed(ref error)) if corrupt_snapshot(&error.cause) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        // Caller holds Working (writer drained) or initial replacement's
+        // advisory ownership. No checkpoint or quick_check is run for T7.
+        let fail = |cause| failure(cause, BackupPublication::Unpublished);
+        cancel.check().map_err(|e| fail(engine_cause(e)))?;
+        let main_size = match fs::symlink_metadata(&self.collection) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(TransferBackup::Absent),
+            Err(e) => return Err(fail(io_cause(e))),
+            Ok(m) if m.file_type().is_file() => m.len(),
+            Ok(_) => {
+                return Err(fail(BackupFailureCause::Io {
+                    detail: "raw backup source is not regular".into(),
+                }));
+            }
+        };
+        let wal_path = self.collection.with_file_name("collection.anki2-wal");
+        let wal_size = match fs::symlink_metadata(&wal_path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(e) => return Err(fail(io_cause(e))),
+            Ok(m) if m.file_type().is_file() => m.len(),
+            Ok(_) => {
+                return Err(fail(BackupFailureCause::Io {
+                    detail: "raw WAL is not regular".into(),
+                }));
+            }
+        };
+        let needed = main_size
+            .checked_add(wal_size)
+            .and_then(|s| s.checked_add(4 * 1024 * 1024))
+            .ok_or_else(|| {
+                fail(BackupFailureCause::Io {
+                    detail: "raw backup space overflow".into(),
+                })
+            })?;
+        let mut ancestor = self.backups.as_path();
+        while !ancestor.exists() {
+            ancestor = ancestor.parent().ok_or_else(|| {
+                fail(BackupFailureCause::Io {
+                    detail: "backup ancestor".into(),
+                })
+            })?;
+        }
+        meguri_storage::space::require_space(self.space.as_ref(), ancestor, needed)
+            .map_err(|e| fail(engine_cause(e.into())))?;
+        create_backup_directory(&self.backups).map_err(|e| fail(engine_cause(e.into())))?;
+        let instant = EpochMillis(self.clock.now_ms());
+        let wall = instant
+            .0
+            .div_euclid(1000)
+            .checked_add(i64::from(self.clock.utc_offset_at(instant.0).seconds()))
+            .ok_or_else(|| {
+                fail(BackupFailureCause::Io {
+                    detail: "raw backup time overflow".into(),
+                })
+            })?;
+        for advance in 0..=60 {
+            let name = backup_name(wall.checked_add(advance).ok_or_else(|| {
+                fail(BackupFailureCause::Io {
+                    detail: "raw backup time overflow".into(),
+                })
+            })?)
+            .map_err(|e| fail(e.into()))?;
+            let main = name.replacen("backup-", "corrupt-", 1).replace(".colpkg", ".anki2");
+            let wal = format!("{main}-wal");
+            if self.backups.join(&main).symlink_metadata().is_ok() || self.backups.join(&wal).symlink_metadata().is_ok()
+            {
+                continue;
+            }
+            cancel.check().map_err(|e| fail(engine_cause(e)))?;
+            if wal_size > 0 {
+                crate::server_copy::copy_raw(&wal_path, &self.backups.join(&wal)).map_err(|e| fail(e.into()))?;
+            }
+            if let Err(error) = crate::server_copy::copy_raw(&self.collection, &self.backups.join(&main)) {
+                // A sync error can follow publication of the main file. Keep
+                // both recovery files whenever that destination is visible.
+                if self.backups.join(&main).symlink_metadata().is_err() && wal_size > 0 {
+                    let _ = fs::remove_file(self.backups.join(&wal));
+                    let _ = meguri_storage::atomic_file::sync_directory(&self.backups);
+                }
+                return Err(fail(error.into()));
+            }
+            return Ok(TransferBackup::Raw {
+                main,
+                wal: (wal_size > 0).then_some(wal),
+                instant,
+            });
+        }
+        Err(fail(BackupFailureCause::DestinationExists))
+    }
+
     fn before_deck_delete(&self) -> Result<(), EngineError> {
         let collection = self
             .engine
@@ -157,7 +259,7 @@ impl BackupService for ForcedBackupProvider {
 
 // New directory entries need their parents synced too; syncing only the
 // package's immediate directory does not make missing ancestors durable.
-fn create_backup_directory(directory: &Path) -> Result<(), StorageError> {
+pub(crate) fn create_backup_directory(directory: &Path) -> Result<(), StorageError> {
     let mut missing = Vec::new();
     let mut ancestor = directory;
     loop {
@@ -231,7 +333,7 @@ fn free_name(directory: &Path, instant: EpochMillis, clock: &dyn Clock) -> Resul
 
 // Convert a bounded Gregorian day by counting complete years and months. This
 // needs no locale or timezone database; year zero has Gregorian leap rules.
-fn backup_name(wall_seconds: i64) -> Result<String, WriteError> {
+pub(crate) fn backup_name(wall_seconds: i64) -> Result<String, WriteError> {
     let day = wall_seconds.div_euclid(86_400);
     let year_start = |year: i64| {
         let prior = year - 1;
@@ -350,4 +452,11 @@ mod tests {
                 .is_symlink()
         );
     }
+}
+
+fn corrupt_snapshot(cause: &BackupFailureCause) -> bool {
+    matches!(cause,
+        BackupFailureCause::Engine(error) if matches!(error.as_ref(),
+            EngineError::Storage(StorageError::Sqlite { code: 11 | 26, .. })
+            | EngineError::Open(meguri_storage::OpenError::Corrupt { .. })))
 }

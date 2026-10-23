@@ -1,4 +1,4 @@
-//! Live collection snapshot for package/container P9–P11 and RF2.3.
+//! Live collection snapshot for package/container P9–P11, RF2.3 and one-way O6.2.
 //! U32 owns the staging directory, its namespace and failure cleanup.
 
 use std::path::{Path, PathBuf};
@@ -19,6 +19,10 @@ impl Reader {
                 detail: "live package snapshots require the Maintenance reader".into(),
             });
         }
+        self.snapshot_source()
+    }
+
+    fn snapshot_source(&self) -> Result<(PathBuf, u64), StorageError> {
         if !self.conn.is_autocommit() {
             return Err(StorageError::TransactionOpen);
         }
@@ -62,14 +66,40 @@ impl Reader {
                 detail: "live package snapshots require the Maintenance reader".into(),
             });
         }
+        let destination = staging_directory.join("snapshot.anki2");
+        self.snapshot_live_to(&destination)?;
+        Ok(destination)
+    }
+
+    /// O6.2 capture uses only the dedicated Sync reader after the caller's
+    /// drain, outside a snapshot and under its engine lease. The package
+    /// export API above remains Maintenance-only.
+    pub(crate) fn snapshot_full_upload_to(
+        &self,
+        stage: &crate::verified_replace::ReplacementStage,
+    ) -> Result<PathBuf, crate::verified_replace::ReplaceError> {
+        if self.role() != ReaderRole::Sync {
+            return Err(StorageError::Mode {
+                detail: "full-upload snapshots require the Sync reader".into(),
+            }
+            .into());
+        }
+        let (source, _) = self.snapshot_source()?;
+        crate::verified_replace::check_directory(stage, &source)?;
+        self.snapshot_live_to(&stage.path())?;
+        Ok(source)
+    }
+
+    // Both role-specific entries validate their role before reaching this
+    // shared capture/finalisation machinery.
+    fn snapshot_live_to(&self, destination: &Path) -> Result<(), StorageError> {
         if !self.conn.is_autocommit() {
             return Err(StorageError::TransactionOpen);
         }
 
-        let destination = staging_directory.join("snapshot.anki2");
         // Reject adjacent state files before SQLite opens the output.
         for suffix in ["-wal", "-shm", "-journal"] {
-            match sibling(&destination, suffix).symlink_metadata() {
+            match sibling(destination, suffix).symlink_metadata() {
                 Ok(_) => return Err(StorageError::DestinationExists),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.into()),
@@ -80,7 +110,7 @@ impl Reader {
         let claim = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(&destination)
+            .open(destination)
             .map_err(|error| {
                 if error.kind() == std::io::ErrorKind::AlreadyExists {
                     StorageError::DestinationExists
@@ -90,8 +120,7 @@ impl Reader {
             })?;
         drop(claim);
         self.conn
-            .execute("VACUUM main INTO ?1", [file_uri(&destination, Some("mode=rw"))])?;
-        finalise_snapshot(&destination)?;
-        Ok(destination)
+            .execute("VACUUM main INTO ?1", [file_uri(destination, Some("mode=rw"))])?;
+        finalise_snapshot(destination)
     }
 }

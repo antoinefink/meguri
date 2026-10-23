@@ -117,7 +117,35 @@ impl Exclusive<'_> {
             reason.package(),
             change,
         )?;
-        self.verified_environment(reason)?;
+        self.activate_finalised(stage, reason, before_commit, None)
+    }
+
+    /// Activates an O6.2 artifact after independently verifying its immutable
+    /// identity, device, finalisation, gate and integrity. This path never
+    /// opens a candidate writer or runs preparation a second time.
+    pub fn activate_prepared_upload(
+        &mut self,
+        artifact: PreparedUpload,
+        before_commit: impl FnOnce() -> Result<(), EngineError>,
+    ) -> Result<Collection, ReplaceError> {
+        self.verified_environment(ReplaceReason::FullUpload)?;
+        artifact.check(self.collection().path())?;
+        self.activate_finalised(
+            artifact.stage,
+            ReplaceReason::FullUpload,
+            before_commit,
+            Some(artifact.identity),
+        )
+    }
+
+    fn activate_finalised(
+        &mut self,
+        stage: ReplacementStage,
+        reason: ReplaceReason,
+        before_commit: impl FnOnce() -> Result<(), EngineError>,
+        identity: Option<crate::device_state::FileIdentity>,
+    ) -> Result<Collection, ReplaceError> {
+        let environment = self.verified_environment(reason)?;
         before_commit()?;
         // Admission is privileged and the writer drained. Recheck under the
         // lifecycle/session locks after preparation and the unlocked hook.
@@ -130,6 +158,19 @@ impl Exclusive<'_> {
         let old_generation = self.collection().generation();
         let result = self.replace_tracked(
             move |live| {
+                if let Some(expected) = &identity {
+                    meguri_storage::one_way::verify_prepared_upload(&stage, live).map_err(|e| {
+                        *record.lock().unwrap() = Some(e.clone());
+                        EngineError::Storage(StorageError::Io {
+                            detail: "prepared upload verification failed".into(),
+                        })
+                    })?;
+                    if device_state::fingerprint(&stage.path())?.as_ref() != Some(expected) {
+                        return Err(EngineError::Storage(StorageError::Io {
+                            detail: "prepared upload identity changed".into(),
+                        }));
+                    }
+                }
                 swap(
                     live,
                     stage,
@@ -190,4 +231,32 @@ pub(crate) fn swap(
     // TempDir removes only the operation-owned directory, best effort.
     drop(stage);
     Ok(())
+}
+
+/// Owned, verified prepared bytes. Construction verifies the caller's recorded
+/// byte identity; no arbitrary unchecked path or caller transform is accepted.
+pub struct PreparedUpload {
+    stage: ReplacementStage,
+    identity: crate::device_state::FileIdentity,
+}
+impl PreparedUpload {
+    pub fn verify(stage: ReplacementStage, live: &Path, length: u64, sha256: [u8; 32]) -> Result<Self, ReplaceError> {
+        let artifact = Self {
+            stage,
+            identity: crate::device_state::FileIdentity { length, sha256 },
+        };
+        artifact.check(live)?;
+        Ok(artifact)
+    }
+    fn check(&self, live: &Path) -> Result<(), ReplaceError> {
+        meguri_storage::one_way::verify_prepared_upload(&self.stage, live)?;
+        if device_state::fingerprint(&self.stage.path())
+            .map_err(StagingError::from)?
+            .as_ref()
+            != Some(&self.identity)
+        {
+            return Err(StagingError::StagingNotFinalised.into());
+        }
+        Ok(())
+    }
 }

@@ -73,9 +73,9 @@ pub struct PublicationToken {
     binding: AccountBinding,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct FileIdentity {
-    length: u64,
-    sha256: [u8; 32],
+pub struct FileIdentity {
+    pub length: u64,
+    pub sha256: [u8; 32],
 }
 pub(crate) fn fingerprint(path: &Path) -> Result<Option<FileIdentity>, StorageError> {
     let mut file = match File::open(path) {
@@ -162,6 +162,17 @@ fn sidecar_path(live: &Path) -> PathBuf {
     live.parent().unwrap_or(Path::new(".")).join("meguri-sidecar.json")
 }
 
+/// Durable local-activation evidence, retained after R6 intent cleanup. This
+/// proves a local replacement only, never remote upload acceptance/equality.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplacementEvidence {
+    pub reason: crate::replace::ReplaceReason,
+    pub prior: Publication,
+    pub candidate: Publication,
+    pub candidate_file: FileIdentity,
+    pub old_file: Option<FileIdentity>,
+}
+
 /// Read access to the device record. Collection ownership must cover these
 /// calls, including queued-work token validation immediately before sending.
 #[derive(Clone, Debug)]
@@ -175,6 +186,14 @@ impl DeviceState {
             path: sidecar_path(live),
             live: live.to_owned(),
         }
+    }
+    pub fn replacement_evidence(&self) -> Result<Option<ReplacementEvidence>, StorageError> {
+        sidecar::read_document(&self.path, |doc| {
+            decode(doc)?
+                .and_then(|s| s.extra.get("lastReplacement").cloned())
+                .map(|v| serde_json::from_value(v).map_err(|_| failure("unreadable activation evidence")))
+                .transpose()
+        })
     }
     pub fn publication(&self) -> Result<Option<Publication>, StorageError> {
         sidecar::read_document(&self.path, |doc| Ok(decode(doc)?.map(|state| state.active)))
@@ -205,6 +224,21 @@ impl DeviceState {
             return Err(failure("stale publication token"));
         }
         Ok(())
+    }
+    /// O8 bookkeeping cannot clear or rewrite the cloud publication decision.
+    pub fn record_manual_transfer_success(
+        &self,
+        optimized_at: Option<meguri_model::time::EpochMillis>,
+    ) -> Result<(), StorageError> {
+        sidecar::update_document(&self.path, |doc| {
+            let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing identity"))?;
+            state.extra.insert("oneWayChoicePending".into(), false.into());
+            state.extra.remove("lastFailedManualSanityCounts");
+            if let Some(at) = optimized_at {
+                state.extra.insert("lastOptimize".into(), at.0.into());
+            }
+            put(doc, &state)
+        })
     }
     /// Legacy manual state is independent; clearing it cannot edit R6's decision.
     pub fn set_manual_transfer_pending(&self, pending: bool) -> Result<(), StorageError> {
@@ -368,6 +402,17 @@ pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), Stor
         let intent = state.intent.as_mut().ok_or_else(|| failure("missing intent"))?;
         state.active = intent.candidate.clone();
         intent.phase = Phase::Activated;
+        let evidence = ReplacementEvidence {
+            reason: intent.reason,
+            prior: intent.prior.clone(),
+            candidate: intent.candidate.clone(),
+            candidate_file: intent.candidate_file.clone(),
+            old_file: intent.old_file.clone(),
+        };
+        state.extra.insert(
+            "lastReplacement".into(),
+            serde_json::to_value(evidence).map_err(failure)?,
+        );
         put(doc, &state)
     })?;
     meguri_model::faultpoint!("replace.after_durable_activation")?;

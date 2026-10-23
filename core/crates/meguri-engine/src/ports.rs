@@ -175,6 +175,18 @@ pub use meguri_storage::space::SpaceProvider as DiskSpaceProvider;
 pub trait BackupService: Send + Sync {
     fn before_deck_delete(&self) -> Result<(), EngineError>;
 
+    /// Working's handle, or None under initial replacement ownership. Never
+    /// called before a downloaded Import candidate has been validated.
+    fn before_manual_transfer(
+        &self,
+        _collection: Option<&Collection>,
+        _cancel: &crate::CancelToken,
+    ) -> Result<TransferBackup, EngineError> {
+        Err(EngineError::Unsupported {
+            feature: "manual-transfer safety backup".into(),
+        })
+    }
+
     /// Called on the import worker after exclusive drain, with Working's
     /// privileged collection. Implementations release every reader before return.
     /// Old test witnesses deliberately do not acknowledge this new operation.
@@ -187,6 +199,17 @@ pub trait BackupService: Send + Sync {
             reason: "forced pre-import backup provider is unavailable".into(),
         })
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TransferBackup {
+    Collection(BackupReceipt),
+    Raw {
+        main: String,
+        wal: Option<String>,
+        instant: meguri_model::time::EpochMillis,
+    },
+    Absent,
 }
 
 /// A durably published package whose device reference was durably recorded.

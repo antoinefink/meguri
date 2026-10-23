@@ -11,12 +11,18 @@ test-hooks = ["meguri-engine/test-hooks"]
 
 [dependencies]
 meguri-package.workspace = true
+meguri-sync.workspace = true
 meguri-engine.workspace = true
 meguri-model.workspace = true
 meguri-storage.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+meguri-testkit.workspace = true
+meguri-sync = { workspace = true, features = ["test-hooks"] }
+bytes.workspace = true
+zstd.workspace = true
+sha2.workspace = true
 meguri-sched.workspace = true
 serde_json.workspace = true
 meguri-engine = { workspace = true, features = ["test-hooks"] }
