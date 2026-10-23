@@ -161,3 +161,7 @@
 - iPhone `20261023T050054Z-30109`: FAIL, same Code -56 at dark/AX5 Prepare. Light/AX5 now passes, with initial all-types and other supplemental types intact. Dark initial all-types passes. Same full-frame control; extend the recorded limit to both appearances for this exact iPhone error/AX5 supplemental case.
 - Round 6 source follow-up on `84d19d35`: no new P0–P1 or deterministic blockers. Privacy `20261023T050037Z-29693`: PASS.
 - Same fixer export `20261023T050437Z-33910`: exact iPhone/error/AX5 supplemental limit now covers light and dark. Round 6 approves; initial all-types, iPad contrast and other checks remain enabled. Native checks pending.
+- Round 6 on `be125276`: no new P0–P1 or deterministic blockers. Privacy `20261023T050544Z-34858`: PASS.
+- iPhone `20261023T050558Z-35247`: PASS, one test and no skips. All states and variants passed with the exact R1977 limitation recorded above. Final Mac/iPad freshness, gate and critic remain pending.
+- Mac `20261023T051301Z-39885`: PASS, one test and no skips. Final source matches the passing iPhone input. iPad and integration checks remain pending.
+- iPad `20261023T051450Z-42197`: PASS, one test and no skips. All three final export audit inputs match `a334c64ce2fab37bc3e3d05f90d385a789fda89966847d8e5bc7821074060b5e`. Native file round trips remain passed on all platforms. Required gate base: `81c207573c20c337c8834e4ae8b4ee8f29603dbf`.
