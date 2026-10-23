@@ -90,3 +90,5 @@
 - Fixer session is recorded in `4e67eb02`. Cleanroom boundary checks passed; native checks are pending.
 - Independent round 6 source review: no new P0–P1 findings or deterministic blockers. Native and visual evidence remain pending.
 - Docker format `20261023T020920Z-84629`: pass. Focused export tests `20261023T020954Z-85161`: pass, 19 tests. Privacy `20261023T021045Z-85798`: pass after whole-sentence log rewrites; earlier failure `20261023T020954Z-85121` is preserved.
+- Native `20261023T021111Z-86248`: production compiled; test compilation failed on an async thread assertion. Fixer `s-20261023T021214Z-66c2fd6c`, cleanroom `20261023T021235Z-88520`, removed that single assertion. Synchronous publication checks remain. Native results are pending.
+- Similarity `20261023T021132Z-87399`: pass against the original RF2 base.

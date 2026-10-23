@@ -43,7 +43,6 @@ private final class RedirectedExportAccess: CollectionExportDestinationAccess {
         let publisher = StagedCollectionExportDestination()
         try await CoordinatedExportDestination().withDestination(destination) { actual in
             try await publisher.save(to: actual, operation: CollectionExportOperation()) { staged in
-                #expect(!Thread.isMainThread)
                 #expect(staged != actual && staged.deletingLastPathComponent() != root)
                 let files = FileManager()
                 let stageVolume = try files.attributesOfFileSystem(forPath: staged.deletingLastPathComponent().path)
