@@ -52,7 +52,7 @@ import XCTest
                     var findings: [AuditFinding] = []
                     var touchTargets: [TouchTargetViolation] = []
                     try self.scrollToRequiredContent(scroll, close: close, app: app, build: build,
-                                                     identifiers: required) { visible, viewport, portions in
+                                                     identifiers: required) { visible, viewport, portions, auditFullFrames in
                         // Only full-frame visibility removes an exact contrast
                         // exception. A paragraph portion retains its exception.
                         let visibleSuppressions = suppressions.filter {
@@ -70,7 +70,9 @@ import XCTest
                         proof.name = "export visibility \(label)"
                         proof.lifetime = .keepAlways
                         self.add(proof)
-                        findings += try AccessibilityAudit.run(app, variant: label, suppressions: visibleSuppressions)
+                        if auditFullFrames {
+                            findings += try AccessibilityAudit.run(app, variant: label, suppressions: visibleSuppressions)
+                        }
                         touchTargets += try TouchTargets.violations(in: app)
                     }
                     return AccessibilityAudit.StateResult(state: state, findings: findings, touchTargets: touchTargets)
@@ -85,7 +87,7 @@ import XCTest
     private func scrollToRequiredContent(_ scroll: XCUIElement, close: XCUIElement,
                                          app: XCUIApplication,
                                          build: BuildUnderTest, identifiers: [String],
-                                         onVisible: ([String], CGRect, [String]) throws -> Void) throws {
+                                         onVisible: ([String], CGRect, [String], Bool) throws -> Void) throws {
         guard scroll.exists, scroll.elementType == .scrollView else {
             throw AuditError(description: "Expected the exact settings.importExport.content ScrollView")
         }
@@ -193,7 +195,7 @@ import XCTest
                     XCTAssertTrue(viewport.contains(targets[index].frame),
                                   "The entire content frame must be visible: \(identifiers[index])")
                 }
-                try onVisible(visible.map { identifiers[$0] }, viewport, portions)
+                try onVisible(visible.map { identifiers[$0] }, viewport, portions, newFullFrames)
                 checked.formUnion(visible)
                 auditedFullFrames.formUnion(visible)
                 // The system audit can change native scroll geometry. Only new
