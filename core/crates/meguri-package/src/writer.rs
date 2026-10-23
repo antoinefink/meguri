@@ -56,6 +56,18 @@ pub struct LiveCollectionPackageWritten {
     pub snapshot_modified: EpochMillis,
 }
 
+/// Run the live writer's P10 capacity check before a caller creates output parents.
+/// The writer repeats it immediately before snapshotting to handle changed conditions.
+pub fn preflight_collection_package_from_live(
+    reader: &Reader,
+    destination: &Path,
+    context: &CollectionPackageWriteContext<'_>,
+) -> Result<()> {
+    cancelled(context.is_cancelled)?;
+    let (_, size) = reader.live_snapshot_source()?;
+    preflight_publication(size, destination, context)
+}
+
 /// Publish one VACUUM snapshot through the shared Maintenance reader, outside
 /// any read transaction. The caller keeps the engine lease, owns cancellation
 /// and releases this reader before replacing the collection. This call neither

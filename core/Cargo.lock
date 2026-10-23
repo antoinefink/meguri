@@ -1698,6 +1698,7 @@ dependencies = [
  "meguri-template",
  "meguri-testkit",
  "meguri-text",
+ "sha2",
  "tempfile",
  "uniffi",
 ]

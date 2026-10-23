@@ -156,6 +156,7 @@ enum CloseState {
 }
 
 pub struct CoreHost {
+    pub(crate) export: crate::collection_export::ExportInputs,
     process: ProcessCore,
     closed: Mutex<CloseState>,
     engine: Engine,
@@ -228,6 +229,7 @@ impl CoreHost {
             config.random.clone(),
             config.disk_space_provider.clone(),
         ));
+        let export = crate::collection_export::ExportInputs::new(&config);
         #[cfg(feature = "test-hooks")]
         let backup = config.test_backup.unwrap_or(backup);
         let options = OpenConfig::new(config.clock.clone(), config.random)
@@ -235,6 +237,7 @@ impl CoreHost {
             .backups_directory(paths.backups.clone())
             .disk_space_provider(config.disk_space_provider);
         let host = Self {
+            export,
             process: process.clone(),
             closed: Mutex::new(CloseState::Prepared),
             engine,

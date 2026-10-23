@@ -1,0 +1,366 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Retry Export Cleanup": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry Export Cleanup"
+          }
+        }
+      }
+    },
+    "The file was saved. Export cleanup is pending. Retry cleanup before starting another export.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The file was saved. Export cleanup is pending. Retry cleanup before starting another export."
+          }
+        }
+      }
+    },
+    "Native file access has ended, but export cleanup is pending. Retry cleanup to continue.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Native file access has ended, but export cleanup is pending. Retry cleanup to continue."
+          }
+        }
+      }
+    },
+    "A copy of the earlier collection was saved. The collection has since been replaced; prepare a new export for the current collection.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A copy of the earlier collection was saved. The collection has since been replaced; prepare a new export for the current collection."
+          }
+        }
+      }
+    },
+    "Cancel Export": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel Export"
+          }
+        }
+      }
+    },
+    "Capturing and writing collection…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capturing and writing collection…"
+          }
+        }
+      }
+    },
+    "Checking completed export…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking completed export…"
+          }
+        }
+      }
+    },
+    "Choose Save Location": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Save Location"
+          }
+        }
+      }
+    },
+    "Collection Files": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collection Files"
+          }
+        }
+      }
+    },
+    "Discard Prepared Export": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discard Prepared Export"
+          }
+        }
+      }
+    },
+    "Done": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Done"
+          }
+        }
+      }
+    },
+    "Export Collection": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Collection"
+          }
+        }
+      }
+    },
+    "Export Collection — Without Media": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Collection — Without Media"
+          }
+        }
+      }
+    },
+    "Import Collection": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import Collection"
+          }
+        }
+      }
+    },
+    "In progress": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In progress"
+          }
+        }
+      }
+    },
+    "Open or import a collection before exporting.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open or import a collection before exporting."
+          }
+        }
+      }
+    },
+    "Prepare Export": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prepare Export"
+          }
+        }
+      }
+    },
+    "Preparing collection export…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing collection export…"
+          }
+        }
+      }
+    },
+    "Ready to Save": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready to Save"
+          }
+        }
+      }
+    },
+    "Removing prepared export…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Removing prepared export…"
+          }
+        }
+      }
+    },
+    "Save a latest-format .colpkg containing every deck, note, card and saved review. Images, audio and other media are excluded. No account or connection is needed.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save a latest-format .colpkg containing every deck, note, card and saved review. Images, audio and other media are excluded. No account or connection is needed."
+          }
+        }
+      }
+    },
+    "Saved": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved"
+          }
+        }
+      }
+    },
+    "Saving collection…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saving collection…"
+          }
+        }
+      }
+    },
+    "Saving pending reviews…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saving pending reviews…"
+          }
+        }
+      }
+    },
+    "Settings": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Settings"
+          }
+        }
+      }
+    },
+    "The collection could not be exported. Check available space and collection access, then try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The collection could not be exported. Check available space and collection access, then try again."
+          }
+        }
+      }
+    },
+    "The collection could not be exported. Check available space and collection access, then try again. A retained export from an earlier launch may still need to finish in Files.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The collection could not be exported. Check available space and collection access, then try again. A retained export from an earlier launch may still need to finish in Files."
+          }
+        }
+      }
+    },
+    "The collection is busy or unavailable. Wait for the current operation to finish, then try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The collection is busy or unavailable. Wait for the current operation to finish, then try again."
+          }
+        }
+      }
+    },
+    "The collection was replaced": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The collection was replaced"
+          }
+        }
+      }
+    },
+    "The collection was replaced. Discard this export and prepare a new one.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The collection was replaced. Discard this export and prepare a new one."
+          }
+        }
+      }
+    },
+    "The destination has received the file. A file provider may continue uploading its copy.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The destination has received the file. A file provider may continue uploading its copy."
+          }
+        }
+      }
+    },
+    "The entire collection will be saved as a latest-format .colpkg. Media files, including images and audio, are excluded. Your saved reviews are included.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The entire collection will be saved as a latest-format .colpkg. Media files, including images and audio, are excluded. Your saved reviews are included."
+          }
+        }
+      }
+    },
+    "The file could not be saved. The completed export is retained; choose another destination and try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The file could not be saved. The completed export is retained; choose another destination and try again."
+          }
+        }
+      }
+    },
+    "The new file may already be saved. Check the destination before trying again. The completed export is retained.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The new file may already be saved. Check the destination before trying again. The completed export is retained."
+          }
+        }
+      }
+    },
+    "This file captures the collection during preparation. Later reviews do not change this copy. Choose a destination to finish saving.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This file captures the collection during preparation. Later reviews do not change this copy. Choose a destination to finish saving."
+          }
+        }
+      }
+    },
+    "Wait for the collection to finish opening.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wait for the collection to finish opening."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

@@ -2,11 +2,15 @@
 import AppModel
 import DesignSystem
 import Home
+import Settings
 import SwiftUI
 
 extension TestHooks {
     enum CollectionEntryRoutes {
         static func register(in registry: inout RouteRegistry) {
+            registry.register("settings/import-export/typical") { _ in .sheet { CollectionExportPreview.preview(.typical) } }
+            registry.register("settings/import-export/error") { _ in .sheet { CollectionExportPreview.preview(.error) } }
+            registry.register("settings/import-export/loading") { _ in .sheet { CollectionExportPreview.preview(.loading) } }
             registry.register("collection/import/empty") { _ in .sheet { CollectionEntryPreview.preview(.empty) } }
             registry.register("collection/import/typical") { _ in .sheet { CollectionEntryPreview.preview(.typical) } }
             registry.register("collection/import/overflow") { _ in .sheet { CollectionEntryPreview.preview(.overflow) } }

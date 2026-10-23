@@ -2,6 +2,7 @@
 import DesignSystem
 import Home
 import Review
+import Settings
 import SwiftUI
 import Testing
 
@@ -58,6 +59,9 @@ struct SnapshotCase: Sendable, CustomTestStringConvertible {
 enum MatrixRegistry {
     static let screens: [ScreenRegistration] = [
         ScreenRegistration(type: HomeDeckListPreview.self) { _, _ in .keyVariants },
+        ScreenRegistration(type: CollectionExportPreview.self) { _, state in
+            [.typical, .error, .loading].contains(state) ? .pairwise : nil
+        },
         ScreenRegistration(type: CollectionEntryPreview.self) { _, _ in .pairwise },
         ScreenRegistration(type: ReviewQuestionPreview.self) { _, _ in .keyVariants },
         ScreenRegistration(type: ReviewAnswerPreview.self) { _, _ in .keyVariants },

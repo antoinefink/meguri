@@ -71,3 +71,8 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = '(package(meguri-host) and test(=close_refuses_restore_admission_and_retains_the_host_for_retry)) or (package(meguri-ffi) and binary(collection_ffi))'
 threads-required = "num-test-threads"
+
+# RF3's measured process footprint needs the runner to itself.
+[[profile.default.overrides]]
+filter = 'package(meguri-ffi) and binary(collection_export_memory)'
+threads-required = "num-test-threads"

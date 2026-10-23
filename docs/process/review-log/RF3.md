@@ -20,3 +20,37 @@
 
 - RF2 critic findings remain open in U152/U166. Apply the small native iOS inline import-title correction with this UI work and obtain fresh evidence for the affected large-text cells. Keep the full title.
 - Home shell evidence and the other full-screen findings remain recorded. No complete Home or import visual acceptance is implied by the local review journeys or this export delivery.
+
+## Source delivery and independent review
+
+- Implementer session `s-20261023T001829Z-cd534ca1`, source `ca13993d`, exported own-code patch in cleanroom run `20261023T001929Z-24460`. The runner passed its boundary checks; it ran no compilation or tests.
+- Independent round 1 found five issues: reverse path overlap could put backups in owned output; capacity preflight followed directory creation; strict route expectations were missing; unused Ready output could block exports after restart; native Files selection needed replacement serialization.
+- Fixer session `s-20261023T004303Z-09daf314`, clean source `da1b62ce`, used the first patch as seed in cleanroom run `20261023T004631Z-33999`. Added canonical overlap checks, reused writer preflight, strict route updates, durable ownership states, native handoff admission and focused regressions. A separate real-file memory test uses the existing sampler.
+- Independent round 2 confirmed the original five source fixes. Two P2 issues remain: queued cancellation can leave native completion non-retryable; cleanup can lose its ownership evidence before a failed final sync. Preserve those findings until fixed and checked.
+- Native rendering and actual Files/Save behavior remain pending. No parent unit is accepted by this source checkpoint.
+
+## Focused checks on the first integrated patch
+
+- Docker formatting `20261023T005912Z-37858`: pass.
+- UI lint `20261023T005945Z-38518`: pass, 115 files.
+- Docker focused export tests `20261023T005942Z-38271`: failed, 13 passed and 1 failed. Reverse-nesting coverage attempted to open a configuration already rejected by the host's collection/backup separation check. Preserve the earlier refusal and correct the test to assert its safety at that boundary; the other alias cases still require export-level refusal.
+- This checkpoint is WIP with known findings. The full gate, native journeys and measured memory result are not yet claimed.
+
+## Targeted round 2 source fixes (checks pending)
+
+- Fixer session `s-20261023T010207Z-73726269` resumed the supplied formatted implementation and round 1 fixes. The starting master and required full-gate base above remain unchanged; no build, test, scan or commit ran in this filtered session.
+- Native completion now captures a terminal guard that restores retryability when its worker is cancelled before entry, dropped, rejected, fails or unwinds. Durable safe ownership still precedes releasing native admission. Swift retains failed completion leases and exposes Retry Export Cleanup without changing a completed save into a failed or cancelled publication.
+- Artifact cleanup retains its validated directory identities and narrow unlink/sync phase through errors. Retries recheck protected paths, reject substituted directories, symlinks and unknown files, and can finish the parent sync after their owned directory has disappeared. Added focused regression source for queued cancellation/suspend, completion error/unwind, unlink/sync retry, idempotent discard and a subsequent export.
+- Reverse-nesting coverage now expects host admission to refuse backups containing the collection; all other alias configurations still reach export admission. Both boundaries preserve source/user content and assert no owned output creation. The two reported own-source comment regions were rewritten without consulting scanner inputs or changing scan policy.
+- Integrator verification remains required. Preserve the earlier focused failure and privacy failure until fresh checks resolve them. Full/native/RSS evidence and unit acceptance remain pending; the full gate must start at `81c207573c20c337c8834e4ae8b4ee8f29603dbf`.
+
+## Integrated source checkpoint
+
+- Independent review round 3 confirmed both round 2 findings fixed and found no new P0–P1 issues. Actual native behavior and rendered visual review remain pending.
+- Focused check-correction session `s-20261023T011343Z-a99f7798`, cleanroom `20261023T011403Z-45572`, corrected three event borrows in regression tests and removed an optional Swift comment. Executable Swift statements are unchanged.
+- Docker format `20261023T011133Z-43852`: pass. The first fresh test build `20261023T011202Z-44223` failed on the three test borrows; that failure is preserved.
+- Docker focused export suite `20261023T011520Z-46607`: pass, 18 tests. Includes real backup preservation, capacity refusal, canonical aliases, captured reviews, native admission, cancellation/unwind, restart ownership and cleanup retries.
+- Standalone memory check `20261023T011632Z-47651`: pass, one test with no skips. A real sparse 1 GiB file traversed the production destination preflight/copy/hash/publication path. The sampler enforced less than 128 MiB peak growth; length and digest matched. This is Rust file-save evidence, not native Files-provider memory evidence.
+- Privacy `20261023T011506Z-46313`: pass for staged source. Earlier failures `20261023T010121Z-39447` and `20261023T011205Z-44480` remain recorded; optional own-source comments were rewritten or removed. No scanner rule changed.
+- Similarity `20261023T011523Z-46857`: failed, one structural flag in `core/crates/meguri-engine/src/lifecycle/state.rs`, lines 84–108. Only the sanitized failure was read. Rewrite this region from Meguri's lifecycle contract; no exemption or acceptance is claimed.
+- Native bridge checks are in progress. This is a WIP source checkpoint; no full gate or parent unit acceptance is claimed.

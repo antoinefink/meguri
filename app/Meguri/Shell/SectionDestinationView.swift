@@ -2,6 +2,7 @@ import AppModel
 import DesignSystem
 import Home
 import Review
+import Settings
 import SwiftUI
 
 /// What the shell hosts in each of its slots (KTD10): section roots, the
@@ -26,8 +27,11 @@ struct ShellFeatures {
     /// available to isolated shell fixtures that replace every review slot.
     static func standard(collection: ReviewCollection) -> ShellFeatures {
         var features = standard
-        features.availableSections = [.home]
-        features.sectionRoot = { _, _ in AnyView(HomeView(collection: collection)) }
+        features.availableSections = [.home, .settings]
+        features.sectionRoot = { section, _ in
+            if section == .settings { AnyView(SettingsView(collection: collection)) }
+            else { AnyView(HomeView(collection: collection)) }
+        }
         features.deckPage = { deck, _ in AnyView(HomeView(collection: collection, deckID: deck.rawValue)) }
         features.sidebarDecks = { _ in AnyView(HomeSidebarDecks(collection: collection)) }
         features.review = { presentation, _ in
@@ -38,6 +42,7 @@ struct ShellFeatures {
         features.sheet = { route, navigation in
             switch route {
             case .collectionEntry: AnyView(CollectionEntryView(coordinator: collection.entry))
+            case .collectionExport: AnyView(CollectionExportDestination(coordinator: collection.collectionExport))
             case .fsrsAdmission: AnyView(FsrsAdmissionView(collection: collection))
             case .add: AnyView(SheetPlaceholder(sheet: route, navigation: navigation))
             }

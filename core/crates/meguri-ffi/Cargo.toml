@@ -25,6 +25,7 @@ meguri-template.workspace = true
 meguri-storage.workspace = true
 meguri-text.workspace = true
 uniffi.workspace = true
+sha2.workspace = true
 
 [features]
 # AnkiWeb build switch (KTD21); off in the App Store build.

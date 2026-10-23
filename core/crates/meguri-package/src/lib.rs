@@ -19,7 +19,8 @@ pub use inspection::{
 };
 pub use meguri_storage::package_inspection::CandidateFacts as CollectionPackageFacts;
 pub use writer::{
-    LiveCollectionPackageWritten, write_collection_package_from_live, write_collection_package_from_standalone,
+    LiveCollectionPackageWritten, preflight_collection_package_from_live, write_collection_package_from_live,
+    write_collection_package_from_standalone,
 };
 pub type CollectionPackageInspectError = CollectionPackageWriteError;
 

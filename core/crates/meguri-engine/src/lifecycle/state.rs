@@ -87,6 +87,8 @@ pub enum LongOp {
     ColpkgImport,
     ApkgApply,
     CheckDatabase,
+    /// Native Files selection/copy owns source admission until delegate completion.
+    CollectionExportHandoff,
 }
 
 impl LongOp {
@@ -97,6 +99,7 @@ impl LongOp {
             LongOp::ColpkgImport => ".colpkg import",
             LongOp::ApkgApply => ".apkg import",
             LongOp::CheckDatabase => "Check Database",
+            LongOp::CollectionExportHandoff => "collection export destination",
         }
     }
 

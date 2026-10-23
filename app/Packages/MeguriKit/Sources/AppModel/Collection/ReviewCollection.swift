@@ -54,6 +54,18 @@ public final class ReviewCollection {
         entryOwner = value
         return value
     }
+    private var exportOwner: CollectionExportCoordinator?
+    private let exportService: any CollectionExportService
+    public var collectionExport: CollectionExportCoordinator {
+        if let exportOwner { return exportOwner }
+        let value = CollectionExportCoordinator(owner: self, service: exportService)
+        exportOwner = value
+        return value
+    }
+    var exportAllowed: Bool {
+        guard !opening, !enabling, state == .ready, case .ready = lifecycle else { return false }
+        return true
+    }
     private let deckService = CoreDeckService()
     private let records: ReviewRecordStore
     private var resolver: MediaPathResolver?
@@ -72,8 +84,9 @@ public final class ReviewCollection {
     private var day: ReviewDayMonitor?
     private var recoveryDrops: [Int64] = []
 
-    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil) {
+    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil) {
         loadMediaIndex = { @MainActor in try await CoreMediaService().trackedNames() }
+        self.exportService = exportService ?? CoreCollectionExportService()
         self.configuration = configuration; self.navigation = navigation
         self.entryService = entryService ?? CoreCollectionEntryService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone))
         collection = CoreCollectionService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone))
@@ -137,7 +150,7 @@ public final class ReviewCollection {
         try await subscribe()
         return try await Self.prepareOpenLocation(configuration.collectionLocation)
     }
-    var entryAllowed: Bool { !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile) }
+    var entryAllowed: Bool { exportOwner?.busy != true && !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile) }
     func beginEntryActivation() throws {
         guard review == nil, !starting else { throw BridgeError.sessionActive }
         guard entryAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
@@ -177,7 +190,7 @@ public final class ReviewCollection {
             lifecycle = value
             switch value {
             case .ready(let next):
-                if generation != next { invalidateMedia() }
+                if generation != next { invalidateMedia(); exportOwner?.generationChanged() }
                 generation = next
                 if !opening {
                     state = .ready
@@ -196,6 +209,7 @@ public final class ReviewCollection {
         case .mediaArrived: scheduleMediaRefresh()
         case .collectionReplaced(let next):
             guard preparedGeneration != next else { return }
+            exportOwner?.generationChanged()
             generation = next; day?.pause()
             invalidateMedia()
             review?.generationEnded(); review = nil; navigation.endReview()
@@ -351,7 +365,7 @@ public final class ReviewCollection {
         let previous = lifecycleTask
         lifecycleTask = Task {
             await previous?.value
-            if !active { await entryOwner?.cancelAndDrain() }
+            if !active { await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain() }
             await openTask?.value
             guard !closed, state != .unopened, state != .noFile else { resuming = false; return }
             do {
@@ -387,6 +401,7 @@ public final class ReviewCollection {
     }
     @discardableResult public func close() async -> Bool {
         await entryOwner?.cancelAndDrain()
+        await exportOwner?.cancelAndDrain()
         await openTask?.value
         await lifecycleTask?.value
         if state == .noFile || state == .unopened {

@@ -17,6 +17,121 @@ import notify
     func testPickerReplacementCreatesDurableReview() throws {
         try exercisePickedPackage(hasLocalCollection: true)
     }
+    /// RF3 journeys use the same public source and real review path as RF2.
+    /// Run on Mac, iPhone and iPad in the VM, with no cloud account required.
+    func testNativeExportCancelSaveReplaceReimportAndDurableReview() throws {
+        try exercisePickedPackage(hasLocalCollection: false)
+        let build = try BuildUnderTest.current()
+        let bundle = try build.bundleIdentifier
+        let app = XCUIApplication()
+        let settings = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@",
+            ["shell.root.tab.settings", "shell.root.sidebar.settings"])).firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10), app.debugDescription)
+        try click(settings, app, bundle)
+        try click(element(app, "settings.root.exportCollection"), app, bundle)
+        try click(element(app, "settings.importExport.prepare"), app, bundle)
+        XCTAssertTrue(element(app, "settings.importExport.ready").waitForExistence(timeout: 30), app.debugDescription)
+        try click(element(app, "settings.importExport.choose"), app, bundle)
+        capturePicker(app)
+        #if os(macOS)
+        let savePanel = app.sheets.matching(identifier: "save-panel").firstMatch
+        XCTAssertTrue(savePanel.waitForExistence(timeout: 10))
+        try click(savePanel.buttons.matching(NSPredicate(format: "identifier == %@ OR title == %@", "CancelButton", "Cancel")).firstMatch, app, bundle)
+        let folder = FileManager.default.temporaryDirectory.appending(path: "RF3-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let saved = folder.appending(path: "Meguri-Collection.colpkg")
+        #else
+        let cancel = app.buttons.matching(NSPredicate(format: "label == %@", "Cancel")).firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 10), app.debugDescription)
+        try click(cancel, app, bundle)
+        // The native local folder is installed by the existing public source hook.
+        let saved = URL(fileURLWithPath: "/RF2 Import Tests/Meguri-Collection.colpkg")
+        #endif
+        XCTAssertTrue(element(app, "settings.importExport.ready").waitForExistence(timeout: 10))
+        for replacement in [false, true] {
+            try click(element(app, "settings.importExport.choose"), app, bundle)
+            #if os(macOS)
+            XCTAssertTrue(savePanel.waitForExistence(timeout: 10))
+            try app.bringToFront(bundleIdentifier: bundle)
+            app.typeKey("g", modifierFlags: [.command, .shift])
+            let go = savePanel.sheets.matching(identifier: "GoToWindow").firstMatch
+            let path = go.textFields.matching(identifier: "PathTextField").firstMatch
+            XCTAssertTrue(path.waitForExistence(timeout: 10), app.debugDescription)
+            try app.bringToFront(bundleIdentifier: bundle); path.typeKey("a", modifierFlags: .command)
+            try app.bringToFront(bundleIdentifier: bundle); path.typeText(saved.path)
+            try app.bringToFront(bundleIdentifier: bundle); path.typeKey(.return, modifierFlags: [])
+            XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: go)], timeout: 10), .completed)
+            try click(savePanel.buttons.matching(identifier: "OKButton").firstMatch, app, bundle)
+            if replacement {
+                let replace = app.buttons.matching(NSPredicate(format: "title == %@ OR label == %@", "Replace", "Replace")).firstMatch
+                XCTAssertTrue(replace.waitForExistence(timeout: 10), app.debugDescription)
+                try click(replace, app, bundle)
+            }
+            #else
+            try selectLocalExportFolder(app, bundle)
+            let save = app.buttons.matching(NSPredicate(format: "label IN %@", ["Export", "Save", "Move", "Copy"])).firstMatch
+            XCTAssertTrue(save.waitForExistence(timeout: 10), app.debugDescription)
+            capturePicker(app)
+            try click(save, app, bundle)
+            if replacement {
+                let replace = app.buttons.matching(NSPredicate(format: "label == %@", "Replace")).firstMatch
+                XCTAssertTrue(replace.waitForExistence(timeout: 10), app.debugDescription)
+                try click(replace, app, bundle)
+            }
+            #endif
+            XCTAssertTrue(element(app, "settings.importExport.saved").waitForExistence(timeout: 30), app.debugDescription)
+        }
+        try click(element(app, "settings.importExport.discard"), app, bundle)
+        try click(element(app, "settings.importExport.close"), app, bundle)
+        try click(element(app, "settings.root.importCollection"), app, bundle)
+        try click(element(app, "onboarding.collectionImport.choose"), app, bundle)
+        try pick(saved, app, bundle)
+        XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.counts"), "6 notes · 11 cards · 7 reviews"))
+        try click(element(app, "onboarding.collectionImport.confirm"), app, bundle)
+        let imported = app.buttons.matching(NSPredicate(format: "identifier == %@", "home.deck.row.1788249600212"))
+        // Return to Home through the production shell after native replacement.
+        let home = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@",
+            ["shell.root.tab.decks", "shell.root.sidebar.home"])).firstMatch
+        XCTAssertTrue(home.waitForExistence(timeout: 30)); try click(home, app, bundle)
+        try waitForAdmission(imported, app, bundle)
+        let deck = try XCTUnwrap(waitForHittable(imported)); try click(deck, app, bundle)
+        try click(element(app, "home.deck.study"), app, bundle)
+        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
+        try click(element(app, "review.session.reveal"), app, bundle)
+        try click(element(app, "review.session.rate.easy"), app, bundle)
+        XCTAssertTrue(element(app, "review.session.close").waitForExistence(timeout: 20))
+        try click(element(app, "review.session.close"), app, bundle)
+        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
+        app.terminate()
+        app.launchArguments = MeguriLaunch(now: "2030-01-15T10:00:00Z", timeZone: "UTC", locale: "en_US", animations: false).arguments
+        app.launch()
+        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
+        capture(app, "export-reimport-durable-review")
+    }
+    #if os(iOS)
+    private func selectLocalExportFolder(_ app: XCUIApplication, _ bundle: String) throws {
+        if app.navigationBars["RF2 Import Tests"].exists { return }
+        let folder = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@ OR identifier == %@",
+            ["RF2 Import Tests", "RF2 Import Tests, Folder"], "RF2 Import Tests, Folder")).firstMatch
+        if !folder.waitForExistence(timeout: 2) {
+            let local = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["On My iPhone", "On My iPad"])).firstMatch
+            if !local.exists {
+                let browse = app.buttons.matching(NSPredicate(format: "label IN %@", ["Browse", "Back"])).firstMatch
+                if browse.exists { try click(browse, app, bundle) }
+            }
+            XCTAssertTrue(local.waitForExistence(timeout: 10), app.debugDescription); try click(local, app, bundle)
+            let meguri = app.cells.containing(NSPredicate(format: "label == %@", "Meguri")).firstMatch
+            if meguri.waitForExistence(timeout: 2) { try click(meguri, app, bundle) }
+        }
+        if folder.waitForExistence(timeout: 2) {
+            let target = folder.images.firstMatch.exists ? folder.images.firstMatch : folder
+            try click(target, app, bundle)
+        }
+        XCTAssertTrue(app.navigationBars["RF2 Import Tests"].waitForExistence(timeout: 10), app.debugDescription)
+        capturePicker(app)
+    }
+    #endif
     private func exercisePickedPackage(hasLocalCollection: Bool) throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
@@ -185,7 +300,7 @@ import notify
         }
         try click(open, app, bundle)
         #else
-        let labels = ["review", "review.colpkg"]
+        let labels = [source.deletingPathExtension().lastPathComponent, source.lastPathComponent]
         let file = app.cells.containing(NSPredicate(format: "label IN %@", labels)).firstMatch
         let rememberedFile = file.waitForExistence(timeout: 2)
         capturePicker(app)

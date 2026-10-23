@@ -508,8 +508,20 @@ impl Engine {
     /// parked ops fail, readers close, the writer checkpoints and closes.
     /// The long-operation slot is freed: its guard, and an exclusive phase
     /// entered through it, no longer act (L5).
+    /// Native destination selection cannot distinguish confirmation from an
+    /// in-flight provider copy. Serialize replacement and close until completion.
+    pub fn reserve_collection_export_handoff(&self) -> Result<SlotGuard, EngineError> {
+        let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
+        self.acquire_slot(LongOp::CollectionExportHandoff)
+    }
+
     pub fn close(&self) -> Result<(), EngineError> {
         let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.slot_holder() == Some(LongOp::CollectionExportHandoff) {
+            return Err(EngineError::Busy {
+                running_op: LongOp::CollectionExportHandoff.name().into(),
+            });
+        }
         if matches!(self.state(), LifecycleState::Opening | LifecycleState::Upgrading { .. }) {
             return Err(EngineError::unavailable("the collection is opening"));
         }

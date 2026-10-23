@@ -191,6 +191,9 @@ struct CollectionEntryContent: View {
                 .background(.token(.backgroundPrimary))
             }
             .navigationTitle("Import Collection")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
         }
         .interactiveDismissDisabled(presentation.busy || presentation.candidateActive)
     }

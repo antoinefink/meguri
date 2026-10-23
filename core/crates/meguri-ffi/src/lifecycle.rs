@@ -51,6 +51,7 @@ pub enum CollectionLongOp {
     ColpkgImport,
     ApkgApply,
     CheckDatabase,
+    CollectionExportHandoff,
 }
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum CollectionExclusivePhase {
@@ -118,6 +119,7 @@ impl From<engine::LifecycleState> for CollectionLifecycle {
                     engine::LongOp::ColpkgImport => CollectionLongOp::ColpkgImport,
                     engine::LongOp::ApkgApply => CollectionLongOp::ApkgApply,
                     engine::LongOp::CheckDatabase => CollectionLongOp::CheckDatabase,
+                    engine::LongOp::CollectionExportHandoff => CollectionLongOp::CollectionExportHandoff,
                 },
                 phase: match phase {
                     engine::ExclusivePhase::Draining => CollectionExclusivePhase::Draining,

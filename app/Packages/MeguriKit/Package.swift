@@ -94,7 +94,7 @@ let package = Package(
             name: name,
             dependencies: ["AppModel", "DesignSystem"] + (name == "Review" ? ["CardRendering"] : []) + (["Home", "Review"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []),
             path: "Sources/Features/\(name)",
-            resources: ["Home", "Review"].contains(name) ? [.process("Resources")] : [],
+            resources: ["Home", "Review", "Settings"].contains(name) ? [.process("Resources")] : [],
             swiftSettings: settings
         )
     }

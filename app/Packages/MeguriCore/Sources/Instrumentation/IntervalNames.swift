@@ -290,8 +290,19 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     public static let validateSchedulingPreferences = BridgeCall("validate_scheduling_preferences")
 
+    public static let startCollectionExport = BridgeCall("start_collection_export")
+    public static let collectionExportResultOutcome = BridgeCall("CollectionExportResult.outcome")
+    public static let collectionExportArtifactMetadata = BridgeCall("CollectionExportArtifact.metadata")
+    public static let collectionExportArtifactAcquire = BridgeCall("CollectionExportArtifact.acquire")
+    public static let collectionExportArtifactDiscard = BridgeCall("CollectionExportArtifact.discard")
+    public static let collectionExportLeaseFinish = BridgeCall("CollectionExportLease.finish")
+    public static let collectionExportLeasePath = BridgeCall("CollectionExportLease.path")
+    public static let startCollectionExportSave = BridgeCall("start_collection_export_save")
+    public static let collectionExportSaveResultOutcome = BridgeCall("CollectionExportSaveResult.outcome")
+
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
+        startCollectionExport, collectionExportResultOutcome, collectionExportArtifactMetadata, collectionExportArtifactAcquire, collectionExportArtifactDiscard, collectionExportLeasePath, collectionExportLeaseFinish, startCollectionExportSave, collectionExportSaveResultOutcome,
         startCollectionInspection, collectionInspectResultOutcome, collectionInspectionFacts, collectionInspectionDiscard, startCollectionActivation, collectionActivationResultOutcome, jobProgressSetListener,
         startOpen, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, deckStudyState, deckDescriptionHtml,
         startSession, reviewSessionJobResult, peekFirstCard, sessionHead, refreshSessionCard, renderSessionHead, answerSession, endSession, peekReviewUndo, flushReviewForBackground,
