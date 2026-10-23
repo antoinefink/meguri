@@ -186,6 +186,7 @@ enum Reply {
     Lost,
     Cancelled,
     Status(u16),
+    Held(Arc<std::sync::Barrier>, Arc<std::sync::Barrier>),
 }
 #[derive(Default)]
 struct Script {
@@ -252,6 +253,11 @@ impl SyncTransport for ScriptTransport {
             let decoded = zstd::stream::decode_all(compressed.as_slice()).unwrap();
             self.0.calls.lock().unwrap().push((request.url, decoded));
             match step.reply {
+                Reply::Held(entered, release) => {
+                    entered.wait();
+                    release.wait();
+                    Err(SyncError::Cancelled)
+                }
                 Reply::Cancelled => Err(SyncError::Cancelled),
                 Reply::Lost => Err(SyncError::Network(meguri_sync::NetworkError {
                     cause: meguri_sync::NetworkCause::Connection,
@@ -606,10 +612,12 @@ fn rf4_selected_media_stays_partial_and_never_starts_media_or_success_cooldown()
     let (_, bytes) = server(&root.path().join("server"));
     let script = export_steps(bytes, Reply::Bytes(b"OK".to_vec()));
     let p = prepare(&host, &script, Direction::Export, Scope::CollectionAndMedia).unwrap();
-    assert!(matches!(
-        confirm(&host, &script, p),
-        Err(TransferError::MediaIncomplete { .. })
-    ));
+    let partial = confirm(&host, &script, p).unwrap();
+    assert!(partial.collection_complete && partial.receipt.is_none());
+    assert_eq!(
+        partial.actual_generation,
+        Some(host.collection().unwrap().generation().0)
+    );
     script.assert_done();
     let done = host.manual_transfer_history().active().unwrap().unwrap();
     assert_eq!(done.scope, Scope::CollectionAndMedia);
@@ -1252,4 +1260,560 @@ fn rf4_preparation_job_retains_its_policy_identity_after_cancellation() {
     assert!(restarted.manual_transfer_history().active().unwrap().is_none());
     script.assert_done();
     restarted.close().unwrap();
+}
+
+#[test]
+fn rf4_same_operation_media_requires_consent_then_resumes_only_media_after_failure() {
+    use meguri_sync::policy::MediaStage;
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config) = seeded(&root.path().join("local"));
+    let (_, bytes) = server(&root.path().join("server"));
+    let collection = export_steps(bytes, Reply::Bytes(b"OK".to_vec()));
+    let preview = prepare(&host, &collection, Direction::Export, Scope::CollectionAndMedia).unwrap();
+    let done = confirm(&host, &collection, preview).unwrap(); // matching terminal, slot released
+    collection.assert_done();
+    assert!(host.engine().jobs().running().is_empty());
+    let fence = DeviceState::for_collection(&config.collection_directory.join("collection.anki2"))
+        .publication()
+        .unwrap();
+    let none = Script::new(vec![]);
+    let events = host.engine().stream().subscribe();
+    let decision = complete(
+        events,
+        host.prepare_manual_media(done.id.clone(), access(&none, "Synthetic User", "rotated"))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(decision.operation.id, done.id);
+    assert_eq!(
+        decision.operation.actual_generation,
+        Some(host.collection().unwrap().generation().0)
+    );
+    assert!(
+        none.calls.lock().unwrap().is_empty(),
+        "offline media preview must issue zero requests"
+    );
+    let stale = decision.confirmation.clone();
+    let events = host.engine().stream().subscribe();
+    let cancellation = host
+        .cancel_prepared_manual_media(decision.confirmation)
+        .expect("offline decision is admitted");
+    let partial = complete(events, cancellation).expect("prepared media cancellation is recorded after drain");
+    assert_eq!(partial.media.stage, MediaStage::Declined);
+    assert!(partial.receipt.is_none() && partial.collection_complete);
+    let events = host.engine().stream().subscribe();
+    assert!(matches!(
+        complete(
+            events,
+            host.run_manual_media(access(&none, "Synthetic User", "rotated"), stale)
+                .unwrap()
+        ),
+        Err(TransferError::Stale(_))
+    ));
+    assert!(none.calls.lock().unwrap().is_empty());
+    let events = host.engine().stream().subscribe();
+    assert!(matches!(
+        complete(
+            events,
+            host.prepare_manual_media(done.id.clone(), access(&none, "Other User", "rotated"))
+                .unwrap()
+        ),
+        Err(TransferError::Stale(Boundary::IdentityChanged))
+    ));
+    let events = host.engine().stream().subscribe();
+    let resume = complete(
+        events,
+        host.prepare_manual_media(done.id.clone(), access(&none, "Synthetic User", "rotated"))
+            .unwrap(),
+    )
+    .unwrap();
+    let broken = Script::new(vec![(Method::MediaBegin, Reply::Lost)]);
+    let events = host.engine().stream().subscribe();
+    let partial = complete(
+        events,
+        host.run_manual_media(access(&broken, "Synthetic User", "rotated"), resume.confirmation)
+            .unwrap(),
+    )
+    .unwrap();
+    broken.assert_done();
+    assert_eq!(partial.media.stage, MediaStage::Failed);
+    assert!(partial.media.remote_outcome_unknown && partial.collection_complete && partial.receipt.is_none());
+    assert_eq!(
+        host.manual_transfer_history()
+            .next_eligible_at(&partial.account)
+            .unwrap(),
+        None
+    );
+    let events = host.engine().stream().subscribe();
+    let resume = complete(
+        events,
+        host.prepare_manual_media(done.id.clone(), access(&none, "Synthetic User", "rotated"))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(resume.operation.media.remote_outcome_unknown);
+    let media = Script::new(vec![(
+        Method::MediaBegin,
+        Reply::Bytes(br#"{"data":{"usn":0,"sk":"synthetic"},"err":""}"#.to_vec()),
+    )]);
+    let events = host.engine().stream().subscribe();
+    let finished = complete(
+        events,
+        host.run_manual_media(access(&media, "Synthetic User", "rotated"), resume.confirmation)
+            .unwrap(),
+    )
+    .unwrap();
+    media.assert_done();
+    assert_eq!(finished.id, done.id);
+    assert_eq!(finished.media.stage, MediaStage::Complete);
+    assert_eq!(finished.phase, Phase::Complete);
+    assert_eq!(finished.receipt.as_ref().unwrap().next_eligible_at, NOW + 3_600_000);
+    assert_eq!(host.manual_transfer_history().get(&finished.id).unwrap(), finished);
+    assert!(host.manual_transfer_history().active().unwrap().is_none());
+    for script in [&broken, &media] {
+        assert_eq!(script.count(Method::Upload), 0);
+        assert_eq!(script.count(Method::Download), 0);
+        assert_eq!(script.count(Method::Meta), 0);
+    }
+    assert_eq!(
+        DeviceState::for_collection(&config.collection_directory.join("collection.anki2"))
+            .publication()
+            .unwrap(),
+        fence
+    );
+    host.close().unwrap();
+}
+
+// Real host admission and R6 activation, followed by media-only requests.
+fn selected_collection(root: &Path) -> (CoreHost, HostConfig, Operation) {
+    let (host, config) = seeded(&root.join("local"));
+    let (_, bytes) = server(&root.join("server"));
+    let script = export_steps(bytes, Reply::Bytes(b"OK".to_vec()));
+    let preview = prepare(&host, &script, Direction::Export, Scope::CollectionAndMedia).unwrap();
+    let op = confirm(&host, &script, preview).unwrap();
+    script.assert_done();
+    assert!(op.collection_complete && op.receipt.is_none());
+    (host, config, op)
+}
+fn media_preview(host: &CoreHost, op: &Operation) -> meguri_sync::oneway::MediaPreview {
+    let offline = Script::new(vec![]);
+    let events = host.engine().stream().subscribe();
+    let preview = complete(
+        events,
+        host.prepare_manual_media(op.id.clone(), access(&offline, "Synthetic User", "rotated"))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(offline.calls.lock().unwrap().is_empty());
+    preview
+}
+fn media_run(host: &CoreHost, script: &Arc<Script>, preview: meguri_sync::oneway::MediaPreview) -> Operation {
+    let events = host.engine().stream().subscribe();
+    let result = complete(
+        events,
+        host.run_manual_media(access(script, "Synthetic User", "rotated"), preview.confirmation)
+            .unwrap(),
+    )
+    .unwrap();
+    script.assert_done();
+    assert!(
+        host.engine().jobs().running().is_empty(),
+        "inspect typed results only after drain"
+    );
+    for method in [Method::Upload, Method::Download, Method::Meta] {
+        assert_eq!(script.count(method), 0);
+    }
+    result
+}
+fn media_answer(data: serde_json::Value) -> Reply {
+    Reply::Bytes(serde_json::to_vec(&serde_json::json!({"data": data, "err": ""})).unwrap())
+}
+fn media_begin(usn: u64) -> Reply {
+    media_answer(serde_json::json!({"usn": usn, "sk": "synthetic"}))
+}
+#[test]
+fn rf4_media_resume_after_review_write_and_restart_rebinds_only_after_durable_proof_and_new_decision() {
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config, op) = selected_collection(root.path());
+    let old_preview = media_preview(&host, &op);
+    let live = host.collection().unwrap();
+    let publication = DeviceState::for_collection(live.path()).publication().unwrap();
+    live.run(
+        OpSpec::named("review after collection activation", OpSource::UserNonUndoable),
+        |ctx| {
+            ctx.scope().put(&RevlogEntry {
+                id: RevlogId(NOW + 1),
+                card_id: CardId(6),
+                usn: Usn(-1),
+                button: 4,
+                interval: 2,
+                last_interval: 1,
+                ease_factor: 2500,
+                answer_millis: 700,
+                kind: RevlogKind::Review,
+            })?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    let candidate = config
+        .manual_transfer_directory
+        .join(op.id.as_str())
+        .join(&op.candidate.as_ref().unwrap().name);
+    host.close().unwrap();
+    assert_ne!(
+        digest(&config.collection_directory.join("collection.anki2")),
+        digest(&candidate),
+        "reviews must not be compared with activation bytes"
+    );
+    let reopened = CoreHost::open(config).unwrap();
+    settle(&reopened);
+    let generation = reopened.collection().unwrap().generation().0;
+    assert_ne!(
+        Some(generation),
+        op.actual_generation,
+        "restart legitimately changes process-local counters"
+    );
+    assert_eq!(
+        reopened
+            .manual_transfer_history()
+            .get(&op.id)
+            .unwrap()
+            .actual_generation,
+        op.actual_generation
+    );
+    let offline = Script::new(vec![]);
+    let events = reopened.engine().stream().subscribe();
+    assert!(matches!(
+        complete(
+            events,
+            reopened
+                .run_manual_media(access(&offline, "Synthetic User", "rotated"), old_preview.confirmation)
+                .unwrap()
+        ),
+        Err(TransferError::Stale(Boundary::LocalChanged))
+    ));
+    let fresh = media_preview(&reopened, &op);
+    assert_eq!(fresh.operation.actual_generation, Some(generation));
+    let script = Script::new(vec![(Method::MediaBegin, media_begin(0))]);
+    let finished = media_run(&reopened, &script, fresh);
+    assert_eq!(finished.media.stage, meguri_sync::policy::MediaStage::Complete);
+    assert!(!finished.media.remote_outcome_unknown && finished.media.exclusions_verified);
+    assert_eq!(
+        DeviceState::for_collection(reopened.collection().unwrap().path())
+            .publication()
+            .unwrap(),
+        publication
+    );
+    reopened.close().unwrap();
+}
+#[test]
+fn rf4_media_admission_and_confirmation_reject_same_id_changed_decision_or_binding() {
+    let _lane = LANE.lock().unwrap();
+    for changed in ["decision", "binding"] {
+        let root = tempfile::tempdir().unwrap();
+        let (host, config, op) = selected_collection(root.path());
+        let preview = media_preview(&host, &op);
+        let path = config.collection_directory.join("meguri-sidecar.json");
+        let original = fs::read(&path).unwrap();
+        let mut doc: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        let active = &mut doc["deviceState"]["active"];
+        if changed == "decision" {
+            active["decision"] = if active["decision"] == "Pending" {
+                "Clear".into()
+            } else {
+                "Pending".into()
+            };
+        } else {
+            active["binding"] = serde_json::json!({"Connected": {"account": "synthetic-other", "configuration": "synthetic-other", "environment": "test"}});
+        }
+        fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
+        assert_eq!(
+            DeviceState::for_collection(host.collection().unwrap().path())
+                .publication()
+                .unwrap()
+                .map(|p| p.identity),
+            op.resulting_publication
+        );
+        let offline = Script::new(vec![]);
+        let events = host.engine().stream().subscribe();
+        assert!(
+            matches!(
+                complete(
+                    events,
+                    host.run_manual_media(access(&offline, "Synthetic User", "rotated"), preview.confirmation)
+                        .unwrap()
+                ),
+                Err(TransferError::Stale(Boundary::LocalChanged))
+            ),
+            "confirmation must reject changed {changed}"
+        );
+        let events = host.engine().stream().subscribe();
+        assert!(
+            matches!(
+                complete(
+                    events,
+                    host.prepare_manual_media(op.id.clone(), access(&offline, "Synthetic User", "rotated"))
+                        .unwrap()
+                ),
+                Err(TransferError::Stale(Boundary::LocalChanged))
+            ),
+            "rebinding must reject changed {changed}"
+        );
+        assert!(offline.calls.lock().unwrap().is_empty());
+        fs::write(path, original).unwrap();
+        host.close().unwrap();
+    }
+}
+#[test]
+fn rf4_media_resume_rejects_unrelated_local_replacement() {
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config, op) = selected_collection(root.path());
+    let preview = media_preview(&host, &op);
+    let copy = op.server_copy.as_ref().unwrap();
+    let path = config.backups_directory.join(&copy.artifact.name);
+    let package = inspect(&config, &path);
+    let slot = host.engine().acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+    slot.replace_verified(
+        ReplacementStage::from_staging(package.into_staged().into_directory()).unwrap(),
+        ReplaceReason::Restore,
+        |_| Ok(()),
+    )
+    .unwrap();
+    drop(slot);
+    assert_ne!(
+        DeviceState::for_collection(host.collection().unwrap().path())
+            .publication()
+            .unwrap()
+            .map(|p| p.identity),
+        op.resulting_publication
+    );
+    let offline = Script::new(vec![]);
+    let events = host.engine().stream().subscribe();
+    assert!(matches!(
+        complete(
+            events,
+            host.run_manual_media(access(&offline, "Synthetic User", "rotated"), preview.confirmation)
+                .unwrap()
+        ),
+        Err(TransferError::Stale(Boundary::LocalChanged))
+    ));
+    let events = host.engine().stream().subscribe();
+    assert!(matches!(
+        complete(
+            events,
+            host.prepare_manual_media(op.id, access(&offline, "Synthetic User", "rotated"))
+                .unwrap()
+        ),
+        Err(TransferError::Stale(Boundary::LocalChanged))
+    ));
+    assert!(offline.calls.lock().unwrap().is_empty());
+    host.close().unwrap();
+}
+#[test]
+fn rf4_lost_accepted_media_upload_resumes_matching_server_hash_without_resend_or_false_exact_counts() {
+    use meguri_sync::policy::MediaStage;
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config, op) = selected_collection(root.path());
+    let media = host.media().unwrap();
+    fs::write(media.store().media_dir().join("accepted.bin"), b"accepted payload").unwrap();
+    let script = Script::new(vec![
+        (Method::MediaBegin, media_begin(0)),
+        (Method::UploadChanges, Reply::Lost),
+    ]);
+    let partial = media_run(&host, &script, media_preview(&host, &op));
+    assert_eq!(script.count(Method::UploadChanges), 1);
+    assert_eq!(partial.media.stage, MediaStage::Failed);
+    assert_eq!(partial.media.counters.uploaded_files, 0);
+    assert!(partial.media.remote_outcome_unknown && partial.receipt.is_none());
+    let hash = media.store().sync_entry("accepted.bin").unwrap().unwrap().sha1.unwrap();
+    drop(media);
+    host.close().unwrap();
+    let restarted = CoreHost::open(config).unwrap();
+    settle(&restarted);
+    let preview = media_preview(&restarted, &op);
+    assert!(preview.operation.media.remote_outcome_unknown);
+    let script = Script::new(vec![
+        (Method::MediaBegin, media_begin(1)),
+        (
+            Method::MediaChanges,
+            media_answer(serde_json::json!([["accepted.bin", 1, hash]])),
+        ),
+        (Method::MediaChanges, media_answer(serde_json::json!([]))),
+        (Method::MediaSanity, media_answer(serde_json::json!("OK"))),
+    ]);
+    let done = media_run(&restarted, &script, preview);
+    assert_eq!(
+        script.count(Method::UploadChanges),
+        0,
+        "matching server bytes must reconcile without resending"
+    );
+    assert_eq!(done.media.stage, MediaStage::Complete);
+    assert_eq!(done.phase, Phase::Complete);
+    assert!(
+        done.media.remote_outcome_unknown,
+        "completion cannot recover missing effect acknowledgements"
+    );
+    assert_eq!(done.media.counters.uploaded_files, 0);
+    assert_eq!(
+        done.media.counters.bytes_uploaded,
+        partial.media.counters.bytes_uploaded
+    );
+    assert_eq!(done.receipt.as_ref().unwrap().next_eligible_at, NOW + 3_600_000);
+    assert!(restarted.manual_transfer_history().active().unwrap().is_none());
+    assert_eq!(restarted.manual_transfer_history().get(&done.id).unwrap(), done);
+    restarted.close().unwrap();
+}
+#[test]
+fn rf4_interrupted_exclusions_are_rechecked_and_edited_eligible_files_upload_on_resume() {
+    use meguri_sync::policy::MediaStage;
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config, op) = selected_collection(root.path());
+    let directory = config.collection_directory.join("collection.media");
+    fs::write(directory.join("empty.bin"), b"").unwrap();
+    fs::File::create(directory.join("large.bin"))
+        .unwrap()
+        .set_len((100 << 20) + 1)
+        .unwrap();
+    fs::write(directory.join("eligible.bin"), b"first payload").unwrap();
+    let entered = Arc::new(std::sync::Barrier::new(2));
+    let release = Arc::new(std::sync::Barrier::new(2));
+    let script = Script::new(vec![
+        (Method::MediaBegin, media_begin(0)),
+        (Method::UploadChanges, media_answer(serde_json::json!([1, 1]))),
+        (Method::MediaSanity, Reply::Held(entered.clone(), release.clone())),
+    ]);
+    let preview = media_preview(&host, &op);
+    let events = host.engine().stream().subscribe();
+    let task = host
+        .run_manual_media(access(&script, "Synthetic User", "rotated"), preview.confirmation)
+        .unwrap();
+    entered.wait();
+    task.stop_media(true);
+    release.wait();
+    let partial = complete(events, task).unwrap();
+    script.assert_done();
+    assert_eq!(partial.media.stage, MediaStage::Interrupted);
+    assert!(partial.media.exclusions_verified);
+    assert_eq!(partial.media.counters.empty, ["empty.bin"]);
+    assert_eq!(partial.media.counters.oversized, ["large.bin"]);
+    assert_eq!(partial.media.counters.uploaded_files, 1);
+    host.close().unwrap();
+    fs::write(directory.join("empty.bin"), b"now eligible").unwrap();
+    fs::write(directory.join("large.bin"), b"also eligible").unwrap();
+    let restarted = CoreHost::open(config).unwrap();
+    settle(&restarted);
+    let preview = media_preview(&restarted, &op);
+    assert!(
+        !preview.operation.media.exclusions_verified,
+        "old checked counts cannot prove current exclusions before a fresh check"
+    );
+    assert!(preview.operation.media.counters.empty.is_empty() && preview.operation.media.counters.oversized.is_empty());
+    assert!(preview.operation.media.counters.checked > 0);
+    let script = Script::new(vec![
+        (Method::MediaBegin, media_begin(1)),
+        (Method::UploadChanges, media_answer(serde_json::json!([2, 3]))),
+        (Method::MediaSanity, media_answer(serde_json::json!("OK"))),
+    ]);
+    let done = media_run(&restarted, &script, preview);
+    assert_eq!(done.media.stage, MediaStage::Complete);
+    assert_eq!(done.media.counters.uploaded_files, 3);
+    assert!(
+        done.media.exclusions_verified
+            && done.media.counters.empty.is_empty()
+            && done.media.counters.oversized.is_empty()
+    );
+    assert_eq!(done.media.counters.awaiting, 0);
+    assert!(done.receipt.is_some());
+    assert_eq!(restarted.manual_transfer_history().get(&done.id).unwrap(), done);
+    restarted.close().unwrap();
+}
+#[test]
+fn rf4_media_drain_uses_first_cause_of_actual_admitted_job_token() {
+    use meguri_engine::StopCause;
+    use meguri_sync::policy::MediaStage;
+    let _lane = LANE.lock().unwrap();
+    for system_first in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let (host, _, op) = selected_collection(root.path());
+        let preview = media_preview(&host, &op);
+        let entered = Arc::new(std::sync::Barrier::new(2));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let script = Script::new(vec![(
+            Method::MediaBegin,
+            Reply::Held(entered.clone(), release.clone()),
+        )]);
+        let events = host.engine().stream().subscribe();
+        let task = host
+            .run_manual_media(access(&script, "Synthetic User", "rotated"), preview.confirmation)
+            .unwrap();
+        entered.wait(); // The real worker is running with its admitted context.
+        let admitted = host
+            .engine()
+            .jobs()
+            .running()
+            .into_iter()
+            .find(|job| job.id == task.job.id)
+            .expect("the request belongs to a registered media job");
+        assert_eq!(admitted.name, meguri_engine::JobKind::MediaSync.name());
+        assert!(!admitted.continued_processing);
+        assert!(Arc::ptr_eq(&admitted.cancel, &task.job.cancel));
+        let slot = host.engine().acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+        drop(slot); // Media admission leaves the collection's long-operation slot free.
+        settle(&host); // Collection writes can still commit while the media request waits.
+        if !system_first {
+            task.job.cancel.cancel();
+        }
+        // Hold the response beyond this suspend attempt: it must interrupt the
+        // ordinary media job and await drain, rather than return Deferred.
+        assert!(matches!(
+            host.engine().suspend(std::time::Duration::from_secs(1)),
+            Err(meguri_engine::EngineError::SuspendDeadline { .. })
+        ));
+        task.stop_media(!system_first);
+        assert_eq!(
+            task.job.cancel.stop_cause(),
+            Some(if system_first {
+                StopCause::System
+            } else {
+                StopCause::User
+            })
+        );
+        assert!(
+            task.take_result().is_none(),
+            "cancellation does not publish a result before drain"
+        );
+        release.wait();
+        let stopped = complete(events, task).unwrap();
+        script.assert_done();
+        assert_eq!(
+            stopped.media.stage,
+            if system_first {
+                MediaStage::Interrupted
+            } else {
+                MediaStage::Cancelled
+            }
+        );
+        assert_eq!(
+            stopped.boundary,
+            Some(if system_first {
+                Boundary::Interrupted
+            } else {
+                Boundary::Cancelled
+            })
+        );
+        assert!(host.engine().jobs().running().is_empty());
+        assert_eq!(host.manual_transfer_history().get(&stopped.id).unwrap(), stopped);
+        assert_eq!(
+            host.engine().suspend(std::time::Duration::from_secs(5)).unwrap(),
+            meguri_engine::SuspendOutcome::Suspended
+        );
+        host.engine().resume().unwrap();
+        host.close().unwrap();
+    }
 }

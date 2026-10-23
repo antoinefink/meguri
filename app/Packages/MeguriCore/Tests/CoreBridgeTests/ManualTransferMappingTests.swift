@@ -52,7 +52,7 @@ extension ManualTransferMappingTests {
             targetEndpoint: "https://example.test/", direction: .export, phase: .preview, acceptance: .notSent,
             boundary: nil, local: nil, remoteHasNoCards: true,
             remote: .init(modifiedMs: 1_900_000_001_234, schemaModifiedMs: 1_899_000_005_678, revision: 19, mediaRevision: 4),
-            servedCounts: nil, preparedMs: 1_900_000_010_000, generation: nil, collectionComplete: false, mediaSelected: false,
+            servedCounts: nil, preparedMs: 1_900_000_010_000, generation: nil, collectionComplete: false, mediaSelected: false, revision: 0, media: nil,
             copies: [.init(name: "safety.colpkg", length: 10, sha256: Data(repeating: 0x11, count: 32), verifiedPackage: true, instantMs: nil, server: false),
                      .init(name: "server.raw", length: 20, sha256: Data(repeating: 0x22, count: 32), verifiedPackage: false, instantMs: 1_900_000_003_456, server: true)], nextEligibleMs: nil))
         #expect(record.remote?.modifiedMilliseconds == 1_900_000_001_234)
@@ -76,7 +76,38 @@ extension ManualTransferMappingTests {
             targetEndpoint: "https://example.test/", direction: acceptance == .exactOk ? .export : .import,
             phase: .preview, acceptance: rawAcceptance, boundary: .localChanged, local: nil, remoteHasNoCards: nil,
             remote: nil, servedCounts: nil, preparedMs: 1, generation: nil, collectionComplete: false,
-            mediaSelected: false, copies: [], nextEligibleMs: nil))
+            mediaSelected: false, revision: 0, media: nil, copies: [], nextEligibleMs: nil))
         #expect(record.canInspectRecovery == (acceptance != .possiblyAccepted))
+    }
+}
+
+extension ManualTransferMappingTests {
+    @Test func typedMediaSnapshotKeepsExclusionsOutsideTransferredCounts() {
+        let snapshot = ManualMediaSnapshot(.init(phase: .downloading,
+            counters: .init(uploadedFiles: 2, uploadedDeletions: 1, downloadedFiles: 7, downloadedDeletions: 3,
+                checked: 18, bytesDownloaded: 900, bytesUploaded: 200, resynced: true,
+                oversized: ["large.bin"], empty: ["empty.bin"], awaiting: 4),
+            listed: 10, downloadFiles: 11, downloadReceived: 7, publishedFiles: 7,
+            filesLeft: 4, estimateSeconds: 1.5))
+        #expect(snapshot.phase == .downloading && snapshot.estimateSeconds == 1.5)
+        #expect(snapshot.counters.downloadedFiles == 7 && snapshot.counters.uploadedFiles == 2)
+        #expect(snapshot.counters.bytesDownloaded == 900 && snapshot.counters.bytesUploaded == 200)
+        #expect(snapshot.counters.oversized == ["large.bin"] && snapshot.counters.empty == ["empty.bin"])
+        #expect(snapshot.filesLeft == 4 && snapshot.counters.awaiting == 4)
+    }
+}
+
+extension ManualTransferMappingTests {
+    @Test func completionKeepsHistoricalEffectUncertaintyAndExclusionKnowledgeSeparate() {
+        for verified in [false, true] {
+            let outcome = ManualMediaOutcome(.init(stage: .complete,
+                counters: .init(uploadedFiles: 0, uploadedDeletions: 0, downloadedFiles: 0, downloadedDeletions: 0,
+                    checked: 9, bytesDownloaded: 0, bytesUploaded: 7, resynced: false,
+                    oversized: [], empty: [], awaiting: 0),
+                remoteOutcomeUnknown: true, exclusionsVerified: verified, failureKind: nil))
+            #expect(outcome.stage == .complete && outcome.remoteOutcomeUnknown)
+            #expect(outcome.exclusionsVerified == verified)
+            #expect(outcome.counters.uploadedFiles == 0 && outcome.counters.bytesUploaded == 7)
+        }
     }
 }

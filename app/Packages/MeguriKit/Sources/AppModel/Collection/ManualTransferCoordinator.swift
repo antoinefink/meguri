@@ -15,6 +15,9 @@ public final class ManualTransferCoordinator {
         case readingRecords
         case inspectingCandidate
         case writingCopy
+        case preparingMedia
+        case awaitingMediaConsent
+        case transferringMedia
     }
     public private(set) var stage: Stage = .ready
     public private(set) var endpoint: String
@@ -24,6 +27,10 @@ public final class ManualTransferCoordinator {
     public private(set) var authenticated = false
     public private(set) var direction: ManualTransferDirection = .import
     public private(set) var preview: PreparedManualTransfer?
+    public private(set) var mediaPreview: PreparedManualMedia?
+    public private(set) var scope: ManualTransferScope = .collectionOnly
+    public private(set) var mediaProgress: ManualMediaSnapshot?
+    private var mediaUsername: String?
     public private(set) var records: [ManualTransferHistory] = []
     public private(set) var result: ManualTransferRecord?
     public private(set) var message: String?
@@ -56,8 +63,8 @@ public final class ManualTransferCoordinator {
     private var recoveryPreview = false
     private var cancellationCauses: [String: ManualTransferCancellation] = [:]
     private var waiters: [CheckedContinuation<Void, Never>] = []
-    public var busy: Bool { stage != .ready && stage != .awaitingConfirmation }
-    public var canPrepare: Bool { !busy && preview == nil && authenticated && owner?.manualAllowed == true }
+    public var busy: Bool { stage != .ready && stage != .awaitingConfirmation && stage != .awaitingMediaConsent }
+    public var canPrepare: Bool { !busy && preview == nil && mediaPreview == nil && authenticated && owner?.manualAllowed == true }
     public var canConfirm: Bool { !busy && preview != nil && authenticated && previewUsername == credentials?.username && endpoint == preview?.record.configuredEndpoint && owner?.manualAllowed == true }
 
     public init(owner: ReviewCollection?, service: any ManualTransferService, keychain: any ManualTransferCredentialStore = DeviceManualTransferCredentialStore(), defaults: UserDefaults? = .standard) {
@@ -71,15 +78,17 @@ public final class ManualTransferCoordinator {
     public func loadOffline() async {
         guard !loaded, !busy else { return }
         loaded = true; stage = .readingRecords
-        defer { stage = preview == nil ? .ready : .awaitingConfirmation; finishWaiters() }
+        defer { stage = preview != nil ? .awaitingConfirmation : (mediaPreview != nil ? .awaitingMediaConsent : .ready); finishWaiters() }
         do {
             credentials = try await keychain.load(endpoint: endpoint)
             authenticated = credentials != nil; username = credentials?.username ?? ""
         } catch { message = "Saved server login is unavailable. Local reviews and Collection Files remain available." }
         await refreshHistory()
     }
-    public func select(_ direction: ManualTransferDirection) { guard !busy, preview == nil else { return }; self.direction = direction; result = nil }
+    public func selectScope(_ scope: ManualTransferScope) { guard !busy, preview == nil, mediaPreview == nil else { return }; self.scope = scope; result = nil }
+    public func select(_ direction: ManualTransferDirection) { guard !busy, preview == nil, mediaPreview == nil else { return }; self.direction = direction; result = nil }
     public func applyEndpoint() async {
+        if stage == .transferringMedia { await cancelAndDrain() }
         guard !busy, preview == nil else { return }
         revision &+= 1
         stage = .readingRecords
@@ -87,6 +96,8 @@ public final class ManualTransferCoordinator {
         do {
             let normalized = try await service.normalizeEndpoint(endpointDraft)
             if normalized != endpoint {
+                try await service.invalidateMediaOwner(operation: ManualTransferOperation())
+                mediaPreview = nil; mediaUsername = nil
                 // Clear in memory before awaiting persistence. A Keychain failure
                 // leaves setup unavailable and never permits reuse of the old key.
                 credentials = nil; authenticated = false; password = ""; username = ""; result = nil
@@ -98,7 +109,11 @@ public final class ManualTransferCoordinator {
         } catch { message = "Couldn’t save this endpoint. Enter an http or https server URL with an optional path prefix, without credentials, a query or a fragment." }
     }
     public func logout() async {
+        if stage == .transferringMedia { await cancelAndDrain() }
         guard !busy, preview == nil else { return }
+        do { try await service.invalidateMediaOwner(operation: ManualTransferOperation()) }
+        catch { message = "Couldn’t finish stopping media. Try logging out again."; return }
+        mediaPreview = nil; mediaUsername = nil
         credentials = nil; authenticated = false; password = ""; username = ""; result = nil
         revision &+= 1
         stage = .readingRecords
@@ -113,8 +128,10 @@ public final class ManualTransferCoordinator {
         let suppliedPassword = password; password = ""
         let operation = ManualTransferOperation(); self.operation = operation
         let expected = revision
-        defer { self.operation = nil; stage = preview == nil ? .ready : .awaitingConfirmation; password = ""; finishWaiters() }
+        defer { self.operation = nil; stage = preview != nil ? .awaitingConfirmation : (mediaPreview != nil ? .awaitingMediaConsent : .ready); password = ""; finishWaiters() }
         do {
+            try await service.invalidateMediaOwner(operation: ManualTransferOperation())
+            mediaPreview = nil; mediaUsername = nil
             credentials = nil; authenticated = false
             try await keychain.clear()
             let value = try await service.login(endpoint: endpoint, username: username, password: suppliedPassword, operation: operation)
@@ -135,7 +152,7 @@ public final class ManualTransferCoordinator {
         let operation = ManualTransferOperation(); self.operation = operation
         let expected = revision
         do {
-            let prepared = try await service.prepare(endpoint: endpoint, credentials: credentials, direction: direction, operation: operation, progress: receiver(expected))
+            let prepared = try await service.prepare(endpoint: endpoint, credentials: credentials, direction: direction, scope: scope, operation: operation, progress: receiver(expected))
             if operation.cancellation != nil {
                 try await service.discard(prepared, interrupted: operation.cancellation == .system, operation: ManualTransferOperation())
             } else if expected == revision {
@@ -147,7 +164,7 @@ public final class ManualTransferCoordinator {
         if let id = operation.operationID, let cause = operation.cancellation { recordCancellation(cause, id: id) }
         await owner.finishEntryActivation(candidateActive: false)
         if preview == nil { await owner.releaseEmptyManualHost() }
-        self.operation = nil; progress = nil; stage = preview == nil ? .ready : .awaitingConfirmation
+        self.operation = nil; progress = nil; stage = preview != nil ? .awaitingConfirmation : (mediaPreview != nil ? .awaitingMediaConsent : .ready)
         await refreshHistory()
     }
     public func confirm() async {
@@ -162,7 +179,9 @@ public final class ManualTransferCoordinator {
         do {
             let value = try await service.confirm(endpoint: endpoint, credentials: credentials, preview: prepared, operation: operation, progress: receiver(revision))
             result = value; activated = value.generation != nil
-            message = value.collectionComplete ? "Collection transfer finished. Media was not transferred." : "Collection transfer needs attention. Retained copies are available below."
+            message = value.collectionComplete
+                ? (value.mediaSelected ? "Collection complete. Selected media is waiting for a separate decision; the operation is partial." : "Collection transfer finished. Media was excluded and left unchanged.")
+                : "Collection transfer needs attention. Retained copies are available below."
         } catch {
             activated = (error as? ManualTransferFailure)?.candidateActive == true
             await report(error, operation: operation)
@@ -170,12 +189,17 @@ public final class ManualTransferCoordinator {
         // Events may precede result delivery. Adopt the actual activated host,
         // even after cancellation/failure, using the existing Files owner once.
         activated = activated || owner.generation != before
-        await owner.finishEntryActivation(candidateActive: activated)
+        let adopted = await owner.finishEntryActivation(candidateActive: activated)
         if let cause = operation.cancellation { recordCancellation(cause, id: prepared.record.id) }
         owner.navigation.show(.settings)
         self.operation = nil; progress = nil; stage = .ready
         await refreshHistory()
         if !activated { await owner.releaseEmptyManualHost() }
+        // The collection worker has drained and Files ownership has adopted the
+        // activated host (including activated errors) before media admission.
+        if adopted, operation.cancellation == nil, let entry = records.first(where: { $0.id == prepared.record.id }), entry.record.canResumeMedia {
+            await prepareMedia(entry)
+        }
     }
     public func discardPreview() async {
         guard !busy, let preview else { return }
@@ -226,13 +250,66 @@ public final class ManualTransferCoordinator {
         if preview == nil { await collection.releaseEmptyManualHost() }
         operation = nil
         progress = nil
-        stage = preview == nil ? .ready : .awaitingConfirmation
+        stage = preview != nil ? .awaitingConfirmation : (mediaPreview != nil ? .awaitingMediaConsent : .ready)
+        await refreshHistory()
+    }
+    /// Explicit media-only Resume, also offered after collection adoption.
+    /// This offline preview cannot send, replace or upload the collection.
+    public func prepareMedia(_ entry: ManualTransferHistory) async {
+        guard !busy, preview == nil, entry.record.canResumeMedia, let credentials else { return }
+        revision &+= 1; stage = .preparingMedia; message = nil
+        let operation = ManualTransferOperation(); self.operation = operation
+        defer { self.operation = nil; stage = mediaPreview == nil ? .ready : .awaitingMediaConsent; finishWaiters() }
+        do {
+            let prepared = try await service.prepareMedia(entry, endpoint: endpoint, credentials: credentials, operation: operation)
+            if operation.cancellation == nil { mediaPreview = prepared; mediaUsername = credentials.username }
+        } catch { await report(error, operation: operation) }
+    }
+    public var canRunMedia: Bool {
+        !busy && authenticated && mediaPreview != nil && mediaUsername == credentials?.username && endpoint == mediaPreview?.record.configuredEndpoint
+    }
+    public func startMedia() async {
+        guard canRunMedia, let prepared = mediaPreview, let credentials else { return }
+        revision &+= 1; let expected = revision
+        mediaPreview = nil; stage = .transferringMedia; message = nil; mediaProgress = nil
+        let operation = ManualTransferOperation(); self.operation = operation
+        // No entry activation/opening ownership spans this separate job. Review
+        // stays available while media uses its journal and pending placeholders.
+        do {
+            let value = try await service.runMedia(prepared, endpoint: endpoint, credentials: credentials, operation: operation) { [weak self] value in
+                Task { @MainActor in
+                    guard let self, self.revision == expected, self.stage == .transferringMedia else { return }
+                    self.mediaProgress = value
+                }
+            }
+            result = value; nextEligibleMilliseconds = value.nextEligibleMilliseconds
+            if value.phase == .complete { message = "Collection and supported media complete. Excluded files are listed in history." }
+            else { message = "Collection complete. Media stopped before completion; the operation is partial. Saved changes remain. Resume media explicitly from history." }
+        } catch { await report(error, operation: operation) }
+        if let cause = operation.cancellation { recordCancellation(cause, id: prepared.record.id) }
+        await refreshHistory()
+        self.operation = nil; stage = .ready; progress = nil; finishWaiters()
+    }
+    public func cancelPreparedMedia() async {
+        guard !busy, let prepared = mediaPreview else { return }
+        mediaPreview = nil; mediaUsername = nil
+        stage = .readingRecords; message = nil
+        defer { stage = .ready; finishWaiters() }
+        do {
+            let partial = try await service.cancelPreparedMedia(prepared, operation: ManualTransferOperation())
+            result = partial
+            message = "Collection complete. Selected media remains for later, so this operation is partial. Saved changes remain. Resume media explicitly from history."
+        } catch { await report(error, operation: nil) }
         await refreshHistory()
     }
     public func cancelAndDrain() async {
         password = ""
         await operation?.cancel(.system)
         if busy { await withCheckedContinuation { waiters.append($0) } }
+        // An unstarted category decision has no network effects. Its durable
+        // operation remains partial and requires a fresh explicit decision.
+        mediaPreview = nil; mediaUsername = nil
+        if stage == .awaitingMediaConsent { stage = .ready }
         if let preview {
             stage = .readingRecords
             if !recoveryPreview {
@@ -254,7 +331,7 @@ public final class ManualTransferCoordinator {
     public func clearPassword() { password = "" }
     public func refreshOfflineHistory() async {
         guard !busy else { return }
-        revision &+= 1; stage = .readingRecords; await refreshHistory(); stage = preview == nil ? .ready : .awaitingConfirmation; finishWaiters()
+        revision &+= 1; stage = .readingRecords; await refreshHistory(); stage = preview != nil ? .awaitingConfirmation : (mediaPreview != nil ? .awaitingMediaConsent : .ready); finishWaiters()
     }
     private func refreshHistory() async {
         do {
@@ -267,7 +344,7 @@ public final class ManualTransferCoordinator {
         revision &+= 1
         stage = .writingCopy; message = nil
         let operation = ManualTransferOperation(); self.operation = operation
-        defer { self.operation = nil; stage = preview == nil ? .ready : .awaitingConfirmation; finishWaiters() }
+        defer { self.operation = nil; stage = preview != nil ? .awaitingConfirmation : (mediaPreview != nil ? .awaitingMediaConsent : .ready); finishWaiters() }
         let copy = entry.record.copies[index]
         let target = folder.appendingPathComponent("Meguri-\(entry.id)-\(copy.name)")
         let scoped = folder.startAccessingSecurityScopedResource()

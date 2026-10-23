@@ -301,6 +301,16 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let collectionExportSaveResultOutcome = BridgeCall("CollectionExportSaveResult.outcome")
 
     public static let normalizeManualEndpoint = BridgeCall("normalize_manual_endpoint")
+    /// Media decisions and their worker controls, keyed by the FFI export names.
+    public enum ManualMediaCalls {
+        public static let preview = BridgeCall("ManualTransferSession.start_media_preview")
+        public static let run = BridgeCall("ManualTransferSession.start_media")
+        public static let cancelPrepared = BridgeCall("ManualTransferSession.start_cancel_prepared_media")
+        public static let forgetOwner = BridgeCall("ManualTransferSession.start_invalidate_media_owner")
+        public static let readPreview = BridgeCall("ManualMediaPreview.record")
+        public static let readProgress = BridgeCall("ManualTransferResult.media_snapshot")
+        public static let stop = BridgeCall("ManualTransferResult.request_stop")
+    }
     public static let manualTransferSessionNew = BridgeCall("ManualTransferSession.new")
     public static let manualTransferSessionStartSetup = BridgeCall("ManualTransferSession.start_setup")
     public static let manualTransferSessionStartLogin = BridgeCall("ManualTransferSession.start_login")
@@ -318,6 +328,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
+        ManualMediaCalls.preview, ManualMediaCalls.run, ManualMediaCalls.cancelPrepared, ManualMediaCalls.forgetOwner, ManualMediaCalls.readPreview, ManualMediaCalls.readProgress, ManualMediaCalls.stop,
         normalizeManualEndpoint, manualTransferSessionNew, manualTransferSessionStartSetup, manualTransferSessionStartLogin, manualTransferSessionStartHistory, manualTransferSessionStartPrepare, manualTransferSessionStartConfirm, manualTransferSessionStartRecoveryPreview, manualTransferSessionStartCancelHistory, manualTransferSessionStartCancelPreview, manualTransferSessionStartSaveCopy, manualTransferResultOutcome, manualTransferResultOperationID, manualTransferPreviewRecord, manualTransferHistoryEntryRecord,
         startCollectionExport, collectionExportResultOutcome, collectionExportArtifactMetadata, collectionExportArtifactAcquire, collectionExportArtifactDiscard, collectionExportLeasePath, collectionExportLeaseFinish, startCollectionExportSave, collectionExportSaveResultOutcome,
         startCollectionInspection, collectionInspectResultOutcome, collectionInspectionFacts, collectionInspectionDiscard, startCollectionActivation, collectionActivationResultOutcome, jobProgressSetListener,

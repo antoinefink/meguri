@@ -53,7 +53,16 @@ import Testing
     }
 
     @Test func bridgeCallsAreSignpostedUnderTheirExportNamesOnly() {
-        #expect(BridgeCall.all.map(\.name) == [
+        let mediaExports = [
+            "ManualTransferSession.start_media_preview",
+            "ManualTransferSession.start_media",
+            "ManualTransferSession.start_cancel_prepared_media",
+            "ManualTransferSession.start_invalidate_media_owner",
+            "ManualMediaPreview.record",
+            "ManualTransferResult.media_snapshot",
+            "ManualTransferResult.request_stop",
+        ]
+        #expect(BridgeCall.all.map(\.name) == mediaExports + [
             "normalize_manual_endpoint", "ManualTransferSession.new", "ManualTransferSession.start_setup", "ManualTransferSession.start_login", "ManualTransferSession.start_history", "ManualTransferSession.start_prepare", "ManualTransferSession.start_confirm", "ManualTransferSession.start_recovery_preview", "ManualTransferSession.start_cancel_history", "ManualTransferSession.start_cancel_preview", "ManualTransferSession.start_save_copy", "ManualTransferResult.outcome", "ManualTransferResult.operation_id", "ManualTransferPreview.record", "ManualTransferHistoryEntry.record",
             "start_collection_export", "CollectionExportResult.outcome", "CollectionExportArtifact.metadata", "CollectionExportArtifact.acquire", "CollectionExportArtifact.discard", "CollectionExportLease.path", "CollectionExportLease.finish", "start_collection_export_save", "CollectionExportSaveResult.outcome",
             "start_collection_inspection", "CollectionInspectResult.outcome", "CollectionInspection.facts", "CollectionInspection.discard", "start_collection_activation", "CollectionActivationResult.outcome", "JobProgress.setListener",

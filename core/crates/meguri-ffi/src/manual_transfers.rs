@@ -11,7 +11,7 @@ use meguri_host::{HostConfig, ManualTransferTask};
 use meguri_model::rng::SeededRandom;
 use meguri_sync::{
     Endpoint, HostKey, JobOptions, ServerKind,
-    oneway::{Confirmation, Preview, TransferAccess, TransferError},
+    oneway::{Confirmation, MediaConfirmation, MediaPreview, Preview, TransferAccess, TransferError},
     policy::{self, Operation},
 };
 use std::sync::{Arc, Mutex, PoisonError};
@@ -35,6 +35,136 @@ impl From<policy::Direction> for TransferDirection {
         match v {
             policy::Direction::Import => Self::Import,
             policy::Direction::Export => Self::Export,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum TransferScope {
+    CollectionOnly,
+    CollectionAndMedia,
+}
+impl From<TransferScope> for policy::Scope {
+    fn from(v: TransferScope) -> Self {
+        match v {
+            TransferScope::CollectionOnly => Self::CollectionOnly,
+            TransferScope::CollectionAndMedia => Self::CollectionAndMedia,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum TransferMediaStage {
+    AwaitingConsent,
+    Declined,
+    Running,
+    Cancelled,
+    Interrupted,
+    Failed,
+    Complete,
+}
+impl From<policy::MediaStage> for TransferMediaStage {
+    fn from(v: policy::MediaStage) -> Self {
+        match v {
+            policy::MediaStage::AwaitingConsent => Self::AwaitingConsent,
+            policy::MediaStage::Declined => Self::Declined,
+            policy::MediaStage::Running => Self::Running,
+            policy::MediaStage::Cancelled => Self::Cancelled,
+            policy::MediaStage::Interrupted => Self::Interrupted,
+            policy::MediaStage::Failed => Self::Failed,
+            policy::MediaStage::Complete => Self::Complete,
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct TransferMediaCounters {
+    pub uploaded_files: u64,
+    pub uploaded_deletions: u64,
+    pub downloaded_files: u64,
+    pub downloaded_deletions: u64,
+    pub checked: u64,
+    pub bytes_downloaded: u64,
+    pub bytes_uploaded: u64,
+    pub resynced: bool,
+    pub oversized: Vec<String>,
+    pub empty: Vec<String>,
+    pub awaiting: u64,
+}
+impl From<&policy::MediaCounters> for TransferMediaCounters {
+    fn from(v: &policy::MediaCounters) -> Self {
+        Self {
+            uploaded_files: v.uploaded_files,
+            uploaded_deletions: v.uploaded_deletions,
+            downloaded_files: v.downloaded_files,
+            downloaded_deletions: v.downloaded_deletions,
+            checked: v.checked,
+            bytes_downloaded: v.bytes_downloaded,
+            bytes_uploaded: v.bytes_uploaded,
+            resynced: v.resynced,
+            oversized: v.oversized.clone(),
+            empty: v.empty.clone(),
+            awaiting: v.awaiting,
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct TransferMediaOutcome {
+    pub stage: TransferMediaStage,
+    pub counters: TransferMediaCounters,
+    pub remote_outcome_unknown: bool,
+    pub exclusions_verified: bool,
+    pub failure_kind: Option<String>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum TransferMediaPhase {
+    Checking,
+    Listing,
+    Downloading,
+    Uploading,
+    Confirming,
+    Resyncing,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct TransferMediaSnapshot {
+    pub phase: TransferMediaPhase,
+    pub counters: TransferMediaCounters,
+    pub listed: u64,
+    pub download_files: u64,
+    pub download_received: u64,
+    pub published_files: u64,
+    pub files_left: u64,
+    pub estimate_seconds: Option<f64>,
+}
+impl From<&meguri_sync::media::MediaSnapshot> for TransferMediaSnapshot {
+    fn from(v: &meguri_sync::media::MediaSnapshot) -> Self {
+        use meguri_sync::media::MediaPhase as P;
+        let t = &v.totals;
+        Self {
+            phase: match v.phase {
+                P::Checking => TransferMediaPhase::Checking,
+                P::Listing => TransferMediaPhase::Listing,
+                P::Downloading => TransferMediaPhase::Downloading,
+                P::Uploading => TransferMediaPhase::Uploading,
+                P::Confirming => TransferMediaPhase::Confirming,
+                P::Resyncing => TransferMediaPhase::Resyncing,
+            },
+            counters: TransferMediaCounters {
+                uploaded_files: t.uploaded_files,
+                uploaded_deletions: t.uploaded_deletions,
+                downloaded_files: t.downloaded_files,
+                downloaded_deletions: t.downloaded_deletions,
+                checked: t.checked,
+                bytes_downloaded: t.bytes_downloaded,
+                bytes_uploaded: t.bytes_uploaded,
+                resynced: t.resynced,
+                oversized: t.oversized.clone(),
+                empty: t.empty.clone(),
+                awaiting: t.awaiting,
+            },
+            listed: v.listed,
+            download_files: v.download_files,
+            download_received: v.download_received,
+            published_files: v.published_files,
+            files_left: v.files_left,
+            estimate_seconds: v.estimate.map(|e| e.as_secs_f64()),
         }
     }
 }
@@ -273,6 +403,8 @@ pub struct TransferRecord {
     pub generation: Option<u64>,
     pub collection_complete: bool,
     pub media_selected: bool,
+    pub revision: u64,
+    pub media: Option<TransferMediaOutcome>,
     pub copies: Vec<TransferCopy>,
     pub next_eligible_ms: Option<i64>,
 }
@@ -320,6 +452,14 @@ impl From<&Operation> for TransferRecord {
             generation: v.actual_generation,
             collection_complete: v.collection_complete,
             media_selected: v.scope == policy::Scope::CollectionAndMedia,
+            revision: v.revision,
+            media: (v.scope == policy::Scope::CollectionAndMedia).then(|| TransferMediaOutcome {
+                stage: v.media.stage.into(),
+                counters: (&v.media.counters).into(),
+                remote_outcome_unknown: v.media.remote_outcome_unknown,
+                exclusions_verified: v.media.exclusions_verified,
+                failure_kind: v.media.failure_kind.clone(),
+            }),
             copies,
             next_eligible_ms: v.receipt.as_ref().map(|r| r.next_eligible_at),
         }
@@ -348,6 +488,29 @@ impl ManualTransferPreview {
         Ok(self.preview.confirmation.clone())
     }
 }
+/// History-owned same-operation category decision, with no foreign id input.
+#[derive(uniffi::Object)]
+pub struct ManualMediaPreview {
+    preview: MediaPreview,
+    consumed: Mutex<bool>,
+}
+#[uniffi::export]
+impl ManualMediaPreview {
+    pub fn record(&self) -> Result<TransferRecord, CoreError> {
+        callback::enter("ManualMediaPreview::record");
+        Ok((&self.preview.operation).into())
+    }
+}
+impl ManualMediaPreview {
+    fn take(&self) -> Result<MediaConfirmation, CoreError> {
+        let mut used = self.consumed.lock().unwrap_or_else(PoisonError::into_inner);
+        if *used {
+            return Err(invalid());
+        }
+        *used = true;
+        Ok(self.preview.confirmation.clone())
+    }
+}
 #[derive(Clone, uniffi::Record)]
 pub struct ManualLogin {
     pub username: String,
@@ -355,6 +518,9 @@ pub struct ManualLogin {
 }
 #[derive(Clone, uniffi::Enum)]
 pub enum ManualTransferValue {
+    MediaPreview {
+        preview: Arc<ManualMediaPreview>,
+    },
     Ready,
     Login {
         credentials: ManualLogin,
@@ -378,21 +544,41 @@ pub enum ManualTransferOutcome {
 enum ResultSource {
     Cell(Option<ManualTransferOutcome>),
     Preview(Arc<ManualTransferTask<Preview>>),
-    Operation(ManualTransferTask<Operation>),
+    Operation(Arc<ManualTransferTask<Operation>>),
+    MediaPreview(ManualTransferTask<MediaPreview>),
 }
 #[derive(uniffi::Object)]
 pub struct ManualTransferResult {
     source: Mutex<ResultSource>,
     preparation: Option<Arc<ManualTransferTask<Preview>>>,
+    media_task: Option<Arc<ManualTransferTask<Operation>>>,
+    known_operation: Option<policy::OperationId>,
 }
 #[uniffi::export]
 impl ManualTransferResult {
+    pub fn media_snapshot(&self) -> Result<Option<TransferMediaSnapshot>, CoreError> {
+        callback::enter("ManualTransferResult::media_snapshot");
+        Ok(self
+            .media_task
+            .as_ref()
+            .and_then(|t| t.media_snapshot())
+            .as_ref()
+            .map(Into::into))
+    }
+    pub fn request_stop(&self, interrupted: bool) -> Result<(), CoreError> {
+        callback::enter("ManualTransferResult::request_stop");
+        if let Some(task) = &self.media_task {
+            task.stop_media(interrupted);
+        }
+        Ok(())
+    }
     pub fn operation_id(&self) -> Result<Option<String>, CoreError> {
         callback::enter("ManualTransferResult::operation_id");
         Ok(self
             .preparation
             .as_ref()
             .and_then(|task| task.operation_id())
+            .or_else(|| self.known_operation.clone())
             .map(|id| id.as_str().into()))
     }
     /// Call only after the matching JobFinished. A pre-entry cancellation has
@@ -406,6 +592,17 @@ impl ManualTransferResult {
                 Ok(preview) => ManualTransferOutcome::Value {
                     value: ManualTransferValue::Preview {
                         preview: Arc::new(ManualTransferPreview {
+                            preview,
+                            consumed: Mutex::new(false),
+                        }),
+                    },
+                },
+                Err(e) => ManualTransferOutcome::Failed { failure: e.into() },
+            }),
+            ResultSource::MediaPreview(task) => task.take_result().map(|v| match v {
+                Ok(preview) => ManualTransferOutcome::Value {
+                    value: ManualTransferValue::MediaPreview {
+                        preview: Arc::new(ManualMediaPreview {
                             preview,
                             consumed: Mutex::new(false),
                         }),
@@ -442,15 +639,33 @@ fn preview_job(task: ManualTransferTask<Preview>) -> ManualTransferJob {
         result: Arc::new(ManualTransferResult {
             source: Mutex::new(ResultSource::Preview(task.clone())),
             preparation: Some(task),
+            media_task: None,
+            known_operation: None,
+        }),
+    }
+}
+fn media_preview_job(task: ManualTransferTask<MediaPreview>) -> ManualTransferJob {
+    let known_operation = task.operation_id();
+    ManualTransferJob {
+        job: jobs::wrap(task.job.clone()),
+        result: Arc::new(ManualTransferResult {
+            source: Mutex::new(ResultSource::MediaPreview(task)),
+            preparation: None,
+            media_task: None,
+            known_operation,
         }),
     }
 }
 fn operation_job(task: ManualTransferTask<Operation>) -> ManualTransferJob {
+    let known_operation = task.operation_id();
+    let task = Arc::new(task);
     ManualTransferJob {
         job: jobs::wrap(task.job.clone()),
         result: Arc::new(ManualTransferResult {
-            source: Mutex::new(ResultSource::Operation(task)),
+            source: Mutex::new(ResultSource::Operation(task.clone())),
             preparation: None,
+            media_task: Some(task),
+            known_operation,
         }),
     }
 }
@@ -462,6 +677,8 @@ fn worker(
     let result = Arc::new(ManualTransferResult {
         source: Mutex::new(ResultSource::Cell(None)),
         preparation: None,
+        media_task: None,
+        known_operation: None,
     });
     let output = result.clone();
     let job = engine.jobs().start(name, engine.generation(), None, move |ctx| {
@@ -579,6 +796,7 @@ impl ManualTransferSession {
         username: String,
         host_key: String,
         direction: TransferDirection,
+        scope: TransferScope,
     ) -> Result<ManualTransferJob, CoreError> {
         callback::enter("ManualTransferSession::start_prepare");
         let base = endpoint(&configured)?;
@@ -592,7 +810,7 @@ impl ManualTransferSession {
         Ok(preview_job(runtime::host()?.prepare_manual_transfer(
             access,
             direction.into(),
-            policy::Scope::CollectionOnly,
+            scope.into(),
         )?))
     }
     pub fn start_confirm(
@@ -613,6 +831,67 @@ impl ManualTransferSession {
         .map_err(|_| invalid())?;
         let host = runtime::host()?;
         Ok(operation_job(host.confirm_manual_transfer(access, preview.take()?)?))
+    }
+    pub fn start_media_preview(
+        &self,
+        configured: String,
+        username: String,
+        host_key: String,
+        entry: Arc<ManualTransferHistoryEntry>,
+    ) -> Result<ManualTransferJob, CoreError> {
+        callback::enter("ManualTransferSession::start_media_preview");
+        let base = endpoint(&configured)?;
+        let access = TransferAccess::new(
+            base.clone(),
+            &username,
+            HostKey::new(host_key),
+            JobOptions::new(base, ServerKind::SelfHosted),
+        )
+        .map_err(|_| invalid())?;
+        Ok(media_preview_job(
+            runtime::host()?.prepare_manual_media(entry.operation.id.clone(), access)?,
+        ))
+    }
+    /// Also used by explicit Resume: this entry point cannot dispatch a
+    /// collection request, upload or replacement.
+    pub fn start_media(
+        &self,
+        configured: String,
+        username: String,
+        host_key: String,
+        preview: Arc<ManualMediaPreview>,
+    ) -> Result<ManualTransferJob, CoreError> {
+        callback::enter("ManualTransferSession::start_media");
+        let base = endpoint(&configured)?;
+        let access = TransferAccess::new(
+            base.clone(),
+            &username,
+            HostKey::new(host_key),
+            JobOptions::new(base, ServerKind::SelfHosted),
+        )
+        .map_err(|_| invalid())?;
+        Ok(operation_job(
+            runtime::host()?.run_manual_media(access, preview.take()?)?,
+        ))
+    }
+    /// Dismiss only this prepared media decision; no transport is constructed.
+    pub fn start_cancel_prepared_media(
+        &self,
+        preview: Arc<ManualMediaPreview>,
+    ) -> Result<ManualTransferJob, CoreError> {
+        callback::enter("ManualTransferSession::start_cancel_prepared_media");
+        Ok(operation_job(
+            runtime::host()?.cancel_prepared_manual_media(preview.take()?)?,
+        ))
+    }
+    pub fn start_invalidate_media_owner(&self) -> Result<ManualTransferJob, CoreError> {
+        callback::enter("ManualTransferSession::start_invalidate_media_owner");
+        worker("invalidate manual media owner", move |_| {
+            if let Ok(host) = runtime::host() {
+                host.invalidate_manual_media_owner()?;
+            }
+            Ok(ManualTransferValue::Ready)
+        })
     }
     pub fn start_recovery_preview(
         &self,
@@ -866,6 +1145,8 @@ mod tests {
         let result = ManualTransferResult {
             source: Mutex::new(ResultSource::Cell(None)),
             preparation: None,
+            media_task: None,
+            known_operation: None,
         };
         assert!(matches!(result.outcome().unwrap(), ManualTransferOutcome::Pending));
         *result.source.lock().unwrap() = ResultSource::Cell(Some(ManualTransferOutcome::Failed {
@@ -911,5 +1192,42 @@ mod tests {
         assert_eq!(failure.issue, TransferIssue::Cooldown);
         assert_eq!(failure.next_eligible_ms, Some(12345));
         assert!(!failure.candidate_active);
+    }
+}
+
+#[cfg(test)]
+mod media_adapter_tests {
+    use super::*;
+    #[test]
+    fn media_snapshot_preserves_stage_bytes_exclusions_and_window_estimate() {
+        let value = meguri_sync::media::MediaSnapshot {
+            phase: meguri_sync::media::MediaPhase::Downloading,
+            totals: meguri_sync::media::MediaSyncResult {
+                downloaded_files: 7,
+                uploaded_files: 2,
+                downloaded_deletions: 1,
+                bytes_downloaded: 900,
+                bytes_uploaded: 200,
+                oversized: vec!["large.bin".into()],
+                empty: vec!["empty.bin".into()],
+                awaiting: 3,
+                ..Default::default()
+            },
+            files_left: 3,
+            estimate: Some(std::time::Duration::from_millis(1500)),
+            ..Default::default()
+        };
+        let mapped = TransferMediaSnapshot::from(&value);
+        assert_eq!(mapped.phase, TransferMediaPhase::Downloading);
+        assert_eq!(mapped.counters.downloaded_files, 7);
+        assert_eq!(mapped.counters.uploaded_files, 2);
+        assert_eq!(mapped.counters.downloaded_deletions, 1);
+        assert_eq!(mapped.counters.bytes_downloaded, 900);
+        assert_eq!(mapped.counters.bytes_uploaded, 200);
+        assert_eq!(mapped.counters.oversized, ["large.bin"]);
+        assert_eq!(mapped.counters.empty, ["empty.bin"]);
+        assert_eq!(mapped.counters.awaiting, 3);
+        assert_eq!(mapped.files_left, 3);
+        assert_eq!(mapped.estimate_seconds, Some(1.5));
     }
 }

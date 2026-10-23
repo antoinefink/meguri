@@ -22,7 +22,7 @@ public struct ManualTransferSections: View {
                     #if os(iOS)
                     .focused($focusedField, equals: .endpoint)
                     #endif
-                    .disabled(model.busy || model.preview != nil)
+                    .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
                     .accessibilityIdentifier("settings.anki.endpoint")
                 action("Save Endpoint", id: "saveEndpoint", disabled: model.busy || model.preview != nil) { await model.applyEndpoint() }
                 if !model.endpoint.isEmpty { LabeledContent("Configured endpoint", value: model.endpoint) }
@@ -53,9 +53,17 @@ public struct ManualTransferSections: View {
                     Text("Import from Anki").tag(ManualTransferDirection.import)
                     Text("Export to Anki").tag(ManualTransferDirection.export)
                 }
-                .disabled(model.busy || model.preview != nil)
+                .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
                 .accessibilityIdentifier("settings.anki.direction")
-                Text("Collection only. Images, audio and other media stay unchanged on both sides. Media reconciliation is not available in this flow.")
+                Picker("Transfer scope", selection: Binding(get: { model.scope }, set: { model.selectScope($0) })) {
+                    Text("Collection only").tag(ManualTransferScope.collectionOnly)
+                    Text("Collection and media").tag(ManualTransferScope.collectionAndMedia)
+                }
+                .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
+                .accessibilityIdentifier("settings.anki.scope")
+                Text(model.scope == .collectionOnly
+                    ? "Collection only. Images, audio and other media stay unchanged on both sides."
+                    : "After the collection finishes, a separate decision lets you reconcile media on this device and server. Media can change both sides in either collection direction.")
                 if model.direction == .import {
                     Text("Preparation downloads and validates a candidate. Final confirmation replaces this device’s collection after making its required safety copy. It does not merge collections.")
                     action("Download and Prepare Import Preview", id: "prepareImport", disabled: !model.canPrepare) { await model.prepare() }
@@ -78,6 +86,16 @@ public struct ManualTransferSections: View {
                     action("Close Preview", id: "closePreview", disabled: model.busy) { await model.discardPreview() }
                 }
             }
+            if let media = model.mediaPreview {
+                Section("Reconcile Media on This Device and Server") {
+                    recordFacts(media.record)
+                    Text("Import and export both reconcile media in both directions. Server files are downloaded and pending local files are uploaded, even when the collection does not reference them. Counts become available after the media check.")
+                    Text("A server file can overwrite a pending local edit, moving the previous local file to trash. A server deletion can move an unchanged local file to trash. Files marked for local deletion may return through download; local deletions may also be sent to the server.")
+                    Text("Repairing names and resolving case conflicts may rename files or remove server names. References in collection fields are not rewritten. Files that are empty or larger than 100 MiB are left out.")
+                    Text("Allowing media applies these effects across every supported file and batch, including changes that occur during the run. Stopping keeps saved changes and does not restore either side. Reviews remain available during media transfer.")
+                    mediaDecisionActions
+                }
+            }
             operationProgress
             if let message = model.message {
                 Section("Result") {
@@ -98,12 +116,15 @@ public struct ManualTransferSections: View {
                         Text(entry.record.direction == .import ? "Import from Anki" : "Export to Anki").font(.headline)
                         Text(status(entry.record))
                         recordFacts(entry.record)
+                        if entry.record.canResumeMedia {
+                            action("Review Media Decision / Resume…", id: "resumeMedia.\(entry.id)", disabled: model.busy || model.preview != nil || model.mediaPreview != nil || !model.authenticated) { await model.prepareMedia(entry) }
+                        }
                         if entry.record.acceptance == .possiblyAccepted {
                             Text("Upload completion is unknown. Another transfer remains blocked. A retry or risk-acceptance clear is not available.")
                         } else if entry.record.canInspectRecovery {
                             action("Inspect Local Recovery", id: "recover.\(entry.id)", disabled: model.busy || model.preview != nil) { await model.recover(entry) }
                         }
-                        if [.preparing, .preview, .needsDecision].contains(entry.record.phase), entry.record.acceptance == .notSent {
+                        if !entry.record.collectionComplete, [.preparing, .preview, .needsDecision].contains(entry.record.phase), entry.record.acceptance == .notSent {
                             action("Cancel Unfinished Preparation", id: "cancelPreparation.\(entry.id)", disabled: model.busy || model.preview != nil) { await model.cancelPreparation(entry) }
                         }
                         ForEach(Array(entry.record.copies.enumerated()), id: \.offset) { index, copy in
@@ -136,12 +157,42 @@ public struct ManualTransferSections: View {
                 ProgressView().accessibilityLabel("Server operation in progress")
                 Text(operationDescription)
                     .accessibilityIdentifier("settings.anki.progress")
-                if model.progress?.cancellable != false {
+                if let media = model.mediaProgress, model.stage == .transferringMedia {
+                    Text(mediaDescription(media.phase))
+                    LabeledContent("Entries checked", value: "\(media.counters.checked)")
+                    LabeledContent("Server changes listed", value: "\(media.listed)")
+                    LabeledContent("Files received", value: "\(media.counters.downloadedFiles)")
+                    LabeledContent("Files sent", value: "\(media.counters.uploadedFiles)")
+                    LabeledContent("File bytes received / sent", value: "\(media.counters.bytesDownloaded) / \(media.counters.bytesUploaded)")
+                    if media.phase == .downloading {
+                        LabeledContent("Files remaining", value: "\(media.filesLeft)")
+                        if let seconds = media.estimateSeconds { LabeledContent("Estimated seconds remaining", value: "\(Int(seconds.rounded(.up)))") }
+                    }
+                }
+                if model.stage == .transferringMedia || model.progress?.cancellable != false {
                     action("Cancel Operation", id: "cancel", disabled: false) {
                         await model.cancel()
                     }
                 }
             }
+        }
+    }
+    private var mediaDecisionActions: some View {
+        Group {
+            action("Allow Both-Side Media Changes and Start", id: "startMedia", disabled: !model.canRunMedia) {
+                await model.startMedia()
+            }
+            action("Keep Media for Later", id: "cancelPreparedMedia", disabled: model.busy, run: model.cancelPreparedMedia)
+        }
+    }
+    private func mediaDescription(_ phase: ManualMediaPhase) -> String {
+        switch phase {
+        case .checking: "Checking local media…"
+        case .listing: "Finding server media changes…"
+        case .downloading: "Receiving media files…"
+        case .uploading: "Sending pending media changes…"
+        case .confirming: "Checking media completion…"
+        case .resyncing: "Checking media again…"
         }
     }
     private var operationDescription: String {
@@ -151,6 +202,9 @@ public struct ManualTransferSections: View {
         case (.authenticating, _): "Getting a login key for this device…"
         case (.buildingDecision, _): "Saving safety copies and preparing the preview…"
         case (.inspectingCandidate, _): "Inspecting the local recovery collection…"
+        case (.preparingMedia, _): "Preparing the saved operation’s media decision…"
+        case (.awaitingMediaConsent, _): "Waiting for a media decision…"
+        case (.transferringMedia, _): "Reconciling media on this device and server. Reviews remain available."
         case (.writingCopy, _): "Verifying the retained file before saving a copy…"
         case (.readingRecords, _), (.ready, _), (.awaitingConfirmation, _): "Loading saved transfer history…"
         }
@@ -171,7 +225,7 @@ public struct ManualTransferSections: View {
         return formatter.string(from: Date(timeIntervalSince1970: Double(recordedInstant) / 1_000))
     }
     private func status(_ record: ManualTransferRecord) -> String {
-        if record.phase == .complete { return "Collection complete. Media was excluded." }
+        if record.phase == .complete { return record.mediaSelected ? "Collection and supported media complete. Excluded files were not transferred." : "Collection complete. Media was excluded." }
         if record.collectionComplete { return "Collection complete. The whole selected operation is incomplete." }
         switch record.phase {
         case .preparing: return "Preparation was interrupted. Inspect recovery before continuing."
@@ -197,7 +251,7 @@ private struct ManualTransferPresentation: ViewModifier {
         content
         .destructiveConfirmation(Text("Confirm collection replacement?"), isPresented: $model.confirmationPresented,
             actionTitle: Text(model.isRecoveryPreview ? "Recover Locally" : "Replace Collection"),
-            message: Text("\(model.endpoint)\nLogin: \(model.previewLoginLabel)\n\(model.isRecoveryPreview ? "The retained candidate replaces this device’s collection. Nothing is uploaded." : (model.preview?.record.direction == .import ? "The prepared collection replaces this device’s collection." : "The prepared collection replaces the server collection and this device’s active version.")) Media is excluded.")) {
+            message: Text("\(model.endpoint)\nLogin: \(model.previewLoginLabel)\n\(model.isRecoveryPreview ? "The retained candidate replaces this device’s collection. Nothing is uploaded." : (model.preview?.record.direction == .import ? "The prepared collection replaces this device’s collection." : "The prepared collection replaces the server collection and this device’s active version.")) \(model.preview?.record.mediaSelected == true ? "Media needs a separate decision after collection completion." : "Media is excluded.")")) {
                 Task { await model.confirm() }
             }
         .fileImporter(isPresented: $model.copyDestinationPresented, allowedContentTypes: [.folder]) { result in

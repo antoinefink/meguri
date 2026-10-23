@@ -41,7 +41,7 @@ public extension ManualTransferRecord {
             add("remoteModified", "Server last modified", date(remote.modifiedMilliseconds))
             add("remoteSchema", "Server structure last modified", date(remote.schemaModifiedMilliseconds))
             add("remoteRevision", "Server change marker", "\(remote.revision). Used to detect changes; it does not guarantee a saved version or reserve the server collection.")
-            add("remoteMediaRevision", "Server media change marker", "\(remote.mediaRevision). Media is excluded from this transfer.")
+            add("remoteMediaRevision", "Server media change marker", mediaSelected ? "\(remote.mediaRevision). Media requires a separate decision." : "\(remote.mediaRevision). Media is excluded from this transfer.")
         } else {
             add("remoteBaseline", "Server observation", "Modification time, structure time and change markers were not recorded.")
         }
@@ -63,6 +63,29 @@ public extension ManualTransferRecord {
             add("acceptance", "Server acceptance", "The server acknowledged the collection. Local activation and media completion require separate evidence.")
         }
         add("scope", "Transfer scope", mediaSelected ? "Collection and media selected; each has a separate completion outcome." : "Collection only. Media is excluded and unchanged on both sides.")
+        if let media {
+            let totals = media.counters
+            let status: String
+            switch media.stage {
+            case .complete: status = "Supported media complete."
+            case .awaitingConsent: status = "Waiting for your decision. The operation is partial."
+            case .declined: status = "Selected media remains for later. The operation is partial; saved effects remain."
+            case .running: status = "Unfinished media work. Inspect before resuming; saved effects remain."
+            case .cancelled: status = "Cancelled. The operation is partial; saved effects remain."
+            case .interrupted: status = "Interrupted by the system. The operation is partial; saved effects remain."
+            case .failed: status = "Failed. The operation is partial; saved effects remain."
+            }
+            add("media.stage", "Media", status)
+            add("media.downloaded", "Media received", "\(totals.downloadedFiles) files, \(totals.downloadedDeletions) deletions, \(totals.bytesDownloaded) file bytes recorded.")
+            add("media.uploaded", "Media sent", "\(totals.uploadedFiles) files, \(totals.uploadedDeletions) deletions, \(totals.bytesUploaded) file bytes recorded.")
+            if media.remoteOutcomeUnknown { add("media.unknown", "Other media effects", "Additional server effects may have completed without a saved acknowledgement.") }
+            if media.exclusionsVerified {
+                for (index, name) in totals.oversized.enumerated() { add("media.large.\(index)", "Excluded: over 100 MiB", name) }
+                for (index, name) in totals.empty.enumerated() { add("media.empty.\(index)", "Excluded: empty file", name) }
+            } else {
+                add("media.counts", "Media work", "Current exclusions are unknown until a fresh media check completes. Recorded transfer counts retain saved effects from earlier attempts.")
+            }
+        }
         if let nextEligibleMilliseconds { add("next", "Next eligible", date(nextEligibleMilliseconds)) }
         return facts
     }

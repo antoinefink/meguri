@@ -1,8 +1,10 @@
 //! Explicit self-hosted collection transfers. Construction/history are offline;
 //! only prepare/confirm/recovery calls supplied by a caller can issue requests.
 mod files;
+mod media_stage;
 use crate::policy::*;
 use crate::{Endpoint, HostKey, Job, JobOptions, Method, Payload, ServerKind, SyncTransport};
+pub use media_stage::{MediaConfirmation, MediaPreview};
 use meguri_engine::{
     CancelToken, Collection, Engine, EngineError, LifecycleState, OpenConfig, ProgressPhase, ProgressSink, SlotGuard,
     device_state::DeviceState,
@@ -451,6 +453,8 @@ impl ManualTransfers {
             prepared_at: now,
             actual_generation: current.as_ref().map(|c| c.generation().0),
             collection_complete: false,
+            resulting_publication: None,
+            media: MediaOutcome::default(),
             receipt: None,
             revision: 0,
         };
@@ -999,16 +1003,16 @@ impl ManualTransfers {
             (op.direction == Direction::Export).then_some(EpochMillis(op.prepared_at)),
         )?;
         op.collection_complete = true;
+        op.resulting_publication = DeviceState::for_collection(&self.live())
+            .publication()?
+            .map(|p| p.identity);
         op.phase = Phase::CollectionComplete;
         self.policy.save(op)?;
         if op.scope == Scope::CollectionAndMedia {
             op.phase = Phase::MediaIncomplete;
-            op.boundary = Some(Boundary::MediaProviderUnavailable);
+            op.boundary = None;
+            op.media.stage = MediaStage::AwaitingConsent;
             self.policy.save(op)?;
-            return Err(TransferError::MediaIncomplete {
-                operation: op.id.clone(),
-                generation: op.actual_generation,
-            });
         } else {
             self.policy.finish(op, self.inputs.clock.now_ms())?;
         }

@@ -11,6 +11,72 @@ public enum ManualTransferDirection: String, Sendable, Equatable {
         }
     }
 }
+public enum ManualTransferScope: String, Sendable, Equatable {
+    case collectionOnly, collectionAndMedia
+}
+public enum ManualMediaStage: String, Sendable, Equatable {
+    case awaitingConsent, declined, running, cancelled, interrupted, failed, complete
+    init(_ raw: MeguriCoreBindings.TransferMediaStage) {
+        switch raw {
+        case .awaitingConsent: self = .awaitingConsent
+        case .declined: self = .declined
+        case .running: self = .running
+        case .cancelled: self = .cancelled
+        case .interrupted: self = .interrupted
+        case .failed: self = .failed
+        case .complete: self = .complete
+        }
+    }
+}
+public enum ManualMediaPhase: String, Sendable, Equatable {
+    case checking, listing, downloading, uploading, confirming, resyncing
+    init(_ raw: MeguriCoreBindings.TransferMediaPhase) {
+        switch raw {
+        case .checking: self = .checking
+        case .listing: self = .listing
+        case .downloading: self = .downloading
+        case .uploading: self = .uploading
+        case .confirming: self = .confirming
+        case .resyncing: self = .resyncing
+        }
+    }
+}
+public struct ManualMediaCounters: Sendable, Equatable {
+    public let uploadedFiles: UInt64, uploadedDeletions: UInt64, downloadedFiles: UInt64, downloadedDeletions: UInt64
+    public let checked: UInt64, bytesDownloaded: UInt64, bytesUploaded: UInt64, awaiting: UInt64
+    public let resynced: Bool, oversized: [String], empty: [String]
+    init(_ raw: MeguriCoreBindings.TransferMediaCounters) {
+        uploadedFiles = raw.uploadedFiles; uploadedDeletions = raw.uploadedDeletions
+        downloadedFiles = raw.downloadedFiles; downloadedDeletions = raw.downloadedDeletions
+        checked = raw.checked; bytesDownloaded = raw.bytesDownloaded; bytesUploaded = raw.bytesUploaded
+        awaiting = raw.awaiting; resynced = raw.resynced; oversized = raw.oversized; empty = raw.empty
+    }
+}
+public struct ManualMediaOutcome: Sendable, Equatable {
+    public let stage: ManualMediaStage, counters: ManualMediaCounters, remoteOutcomeUnknown: Bool, exclusionsVerified: Bool, failureKind: String?
+    init(_ raw: MeguriCoreBindings.TransferMediaOutcome) {
+        stage = .init(raw.stage); counters = .init(raw.counters)
+        remoteOutcomeUnknown = raw.remoteOutcomeUnknown; exclusionsVerified = raw.exclusionsVerified; failureKind = raw.failureKind
+    }
+}
+public struct ManualMediaSnapshot: Sendable, Equatable {
+    public let phase: ManualMediaPhase, counters: ManualMediaCounters
+    public let listed: UInt64, downloadFiles: UInt64, downloadReceived: UInt64, publishedFiles: UInt64, filesLeft: UInt64
+    public let estimateSeconds: Double?
+    init(_ raw: MeguriCoreBindings.TransferMediaSnapshot) {
+        phase = .init(raw.phase); counters = .init(raw.counters); listed = raw.listed
+        downloadFiles = raw.downloadFiles; downloadReceived = raw.downloadReceived
+        publishedFiles = raw.publishedFiles; filesLeft = raw.filesLeft; estimateSeconds = raw.estimateSeconds
+    }
+}
+public final class PreparedManualMedia: Sendable {
+    let raw: MeguriCoreBindings.ManualMediaPreview?
+    public let record: ManualTransferRecord
+    init(raw: MeguriCoreBindings.ManualMediaPreview, record: ManualTransferRecord) { self.raw = raw; self.record = record }
+    // Internal fixture value carries no backend authority. Production adapters
+    // refuse it before starting any work; no foreign id can be reconstructed.
+    init(record: ManualTransferRecord) { self.raw = nil; self.record = record }
+}
 public enum ManualTransferPhase: String, Sendable, Equatable {
     case preparing, preview, confirmedIntent, transferring, remoteAccepted, activating, collectionComplete, mediaIncomplete, complete, cancelled, failed, needsDecision
     init(_ raw: MeguriCoreBindings.TransferPhase) {
@@ -119,6 +185,8 @@ public struct ManualTransferObservation: Sendable, Equatable {
     }
 }
 public struct ManualTransferRecord: Sendable, Identifiable {
+    public let revision: UInt64
+    public let media: ManualMediaOutcome?
     public let id: String, configuredEndpoint: String, targetEndpoint: String
     public let direction: ManualTransferDirection, phase: ManualTransferPhase, acceptance: ManualTransferAcceptance
     public let boundary: ManualTransferBoundary?, local: ManualTransferCounts?, servedCounts: ManualTransferCounts?
@@ -126,6 +194,7 @@ public struct ManualTransferRecord: Sendable, Identifiable {
     public let remoteHasNoCards: Bool?, preparedMilliseconds: Int64, generation: UInt64?
     public let collectionComplete: Bool, mediaSelected: Bool, copies: [ManualTransferCopy], nextEligibleMilliseconds: Int64?
     init(_ raw: MeguriCoreBindings.TransferRecord) {
+        revision = raw.revision; media = raw.media.map(ManualMediaOutcome.init)
         id = raw.id; configuredEndpoint = raw.configuredEndpoint; targetEndpoint = raw.targetEndpoint
         direction = .init(raw.direction); phase = .init(raw.phase); acceptance = .init(raw.acceptance)
         boundary = raw.boundary.map(ManualTransferBoundary.init); local = raw.local.map(ManualTransferCounts.init)
@@ -136,8 +205,9 @@ public struct ManualTransferRecord: Sendable, Identifiable {
     }
 }
 public extension ManualTransferRecord {
+    var canResumeMedia: Bool { collectionComplete && mediaSelected && phase != .complete }
     var canInspectRecovery: Bool {
-        acceptance != .possiblyAccepted && [.preview, .needsDecision, .remoteAccepted, .activating].contains(phase)
+        !collectionComplete && acceptance != .possiblyAccepted && [.preview, .needsDecision, .remoteAccepted, .activating].contains(phase)
     }
 }
 /// Raw keys cross this boundary only for the device-only Keychain store.
@@ -148,21 +218,27 @@ public struct ManualTransferCredentials: Sendable {
     public init(username: String, hostKey: String) { self.username = username; self.hostKey = hostKey }
 }
 public final class PreparedManualTransfer: Sendable {
-    let raw: MeguriCoreBindings.ManualTransferPreview
+    let raw: MeguriCoreBindings.ManualTransferPreview?
     public let record: ManualTransferRecord
     init(raw: MeguriCoreBindings.ManualTransferPreview, record: ManualTransferRecord) { self.raw = raw; self.record = record }
+    // Internal fixture value carries no backend authority. Production adapters
+    // refuse it before starting any work; no foreign id can be reconstructed.
+    init(record: ManualTransferRecord) { self.raw = nil; self.record = record }
 }
 public final class ManualTransferHistory: Sendable, Identifiable {
-    let raw: MeguriCoreBindings.ManualTransferHistoryEntry
+    let raw: MeguriCoreBindings.ManualTransferHistoryEntry?
     public let record: ManualTransferRecord
     public var id: String { record.id }
     init(raw: MeguriCoreBindings.ManualTransferHistoryEntry, record: ManualTransferRecord) { self.raw = raw; self.record = record }
+    // Internal fixture value carries no backend authority. Production adapters
+    // refuse it before starting any work; no foreign id can be reconstructed.
+    init(record: ManualTransferRecord) { self.raw = nil; self.record = record }
 }
 public enum ManualTransferCancellation: String, Sendable { case user, system }
 /// Record the earliest stop request and drain its worker. Inspect the worker's
 /// result to learn which effects committed; a stop request cannot undo them.
 public final class ManualTransferOperation: Sendable, CollectionExportCancellationChecking {
-    private struct State { var cause: ManualTransferCancellation?; var job: CoreJob?; var operationID: String? }
+    private struct State { var cause: ManualTransferCancellation?; var job: CoreJob?; var operationID: String?; var stop: (@Sendable (ManualTransferCancellation) async -> Void)? }
     private let state = Mutex(State())
     // Event seam for deterministic cancellation/drain checks. Delivery happens
     // after releasing state; it carries the same first cause as publication.
@@ -174,17 +250,18 @@ public final class ManualTransferOperation: Sendable, CollectionExportCancellati
     deinit { cancellationContinuation.finish() }
     public var cancellation: ManualTransferCancellation? { state.withLock { $0.cause } }
     public func cancel(_ cause: ManualTransferCancellation = .user) async {
-        let (job, first) = state.withLock { state in
+        let (job, first, stop, recorded) = state.withLock { state in
             let first = state.cause == nil
             if first { state.cause = cause }
-            return (state.job, first)
+            return (state.job, first, state.stop, state.cause ?? cause)
         }
         if first { cancellationContinuation.yield(cause); cancellationContinuation.finish() }
+        await stop?(recorded)
         try? await job?.cancel()
     }
-    func attach(_ job: CoreJob) async {
-        let cancel = state.withLock { state in state.job = job; return state.cause != nil }
-        if cancel { try? await job.cancel() }
+    func attach(_ job: CoreJob, stop: (@Sendable (ManualTransferCancellation) async -> Void)? = nil) async {
+        let cause = state.withLock { state in state.job = job; state.stop = stop; return state.cause }
+        if let cause { await stop?(cause); try? await job.cancel() }
     }
     public var operationID: String? { state.withLock { $0.operationID } }
     func identify(_ id: String) {

@@ -767,3 +767,36 @@ integration and the combined full gate remain pending. No Unit is accepted.
 
 Publication binding, unknown counts and exclusions need correction.
 RF4/U111 acceptance and the full gate remain pending.
+
+Composition base: `0637da0f`. The prepared source is integrated without
+replacing the committed wire/storage/reconciler work.
+
+| Check | Receipt | Outcome |
+| --- | --- | --- |
+| Attachment review (4) | `20261023T224050Z-31294` | No P0–P1 |
+| Tooling review (2) | `20261023T222619Z-21493` | No P0–P2 |
+| Tooling focused tests | `20261023T224358Z-33097` | 22 passed |
+| Complete source privacy | `20261023T225938Z-39716` | PASS, 26 files |
+| Rust checks | `20261023T230045Z-40314` | 354 passed; eight skipped |
+| Bridge tests | `20261023T230209Z-41020` | 97 passed |
+| App-model tests | `20261023T230254Z-42636` | 90 passed |
+| Strict Rust lint | `20261023T230245Z-42280` | All four checks passed |
+
+The earlier complete Kit run `20261023T223402Z-27811` passed 365 tests and
+retained its known issue. This is not an audio repair or final acceptance.
+The failed compile and lint receipts remain retained.
+
+The prepared-decision cancellation API now follows the existing cancellation
+convention. It checks captured identity and publication proof; persisted
+Declined, partial results and cooldown rules are unchanged. Seven bridge
+calls remain covered. Both M8 evidence requirements now have controller
+checks: observed requests and Cancel/restart/resume. VM execution is pending.
+
+Cache refresh `20261023T223035Z-24022` ran on clean `0637da0f` only:
+87,721 candidates, 4,773 already in the repository, 82,948 tokens. No private
+values were read. The unchanged candidate still failed afterwards; the
+source corrections above resolve it without another scanner-rule change.
+
+Parent final review, rendered UI, accessibility, all three native journeys
+and the combined full gate remain required. No Unit trailer is added.
+Gate base remains `81c207573c20c337c8834e4ae8b4ee8f29603dbf`.

@@ -12,6 +12,9 @@ use std::{
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountRef(String);
 impl AccountRef {
+    pub(crate) fn media_owner(&self) -> meguri_storage::media::MediaBaselineOwner {
+        meguri_storage::media::MediaBaselineOwner::new(self.0.clone())
+    }
     /// Logical identity is the normalized CONFIGURED endpoint and trimmed,
     /// case-preserved username. Neither a key nor a redirect changes it.
     pub fn derive(configured: &Endpoint, username: &str) -> Option<Self> {
@@ -184,6 +187,54 @@ pub struct SuccessReceipt {
     pub completed_at: i64,
     pub next_eligible_at: i64,
 }
+/// Revision of the disclosed M5 effect categories, not a file manifest.
+pub const MEDIA_CATEGORIES: u32 = 1;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MediaStage {
+    #[default]
+    AwaitingConsent,
+    Declined,
+    Running,
+    Cancelled,
+    Interrupted,
+    Failed,
+    Complete,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaConsent {
+    pub revision: u64,
+    pub generation: u64,
+    pub categories: u32,
+    pub account: AccountRef,
+    pub configured_endpoint: String,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaCounters {
+    pub uploaded_files: u64,
+    pub uploaded_deletions: u64,
+    pub downloaded_files: u64,
+    pub downloaded_deletions: u64,
+    pub checked: u64,
+    pub bytes_downloaded: u64,
+    pub bytes_uploaded: u64,
+    pub resynced: bool,
+    pub oversized: Vec<String>,
+    pub empty: Vec<String>,
+    pub awaiting: u64,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaOutcome {
+    pub stage: MediaStage,
+    pub consent: Option<MediaConsent>,
+    pub counters: MediaCounters,
+    /// A lost response or process death may leave additional remote effects.
+    pub remote_outcome_unknown: bool,
+    /// Exclusion names describe the latest completed check, not old attempts.
+    #[serde(default)]
+    pub exclusions_verified: bool,
+    /// Safe stable error category, never server text or transport details.
+    pub failure_kind: Option<String>,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Operation {
     pub id: OperationId,
@@ -208,6 +259,12 @@ pub struct Operation {
     pub prepared_at: i64,
     pub actual_generation: Option<u64>,
     pub collection_complete: bool,
+    /// Persistent R6 identity distinguishes unrelated replacements across process
+    /// generation reuse. No publication decision is written by media.
+    #[serde(default)]
+    pub resulting_publication: Option<meguri_engine::device_state::PublicationId>,
+    #[serde(default)]
+    pub media: MediaOutcome,
     pub receipt: Option<SuccessReceipt>,
     /// Binds final authority to a persisted revision, not caller-supplied facts.
     pub revision: u64,
@@ -335,6 +392,26 @@ impl TransferPolicy {
             {
                 return Err(PolicyError::Stale);
             }
+            let prior = state.operations.get(operation.id.as_str()).ok_or(PolicyError::Stale)?;
+            if prior.scope != operation.scope
+                || prior.account != operation.account
+                || prior.configured_endpoint != operation.configured_endpoint
+                || prior.direction != operation.direction
+                || (prior.collection_complete
+                    && (!operation.collection_complete
+                        || (prior.resulting_publication != operation.resulting_publication
+                            && !(prior.resulting_publication.is_none()
+                                && operation.resulting_publication.is_some()
+                                && operation.media.stage == MediaStage::AwaitingConsent
+                                && operation.media.consent.is_none()))
+                        || prior.target_endpoint != operation.target_endpoint
+                        || (prior.actual_generation != operation.actual_generation
+                            && (operation.resulting_publication.is_none()
+                                || operation.media.stage != MediaStage::AwaitingConsent
+                                || operation.media.consent.is_some()))))
+            {
+                return Err(PolicyError::Invalid);
+            }
             let mut saved = operation.clone();
             saved.revision = next;
             state.operations.insert(saved.id.0.clone(), saved);
@@ -343,17 +420,25 @@ impl TransferPolicy {
         operation.revision = next;
         Ok(())
     }
+    /// The caller retains the last successfully saved snapshot under its flight
+    /// guard. Per-file UI progress with identical durable facts needs no sidecar
+    /// publication. Error and terminal transitions still use save directly.
+    pub(crate) fn save_snapshot(&self, operation: &mut Operation, saved: &mut Operation) -> Result<(), PolicyError> {
+        if operation != saved {
+            self.save(operation)?;
+            saved.clone_from(operation);
+        }
+        Ok(())
+    }
     /// Only a complete selected scope gets a receipt. Receipt, retained deadline
     /// and guard release are a SINGLE durable transition. Rollback never lowers it.
     pub(crate) fn finish(&self, operation: &mut Operation, now: i64) -> Result<(), PolicyError> {
-        if !operation.collection_complete || operation.scope != Scope::CollectionOnly {
+        if !selected_complete(operation) {
             return Err(PolicyError::Invalid);
         }
         let mut saved = operation.clone();
         self.update(|state| {
-            if state.active.as_ref() != Some(&saved.id)
-                || state.operations.get(saved.id.as_str()).map(|o| o.revision) != Some(saved.revision)
-            {
+            if state.active.as_ref() != Some(&saved.id) || state.operations.get(saved.id.as_str()) != Some(&saved) {
                 return Err(PolicyError::Stale);
             }
             let previous = state
@@ -401,6 +486,18 @@ impl TransferPolicy {
         })
     }
 }
+fn selected_complete(op: &Operation) -> bool {
+    op.collection_complete
+        && (op.scope == Scope::CollectionOnly
+            || (op.media.stage == MediaStage::Complete
+                && op.media.consent.as_ref().is_some_and(|c| {
+                    Some(c.generation) == op.actual_generation
+                        && c.account == op.account
+                        && c.configured_endpoint == op.configured_endpoint
+                        && c.categories == MEDIA_CATEGORIES
+                        && c.revision < op.revision
+                })))
+}
 fn invalid() -> StorageError {
     StorageError::Io {
         detail: "manual transfer metadata is unavailable or inconsistent".into(),
@@ -439,8 +536,7 @@ fn decode(doc: Option<&serde_json::Map<String, serde_json::Value>>) -> Result<St
                 .bytes()
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
             || (unresolved && state.active.as_ref() != Some(&op.id))
-            || (op.phase == Phase::Complete
-                && (op.receipt.is_none() || !op.collection_complete || op.scope != Scope::CollectionOnly))
+            || (op.phase == Phase::Complete && (op.receipt.is_none() || !selected_complete(op)))
             || (op.receipt.is_some() && op.phase != Phase::Complete)
         {
             return Err(invalid());
@@ -476,6 +572,8 @@ mod tests {
             prepared_at: 0,
             actual_generation: None,
             collection_complete: false,
+            resulting_publication: None,
+            media: MediaOutcome::default(),
             receipt: None,
             revision: 0,
         }
@@ -530,7 +628,9 @@ mod tests {
         failed.phase = Phase::Failed;
         p.end_before_activation(&mut failed).unwrap();
         assert_eq!(p.next_eligible_at(&account).unwrap(), None);
-        let mut op = p.begin(operation(account.clone(), Direction::Export), 2, 0).unwrap();
+        let mut selected = operation(account.clone(), Direction::Export);
+        selected.scope = Scope::CollectionAndMedia;
+        let mut op = p.begin(selected, 2, 0).unwrap();
         op.acceptance = Acceptance::PossiblyAccepted;
         op.phase = Phase::ConfirmedIntent;
         p.save(&mut op).unwrap();
@@ -542,12 +642,145 @@ mod tests {
             Err(PolicyError::Overlap(_))
         ));
         assert_eq!(restart.next_eligible_at(&account).unwrap(), None);
-        op.scope = Scope::CollectionAndMedia;
         op.acceptance = Acceptance::ExactOk;
         op.collection_complete = true;
         p.save(&mut op).unwrap();
         assert_eq!(p.finish(&mut op, 1_000), Err(PolicyError::Invalid));
         assert_eq!(p.next_eligible_at(&account).unwrap(), None);
+    }
+    #[test]
+    fn media_receipt_requires_durable_completion_and_scope_is_immutable() {
+        let root = tempfile::tempdir().unwrap();
+        let policy = TransferPolicy::new(root.path());
+        let account = AccountRef::derive(&Endpoint::parse("http://127.0.0.1/").unwrap(), "synthetic").unwrap();
+        let mut selected = operation(account.clone(), Direction::Import);
+        selected.scope = Scope::CollectionAndMedia;
+        let mut op = policy.begin(selected, 20, 0).unwrap();
+        op.collection_complete = true;
+        op.actual_generation = Some(7);
+        op.phase = Phase::MediaIncomplete;
+        policy.save(&mut op).unwrap();
+        // A caller cannot discard selected media by submitting a narrower scope.
+        let mut collection_only = Operation {
+            scope: Scope::CollectionOnly,
+            ..op.clone()
+        };
+        let save_result = policy.save(&mut collection_only);
+        assert_eq!(save_result, Err(PolicyError::Invalid));
+        let finish_result = policy.finish(&mut collection_only, 1);
+        assert_eq!(finish_result, Err(PolicyError::Stale));
+        for stage in [
+            MediaStage::AwaitingConsent,
+            MediaStage::Declined,
+            MediaStage::Running,
+            MediaStage::Cancelled,
+            MediaStage::Interrupted,
+            MediaStage::Failed,
+        ] {
+            op.media.stage = stage;
+            policy.save(&mut op).unwrap();
+            assert_eq!(policy.finish(&mut op, 1), Err(PolicyError::Invalid));
+            assert_eq!(policy.next_eligible_at(&account).unwrap(), None);
+        }
+        op.media.consent = Some(MediaConsent {
+            revision: op.revision,
+            generation: 7,
+            categories: MEDIA_CATEGORIES,
+            account: account.clone(),
+            configured_endpoint: op.configured_endpoint.clone(),
+        });
+        op.media.stage = MediaStage::Running;
+        policy.save(&mut op).unwrap();
+        op.media.stage = MediaStage::Complete;
+        assert_eq!(
+            policy.finish(&mut op, 1),
+            Err(PolicyError::Stale),
+            "cannot finish using completion that was not saved"
+        );
+        policy.save(&mut op).unwrap();
+        policy.finish(&mut op, 1).unwrap();
+        assert_eq!(TransferPolicy::new(root.path()).get(&op.id).unwrap(), op);
+        assert_eq!(policy.next_eligible_at(&account).unwrap(), Some(3_600_001));
+    }
+    #[test]
+    fn repeated_media_snapshot_does_not_publish_but_batch_error_and_terminal_do() {
+        use std::os::unix::fs::MetadataExt;
+        let root = tempfile::tempdir().unwrap();
+        let policy = TransferPolicy::new(root.path());
+        let account = AccountRef::derive(&Endpoint::parse("http://127.0.0.1/").unwrap(), "synthetic").unwrap();
+        let mut selected = operation(account, Direction::Import);
+        selected.scope = Scope::CollectionAndMedia;
+        let mut op = policy.begin(selected, 22, 0).unwrap();
+        op.collection_complete = true;
+        op.actual_generation = Some(7);
+        op.phase = Phase::MediaIncomplete;
+        op.media.consent = Some(MediaConsent {
+            revision: op.revision,
+            generation: 7,
+            categories: MEDIA_CATEGORIES,
+            account: op.account.clone(),
+            configured_endpoint: op.configured_endpoint.clone(),
+        });
+        op.media.stage = MediaStage::Running;
+        policy.save(&mut op).unwrap();
+        let mut saved = op.clone();
+        let path = root.path().join("manual-transfers.json");
+        let original = std::fs::metadata(&path).unwrap().ino();
+        let revision = op.revision;
+        for _ in 0..25 {
+            policy.save_snapshot(&mut op, &mut saved).unwrap();
+        }
+        assert_eq!(op.revision, revision);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().ino(),
+            original,
+            "unchanged progress must not republish metadata"
+        );
+        op.media.counters.downloaded_files = 25;
+        policy.save_snapshot(&mut op, &mut saved).unwrap();
+        assert_eq!(op.revision, revision + 1);
+        assert_ne!(std::fs::metadata(&path).unwrap().ino(), original);
+        assert_eq!(policy.get(&op.id).unwrap().media.counters.downloaded_files, 25);
+        for stage in [MediaStage::Failed, MediaStage::Complete] {
+            let previous = std::fs::metadata(&path).unwrap().ino();
+            op.media.stage = stage;
+            policy.save(&mut op).unwrap();
+            assert_ne!(std::fs::metadata(&path).unwrap().ino(), previous);
+            assert_eq!(policy.get(&op.id).unwrap().media.stage, stage);
+        }
+        assert_eq!(op.revision, revision + 3);
+        policy.finish(&mut op, 1).unwrap();
+        assert_eq!(policy.get(&op.id).unwrap().receipt.unwrap().next_eligible_at, 3_600_001);
+    }
+    #[test]
+    fn legacy_history_without_media_fields_stays_readable() {
+        let root = tempfile::tempdir().unwrap();
+        let policy = TransferPolicy::new(root.path());
+        let account = AccountRef::derive(&Endpoint::parse("http://127.0.0.1/").unwrap(), "synthetic").unwrap();
+        let op = policy.begin(operation(account, Direction::Import), 21, 0).unwrap();
+        let path = root.path().join("manual-transfers.json");
+        let mut document: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let saved = document["manualTransfers"]["operations"][op.id.as_str()]
+            .as_object_mut()
+            .unwrap();
+        saved
+            .get_mut("media")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove("exclusions_verified");
+        std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        assert!(
+            !policy.get(&op.id).unwrap().media.exclusions_verified,
+            "old snapshots cannot prove a fresh exclusion check"
+        );
+        let saved = document["manualTransfers"]["operations"][op.id.as_str()]
+            .as_object_mut()
+            .unwrap();
+        saved.remove("media");
+        saved.remove("resulting_publication");
+        std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        assert_eq!(policy.get(&op.id).unwrap(), op);
     }
     #[test]
     fn unreadable_history_is_retained_and_refused() {
