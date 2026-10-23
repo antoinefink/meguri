@@ -20,10 +20,11 @@ use meguri_storage::{
 use meguri_sync::{
     Endpoint, HostKey, Job, JobOptions, Method, Payload,
     oneway::TransferAccess,
-    policy::{Direction, Phase, Scope},
-    wire::{ServerMeta, decode_meta, encode_meta_request},
+    policy::{Direction, MediaCounters, MediaStage, Phase, Scope},
+    wire::{self, ServerMeta, decode_meta, encode_meta_request},
 };
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{fs, io::Write, net::ToSocketAddrs, path::Path, sync::Arc};
 
 // Error payloads/row values may contain secrets or content. Never Debug-print
@@ -36,6 +37,202 @@ fn json_file(path: &Path) -> Value {
 }
 fn write_json(path: &Path, value: Value) {
     checked(fs::write(path, checked(serde_json::to_vec(&value))));
+}
+const SERVER_MEDIA: &str = "rf4-server.bin";
+const DEVICE_MEDIA: &str = "rf4-device.bin";
+const ZERO_MEDIA: &str = "rf4-zero.bin";
+const MEDIA_NAMES: [&str; 3] = [SERVER_MEDIA, DEVICE_MEDIA, ZERO_MEDIA];
+
+// The controller run ID is the deterministic seed. A repeated invocation gets
+// different bytes under the same logical names, forcing real native downloads.
+fn media_bytes(root: &Path, label: &str, size: usize) -> Vec<u8> {
+    let run = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("controller run identity");
+    (0..size.div_ceil(32))
+        .flat_map(|block| Sha256::digest(format!("RF4:{run}:{label}:{block}").as_bytes()))
+        .take(size)
+        .collect()
+}
+fn sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
+}
+fn media_request(job: &mut Job, method: Method, bytes: Vec<u8>) -> Vec<u8> {
+    rig_common::block_on(async {
+        let response = checked(job.request(method, Payload::Json(bytes)).await);
+        checked(response.bytes().await)
+    })
+}
+fn listed_media(job: &mut Job) -> Vec<String> {
+    checked(wire::decode_begin(&media_request(
+        job,
+        Method::MediaBegin,
+        wire::encode_begin(),
+    )));
+    let mut last = 0;
+    let mut names = Vec::new();
+    for _ in 0..100 {
+        let page = checked(wire::decode_media_changes(&media_request(
+            job,
+            Method::MediaChanges,
+            wire::encode_media_changes(last),
+        )));
+        if page.is_empty() {
+            return names;
+        }
+        for change in page {
+            assert!(change.usn > last, "media listing did not advance");
+            last = change.usn;
+            if !change.sha1.is_empty() {
+                assert!(
+                    MEDIA_NAMES.contains(&change.name.as_str()),
+                    "unexpected rig media; refusing to modify it"
+                );
+                names.push(change.name);
+            }
+        }
+    }
+    panic!("synthetic media listing bound exceeded")
+}
+fn upload_media(job: &mut Job, changes: &[wire::UploadChange<'_>]) {
+    if changes.is_empty() {
+        return;
+    }
+    let bytes = checked(wire::encode_upload_zip(changes));
+    let (accepted, _) = checked(wire::decode_upload_changes(&media_request(
+        job,
+        Method::UploadChanges,
+        bytes,
+    )));
+    assert!(
+        accepted as usize == changes.len(),
+        "synthetic media batch was only partly accepted"
+    );
+}
+fn seed_media(root: &Path, options: &JobOptions) {
+    for (account, label, size) in [(3, "server-c", 4096), (4, "server-d", 8192)] {
+        let credential = key(options, account);
+        let mut job = checked(Job::new(options, Some(credential), &SeededRandom::new(211)));
+        let old = listed_media(&mut job);
+        let removals: Vec<_> = old.iter().map(|name| wire::UploadChange::Delete { name }).collect();
+        // No server database/filesystem access, account reset or non-fixture deletion.
+        upload_media(&mut job, &removals);
+        let bytes = media_bytes(root, label, size);
+        upload_media(
+            &mut job,
+            &[wire::UploadChange::Add {
+                name: SERVER_MEDIA,
+                data: &bytes,
+            }],
+        );
+        assert!(
+            listed_media(&mut job) == [SERVER_MEDIA],
+            "server fixture is not isolated"
+        );
+        drop(job);
+        meguri_sync::transport::runtime::shut_down();
+    }
+    let directory = root.join("device-fixture/collection.media");
+    checked(fs::create_dir_all(&directory));
+    checked(fs::write(
+        directory.join(DEVICE_MEDIA),
+        media_bytes(root, "device", 6144),
+    ));
+    checked(fs::write(directory.join(ZERO_MEDIA), []));
+}
+fn verify_media(root: &Path, options: &JobOptions) -> Value {
+    let native = json_file(&root.join("native-media.json"));
+    let device = media_bytes(root, "device", 6144);
+    let mut stages = Vec::new();
+    for (direction, size) in [("Import", 4096), ("Export", 8192)] {
+        let fact = &native["stages"][direction];
+        let phase: Phase = checked(serde_json::from_value(fact["phase"].clone()));
+        let scope: Scope = checked(serde_json::from_value(fact["scope"].clone()));
+        let stage: MediaStage = checked(serde_json::from_value(fact["media_stage"].clone()));
+        let counters: MediaCounters = checked(serde_json::from_value(fact["counters"].clone()));
+        assert!(
+            phase == Phase::Complete && scope == Scope::CollectionAndMedia && stage == MediaStage::Complete,
+            "native whole selected operation is incomplete"
+        );
+        assert!(
+            fact["collection_complete"] == true
+                && fact["consent_bound"] == true
+                && fact["exclusions_verified"] == true
+                && fact["remote_outcome_unknown"] == (direction == "Import"),
+            "native stage authority/completion facts differ"
+        );
+        let completed = fact["completed_at"].as_i64().expect("whole completion instant missing");
+        let deadline = fact["next_eligible_at"].as_i64().expect("success deadline missing");
+        assert!(
+            deadline - completed == 3_600_000,
+            "success cooldown is not one real hour"
+        );
+        assert!(
+            completed
+                >= json_file(&root.join("seed.json"))["server_time_ms"]
+                    .as_i64()
+                    .expect("seed instant"),
+            "native media receipt predates this run"
+        );
+        assert!(
+            counters.downloaded_files == 1
+                && counters.uploaded_files == 1
+                && counters.bytes_downloaded == size
+                && counters.bytes_uploaded == device.len() as u64
+                && counters.downloaded_deletions == 0
+                && counters.uploaded_deletions == 0
+                && counters.awaiting == 0
+                && counters.oversized.is_empty()
+                && counters.empty == [ZERO_MEDIA],
+            "native media counters/exclusions differ"
+        );
+        stages.push(json!({"direction": direction, "complete": true, "downloaded_files": 1,
+            "uploaded_files": 1, "bytes_downloaded": size, "bytes_uploaded": device.len(),
+            "excluded_empty": [ZERO_MEDIA], "awaiting": 0, "real_hour_cooldown": true,
+            "prior_effects_unknown": direction == "Import"}));
+    }
+    let mut peers = Vec::new();
+    for (index, label, size) in [(3, "server-c", 4096), (4, "server-d", 8192)] {
+        let credential = key(options, index);
+        let mut job = checked(Job::new(options, Some(credential), &SeededRandom::new(212)));
+        let mut names = listed_media(&mut job);
+        names.sort();
+        assert!(
+            names == [DEVICE_MEDIA, SERVER_MEDIA],
+            "peer media membership/exclusion differs"
+        );
+        let staging = checked(tempfile::tempdir_in(root));
+        let bytes = media_request(&mut job, Method::DownloadFiles, wire::encode_download_files(&names));
+        let files = checked(wire::decode_download_zip(&bytes, staging.path()));
+        assert!(files.len() == 2, "peer omitted a synthetic media file");
+        for file in files {
+            let expected = if file.name == SERVER_MEDIA {
+                media_bytes(root, label, size)
+            } else {
+                assert!(file.name == DEVICE_MEDIA, "peer returned an unrequested logical name");
+                device.clone()
+            };
+            let actual = checked(fs::read(file.file.path()));
+            assert!(actual == expected, "actual server media bytes differ");
+            peers.push(json!({"account": if index == 3 { "C" } else { "D" },
+                "name": file.name, "bytes": actual.len(), "sha256": sha256(&actual)}));
+        }
+        drop(job);
+        meguri_sync::transport::runtime::shut_down();
+    }
+    for (name, expected) in [
+        (SERVER_MEDIA, media_bytes(root, "server-d", 8192)),
+        (DEVICE_MEDIA, device),
+        (ZERO_MEDIA, vec![]),
+    ] {
+        assert!(
+            native["files"][name]["bytes"] == expected.len() && native["files"][name]["sha256"] == sha256(&expected),
+            "actual app media bytes differ"
+        );
+    }
+    json!({"complete": true, "native_bytes": true, "server_bytes": true,
+        "typed_stages": stages, "peers": peers, "native_files": native["files"]})
 }
 fn account(index: usize) -> (String, String) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
@@ -227,6 +424,7 @@ fn same_rows(a: &PlainDatabase, b: &PlainDatabase, table: &str, order: &str) {
     assert!(rows_equal(a, b, table, order), "logical cells differ in {table}");
 }
 fn verify(root: &Path, options: &JobOptions) {
+    let media_proof = verify_media(root, options);
     let seed = json_file(&root.join("seed.json"));
     let note_id = NoteId(seed["noteID"].as_i64().expect("generated note identity missing"));
     let card_id = CardId(seed["cardID"].as_i64().expect("generated card identity missing"));
@@ -385,6 +583,7 @@ fn verify(root: &Path, options: &JobOptions) {
             "complete": true, "notes": 1, "cards": 1, "reviews": 1,
             "easy_reviews": 1, "identity_content": true, "scheduling": true,
             "all_logical_cells": true, "declared_download_transforms": true,
+            "media": media_proof,
             "download_transforms": [
                 "O7.4: observed download time becomes col.mod",
                 "O7.4: the server advances col.usn by exactly one",
@@ -472,11 +671,13 @@ fn rig_manual_transfer_data() {
             meguri_sync::transport::runtime::shut_down();
             let identity = seed_one(&root.join("seed-a"), &transport, &endpoint, 3, instant);
             seed_one(&root.join("seed-b"), &transport, &endpoint, 4, instant);
+            seed_media(root, &transport);
             let proof = json!({
                 "notes": 1, "cards": 1, "reviews": 0, "deckID": 1,
                 "noteID": identity["noteID"], "cardID": identity["cardID"],
                 "server_time_ms": instant, "distinct_accounts": account(3).0 != account(4).0,
                 "empty_nondefault_b": true,
+                "media_seeded": true, "media_names": MEDIA_NAMES,
             });
             write_json(&root.join("seed.json"), proof);
         }

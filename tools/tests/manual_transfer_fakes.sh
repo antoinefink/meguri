@@ -29,7 +29,35 @@ mg_mac_ui_begin() {
   MG_MAC_RUNNER=vm
   MG_MAC_VMS="$(jq -nc --arg ssh "$FX_WRAPPER" '[{name:"dedicated",ssh:$ssh}]')"
 }
-mg_mt_prepare_data() { printf 'seed\n' >>"$FX_EVENTS"; MG_MT_HOST_PORT=19090; }
+mg_mt_prepare_data() {
+  printf 'seed\n' >>"$FX_EVENTS"
+  MG_MT_HOST_PORT=19090
+  mkdir -p "$MG_RUN_DIR/device-fixture/collection.media"
+}
+# Controller-order doubles only. Real request counts come exclusively from
+# manual-transfer-wire.py; its socket tests never derive counts from UI state.
+mg_mt_start_wire() {
+  printf 'start-wire\n' >>"$FX_EVENTS"
+  MG_MT_OBSERVER_PORT=19090
+  MG_MT_WIRE_CONFIG='{"port":19090,"token":"0000000000000000000000000000000000000000000000000000000000000000"}'
+}
+mg_mt_wire_proof() {
+  printf 'wire-proof\n' >>"$FX_EVENTS"
+  if [ "${FX_WIRE_FAIL:-0}" = 1 ]; then
+    mg_mt_error wire-proof "contract double: missing native wire proof" fail
+    return 1
+  fi
+}
+mg_mac_vm_copy_in() {
+  local input destination
+  printf 'stage-media\n' >>"$FX_EVENTS"
+  [ "${FX_MEDIA_STAGE_FAIL:-0}" = 0 ] || return 1
+  for input in "$@"; do
+    destination="${input/"$MG_ROOT"/"$FX_VM"}"
+    mkdir -p "$(dirname "$destination")"
+    cp -R "$input" "$destination"
+  done
+}
 mg_app_build() { printf 'build %s\n' "$*" >>"$FX_EVENTS"; }
 mg_mac_vm_take() {
   printf 'lease\n' >>"$FX_EVENTS"
@@ -58,6 +86,7 @@ mg_mac_vm_ssh_in() {
 mg_sim_lease() { printf 'sim-lease %s\n' "$*" >>"$FX_EVENTS"; MG_SIM_UDID=fake-udid; }
 mg_sim_check_runtime() { :; }
 mg_sim_prepare() { :; }
+mg_mt_set_native_support() { MG_MT_SUPPORT="$FX_VM/native-support"; }
 mg_app_xcodebuild_test() {
   local selection='-only-testing:MeguriUITests/ManualTransferJourneyTests/testDistinctAccountRoundTripPreservesImportCooldownAfterRestart'
   [ "$#" -eq 5 ] && [ "$5" = "$selection" ] || return 2
@@ -82,9 +111,10 @@ xcrun() {
 mg_mt_copy_export() { printf 'capture\n' >>"$FX_EVENTS"; }
 mg_mt_child() {
   printf 'peer\n' >>"$FX_EVENTS"
-  jq -nc --argjson cells "${FX_PEER_MATCH:-true}" '{complete:true,notes:1,cards:1,reviews:1,
+  jq -nc --argjson cells "${FX_PEER_MATCH:-true}" --argjson media "${FX_MEDIA_MATCH:-true}" '{complete:true,notes:1,cards:1,reviews:1,
     easy_reviews:1,identity_content:true,scheduling:true,all_logical_cells:$cells,
-    declared_download_transforms:true}' >"$MG_RUN_DIR/peer-proof.json"
+    declared_download_transforms:true,media:{complete:$media,native_bytes:$media,server_bytes:$media,
+      typed_stages:[{},{}],peers:[{},{},{},{}]}}' >"$MG_RUN_DIR/peer-proof.json"
 }
 mg_queued_settle() { :; }
 
@@ -99,7 +129,9 @@ case "${1:-}" in
     MG_MT_VM_PORT=18765
     MG_MT_HOST_PORT=19090
     MG_MT_MANIFEST="$MG_ROOT/app/Fixtures/ManualTransfer/controlled-rig.json"
+    MG_MT_SUPPORT="$FX_VM/native-support"
     mg_on_exit mg_mt_cleanup
+    mg_mt_start_wire
     if [ "$operation" = forward ]; then
       mg_mt_open_forward
     else

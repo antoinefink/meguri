@@ -4,6 +4,39 @@ MG_MT_MANIFEST=""
 MG_MT_ROUTE_FD=""
 MG_MT_CLEANED=""
 MG_MT_ROUTE_VERIFIED=""
+MG_MT_WIRE_PID=""
+MG_MT_WIRE_CONFIG=""
+MG_MT_WIRE_FD=""
+
+mg_mt_start_wire() {
+  # Start only after owned-rig validation and under the VM lease. The ephemeral
+  # bind and capability travel through private FIFOs and memory, never artifacts.
+  mvl_lease_held "$MG_LEASE_DIR" || return 1
+  mkfifo "$MG_RUN_DIR/wire-input.fifo" "$MG_RUN_DIR/wire-ready.fifo" || return 1
+  exec 9<>"$MG_RUN_DIR/wire-input.fifo"
+  exec 7<>"$MG_RUN_DIR/wire-ready.fifo"
+  MG_MT_WIRE_FD=1
+  python3 "$MG_TOOLS/scripts/manual-transfer-wire.py" "$MG_MT_HOST_PORT" \
+    <"$MG_RUN_DIR/wire-input.fifo" 9>&- 7>&- \
+    >"$MG_RUN_DIR/wire-ready.fifo" 2>/dev/null &
+  MG_MT_WIRE_PID=$!
+  if ! IFS= read -r -t 10 MG_MT_WIRE_CONFIG <&7; then
+    exec 7>&-
+    mg_mt_error wire-start "controlled observer did not become ready within ten seconds"
+    return 1
+  fi
+  exec 7>&-
+  MG_MT_OBSERVER_PORT="$(printf '%s' "$MG_MT_WIRE_CONFIG" | python3 "$MG_TOOLS/scripts/manual-transfer-config.py" wire-port)" || return 1
+}
+
+mg_mt_wire_proof() {
+  if ! printf '%s' "$MG_MT_WIRE_CONFIG" | python3 "$MG_TOOLS/scripts/manual-transfer-config.py" wire-proof \
+      >"$MG_RUN_DIR/wire-proof.json"; then
+    mg_mt_error wire-proof "observed request counts, cancellation or media-only resume were not proven" fail
+    return 1
+  fi
+  mg_artifact wire-proof "$MG_RUN_DIR/wire-proof.json" "observed protocol aggregates at native consent/cancel/restart/resume boundaries"
+}
 
 mg_mt_open_forward() {
   local wrapper lifetime waited=0
@@ -36,8 +69,8 @@ reader=$!
 wait "$reader"' manual-transfer-forward "$MG_MT_MANIFEST")"
   "$wrapper" -o BatchMode=yes -o ConnectTimeout=10 -o ExitOnForwardFailure=yes \
     -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
-    -R "127.0.0.1:$MG_MT_VM_PORT:127.0.0.1:$MG_MT_HOST_PORT" "$lifetime" \
-    <"$MG_RUN_DIR/route.fifo" 8>&- >"$MG_RUN_DIR/route.log" 2>&1 &
+    -R "127.0.0.1:$MG_MT_VM_PORT:127.0.0.1:$MG_MT_OBSERVER_PORT" "$lifetime" \
+    <"$MG_RUN_DIR/route.fifo" 8>&- 9>&- >"$MG_RUN_DIR/route.log" 2>&1 &
   MG_MT_ROUTE_PID=$!
   while [ "$waited" -lt 10 ]; do
     grep -qx mg-transfer-forward-ready "$MG_RUN_DIR/route.log" && break
@@ -57,7 +90,7 @@ wait "$reader"' manual-transfer-forward "$MG_MT_MANIFEST")"
   fi
   MG_MT_ROUTE_VERIFIED=1
   mg_detail native_transfer_route "$(jq -nc --argjson host_port "$MG_MT_HOST_PORT" \
-    '{kind: "attested-wrapper-ssh-reverse-forward", workstation_loopback_port: $host_port,
+    '{kind: "attested-wrapper-ssh-reverse-forward-with-fixture-observer", workstation_loopback_port: $host_port,
       vm_loopback_port: 18765, http_probe: true, listener_loopback_only: true}')"
 }
 
@@ -86,6 +119,23 @@ mg_mt_cleanup() {
   if [ -n "$MG_MT_ROUTE_VERIFIED" ]; then
     mg_mac_vm_ssh "test ! -e $(mvl_q "$MG_MT_MANIFEST") && ! /usr/sbin/lsof -nP -iTCP:$MG_MT_VM_PORT -sTCP:LISTEN -Fn" >/dev/null 2>&1 || errors=1
   fi
+  if [ -n "$MG_MT_WIRE_FD" ]; then
+    exec 9>&-
+    MG_MT_WIRE_FD=""
+  fi
+  if [ -n "$MG_MT_WIRE_PID" ]; then
+    kill -TERM "$MG_MT_WIRE_PID" 2>/dev/null || true
+    waited=0
+    while kill -0 "$MG_MT_WIRE_PID" 2>/dev/null && [ "$waited" -lt 3 ]; do
+      mg_sleep 1
+      waited=$((waited + 1))
+    done
+    kill -KILL "$MG_MT_WIRE_PID" 2>/dev/null || true
+    wait "$MG_MT_WIRE_PID" 2>/dev/null || true
+    MG_MT_WIRE_PID=""
+  fi
+  MG_MT_WIRE_CONFIG=""
+  rm -f "$MG_RUN_DIR/wire-input.fifo" "$MG_RUN_DIR/wire-ready.fifo"
   rm -f "$MG_RUN_DIR/route.fifo" "$MG_RUN_DIR/route.log"
   if [ "$errors" -ne 0 ]; then
     mg_mt_error cleanup "VM teardown is unconfirmed; the manifest watchdog expires at thirty minutes and the next VM fixture copy replaces it"

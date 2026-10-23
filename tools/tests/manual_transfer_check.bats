@@ -54,8 +54,8 @@ from pathlib import Path
 import sys
 events = Path(sys.argv[1]).read_text().splitlines()
 sequence = (
-    "seed", "build mac Debug", "lease", "reverse-forward-loopback-only",
-    "loopback-probe", "stage-manifest", "test mac", "capture", "peer",
+    "seed", "build mac Debug", "lease", "start-wire", "reverse-forward-loopback-only",
+    "loopback-probe", "stage-media", "stage-manifest", "test mac", "wire-proof", "capture", "peer",
     "native_transfer_cleanup true", "release",
 )
 positions = [events.index(event) for event in sequence]
@@ -174,6 +174,93 @@ PY
   grep -qx 'failure manual-transfer/peer-proof' "$FX_EVENTS"
   ! grep -qx 'native_transfer_complete true' "$FX_EVENTS"
   [ ! -e "$(guest_manifest)" ]
+}
+
+@test "manual transfer: collection-only peer success cannot supply media evidence" {
+  export FX_MEDIA_MATCH=false
+  run invoke_fake check --platform mac
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = fail ]
+  grep -qx 'failure manual-transfer/peer-proof' "$FX_EVENTS"
+  ! grep -qx 'native_transfer_complete true' "$FX_EVENTS"
+  [ ! -e "$FX_VM/build/mg/manual-transfer-check/fake-run/device-fixture" ]
+  [ ! -e "$FX_VM/build/mg/manual-transfer-check/fake-run/media-proof-config.py" ]
+}
+
+@test "manual transfer: failed device fixture copy prevents native work and cleans inputs" {
+  export FX_MEDIA_STAGE_FAIL=1
+  run invoke_fake check --platform ipad
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = error ]
+  ! grep -q '^test ' "$FX_EVENTS"
+  ! grep -qx peer "$FX_EVENTS"
+  [ ! -e "$(guest_manifest)" ]
+  [ ! -e "$FX_ROOT/build/mg/manual-transfer-check/fake-run/device-fixture" ]
+}
+
+@test "manual transfer: manifest names the generated fixture without installing a collection" {
+  run bash -c 'printf '\''{"port":19090,"token":"0000000000000000000000000000000000000000000000000000000000000000"}'\'' | python3 "$1/tools/scripts/manual-transfer-config.py" manifest "$2/docker/syncserver.env.example" 18765 "$2/build/mg/manual-transfer-check/fake-run/device-fixture" "$3/native-support"' _ "$FX_REPO" "$FX_ROOT" "$FX_VM"
+  [ "$status" -eq 0 ]
+  # Do not echo the manifest or assert on its credential values.
+  python3 -c 'import json,sys; assert json.load(sys.stdin)["fixturePath"].endswith("/fake-run/device-fixture")' <<<"$output"
+}
+
+@test "manual transfer: wire evidence failure cannot pass on native text or peer bytes" {
+  export FX_WIRE_FAIL=1
+  run invoke_fake check --platform mac
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = fail ]
+  ! grep -qx peer "$FX_EVENTS"
+  ! grep -qx 'native_transfer_complete true' "$FX_EVENTS"
+  [ ! -e "$(guest_manifest)" ]
+}
+
+@test "manual transfer: real socket observer enforces consent counts gate and bounded teardown" {
+  run python3 "$FX_REPO/tools/tests/manual_transfer_wire_test.py"
+  [ "$status" -eq 0 ]
+}
+
+@test "manual transfer: missing native media evidence fails without exposing input" {
+  mkdir -p "$FX_ROOT/native/ManualTransfers"
+  printf '%s' '{"private":"never-print-this"}' >"$FX_ROOT/native/ManualTransfers/manual-transfers.json"
+  run python3 "$FX_REPO/tools/scripts/manual-transfer-config.py" native-proof "$FX_ROOT/native"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *never-print-this* ]]
+}
+
+@test "manual transfer: native reducer emits only media aggregates and fixed logical IDs" {
+  python3 - "$FX_ROOT/native" <<'PY'
+import json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+(root / "ManualTransfers").mkdir(parents=True)
+(root / "Collection/collection.media").mkdir(parents=True)
+for name in ("rf4-server.bin", "rf4-device.bin", "rf4-zero.bin"):
+    (root / "Collection/collection.media" / name).write_bytes(b"" if name.endswith("zero.bin") else b"synthetic")
+counters = dict(uploaded_files=1, uploaded_deletions=0, downloaded_files=1,
+                downloaded_deletions=0, checked=3, bytes_downloaded=9,
+                bytes_uploaded=9, awaiting=0, resynced=False,
+                empty=["rf4-zero.bin"], oversized=[])
+operations = {}
+for direction in ("Import", "Export"):
+    operations[direction] = dict(direction=direction, prepared_at=10, revision=5,
+        account="opaque-account-do-not-export", configured_endpoint="http://reserved.invalid/",
+        actual_generation=2, phase="Complete", scope="CollectionAndMedia",
+        collection_complete=True, receipt=dict(completed_at=20, next_eligible_at=3600020),
+        media=dict(stage="Complete", exclusions_verified=True, remote_outcome_unknown=False,
+            counters=counters, consent=dict(generation=2, categories=1,
+                account="opaque-account-do-not-export", configured_endpoint="http://reserved.invalid/")))
+(root / "ManualTransfers/manual-transfers.json").write_text(json.dumps(dict(manualTransfers=dict(operations=operations))))
+PY
+  run python3 "$FX_REPO/tools/scripts/manual-transfer-config.py" native-proof "$FX_ROOT/native"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *opaque-account-do-not-export* ]]
+  [[ "$output" != *reserved.invalid* ]]
+  python3 -c 'import json,sys; p=json.load(sys.stdin); assert set(p)=={"stages","files"}; assert all(s["consent_bound"] for s in p["stages"].values()); assert p["files"]["rf4-zero.bin"]["bytes"]==0' <<<"$output"
+  rm "$FX_ROOT/native/Collection/collection.media/rf4-device.bin"
+  run python3 "$FX_REPO/tools/scripts/manual-transfer-config.py" native-proof "$FX_ROOT/native"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *opaque-account-do-not-export* ]]
 }
 
 @test "manual transfer: cancellation cleans VM inputs before returning its lease" {
