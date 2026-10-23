@@ -38,7 +38,8 @@ final class StagedCollectionExportDestination: Sendable {
     init(publication: any CollectionExportPublication = FoundationCollectionExportPublication()) {
         self.publication = publication
     }
-    func save(to destination: URL, operation: CollectionExportOperation,
+    func save(to destination: URL, operation: any CollectionExportCancellationChecking,
+              beforePublication: @escaping @Sendable () async -> Void = {},
               stage: @escaping @Sendable (URL) async throws -> Void) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
             queue.async { [publication] in
@@ -70,7 +71,11 @@ final class StagedCollectionExportDestination: Sendable {
                     let finished = DispatchSemaphore(value: 0)
                     Task {
                         defer { finished.signal() }
-                        do { try await stage(staged); result.value.withLock { $0 = .success(()) } }
+                        do {
+                            try await stage(staged)
+                            await beforePublication()
+                            result.value.withLock { $0 = .success(()) }
+                        }
                         catch { result.value.withLock { $0 = .failure(error) } }
                     }
                     finished.wait() // Actual worker completion, including cancellation/draining.

@@ -568,6 +568,20 @@ fn rf4_known_ok_recovery_after_restart_activates_retained_digest_without_uploadi
     let op = host.manual_transfer_history().active().unwrap().unwrap();
     assert_eq!(op.acceptance, Acceptance::ExactOk);
     host.close().unwrap();
+    let restarted = CoreHost::open(config.clone()).unwrap();
+    settle(&restarted);
+    let events = restarted.engine().stream().subscribe();
+    let task = restarted.prepare_manual_transfer_recovery(op.id.clone()).unwrap();
+    let preview = complete(events, task).unwrap();
+    assert_eq!(preview.operation.phase, Phase::Preview);
+    for interrupted in [false, true] {
+        assert!(restarted.cancel_prepared_manual_transfer(&op.id, interrupted).is_err());
+        let retained = restarted.manual_transfer_history().active().unwrap().unwrap();
+        assert_eq!(retained.id, op.id);
+        assert_eq!(retained.acceptance, Acceptance::ExactOk);
+        assert_eq!(retained.phase, Phase::Preview);
+    }
+    restarted.close().unwrap();
     let restarted = CoreHost::open(config).unwrap();
     settle(&restarted);
     let events = restarted.engine().stream().subscribe();
@@ -891,6 +905,25 @@ fn rf4_absent_import_recovers_after_durable_intent_with_fresh_confirmation() {
     assert_eq!(preview.operation.candidate, interrupted.candidate);
     assert_eq!(preview.operation.activation_identity, interrupted.activation_identity);
     assert_eq!(digest(&candidate), expected);
+    assert_eq!(preview.operation.phase, Phase::Preview);
+    for background in [false, true] {
+        assert!(
+            host.cancel_prepared_manual_transfer(&interrupted.id, background)
+                .is_err()
+        );
+        let retained = host.manual_transfer_history().active().unwrap().unwrap();
+        assert_eq!(retained.activation_identity, interrupted.activation_identity);
+        assert_eq!(retained.phase, Phase::Preview);
+    }
+    host.close().unwrap();
+    drop(host);
+    drop(process);
+    let process = ProcessCore::new(options.engine.clone()).unwrap();
+    let host = process.open_for_manual_import(options.clone()).unwrap();
+    let events = host.engine().stream().subscribe();
+    let task = host.prepare_manual_transfer_recovery(interrupted.id.clone()).unwrap();
+    let preview = complete(events, task).unwrap();
+    assert_eq!(preview.operation.activation_identity, interrupted.activation_identity);
     let events = host.engine().stream().subscribe();
     let task = host
         .confirm_manual_transfer(
@@ -1184,4 +1217,39 @@ fn rf4_low_space_preflight_refuses_before_any_request() {
     ));
     assert!(no_requests.calls.lock().unwrap().is_empty());
     host.close().unwrap();
+}
+
+#[test]
+fn rf4_preparation_job_retains_its_policy_identity_after_cancellation() {
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config) = seeded(&root.path().join("local"));
+    let script = Script::new(vec![(Method::Meta, Reply::Cancelled)]);
+    let events = host.engine().stream().subscribe();
+    let task = host
+        .prepare_manual_transfer(
+            access(&script, "Synthetic User", "key"),
+            Direction::Import,
+            Scope::CollectionOnly,
+        )
+        .unwrap();
+    loop {
+        let event = events.recv().unwrap();
+        if matches!(event.kind, EventKind::JobFinished { id, .. } if id == task.job.id) {
+            break;
+        }
+    }
+    assert!(matches!(task.take_result(), Some(Err(TransferError::Cancelled))));
+    let id = task.operation_id().expect("policy admission belongs to this worker");
+    assert_eq!(task.operation_id(), Some(id.clone()));
+    host.close().unwrap();
+    let restarted = CoreHost::open(config).unwrap();
+    let history = restarted.manual_transfer_history().history().unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].id, id);
+    assert_eq!(history[0].phase, Phase::Cancelled);
+    assert_eq!(history[0].acceptance, Acceptance::NotSent);
+    assert!(restarted.manual_transfer_history().active().unwrap().is_none());
+    script.assert_done();
+    restarted.close().unwrap();
 }

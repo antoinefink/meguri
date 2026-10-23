@@ -401,10 +401,23 @@ impl ManualTransfers {
     pub fn prepare(
         &self,
         slot: &SlotGuard,
+        access: TransferAccess,
+        direction: Direction,
+        scope: Scope,
+        progress: &ProgressSink,
+    ) -> Result<Preview> {
+        self.prepare_identified(slot, access, direction, scope, progress, |_| {})
+    }
+    /// Reports only the id committed by policy admission. This Rust-only sink
+    /// runs after policy storage releases its lock and before requests start.
+    pub fn prepare_identified(
+        &self,
+        slot: &SlotGuard,
         mut access: TransferAccess,
         direction: Direction,
         scope: Scope,
         progress: &ProgressSink,
+        identify: impl FnOnce(&OperationId),
     ) -> Result<Preview> {
         let _flight = Flight::acquire()?;
         self.eligibility(slot, direction)?;
@@ -442,6 +455,7 @@ impl ManualTransfers {
             revision: 0,
         };
         let mut op = self.policy.begin(operation, self.inputs.random.next_u64(), now)?;
+        identify(&op.id);
         let outcome = (|| {
             files::directory(&self.owned(&op)?)?;
             self.cancel_media_jobs(&cancel)?;

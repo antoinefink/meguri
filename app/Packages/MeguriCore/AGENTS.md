@@ -12,3 +12,7 @@
 - Tests call test-only exports (Rust `test-hooks`) through `import MeguriCoreBindings`, so they compile only against Debug or Profile bindings. The event listener is process-wide: tests that replace it belong in the serialized `EventTests` suite and go through `withRawListener`, which restores `CoreEventStream`.
 
 - NSSavePanel grants the selected file, not its parent. Export uses Foundation item-replacement staging on that volume; Rust must validate the final destination as well as staging. Retain coordination and scope through native publication; preserve recovery files on uncertain replacement.
+
+- Manual transfer results are inspected only after the matching job drains. An activated typed failure outranks cancellation. Passwords are transient; only the device-only Keychain stores login labels/keys. Native cancellation-cause preferences contain backend operation ids and enum values only; they never change backend acceptance/recovery/cooldown.
+
+- Preparation cancellation uses the drained job’s policy id, never history differencing. Recovery Preview can retain activation/acceptance evidence; closing its native view does not cancel that operation. Publication checks the manual operation’s own cancellation state.

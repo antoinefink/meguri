@@ -92,6 +92,7 @@ fn location(root: &Path) -> CollectionLocation {
     std::fs::create_dir_all(&collection).unwrap();
     std::fs::create_dir_all(&backups).unwrap();
     CollectionLocation {
+        manual_transfer_directory: root.join("ManualTransfers").to_string_lossy().into_owned(),
         collection_directory: collection.to_str().unwrap().into(),
         backups_directory: backups.to_str().unwrap().into(),
         app_group_snapshot: root.join("widget.snapshot").to_str().unwrap().into(),

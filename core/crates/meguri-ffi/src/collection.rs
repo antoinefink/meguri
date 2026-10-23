@@ -18,6 +18,7 @@ pub struct CollectionLocation {
     pub collection_directory: String,
     pub backups_directory: String,
     pub app_group_snapshot: String,
+    pub manual_transfer_directory: String,
 }
 
 /// Trusted bounded synchronous platform values only; no core reentry, UI or async
@@ -83,7 +84,8 @@ pub fn start_open(
 ) -> Result<JobHandle, CoreError> {
     callback::enter("start_open");
     let reservation = runtime::reserve_open()?;
-    let config = HostConfig::new(
+    let manual_transfer_directory = location.manual_transfer_directory.clone();
+    let mut config = HostConfig::new(
         location.collection_directory.into(),
         location.backups_directory.into(),
         location.app_group_snapshot.into(),
@@ -91,6 +93,7 @@ pub fn start_open(
         Arc::new(SeededRandom::new(random_seed)),
         Arc::new(ForeignSpace(disk_space)),
     );
+    config.manual_transfer_directory = manual_transfer_directory.into();
     jobs::start("open collection", runtime::engine()?.generation().0, move |job| {
         job.cancel.check()?;
         reservation.open(config)?;

@@ -300,8 +300,25 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let startCollectionExportSave = BridgeCall("start_collection_export_save")
     public static let collectionExportSaveResultOutcome = BridgeCall("CollectionExportSaveResult.outcome")
 
+    public static let normalizeManualEndpoint = BridgeCall("normalize_manual_endpoint")
+    public static let manualTransferSessionNew = BridgeCall("ManualTransferSession.new")
+    public static let manualTransferSessionStartSetup = BridgeCall("ManualTransferSession.start_setup")
+    public static let manualTransferSessionStartLogin = BridgeCall("ManualTransferSession.start_login")
+    public static let manualTransferSessionStartHistory = BridgeCall("ManualTransferSession.start_history")
+    public static let manualTransferSessionStartPrepare = BridgeCall("ManualTransferSession.start_prepare")
+    public static let manualTransferSessionStartConfirm = BridgeCall("ManualTransferSession.start_confirm")
+    public static let manualTransferSessionStartRecoveryPreview = BridgeCall("ManualTransferSession.start_recovery_preview")
+    public static let manualTransferSessionStartCancelHistory = BridgeCall("ManualTransferSession.start_cancel_history")
+    public static let manualTransferSessionStartCancelPreview = BridgeCall("ManualTransferSession.start_cancel_preview")
+    public static let manualTransferSessionStartSaveCopy = BridgeCall("ManualTransferSession.start_save_copy")
+    public static let manualTransferResultOperationID = BridgeCall("ManualTransferResult.operation_id")
+    public static let manualTransferResultOutcome = BridgeCall("ManualTransferResult.outcome")
+    public static let manualTransferPreviewRecord = BridgeCall("ManualTransferPreview.record")
+    public static let manualTransferHistoryEntryRecord = BridgeCall("ManualTransferHistoryEntry.record")
+
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
+        normalizeManualEndpoint, manualTransferSessionNew, manualTransferSessionStartSetup, manualTransferSessionStartLogin, manualTransferSessionStartHistory, manualTransferSessionStartPrepare, manualTransferSessionStartConfirm, manualTransferSessionStartRecoveryPreview, manualTransferSessionStartCancelHistory, manualTransferSessionStartCancelPreview, manualTransferSessionStartSaveCopy, manualTransferResultOutcome, manualTransferResultOperationID, manualTransferPreviewRecord, manualTransferHistoryEntryRecord,
         startCollectionExport, collectionExportResultOutcome, collectionExportArtifactMetadata, collectionExportArtifactAcquire, collectionExportArtifactDiscard, collectionExportLeasePath, collectionExportLeaseFinish, startCollectionExportSave, collectionExportSaveResultOutcome,
         startCollectionInspection, collectionInspectResultOutcome, collectionInspectionFacts, collectionInspectionDiscard, startCollectionActivation, collectionActivationResultOutcome, jobProgressSetListener,
         startOpen, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, deckStudyState, deckDescriptionHtml,

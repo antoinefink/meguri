@@ -103,6 +103,12 @@ impl OpenReservation {
         self.pending = false;
         completed.outcome
     }
+    pub(crate) fn open_manual(mut self, config: meguri_host::HostConfig) -> Result<(), CoreError> {
+        let host = Arc::new(self.runtime.process.open_for_manual_import(config)?);
+        *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host);
+        self.pending = false;
+        Ok(())
+    }
     pub(crate) fn open(mut self, config: meguri_host::HostConfig) -> Result<(), CoreError> {
         let host = Arc::new(self.runtime.process.open(config)?);
         // No fallible call between receiving the host and retaining it.

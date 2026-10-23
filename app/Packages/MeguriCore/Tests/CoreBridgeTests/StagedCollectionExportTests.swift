@@ -210,3 +210,55 @@ private final class RedirectedExportAccess: CollectionExportDestinationAccess {
         #expect(try String(contentsOf: destination, encoding: .utf8) == "original")
     }
 }
+
+extension StagedCollectionExportTests {
+    @Test(arguments: [ManualTransferCancellation.user, .system])
+    func retainedCopyCancellationAfterStagingPreventsPublication(cause: ManualTransferCancellation) async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("retained-copy.colpkg")
+        try "original".write(to: target, atomically: false, encoding: .utf8)
+        let operation = ManualTransferOperation()
+        let witness = StagedExportWitness()
+        let publication = StagedCollectionExportDestination(publication: ExportPublicationHook { _, _, _ in
+            witness.calls.withLock { $0 += 1 }
+            Issue.record("A cancelled retained copy reached publication")
+        })
+        do {
+            try await CoordinatedExportDestination().withDestination(target) { actual in
+                try await publication.save(to: actual, operation: operation, beforePublication: {
+                    // This seam runs after the stage closure succeeds and before
+                    // publication's last cancellation check. No delay or polling.
+                    await operation.cancel(cause)
+                    await operation.cancel(cause == .user ? .system : .user)
+                }) { staged in
+                    witness.url.withLock { $0 = staged }
+                    try "fully staged copy".write(to: staged, atomically: false, encoding: .utf8)
+                }
+            }
+            Issue.record("Expected cancellation before publishing the retained copy")
+        } catch { #expect(error as? BridgeError == .cancelled) }
+        #expect(operation.cancellation == cause)
+        #expect(witness.calls.withLock { $0 } == 0)
+        #expect(try String(contentsOf: target, encoding: .utf8) == "original")
+        let staged = try #require(witness.url.withLock { $0 })
+        #expect(!FileManager.default.fileExists(atPath: staged.deletingLastPathComponent().path))
+    }
+    @Test func retainedCopyActualPublicationWinsSystemCancellation() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("retained-copy.colpkg")
+        let operation = ManualTransferOperation()
+        let publication = StagedCollectionExportDestination(publication: ExportPublicationHook { staged, target, replacing in
+            try FoundationCollectionExportPublication().publish(staged, to: target, replacing: replacing)
+            let done = DispatchSemaphore(value: 0)
+            Task { await operation.cancel(.system); done.signal() }
+            done.wait()
+        })
+        try await publication.save(to: target, operation: operation) { staged in
+            try "published copy".write(to: staged, atomically: false, encoding: .utf8)
+        }
+        #expect(operation.cancellation == .system)
+        #expect(try String(contentsOf: target, encoding: .utf8) == "published copy")
+    }
+}

@@ -412,7 +412,7 @@ fn prepare_export(
     }
     Ok(artifact)
 }
-fn digest(path: &Path, cancel: &CancelToken) -> Result<(u64, [u8; 32]), EngineError> {
+pub(crate) fn digest(path: &Path, cancel: &CancelToken) -> Result<(u64, [u8; 32]), EngineError> {
     let mut file = File::open(path).map_err(core)?;
     let mut hash = Sha256::new();
     let mut length = 0;
@@ -428,12 +428,12 @@ fn digest(path: &Path, cancel: &CancelToken) -> Result<(u64, [u8; 32]), EngineEr
     }
     Ok((length, hash.finalize().into()))
 }
-fn resolved(path: &Path) -> Option<PathBuf> {
+pub(crate) fn resolved(path: &Path) -> Option<PathBuf> {
     path.canonicalize()
         .ok()
         .or_else(|| Some(path.parent()?.canonicalize().ok()?.join(path.file_name()?)))
 }
-fn alias(a: &Path, b: &Path) -> bool {
+pub(crate) fn alias(a: &Path, b: &Path) -> bool {
     resolved(a).zip(resolved(b)).is_some_and(|(a, b)| a == b)
         || fs::metadata(a)
             .ok()
@@ -531,7 +531,7 @@ pub fn start_collection_export_save(
     })
 }
 /// All app-controlled destination writes pass through this bounded loop.
-fn copy_bounded(
+pub(crate) fn copy_bounded(
     source: &mut impl Read,
     destination: &mut impl Write,
     expected: u64,

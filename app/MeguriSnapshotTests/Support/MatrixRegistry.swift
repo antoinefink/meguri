@@ -58,6 +58,7 @@ struct SnapshotCase: Sendable, CustomTestStringConvertible {
 @MainActor
 enum MatrixRegistry {
     static let screens: [ScreenRegistration] = [
+        ScreenRegistration(type: ManualTransferSettingsPreview.self) { _, _ in .pairwise },
         ScreenRegistration(type: HomeDeckListPreview.self) { _, _ in .keyVariants },
         ScreenRegistration(type: CollectionExportPreview.self) { _, state in
             [.typical, .error, .loading].contains(state) ? .pairwise : nil

@@ -71,7 +71,10 @@ public final class CollectionExportReadLease: Sendable {
         try await job.value()
     }
 }
-public final class CollectionExportOperation: Sendable {
+protocol CollectionExportCancellationChecking: Sendable {
+    func check() throws(BridgeError)
+}
+public final class CollectionExportOperation: Sendable, CollectionExportCancellationChecking {
     private struct State { var cancelled = false; var job: CoreJob? }
     private let state = Mutex(State())
     public init() {}

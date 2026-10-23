@@ -8,6 +8,10 @@ import SwiftUI
 extension TestHooks {
     enum CollectionEntryRoutes {
         static func register(in registry: inout RouteRegistry) {
+            registry.register("settings/anki-transfer/empty") { _ in .screen { ManualTransferSettingsPreview.preview(.empty) } }
+            registry.register("settings/anki-transfer/typical") { _ in .screen { ManualTransferSettingsPreview.preview(.typical) } }
+            registry.register("settings/anki-transfer/error") { _ in .screen { ManualTransferSettingsPreview.preview(.error) } }
+            registry.register("settings/anki-transfer/loading") { _ in .screen { ManualTransferSettingsPreview.preview(.loading) } }
             registry.register("settings/import-export/typical") { _ in .sheet { CollectionExportPreview.preview(.typical) } }
             registry.register("settings/import-export/error") { _ in .sheet { CollectionExportPreview.preview(.error) } }
             registry.register("settings/import-export/loading") { _ in .sheet { CollectionExportPreview.preview(.loading) } }

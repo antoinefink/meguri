@@ -174,9 +174,76 @@ Final similarity `20261023T112453Z-29141` passed.
 
 Native adapter and Settings work starts from backend checkpoint `638d3580`.
 Implementer session: `s-20261023T112525Z-07a57d21`. It will run in isolation;
-master stays fixed for the full integration gate from original base
-`81c207573c20c337c8834e4ae8b4ee8f29603dbf`. The native patch must not be applied
-until that gate has ended and its failures have been resolved.
+master stays fixed during the integration run from original base
+`81c207573c20c337c8834e4ae8b4ee8f29603dbf`. Native source remains separate
+until that run ends.
+
+## Native source and integration checks
+
+Native implementer run `20261023T112606Z-32521` exported the adapter and Settings
+source. First review found four issues: recovery was unreachable after restart
+from a saved preview; final confirmation omitted required facts; cancellation
+did not reach copy publication; history failure could lose cancellation cause.
+Fixer `s-20261023T111328Z-4f11cfe5`, run `20261023T115706Z-80125`, repairs them
+and adds regression sources. Round 2 found no new P0–P2 issues. The owning host
+task now retains its actual admitted operation id before network requests.
+
+Run `20261023T121314Z-6686` prepares this UI test. It has not run.
+
+| Part | Intended check |
+| --- | --- |
+| Clock | System time |
+| Import | Account A supplies the collection |
+| Review | Save an answer and restart |
+| Account A | Refuse another transfer before the stored deadline |
+| Export | Account B receives the reviewed collection |
+
+This case supplies no native result for A after the deadline. Round 3 source
+review found no new P0–P1 issues.
+
+Run `20261023T122515Z-21750` rewrites full sections without changing behavior.
+Round 4 found no new P0–P1 source issues.
+
+The privacy token cache dated October 19 was refreshed through the documented
+job `20261023T122112Z-15765` against clean committed `891e6701`. All native
+source remained outside HEAD. No scanner or exception changed; root read only
+counts and results. Remaining wording failures were repaired. The integrator
+replaced one complete README paragraph; scan `20261023T123323Z-27815` passed.
+Earlier failed scans remain recorded.
+
+The real Keychain test belongs in the VM. Run `20261023T124358Z-44033` moves
+its complete body unchanged from CoreBridge's host tests to app-hosted tests.
+The pure cancellation case stays in CoreBridge. Independent follow-up confirms
+the move. Full native source privacy `20261023T124529Z-47832` passed, 41 files.
+All source reviews remain separate from compilation and runtime evidence.
+
+Baseline gate `20261023T112602Z-31273` completed Rust, native durability,
+compatibility, Swift, configuration, snapshot, accessibility and UI phases
+without a product failure. Rust main phase: 2,783 passed. Native durability:
+25 passed. CoreBridge: 87 passed; optimized decoder: one passed; MeguriKit:
+356 passed. Xcode check: 148 passed, one deferred to the Mac UI job. Snapshots:
+659 passed, 846 states deferred to their remaining feature units. iPhone audit:
+12 passed. Mac audit: 11 passed, one skipped. UI tests: iPhone 12 passed,
+iPad 13 passed, Mac nine passed, with their platform skips retained.
+
+The integrator stopped only that owned gate after the native candidate was ready,
+during simulator unit checks. Cancellation and all completed receipts remain
+recorded. This avoids finishing a gate over the older UI before repeating it.
+The final combined gate must still use the original base above and pass every
+required phase. No complete passing gate or unit acceptance is claimed.
+
+Native candidate `20261023T124358Z-44033` is now applied on master. Formatting
+`20261023T130700Z-71217` passed. Focused compilation, lint, privacy and similarity
+checks are running. Controller tooling is reviewed separately; only its owned
+paths may be combined, never its older native seed. Actual VM server journeys,
+peer verification, fault and rendered evidence remain required.
+
+Applied native checks: privacy `20261023T130742Z-72073` passed all 41 files;
+similarity `20261023T130740Z-71727` passed 35 files without flags. UI lint
+`20261023T130742Z-72036` passed 119 files. Rust lint
+`20261023T130742Z-71965` reaches three large-enum warnings in the new FFI result
+types. These require a focused fix; no lint suppression or acceptance is added.
+Swift compilation and actual native execution have not run on this source yet.
 
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,

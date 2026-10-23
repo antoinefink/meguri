@@ -92,7 +92,7 @@ let package = Package(
     ] + features.map { name in
         .target(
             name: name,
-            dependencies: ["AppModel", "DesignSystem"] + (name == "Review" ? ["CardRendering"] : []) + (["Home", "Review"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []),
+            dependencies: ["AppModel", "DesignSystem"] + (name == "Review" ? ["CardRendering"] : []) + (["Home", "Review", "Settings"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []),
             path: "Sources/Features/\(name)",
             resources: ["Home", "Review", "Settings"].contains(name) ? [.process("Resources")] : [],
             swiftSettings: settings

@@ -59,6 +59,7 @@ fn runtime_jobs_expose_snapshot_validation_staging_save_stale_and_preferences() 
     meguri_ffi::events::set_event_listener(Arc::new(Listener(tx))).unwrap();
     let handle = collection::start_open(
         CollectionLocation {
+            manual_transfer_directory: dir.path().join("ManualTransfers").to_string_lossy().into_owned(),
             collection_directory: collection.to_str().unwrap().into(),
             backups_directory: backups.to_str().unwrap().into(),
             app_group_snapshot: dir.path().join("widget.snapshot").to_str().unwrap().into(),

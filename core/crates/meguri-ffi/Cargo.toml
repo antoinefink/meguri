@@ -17,6 +17,7 @@ crate-type = ["staticlib", "lib"]
 # exported objects.
 meguri-engine.workspace = true
 meguri-host.workspace = true
+meguri-sync.workspace = true
 meguri-package.workspace = true
 meguri-sched.workspace = true
 # The change value types and ids the `Changes` event carries (KTD2).

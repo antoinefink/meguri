@@ -1695,6 +1695,7 @@ dependencies = [
  "meguri-package",
  "meguri-sched",
  "meguri-storage",
+ "meguri-sync",
  "meguri-template",
  "meguri-testkit",
  "meguri-text",

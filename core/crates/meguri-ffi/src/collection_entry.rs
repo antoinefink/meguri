@@ -410,7 +410,8 @@ pub fn start_collection_inspection(
     random_seed: u64,
 ) -> Result<CollectionInspectJob, CoreError> {
     callback::enter("start_collection_inspection");
-    let config = HostConfig::new(
+    let manual_transfer_directory = location.manual_transfer_directory.clone();
+    let mut config = HostConfig::new(
         location.collection_directory.into(),
         location.backups_directory.into(),
         location.app_group_snapshot.into(),
@@ -418,6 +419,7 @@ pub fn start_collection_inspection(
         Arc::new(SeededRandom::new(random_seed)),
         Arc::new(ForeignSpace(disk_space)),
     );
+    config.manual_transfer_directory = manual_transfer_directory.into();
     let engine = runtime::engine()?.clone();
     let result = Arc::new(CollectionInspectResult {
         cell: Arc::new(ResultCell(Mutex::new(None))),

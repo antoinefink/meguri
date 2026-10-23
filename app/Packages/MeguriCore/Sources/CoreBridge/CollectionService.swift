@@ -28,15 +28,17 @@ final class CollectionClockRelay: MeguriCoreBindings.HostClock {
 public struct CollectionLocation: Sendable, Hashable {
     public let collectionDirectory: URL
     public let backupsDirectory: URL
+    public let manualTransferDirectory: URL
     public let appGroupSnapshot: URL
-    public init(collectionDirectory: URL, backupsDirectory: URL, appGroupSnapshot: URL) {
+    public init(collectionDirectory: URL, backupsDirectory: URL, appGroupSnapshot: URL, manualTransferDirectory: URL = URL.applicationSupportDirectory.appending(path: "ManualTransfers", directoryHint: .isDirectory)) {
         self.collectionDirectory = collectionDirectory
         self.backupsDirectory = backupsDirectory
         self.appGroupSnapshot = appGroupSnapshot
+        self.manualTransferDirectory = manualTransferDirectory
     }
     var raw: MeguriCoreBindings.CollectionLocation {
         .init(collectionDirectory: collectionDirectory.path, backupsDirectory: backupsDirectory.path,
-              appGroupSnapshot: appGroupSnapshot.path)
+              appGroupSnapshot: appGroupSnapshot.path, manualTransferDirectory: manualTransferDirectory.path)
     }
 }
 

@@ -62,6 +62,33 @@ public final class ReviewCollection {
         exportOwner = value
         return value
     }
+    private var manualOwner: ManualTransferCoordinator?
+    private var releasedManualHostState: State?
+    public var manualTransfers: ManualTransferCoordinator {
+        if let manualOwner { return manualOwner }
+        let location = CoreBridge.CollectionLocation(collectionDirectory: configuration.collectionLocation.directory,
+            backupsDirectory: configuration.collectionLocation.backupsDirectory,
+            appGroupSnapshot: configuration.collectionLocation.directory.appending(path: "meguri-widget-unavailable.json"))
+        let value = ManualTransferCoordinator(owner: self, service: CoreManualTransferService(location: location,
+            clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone)))
+        manualOwner = value
+        return value
+    }
+    /// A failed first server preparation must not reserve the host against Files.
+    /// Called after terminal drain only, with no remaining preview authority.
+    func releaseEmptyManualHost() async {
+        guard !opening else { return }
+        guard let current = try? await collection.lifecycle() else { return }
+        let restored: State
+        switch current {
+        case .noCollection: restored = .noFile
+        case .failed: restored = .failed("The local collection requires recovery or replacement.")
+        default: return
+        }
+        releasedManualHostState = restored
+        try? await collection.close()
+        lifecycle = .noCollection; state = restored
+    }
     var exportAllowed: Bool {
         guard !opening, !enabling, state == .ready, case .ready = lifecycle else { return false }
         return true
@@ -101,7 +128,7 @@ public final class ReviewCollection {
         await task.value
     }
     private func openCollection() async {
-        opening = true; state = .loading; error = nil; closed = false
+        opening = true; state = .loading; error = nil; closed = false; releasedManualHostState = nil
         defer { opening = false }
         do {
             try await subscribe()
@@ -127,7 +154,7 @@ public final class ReviewCollection {
         lifecycle = try await collection.lifecycle()
         guard case .ready(let value) = lifecycle else { state = .unavailable; return }
         if generation != value { exportOwner?.generationChanged() }
-        generation = value; state = .ready; error = nil; closed = false
+        generation = value; state = .ready; error = nil; closed = false; releasedManualHostState = nil
         if loadRecord {
             do { previousRecord = try await records.load() }
             catch { self.error = "Couldn’t read the previous session record. \(error)" }
@@ -151,7 +178,14 @@ public final class ReviewCollection {
         try await subscribe()
         return try await Self.prepareOpenLocation(configuration.collectionLocation)
     }
-    var entryAllowed: Bool { exportOwner?.busy != true && !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile) }
+    var entryAllowed: Bool { (state == .ready || manualOwner?.preview == nil) && manualAllowed && state != .unavailable }
+    var manualAllowed: Bool { entryOwner?.busy != true && exportOwner?.busy != true && !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed) }
+    func beginManualActivation() throws {
+        guard review == nil, !starting else { throw BridgeError.sessionActive }
+        guard manualAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
+        opening = true
+        day?.pause(); countTimer?.invalidate(); countsTask?.cancel()
+    }
     func beginEntryActivation() throws {
         guard review == nil, !starting else { throw BridgeError.sessionActive }
         guard entryAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
@@ -200,7 +234,7 @@ public final class ReviewCollection {
             case .opening, .upgrading: state = .loading
             case .exclusiveBusy: state = .unavailable; review?.requestRefresh()
             case .failed(let reason): state = .failed(String(describing: reason))
-            case .noCollection: state = .unopened
+            case .noCollection: state = releasedManualHostState ?? .unopened
             }
         case .nextDayAtChanged(let instant): if !opening { day?.event(nextDayAt: instant) }
         case .rolledOver, .timeZoneChanged: refreshCounts()
@@ -366,7 +400,7 @@ public final class ReviewCollection {
         let previous = lifecycleTask
         lifecycleTask = Task {
             await previous?.value
-            if !active { await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain() }
+            if !active { await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain() }
             await openTask?.value
             guard !closed, state != .unopened, state != .noFile else { resuming = false; return }
             do {
@@ -401,6 +435,7 @@ public final class ReviewCollection {
         Task { await day?.checkNow() }
     }
     @discardableResult public func close() async -> Bool {
+        await manualOwner?.cancelAndDrain()
         await entryOwner?.cancelAndDrain()
         await exportOwner?.cancelAndDrain()
         await openTask?.value

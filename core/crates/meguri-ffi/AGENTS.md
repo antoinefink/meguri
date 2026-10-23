@@ -11,3 +11,7 @@
 - U37 retains the open host in `runtime`; opening/closing reservations exclude other owners without holding a lock across host work. Close during open is Busy. Do not close the engine from an open job: close waits for that job. Late open cancellation reports an explicit failure while retaining the live host; cancellable rollback needs an engine contract.
 
 - RF2 callers hold coordinated native source access through terminal inspection delivery, including cancel/drain. Result objects carry typed backup publication and candidate-active failures; `JobFinished` alone does not describe rollback. Native bridge/instrumentation registration remains a later pass.
+
+- Manual transfer previews own backend confirmations; never reconstruct ids/revisions into authority. History entries own backend ids. `CollectionLocation.manual_transfer_directory` is a separate installation-wide private root, including initial Files/open paths; profile parents cannot select it.
+
+- A preparation task keeps the policy admission identity assigned to that host job after its typed result is consumed. Read it from the task’s stored value without I/O; never derive ownership from history entries.

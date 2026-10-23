@@ -10,9 +10,16 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 pub struct ManualTransferTask<T> {
     pub job: JobHandle,
+    operation_id: Arc<Mutex<Option<OperationId>>>,
     result: Arc<Mutex<Option<Result<T, TransferError>>>>,
 }
 impl<T> ManualTransferTask<T> {
+    /// Exact policy identity for this preparation, including failed/cancelled
+    /// workers. No identity means this worker never completed policy admission.
+    pub fn operation_id(&self) -> Option<OperationId> {
+        self.operation_id.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
     /// Take the worker's value after its JobFinished event, whether it succeeded
     /// or failed. Cancellation before worker entry produces no value here;
     /// consult JobOutcome::Cancelled for that case.
@@ -30,15 +37,20 @@ impl CoreHost {
         direction: Direction,
         scope: Scope,
     ) -> Result<ManualTransferTask<Preview>, EngineError> {
-        self.transfer_worker(move |service, context| {
-            service.prepare(
+        let identity = Arc::new(Mutex::new(None));
+        let output = identity.clone();
+        let mut task = self.transfer_worker(move |service, context| {
+            service.prepare_identified(
                 context.slot().ok_or(TransferError::Unavailable)?,
                 access.with_cancel(context.cancel.clone()),
                 direction,
                 scope,
                 &context.progress,
+                |id| *output.lock().unwrap_or_else(PoisonError::into_inner) = Some(id.clone()),
             )
-        })
+        })?;
+        task.operation_id = identity;
+        Ok(task)
     }
     pub fn confirm_manual_transfer(
         &self,
@@ -89,6 +101,10 @@ impl CoreHost {
             *output.lock().unwrap_or_else(PoisonError::into_inner) = Some(typed);
             outcome
         })?;
-        Ok(ManualTransferTask { job, result })
+        Ok(ManualTransferTask {
+            job,
+            result,
+            operation_id: Arc::new(Mutex::new(None)),
+        })
     }
 }
