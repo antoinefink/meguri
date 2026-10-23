@@ -139,3 +139,4 @@
 - iPad `20261023T035747Z-85354`: FAIL. Whole-view swipe dismissed the sheet before complete AX5 coverage. Footer padding was counted as visible content space. Frame proof needs the actual footer boundary and fresh geometry after each audit. Native file round trips remain passed.
 - Fixer `s-20261023T040137Z-82dbf292`, export `20261023T040251Z-89276`: added footer frame anchor, refreshed audit geometry, bounded content pans and one evidenced Discard contrast reason. Button ownership, appearance and native journeys are unchanged. Checks pending.
 - Catch-up `20261023T040307Z-89697`: PASS, nothing queued.
+- iPad `20261023T040534Z-90977`: FAIL. Footer and close Button share the same AX frame. Revert that annotation; preserve the proven button and use a conservative audit viewport. No new native pass is claimed.
