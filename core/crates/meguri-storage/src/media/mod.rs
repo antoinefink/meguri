@@ -1,11 +1,14 @@
 //! Meguri's flat media store and independent journal (media/media-journal).
 mod case_fold;
+mod check_report;
 mod folder;
 mod journal_db;
 mod staging;
+mod sync_state;
 mod trash;
 
-pub use journal_db::{MediaEntry, PendingChange, TrackedMediaName};
+pub use check_report::MediaCheckReport;
+pub use journal_db::{MediaEntry, MediaSyncState, PendingChange, TrackedMediaName};
 use meguri_model::clock::Clock;
 use rusqlite::Connection;
 pub use staging::{NoteReference, RecoveryReport, StagedOp};
@@ -18,6 +21,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
+pub use sync_state::*;
 pub use trash::{TrashEntry, TrashSummary};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -191,7 +195,14 @@ impl MediaStore {
         journal_db::counter(&*self.db()?)
     }
     pub fn pending(&self) -> Result<Vec<PendingChange>> {
-        journal_db::pending(&*self.db()?)
+        journal_db::pending(&*self.db()?, i64::MAX as u64)
+    }
+    /// Oldest stamps first, up to the requested limit and Y10's 25 entries.
+    pub fn pending_batch(&self, limit: u32) -> Result<Vec<PendingChange>> {
+        journal_db::pending(&*self.db()?, u64::from(limit.min(25)))
+    }
+    pub fn pending_any(&self) -> Result<bool> {
+        journal_db::pending_any(&*self.db()?)
     }
     pub fn acknowledge(&self, name: &str, counter: u64) -> Result<bool> {
         Ok(self.db()?.execute(

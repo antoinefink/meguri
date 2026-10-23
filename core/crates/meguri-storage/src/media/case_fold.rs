@@ -1,4 +1,4 @@
-use meguri_text::{media_name::safe_media_name, normalize::nfc};
+use meguri_text::media_name::safe_media_name;
 
 pub fn case_key(name: &str) -> String {
     name.to_lowercase()
@@ -21,14 +21,6 @@ pub fn ignored(name: &str) -> bool {
     chars.len() == 9
         && ((chars[..6] == ['t', 'h', 'u', 'm', 'b', 's'] && chars[7..] == ['d', 'b'])
             || chars[1..] == ['d', 's', '_', 's', 't', 'o', 'r', 'e'])
-}
-pub fn disk_name(name: &str) -> Option<String> {
-    let normalized = nfc(name);
-    if cfg!(target_vendor = "apple") || normalized == name {
-        Some(normalized.into_owned())
-    } else {
-        None
-    }
 }
 fn cut(s: &str, max: usize) -> &str {
     let mut end = s.len().min(max);

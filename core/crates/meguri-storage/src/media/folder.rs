@@ -1,4 +1,4 @@
-use super::{MediaEntry, MediaError, MediaStore, Result, case_fold::*, journal_db};
+use super::{MediaEntry, MediaError, MediaStore, MediaSyncState, Result, case_fold::*, journal_db};
 use crate::atomic_file::{AtomicFile, Purpose};
 use rusqlite::Connection;
 use sha1::{Digest, Sha1};
@@ -31,6 +31,11 @@ pub(super) fn probe_case_sensitivity(path: &Path) -> Result<bool> {
         .to_string_lossy();
     Ok(!path.join(name.to_uppercase()).exists())
 }
+pub(super) fn sidecar(path: &Path, suffix: &str) -> std::path::PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    name.into()
+}
 pub(super) fn stamp(m: &Metadata) -> String {
     format!("{}:{}", m.mtime(), m.mtime_nsec())
 }
@@ -45,10 +50,16 @@ pub(super) fn hash_bytes(bytes: &[u8]) -> String {
     format!("{:x}", Sha1::digest(bytes))
 }
 pub(super) fn hash_file(path: &Path) -> Result<String> {
+    hash_file_cancellable(path, || true)
+}
+fn hash_file_cancellable(path: &Path, mut keep_going: impl FnMut() -> bool) -> Result<String> {
     let mut file = open_regular(path)?;
     let mut hash = Sha1::new();
     let mut bytes = [0_u8; 65_536];
     loop {
+        if !keep_going() {
+            return Err(MediaError::Cancelled);
+        }
         let n = file.read(&mut bytes)?;
         if n == 0 {
             break;
@@ -73,15 +84,31 @@ fn same_stat(entry: &MediaEntry, m: &Metadata) -> bool {
         && entry.mtime_secs == m.mtime()
         && i64::from(entry.mtime_nanos) == m.mtime_nsec()
 }
-pub(super) fn live(db: &mut Connection, name: &str, hash: String, m: &Metadata, force_dirty: bool) -> Result<()> {
+pub(super) fn live(db: &Connection, name: &str, hash: String, m: &Metadata, force_dirty: bool) -> Result<()> {
     let old = journal_db::entry(db, name)?;
     let syncable = (1..=104_857_600).contains(&m.len());
-    let changed = old
+    if !syncable && old.as_ref().is_some_and(|o| o.sync_state == MediaSyncState::Awaiting) {
+        return Ok(());
+    }
+    let state = if syncable {
+        MediaSyncState::Live
+    } else if old
         .as_ref()
-        .is_none_or(|o| o.sha1.as_ref() != Some(&hash) || o.syncable() != syncable || !o.live);
+        .is_some_and(|o| matches!(o.sync_state, MediaSyncState::Live | MediaSyncState::Deleted))
+    {
+        MediaSyncState::Deleted
+    } else {
+        MediaSyncState::None
+    };
     let dirty = old.as_ref().is_some_and(|o| o.dirty)
-        || (changed && (syncable || old.as_ref().is_some_and(MediaEntry::syncable)))
-        || (force_dirty && syncable);
+        || (syncable
+            && (force_dirty
+                || old
+                    .as_ref()
+                    .is_none_or(|o| o.sync_state != MediaSyncState::Live || o.sha1.as_ref() != Some(&hash))))
+        || old
+            .as_ref()
+            .is_some_and(|o| o.sync_state == MediaSyncState::Live && !syncable);
     let entry = MediaEntry {
         name: name.into(),
         sha1: Some(hash),
@@ -91,28 +118,30 @@ pub(super) fn live(db: &mut Connection, name: &str, hash: String, m: &Metadata, 
         live: true,
         dirty,
         change_counter: 0,
-        pending_download: false,
+        pending_download: old.as_ref().is_some_and(|o| o.pending_download),
+        sync_state: state,
     };
-    if old
-        .as_ref()
-        .is_some_and(|o| same_stat(o, m) && o.sha1 == entry.sha1 && o.dirty == entry.dirty && !o.pending_download)
-    {
-        return Ok(());
-    }
     journal_db::save(db, &entry)
 }
-pub(super) fn deleted(db: &mut Connection, name: &str) -> Result<()> {
+pub(super) fn deleted(db: &Connection, name: &str) -> Result<()> {
     let Some(mut entry) = journal_db::entry(db, name)? else {
         return Ok(());
     };
     if !entry.live {
         return Ok(());
     }
-    entry.dirty |= entry.syncable();
+    if entry.sync_state == MediaSyncState::None {
+        return journal_db::remove(db, name);
+    }
+    if entry.sync_state == MediaSyncState::Live {
+        entry.sync_state = MediaSyncState::Deleted;
+        entry.dirty = true;
+    }
     entry.live = false;
     entry.sha1 = None;
     entry.size = 0;
-    entry.pending_download = false;
+    entry.mtime_secs = 0;
+    entry.mtime_nanos = 0;
     journal_db::save(db, &entry)
 }
 
@@ -132,21 +161,49 @@ impl Publication {
 impl MediaStore {
     /// A matching folder marker performs no enumeration or hashing.
     pub fn check_changes(&self) -> Result<()> {
+        self.check_changes_report().map(|_| ())
+    }
+    pub fn check_changes_report(&self) -> Result<super::MediaCheckReport> {
         let current = stamp(&fs::metadata(self.media_dir())?);
         if journal_db::marker(&*self.db()?)?.as_deref() == Some(&current) {
-            return Ok(());
+            let mut report = super::MediaCheckReport::started(self.inner.clock.now_ms());
+            report.completed = true;
+            self.finish_check_report(&mut report)?;
+            return Ok(report);
         }
-        self.register_full(|_, _| true)
+        self.register_full_report(|_, _| true)
     }
     /// The callback cancels by returning false; completed records remain valid.
-    pub fn register_full(&self, mut progress: impl FnMut(usize, usize) -> bool) -> Result<()> {
+    pub fn register_full(&self, progress: impl FnMut(usize, usize) -> bool) -> Result<()> {
+        self.register_full_report(progress).map(|_| ())
+    }
+    pub fn register_full_report(
+        &self,
+        mut progress: impl FnMut(usize, usize) -> bool,
+    ) -> Result<super::MediaCheckReport> {
+        // Refuse suspended stores before touching the folder or callbacks.
+        drop(self.db()?);
+        let mut report = super::MediaCheckReport::started(self.inner.clock.now_ms());
+        let result = self.scan(&mut progress, &mut report);
+        report.completed = result.is_ok();
+        self.finish_check_report(&mut report)?;
+        result?;
+        Ok(report)
+    }
+    fn scan(
+        &self,
+        progress: &mut impl FnMut(usize, usize) -> bool,
+        report: &mut super::MediaCheckReport,
+    ) -> Result<()> {
         let before = stamp(&fs::metadata(self.media_dir())?);
-        let cutoff = {
+        let (cutoff, epoch) = {
             let db = self.db()?;
-            journal_db::set_marker(&db, None)?;
-            journal_db::counter(&db)?
+            let cutoff = journal_db::counter(&db)?;
+            meguri_model::faultpoint!("media.scan.after_cutoff")?;
+            (cutoff, super::sync_state::epoch(&db)?)
         };
         self.inner.scans.fetch_add(1, Ordering::Relaxed);
+        report.listed = true;
         let files = fs::read_dir(self.media_dir())?.collect::<std::io::Result<Vec<_>>>()?;
         let total = files.len();
         let mut found = BTreeSet::new();
@@ -155,29 +212,71 @@ impl MediaStore {
             if !progress(index, total) {
                 return Err(MediaError::Cancelled);
             }
-            let Some(name) = file.file_name().to_str().and_then(disk_name) else {
+            report.seen += 1;
+            let disk = file.file_name();
+            let Some(disk) = disk.to_str() else {
+                report.skipped += 1;
                 continue;
             };
+            let name = meguri_text::normalize::nfc(disk).into_owned();
             if !normalized(&name) || ignored(&name) {
+                report.skipped += 1;
                 continue;
             }
-            let db = self.db()?;
             let Some(m) = regular(&file.path())? else {
+                report.skipped += 1;
                 continue;
             };
+            let old = journal_db::entry(&*self.db()?, &name)?;
+            let mut path = file.path();
+            if name != disk && !old.as_ref().is_some_and(|e| same_stat(e, &m)) {
+                let canonical = self.media_dir().join(&name);
+                match crate::atomic_file::move_new(&path, &canonical) {
+                    Ok(()) => {
+                        path = canonical;
+                        report.renamed += 1;
+                    }
+                    Err(_) => {
+                        // Apple can resolve both spellings to the same inode.
+                        if regular(&canonical)?.is_some_and(|c| c.ino() == m.ino() && c.dev() == m.dev()) {
+                            path = canonical;
+                        } else {
+                            report.skipped += 1;
+                            continue;
+                        }
+                    }
+                }
+            }
             found.insert(name.clone());
-            let old = journal_db::entry(&db, &name)?;
-            if old.as_ref().is_some_and(|o| same_stat(o, &m)) {
+            let same = old.as_ref().is_some_and(|o| same_stat(o, &m));
+            if same
+                && old
+                    .as_ref()
+                    .is_some_and(|o| o.sync_state == MediaSyncState::Live || !(1..=104_857_600).contains(&m.len()))
+            {
                 continue;
             }
-            // Hashing can take seconds for a large outside file. No journal
-            // lock is held, and a concurrent writer's newer record wins.
-            drop(db);
-            self.inner.hashes.fetch_add(1, Ordering::Relaxed);
-            meguri_model::faultpoint!("media.scan.before_hash")?;
-            let hash = hash_file(&file.path())?;
-            let Some(after) = regular(&file.path())? else {
-                stable = false;
+            // No lock across hashing or the external progress callback.
+            let hash = if same {
+                old.as_ref()
+                    .and_then(|e| e.sha1.clone())
+                    .ok_or_else(|| MediaError::Database("missing media hash".into()))?
+            } else {
+                self.inner.hashes.fetch_add(1, Ordering::Relaxed);
+                report.hashed += 1;
+                meguri_model::faultpoint!("media.scan.before_hash")?;
+                match hash_file_cancellable(&path, || progress(index, total)) {
+                    Ok(hash) => hash,
+                    Err(MediaError::Cancelled) => return Err(MediaError::Cancelled),
+                    Err(_) if regular(&path)?.is_none() => {
+                        found.remove(&name);
+                        continue;
+                    }
+                    Err(error) => return Err(MediaError::Io(format!("{name}: {error}"))),
+                }
+            };
+            let Some(after) = regular(&path)? else {
+                found.remove(&name);
                 continue;
             };
             if stamp(&after) != stamp(&m) || after.len() != m.len() || after.ino() != m.ino() || after.dev() != m.dev()
@@ -185,26 +284,44 @@ impl MediaStore {
                 stable = false;
                 continue;
             }
-            let mut db = self.db()?;
+            let db = self.db()?;
             if journal_db::entry(&db, &name)? != old {
                 stable = false;
                 continue;
             }
-            live(&mut db, &name, hash, &after, false)?;
+            live(&db, &name, hash.clone(), &after, false)?;
+            let new = journal_db::entry(&db, &name)?;
+            if let Some(new) = new.filter(|e| old.as_ref().is_none_or(|o| o.change_counter != e.change_counter)) {
+                if new.sync_state == MediaSyncState::Live {
+                    if old.as_ref().is_none_or(|e| e.sync_state != MediaSyncState::Live) {
+                        report.added += 1;
+                    } else if old.as_ref().and_then(|e| e.sha1.as_ref()) != Some(&hash) {
+                        report.changed += 1;
+                    }
+                } else if old.as_ref().is_some_and(|e| e.sync_state == MediaSyncState::Live) {
+                    report.removed += 1;
+                }
+            }
         }
         if !progress(total, total) {
             return Err(MediaError::Cancelled);
         }
         let mut db = self.db()?;
-        for entry in journal_db::entries(&db)? {
+        let tx = db.savepoint()?;
+        for entry in journal_db::entries(&tx)? {
             if entry.live && entry.change_counter <= cutoff && !found.contains(&entry.name) {
-                deleted(&mut db, &entry.name)?;
+                if entry.sync_state == MediaSyncState::Live {
+                    report.removed += 1;
+                }
+                deleted(&tx, &entry.name)?;
             }
         }
-        let after = stamp(&fs::metadata(self.media_dir())?);
-        if stable && before == after {
-            journal_db::set_marker(&db, Some(&after))?;
+        // Save the time read BEFORE listing, even if a rename moved it.
+        // A racing reset must retain its unset marker.
+        if stable && super::sync_state::epoch(&tx)? == epoch {
+            journal_db::set_marker(&tx, Some(&before))?;
         }
+        tx.commit()?;
         Ok(())
     }
     pub fn lookup(&self, name: &str) -> Result<Option<String>> {

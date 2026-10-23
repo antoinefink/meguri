@@ -1,5 +1,5 @@
 mod common;
-use meguri_storage::media::{MediaError, MediaStore};
+use meguri_storage::media::{MediaBaselineOwner, MediaError, MediaStore, MediaSyncState};
 use rusqlite::{Connection, params};
 use std::{fs, os::unix::fs::MetadataExt, sync::Arc};
 
@@ -24,7 +24,7 @@ fn media_reopening_preserves_the_unchanged_folder_fast_path() {
     assert_eq!(store.diagnostics().scans, 1);
     assert!(store.entries().unwrap().iter().any(|e| e.name == "outside.png"));
 }
-fn before_hash() {
+fn run_scan_hook() {
     let hook = SCAN_HOOK.lock().unwrap().take();
     if let Some(hook) = hook {
         hook();
@@ -54,7 +54,7 @@ fn media_scanning_does_not_hold_the_journal_lock_while_hashing() {
     }));
     meguri_model::faultpoint::arm(
         "media.scan.before_hash",
-        meguri_model::faultpoint::Fault::Callback(before_hash),
+        meguri_model::faultpoint::Fault::Callback(run_scan_hook),
     );
     let result = store.register_full(|_, _| true);
     meguri_model::faultpoint::disarm_all();
@@ -64,6 +64,61 @@ fn media_scanning_does_not_hold_the_journal_lock_while_hashing() {
         finished.load(std::sync::atomic::Ordering::SeqCst),
         "a scan held the journal during file hashing"
     );
+}
+
+#[test]
+fn scan_reset_keeps_the_marker_unset_until_absent_retained_facts_are_removed() {
+    for rebind in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+        store.bind_sync_owner(&MediaBaselineOwner::new("m6:before")).unwrap();
+        store.add("absent.png", b"absent").unwrap();
+        fs::remove_file(store.media_dir().join("absent.png")).unwrap();
+        let cutoff = store.change_counter().unwrap();
+        let folder_time = fs::metadata(store.media_dir()).unwrap();
+        let marker = format!("{}:{}", folder_time.mtime(), folder_time.mtime_nsec());
+        let snapshot_store = store.clone();
+        let checked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = checked.clone();
+        *SCAN_HOOK.lock().unwrap() = Some(Box::new(move || {
+            // This test-only callback observes the guard between the two
+            // snapshot reads. It never waits for or mutates the journal.
+            assert!(!snapshot_store.try_close().unwrap());
+            observed.store(true, std::sync::atomic::Ordering::SeqCst);
+        }));
+        meguri_model::faultpoint::arm(
+            "media.scan.after_cutoff",
+            meguri_model::faultpoint::Fault::Callback(run_scan_hook),
+        );
+        let mut reset = false;
+        let result = store.register_full(|_, _| {
+            if !reset {
+                if rebind {
+                    store.bind_sync_owner(&MediaBaselineOwner::new("m6:after")).unwrap();
+                } else {
+                    store.reset_sync().unwrap();
+                }
+                reset = true;
+            }
+            true
+        });
+        meguri_model::faultpoint::disarm("media.scan.after_cutoff");
+        result.unwrap();
+        assert!(checked.load(std::sync::atomic::Ordering::SeqCst));
+        let retained = store.sync_entry("absent.png").unwrap().unwrap();
+        assert!(retained.live && retained.change_counter > cutoff);
+        assert_eq!(retained.sync_state, MediaSyncState::None);
+        let after = fs::metadata(store.media_dir()).unwrap();
+        assert_eq!(
+            (after.mtime(), after.mtime_nsec()),
+            (folder_time.mtime(), folder_time.mtime_nsec())
+        );
+        assert_eq!(store.change_marker().unwrap(), None);
+        assert!(store.check_changes_report().unwrap().listed);
+        assert!(store.sync_entry("absent.png").unwrap().is_none());
+        assert_eq!(store.change_marker().unwrap(), Some(marker));
+        assert!(!store.check_changes_report().unwrap().listed);
+    }
 }
 
 #[test]
@@ -109,7 +164,9 @@ fn media_pending_query_uses_its_partial_index_with_20000_clean_tombstones() {
     }
     tx.commit().unwrap();
     let plan: Vec<String> = db
-        .prepare("EXPLAIN QUERY PLAN SELECT name,sha1,change_counter FROM media WHERE dirty=1 ORDER BY name")
+        .prepare(
+            "EXPLAIN QUERY PLAN SELECT name,sha1,change_counter FROM media WHERE dirty=1 ORDER BY change_counter,name",
+        )
         .unwrap()
         .query_map([], |row| row.get(3))
         .unwrap()

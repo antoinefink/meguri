@@ -354,3 +354,37 @@ Selected-media storage starts at `d55cda0e`, recorded by session
 `s-20261023T140500Z-c24c8246` before its isolated implementation. Its neutral
 owner/reset contract was prepared earlier and integrated without a new protocol
 implementation. Native and full-gate acceptance remain open.
+
+### Selected-media journal foundation
+
+The original filtered run `20261023T140605Z-31843` continued after the
+Codex restart. Its host handle was lost. The owned container was checked live,
+then observed to exit 0 with the validated patch exported. Its temporary auth
+file was removed. No passing MG receipt is claimed for the interrupted wrapper.
+The prepared patch was retained as the seed for fixer `20261023T143223Z-52317`.
+
+Round 1 found two unsupported SQL count reads, a reset/check race and a shared
+download-name transaction error. The fixer corrected those and added focused
+regressions. It also rewrote two privacy-flagged regions from the neutral spec.
+Round 2 found no remaining P0–P2 findings.
+
+| Check | Receipt | Result |
+| --- | --- | --- |
+| First focused build | `20261023T142734Z-49762` | Failed on two count reads |
+| Focused media tests after fixes | `20261023T155700Z-84707` | 54 passed |
+| Privacy, corrected media source | `20261023T155703Z-84961` | Passed |
+| Similarity, base `0704decb` | `20261023T155730Z-85332` | Passed |
+| Rust lint | `20261023T155734Z-85563` | Four Clippy errors; repair pending |
+
+This checkpoint adds the media journal and its durable commit boundaries.
+Transport reconciliation, selected-operation completion and native media
+consent/resume remain open. No Unit trailer or selected-media acceptance.
+
+### Mac profile setup
+
+Profile work has Antoine's 2026-10-23 approval. Chrome registered the VM;
+the new local profile has both Macs and the app's own Keychain group.
+Build `20261023T155213Z-78613` passed with the previous profile. A backup
+of that cache entry is kept outside Git. Removing that entry let automatic
+signing refresh it: `20261023T155353Z-80293` passed with both Macs covered.
+VM runtime checks remain pending. Existing signing keys are unchanged.

@@ -65,7 +65,7 @@ fn tracked_names_preserve_journal_bytes_filter_nonlive_and_never_scan() {
         ("missing.png", "stored-key", true, false),
     ] {
         db.execute(
-            "INSERT INTO media VALUES(?1,?2,NULL,0,0,0,?3,0,1,?4)",
+            "INSERT INTO media(name,case_key,sha1,size,mtime_secs,mtime_nanos,live,dirty,change_counter,pending_download,sync_state) VALUES(?1,?2,NULL,0,0,0,?3,0,1,?4,CASE WHEN ?4 THEN 3 ELSE 0 END)",
             rusqlite::params![name, key, live, pending],
         )
         .unwrap();
