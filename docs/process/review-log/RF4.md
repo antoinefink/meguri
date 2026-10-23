@@ -815,3 +815,24 @@ receipts. Independent source review found no P0–P2. The production Mac
 Form now scrolls; the test reaches history and returns to the endpoint.
 No login or server request occurs in this test. Final review remains round 6.
 The real media journeys, rendered checks and combined gate remain open.
+
+VM evidence bridge; start `2b7b92a5`.
+
+| Check | Receipt | Outcome |
+| --- | --- | --- |
+| Mac media | `manual-transfer-check/20261023T232610Z-63483` | FAIL; direct file read denied |
+| iPhone media | `manual-transfer-check/20261023T233046Z-67479` | FAIL; direct file read denied |
+| Tool tests | `selftest/20261023T234157Z-78664` | PASS; 23 checks |
+| Bridge tests | `swift-test/20261023T233949Z-75364` | PASS; 97 tests |
+| Model tests | `swift-test/20261023T234003Z-76336` | PASS; 90 tests |
+| Native compile | `ui-test/20261023T234313Z-79526` | Compiled; one route test passed, two fixture checks failed |
+
+Patch `cleanroom/20261023T233219Z-71131` replaces direct reads with fixed,
+authenticated VM reads. Tooling review round 3 has no P0–P1. Its two lower
+priority notes remain recorded: file signatures across the full snapshot,
+and a stricter consent revision comparison. A later comment-only correction
+is in `cleanroom/20261023T234549Z-81833`.
+
+The fixture failures concern its Form lookup. Native media proof, visual and
+accessibility checks, final native review round 6 and the full gate remain
+open. No Unit is accepted.

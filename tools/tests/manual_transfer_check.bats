@@ -54,8 +54,8 @@ from pathlib import Path
 import sys
 events = Path(sys.argv[1]).read_text().splitlines()
 sequence = (
-    "seed", "build mac Debug", "lease", "start-wire", "reverse-forward-loopback-only",
-    "loopback-probe", "stage-media", "stage-manifest", "test mac", "wire-proof", "capture", "peer",
+    "seed", "build mac Debug", "lease", "native-container", "stage-media", "stage-reader", "start-wire",
+    "reverse-forward-loopback-only", "loopback-probe", "stage-manifest", "test mac", "wire-proof", "capture", "peer",
     "native_transfer_cleanup true", "release",
 )
 positions = [events.index(event) for event in sequence]
@@ -199,7 +199,7 @@ PY
 }
 
 @test "manual transfer: manifest names the generated fixture without installing a collection" {
-  run bash -c 'printf '\''{"port":19090,"token":"0000000000000000000000000000000000000000000000000000000000000000"}'\'' | python3 "$1/tools/scripts/manual-transfer-config.py" manifest "$2/docker/syncserver.env.example" 18765 "$2/build/mg/manual-transfer-check/fake-run/device-fixture" "$3/native-support"' _ "$FX_REPO" "$FX_ROOT" "$FX_VM"
+  run bash -c 'printf '\''{"port":19090,"token":"0000000000000000000000000000000000000000000000000000000000000000","nativeContext":"1111111111111111111111111111111111111111111111111111111111111111"}'\'' | python3 "$1/tools/scripts/manual-transfer-config.py" manifest "$2/docker/syncserver.env.example" 18765 "$2/build/mg/manual-transfer-check/fake-run/device-fixture" "$3/native-support"' _ "$FX_REPO" "$FX_ROOT" "$FX_VM"
   [ "$status" -eq 0 ]
   # Do not echo the manifest or assert on its credential values.
   python3 -c 'import json,sys; assert json.load(sys.stdin)["fixturePath"].endswith("/fake-run/device-fixture")' <<<"$output"
@@ -275,4 +275,16 @@ PY
   run bash -c 'printf '\''[{"Config":{"Env":["SYNC_USER3=unknown:never-print-this"]}}]'\'' | python3 "$FX_REPO/tools/scripts/manual-transfer-config.py" check-users "$FX_ROOT/docker/syncserver.env.example"'
   [ "$status" -ne 0 ]
   [[ "$output" != *never-print-this* ]]
+}
+
+@test "manual transfer: refused reader staging prevents observer and native work" {
+  export FX_READER_STAGE_FAIL=1
+  run invoke_fake check --platform mac
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = error ]
+  ! grep -qx start-wire "$FX_EVENTS"
+  ! grep -q '^test ' "$FX_EVENTS"
+  [ ! -e "$FX_ROOT/build/mg/manual-transfer-check/fake-run/native-reader-command.json" ]
+  [ ! -e "$FX_VM/build/mg/manual-transfer-check/fake-run/native-reader-input.json" ]
+  [ "$(tail -n 1 "$FX_EVENTS")" = release ]
 }

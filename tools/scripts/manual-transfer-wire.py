@@ -7,6 +7,10 @@ The first file request is held *before* any upstream connection until UI cancel;
 the native test then aborts that held socket and explicitly releases for Resume.
 """
 import hmac
+import importlib.util
+import select
+import subprocess
+from pathlib import Path
 import http.client
 import http.server
 import json
@@ -35,13 +39,34 @@ GATE_SECONDS = 90
 IO_SECONDS = 10
 REQUEST_SECONDS = 120
 LIFETIME_SECONDS = 1800
+READER_SECONDS = 8  # plus <=2 seconds to kill, drain and reap
+READER_LIMIT = 65536
+_spec = importlib.util.spec_from_file_location('rf4_reducer', Path(__file__).with_name('manual-transfer-config.py'))
+reducer = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(reducer)
+
+
+def drain_reader(child):
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    if child.stdin:
+        child.stdin.close()
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline:
+        if select.select([child.stdout], [], [], 0.05)[0]:
+            if not os.read(child.stdout.fileno(), 8192):
+                break
+    child.stdout.close()
+    child.wait(timeout=1)
 
 
 class RigServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
     block_on_close = False
 
-    def __init__(self, upstream_port):
+    def __init__(self, upstream_port, reader_command=None, reader_context=None):
         if type(upstream_port) is not int or not 1024 <= upstream_port <= 65535:
             raise ValueError('invalid owned rig port')
         super().__init__(('127.0.0.1', 0), Handler)
@@ -54,6 +79,11 @@ class RigServer(http.server.ThreadingHTTPServer):
         self.checkpoints = {}
         self.gate = 'armed'
         self.stopping = False
+        self.reader_command = reader_command
+        self.reader_context = reader_context
+        self.reader_slot = threading.Lock()
+        self.reader_guard = threading.Lock()
+        self.reader_process = None
 
     def process_request(self, request, address):
         if not self.slots.acquire(blocking=False):
@@ -76,7 +106,65 @@ class RigServer(http.server.ThreadingHTTPServer):
         with self.condition:
             self.counts['errors'] += 1
 
+    def stop_reader(self):
+        with self.reader_guard:
+            self.stopping = True
+            if self.reader_process is not None:
+                try:
+                    os.killpg(self.reader_process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        # The request worker owns draining/reaping. Never release the controller
+        # lease while that worker could still start or retain a reader.
+        with self.reader_slot:
+            pass
+
+    def native_state(self, connection):
+        if not self.reader_command or not self.reader_slot.acquire(blocking=False):
+            return 409, {}
+        child = None
+        try:
+            with self.reader_guard:
+                if self.stopping:
+                    return 409, {}
+                child = subprocess.Popen(self.reader_command, stdin=subprocess.PIPE,
+                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                         start_new_session=True, close_fds=True)
+                self.reader_process = child
+            deadline = time.monotonic() + READER_SECONDS
+            output = bytearray()
+            while True:
+                if self.stopping or time.monotonic() >= deadline:
+                    raise ValueError('reader stopped')
+                readable, _, _ = select.select([child.stdout, connection], [], [], 0.05)
+                if connection in readable:
+                    # A control body is forbidden; EOF is cancellation.
+                    raise ValueError('reader client cancelled')
+                if child.stdout in readable:
+                    piece = os.read(child.stdout.fileno(), min(8192, READER_LIMIT + 1 - len(output)))
+                    if not piece:
+                        break
+                    output.extend(piece)
+                    if len(output) > READER_LIMIT:
+                        raise ValueError('reader output bound')
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or child.wait(timeout=remaining) != 0 or self.stopping:
+                raise ValueError('reader failed')
+            value = reducer.validate_native_state(reducer.strict_json(output), self.reader_context)
+            return 200, value
+        except (OSError, ValueError, TypeError, KeyError, RecursionError, subprocess.SubprocessError):
+            return 503, {}
+        finally:
+            try:
+                if child is not None:
+                    drain_reader(child)
+            finally:
+                with self.reader_guard:
+                    self.reader_process = None
+                self.reader_slot.release()
+
     def stop(self):
+        self.stop_reader()
         with self.condition:
             self.stopping = True
             self.condition.notify_all()
@@ -249,10 +337,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if len(tokens) != 1 or not hmac.compare_digest(tokens[0], state.token):
             self.reply(403, {})
             return
-        if self.headers.get('Content-Length') != '0' or self.headers.get('Transfer-Encoding'):
+        if self.headers.get_all('Content-Length') != ['0'] or self.headers.get_all('Transfer-Encoding'):
             self.reply(400, {})
             return
-        action = self.path.removeprefix('/__rf4/')
+        if self.path == '/__rf4/native-state':
+            status, value = state.native_state(self.connection)
+            self.reply(status, value)
+            return
+        action = self.path[len('/__rf4/'):]
         with state.condition:
             if action == 'abort' and state.gate == 'holding':
                 state.gate = 'aborted'
@@ -276,7 +368,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def main():
     import sys
-    server = RigServer(int(sys.argv[1]))
+    command, context = None, None
+    if len(sys.argv) == 3:
+        with open(sys.argv[2], 'rb') as stream:
+            data = stream.read(16385)
+        if len(data) > 16384:
+            raise ValueError('reader configuration bound')
+        config = reducer.strict_json(data)
+        reducer.keys(config, ('command', 'context'))
+        command, context = config['command'], reducer.digest(config['context'])
+        if type(command) is not list or not 2 <= len(command) <= 16 or any(type(arg) is not str or not arg or len(arg) > 8192 or '\x00' in arg for arg in command):
+            raise ValueError('reader configuration')
+    elif len(sys.argv) != 2:
+        raise ValueError('observer arguments')
+    server = RigServer(int(sys.argv[1]), command, context)
     def stop(*_args):
         threading.Thread(target=server.stop, daemon=True).start()
     signal.signal(signal.SIGTERM, stop)
@@ -289,11 +394,15 @@ def main():
     watchdog = threading.Timer(LIFETIME_SECONDS, stop)
     watchdog.daemon = True
     watchdog.start()
-    print(json.dumps(dict(port=server.server_port, token=server.token)), flush=True)
+    ready = dict(port=server.server_port, token=server.token)
+    if context is not None:
+        ready['nativeContext'] = context
+    print(json.dumps(ready), flush=True)
     try:
         server.serve_forever(poll_interval=0.1)
     finally:
         watchdog.cancel()
+        server.stop_reader()
         server.server_close()
 
 

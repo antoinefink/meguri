@@ -16,7 +16,7 @@ mg_mt_start_wire() {
   exec 9<>"$MG_RUN_DIR/wire-input.fifo"
   exec 7<>"$MG_RUN_DIR/wire-ready.fifo"
   MG_MT_WIRE_FD=1
-  python3 "$MG_TOOLS/scripts/manual-transfer-wire.py" "$MG_MT_HOST_PORT" \
+  python3 "$MG_TOOLS/scripts/manual-transfer-wire.py" "$MG_MT_HOST_PORT" "$MG_RUN_DIR/native-reader-command.json" \
     <"$MG_RUN_DIR/wire-input.fifo" 9>&- 7>&- \
     >"$MG_RUN_DIR/wire-ready.fifo" 2>/dev/null &
   MG_MT_WIRE_PID=$!
@@ -57,16 +57,16 @@ mg_mt_open_forward() {
   MG_MT_ROUTE_FD=1
   # The remote process owns manifest lifetime. Closing input or reaching the
   # deadline removes it even if the controller cannot run remote cleanup.
-  lifetime="$(mvl_q /bin/bash -c 'file=$1
+  lifetime="$(mvl_q /bin/bash -c 'file=$1; input=$2; code=$3
 trap '\''exit 143'\'' TERM HUP
-trap '\''rm -f "$file"; kill "$timer" "$reader" 2>/dev/null || true'\'' EXIT
+trap '\''rm -f "$file" "$input" "$code"; kill "$timer" "$reader" 2>/dev/null || true'\'' EXIT
 (sleep 1800 & sleeper=$!; trap '\''kill "$sleeper" 2>/dev/null; exit'\'' TERM HUP; wait "$sleeper"; kill -TERM $$) </dev/null >/dev/null 2>&1 &
 timer=$!
 rm -f "$file"
 printf "mg-transfer-forward-ready\\n"
 cat <&0 >/dev/null &
 reader=$!
-wait "$reader"' manual-transfer-forward "$MG_MT_MANIFEST")"
+wait "$reader"' manual-transfer-forward "$MG_MT_MANIFEST" "$MG_RUN_DIR/native-reader-input.json" "$MG_RUN_DIR/media-proof-config.py")"
   "$wrapper" -o BatchMode=yes -o ConnectTimeout=10 -o ExitOnForwardFailure=yes \
     -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
     -R "127.0.0.1:$MG_MT_VM_PORT:127.0.0.1:$MG_MT_OBSERVER_PORT" "$lifetime" \
@@ -99,6 +99,21 @@ mg_mt_cleanup() {
   [ -z "$MG_MT_CLEANED" ] || return 0
   MG_MT_CLEANED=1
   mg__mac_vm_stop_orphans
+  if [ -n "$MG_MT_WIRE_FD" ]; then
+    exec 9>&-
+    MG_MT_WIRE_FD=""
+  fi
+  if [ -n "$MG_MT_WIRE_PID" ]; then
+    kill -TERM "$MG_MT_WIRE_PID" 2>/dev/null || true
+    waited=0
+    while kill -0 "$MG_MT_WIRE_PID" 2>/dev/null && [ "$waited" -lt 3 ]; do
+      mg_sleep 1
+      waited=$((waited + 1))
+    done
+    kill -KILL "$MG_MT_WIRE_PID" 2>/dev/null || true
+    wait "$MG_MT_WIRE_PID" 2>/dev/null || true
+    MG_MT_WIRE_PID=""
+  fi
   if [ -n "$MG_MT_MANIFEST" ]; then
     mg_mac_vm_ssh "rm -f $(mvl_q "$MG_MT_MANIFEST" "$MG_RUN_DIR/native.anki2")" >/dev/null 2>&1 || errors=1
   fi
@@ -119,22 +134,8 @@ mg_mt_cleanup() {
   if [ -n "$MG_MT_ROUTE_VERIFIED" ]; then
     mg_mac_vm_ssh "test ! -e $(mvl_q "$MG_MT_MANIFEST") && ! /usr/sbin/lsof -nP -iTCP:$MG_MT_VM_PORT -sTCP:LISTEN -Fn" >/dev/null 2>&1 || errors=1
   fi
-  if [ -n "$MG_MT_WIRE_FD" ]; then
-    exec 9>&-
-    MG_MT_WIRE_FD=""
-  fi
-  if [ -n "$MG_MT_WIRE_PID" ]; then
-    kill -TERM "$MG_MT_WIRE_PID" 2>/dev/null || true
-    waited=0
-    while kill -0 "$MG_MT_WIRE_PID" 2>/dev/null && [ "$waited" -lt 3 ]; do
-      mg_sleep 1
-      waited=$((waited + 1))
-    done
-    kill -KILL "$MG_MT_WIRE_PID" 2>/dev/null || true
-    wait "$MG_MT_WIRE_PID" 2>/dev/null || true
-    MG_MT_WIRE_PID=""
-  fi
   MG_MT_WIRE_CONFIG=""
+  mg_mt_cleanup_media || errors=1
   rm -f "$MG_RUN_DIR/wire-input.fifo" "$MG_RUN_DIR/wire-ready.fifo"
   rm -f "$MG_RUN_DIR/route.fifo" "$MG_RUN_DIR/route.log"
   if [ "$errors" -ne 0 ]; then

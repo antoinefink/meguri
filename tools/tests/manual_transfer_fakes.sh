@@ -37,9 +37,10 @@ mg_mt_prepare_data() {
 # Controller-order doubles only. Real request counts come exclusively from
 # manual-transfer-wire.py; its socket tests never derive counts from UI state.
 mg_mt_start_wire() {
+  [ -f "$MG_RUN_DIR/native-reader-command.json" ] || return 1
   printf 'start-wire\n' >>"$FX_EVENTS"
   MG_MT_OBSERVER_PORT=19090
-  MG_MT_WIRE_CONFIG='{"port":19090,"token":"0000000000000000000000000000000000000000000000000000000000000000"}'
+  MG_MT_WIRE_CONFIG='{"port":19090,"token":"0000000000000000000000000000000000000000000000000000000000000000","nativeContext":"1111111111111111111111111111111111111111111111111111111111111111"}'
 }
 mg_mt_wire_proof() {
   printf 'wire-proof\n' >>"$FX_EVENTS"
@@ -86,7 +87,18 @@ mg_mac_vm_ssh_in() {
 mg_sim_lease() { printf 'sim-lease %s\n' "$*" >>"$FX_EVENTS"; MG_SIM_UDID=fake-udid; }
 mg_sim_check_runtime() { :; }
 mg_sim_prepare() { :; }
-mg_mt_set_native_support() { MG_MT_SUPPORT="$FX_VM/native-support"; }
+mg_mt_set_native_support() {
+  printf 'native-container\n' >>"$FX_EVENTS"
+  MG_MT_SUPPORT="$FX_VM/native-support"
+}
+mg_mt_stage_reader() {
+  printf 'stage-reader\n' >>"$FX_EVENTS"
+  [ "${FX_READER_STAGE_FAIL:-0}" = 0 ] || return 1
+  printf '{}' >"$MG_RUN_DIR/native-reader-command.json"
+  mkdir -p "${MG_RUN_DIR/"$MG_ROOT"/"$FX_VM"}"
+  printf '{}' >"${MG_RUN_DIR/"$MG_ROOT"/"$FX_VM"}/native-reader-input.json"
+  MG_MT_MEDIA_STAGED=1
+}
 mg_app_xcodebuild_test() {
   local selection='-only-testing:MeguriUITests/ManualTransferJourneyTests/testDistinctAccountRoundTripPreservesImportCooldownAfterRestart'
   [ "$#" -eq 5 ] && [ "$5" = "$selection" ] || return 2
@@ -131,6 +143,7 @@ case "${1:-}" in
     MG_MT_MANIFEST="$MG_ROOT/app/Fixtures/ManualTransfer/controlled-rig.json"
     MG_MT_SUPPORT="$FX_VM/native-support"
     mg_on_exit mg_mt_cleanup
+    mg_mt_stage_reader
     mg_mt_start_wire
     if [ "$operation" = forward ]; then
       mg_mt_open_forward

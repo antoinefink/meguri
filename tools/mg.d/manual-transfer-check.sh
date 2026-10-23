@@ -118,8 +118,8 @@ mg_mt_set_native_support() {
       MG_MT_SUPPORT="$(mg_mac_vm_ssh 'printf "%s/Library/Containers/com.antoinefink.meguri.dev/Data/Library/Application Support" "$HOME"')" || return 1
       ;;
     *)
-      # Install through the existing VM simulator seam so XCTest can read the
-      # actual target container. This never launches or imports a collection.
+      # Select the actual container through the existing owned VM app-ID seam.
+      # This never launches or imports a collection.
       mg_simctl install "$2" "$(mg_app_products ios-sim Debug)/Meguri.app" >&2 || return 1
       app_home="$(mg_simctl get_app_container "$2" com.antoinefink.meguri.dev data)" || return 1
       case "$app_home" in /*/Containers/Data/Application/*) ;; *) return 1 ;; esac
@@ -131,8 +131,9 @@ mg_mt_set_native_support() {
 mg_mt_cleanup_media() {
   # Only controller-owned VM inputs are removed; never app receipts or rig data.
   rm -rf "$MG_RUN_DIR/device-fixture" "$MG_RUN_DIR/media-proof-config.py"
+  rm -f "$MG_RUN_DIR/native-reader-command.json"
   if [ -n "${MG_MT_MEDIA_STAGED:-}" ]; then
-    if ! mg_mac_vm_ssh "rm -rf $(mvl_q "$MG_RUN_DIR/device-fixture" "$MG_RUN_DIR/media-proof-config.py")" >/dev/null 2>&1; then
+    if ! mg_mac_vm_ssh "rm -rf $(mvl_q "$MG_RUN_DIR/device-fixture" "$MG_RUN_DIR/media-proof-config.py" "$MG_RUN_DIR/native-reader-input.json")" >/dev/null 2>&1; then
       mg_mt_error cleanup "media fixture teardown is unconfirmed"
       return 1
     fi
@@ -143,8 +144,37 @@ mg_mt_cleanup_media() {
 mg_mt_stage_media() {
   cp "$MG_TOOLS/scripts/manual-transfer-config.py" "$MG_RUN_DIR/media-proof-config.py" || return 1
   MG_MT_MEDIA_STAGED=1
-  mg_on_exit mg_mt_cleanup_media
+  mg_on_exit mg_mt_cleanup
   mg_mac_vm_copy_in "$MG_RUN_DIR/device-fixture" "$MG_RUN_DIR/media-proof-config.py"
+}
+
+mg_mt_stage_reader() {
+  local context command wrapper
+  mvl_lease_held "$MG_LEASE_DIR" || return 1
+  # The selected app-ID seam above alone chooses the root. HTTP supplies nothing.
+  context="$(mg_mac_vm_ssh "/usr/bin/python3 $(mvl_q "$MG_RUN_DIR/media-proof-config.py") native-context $(mvl_q "$MG_MT_SUPPORT")" 2>/dev/null)" || return 1
+  printf '%s' "$context" | mg_mac_vm_ssh_in "umask 077; cat >$(mvl_q "$MG_RUN_DIR/native-reader-input.json")" >/dev/null 2>&1 || return 1
+  wrapper="$(jq -r .ssh <<<"$MG_MAC_VM")"
+  # SSH stdin stays open for the read. EOF/SSH loss terminates and reaps the
+  # remote reader; its own six-second alarm is independent of the host deadline.
+  command="$(mvl_q /bin/bash -c 'exec 3<&0
+worker=""; guard=""
+cleanup() {
+  [ -z "$worker" ] || kill -KILL "$worker" 2>/dev/null || true
+  [ -z "$guard" ] || kill -TERM "$guard" 2>/dev/null || true
+  [ -z "$worker" ] || wait "$worker" 2>/dev/null || true
+  [ -z "$guard" ] || wait "$guard" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap '\''exit 143'\'' TERM HUP
+/usr/bin/python3 "$1" native-state "$2" < /dev/null &
+worker=$!
+(IFS= read -r ignored <&3; kill -KILL "$worker" 2>/dev/null || true) &
+guard=$!
+wait "$worker"; result=$?
+exit "$result"' manual-transfer-reader "$MG_RUN_DIR/media-proof-config.py" "$MG_RUN_DIR/native-reader-input.json")"
+  printf '%s' "$context" | python3 "$MG_TOOLS/scripts/manual-transfer-config.py" reader-config "$wrapper" "$command" \
+    >"$MG_RUN_DIR/native-reader-command.json"
 }
 
 mg_mt_read_results() {
@@ -260,8 +290,22 @@ mg_manual_transfer_check() {
   mg_on_exit mg_mt_cleanup
   MG_MT_MANIFEST="$MG_ROOT/app/Fixtures/ManualTransfer/controlled-rig.json"
   MG_MT_VM_PORT=18765
-  mg_mt_start_wire || return 0
-  mg_mt_open_forward || return 0
+  if [ "$selected_platform" = mac ]; then
+    test_destination='platform=macOS,arch=arm64'
+    started_at="$(mg_app_log_now)"
+  else
+    mg_sim_lease "$selected_platform" release || return 0
+    leased_device="$MG_SIM_UDID"
+    mg_on_exit mg_mt_cleanup
+    mg_sim_check_runtime "$leased_device" || return 0
+    mg_sim_prepare "$leased_device" || return 0
+    test_destination="id=$leased_device"
+  fi
+  mg_on_exit mg_mt_cleanup
+  if ! mg_mt_set_native_support "$selected_platform" "$leased_device"; then
+    mg_mt_error native-container "the VM development app container could not be established"
+    return 0
+  fi
   mg_mt_stage_media
   media_stage_status=$?
   case "$media_stage_status" in
@@ -269,20 +313,12 @@ mg_manual_transfer_check() {
     2) mg_queued_settle; return 0 ;;
     *) mg_mt_error media-fixture "generated device media could not be staged in the VM"; return 0 ;;
   esac
-  if [ "$selected_platform" = mac ]; then
-    test_destination='platform=macOS,arch=arm64'
-    started_at="$(mg_app_log_now)"
-  else
-    mg_sim_lease "$selected_platform" release || return 0
-    leased_device="$MG_SIM_UDID"
-    mg_sim_check_runtime "$leased_device" || return 0
-    mg_sim_prepare "$leased_device" || return 0
-    test_destination="id=$leased_device"
-  fi
-  if ! mg_mt_set_native_support "$selected_platform" "$leased_device"; then
-    mg_mt_error native-container "the VM development app container could not be established"
+  if ! mg_mt_stage_reader; then
+    mg_mt_error native-reader "the fixed VM evidence reader could not be staged"
     return 0
   fi
+  mg_mt_start_wire || return 0
+  mg_mt_open_forward || return 0
   mg_mt_write_manifest || return 0
   # Callbacks run in reverse order. Remove inputs before releasing leases.
   mg_on_exit mg_mt_cleanup
@@ -317,7 +353,6 @@ mg_manual_transfer_check() {
     return 0
   fi
   mg_mt_compare_peer || return 0
-  mg_mt_cleanup_media || return 0
   mg_mt_cleanup || return 0
   mg_count total 1
   mg_count passed 1

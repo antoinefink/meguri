@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 import XCTest
 #if os(macOS)
 import AppKit
@@ -17,11 +16,11 @@ import AppKit
         let exportPassword: String
         let deckID: Int64
         let fixturePath: String
-        let supportPath: String
         let serverImportSHA256: String
         let serverExportSHA256: String
         let deviceSHA256: String
         let wireToken: String
+        let nativeContext: String
     }
     #if os(macOS)
     func testSettingsScrollCarrierPreflight() throws {
@@ -189,19 +188,19 @@ import AppKit
         waitUntilReady(allow, app)
         XCTAssertFalse(element(app, "settings.anki.confirm").exists)
         XCTAssertFalse(element(app, "settings.anki.progress").exists)
-        let media = URL(filePath: rig.supportPath).appending(path: "Collection/collection.media")
+        let initial = try await nativeState(rig)
         if importing {
-            XCTAssertFalse(FileManager.default.fileExists(atPath: media.appending(path: "rf4-server.bin").path),
+            XCTAssertFalse(try XCTUnwrap(initial.files["rf4-server.bin"]).exists,
                            "The server file must not arrive before media consent.")
         } else {
-            try assertMediaHash(media, name: "rf4-server.bin", expected: rig.serverImportSHA256)
+            try assertMediaHash(initial, name: "rf4-server.bin", expected: rig.serverImportSHA256, bytes: 4096)
         }
-        try assertMediaHash(media, name: "rf4-device.bin", expected: rig.deviceSHA256)
+        try assertMediaHash(initial, name: "rf4-device.bin", expected: rig.deviceSHA256, bytes: 6144)
         attachSuccess(app, name + "-collection-complete-media-awaiting-consent")
         let before = try await wire(rig, importing ? "mark/before-consent" : "mark/export-before-consent")
         XCTAssertEqual(before.active, 0)
         if importing { XCTAssertEqual(before.media, 0, "Preparing the media decision must be offline.") }
-        let original = try durableOperation(rig, direction: importing ? "Import" : "Export")
+        let original = try durableOperation(initial, direction: importing ? "Import" : "Export")
         XCTAssertTrue(original.collectionComplete && original.receipt == nil && original.media.stage == "AwaitingConsent")
         try click(allow, app, bundle)
         if importing {
@@ -215,7 +214,8 @@ import AppKit
             XCTAssertFalse(element(app, "settings.anki.progress").exists)
             XCTAssertFalse(element(app, "settings.anki.nextEligible").exists)
 
-            let partial = try durableOperation(rig, direction: "Import")
+            let cancelled = try await nativeState(rig)
+            let partial = try durableOperation(cancelled, direction: "Import")
             XCTAssertEqual(partial.media.stage, "Cancelled")
             assertSameOperation(original, partial)
             XCTAssertEqual(partial.phase, "MediaIncomplete")
@@ -224,7 +224,9 @@ import AppKit
             XCTAssertTrue(partial.media.remoteOutcomeUnknown)
             XCTAssertEqual(partial.media.counters.downloadedFiles, 0)
             XCTAssertEqual(partial.media.counters.uploadedFiles, 0)
-            try assertNoSuccessCooldown(rig, operation: partial)
+            assertNoSuccessCooldown(partial)
+            XCTAssertFalse(try XCTUnwrap(cancelled.files["rf4-server.bin"]).exists)
+            try assertMediaHash(cancelled, name: "rf4-device.bin", expected: rig.deviceSHA256, bytes: 6144)
             _ = try await wire(rig, "abort")
             _ = try await waitForWire(rig) { $0.active == 0 && $0.aborted == 1 }
             let stopped = try await wire(rig, "mark/cancelled")
@@ -241,11 +243,11 @@ import AppKit
             waitUntilReady(element(app, "settings.anki.history"), app)
             XCTAssertFalse(element(app, "settings.anki.startMedia").exists)
             XCTAssertFalse(element(app, "settings.anki.progress").exists)
-            let recovered = try durableOperation(rig, direction: "Import")
+            let recovered = try durableOperation(try await nativeState(rig), direction: "Import")
             assertSameOperation(partial, recovered)
             XCTAssertTrue(recovered.collectionComplete && recovered.receipt == nil)
             XCTAssertEqual(recovered.media.stage, "Cancelled")
-            try assertNoSuccessCooldown(rig, operation: recovered)
+            assertNoSuccessCooldown(recovered)
             let passive = try await wire(rig, "mark/passive-history")
             XCTAssertEqual(passive.media, stopped.media, "Restart and offline history must issue zero additional media requests.")
             XCTAssertEqual(passive.collectionTransfers, stopped.collectionTransfers)
@@ -254,7 +256,7 @@ import AppKit
             try click(element(app, "settings.anki.resumeMedia.\(original.id)"), app, bundle)
             try reveal(allow, app, bundle)
             waitUntilReady(allow, app)
-            let decision = try durableOperation(rig, direction: "Import")
+            let decision = try durableOperation(try await nativeState(rig), direction: "Import")
             assertSameOperation(original, decision)
             XCTAssertEqual(decision.media.stage, "AwaitingConsent")
             XCTAssertTrue(decision.media.consent == nil && decision.receipt == nil)
@@ -268,12 +270,17 @@ import AppKit
         waitUntilReady(element(app, "settings.anki.history"), app)
         XCTAssertFalse(element(app, "settings.anki.startMedia").exists)
         XCTAssertTrue(element(app, "settings.anki.nextEligible").exists)
-        try assertMediaHash(media, name: "rf4-server.bin", expected: importing ? rig.serverImportSHA256 : rig.serverExportSHA256)
-        try assertMediaHash(media, name: "rf4-device.bin", expected: rig.deviceSHA256)
-        XCTAssertEqual(try Data(contentsOf: media.appending(path: "rf4-zero.bin")).count, 0)
-        let finished = try durableOperation(rig, direction: importing ? "Import" : "Export")
+        let final = try await nativeState(rig)
+        try assertMediaHash(final, name: "rf4-server.bin", expected: importing ? rig.serverImportSHA256 : rig.serverExportSHA256, bytes: importing ? 4096 : 8192)
+        try assertMediaHash(final, name: "rf4-device.bin", expected: rig.deviceSHA256, bytes: 6144)
+        try assertMediaHash(final, name: "rf4-zero.bin", expected: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", bytes: 0)
+        let finished = try durableOperation(final, direction: importing ? "Import" : "Export")
         assertSameOperation(original, finished)
         XCTAssertTrue(finished.phase == "Complete" && finished.media.stage == "Complete" && finished.receipt != nil)
+        XCTAssertTrue(finished.media.consentBound && finished.media.exclusionsVerified)
+        XCTAssertTrue(finished.successCooldown != nil)
+        XCTAssertTrue(finished.receipt?.completedAt == finished.successCooldown?.completedAt &&
+                      finished.receipt?.nextEligibleAt == finished.successCooldown?.nextEligibleAt)
         XCTAssertEqual(finished.media.remoteOutcomeUnknown, importing,
                        "A completed resume cannot erase unknown prior effects; fresh Export has none.")
         _ = try await waitForWire(rig) { $0.active == 0 }
@@ -321,34 +328,48 @@ import AppKit
             struct Counters: Decodable { let downloadedFiles, uploadedFiles: UInt64 }
             struct Consent: Decodable { let categories: UInt32 }
             let stage: String
-            let remoteOutcomeUnknown: Bool
+            let remoteOutcomeUnknown, consentBound, exclusionsVerified: Bool
             let counters: Counters
             let consent: Consent?
         }
-        let id, direction, phase, account, configuredEndpoint: String
+        let id, direction, phase, authority, account, configuredEndpoint: String
         let collectionComplete: Bool
-        let resultingPublication: [UInt64]?
-        let receipt: Receipt?
+        let resultingPublication: String?
+        let receipt, successCooldown: Receipt?
         let media: Media
     }
-    private struct DurableHistory: Decodable {
-        struct Transfers: Decodable {
-            let operations: [String: DurableOperation]
-            let cooldowns: [String: DurableOperation.Receipt]
+    private struct NativeState: Decodable {
+        struct FileFact: Decodable {
+            let exists: Bool
+            let bytes: UInt64?
+            let sha256: String?
         }
-        let manualTransfers: Transfers
+        let context: String
+        let operations: [String: DurableOperation?]
+        let files: [String: FileFact]
     }
-    private func durableHistory(_ rig: Rig) throws -> DurableHistory.Transfers {
+    private func nativeState(_ rig: Rig) async throws -> NativeState {
         do {
-            let url = URL(filePath: rig.supportPath).appending(path: "ManualTransfers/manual-transfers.json")
+            var request = URLRequest(url: try XCTUnwrap(URL(string: rig.endpoint + "__rf4/native-state")))
+            request.httpMethod = "POST"
+            request.httpBody = Data()
+            request.timeoutInterval = 12
+            request.setValue(rig.wireToken, forHTTPHeaderField: "X-RF4-Control")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 65536 else {
+                throw EvidenceError.unavailable
+            }
+            // The controlled observer validates the entire strict schema before
+            // returning it. Decoder failures never attach response bodies.
             let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
-            return try decoder.decode(DurableHistory.self, from: Data(contentsOf: url)).manualTransfers
+            let state = try decoder.decode(NativeState.self, from: data)
+            guard state.context == rig.nativeContext else { throw EvidenceError.unavailable }
+            return state
         } catch { throw EvidenceError.unavailable }
     }
-    private func durableOperation(_ rig: Rig, direction: String) throws -> DurableOperation {
-        let candidates = try durableHistory(rig).operations.values.filter { $0.direction == direction }
-        // Operation IDs begin with a monotonically increasing fixed-width serial.
-        guard let record = candidates.max(by: { $0.id < $1.id }),
+    private func durableOperation(_ state: NativeState, direction: String) throws -> DurableOperation {
+        guard let candidate = state.operations[direction], let record = candidate,
+              record.direction == direction,
               record.id.range(of: "^[0-9a-f]{16}-[0-9a-f]{16}$", options: .regularExpression) != nil else {
             throw EvidenceError.unavailable
         }
@@ -356,18 +377,19 @@ import AppKit
     }
     private func assertSameOperation(_ first: DurableOperation, _ second: DurableOperation) {
         // Compare opaque identities only in memory; never attach the sidecar.
-        XCTAssertTrue(first.id == second.id && first.account == second.account && first.configuredEndpoint == second.configuredEndpoint)
+        XCTAssertTrue(first.id == second.id && first.authority == second.authority && first.account == second.account && first.configuredEndpoint == second.configuredEndpoint)
         XCTAssertTrue(first.resultingPublication != nil && first.resultingPublication == second.resultingPublication,
                       "Media cancellation/recovery/resume must retain this collection activation.")
     }
-    private func assertNoSuccessCooldown(_ rig: Rig, operation: DurableOperation) throws {
-        XCTAssertTrue(try durableHistory(rig).cooldowns[operation.account] == nil,
+    private func assertNoSuccessCooldown(_ operation: DurableOperation) {
+        XCTAssertTrue(operation.successCooldown == nil,
                       "No whole-operation receipt or success cooldown exists for partial media.")
     }
-    private func assertMediaHash(_ directory: URL, name: String, expected: String) throws {
-        let bytes = try Data(contentsOf: directory.appending(path: name))
-        let actual = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
-        XCTAssertEqual(actual, expected, "Actual app bytes differ for reserved synthetic media: \(name)")
+    private func assertMediaHash(_ state: NativeState, name: String, expected: String, bytes: UInt64) throws {
+        let fact = try XCTUnwrap(state.files[name])
+        XCTAssertTrue(fact.exists, "Reserved synthetic media must exist.")
+        XCTAssertTrue(fact.bytes == bytes && fact.sha256 == expected,
+                      "Actual reserved synthetic media bytes and SHA256 must match.")
     }
     private func requireControlledEndpoint(_ text: String) throws {
         let endpoint = try XCTUnwrap(URLComponents(string: text))
