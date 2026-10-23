@@ -93,19 +93,27 @@ final class VMAccessibilitySetupTests: XCTestCase {
             return
         }
         info.click()
-        let sheetContent = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            settings.sheets.count == 1
-                && settings.sheets.element(boundBy: 0).staticTexts["Remote Login"].exists
+        let infoAppearance = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            settings.sheets.count > 0 || settings.windows.count > windows.count
         }, object: nil)
-        guard XCTWaiter().wait(for: [sheetContent], timeout: 5) == .completed else {
-            XCTFail("Remote Login Info sheet content did not appear; inspection evidence withheld")
+        let appeared = XCTWaiter().wait(for: [infoAppearance], timeout: 5) == .completed
+        let inspectionWindows = settings.windows.allElementsBoundByAccessibilityElement
+        let sheetCount = settings.sheets.count
+        guard (1...2).contains(inspectionWindows.count),
+              settings.windows.count == inspectionWindows.count,
+              inspectionWindows.allSatisfy({ $0.exists }) else {
+            XCTFail("Expected one or two stable System Settings windows after Info; inspection evidence withheld")
             return
         }
 
         var secureFieldsPresent = settings.secureTextFields.firstMatch.exists
         var windowEvidence: [XCTAttachment] = []
-        for (index, window) in windows.enumerated() {
+        for (index, window) in inspectionWindows.enumerated() {
             if secureFieldsPresent { break }
+            guard window.exists, settings.windows.count == inspectionWindows.count else {
+                XCTFail("System Settings windows changed during inspection; inspection evidence withheld")
+                return
+            }
             let outline = XCTAttachment(string: String(window.debugDescription.prefix(64_000)))
             outline.name = "VM Remote Login window \(index) tree (up to 64000 characters)"
             outline.lifetime = .keepAlways
@@ -120,9 +128,9 @@ final class VMAccessibilitySetupTests: XCTestCase {
         }
         // Hold all pixels and hierarchy until the final secure-field check has passed.
         secureFieldsPresent = settings.secureTextFields.firstMatch.exists || secureFieldsPresent
-        let report: [String: Any] = ["windowCount": windows.count,
-                                   "secureFieldsPresent": secureFieldsPresent,
-                                   "pixelsAndHierarchyWithheld": secureFieldsPresent]
+        let report: [String: Any] = ["windowCount": inspectionWindows.count,
+                                   "sheetCount": sheetCount,
+                                   "infoAppeared": appeared]
         let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
         let diagnostic = XCTAttachment(string: String(decoding: data, as: UTF8.self))
         diagnostic.name = "VM Remote Login inspection status"
@@ -130,6 +138,9 @@ final class VMAccessibilitySetupTests: XCTestCase {
         add(diagnostic)
         if !secureFieldsPresent {
             for attachment in windowEvidence { add(attachment) }
+        }
+        if !appeared {
+            XCTFail("Remote Login Info sheet or added window did not appear within five seconds")
         }
     }
 

@@ -563,3 +563,13 @@ Info inspection `20261023T192410Z-88778` reached the exact Info click and
 failed its assumed sheet-title predicate. It changed no settings and its
 marker was removed. The next inspection must capture the actual bounded
 window state before assuming the Info surface's accessibility type.
+
+iPhone picker check `20261023T192844Z-94566` passed one case without skips:
+native file selection, validated collection import, saved review and restart.
+This proves the local-entry review checkpoint on iPhone as well as Mac.
+
+Info evidence correction `20261023T192603Z-92129` starts at `5bfd9bca`.
+OS-setup review round 4 found no new P0–P1 findings. It captures bounded
+Settings windows after the existing exact Info click, even when the surface
+type differs from the prior predicate. It adds no input or permission change.
+Private scan `20261023T193127Z-97133` passed. Runtime evidence remains open.
