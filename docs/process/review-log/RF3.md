@@ -115,3 +115,5 @@
 - iPhone `20261023T030509Z-33509`: actual Back navigation and Cancel passed; native delegate returned Ready. The test failed after reopening Files for Save when an indexed folder query lost its remote element. Save and replacement remain pending.
 - iPhone export accessibility `20261023T030913Z-38005`: pass, one test and no skips.
 - Fixer `s-20261023T030832Z-0a17baf4`, cleanroom `20261023T030902Z-37194`: direct folder targets, native provider readiness and observed folder transitions replace indexed Save navigation. Native Save awaits hittability. Production and cancellation code are unchanged. Earlier runner `20261023T030854Z-36929` refused an incorrect session id before work; the recorded session above ran successfully.
+- Independent round 6 follow-up on `44565a3a`: no new P0–P1 findings or deterministic blockers.
+- iPhone `20261023T031156Z-40577`: Cancel and first native Save passed. The next Choose action was tapped while native completion still disabled it; screenshot shows Saved with Choose disabled. The replacement picker did not open. Wait for the actual action to become enabled before the next selection; retain the production cleanup guard.
