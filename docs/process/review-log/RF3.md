@@ -149,3 +149,4 @@
 - Independent round 6 source follow-up on `7c444fa6`: no new P0–P1 findings or deterministic blockers. Privacy `20261023T042046Z-2822`: PASS.
 - iPad export audit `20261023T042057Z-3184`: PASS, one test and no skips. Ready, error and loading passed in both appearances at default and largest accessibility text sizes, including continuous paragraphs and full-frame controls. iPhone/Mac freshness and integration gate remain pending.
 - iPhone `20261023T042829Z-7018`: FAIL. Paragraph height comparison failed at AX5. Contrast findings: none. Numeric diagnostics and a bounded comparison remain pending.
+- Fixer `s-20261023T043102Z-ce426e11`; exports `20261023T043144Z-10524`, `20261023T043321Z-11763`. Height baseline retained; limit 1e-6pt; diagnostics attached. Privacy failures `20261023T043253Z-11382`, `20261023T043400Z-12325` retained. Native checks pending.

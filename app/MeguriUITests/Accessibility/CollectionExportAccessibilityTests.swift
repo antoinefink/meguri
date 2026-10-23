@@ -149,7 +149,16 @@ import XCTest
                     }
                 }
                 if let previous = coverage[index], previous.height != frames[index].height {
-                    throw AuditError(description: "Paragraph geometry changed during coverage: \(identifiers[index])")
+                    let delta = frames[index].height - previous.height
+                    let signedDelta = String(format: "%+.17g", Double(delta))
+                    let numerics = "\(identifiers[index]), baseline height \(previous.height)pt, current height \(frames[index].height)pt, signed delta \(signedDelta)pt, frame \(frames[index]), viewport \(viewport), gesture \(gesture)"
+                    let proof = XCTAttachment(string: numerics)
+                    proof.name = "export paragraph height delta \(identifiers[index]) gesture \(gesture)"
+                    proof.lifetime = .keepAlways
+                    add(proof)
+                    guard abs(delta) <= 1e-6 else {
+                        throw AuditError(description: "Paragraph geometry changed during coverage: \(numerics)")
+                    }
                 }
             }
             let visible = targets.indices.filter {
@@ -175,7 +184,7 @@ import XCTest
                 } else {
                     guard start == 0 else { continue }
                 }
-                coverage[index] = (frame.height, end)
+                coverage[index] = (coverage[index]?.height ?? frame.height, end)
                 portions.append("\(identifiers[index]), gesture \(gesture): frame \(frame), visible \(portion), text offsets \(start)...\(end), cumulative 0...\(end) of \(frame.height)")
                 if portion.maxY == frame.maxY { checked.insert(index) }
             }
