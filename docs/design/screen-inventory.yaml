@@ -328,10 +328,15 @@ screens:
     units: [U161]
     signature: false
     platforms: [iphone, ipad, mac]
-    states: [empty, typical, error, loading]
+    states: [empty, typical, error, loading, overflow]
     variants: pairwise
     references: [grouped-form, confirmation-dialog]
-    purpose: Log in, sync status and the one-way sync choice.
+    purpose: >-
+      Explicit Anki collection transfers and separate both-side media consent.
+      Overflow renders media-consent; supplemental settings/anki-transfer routes
+      media-progress, media-partial, media-complete and media-unknown cover Cancel,
+      explicit Resume, long excluded names and unverified exclusions using the
+      production controls with synthetic values and no server work.
   - id: settings.importExport
     title: Import and export
     units: [U162]

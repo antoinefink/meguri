@@ -420,12 +420,21 @@ public final class ManualTransferCoordinator {
 }
 
 extension ManualTransferCoordinator {
-    public enum RenderState { case empty, configured, error, loading }
-    /// Builds Settings examples for screenshots with unavailable service and
-    /// credential stores. Live transfer evidence must come from a VM run.
+    public enum RenderState: Equatable { case empty, configured, error, loading, mediaConsent, mediaProgress, mediaPartial, mediaComplete, mediaUnknown }
+    /// Builds synthetic Settings examples. Selected-media effects stay in memory;
+    /// no fixture owns a collection or provides live transfer evidence.
     public static func renderFixture(_ state: RenderState) -> ManualTransferCoordinator {
+        let mediaState: ManualTransferMediaRenderFixture.State?
+        switch state {
+        case .mediaConsent: mediaState = .consent
+        case .mediaProgress: mediaState = .progress
+        case .mediaPartial: mediaState = .partial
+        case .mediaComplete: mediaState = .complete
+        case .mediaUnknown: mediaState = .unknown
+        default: mediaState = nil
+        }
         let model = ManualTransferCoordinator(
-            owner: nil, service: UnavailableManualTransferService(),
+            owner: nil, service: UnavailableManualTransferService(mediaState: mediaState),
             keychain: RenderingTransferCredentials(), defaults: nil)
         model.loaded = true
         switch state {
@@ -438,6 +447,20 @@ extension ManualTransferCoordinator {
         case .configured:
             model.authenticated = true
             model.username = "Study account"
+        case .mediaConsent, .mediaProgress, .mediaPartial, .mediaComplete, .mediaUnknown:
+            guard let mediaState else { return model }
+            // Inert synthetic identity satisfies the existing presentation checks.
+            // The fixture service never forwards it to a production adapter.
+            let identity = ManualTransferCredentials(username: "Fixture study account", hostKey: "render-only-inert")
+            model.credentials = identity; model.authenticated = true; model.username = identity.username
+            model.scope = .collectionAndMedia; model.direction = .export
+            model.records = [ManualTransferMediaRenderFixture.history(mediaState)]
+            model.result = model.records.first?.record
+            model.message = "Rendering fixture: simulated collection/media state. No server work or acceptance."
+            if state == .mediaConsent || state == .mediaProgress {
+                model.mediaPreview = ManualTransferMediaRenderFixture.preview(mediaState)
+                model.mediaUsername = identity.username; model.stage = .awaitingMediaConsent
+            }
         }
         model.endpoint = "https://study.example.test/personal/collection/"
         model.endpointDraft = model.endpoint
@@ -449,10 +472,36 @@ private actor RenderingTransferCredentials: ManualTransferCredentialStore {
     func save(_ credentials: ManualTransferCredentials, endpoint: String) throws { throw BridgeError.unavailable(reason: "Rendering fixture") }
     func clear() {}
 }
+/// Fixture-only service. All non-media operations remain unavailable. Media
+/// actions update synthetic values, never network, Keychain, files or a host.
 private actor UnavailableManualTransferService: ManualTransferService {
+    private var mediaState: ManualTransferMediaRenderFixture.State?
+    init(mediaState: ManualTransferMediaRenderFixture.State? = nil) { self.mediaState = mediaState }
+    func prepareMedia(_ entry: ManualTransferHistory, endpoint: String, credentials: ManualTransferCredentials, operation: ManualTransferOperation) throws -> PreparedManualMedia {
+        guard let mediaState else { throw BridgeError.unavailable(reason: "Rendering fixture") }
+        return ManualTransferMediaRenderFixture.preview(mediaState)
+    }
+    func runMedia(_ preview: PreparedManualMedia, endpoint: String, credentials: ManualTransferCredentials, operation: ManualTransferOperation, progress: @escaping @Sendable (ManualMediaSnapshot) -> Void) async throws -> ManualTransferRecord {
+        guard mediaState != nil else { throw BridgeError.unavailable(reason: "Rendering fixture") }
+        mediaState = .progress
+        progress(ManualTransferMediaRenderFixture.progress)
+        // Hold this deterministic progress frame until the real Cancel control
+        // cancels the coordinator's token. No batches or server effects occur.
+        while operation.cancellation == nil { try await Task.sleep(for: .milliseconds(50)) }
+        mediaState = .partial
+        return ManualTransferMediaRenderFixture.record(.partial)
+    }
+    func cancelPreparedMedia(_ preview: PreparedManualMedia, operation: ManualTransferOperation) throws -> ManualTransferRecord {
+        guard mediaState != nil else { throw BridgeError.unavailable(reason: "Rendering fixture") }
+        mediaState = .partial
+        return ManualTransferMediaRenderFixture.record(.partial)
+    }
     func normalizeEndpoint(_ text: String) throws -> String { throw BridgeError.unavailable(reason: "Rendering fixture") }
     func login(endpoint: String, username: String, password: String, operation: ManualTransferOperation) throws -> ManualTransferCredentials { throw BridgeError.unavailable(reason: "Rendering fixture") }
-    func history(operation: ManualTransferOperation) throws -> [ManualTransferHistory] { throw BridgeError.unavailable(reason: "Rendering fixture") }
+    func history(operation: ManualTransferOperation) throws -> [ManualTransferHistory] {
+        guard let mediaState else { throw BridgeError.unavailable(reason: "Rendering fixture") }
+        return [ManualTransferMediaRenderFixture.history(mediaState)]
+    }
     func prepare(endpoint: String, credentials: ManualTransferCredentials, direction: ManualTransferDirection, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) throws -> PreparedManualTransfer { throw BridgeError.unavailable(reason: "Rendering fixture") }
     func confirm(endpoint: String, credentials: ManualTransferCredentials, preview: PreparedManualTransfer, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) throws -> ManualTransferRecord { throw BridgeError.unavailable(reason: "Rendering fixture") }
     func recover(_ entry: ManualTransferHistory, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) throws -> PreparedManualTransfer { throw BridgeError.unavailable(reason: "Rendering fixture") }

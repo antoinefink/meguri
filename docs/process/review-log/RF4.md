@@ -836,3 +836,25 @@ is in `cleanroom/20261023T234549Z-81833`.
 The fixture failures concern its Form lookup. Native media proof, visual and
 accessibility checks, final native review round 6 and the full gate remain
 open. No Unit is accepted.
+
+Prepared media rendering fixtures; source base `2b7b92a5`, saved on
+`c28699fc`. Filtered final export: `cleanroom/20261023T234905Z-86366`.
+
+| Check | Receipt | Outcome |
+| --- | --- | --- |
+| Fixture review 1 | `231545Z-53043` | Four P2 findings |
+| Fixture review 2 | `232607Z-63231` | One P2 finding |
+| Fixture review 3 | `233335Z-71906` | No P0–P1 |
+| Package checks | `233949Z-75364`, `234003Z-76336` | 187 passed |
+| Mac fixture runtime | `ui-test/20261023T234313Z-79526` | Two failed; Form lookup |
+| Privacy | `private/20261023T235038Z-87611` | PASS; nine files |
+| Similarity | `similarity/20261023T235048Z-87910` | Eight passed; one excluded |
+| Inventory | `design-docs/20261023T235058Z-88247` | PASS |
+
+Five media routes use synthetic values and inert wrappers. Only consent
+adds the overflow matrix cell; supplemental captures cover the other
+states. Mac keyboard action checks are implemented but unproven. The iPad
+keyboard skip remains a final device-evidence gap.
+
+This is WIP. The next fixture run records numeric Form lookup facts.
+Rendered evidence, audits and final native review remain required.

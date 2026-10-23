@@ -143,7 +143,7 @@ the others use the pairwise set (U252).
 | Screen | Id | Units | Platforms | States | Variants | References |
 |---|---|---|---|---|---|---|
 | Settings | `settings.root` | U160 | iphone, ipad, mac | typical | pairwise set | `grouped-form`, `sidebar` |
-| Sync account and status | `settings.sync` | U161 | iphone, ipad, mac | empty, typical, error, loading | pairwise set | `grouped-form`, `confirmation-dialog` |
+| Sync account and status | `settings.sync` | U161 | iphone, ipad, mac | empty, typical, error, loading, overflow | pairwise set | `grouped-form`, `confirmation-dialog` |
 | Import and export | `settings.importExport` | U162 | iphone, ipad, mac | typical, error, loading | pairwise set | `grouped-form`, `sheet-form` |
 | Backups | `settings.backups` | U163 | iphone, ipad, mac | empty, typical, overflow, error, loading | pairwise set | `list-counts`, `confirmation-dialog` |
 | Maintenance | `settings.maintenance` | U163 | iphone, ipad, mac | typical, error, loading | pairwise set | `grouped-form` |
@@ -153,7 +153,7 @@ the others use the pairwise set (U252).
 | Recently received | `settings.recentlyReceived` | U145 | mac | empty, typical, overflow | pairwise set | `table` |
 
 - `settings.root`: The settings pages and their preferences.
-- `settings.sync`: Log in, sync status and the one-way sync choice.
+- `settings.sync`: Explicit Anki collection transfers and separate both-side media consent. Overflow renders media-consent; supplemental settings/anki-transfer routes media-progress, media-partial, media-complete and media-unknown cover Cancel, explicit Resume, long excluded names and unverified exclusions using the production controls with synthetic values and no server work.
 - `settings.importExport`: Import packages and export decks or the collection.
 - `settings.backups`: The backup list, creating a backup and restoring one.
 - `settings.maintenance`: Check Database, Check Media and Empty Cards with their reports.

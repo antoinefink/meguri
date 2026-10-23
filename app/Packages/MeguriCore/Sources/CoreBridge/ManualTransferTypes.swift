@@ -273,3 +273,39 @@ public final class ManualTransferOperation: Sendable, CollectionExportCancellati
     func check() throws(BridgeError) { if cancellation != nil { throw .cancelled } }
 }
 public struct ManualTransferInterrupted: Error, Sendable { public init() {} }
+
+/// Synthetic display values only. Preview/history wrappers have raw == nil;
+/// production adapters reject them. This cannot create a session or authority.
+nonisolated public enum ManualTransferMediaRenderFixture {
+    public enum State: Sendable, Equatable { case consent, progress, partial, complete, unknown }
+    public static func record(_ state: State) -> ManualTransferRecord {
+        let complete = state == .complete
+        let stopped = state == .partial || state == .unknown
+        let stage: MeguriCoreBindings.TransferMediaStage = complete ? .complete : (stopped ? .cancelled : (state == .progress ? .running : .awaitingConsent))
+        return ManualTransferRecord(.init(id: "render-selected-media", configuredEndpoint: "https://study.example.test/personal/collection/",
+            targetEndpoint: "https://study.example.test/personal/collection/", direction: .export,
+            phase: complete ? .complete : .mediaIncomplete, acceptance: .notSent,
+            boundary: stopped ? .cancelled : nil,
+            local: .init(cards: 28_800, notes: 19_200, reviews: 164_320, pendingReviews: 37, pendingRows: [12, 3, 4]),
+            remoteHasNoCards: nil, remote: nil, servedCounts: nil,
+            preparedMs: 1_894_701_600_000, generation: nil, collectionComplete: true, mediaSelected: true, revision: 1,
+            media: .init(stage: stage, counters: counters(complete: complete), remoteOutcomeUnknown: state == .unknown,
+                exclusionsVerified: complete, failureKind: stopped ? "cancelled" : nil),
+            copies: [], nextEligibleMs: nil))
+    }
+    public static func history(_ state: State) -> ManualTransferHistory { .init(record: record(state)) }
+    public static func preview(_ state: State) -> PreparedManualMedia { .init(record: record(state)) }
+    public static var progress: ManualMediaSnapshot {
+        .init(.init(phase: .downloading, counters: counters(complete: false), listed: 28_800,
+            downloadFiles: 9_600, downloadReceived: 3_200, publishedFiles: 3_200, filesLeft: 6_400, estimateSeconds: 128))
+    }
+    private static func counters(complete: Bool) -> MeguriCoreBindings.TransferMediaCounters {
+        .init(uploadedFiles: complete ? 12_480 : 480, uploadedDeletions: 17,
+            downloadedFiles: complete ? 9_600 : 3_200, downloadedDeletions: 23,
+            checked: 48_000, bytesDownloaded: complete ? 987_654_321 : 234_567_890, bytesUploaded: 123_456_789,
+            resynced: false,
+            oversized: complete ? ["f-0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789.wav"] : [],
+            empty: complete ? ["f-9876543210987654321098765432109876543210987654321098765432109876543210987654321098765432109876543210.png"] : [],
+            awaiting: complete ? 0 : 6_400)
+    }
+}

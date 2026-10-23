@@ -12,6 +12,12 @@ extension TestHooks {
             registry.register("settings/anki-transfer/typical") { _ in .screen { ManualTransferSettingsPreview.preview(.typical) } }
             registry.register("settings/anki-transfer/error") { _ in .screen { ManualTransferSettingsPreview.preview(.error) } }
             registry.register("settings/anki-transfer/loading") { _ in .screen { ManualTransferSettingsPreview.preview(.loading) } }
+            registry.register("settings/anki-transfer/overflow") { _ in .screen { ManualTransferSettingsPreview.preview(.overflow) } }
+            registry.register("settings/anki-transfer/media-consent") { _ in .screen { ManualTransferSettingsPreview.mediaFixture(.mediaConsent) } }
+            registry.register("settings/anki-transfer/media-progress") { _ in .screen { ManualTransferSettingsPreview.mediaFixture(.mediaProgress) } }
+            registry.register("settings/anki-transfer/media-partial") { _ in .screen { ManualTransferSettingsPreview.mediaFixture(.mediaPartial) } }
+            registry.register("settings/anki-transfer/media-complete") { _ in .screen { ManualTransferSettingsPreview.mediaFixture(.mediaComplete) } }
+            registry.register("settings/anki-transfer/media-unknown") { _ in .screen { ManualTransferSettingsPreview.mediaFixture(.mediaUnknown) } }
             registry.register("settings/import-export/typical") { _ in .sheet { CollectionExportPreview.preview(.typical) } }
             registry.register("settings/import-export/error") { _ in .sheet { CollectionExportPreview.preview(.error) } }
             registry.register("settings/import-export/loading") { _ in .sheet { CollectionExportPreview.preview(.loading) } }
