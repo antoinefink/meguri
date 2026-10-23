@@ -652,3 +652,16 @@ one P1, because resumed auth was not bound to the underlying Remote Login
 Info state. Its scoped correction is in progress. No credential input is
 authorized by the tool implementation until that finding is resolved and
 checked; Antoine's standing VM permission is retained.
+
+Fresh snapshot comparison `20261023T201028Z-30289` passed all four selected
+cells. The exact missing-file failure is repaired; the full app-hosted suite
+and combined gate remain required.
+
+Round 6 P1 correction `20261023T200901Z-29202` binds OS authorization to the
+unique underlying Remote Login Info sheet, On state and allowed-user snapshot
+before credential use and before Modify Settings. The reviewer confirmed the
+P1 closed, with no new P0–P1 findings. Actual scan
+`20261023T201514Z-36360` cleared this file; its sole finding was a comment in
+the separate native navigation patch. The credentialed VM action is pending.
+The refused source copy `20261023T200609Z-27517` ran no implementation while
+spec changes were dirty; the later clean run is the correction cited above.

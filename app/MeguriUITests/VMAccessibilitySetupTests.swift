@@ -77,46 +77,62 @@ final class VMAccessibilitySetupTests: XCTestCase {
         continueAfterFailure = false
         let settings = XCUIApplication(bundleIdentifier: "com.apple.systempreferences")
         defer {
-            // Never use the general setup evidence/authorization helpers in this case.
-            if let authorization = remoteLoginAuthorizationSurface(settings) {
-                attachRemoteLoginAuthorizationFacts(authorization)
-            }
+            if vmConsentValue != nil { NSPasteboard.general.clearContents() }
             if settings.state != .notRunning { settings.terminate() }
+            vmConsentValue = nil
+        }
+        // A previous single FDA click may have left its normal OS authorization open.
+        let resumedAuthorization = remoteLoginAuthorizationSurface(settings) != nil
+        let resumedAuthority: RemoteLoginInfoAuthority?
+        if resumedAuthorization {
+            guard let underlying = remoteLoginUnderlyingInfoFacts(settings) else {
+                reportRemoteLoginFailure(settings, "Exact underlying Remote Login Info authority is absent or ambiguous; no credential read or input performed")
+                return
+            }
+            resumedAuthority = underlying.authority
+            guard authorizeRemoteLoginIfNeeded(settings, authority: underlying.authority) else { return }
+        } else {
+            resumedAuthority = nil
+            if remoteLoginFullDiskAccessState(settings) == nil {
+                guard let inspection = openRemoteLoginInfo(settings, onFailure: {
+                    self.reportRemoteLoginFailure(settings, $0)
+                }) else { return }
+                guard inspection.appeared else {
+                    reportRemoteLoginFailure(settings, "Remote Login Info did not appear within five seconds; no permission input performed")
+                    return
+                }
+            }
         }
         guard remoteLoginAuthorizationSurface(settings) == nil else {
-            XCTFail("Authorization was already present; exact observed prompt facts attached, no navigation input performed")
-            return
-        }
-        guard let inspection = openRemoteLoginInfo(settings) else { return }
-        guard inspection.appeared else {
-            XCTFail("Remote Login Info did not appear within five seconds; no permission input performed")
-            return
-        }
-        guard remoteLoginAuthorizationSurface(settings) == nil else {
-            XCTFail("Remote Login authorization appeared; exact observed prompt facts attached, no authorization input performed")
+            reportRemoteLoginFailure(settings, "Unexpected Remote Login authorization before the FDA action; no permission input performed")
             return
         }
         guard let initial = remoteLoginFullDiskAccessState(settings),
+              resumedAuthority == nil || resumedAuthority == initial.authority,
               let alreadyEnabled = remoteLoginBoolean(initial.control) else {
-            XCTFail("Remote Login Info did not match the exact recorded settings; no permission input performed")
+            reportRemoteLoginFailure(settings, "Remote Login Info did not match the exact recorded settings; no permission input performed")
             return
         }
         if !alreadyEnabled {
+            guard !resumedAuthorization else {
+                reportRemoteLoginFailure(settings, "The previous FDA authorization did not enable full disk access; no retry performed")
+                return
+            }
             do {
                 try settings.bringToFront(bundleIdentifier: "com.apple.systempreferences", timeout: 4)
             } catch {
-                XCTFail("Could not bring Settings forward; no permission input performed")
+                reportRemoteLoginFailure(settings, "Could not bring Settings forward; no permission input performed")
                 return
             }
             guard remoteLoginAuthorizationSurface(settings) == nil,
                   let current = remoteLoginFullDiskAccessState(settings),
-                  current.allowedUsers == initial.allowedUsers,
+                  current.authority == initial.authority,
                   remoteLoginBoolean(current.control) == false,
                   current.control.isEnabled, current.control.isHittable else {
-                XCTFail("Exact Remote Login full disk access switch changed or is unavailable; no permission input performed")
+                reportRemoteLoginFailure(settings, "Exact Remote Login full disk access switch changed or is unavailable; no permission input performed")
                 return
             }
-            // The only permission-changing input: the unique, exact FDA row's switch, once.
+            // The single FDA permission input: the unique, exact FDA row's switch, once.
             current.control.click()
             let enabledOrAuthorization = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 if self.remoteLoginAuthorizationSurface(settings) != nil { return true }
@@ -124,42 +140,39 @@ final class VMAccessibilitySetupTests: XCTestCase {
                 return self.remoteLoginBoolean(state.control) == true
             }, object: nil)
             let completed = XCTWaiter().wait(for: [enabledOrAuthorization], timeout: 10) == .completed
-            guard remoteLoginAuthorizationSurface(settings) == nil else {
-                XCTFail("Remote Login authorization appeared after the single FDA click; exact observed prompt facts attached, no authorization input performed")
-                return
-            }
             guard completed else {
-                XCTFail("Remote Login full disk access did not become enabled within ten seconds; no further permission input performed")
+                reportRemoteLoginFailure(settings, "Remote Login full disk access did not become enabled within ten seconds; no further permission input performed")
                 return
             }
+            guard authorizeRemoteLoginIfNeeded(settings, authority: initial.authority) else { return }
         }
         guard let final = remoteLoginFullDiskAccessState(settings),
               remoteLoginBoolean(final.control) == true,
-              final.allowedUsers == initial.allowedUsers else {
-            XCTFail("Remote Login full disk access or the unchanged Remote Login/allowed-user settings could not be verified")
+              final.authority == initial.authority else {
+            reportRemoteLoginFailure(settings, "Remote Login full disk access or the unchanged Remote Login/allowed-user settings could not be verified")
             return
         }
         do {
             try settings.bringToFront(bundleIdentifier: "com.apple.systempreferences", timeout: 4)
         } catch {
-            XCTFail("Could not bring Settings forward to finish Remote Login setup")
+            reportRemoteLoginFailure(settings, "Could not bring Settings forward to finish Remote Login setup")
             return
         }
         guard remoteLoginAuthorizationSurface(settings) == nil,
               let verified = remoteLoginFullDiskAccessState(settings),
               remoteLoginBoolean(verified.control) == true,
-              verified.allowedUsers == initial.allowedUsers else {
-            XCTFail("Remote Login settings changed before Done; no further input performed")
+              verified.authority == initial.authority else {
+            reportRemoteLoginFailure(settings, "Remote Login settings changed before Done; no further input performed")
             return
         }
         let doneButtons = settings.sheets.element(boundBy: 0).buttons.matching(NSPredicate(format: "label == %@", "Done"))
         guard doneButtons.count == 1 else {
-            XCTFail("Remote Login Info Done button was not unique; no further input performed")
+            reportRemoteLoginFailure(settings, "Remote Login Info Done button was not unique; no further input performed")
             return
         }
         let done = doneButtons.element(boundBy: 0)
         guard done.isEnabled, done.isHittable else {
-            XCTFail("Remote Login Info Done button was unavailable; no further input performed")
+            reportRemoteLoginFailure(settings, "Remote Login Info Done button was unavailable; no further input performed")
             return
         }
         done.click()
@@ -168,7 +181,7 @@ final class VMAccessibilitySetupTests: XCTestCase {
         }, object: nil)
         guard XCTWaiter().wait(for: [dismissed], timeout: 5) == .completed,
               remoteLoginAuthorizationSurface(settings) == nil, settings.sheets.count == 0 else {
-            XCTFail("Remote Login Info did not close normally after Done; no further input performed")
+            reportRemoteLoginFailure(settings, "Remote Login Info did not close normally after Done; no further input performed")
             return
         }
         settings.terminate()
@@ -180,7 +193,7 @@ final class VMAccessibilitySetupTests: XCTestCase {
         evidence.name = "VM Remote Login safe settings status"
         evidence.lifetime = .keepAlways
         add(evidence)
-        if settings.state != .notRunning { XCTFail("Settings did not close after Remote Login setup") }
+        if settings.state != .notRunning { reportRemoteLoginFailure(settings, "Settings did not close after Remote Login setup") }
     }
 
     @MainActor
@@ -192,12 +205,33 @@ final class VMAccessibilitySetupTests: XCTestCase {
         }
     }
 
+    private struct RemoteLoginInfoAuthority: Equatable {
+        let allowedUsers: [String]
+        let remoteLoginOn: Bool
+    }
+
     @MainActor
-    private func remoteLoginFullDiskAccessState(_ settings: XCUIApplication) -> (control: XCUIElement, allowedUsers: [String])? {
-        guard settings.windows.count == 1, settings.sheets.count == 1,
+    private func remoteLoginFullDiskAccessState(_ settings: XCUIApplication) -> (control: XCUIElement, authority: RemoteLoginInfoAuthority)? {
+        guard settings.state != .notRunning, settings.windows.count == 1, settings.sheets.count == 1,
               settings.dialogs.count == 0, settings.alerts.count == 0,
               settings.secureTextFields.count == 0 else { return nil }
-        let sheet = settings.sheets.element(boundBy: 0)
+        guard let facts = remoteLoginUnderlyingInfoFacts(settings) else { return nil }
+        return (facts.control, facts.authority)
+    }
+
+    /// Read only recorded Info facts, including beneath a separately matched authorization overlay.
+    /// Query static text, switches, popup and outline only; never secure-field values.
+    @MainActor
+    private func remoteLoginUnderlyingInfoFacts(_ settings: XCUIApplication) -> (control: XCUIElement, authority: RemoteLoginInfoAuthority)? {
+        guard settings.state != .notRunning, settings.windows.count == 1 else { return nil }
+        let fda = NSPredicate(format: "label == %@ OR value == %@",
+                              "Allow full disk access for remote users", "Allow full disk access for remote users")
+        let on = NSPredicate(format: "label == %@ OR value == %@", "Remote Login: On", "Remote Login: On")
+        let sheets = settings.sheets.allElementsBoundByAccessibilityElement.filter {
+            $0.staticTexts.matching(fda).count == 1 && $0.staticTexts.matching(on).count == 1
+        }
+        guard sheets.count == 1 else { return nil }
+        let sheet = sheets[0]
         let groups = sheet.descendants(matching: .group).allElementsBoundByAccessibilityElement
         func groupsWithDirectText(_ text: String) -> [XCUIElement] {
             let exact = NSPredicate(format: "label == %@ OR value == %@", text, text)
@@ -210,7 +244,7 @@ final class VMAccessibilitySetupTests: XCTestCase {
                                                      "Allow access for", "Allow access for")).count == 1,
               rows[0].switches.count == 1, headers[0].switches.count == 1,
               sheet.switches.count == 2,
-              remoteLoginBoolean(headers[0].switches.element(boundBy: 0)) == true,
+              let remoteLoginOn = remoteLoginBoolean(headers[0].switches.element(boundBy: 0)), remoteLoginOn,
               sheet.popUpButtons.count == 1,
               sheet.popUpButtons.element(boundBy: 0).value as? String == "Only these users",
               sheet.outlines.count == 1 else { return nil }
@@ -221,17 +255,25 @@ final class VMAccessibilitySetupTests: XCTestCase {
         let allowedUsers = outline.staticTexts.allElementsBoundByAccessibilityElement.map {
             [$0.label, $0.value as? String ?? ""]
         }.map { $0.joined(separator: "\u{0}") }.sorted()
-        return (rows[0].switches.element(boundBy: 0), allowedUsers)
+        return (rows[0].switches.element(boundBy: 0), RemoteLoginInfoAuthority(allowedUsers: allowedUsers, remoteLoginOn: remoteLoginOn))
     }
 
-    /// Observe an auth surface only; never accept it, inspect fields, or load credentials.
+    private typealias RemoteLoginAuthorization = (owner: XCUIApplication, bundleIdentifier: String, surface: XCUIElement)
+
+    /// Enumerate only trusted OS owners; never launch SecurityAgent.
     @MainActor
-    private func remoteLoginAuthorizationSurface(_ settings: XCUIApplication) -> XCUIElement? {
+    private func remoteLoginAuthorizationSurfaces(_ settings: XCUIApplication) -> [RemoteLoginAuthorization] {
+        var surfaces: [RemoteLoginAuthorization] = []
         let agent = XCUIApplication(bundleIdentifier: "com.apple.SecurityAgent")
-        if agent.state != .notRunning, agent.windows.count > 0 {
-            return agent.windows.count == 1 ? agent.windows.element(boundBy: 0) : agent
+        if agent.state != .notRunning {
+            if agent.windows.count > 0 {
+                surfaces += agent.windows.allElementsBoundByIndex.map { (agent, "com.apple.SecurityAgent", $0) }
+            } else if agent.secureTextFields.count > 0 || agent.dialogs.count > 0 || agent.alerts.count > 0
+                        || agent.sheets.count > 0 {
+                surfaces.append((agent, "com.apple.SecurityAgent", agent))
+            }
         }
-        guard settings.state != .notRunning else { return nil }
+        guard settings.state != .notRunning else { return surfaces }
         let containers = settings.descendants(matching: .sheet).allElementsBoundByIndex
             + settings.descendants(matching: .dialog).allElementsBoundByIndex
             + settings.descendants(matching: .alert).allElementsBoundByIndex
@@ -241,10 +283,169 @@ final class VMAccessibilitySetupTests: XCTestCase {
         }
         let infoRow = NSPredicate(format: "label == %@ OR value == %@",
                                   "Allow full disk access for remote users", "Allow full disk access for remote users")
-        return leaves.first {
+        let settingsSurfaces = leaves.filter {
             $0.elementType == .dialog || $0.elementType == .alert
                 || $0.secureTextFields.count > 0 || $0.staticTexts.matching(infoRow).count == 0
         }
+        surfaces += settingsSurfaces.map { (settings, "com.apple.systempreferences", $0) }
+        if settingsSurfaces.isEmpty,
+           settings.secureTextFields.count > 0
+            || settings.buttons.matching(NSPredicate(format: "label == %@", "Modify Settings")).count > 0 {
+            surfaces.append((settings, "com.apple.systempreferences", settings))
+        }
+        return surfaces
+    }
+
+    @MainActor
+    private func remoteLoginAuthorizationSurface(_ settings: XCUIApplication) -> XCUIElement? {
+        remoteLoginAuthorizationSurfaces(settings).first?.surface
+    }
+
+    @MainActor
+    private func matchedRemoteLoginAuthorization(_ settings: XCUIApplication, authority: RemoteLoginInfoAuthority) -> RemoteLoginAuthorization? {
+        guard remoteLoginUnderlyingInfoFacts(settings)?.authority == authority else { return nil }
+        let surfaces = remoteLoginAuthorizationSurfaces(settings)
+        guard surfaces.count == 1 else { return nil }
+        let authorization = surfaces[0]
+        let owner = authorization.owner
+        let surface = authorization.surface
+        let modify = NSPredicate(format: "label == %@", "Modify Settings")
+        let cancel = NSPredicate(format: "label == %@", "Cancel")
+        let purpose = NSPredicate(format: "label CONTAINS[c] %@ OR value CONTAINS[c] %@",
+                                  "modify your system settings", "modify your system settings")
+        guard settings.state != .notRunning, settings.windows.count == 1,
+              owner.state != .notRunning, owner.windows.count == 1,
+              owner.secureTextFields.count == 1, surface.secureTextFields.count == 1,
+              owner.textFields.count == 1, surface.textFields.count == 1,
+              surface.secureTextFields.element(boundBy: 0).label == "Password",
+              surface.buttons.count == 2,
+              surface.buttons.matching(modify).count == 1, owner.buttons.matching(modify).count == 1,
+              surface.buttons.matching(cancel).count == 1, owner.buttons.matching(cancel).count == 1,
+              surface.staticTexts.matching(purpose).count == 1 else { return nil }
+        let username = surface.textFields.element(boundBy: 0)
+        guard username.placeholderValue == "Username", let account = username.value as? String,
+              account.caseInsensitiveCompare(NSUserName()) == .orderedSame else { return nil }
+        return authorization
+    }
+
+    /// FDA consent has its own opt-in and matcher; it never widens AX provisioning.
+    @MainActor
+    private func authorizeRemoteLoginIfNeeded(_ settings: XCUIApplication, authority: RemoteLoginInfoAuthority) -> Bool {
+        guard remoteLoginAuthorizationSurface(settings) != nil else { return true }
+        guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-remote-login-fda-enable"),
+              CardSwapTimingGate.hypervisorPresent() == true, NSUserName() == "meguri",
+              let authorization = matchedRemoteLoginAuthorization(settings, authority: authority) else {
+            reportRemoteLoginFailure(settings, "Refusing unexpected or ambiguous Remote Login authorization; no credential read or input performed")
+            return false
+        }
+        do {
+            try authorization.owner.bringToFront(bundleIdentifier: authorization.bundleIdentifier, timeout: 4)
+        } catch {
+            reportRemoteLoginFailure(settings, "Could not bring the trusted Remote Login authorization owner forward")
+            return false
+        }
+        guard let current = matchedRemoteLoginAuthorization(settings, authority: authority),
+              current.bundleIdentifier == authorization.bundleIdentifier else {
+            reportRemoteLoginFailure(settings, "Remote Login authorization changed before credential access")
+            return false
+        }
+        let field = current.surface.secureTextFields.element(boundBy: 0)
+        let modify = current.surface.buttons.matching(NSPredicate(format: "label == %@", "Modify Settings")).element(boundBy: 0)
+        let cancel = current.surface.buttons.matching(NSPredicate(format: "label == %@", "Cancel")).element(boundBy: 0)
+        guard field.isEnabled, field.isHittable, modify.isEnabled, modify.isHittable,
+              cancel.isEnabled, cancel.isHittable else {
+            reportRemoteLoginFailure(settings, "Remote Login authorization controls are unavailable; no credential read or input performed")
+            return false
+        }
+        guard remoteLoginUnderlyingInfoFacts(settings)?.authority == authority else {
+            reportRemoteLoginFailure(settings, "Remote Login Info authority changed before credential access; no credential read or input performed")
+            return false
+        }
+        guard let password = readVMConsentValue() else {
+            reportRemoteLoginFailure(settings, "VM authorization credential is unavailable or invalid")
+            return false
+        }
+        vmConsentValue = password
+        let pasteboard = NSPasteboard.general
+        defer { pasteboard.clearContents() }
+        field.click()
+        field.typeKey("a", modifierFlags: .command)
+        guard let input = matchedRemoteLoginAuthorization(settings, authority: authority),
+              input.bundleIdentifier == current.bundleIdentifier else {
+            reportRemoteLoginFailure(settings, "Remote Login Info authority or authorization changed before credential input")
+            return false
+        }
+        pasteboard.clearContents()
+        let pasted = pasteboard.setString(password, forType: .string)
+        if pasted {
+            guard let paste = matchedRemoteLoginAuthorization(settings, authority: authority),
+                  paste.bundleIdentifier == input.bundleIdentifier else {
+                reportRemoteLoginFailure(settings, "Remote Login Info authority or authorization changed before password paste")
+                return false
+            }
+            paste.surface.secureTextFields.element(boundBy: 0).typeKey("v", modifierFlags: .command)
+        }
+        pasteboard.clearContents()
+        guard pasted, let filled = matchedRemoteLoginAuthorization(settings, authority: authority),
+              filled.bundleIdentifier == current.bundleIdentifier else {
+            reportRemoteLoginFailure(settings, "Could not fill the exact Remote Login authorization form; no authorization click performed")
+            return false
+        }
+        do {
+            try filled.owner.bringToFront(bundleIdentifier: filled.bundleIdentifier, timeout: 4)
+        } catch {
+            reportRemoteLoginFailure(settings, "Could not bring the trusted authorization owner forward to submit")
+            return false
+        }
+        guard let ready = matchedRemoteLoginAuthorization(settings, authority: authority),
+              ready.bundleIdentifier == filled.bundleIdentifier else {
+            reportRemoteLoginFailure(settings, "Remote Login authorization changed before Modify Settings")
+            return false
+        }
+        let submit = ready.surface.buttons.matching(NSPredicate(format: "label == %@", "Modify Settings")).element(boundBy: 0)
+        guard submit.isEnabled, submit.isHittable else {
+            reportRemoteLoginFailure(settings, "Exact Remote Login Modify Settings action is unavailable")
+            return false
+        }
+        guard remoteLoginUnderlyingInfoFacts(settings)?.authority == authority else {
+            reportRemoteLoginFailure(settings, "Remote Login Info authority changed before Modify Settings; no authorization click performed")
+            return false
+        }
+        // Exactly one submission; failure or a replacement prompt is never retried.
+        submit.click()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.remoteLoginAuthorizationSurface(settings) == nil
+        }, object: nil)
+        guard XCTWaiter().wait(for: [dismissed], timeout: 10) == .completed else {
+            reportRemoteLoginFailure(settings, "Remote Login authorization did not dismiss within ten seconds; no retry performed")
+            return false
+        }
+        return true
+    }
+
+    @MainActor
+    private func reportRemoteLoginFailure(_ settings: XCUIApplication, _ reason: String, file: StaticString = #filePath, line: UInt = #line) {
+        if vmConsentValue != nil { NSPasteboard.general.clearContents() }
+        // XCTest can abort without Swift unwinding: evidence must precede XCTFail.
+        let fda = NSPredicate(format: "label == %@ OR value == %@",
+                              "Allow full disk access for remote users", "Allow full disk access for remote users")
+        let on = NSPredicate(format: "label == %@ OR value == %@", "Remote Login: On", "Remote Login: On")
+        let facts: [String: Any] = ["settingsRunning": settings.state != .notRunning,
+                                   "windowCountUpTo16": min(16, settings.windows.count),
+                                   "sheetCountUpTo16": min(16, settings.sheets.count),
+                                   "fdaTextCountUpTo16": min(16, settings.staticTexts.matching(fda).count),
+                                   "onHeaderTextCountUpTo16": min(16, settings.staticTexts.matching(on).count),
+                                   "exactUnderlyingInfoMatched": remoteLoginUnderlyingInfoFacts(settings) != nil]
+        if let data = try? JSONSerialization.data(withJSONObject: facts, options: [.prettyPrinted, .sortedKeys]) {
+            let evidence = XCTAttachment(string: String(decoding: data, as: UTF8.self))
+            evidence.name = "VM Remote Login underlying Info match facts"
+            evidence.lifetime = .keepAlways
+            add(evidence)
+        }
+        for authorization in remoteLoginAuthorizationSurfaces(settings).prefix(16) {
+            attachRemoteLoginAuthorizationFacts(authorization.surface)
+        }
+        XCTFail(safeDiagnostic(reason), file: file, line: line)
     }
 
     @MainActor
@@ -254,15 +455,17 @@ final class VMAccessibilitySetupTests: XCTestCase {
         let embedded = surface.staticTexts.matching(infoRow).count > 0
         let texts = (0..<(embedded ? 0 : min(16, surface.staticTexts.count))).map { index in
             let text = surface.staticTexts.element(boundBy: index)
-            return ["label": String(text.label.prefix(512)), "value": String((text.value as? String ?? "").prefix(512))]
+            return ["label": String(safeDiagnostic(text.label).prefix(512)),
+                    "value": String(safeDiagnostic(text.value as? String ?? "").prefix(512))]
         }
         let buttons = (0..<(embedded ? 0 : min(16, surface.buttons.count))).map { index in
             let button = surface.buttons.element(boundBy: index)
-            return ["identifier": String(button.identifier.prefix(256)), "title": String(button.title.prefix(256))]
+            return ["identifier": String(safeDiagnostic(button.identifier).prefix(256)),
+                    "title": String(safeDiagnostic(button.title).prefix(256))]
         }
         let facts = ["staticTexts": texts, "buttons": buttons]
         guard let data = try? JSONSerialization.data(withJSONObject: facts, options: [.prettyPrinted, .sortedKeys]) else { return }
-        let evidence = XCTAttachment(string: String(decoding: data, as: UTF8.self))
+        let evidence = XCTAttachment(string: safeDiagnostic(String(decoding: data, as: UTF8.self)))
         evidence.name = "VM Remote Login observed authorization prompt facts"
         evidence.lifetime = .keepAlways
         add(evidence)
@@ -270,50 +473,53 @@ final class VMAccessibilitySetupTests: XCTestCase {
 
     /// The single recorded Sharing > Remote Login Info route; no settings are changed here.
     @MainActor
-    private func openRemoteLoginInfo(_ settings: XCUIApplication) -> (windows: [XCUIElement], appeared: Bool)? {
+    private func openRemoteLoginInfo(_ settings: XCUIApplication, onFailure: ((String) -> Void)? = nil) -> (windows: [XCUIElement], appeared: Bool)? {
+        let fail: (String) -> Void = { reason in
+            if let onFailure { onFailure(reason) } else { XCTFail(reason) }
+        }
         let url = URL(string: "x-apple.systempreferences:com.apple.Sharing-Settings.extension?RemoteLogin")!
         guard NSWorkspace.shared.open(url), settings.wait(for: .runningForeground, timeout: 5) else {
-            XCTFail("Could not open System Settings Remote Login pane")
+            fail("Could not open System Settings Remote Login pane")
             return nil
         }
         do {
             try settings.bringToFront(bundleIdentifier: "com.apple.systempreferences", timeout: 4)
         } catch {
-            XCTFail("Could not bring System Settings forward for Remote Login inspection")
+            fail("Could not bring System Settings forward for Remote Login inspection")
             return nil
         }
         let windows = settings.windows.allElementsBoundByAccessibilityElement
         guard (1...2).contains(windows.count) else {
-            XCTFail("Expected one or two System Settings windows; inspection evidence withheld")
+            fail("Expected one or two System Settings windows; inspection evidence withheld")
             return nil
         }
 
         let infoIdentifier = "Remote LoginToggle.infoButton"
         let infoButtons = settings.buttons.matching(identifier: infoIdentifier)
         guard infoButtons.firstMatch.waitForExistence(timeout: 5) else {
-            XCTFail("Remote Login Info button did not appear; inspection evidence withheld")
+            fail("Remote Login Info button did not appear; inspection evidence withheld")
             return nil
         }
         // Only the observed detail pane may scroll; never use the sidebar or toggle.
         for attempt in 0...3 {
             guard !settings.secureTextFields.firstMatch.exists,
                   settings.sheets.count == 0, infoButtons.count == 1 else {
-                XCTFail("Remote Login navigation is ambiguous or has secure fields; inspection evidence withheld")
+                fail("Remote Login navigation is ambiguous or has secure fields; inspection evidence withheld")
                 return nil
             }
             let info = settings.buttons[infoIdentifier]
             guard info.label == "Show Detail", info.isEnabled else {
-                XCTFail("Remote Login Info button did not match; inspection evidence withheld")
+                fail("Remote Login Info button did not match; inspection evidence withheld")
                 return nil
             }
             if info.isHittable { break }
             guard attempt < 3 else {
-                XCTFail("Remote Login Info button remained offscreen after three scrolls; inspection evidence withheld")
+                fail("Remote Login Info button remained offscreen after three scrolls; inspection evidence withheld")
                 return nil
             }
             let owners = windows.filter { $0.buttons.matching(identifier: infoIdentifier).count == 1 }
             guard owners.count == 1 else {
-                XCTFail("Remote Login Info window is ambiguous; inspection evidence withheld")
+                fail("Remote Login Info window is ambiguous; inspection evidence withheld")
                 return nil
             }
             let window = owners[0]
@@ -326,19 +532,19 @@ final class VMAccessibilitySetupTests: XCTestCase {
                     && buttonFrame.minY >= frame.minY
             }
             guard panes.count == 1, buttonFrame.maxY > panes[0].frame.maxY else {
-                XCTFail("Remote Login detail scroll view is ambiguous or button is not below it; inspection evidence withheld")
+                fail("Remote Login detail scroll view is ambiguous or button is not below it; inspection evidence withheld")
                 return nil
             }
             panes[0].scroll(byDeltaX: 0, deltaY: -180)
         }
         guard !settings.secureTextFields.firstMatch.exists,
               settings.sheets.count == 0, infoButtons.count == 1 else {
-            XCTFail("Remote Login Info navigation changed; inspection evidence withheld")
+            fail("Remote Login Info navigation changed; inspection evidence withheld")
             return nil
         }
         let info = settings.buttons[infoIdentifier]
         guard info.label == "Show Detail", info.isEnabled, info.isHittable else {
-            XCTFail("Exact Remote Login Info button is unavailable; inspection evidence withheld")
+            fail("Exact Remote Login Info button is unavailable; inspection evidence withheld")
             return nil
         }
         info.click()
@@ -350,7 +556,7 @@ final class VMAccessibilitySetupTests: XCTestCase {
         guard (1...2).contains(inspectionWindows.count),
               settings.windows.count == inspectionWindows.count,
               inspectionWindows.allSatisfy({ $0.exists }) else {
-            XCTFail("Expected one or two stable System Settings windows after Info; inspection evidence withheld")
+            fail("Expected one or two stable System Settings windows after Info; inspection evidence withheld")
             return nil
         }
 
