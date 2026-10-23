@@ -34,7 +34,6 @@ import XCTest
                     #endif
                     let scroll = app.scrollViews["settings.importExport.content"].firstMatch
                     let close = app.buttons["settings.importExport.close"].firstMatch
-                    let footer = app.descendants(matching: .any)["settings.importExport.footer"].firstMatch
                     XCTAssertTrue(close.exists)
                     XCTAssertEqual(close.label, state == "loading" ? "Cancel Export" : "Done")
                     let required = ["settings.importExport.explanation"] + (state == "typical"
@@ -52,7 +51,7 @@ import XCTest
                     }
                     var findings: [AuditFinding] = []
                     var touchTargets: [TouchTargetViolation] = []
-                    try self.scrollToRequiredContent(scroll, close: close, footer: footer, app: app, build: build,
+                    try self.scrollToRequiredContent(scroll, close: close, app: app, build: build,
                                                      identifiers: required) { visible, viewport, portions in
                         // Only full-frame visibility removes an exact contrast
                         // exception. A paragraph portion retains its exception.
@@ -67,7 +66,7 @@ import XCTest
                         let frames = visible.map {
                             "\($0): \(scroll.descendants(matching: .any)[$0].firstMatch.frame)"
                         }.joined(separator: "\n")
-                        let proof = XCTAttachment(string: "Scroll viewport: \(viewport)\nFull frames:\n\(frames)\nParagraph portions:\n\(portions.joined(separator: "\n"))\nFooter: \(footer.frame)\nDone/Cancel: \(close.frame)")
+                        let proof = XCTAttachment(string: "Conservative content viewport (48pt inset above native button, not the exact background frame): \(viewport)\nScroll frame: \(scroll.frame)\nWindow frame: \(app.windows.firstMatch.frame)\nFull frames:\n\(frames)\nParagraph portions:\n\(portions.joined(separator: "\n"))\nNative Done/Cancel: \(close.frame)")
                         proof.name = "export visibility \(label)"
                         proof.lifetime = .keepAlways
                         self.add(proof)
@@ -81,9 +80,9 @@ import XCTest
         for state in states { AccessibilityAudit.assertClean(state.findings); TouchTargets.assertMet(state.touchTargets) }
     }
 
-    /// Controls require full frames; tall prose requires continuous observed coverage
+    /// Controls require full frames; prose requires continuous observed coverage
     /// from its beginning to its end, with exact accessible text throughout.
-    private func scrollToRequiredContent(_ scroll: XCUIElement, close: XCUIElement, footer: XCUIElement,
+    private func scrollToRequiredContent(_ scroll: XCUIElement, close: XCUIElement,
                                          app: XCUIApplication,
                                          build: BuildUnderTest, identifiers: [String],
                                          onVisible: ([String], CGRect, [String]) throws -> Void) throws {
@@ -104,23 +103,18 @@ import XCTest
         ]
         var coverage: [Int: (height: CGFloat, end: CGFloat)] = [:]
         var checked: Set<Int> = []
+        var auditedFullFrames: Set<Int> = []
         var gesture = 0
-        while gesture <= 24 {
+        // Bound observations too: audits may scroll without consuming a gesture.
+        for _ in 0..<128 {
             let scrollFrame = scroll.frame
             var viewport = scrollFrame.intersection(app.windows.firstMatch.frame)
             XCTAssertTrue(close.exists && close.isEnabled && close.isHittable,
                           "The foreground Done/Cancel action must remain reachable")
-            XCTAssertFalse(close.frame.isEmpty)
-            XCTAssertTrue(app.windows.firstMatch.frame.contains(close.frame),
+            let closeFrame = close.frame
+            XCTAssertFalse(closeFrame.isEmpty)
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(closeFrame),
                           "The entire Done/Cancel frame must remain visible")
-            guard footer.exists else {
-                throw AuditError(description: "Missing the exact settings.importExport.footer container")
-            }
-            let footerFrame = footer.frame
-            guard !footerFrame.isEmpty, footerFrame.contains(close.frame),
-                  footerFrame.minY < close.frame.minY else {
-                throw AuditError(description: "The padded export footer must contain Done/Cancel and begin above it: footer \(footerFrame), button \(close.frame)")
-            }
             var top = viewport.minY
             #if os(iOS)
             let navigationBar = app.navigationBars["Export Collection"].firstMatch
@@ -128,8 +122,12 @@ import XCTest
                 top = max(top, navigationBar.frame.maxY)
             }
             #endif
-            // Native chrome and the entire padded footer cannot prove coverage.
-            let bottom = min(viewport.maxY, footerFrame.minY)
+            // Test-only 48pt inset: two 24pt production Spacing.large padding
+            // steps. UITests does not link DesignSystem. Retained 035747Z-85354
+            // showed about 30pt from the native button to the covered edge, so
+            // this boundary sits conservatively above the opaque footer; it
+            // does not measure the exact background frame.
+            let bottom = min(viewport.maxY, closeFrame.minY - 48)
             viewport = CGRect(x: viewport.minX, y: top, width: viewport.width, height: max(0, bottom - top))
             guard !viewport.isEmpty else { throw AuditError(description: "Export scroll viewport is empty") }
             let frames = targets.map(\.frame)
@@ -137,7 +135,7 @@ import XCTest
                 guard targets[index].exists, !frames[index].isEmpty,
                       frames[index].width <= viewport.width,
                       paragraphs[identifiers[index]] != nil || frames[index].height <= viewport.height else {
-                    throw AuditError(description: "\(identifiers[index]) must have a nonempty frame that fits the actual scroll viewport: \(frames[index]) in \(viewport)")
+                    throw AuditError(description: "\(identifiers[index]) must have a nonempty frame that fits the conservative content viewport: \(frames[index]) in \(viewport)")
                 }
                 if let text = paragraphs[identifiers[index]] {
                     #if os(macOS)
@@ -158,10 +156,10 @@ import XCTest
                 viewport.contains(frames[$0]) && (targets[$0].elementType != .button
                     || (targets[$0].isEnabled && targets[$0].isHittable))
             }
-            let newFullFrames = visible.contains(where: { !checked.contains($0) })
+            let newFullFrames = visible.contains(where: { !auditedFullFrames.contains($0) })
             var portions: [String] = []
             for index in targets.indices where !checked.contains(index)
-                && paragraphs[identifiers[index]] != nil && frames[index].height > viewport.height {
+                && paragraphs[identifiers[index]] != nil && !viewport.contains(frames[index]) {
                 let frame = frames[index]
                 let portion = frame.intersection(viewport)
                 guard frame.minX >= viewport.minX, frame.maxX <= viewport.maxX,
@@ -188,6 +186,7 @@ import XCTest
                 }
                 try onVisible(visible.map { identifiers[$0] }, viewport, portions)
                 checked.formUnion(visible)
+                auditedFullFrames.formUnion(visible)
                 // The system audit can change native scroll geometry. Only new
                 // coverage enters here; resample before choosing any gesture.
                 continue
@@ -195,9 +194,10 @@ import XCTest
             if checked.count == targets.count { return }
             guard gesture < 24, let next = targets.indices.first(where: { !checked.contains($0) }) else { break }
             let offset: CGFloat
-            if paragraphs[identifiers[next]] != nil, frames[next].height > viewport.height {
-                // First expose the beginning; then advance overlapping portions
-                // toward the end, rather than centring an oversized paragraph.
+            if paragraphs[identifiers[next]] != nil {
+                // First expose the beginning; after observed coverage, advance
+                // overlapping portions toward the end even if the whole frame
+                // could fit with precise alignment. Do not recenter prose.
                 offset = coverage[next] == nil
                     ? frames[next].minY - (viewport.minY + viewport.height / 6)
                     : frames[next].maxY - (viewport.maxY - viewport.height / 10)
@@ -230,7 +230,7 @@ import XCTest
                 let frameChanges = targets.indices.map {
                     "\(identifiers[$0]): before \(frames[$0]), after \(afterFrames[$0])"
                 }.joined(separator: "\n")
-                let proof = XCTAttachment(string: "Target: \(identifiers[next])\nOffset: \(offset), movement: \(movement)\nCoverage viewport before gesture: \(viewport)\nScroll frame before gesture: \(scrollFrame), after: \(scroll.frame)\nFooter frame before gesture: \(footerFrame), after: \(footer.frame)\n\(frameChanges)")
+                let proof = XCTAttachment(string: "Target: \(identifiers[next])\nOffset: \(offset), movement: \(movement)\nCoverage viewport before gesture: \(viewport)\nScroll frame before gesture: \(scrollFrame), after: \(scroll.frame)\nNative Done/Cancel frame before gesture: \(closeFrame), after: \(close.frame)\nBoundary uses the conservative 48pt inset, not the exact footer background frame.\n\(frameChanges)")
                 proof.name = "export scroll no progress frames gesture \(gesture)"
                 proof.lifetime = .keepAlways
                 add(proof)
@@ -238,6 +238,6 @@ import XCTest
             }
         }
         let missing = targets.indices.filter { !checked.contains($0) }.map { identifiers[$0] }
-        throw AuditError(description: "Export content needs full frames or continuous beginning-to-end paragraph coverage, and actions must be hittable, after at most 24 scoped scroll gestures: \(missing)\n\(app.debugDescription)")
+        throw AuditError(description: "Export content needs full frames or continuous beginning-to-end paragraph coverage, and actions must be hittable, after at most 24 scoped scroll gestures and 128 observations: \(missing)\n\(app.debugDescription)")
     }
 }

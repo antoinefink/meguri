@@ -140,3 +140,4 @@
 - Fixer `s-20261023T040137Z-82dbf292`, export `20261023T040251Z-89276`: added footer frame anchor, refreshed audit geometry, bounded content pans and one evidenced Discard contrast reason. Button ownership, appearance and native journeys are unchanged. Checks pending.
 - Catch-up `20261023T040307Z-89697`: PASS, nothing queued.
 - iPad `20261023T040534Z-90977`: FAIL. Footer and close Button share the same AX frame. Revert that annotation; preserve the proven button and use a conservative audit viewport. No new native pass is claimed.
+- Fixer `s-20261023T040945Z-1941ce7d`, export `20261023T041001Z-94415`: restored the proven footer Button. The audit uses a conservative 48pt inset, fresh geometry and overlapping paragraph coverage. No production appearance change; checks pending.
