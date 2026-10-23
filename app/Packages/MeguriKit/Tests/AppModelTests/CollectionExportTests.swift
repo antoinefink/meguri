@@ -55,6 +55,8 @@ extension ReviewCollectionStartupTests {
             owner.entry.inspect(saved); await owner.entry.waitForCompletion()
             owner.entry.confirm(); await owner.entry.waitForCompletion()
             try #require(owner.state == .ready)
+            #expect(owner.generation != artifact.metadata.sourceGeneration)
+            #expect(coordinator.artifact === artifact)
             #expect(coordinator.stage == .saved && !coordinator.canSave)
             await coordinator.discard()
             #expect(coordinator.artifact == nil && files.fileExists(atPath: saved.path))

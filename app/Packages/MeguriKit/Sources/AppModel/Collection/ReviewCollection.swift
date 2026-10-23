@@ -126,6 +126,7 @@ public final class ReviewCollection {
     private func completeOpenedHost(loadRecord: Bool) async throws {
         lifecycle = try await collection.lifecycle()
         guard case .ready(let value) = lifecycle else { state = .unavailable; return }
+        if generation != value { exportOwner?.generationChanged() }
         generation = value; state = .ready; error = nil; closed = false
         if loadRecord {
             do { previousRecord = try await records.load() }

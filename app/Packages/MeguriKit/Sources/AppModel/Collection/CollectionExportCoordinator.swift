@@ -27,7 +27,10 @@ public final class CollectionExportCoordinator {
     private var finishingProvider = false
     public var busy: Bool { stage == .preparing || stage == .saving || stage == .discarding || discarding || finishingProvider || destinationPresented }
     public var canPrepare: Bool { !busy && artifact == nil && owner?.exportAllowed == true }
-    public var canSave: Bool { !busy && artifact != nil && providerLease == nil && !stale && !discardRequested }
+    public var canSave: Bool {
+        guard let owner, let artifact else { return false }
+        return !busy && providerLease == nil && !stale && !discardRequested && owner.generation == artifact.metadata.sourceGeneration
+    }
     public var canRetryCompletion: Bool { !busy && completionRetryNeeded && providerLease != nil }
     public var progressTitle: String {
         if stage == .discarding { return "Removing prepared export…" }
