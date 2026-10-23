@@ -128,3 +128,5 @@
 - Privacy `20261023T033355Z-66932`: pass. Earlier `20261023T033257Z-66194` flagged new log prose; whole sentences were rewritten. Public images and scan policy are unchanged.
 - Final same-session export `20261023T033604Z-68430`: Mac exact text uses its native String value; four exact contrast entries retain initial audit evidence. One new reason was fully rewritten after the privacy hook; scan policy is unchanged. No native pass is claimed yet.
 - Independent round 6 follow-up on the paragraph correction: no new P0–P1 finding or deterministic blocker beyond the Mac value correction above. Initial paragraph-fit issue is resolved in source; runtime proof remains pending.
+- iPhone `20261023T033607Z-68711`: actual review, restart, Cancel, first Save, completed cleanup and picker reopening passed. Second Save reached native In progress; no app-owned Replace button appeared within the test wait. Capture native conflict ownership before claiming replacement.
+- iPad `20261023T033943Z-71908`: FAIL. Default typical light/dark pass. AX5 stops after Ready: no scroll movement. Other states pending.
