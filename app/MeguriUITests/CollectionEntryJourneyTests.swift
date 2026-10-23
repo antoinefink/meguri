@@ -159,7 +159,9 @@ import notify
         try click(home, app, bundle)
         try waitForAdmission(imported, app, bundle)
         let deck = try XCTUnwrap(waitForHittable(imported)); try click(deck, app, bundle)
-        try click(element(app, "home.deck.study"), app, bundle)
+        let study = app.buttons["home.deck.study"].firstMatch
+        try waitForStudyReady(study, app)
+        try click(study, app, bundle)
         XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
         try click(element(app, "review.session.reveal"), app, bundle)
         try click(element(app, "review.session.rate.easy"), app, bundle)
@@ -402,8 +404,8 @@ import notify
         capture(app, "entry-real-decks")
         try click(deck, app, bundle)
         XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
-        let study = deckPage.descendants(matching: .any)["home.deck.study"].firstMatch
-        XCTAssertTrue(study.waitForExistence(timeout: 10))
+        let study = deckPage.buttons["home.deck.study"].firstMatch
+        try waitForStudyReady(study, app)
         let counts = deckPage.descendants(matching: .any)["home.deck.counts"].firstMatch
         let before = text(counts)
         try click(study, app, bundle)
@@ -598,6 +600,17 @@ import notify
             : "There is no local collection file to replace. A pre-import safety backup is not needed."
         XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.safety"), safety))
         XCTAssertEqual(element(app, "onboarding.collectionImport.confirm").label, hasLocalCollection ? "Replace Collection" : "Import Collection")
+    }
+    private func waitForStudyReady(_ study: XCUIElement, _ app: XCUIApplication) throws {
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            study.exists && study.elementType == .button && study.isEnabled && study.isHittable
+        }, object: nil)
+        guard XCTWaiter().wait(for: [ready], timeout: 30) == .completed else {
+            capture(app, "entry-study-not-ready")
+            XCTFail("Study Now must be an existing, enabled, hittable Button after collection admission: \(app.debugDescription)")
+            throw NSError(domain: "CollectionEntryJourneyTests", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Study Now did not become ready within 30 seconds"])
+        }
     }
     private func waitForAdmission(_ query: XCUIElementQuery, _ app: XCUIApplication, _ bundle: String) throws {
         let enable = element(app, "home.policy.enable")

@@ -60,6 +60,7 @@ struct CollectionExportContent: View {
                         Text("Ready to Save", bundle: .module).font(.headline)
                             .accessibilityIdentifier("settings.importExport.ready")
                         Text("This file captures the collection during preparation. Later reviews do not change this copy. Choose a destination to finish saving.", bundle: .module)
+                            .accessibilityIdentifier("settings.importExport.readyDetail")
                     }
                     if let message = presentation.message {
                         Text(LocalizedStringKey(message), bundle: .module)

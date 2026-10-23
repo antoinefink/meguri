@@ -123,3 +123,6 @@
 - Recording `20261023T032259Z-50585`: PASS. recorded=232; captured=23; deferred=472. Comparison pending.
 - Review round 6: all 20 phone AX4/AX5 import titles are complete. Export images show no new P0–P1 issue. Scrolling, critic and Home/U152/U166 remain pending.
 - Token checks `20261023T033143Z-64955`: pass, 13 tests covering declared contrast pairs and token variants.
+- Fixer `s-20261023T032133Z-c04d6162`; exports `20261023T032255Z-50306`, `20261023T032923Z-60497`. Added sheet fixtures, Study readiness and scroll checks. Audits pending.
+- Same round 6 review caught the first export's paragraph-fit assertion before integration. The second export allows text to span viewports while requiring observed beginning-to-end coverage; buttons still need full frames. Mac text value handling needs its platform correction before the new Mac audit.
+- Privacy `20261023T033355Z-66932`: pass. Earlier `20261023T033257Z-66194` flagged new log prose; whole sentences were rewritten. Public images and scan policy are unchanged.
