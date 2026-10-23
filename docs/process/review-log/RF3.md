@@ -174,3 +174,5 @@
 - Fixer `s-20261023T052622Z-323314c8`; export `20261023T061902Z-38304`: generation check in canSave; invalidation before host adoption; stronger real reimport assertions. Same round 6: no new P0–P1 or blockers in the patch. Runtime checks pending.
 - Privacy `20261023T075128Z-92008`: PASS. Full MeguriKit `20261023T075144Z-92407`: PASS, 356 tests; reimport regression passed. Native Mac round trip `20261023T075528Z-95171`: PASS, one test, no skips, zero build warnings.
 - Local Mac preview from `bf7f2434` staged at `build/review-preview/bf7f2434/Meguri.app`; no host launch. Collection-only latest .colpkg scope remains. Self-hosted transfers and final acceptance are pending.
+- Static `20261023T080818Z-1516`: PASS. Similarity `20261023T080819Z-2046`: PASS. Catch-up `20261023T080045Z-98574`: PASS, nothing queued.
+- Host now reports Xcode 27.1 (27A9275). Doctor waited on first-launch setup for 15 minutes, then was cancelled; host setup requested from Antoine. Full integration acceptance remains open. Independent server-transfer work proceeds while this external step is pending; no RF3 Unit acceptance is claimed.
