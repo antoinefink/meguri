@@ -120,3 +120,6 @@
 - Fixer `s-20261023T031550Z-fb258a85`, cleanroom `20261023T031612Z-45293`: test waits for the actual Choose button to become enabled and hittable before each Save attempt. The bounded wait fails with evidence rather than tapping again. Production completion and its guard are unchanged; native liveness is still required.
 - iPad export audit `20261023T031552Z-43929`: fail, 26 unsuppressed findings. Default screenshots show dimmed shell text behind the sheet; largest-size contrast targets lie below the current scroll viewport. The export fixture lacks the existing import fixture's neutral presenter. Foreground reachability and scrolled audits are required; no acceptance is claimed.
 - iPhone `20261023T031830Z-46893`: failed before export. The initial Study Now control existed but was disabled after activation; the test tapped before action readiness. Export cleanup liveness remains unverified by this run. Preserve the assertion and require enabled/hittable study admission.
+- Recording `20261023T032259Z-50585`: PASS. recorded=232; captured=23; deferred=472. Comparison pending.
+- Review round 6: all 20 phone AX4/AX5 import titles are complete. Export images show no new P0–P1 issue. Scrolling, critic and Home/U152/U166 remain pending.
+- Token checks `20261023T033143Z-64955`: pass, 13 tests covering declared contrast pairs and token variants.
