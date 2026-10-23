@@ -87,7 +87,9 @@ fn host_config(root: &Path, now: i64) -> HostConfig {
 }
 fn complete<T>(events: Subscription, task: ManualTransferTask<T>) -> T {
     loop {
-        let event = checked(events.recv());
+        let Some(event) = events.recv() else {
+            panic!("manual transfer data event stream closed")
+        };
         if matches!(event.kind, EventKind::JobFinished { id, .. } if id == task.job.id) {
             break;
         }
@@ -106,7 +108,7 @@ fn seed_one(root: &Path, options: &JobOptions, endpoint: &Endpoint, index: usize
     let collection = checked(host.collection());
     checked(collection.run(
         OpSpec::named("RF4 generated account settings", OpSource::Maintenance),
-        |operation| {
+        move |operation| {
             let scope = operation.scope();
             for (name, value) in [
                 ("fsrs", ConfigValue::Bool(true)),
@@ -292,7 +294,7 @@ fn verify(root: &Path, options: &JobOptions) {
         "uploaded scheduling state is missing"
     );
     let answer_time = saved.id.0;
-    let answer_duration = saved.answer_millis;
+    let answer_duration = u64::from(saved.answer_millis);
     drop(reader);
     checked(collection.close());
 

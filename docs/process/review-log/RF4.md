@@ -280,6 +280,12 @@ stream, and lossless duration conversion. These are compile failures; its
 actual seed and peer comparison have not run. Native VM journeys, Keychain
 integration, rendered review and the full combined gate remain pending.
 
+Controller WIP is `36a12728`. Filtered fix `20261023T133449Z-94781` corrects
+the three helper types without changing its checks. Rust lint
+`20261023T133736Z-98118` passed. The actual Mac app and UI bundle build
+`20261023T133658Z-96816` passed; screen documentation
+`20261023T133657Z-96607` passed. Real VM execution and peer proof are next.
+
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,
 focused server/native evidence and the required full gate remain open.
