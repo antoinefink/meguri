@@ -715,3 +715,16 @@ Reconciler `20261023T204936Z-56052`, round 1: five P2 findings.
 Sanity response race; stale download records; capacity errors;
 interruption errors; deletion counts. Fix `20261023T212318Z-70100`: pending.
 CoreHost fixture seam: authorized in the worker's scope.
+
+| Check | Receipt | Outcome |
+| --- | --- | --- |
+| iPhone manual transfer | `20261023T212333Z-70740` | PASS: native case, peer comparison, teardown |
+| Wire focused suite | `20261023T213219Z-80882` | 18 passed, zero skipped |
+| Wire round 6 | `20261023T212841Z-78688` | No P0–P1 findings |
+| Reconciler focused suite | `20261023T213430Z-82255` | Compile failure: OpSource::Raw is unavailable |
+| Reconciler round 2 | `20261023T212318Z-70100` | One P2: mutable download eligibility bypasses repair |
+
+Reconciler correction `20261023T213704Z-83672`: pending.
+Native iPad check: pending. Native Mac check: pending. Final native review:
+pending. Selected-media integration started at `4d6a4c3f` in
+`20261023T213146Z-80044`; no completion claim.
