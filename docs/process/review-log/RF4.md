@@ -172,6 +172,12 @@ round trip, existing status/login cases and four routing cases. Other tests
 were outside this focused selection. The earlier failed receipts are retained.
 Final similarity `20261023T112453Z-29141` passed.
 
+Native adapter and Settings work starts from backend checkpoint `638d3580`.
+Implementer session: `s-20261023T112525Z-07a57d21`. It will run in isolation;
+master stays fixed for the full integration gate from original base
+`81c207573c20c337c8834e4ae8b4ee8f29603dbf`. The native patch must not be applied
+until that gate has ended and its failures have been resolved.
+
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,
 focused server/native evidence and the required full gate remain open.
