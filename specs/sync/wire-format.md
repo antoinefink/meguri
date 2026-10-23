@@ -353,7 +353,7 @@ Both zips use the standard zip format with each entry stored uncompressed. Megur
 - File entries are named `0`, `1`, `2`, … in the order the server packed them, each holding one file's bytes.
 - `_meta` holds a JSON object mapping each entry name to the file's real name: `{"0":"sun.mp3","1":"moon.jpg"}`.
 - A file entry whose name `_meta` does not map is a decode failure for the whole zip. A `_meta` member with no matching entry is ignored.
-- The zip may hold fewer files than were asked for: the server leaves out names its media database does not list (and answers 409 when a listed file is missing from its disk). What the client does with the names left over is U111's; it never repeats forever a request that returned no file.
+- The zip may contain only a prefix of requested names: the official server stops after the file that brings its packed file bytes above 2,621,440 (`media-sync#Y2`). A requested name absent from its records or disk gives 409, not a zip. `media-sync#Y8` defines how remaining names are retried and rejects an empty answer to a nonempty request.
 
 ### W17.2 `uploadChanges` request
 

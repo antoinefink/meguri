@@ -24,8 +24,8 @@ O6.1 permits another client's change between preview, server copy and upload; th
 O12 permits remote acceptance without a received/durable OK. Local cancellation does not prove remote rollback.
 `sync/media-sync#Y3` pulls and pushes; Y6–Y11 define decisions, durable batches, acknowledgements and sanity checking.
 These are retained compatibility facts, not permission to run requests automatically or reconcile without consent.
-U107 normal/hold-back and U110/U111 media contracts remain deferred integration dependencies. References to their
-prepared section IDs do not claim their code, scenarios or contracts are already integrated; M5 support remains required.
+U109 one-way and U110/U111 media contracts are integrated. Their code, scenarios and acceptance remain pending;
+M5 support is still required. U107 normal/hold-back contracts remain a deferred dependency, not an implied exchange.
 
 ## M1. Entry, credentials and isolation
 

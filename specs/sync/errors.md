@@ -101,7 +101,7 @@ A `status` failure from the transport (`transport.md` T11: any 4xx or 5xx, and a
 | any other 4xx | `unexpected_status` |
 
 - The order of checks of `transport.md` T6.1 means a 403 or 407 without `anki-original-size` is classified by its code, never as `bad_response`.
-- On which requests the official server sends each code (`transport.md` T14): 400 for a malformed request and for a request its collection could not apply (a note whose note type it does not have, for example); 403 for an unknown host key or a wrong login; 409 for a request whose session key is not the one that started the sync, and for `downloadFiles` naming a file missing from its disk; 501 for a `meta` body version it does not support; 500 for internal failures.
+- On which requests the official server sends each code (`transport.md` T14): 400 for a malformed request and for a request its collection could not apply (a note whose note type it does not have, for example); 403 for an unknown host key or a wrong login; 409 for a request whose session key is not the one that started the sync, and for `downloadFiles` naming a file absent from its records or disk (`media-sync#Y8.3`); 501 for a `meta` body version it does not support; 500 for internal failures.
 
 ## E5. Transport categories
 
