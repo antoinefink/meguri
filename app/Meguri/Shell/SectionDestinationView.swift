@@ -170,7 +170,7 @@ struct DeckPagePlaceholder: View {
 struct SidebarDecksPlaceholder: View {
     var body: some View {
         Text("No decks")
-            .foregroundStyle(.token(.textPrimary))
+            .foregroundStyle(.token(.textSecondary))
             .accessibilityIdentifier("shell.root.sidebarDecksEmpty")
     }
 }

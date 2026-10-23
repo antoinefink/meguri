@@ -15,6 +15,23 @@ import XCTest
                 launch: MeguriLaunch(locale: "en_US", animations: false, route: "settings/import-export/\(state)"),
                 waitFor: "settings.importExport.content", suppressions: suppressions,
                 supplemental: { app, _ in
+                    #if os(macOS)
+                    for identifier in ["settings.importExport.content", "settings.importExport.explanation"] {
+                        XCTAssertTrue(app.descendants(matching: .any)[identifier].firstMatch.exists,
+                            "Foreground export content must remain accessible: \(identifier)")
+                    }
+                    let controls = ["settings.importExport.close"] + (state == "typical"
+                        ? ["settings.importExport.choose", "settings.importExport.discard"]
+                        : state == "error" ? ["settings.importExport.prepare"] : [])
+                    for identifier in controls {
+                        XCTAssertTrue(app.buttons[identifier].firstMatch.exists,
+                            "Foreground export controls must remain accessible: \(identifier)")
+                    }
+                    for identifier in ["shell.root.sidebarDecksEmpty", "shell.root.sidebar.home"] {
+                        XCTAssertFalse(app.descendants(matching: .any)[identifier].firstMatch.exists,
+                            "The underlying shell must leave the AX tree while the export sheet is active: \(identifier)")
+                    }
+                    #endif
                     if state == "loading" {
                         let progress = app.descendants(matching: .any)["settings.importExport.progress"].firstMatch
                         XCTAssertTrue(progress.exists)

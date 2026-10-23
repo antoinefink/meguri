@@ -101,3 +101,8 @@
 - iPhone `20261023T022952Z-3748`: Cancel existed but readiness failed. Cleanroom `20261023T023520Z-9657` adds post-wait picker capture and native control attributes. This is diagnosis; no Files pass is claimed.
 - Mac accessibility `20261023T023306Z-7416`: spinner checks passed; system audit reports contrast for sidebar No decks in all six export cells. This finding remains open.
 - Cleanroom `20261023T023805Z-12686`: sidebar No decks now uses textPrimary. Native contrast verification is pending; no audit exception or token change was added.
+- iPhone `20261023T023737Z-10822`: post-wait capture shows a loaded picker. Save and More are enabled and hittable; Cancel is enabled but not hittable. Native cancellation remains unproven.
+- Mac accessibility `20261023T024040Z-14051`: the primary-text candidate still failed on the background sidebar text. No acceptance is claimed.
+- Cleanroom `20261023T024441Z-16867`: bounded native Back navigation seeks a visible Cancel; actual delegate completion must restore Ready. Mac modal background leaves the AX tree, with explicit foreground assertions. Reverted the unsuccessful text-color candidate. All native follow-ups are pending.
+- Mac snapshots `20261023T024654Z-17865`: 18 export baselines recorded, 30 comparisons passed, 312 cells deferred outside this focused run. Native-window context, image review, mobile renders and critic remain pending.
+- Independent round 6 follow-up: no new P0–P1 findings or deterministic blockers in modal ownership and bounded Files navigation. Native audits and rendered acceptance remain pending.

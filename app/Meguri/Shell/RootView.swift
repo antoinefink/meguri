@@ -66,12 +66,19 @@ struct RootView: View {
                 }
             }
         }
+        #if os(macOS)
+        // Hide only the presenting shell; sheets and alerts own their AX tree.
+        .accessibilityHidden(launchSheet || launchAlert || linkRefusal != nil || navigation.sheet != nil)
+        #endif
         .modifier(PresentationHost(
             navigation: navigation, features: features, configuration: configuration,
             isActive: !(layout == .compact && navigation.review != nil)
         ))
         .sheet(isPresented: $launchSheet) {
             launchContent
+                #if os(macOS)
+                .accessibilityHidden(false)
+                #endif
         }
         .alert(configuration.initialPresentation?.alertTitle ?? "", isPresented: $launchAlert) {
             configuration.initialPresentation?.alertActions

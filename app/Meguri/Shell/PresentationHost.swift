@@ -17,6 +17,9 @@ struct PresentationHost: ViewModifier {
         content
             .sheet(item: Binding(get: { isActive ? navigation.sheet : nil }, set: { if $0 == nil { navigation.dismissSheet() } })) { sheet in
                 features.sheet(sheet, navigation)
+                    #if os(macOS)
+                    .accessibilityHidden(false)
+                    #endif
                     // A Mac sheet takes its environment from its own window:
                     // the launch values again.
                     .modifier(LaunchEnvironment(configuration: configuration))

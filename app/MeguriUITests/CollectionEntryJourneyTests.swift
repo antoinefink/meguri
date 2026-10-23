@@ -50,30 +50,15 @@ import notify
         defer { try? FileManager.default.removeItem(at: folder) }
         let saved = folder.appending(path: "Meguri-Collection.colpkg")
         #else
-        let cancel = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Cancel")).firstMatch
-        let cancelReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            cancel.exists && cancel.isEnabled && cancel.isHittable
+        try cancelNativeExportPicker(app, bundle)
+        let delegateReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let choose = self.element(app, "settings.importExport.choose")
+            return self.element(app, "settings.importExport.ready").exists
+                && choose.exists && choose.isEnabled && choose.isHittable
         }, object: nil)
-        let cancelResult = XCTWaiter().wait(for: [cancelReady], timeout: 10)
-        if cancelResult != .completed {
-            capturePicker(app)
-            func attributes(_ target: XCUIElement) -> String {
-                "elementType=\(target.elementType) label=\(target.label.debugDescription) identifier=\(target.identifier.debugDescription) exists=\(target.exists) isEnabled=\(target.isEnabled) isHittable=\(target.isHittable) frame=\(target.frame)"
-            }
-            let cancels = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Cancel"))
-            let buttons = app.buttons.matching(NSPredicate(format: "label IN %@ OR identifier IN %@",
-                ["Cancel", "Close", "Save", "More"], ["Cancel", "Close", "Save", "More", "DOCPicker.actionButton"]))
-            let cancelRows = cancels.allElementsBoundByIndex.map { "exact Cancel: \(attributes($0))" }
-            let buttonRows = buttons.allElementsBoundByIndex.map { "native button: \(attributes($0))" }
-            let rows = (cancelRows.isEmpty ? ["No exact Cancel candidates"] : cancelRows)
-                + (buttonRows.isEmpty ? ["No named native button candidates"] : buttonRows)
-            let diagnostic = XCTAttachment(string: rows.joined(separator: "\n"))
-            diagnostic.name = "export-cancel-postwait-native-attributes"
-            diagnostic.lifetime = .keepAlways
-            add(diagnostic)
-        }
-        XCTAssertEqual(cancelResult, .completed, app.debugDescription)
-        try click(cancel, app, bundle)
+        let delegateResult = XCTWaiter().wait(for: [delegateReady], timeout: 10)
+        if delegateResult != .completed { capturePicker(app) }
+        XCTAssertEqual(delegateResult, .completed, "Native cancellation must return the export to Ready: \(app.debugDescription)")
         // The native local folder is installed by the existing public source hook.
         let saved = URL(fileURLWithPath: "/RF2 Import Tests/Meguri-Collection.colpkg")
         #endif
@@ -175,27 +160,122 @@ import notify
         capture(app, "export-reimport-durable-review")
     }
     #if os(iOS)
+    private func cancelNativeExportPicker(_ app: XCUIApplication, _ bundle: String) throws {
+        let cancels = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Cancel"))
+        let backs = app.buttons.matching(identifier: "BackButton")
+        let more = app.buttons.matching(identifier: "OverflowBarButtonItem")
+        func actionable(_ query: XCUIElementQuery) -> XCUIElement? {
+            query.allElementsBoundByIndex.first { $0.exists && $0.isEnabled && $0.isHittable }
+        }
+        func navigationTitles() -> [String] {
+            let bars = app.navigationBars.allElementsBoundByIndex
+            return bars.map(\.identifier)
+                + app.navigationBars.staticTexts.allElementsBoundByIndex.map(\.label)
+                + app.navigationBars.buttons.matching(NSPredicate(format: "label ENDSWITH %@", ", Actions Menu"))
+                    .allElementsBoundByIndex.map(\.label)
+        }
+        func captureFailure(_ reason: String) {
+            capturePicker(app)
+            func attributes(_ target: XCUIElement) -> String {
+                guard target.exists else { return "exists=false" }
+                return "elementType=\(target.elementType) label=\(target.label.debugDescription) identifier=\(target.identifier.debugDescription) exists=true isEnabled=\(target.isEnabled) isHittable=\(target.isHittable) frame=\(target.frame)"
+            }
+            let buttons = app.buttons.matching(NSPredicate(format: "label IN %@ OR identifier IN %@",
+                ["Cancel", "Close", "Save", "More"], ["BackButton", "OverflowBarButtonItem", "DOCPicker.actionButton"]))
+            let rows = [reason, "navigation titles: \(navigationTitles())"]
+                + cancels.allElementsBoundByIndex.prefix(8).map { "exact Cancel: \(attributes($0))" }
+                + buttons.allElementsBoundByIndex.prefix(12).map { "native button: \(attributes($0))" }
+            let diagnostic = XCTAttachment(string: rows.joined(separator: "\n"))
+            diagnostic.name = "export-cancel-postwait-native-attributes"
+            diagnostic.lifetime = .keepAlways
+            add(diagnostic)
+        }
+        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            actionable(cancels) != nil || actionable(backs) != nil || actionable(more) != nil
+        }, object: nil)
+        guard XCTWaiter().wait(for: [loaded], timeout: 10) == .completed else {
+            captureFailure("No actionable native Cancel, Back or More after loading")
+            XCTFail("Native export picker did not load cancellation navigation")
+            return
+        }
+        // Files may replace Cancel with Back inside RF2 Import Tests → Meguri
+        // → On My Device → Browse. Each tap must produce an observed transition.
+        var steps = 0
+        var visited: Set<[String]> = []
+        while actionable(cancels) == nil, let back = actionable(backs), steps < 4 {
+            let label = back.label
+            guard ["Meguri", "On My iPhone", "On My iPad", "Browse", "Back"].contains(label) else {
+                captureFailure("Unexpected native Back destination: \(label)")
+                XCTFail("Native export picker left the known local folder hierarchy")
+                return
+            }
+            let titles = navigationTitles()
+            guard visited.insert([label] + titles).inserted else {
+                captureFailure("Native Back returned to an unchanged navigation state")
+                XCTFail("Native export picker must not retry the same Back state")
+                return
+            }
+            try click(back, app, bundle)
+            steps += 1
+            let navigated = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                actionable(cancels) != nil
+                    || backs.allElementsBoundByIndex.contains { $0.exists && $0.label != label }
+                    || { let current = navigationTitles(); return !current.isEmpty && current != titles }()
+            }, object: nil)
+            guard XCTWaiter().wait(for: [navigated], timeout: 10) == .completed else {
+                captureFailure("Native Back did not change its label or navigation title at step \(steps)")
+                XCTFail("Native export picker Back navigation did not advance")
+                return
+            }
+        }
+        if let cancel = actionable(cancels) {
+            try click(cancel, app, bundle)
+            return
+        }
+        // Only inspect the native overflow once, after Back navigation ends.
+        if !backs.firstMatch.exists, let overflow = actionable(more) {
+            try click(overflow, app, bundle)
+            let offered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in actionable(cancels) != nil }, object: nil)
+            if XCTWaiter().wait(for: [offered], timeout: 5) == .completed, let cancel = actionable(cancels) {
+                try click(cancel, app, bundle)
+                return
+            }
+        }
+        captureFailure("No visible native Cancel after \(steps) Back steps and at most one overflow inspection")
+        XCTFail("Native export picker must offer a hittable Cancel")
+    }
+
     private func selectLocalExportFolder(_ app: XCUIApplication, _ bundle: String) throws {
         let folderActions = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].buttons
             .matching(NSPredicate(format: "label == %@", "RF2 Import Tests, Actions Menu")).firstMatch
         let isInFolder = { app.navigationBars["RF2 Import Tests"].exists || folderActions.exists }
         if isInFolder() { return }
         let folder = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@ OR identifier == %@",
-            ["RF2 Import Tests", "RF2 Import Tests, Folder"], "RF2 Import Tests, Folder")).firstMatch
-        if !folder.waitForExistence(timeout: 2) {
-            let local = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["On My iPhone", "On My iPad"])).firstMatch
-            if !local.exists {
-                let browse = app.buttons.matching(NSPredicate(format: "label IN %@", ["Browse", "Back"])).firstMatch
-                if browse.exists { try click(browse, app, bundle) }
+            ["RF2 Import Tests", "RF2 Import Tests, Folder"], "RF2 Import Tests, Folder"))
+        let meguri = app.cells.containing(NSPredicate(format: "label == %@", "Meguri"))
+        if waitForHittable(folder, timeout: 2) == nil {
+            if waitForHittable(meguri, timeout: 2) == nil {
+                let local = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["On My iPhone", "On My iPad"]))
+                if waitForHittable(local, timeout: 2) == nil {
+                    let back = try XCTUnwrap(waitForHittable(app.buttons.matching(identifier: "BackButton")), app.debugDescription)
+                    try click(back, app, bundle)
+                }
+                let location = try XCTUnwrap(waitForHittable(local), app.debugDescription)
+                try click(location, app, bundle)
+                let contents = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    folder.allElementsBoundByIndex.contains { $0.exists && $0.isHittable }
+                        || meguri.allElementsBoundByIndex.contains { $0.exists && $0.isHittable }
+                }, object: nil)
+                XCTAssertEqual(XCTWaiter().wait(for: [contents], timeout: 10), .completed, app.debugDescription)
             }
-            XCTAssertTrue(local.waitForExistence(timeout: 10), app.debugDescription); try click(local, app, bundle)
-            let meguri = app.cells.containing(NSPredicate(format: "label == %@", "Meguri")).firstMatch
-            if meguri.waitForExistence(timeout: 2) { try click(meguri, app, bundle) }
+            if waitForHittable(folder, timeout: 2) == nil {
+                let appFolder = try XCTUnwrap(waitForHittable(meguri), app.debugDescription)
+                try click(appFolder, app, bundle)
+            }
         }
-        if folder.waitForExistence(timeout: 2) {
-            let target = folder.images.firstMatch.exists ? folder.images.firstMatch : folder
-            try click(target, app, bundle)
-        }
+        let destination = try XCTUnwrap(waitForHittable(folder), app.debugDescription)
+        let target = destination.images.firstMatch.exists ? destination.images.firstMatch : destination
+        try click(target, app, bundle)
         let folderReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in isInFolder() }, object: nil)
         XCTAssertEqual(XCTWaiter().wait(for: [folderReady], timeout: 10), .completed, app.debugDescription)
         capturePicker(app)
