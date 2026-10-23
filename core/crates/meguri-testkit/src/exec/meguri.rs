@@ -756,7 +756,7 @@ mod host_tests {
     use meguri_engine::UndoScope;
 
     #[test]
-    fn default_executor_refuses_unavailable_backup_without_mutation_or_history_events() {
+    fn injected_unavailable_backup_refuses_deletion_without_mutation_or_history_events() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("refusal.yaml");
         std::fs::write(&path, "id: host/refusal\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsetup:\n  decks: [Protected]\n  notes: [{notetype: Basic, deck: Protected, fields: [front, back]}]\nsteps:\n  - delete_decks: {decks: [Protected]}\n").unwrap();
@@ -764,6 +764,12 @@ mod host_tests {
         let mut executor = MeguriExecutor::new();
         executor.registry.record_changes();
         let mut session = executor.session(&loaded, None).unwrap();
+        session
+            .storage
+            .override_backup_for_testing(Arc::new(meguri_engine::ports::Unavailable {
+                feature: "testkit injected safety backup",
+                provider_unit: "testkit-injected-backup-provider",
+            }));
         executor.new_collection(&mut session).unwrap();
         executor.run_setup(&mut session).unwrap();
         let collection = session.engine_collection().unwrap();
@@ -780,10 +786,83 @@ mod host_tests {
         session.storage.take_changes();
         let error = executor.step(&mut session, &loaded.scenario.steps[0]).unwrap_err();
         assert_eq!(error.kind, "core_error");
+        assert_eq!(
+            error.detail,
+            "collection unavailable: testkit injected safety backup requires provider testkit-injected-backup-provider"
+        );
         assert_eq!(data(&session), before);
         assert_eq!(collection.peek_undo(UndoScope::Global).unwrap(), undo);
         assert!(session.storage.take_changes().is_empty());
         assert_eq!(session.storage.backup_calls(), 0);
+    }
+
+    #[test]
+    fn default_executor_deletion_publishes_a_recoverable_pre_delete_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backup.yaml");
+        std::fs::write(&path, "id: host/backup\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsetup:\n  decks: [Protected]\n  notes: [{notetype: Basic, deck: Protected, fields: [front, back]}]\nsteps:\n  - delete_decks: {decks: [Protected]}\n").unwrap();
+        let loaded = crate::scenario::load(&path).unwrap();
+        let executor = MeguriExecutor::new();
+        let mut session = executor.session(&loaded, None).unwrap();
+        executor.new_collection(&mut session).unwrap();
+        executor.run_setup(&mut session).unwrap();
+        let protected_rows = |reader: &meguri_storage::Reader| {
+            [
+                "SELECT * FROM decks WHERE name = 'Protected' ORDER BY id",
+                "SELECT * FROM notes ORDER BY id",
+                "SELECT * FROM cards ORDER BY id",
+            ]
+            .map(|sql| reader.execute_raw(sql, &[]).unwrap())
+        };
+        let before = {
+            let reader = session.storage.collection().unwrap().reader().unwrap();
+            protected_rows(&reader)
+        };
+        assert!(before.iter().all(|table| table.rows.len() == 1));
+        let backups = session.storage.backup_directory_for_testing();
+        assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 0);
+        assert_eq!(
+            executor.step(&mut session, &loaded.scenario.steps[0]).unwrap(),
+            json!({"delete_decks": {"count": 1}})
+        );
+        {
+            let reader = session.storage.collection().unwrap().reader().unwrap();
+            assert!(protected_rows(&reader).iter().all(|table| table.rows.is_empty()));
+        }
+        assert_eq!(session.storage.backup_calls(), 0);
+        let published = std::fs::read_dir(&backups)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].file_name().unwrap(), "backup-2030-01-15-10.00.00.colpkg");
+        // T6.2: the real provider must publish before deletion commits. P12
+        // inspection extracts and validates the saved pre-delete collection.
+        let captured = meguri_package::inspect_collection_package(
+            &published[0],
+            &meguri_package::CollectionPackageInspectContext {
+                collection_directory: dir.path(),
+                live_collection_size: 0,
+                reserved_space_bytes: 0,
+                clock: &*session.clock,
+                random: &*session.random,
+                space: &meguri_storage::space::StatvfsSpace,
+                is_cancelled: &|| false,
+            },
+        )
+        .unwrap();
+        assert_eq!((captured.facts().notes, captured.facts().cards), (1, 1));
+        let recovered = meguri_storage::open_collection(
+            &captured.collection_path(),
+            &meguri_storage::OpenOptions::new(&*session.clock, &*session.random),
+        )
+        .unwrap();
+        {
+            let reader = recovered.open_reader(meguri_storage::ReaderRole::Query).unwrap();
+            assert_eq!(protected_rows(&reader), before);
+        }
+        recovered.close().unwrap();
+        executor.finish(&mut session).unwrap();
     }
 
     #[test]

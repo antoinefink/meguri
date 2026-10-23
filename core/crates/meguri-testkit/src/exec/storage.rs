@@ -56,6 +56,8 @@ pub struct Storage {
     host_data: Option<TempDir>,
     backup: std::sync::Arc<super::BackupWitness>,
     fixture_backup_witness: bool,
+    #[cfg(test)]
+    backup_override: Option<std::sync::Arc<dyn meguri_engine::ports::BackupService>>,
     record_changes: bool,
     changes: Vec<std::sync::Arc<meguri_engine::Event>>,
     subscription: Option<meguri_engine::Subscription>,
@@ -195,6 +197,12 @@ impl Storage {
         } else {
             config
         };
+        #[cfg(test)]
+        let config = if let Some(backup) = &self.backup_override {
+            config.with_backup_for_testing(backup.clone())
+        } else {
+            config
+        };
         let host = CoreHost::open(config).map_err(core)?;
         let collection = host.collection().map_err(core)?;
         self.backup.bind(collection.clone());
@@ -240,6 +248,22 @@ impl Storage {
     }
     pub(super) fn fixture_backup_witness(&mut self) {
         self.fixture_backup_witness = true;
+    }
+    #[cfg(test)]
+    pub(super) fn override_backup_for_testing(
+        &mut self,
+        backup: std::sync::Arc<dyn meguri_engine::ports::BackupService>,
+    ) {
+        assert!(self.collection.is_none(), "install the backup override before setup");
+        self.backup_override = Some(backup);
+    }
+    #[cfg(test)]
+    pub(super) fn backup_directory_for_testing(&self) -> PathBuf {
+        self.host_data
+            .as_ref()
+            .expect("host data was initialized")
+            .path()
+            .join("backups")
     }
     fn collect_changes(&mut self) {
         if let Some(subscription) = &self.subscription {

@@ -165,14 +165,25 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "undo_status",
         ])
     );
-    // dsl.md D7.2: 68 ops besides observe, the actor ops of sync-ops.md, the
+    // dsl.md D7.2: 72 ops besides observe, the actor ops of sync-ops.md, the
     // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
     // set_config, undo-ops.md's undo, redo and remove_config, the eight ops
     // of tag-ops.md, browser-config-ops.md's browser_config_set, the note
     // type ops of notetype-ops.md and the deck ops of deck-ops.md, plus save_deck_options
-    // and set_scheduling_prefs, and the scheduling operations of sched-ops.md.
+    // and set_scheduling_prefs, the scheduling operations of sched-ops.md,
+    // and the four parsing-only backup ops of backup-ops.md and backup-trigger-ops.md.
     // D8 also lists the declared answer.filtered part; Meguri does not support it.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 69);
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 73);
+    for op in ["add_backup_files", "force_backup", "save_backup_settings", "backup"] {
+        assert!(
+            json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
+            "{op}"
+        );
+        assert!(
+            !json["supports"]["ops"].as_array().unwrap().iter().any(|o| o == op),
+            "{op}"
+        );
+    }
     for op in [
         "actor",
         "sync",
