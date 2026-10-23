@@ -89,6 +89,22 @@ on manual collection Import/Export and policy. Exact accepted-byte activation
 must bypass a second transforming preparation while retaining verification/R6.
 No new code from these isolated runs has been applied to master yet.
 
+Antoine removed the backup snapshot; free space returned to 88 GiB. The
+workstation step is clear. Backend export `20261023T091316Z-60091` contains 29
+core paths, including the preserved storage seed. Formatting
+`20261023T095926Z-85746` passed. Initial compile/lint
+`20261023T095942Z-86364` failed because the package crate lacked its SHA-1
+dependency. Privacy scan `20261023T095946Z-86609` reported six new-source regions;
+they need whole-region rewrites without inspecting private tokens.
+
+Backend round 1 independent review found P1 read-only Export activation files
+and P2 absent-collection Import recovery that can retain a permanent operation
+guard. Both require fixes and regressions. No other findings were confirmed.
+The formatted code is preserved for the fixer in the owned stash
+`7254a3ae99cf5185981746dd54c9a86ed470d2b0` and an exported own-code seed patch.
+No commit hook, check or acceptance boundary was bypassed. Focused tests and
+the full gate remain pending until these findings are resolved.
+
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,
 focused server/native evidence and the required full gate remain open.
