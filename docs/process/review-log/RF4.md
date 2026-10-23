@@ -245,6 +245,41 @@ similarity `20261023T130740Z-71727` passed 35 files without flags. UI lint
 types. These require a focused fix; no lint suppression or acceptance is added.
 Swift compilation and actual native execution have not run on this source yet.
 
+Native WIP `2d351f9f` is committed and pushed. Swift bridge
+`20261023T131239Z-76171` passed 95 tests. Focused Rust
+`20261023T131914Z-83877` passed 51 tests. Swift Kit compile
+`20261023T131447Z-80635` found an observed-property initialization error.
+Fixer run `20261023T131821Z-82821` initializes both endpoint fields from one
+local value and boxes the large FFI record using the existing UniFFI pattern.
+Independent round 5 found no new P0–P1 issues.
+
+The same run integrates the controller's reviewed source. Jobs are
+`manual-transfer-check` and `manual-transfer-data`; their source filenames,
+callers and test doubles use that family. Only their owned paths were combined.
+The operator setting is `MEGURI_MANUAL_TRANSFER_SSH_OPTION_PASSTHROUGH`.
+Root inspected the dedicated VM wrapper without printing its text or values:
+it passes separate arguments directly to SSH after the target, without an
+argument parser or inserted shell. Actual forwarding still requires proof.
+
+| Check | Receipt | Result |
+| --- | --- | --- |
+| Privacy, integrated fixes | `20261023T132735Z-87917` | Passed |
+| Controller tests | `20261023T132759Z-89698` | 15 passed |
+| Similarity | `20261023T133147Z-91856` | Passed |
+| Swift Kit | `20261023T132735Z-88283` | 362 passed; one recorded audio failure |
+| Rust lint | `20261023T132735Z-87985` | Three type errors in the new peer helper |
+
+All transfer model tests passed. The Swift failure is
+`controllerQueueAdvancesAcrossMissingMiddleWithinBudget()`, still owned by U69
+under approval `E-20261021T134124Z-a07a`. The failed result and hardware
+diagnostics remain recorded. No limit or playback setting was changed.
+This is not a repair or milestone closure.
+
+The peer helper needs an owned closure capture, Option handling for its event
+stream, and lossless duration conversion. These are compile failures; its
+actual seed and peer comparison have not run. Native VM journeys, Keychain
+integration, rendered review and the full combined gate remain pending.
+
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,
 focused server/native evidence and the required full gate remain open.

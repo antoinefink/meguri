@@ -366,7 +366,7 @@ pub enum ManualTransferValue {
         preview: Arc<ManualTransferPreview>,
     },
     Operation {
-        record: TransferRecord,
+        record: Box<TransferRecord>,
     },
 }
 #[derive(Clone, uniffi::Enum)]
@@ -415,7 +415,9 @@ impl ManualTransferResult {
             }),
             ResultSource::Operation(task) => task.take_result().map(|v| match v {
                 Ok(op) => ManualTransferOutcome::Value {
-                    value: ManualTransferValue::Operation { record: (&op).into() },
+                    value: ManualTransferValue::Operation {
+                        record: Box::new((&op).into()),
+                    },
                 },
                 Err(e) => ManualTransferOutcome::Failed { failure: e.into() },
             }),
@@ -654,7 +656,7 @@ impl ManualTransferSession {
         let id = entry.operation.id.clone();
         worker("cancel interrupted manual preparation", move |_| {
             Ok(ManualTransferValue::Operation {
-                record: (&host.cancel_prepared_manual_transfer(&id, interrupted)?).into(),
+                record: Box::new((&host.cancel_prepared_manual_transfer(&id, interrupted)?).into()),
             })
         })
     }
@@ -669,7 +671,7 @@ impl ManualTransferSession {
         preview.take()?;
         worker("cancel prepared manual transfer", move |_| {
             Ok(ManualTransferValue::Operation {
-                record: (&host.cancel_prepared_manual_transfer(&id, interrupted)?).into(),
+                record: Box::new((&host.cancel_prepared_manual_transfer(&id, interrupted)?).into()),
             })
         })
     }

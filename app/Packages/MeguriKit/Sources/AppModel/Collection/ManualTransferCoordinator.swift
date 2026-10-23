@@ -62,8 +62,9 @@ public final class ManualTransferCoordinator {
 
     public init(owner: ReviewCollection?, service: any ManualTransferService, keychain: any ManualTransferCredentialStore = DeviceManualTransferCredentialStore(), defaults: UserDefaults? = .standard) {
         self.owner = owner; self.service = service; self.keychain = keychain; self.defaults = defaults
-        endpoint = defaults?.string(forKey: "manualTransfer.endpoint") ?? ""
-        endpointDraft = endpoint
+        let restoredEndpoint = defaults?.string(forKey: "manualTransfer.endpoint") ?? ""
+        endpoint = restoredEndpoint
+        endpointDraft = restoredEndpoint
     }
     /// Invoked on Settings presentation. Neither history nor Keychain loading
     /// opens a collection, probes a server, starts a transfer or resumes one.

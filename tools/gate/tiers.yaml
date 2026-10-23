@@ -782,6 +782,8 @@ utilities:
   - {job: sim-setup, why: "prepares the simulator pool"}
   - {job: sim-reset, why: "resets a leased simulator"}
   - {job: sync-rig, why: "starts and stops the local sync server; the actor scenarios of live-oracle and the sync suites use it"}
+  - {job: manual-transfer-check, why: "explicit RF4 manual-transfer check; requires pool VM native proof, reserved rig peer data and verified loopback forwarding"}
+  - {job: manual-transfer-data, why: "manual-transfer-check-only Docker data helper: seed or verify generated RF4 accounts and exact peer comparison"}
   - {job: fixtures, why: "generates collections; fixtures-check verifies the generator"}
   - {job: anonymize, why: "makes the anonymized clone; private-suite and anonymize-check cover it"}
   - {job: harvest-inventory, why: "spec side: re-inventories Anki's tests"}
