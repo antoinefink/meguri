@@ -61,6 +61,12 @@ Next isolated patch: typed transfer facts and staged-upload storage preparation.
 Starting commit `8f227ed0dfead33aab8ebedb05a63a9fddbf9a04`; implementer session
 `s-20261023T085242Z-6179d829`. It does not mutate the checkout while running.
 
+Readiness `20261023T085837Z-34619` reports no required setup missing. Host first
+launch is no longer blocked. VM is healthy; its older Xcode remains a recorded
+warning for native verification. Resume the full integration gate from the
+original RF3 base `81c207573c20c337c8834e4ae8b4ee8f29603dbf`, covering this committed
+engine prerequisite too. Do not apply the isolated storage patch during it.
+
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,
 focused server/native evidence and the required full gate remain open.
