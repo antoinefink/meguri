@@ -67,6 +67,28 @@ warning for native verification. Resume the full integration gate from the
 original RF3 base `81c207573c20c337c8834e4ae8b4ee8f29603dbf`, covering this committed
 engine prerequisite too. Do not apply the isolated storage patch during it.
 
+Gate `20261023T090045Z-36621` was cancelled after a missing host dependency
+prevented the native durability build; all 2752 Docker Rust tests passed first.
+Locked host dependencies are now available, and native check
+`20261023T092220Z-65494` passed all 25 tests without skips or changed limits.
+No passing full gate is claimed. Disk headroom is 42 GB after inactive Meguri
+cache cleanup; a backup snapshot appears to retain deleted blocks, so Antoine
+has been asked to handle that snapshot or free space before larger Apple work.
+
+Storage prerequisite: implementer `20261023T085302Z-29621`, then fixer
+`20261023T090756Z-56474` using `s-20261023T084708Z-2448b237`. Review found signed
+SQLite count decoding and dedicated Sync-reader requirements; both are fixed.
+The spec writer confirmed KTD3/C6 already require Sync: no contract was relaxed.
+Round 2 source review has no P0–P2 findings; focused compile/tests remain pending.
+The public package snapshot APIs remain Maintenance-only. Preserve the five tests.
+
+The next collection-transfer backend run is `20261023T091316Z-60091`, reusing
+implementer session `s-20261023T085242Z-6179d829` and the reviewed fixed seed.
+Source base is `ff62b9b4d60f863117fb21a23258592c4a26c645`. It works in isolation
+on manual collection Import/Export and policy. Exact accepted-byte activation
+must bypass a second transforming preparation while retaining verification/R6.
+No new code from these isolated runs has been applied to master yet.
+
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,
 focused server/native evidence and the required full gate remain open.
