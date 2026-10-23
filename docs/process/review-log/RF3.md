@@ -133,3 +133,5 @@
 - Mac export audit `20261023T034317Z-75306`: PASS, one test and no skips, including added scroll/content proof.
 - Fixer `s-20261023T034234Z-c79a0d01`, export `20261023T034313Z-75039`: iOS uses native slow swipes and captures failed movement. Replacement still requires the exact native Replace action, now checked in the app and system alert owner with bounded diagnostics. No production changes or replacement pass are claimed.
 - Fix21 export `20261023T034723Z-78395`: standard native swipe calls; optional comment removed. Privacy `20261023T034837Z-79134`: PASS. Earlier `20261023T034626Z-77702`: FAIL on new source. Checks pending.
+- iPhone `20261023T034854Z-79513`: PASS, one test and no skips. Actual import/review/restart, native Cancel, Save, Replace, reimport, another review and restart all passed.
+- Independent round 6 follow-up on `0042e125`: no new P0–P1 finding or deterministic blocker. Actual native Replace remains mandatory and scroll coverage is unchanged.
