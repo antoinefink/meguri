@@ -128,8 +128,13 @@ import XCTest
                     throw AuditError(description: "\(identifiers[index]) must have a nonempty frame that fits the actual scroll viewport: \(frames[index]) in \(viewport)")
                 }
                 if let text = paragraphs[identifiers[index]] {
+                    #if os(macOS)
+                    let exactText = targets[index].value as? String
+                    #else
+                    let exactText = targets[index].label
+                    #endif
                     guard targets[index].identifier == identifiers[index],
-                          targets[index].elementType == .staticText, targets[index].label == text else {
+                          targets[index].elementType == .staticText, exactText == text else {
                         throw AuditError(description: "Expected the exact accessible Text for \(identifiers[index]): \(text)")
                     }
                 }

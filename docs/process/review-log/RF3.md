@@ -126,3 +126,5 @@
 - Fixer `s-20261023T032133Z-c04d6162`; exports `20261023T032255Z-50306`, `20261023T032923Z-60497`. Added sheet fixtures, Study readiness and scroll checks. Audits pending.
 - Same round 6 review caught the first export's paragraph-fit assertion before integration. The second export allows text to span viewports while requiring observed beginning-to-end coverage; buttons still need full frames. Mac text value handling needs its platform correction before the new Mac audit.
 - Privacy `20261023T033355Z-66932`: pass. Earlier `20261023T033257Z-66194` flagged new log prose; whole sentences were rewritten. Public images and scan policy are unchanged.
+- Final same-session export `20261023T033604Z-68430`: Mac exact text uses its native String value; four exact contrast entries retain initial audit evidence. One new reason was fully rewritten after the privacy hook; scan policy is unchanged. No native pass is claimed yet.
+- Independent round 6 follow-up on the paragraph correction: no new P0–P1 finding or deterministic blocker beyond the Mac value correction above. Initial paragraph-fit issue is resolved in source; runtime proof remains pending.

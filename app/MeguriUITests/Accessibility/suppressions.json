@@ -2,6 +2,26 @@
   "version": 1,
   "suppressions": [
     {
+      "identifier": "settings.importExport.ready",
+      "auditType": "contrast",
+      "reason": "iPad AX5 light/dark run 20261023T031552Z-43929 reports the entire foreground Ready at 250,905 335x63 below the visible scroll viewport. This is the scroll-edge/whole-frame limitation (R1977); textPrimary/backgroundPrimary is the unchanged declared token pair checked by ContrastTests (R1979). CollectionExportAccessibilityTests adds scrolled full-frame visibility proof and a supplemental all-types system audit with this exact contrast suppression removed while this target is visible; native verification is pending."
+    },
+    {
+      "identifier": "settings.importExport.readyDetail",
+      "auditType": "contrast",
+      "reason": "R1977: iPad run 20261023T031552Z-43929 records Ready detail below the scroll viewport at AX5. ContrastTests checks textPrimary/backgroundPrimary (R1979). Supplemental audits check visible text without this exact exception. Native checks remain pending."
+    },
+    {
+      "identifier": "settings.importExport.message",
+      "auditType": "contrast",
+      "reason": "iPad AX5 light/dark run 20261023T031552Z-43929 reports the entire foreground Message at 250,905 530x311 below the visible scroll viewport. This is the scroll-edge/whole-frame limitation (R1977); textPrimary/backgroundPrimary is the unchanged declared token pair checked by ContrastTests (R1979). CollectionExportAccessibilityTests checks exact accessible Text and bounded, overlapping beginning-to-end portions with screenshots and frames. The supplemental all-types audit removes this exact contrast suppression only when the entire paragraph frame is visible; taller paragraphs retain this evidenced whole-frame exception and token proof. Native verification is pending."
+    },
+    {
+      "identifier": "settings.importExport.prepare",
+      "auditType": "contrast",
+      "reason": "iPad AX5 light/dark run 20261023T031552Z-43929 reports the entire foreground Prepare at 250,1241 375x77 below the visible scroll viewport. This is the scroll-edge/whole-frame limitation (R1977); textPrimary/backgroundPrimary is the unchanged declared token pair checked by ContrastTests (R1979). CollectionExportAccessibilityTests adds scrolled full-frame visibility proof and a supplemental all-types system audit with this exact contrast suppression removed while this target is visible; native verification is pending."
+    },
+    {
       "identifier": "onboarding.collectionImport.preview.heading",
       "auditType": "contrast",
       "reason": "At the largest text size in iPad run 20261022T205058Z-15571 the preview heading is offscreen. The scroll-edge whole-frame limitation applies (R1977); textPrimary/backgroundPrimary is a declared pair checked by ContrastTests (R1979)."
