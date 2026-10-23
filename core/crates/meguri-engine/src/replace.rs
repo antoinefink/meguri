@@ -21,6 +21,12 @@ impl ReplaceReason {
     pub(crate) fn package(self) -> bool {
         matches!(self, Self::Restore | Self::ColpkgImport)
     }
+    pub(crate) fn requires_publication_decision(self) -> bool {
+        matches!(self, Self::Restore | Self::ColpkgImport | Self::FullDownload)
+    }
+    pub(crate) fn refuses_active_review(self) -> bool {
+        matches!(self, Self::ColpkgImport | Self::FullDownload | Self::FullUpload)
+    }
     pub(crate) fn long_op(self) -> crate::LongOp {
         match self {
             Self::Restore => crate::LongOp::Restore,
@@ -59,9 +65,9 @@ impl From<StagingError> for ReplaceError {
 }
 
 impl SlotGuard {
-    /// Minimal verified entry. Import refuses an active review before closing
-    /// admission, and again after the exclusive drain. The legacy closure entry
-    /// deliberately retains its ability to replace a session.
+    /// Minimal verified entry. Collection import and manual transfers refuse an
+    /// active review before closing admission, and after the exclusive drain.
+    /// The legacy closure entry retains its ability to replace a session.
     pub fn replace_verified(
         &self,
         stage: ReplacementStage,
@@ -111,9 +117,11 @@ impl Exclusive<'_> {
             reason.package(),
             change,
         )?;
-        // Recheck after validation too; a closed/stale exclusive cannot swap.
         self.verified_environment(reason)?;
         before_commit()?;
+        // Admission is privileged and the writer drained. Recheck under the
+        // lifecycle/session locks after preparation and the unlocked hook.
+        self.verified_environment(reason)?;
         let error = Arc::new(Mutex::new(None));
         let record = error.clone();
         let activated = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -167,8 +175,8 @@ pub(crate) fn swap(
     storage::check_device(&stage, live)?;
     meguri_model::faultpoint!("replace.before_live_wal_check")?;
     storage::check_live_wal(live)?;
-    // Manual one-way replacements also retire queued tokens. Their new
-    // identity retains the exact cloud decision rather than resolving it.
+    // Every replacement retires queued tokens. Manual Import requires a new
+    // publication decision; Export preserves the exact prior decision.
     device_state::begin(live, &stage.path(), reason, binding, random)?;
     meguri_model::faultpoint!("replace.after_pause_recorded")?;
     storage::remove_empty_live_sidecars(live)?;

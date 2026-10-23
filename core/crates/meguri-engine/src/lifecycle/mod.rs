@@ -751,9 +751,7 @@ impl<'s> Exclusive<'s> {
         if self.slot.op != reason.long_op() {
             return Err(crate::replace::ReplaceError::NotExclusive);
         }
-        if reason == crate::replace::ReplaceReason::ColpkgImport
-            && self.core.exec.active_session.lock().unwrap().is_some()
-        {
+        if reason.refuses_active_review() && self.core.exec.active_session.lock().unwrap().is_some() {
             return Err(EngineError::SessionActive.into());
         }
         Ok(state

@@ -143,7 +143,7 @@ fn bound(state: &State, binding: &AccountBinding) -> Result<(), StorageError> {
         if &intent.prior.binding != binding || &intent.candidate.binding != binding {
             return Err(failure("intent account binding differs"));
         }
-        let expected = if intent.reason.package() {
+        let expected = if intent.reason.requires_publication_decision() {
             PublicationDecision::Pending
         } else {
             intent.prior.decision
@@ -268,7 +268,7 @@ pub(crate) fn reconcile(live: &Path, binding: &AccountBinding) -> Result<(), Sto
     };
     let decision = match intent.phase {
         Phase::Activated => {
-            let expected = if intent.reason.package() {
+            let expected = if intent.reason.requires_publication_decision() {
                 PublicationDecision::Pending
             } else {
                 intent.prior.decision
@@ -340,7 +340,7 @@ pub(crate) fn begin(
         let candidate = Publication {
             identity: PublicationId::successor(random, state.active.identity),
             binding: binding.clone(),
-            decision: if reason.package() {
+            decision: if reason.requires_publication_decision() {
                 PublicationDecision::Pending
             } else {
                 state.active.decision

@@ -1,4 +1,4 @@
-//! R1-R10/RF2 durable primitive, using the production gate and lifecycle.
+//! R1-R10 durable primitive and RF4 manual-transfer publication boundary.
 mod common;
 mod session_support;
 use common::{Harness, NOW_MS};
@@ -44,6 +44,24 @@ fn publication(live: &Path) -> Publication {
 }
 fn marker(collection: &meguri_engine::Collection) -> i64 {
     collection.reader(ReaderRole::Query).unwrap().col().unwrap().dirty
+}
+
+// Both reasons require pending publication independently of package stamping.
+const FENCED_REASONS: [ReplaceReason; 2] = [ReplaceReason::Restore, ReplaceReason::FullDownload];
+fn replacement_op(reason: ReplaceReason) -> LongOp {
+    match reason {
+        ReplaceReason::Restore => LongOp::Restore,
+        ReplaceReason::ColpkgImport => LongOp::ColpkgImport,
+        ReplaceReason::FullDownload | ReplaceReason::FullUpload => LongOp::OneWaySync,
+    }
+}
+fn download_change(reason: ReplaceReason, scope: &mut meguri_storage::WriteScope<'_>) -> Result<(), StorageError> {
+    if reason == ReplaceReason::FullDownload {
+        let mut col = scope.col()?;
+        col.last_sync = col.modified;
+        scope.put_col(&col)?;
+    }
+    Ok(())
 }
 
 #[test]
@@ -120,24 +138,42 @@ fn real_import_and_restore_stamp_once_expire_handles_and_publish_one_event() {
 }
 
 #[test]
-fn manual_one_way_reasons_preserve_cloud_decisions_and_do_not_stamp_packages() {
-    let h = Harness::open();
-    for pending in [false, true] {
-        if pending {
-            let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
-            slot.replace_verified(stage(h.dir.path(), "schema-18.anki2"), ReplaceReason::Restore, |_| {
-                Ok(())
-            })
+fn manual_import_fences_export_preserves_and_neither_stamps_packages() {
+    for reason in [ReplaceReason::FullDownload, ReplaceReason::FullUpload] {
+        for pending in [false, true] {
+            let (dir, live) = common::copy_fixture("schema-18.anki2");
+            let engine = Engine::new(EngineConfig::default()).unwrap();
+            engine.open_raw(&live, config(binding(), 7)).unwrap();
+            if pending {
+                let slot = engine.acquire_slot(LongOp::Restore).unwrap();
+                slot.replace_verified(stage(dir.path(), "schema-18.anki2"), ReplaceReason::Restore, |_| Ok(()))
+                    .unwrap();
+            }
+            let device = DeviceState::for_collection(&live);
+            let prior = publication(&live);
+            let token = if pending {
+                assert!(device.publication_token(&binding()).is_err());
+                None
+            } else {
+                Some(device.publication_token(&binding()).unwrap())
+            };
+            let candidate = stage(dir.path(), "schema-18.anki2");
+            let db = meguri_storage::raw::PlainDatabase::open(&candidate.path()).unwrap();
+            db.execute_batch(&format!(
+                "UPDATE col SET mod={}, scm={}, ls=19, usn=23",
+                NOW_MS - 5000,
+                NOW_MS - 6000
+            ))
             .unwrap();
-        }
-        let prior = publication(&h.path);
-        for reason in [ReplaceReason::FullDownload, ReplaceReason::FullUpload] {
-            let subscription = h.engine.stream().subscribe();
-            let slot = h.engine.acquire_slot(LongOp::OneWaySync).unwrap();
+            drop(db);
+            let subscription = engine.stream().subscribe();
+            let slot = engine.acquire_slot(LongOp::OneWaySync).unwrap();
             let new = slot
-                .replace_verified(stage(h.dir.path(), "schema-18.anki2"), reason, |scope| {
+                .replace_verified(candidate, reason, |scope| {
                     let mut col = scope.col()?;
-                    assert_ne!(col.schema_modified.0, NOW_MS);
+                    assert_eq!(col.modified.0, NOW_MS - 5000);
+                    assert_eq!(col.schema_modified.0, NOW_MS - 6000);
+                    assert_eq!(col.last_sync.0, 19);
                     if reason == ReplaceReason::FullDownload {
                         col.last_sync = col.modified;
                     }
@@ -145,14 +181,38 @@ fn manual_one_way_reasons_preserve_cloud_decisions_and_do_not_stamp_packages() {
                     Ok(())
                 })
                 .unwrap();
-            let active = publication(&h.path);
-            assert_eq!(active.decision, prior.decision);
-            assert_eq!(active.binding, prior.binding);
-            assert_ne!(active.identity, prior.identity);
-            assert_ne!(
-                new.reader(ReaderRole::Query).unwrap().col().unwrap().schema_modified.0,
-                NOW_MS
+            let active = publication(&live);
+            assert_eq!(
+                active.decision,
+                if pending || reason == ReplaceReason::FullDownload {
+                    PublicationDecision::Pending
+                } else {
+                    PublicationDecision::Clear
+                }
             );
+            assert_eq!(active.binding, binding());
+            assert_ne!(active.identity, prior.identity);
+            if let Some(token) = token {
+                assert!(device.validate_token(&token, &binding()).is_err());
+            }
+            if active.decision == PublicationDecision::Clear {
+                let fresh = device.publication_token(&binding()).unwrap();
+                device.validate_token(&fresh, &binding()).unwrap();
+            } else {
+                assert!(device.publication_token(&binding()).is_err());
+            }
+            let col = new.reader(ReaderRole::Query).unwrap().col().unwrap();
+            assert_eq!(col.modified.0, NOW_MS - 5000);
+            assert_eq!(col.schema_modified.0, NOW_MS - 6000);
+            assert_eq!(
+                col.last_sync.0,
+                if reason == ReplaceReason::FullDownload {
+                    NOW_MS - 5000
+                } else {
+                    19
+                }
+            );
+            assert_eq!(col.usn.0, 23);
             let events = common::drain(&subscription, Duration::from_millis(10));
             assert_eq!(
                 events
@@ -166,142 +226,197 @@ fn manual_one_way_reasons_preserve_cloud_decisions_and_do_not_stamp_packages() {
                     .iter()
                     .any(|e| matches!(&e.kind, EventKind::Changes(changes) if changes.whole_collection))
             );
+            device.set_manual_transfer_pending(true).unwrap();
+            device.set_manual_transfer_pending(false).unwrap();
+            assert_eq!(publication(&live), active);
+            drop(slot);
+            engine.close().unwrap();
+            for _ in 0..2 {
+                let reopened = engine.open_raw(&live, config(binding(), 7)).unwrap();
+                assert_eq!(publication(&live), active);
+                assert_eq!(reopened.reader(ReaderRole::Query).unwrap().col().unwrap(), col);
+                engine.close().unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn initial_manual_download_is_pending_bound_and_keeps_server_stamps() {
+    for binding in [binding(), AccountBinding::LocalOnly] {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("collection.anki2");
+        let engine = Engine::new(EngineConfig::default()).unwrap();
+        let slot = engine.acquire_slot(LongOp::OneWaySync).unwrap();
+        let mut stamps = None;
+        let new = slot
+            .replace_verified_initial(
+                &live,
+                config(binding.clone(), 7),
+                stage(dir.path(), "schema-18.anki2"),
+                ReplaceReason::FullDownload,
+                |scope| {
+                    let mut col = scope.col()?;
+                    assert_ne!(col.modified.0, NOW_MS);
+                    assert_ne!(col.schema_modified.0, NOW_MS);
+                    col.last_sync = col.modified;
+                    stamps = Some((col.modified, col.schema_modified));
+                    scope.put_col(&col)?;
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(new.generation(), Generation(1));
+        let col = new.reader(ReaderRole::Query).unwrap().col().unwrap();
+        assert_eq!((col.modified, col.schema_modified), stamps.unwrap());
+        assert_eq!(col.last_sync, col.modified);
+        let active = publication(&live);
+        assert_eq!(active.binding, binding);
+        assert_eq!(active.decision, PublicationDecision::Pending);
+        assert!(DeviceState::for_collection(&live).publication_token(&binding).is_err());
+        drop(slot);
+        engine.close().unwrap();
+        for _ in 0..2 {
+            engine.open_raw(&live, config(binding.clone(), 7)).unwrap();
+            assert_eq!(publication(&live), active);
+            engine.close().unwrap();
         }
     }
 }
 
 #[test]
 fn wrong_slot_and_bad_candidate_never_close_or_mutate_live_collection() {
-    let h = Harness::open();
-    let generation = h.collection.generation();
-    let prior = publication(&h.path);
-    let slot = h.engine.acquire_slot(LongOp::CheckDatabase).unwrap();
-    assert!(matches!(
-        slot.replace_verified(stage(h.dir.path(), "schema-18.anki2"), ReplaceReason::Restore, |_| Ok(
-            ()
-        )),
-        Err(ReplaceError::NotExclusive)
-    ));
-    drop(slot);
-    let bytes = fs::read(&h.path).unwrap();
-    let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
-    let bad = stage(h.dir.path(), "ver-10-delete.anki2");
-    let owned = bad.directory().to_owned();
-    assert!(matches!(
-        slot.replace_verified(bad, ReplaceReason::Restore, |_| panic!(
-            "refused candidate reached caller"
-        )),
-        Err(ReplaceError::Staging(StagingError::StagingRefused(_)))
-    ));
-    assert!(!owned.exists());
-    assert_eq!(h.engine.generation(), generation);
-    assert_eq!(publication(&h.path), prior);
-    assert_eq!(fs::read(&h.path).unwrap(), bytes);
-    assert!(h.collection.reader(ReaderRole::Query).is_ok());
+    for reason in FENCED_REASONS {
+        let h = Harness::open();
+        let generation = h.collection.generation();
+        let prior = publication(&h.path);
+        let slot = h.engine.acquire_slot(LongOp::CheckDatabase).unwrap();
+        assert!(matches!(
+            slot.replace_verified(stage(h.dir.path(), "schema-18.anki2"), reason, |_| Ok(())),
+            Err(ReplaceError::NotExclusive)
+        ));
+        drop(slot);
+        let bytes = fs::read(&h.path).unwrap();
+        let slot = h.engine.acquire_slot(replacement_op(reason)).unwrap();
+        let bad = stage(h.dir.path(), "ver-10-delete.anki2");
+        let owned = bad.directory().to_owned();
+        assert!(matches!(
+            slot.replace_verified(bad, reason, |_| panic!("refused candidate reached caller")),
+            Err(ReplaceError::Staging(StagingError::StagingRefused(_)))
+        ));
+        assert!(!owned.exists());
+        assert_eq!(h.engine.generation(), generation);
+        assert_eq!(publication(&h.path), prior);
+        assert_eq!(fs::read(&h.path).unwrap(), bytes);
+        assert!(h.collection.reader(ReaderRole::Query).is_ok());
+    }
 }
 
 #[test]
 fn pre_rename_faults_preserve_old_bytes_and_exact_clear_or_pending_decision() {
-    for already_pending in [false, true] {
-        for point in [
-            "replace.after_check",
-            "replace.after_finalise",
-            "replace.after_pause_recorded",
-            "replace.after_live_wal_removed",
-        ] {
-            let h = Harness::open();
-            if already_pending {
-                let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
-                slot.replace_verified(stage(h.dir.path(), "schema-18.anki2"), ReplaceReason::Restore, |_| {
-                    Ok(())
-                })
-                .unwrap();
+    for reason in FENCED_REASONS {
+        for already_pending in [false, true] {
+            for point in [
+                "replace.after_check",
+                "replace.after_finalise",
+                "replace.after_pause_recorded",
+                "replace.after_live_wal_removed",
+            ] {
+                let h = Harness::open();
+                if already_pending {
+                    let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
+                    slot.replace_verified(stage(h.dir.path(), "schema-18.anki2"), ReplaceReason::Restore, |_| {
+                        Ok(())
+                    })
+                    .unwrap();
+                }
+                // A clean checkpoint baseline makes byte equality meaningful.
+                h.engine.close().unwrap();
+                let old = fs::read(&h.path).unwrap();
+                h.engine.open_raw(&h.path, common::open_config(&h.clock)).unwrap();
+                let generation = h.engine.generation();
+                let prior = publication(&h.path);
+                let slot = h.engine.acquire_slot(replacement_op(reason)).unwrap();
+                faultpoint::arm(point, Fault::IoError(std::io::ErrorKind::Other));
+                let result = slot.replace_verified(stage(h.dir.path(), "schema-18.anki2"), reason, |scope| {
+                    download_change(reason, scope)
+                });
+                faultpoint::disarm_all();
+                assert!(result.is_err(), "{point}");
+                assert_eq!(h.engine.generation(), generation, "{point}");
+                assert_eq!(publication(&h.path), prior, "{point}");
+                h.engine.close().unwrap();
+                assert_eq!(fs::read(&h.path).unwrap(), old, "{point}");
             }
-            // A clean checkpoint baseline makes byte equality meaningful.
-            h.engine.close().unwrap();
-            let old = fs::read(&h.path).unwrap();
-            h.engine.open_raw(&h.path, common::open_config(&h.clock)).unwrap();
-            let generation = h.engine.generation();
-            let prior = publication(&h.path);
-            let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
-            faultpoint::arm(point, Fault::IoError(std::io::ErrorKind::Other));
-            let result = slot.replace_verified(stage(h.dir.path(), "schema-18.anki2"), ReplaceReason::Restore, |_| {
-                Ok(())
-            });
-            faultpoint::disarm_all();
-            assert!(result.is_err(), "{point}");
-            assert_eq!(h.engine.generation(), generation, "{point}");
-            assert_eq!(publication(&h.path), prior, "{point}");
-            h.engine.close().unwrap();
-            assert_eq!(fs::read(&h.path).unwrap(), old, "{point}");
         }
     }
 }
 
 #[test]
 fn post_rename_errors_are_honest_and_fenced_before_writer_reopens() {
-    for point in [
-        "replace.after_rename",
-        "replace.after_dir_sync",
-        "replace.after_durable_activation",
-    ] {
-        let h = Harness::open();
-        let prior = publication(&h.path);
-        let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
-        let mut exclusive = slot.enter_exclusive(true).unwrap();
-        faultpoint::arm(point, Fault::IoError(std::io::ErrorKind::Other));
-        let result = exclusive.replace_verified(
-            stage(h.dir.path(), "schema-18.anki2"),
-            ReplaceReason::Restore,
-            |scope| {
+    for reason in FENCED_REASONS {
+        for point in [
+            "replace.after_rename",
+            "replace.after_dir_sync",
+            "replace.after_durable_activation",
+        ] {
+            let h = Harness::open();
+            let prior = publication(&h.path);
+            let slot = h.engine.acquire_slot(replacement_op(reason)).unwrap();
+            let mut exclusive = slot.enter_exclusive(true).unwrap();
+            faultpoint::arm(point, Fault::IoError(std::io::ErrorKind::Other));
+            let result = exclusive.replace_verified(stage(h.dir.path(), "schema-18.anki2"), reason, |scope| {
+                download_change(reason, scope)?;
                 let mut col = scope.col()?;
                 col.dirty = 722;
                 scope.put_col(&col)?;
                 Ok(())
-            },
-        );
-        faultpoint::disarm_all();
-        assert!(result.is_err());
-        // A repeated activation-boundary I/O error may refuse the immediate
-        // reopen. A restart must still recover; it must never reopen unfenced.
-        if !matches!(h.engine.state(), meguri_engine::LifecycleState::Failed { .. }) {
-            let current = exclusive.collection();
-            assert_ne!(current.generation(), h.collection.generation());
-            assert_eq!(marker(current), 722);
+            });
+            faultpoint::disarm_all();
+            assert!(result.is_err());
+            // A repeated activation-boundary I/O error may refuse the immediate
+            // reopen. A restart must still recover; it must never reopen unfenced.
+            if !matches!(h.engine.state(), meguri_engine::LifecycleState::Failed { .. }) {
+                let current = exclusive.collection();
+                assert_ne!(current.generation(), h.collection.generation());
+                assert_eq!(marker(current), 722);
+                assert_eq!(publication(&h.path).decision, PublicationDecision::Pending);
+            }
+            drop(exclusive);
+            drop(slot);
+            h.engine.close().unwrap();
+            let current = h.engine.open_raw(&h.path, common::open_config(&h.clock)).unwrap();
+            assert_eq!(marker(&current), 722);
+            assert_ne!(publication(&h.path).identity, prior.identity);
             assert_eq!(publication(&h.path).decision, PublicationDecision::Pending);
         }
-        drop(exclusive);
-        drop(slot);
-        h.engine.close().unwrap();
-        let current = h.engine.open_raw(&h.path, common::open_config(&h.clock)).unwrap();
-        assert_eq!(marker(&current), 722);
-        assert_ne!(publication(&h.path).identity, prior.identity);
-        assert_eq!(publication(&h.path).decision, PublicationDecision::Pending);
     }
 }
 
 #[test]
 fn a_failed_intent_durable_save_does_not_rename_or_destroy_evidence() {
-    let h = Harness::open();
-    let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
-    let mut exclusive = slot.enter_exclusive(true).unwrap();
-    // Arm only after finalisation, to avoid failing F3's close beforehand.
-    faultpoint::arm(
-        "replace.after_finalise",
-        Fault::Callback(|| {
-            // Close writes F3 once, then the intent writes. Count only those saves.
-            SAVE_COUNT.store(0, std::sync::atomic::Ordering::SeqCst);
-            faultpoint::arm("storage.sidecar.before_save", Fault::Callback(fail_second_save));
-        }),
-    );
-    let old = publication(&h.path);
-    let result = exclusive.replace_verified(stage(h.dir.path(), "schema-18.anki2"), ReplaceReason::Restore, |_| {
-        Ok(())
-    });
-    faultpoint::disarm_all();
-    assert!(result.is_err());
-    assert_eq!(publication(&h.path), old);
-    assert_eq!(h.engine.generation(), Generation(1));
+    for reason in FENCED_REASONS {
+        let h = Harness::open();
+        let slot = h.engine.acquire_slot(replacement_op(reason)).unwrap();
+        let mut exclusive = slot.enter_exclusive(true).unwrap();
+        // Arm only after finalisation, to avoid failing F3's close beforehand.
+        faultpoint::arm(
+            "replace.after_finalise",
+            Fault::Callback(|| {
+                // Close writes F3 once, then the intent writes. Count only those saves.
+                SAVE_COUNT.store(0, std::sync::atomic::Ordering::SeqCst);
+                faultpoint::arm("storage.sidecar.before_save", Fault::Callback(fail_second_save));
+            }),
+        );
+        let old = publication(&h.path);
+        let result = exclusive.replace_verified(stage(h.dir.path(), "schema-18.anki2"), reason, |scope| {
+            download_change(reason, scope)
+        });
+        faultpoint::disarm_all();
+        assert!(result.is_err());
+        assert_eq!(publication(&h.path), old);
+        assert_eq!(h.engine.generation(), Generation(1));
+    }
 }
 static SAVE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 fn fail_second_save() {
@@ -322,7 +437,7 @@ fn prior_publication_token_and_manual_transfer_do_not_allow_replacement() {
     manual
         .replace_verified(
             stage(dir.path(), "schema-18.anki2"),
-            ReplaceReason::FullDownload,
+            ReplaceReason::FullUpload,
             |scope| {
                 let mut col = scope.col()?;
                 col.last_sync = col.modified;
@@ -335,9 +450,18 @@ fn prior_publication_token_and_manual_transfer_do_not_allow_replacement() {
     assert!(device.validate_token(&token, &binding()).is_err());
     let manual_token = device.publication_token(&binding()).unwrap();
     device.validate_token(&manual_token, &binding()).unwrap();
-    let slot = engine.acquire_slot(LongOp::Restore).unwrap();
-    slot.replace_verified(stage(dir.path(), "schema-18.anki2"), ReplaceReason::Restore, |_| Ok(()))
-        .unwrap();
+    let slot = engine.acquire_slot(LongOp::OneWaySync).unwrap();
+    slot.replace_verified(
+        stage(dir.path(), "schema-18.anki2"),
+        ReplaceReason::FullDownload,
+        |scope| {
+            let mut col = scope.col()?;
+            col.last_sync = col.modified;
+            scope.put_col(&col)?;
+            Ok(())
+        },
+    )
+    .unwrap();
     assert!(device.validate_token(&manual_token, &binding()).is_err());
     assert!(device.validate_token(&token, &binding()).is_err());
     device.set_manual_transfer_pending(true).unwrap();
@@ -348,29 +472,83 @@ fn prior_publication_token_and_manual_transfer_do_not_allow_replacement() {
 }
 
 #[test]
-fn import_refuses_review_but_low_level_replace_still_supports_active_session() {
+fn verified_import_and_transfers_refuse_review_at_both_entries_without_mutation() {
+    use meguri_engine::SuspendParticipant;
     let h = session_support::Harness::new(3);
     let (id, _) = h.start();
+    h.review.flush().unwrap();
     let live = h.dir.path().join("collection.anki2");
-    let slot = h.engine.acquire_slot(LongOp::ColpkgImport).unwrap();
-    assert!(matches!(
-        slot.replace_verified(
-            stage(h.dir.path(), "schema-18.anki2"),
-            ReplaceReason::ColpkgImport,
-            |_| Ok(())
-        ),
-        Err(ReplaceError::Lifecycle(EngineError::SessionActive))
-    ));
-    assert_eq!(h.review.active_session(), Some(id));
-    drop(slot);
-    let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
-    let mut exclusive = slot.enter_exclusive(true).unwrap();
-    let source = h.dir.path().join("low-level-replacement.anki2");
-    fs::copy(common::fixture("schema-18.anki2"), &source).unwrap();
-    exclusive
-        .replace(move |path| fs::rename(source, path).map_err(|e| EngineError::Storage(e.into())))
-        .unwrap();
-    assert_eq!(publication(&live).decision, PublicationDecision::Clear);
+    let prior = publication(&live);
+    let generation = h.engine.generation();
+    let before = h.collection.reader(ReaderRole::Query).unwrap().col().unwrap();
+    let bytes = fs::read(&live).unwrap();
+    let wal = fs::read(live.with_extension("anki2-wal")).unwrap();
+    for reason in [
+        ReplaceReason::ColpkgImport,
+        ReplaceReason::FullDownload,
+        ReplaceReason::FullUpload,
+    ] {
+        for late in [false, true] {
+            let slot = h.engine.acquire_slot(replacement_op(reason)).unwrap();
+            let candidate = stage(h.dir.path(), "schema-18.anki2");
+            let result = if late {
+                // Bypass the early convenience entry; the drained exclusive
+                // seam must independently refuse the still-active session.
+                let mut exclusive = slot.enter_exclusive(true).unwrap();
+                exclusive.replace_verified(candidate, reason, |_| panic!("active review reached preparation"))
+            } else {
+                assert!(matches!(
+                    slot.check_verified_review(reason),
+                    Err(EngineError::SessionActive)
+                ));
+                slot.replace_verified(candidate, reason, |_| panic!("active review reached preparation"))
+            };
+            assert!(matches!(
+                result,
+                Err(ReplaceError::Lifecycle(EngineError::SessionActive))
+            ));
+            assert_eq!(h.review.active_session(), Some(id));
+            assert_eq!(h.engine.generation(), generation);
+            assert_eq!(publication(&live), prior);
+            assert_eq!(h.collection.reader(ReaderRole::Query).unwrap().col().unwrap(), before);
+            assert_eq!(fs::read(&live).unwrap(), bytes);
+            assert_eq!(fs::read(live.with_extension("anki2-wal")).unwrap(), wal);
+        }
+    }
+}
+
+#[test]
+fn restore_and_legacy_replace_still_support_active_session() {
+    for verified in [false, true] {
+        let h = session_support::Harness::new(3);
+        h.start();
+        let live = h.dir.path().join("collection.anki2");
+        let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
+        assert!(slot.check_verified_review(ReplaceReason::Restore).is_ok());
+        let mut exclusive = slot.enter_exclusive(true).unwrap();
+        if verified {
+            exclusive
+                .replace_verified(stage(h.dir.path(), "schema-18.anki2"), ReplaceReason::Restore, |_| {
+                    Ok(())
+                })
+                .unwrap();
+        } else {
+            let source = h.dir.path().join("low-level-replacement.anki2");
+            fs::copy(common::fixture("schema-18.anki2"), &source).unwrap();
+            exclusive
+                .replace(move |path| fs::rename(source, path).map_err(|e| EngineError::Storage(e.into())))
+                .unwrap();
+        }
+        assert!(h.review.active_session().is_none());
+        assert_eq!(
+            publication(&live).decision,
+            if verified {
+                PublicationDecision::Pending
+            } else {
+                PublicationDecision::Clear
+            }
+        );
+    }
 }
 
 // The worker always reaches real production fault points. Parents inspect the
@@ -403,6 +581,7 @@ fn replacement_crash_worker() {
     let directory = live.parent().unwrap();
     let mode = std::env::var("MEGURI_REPLACE_MODE").unwrap();
     let point = std::env::var("MEGURI_REPLACE_POINT").unwrap();
+    let reason: ReplaceReason = serde_json::from_str(&std::env::var("MEGURI_REPLACE_REASON").unwrap()).unwrap();
     let engine = Engine::new(EngineConfig::default()).unwrap();
     let initial = mode == "absent" || mode == "identical";
     if !initial {
@@ -437,28 +616,29 @@ fn replacement_crash_worker() {
     if mode == "identical" {
         faultpoint::arm("replace.after_finalise", Fault::Callback(make_identical_before_intent));
     }
-    let slot = engine.acquire_slot(LongOp::Restore).unwrap();
+    let slot = engine.acquire_slot(replacement_op(reason)).unwrap();
     let change = |scope: &mut meguri_storage::WriteScope<'_>| -> Result<(), StorageError> {
+        download_change(reason, scope)?;
         let mut col = scope.col()?;
         col.dirty = 722;
         scope.put_col(&col)?;
         Ok(())
     };
     if initial {
-        slot.replace_verified_initial(&live, config(binding(), 991), candidate, ReplaceReason::Restore, change)
+        slot.replace_verified_initial(&live, config(binding(), 991), candidate, reason, change)
             .unwrap();
     } else {
-        slot.replace_verified(candidate, ReplaceReason::Restore, change)
-            .unwrap();
+        slot.replace_verified(candidate, reason, change).unwrap();
     }
     panic!("fault point was not reached: {point}");
 }
-fn crash(live: &Path, point: &str, mode: &str) {
+fn crash(live: &Path, point: &str, mode: &str, reason: ReplaceReason) {
     let status = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "replacement_crash_worker", "--nocapture"])
         .env("MEGURI_REPLACE_LIVE", live)
         .env("MEGURI_REPLACE_POINT", point)
         .env("MEGURI_REPLACE_MODE", mode)
+        .env("MEGURI_REPLACE_REASON", serde_json::to_string(&reason).unwrap())
         .status()
         .unwrap();
     use std::os::unix::process::ExitStatusExt;
@@ -479,6 +659,9 @@ fn recover_twice(live: &Path, pending: bool, expected_marker: i64) -> Publicatio
         let engine = Engine::new(EngineConfig::default()).unwrap();
         let collection = engine.open_raw(live, config(binding(), 144)).unwrap();
         assert_eq!(marker(&collection), expected_marker);
+        let sidecar: serde_json::Value =
+            serde_json::from_slice(&fs::read(live.parent().unwrap().join("meguri-sidecar.json")).unwrap()).unwrap();
+        assert!(sidecar["deviceState"]["intent"].is_null());
         let active = publication(live);
         assert_eq!(
             active.decision,
@@ -498,130 +681,195 @@ fn recover_twice(live: &Path, pending: bool, expected_marker: i64) -> Publicatio
     recovered.unwrap()
 }
 #[test]
-fn crash_every_boundary_recovers_exact_old_or_pending_candidate_and_restarts_twice() {
-    for mode in ["clear", "pending"] {
-        for point in [
-            "replace.after_check",
-            "replace.after_finalise",
-            "replace.after_pause_recorded",
-            "replace.after_live_wal_removed",
-            "replace.after_rename",
-            "replace.after_dir_sync",
-            "replace.after_durable_activation",
-        ] {
-            let (dir, live) = common::copy_fixture("schema-18.anki2");
-            settled_old(&live);
-            crash(&live, point, mode);
-            let prior: Publication = serde_json::from_slice(&fs::read(dir.path().join("prior.json")).unwrap()).unwrap();
-            let activated = matches!(
-                point,
-                "replace.after_rename" | "replace.after_dir_sync" | "replace.after_durable_activation"
-            );
-            if !activated && live.with_extension("old-closed").exists() {
-                assert_eq!(
-                    fs::read(&live).unwrap(),
-                    fs::read(live.with_extension("old-closed")).unwrap()
+fn crash_every_boundary_recovers_exact_old_or_candidate_decision_and_restarts_twice() {
+    for reason in [
+        ReplaceReason::Restore,
+        ReplaceReason::FullDownload,
+        ReplaceReason::FullUpload,
+    ] {
+        for mode in ["clear", "pending"] {
+            for point in [
+                "replace.after_check",
+                "replace.after_finalise",
+                "replace.after_pause_recorded",
+                "replace.after_live_wal_removed",
+                "replace.after_rename",
+                "replace.after_dir_sync",
+                "replace.after_durable_activation",
+            ] {
+                let (dir, live) = common::copy_fixture("schema-18.anki2");
+                settled_old(&live);
+                crash(&live, point, mode, reason);
+                let prior: Publication =
+                    serde_json::from_slice(&fs::read(dir.path().join("prior.json")).unwrap()).unwrap();
+                let activated = matches!(
+                    point,
+                    "replace.after_rename" | "replace.after_dir_sync" | "replace.after_durable_activation"
                 );
-            }
-            let current = recover_twice(
-                &live,
-                activated || mode == "pending",
-                if activated || mode == "pending" { 722 } else { 0 },
-            );
-            if activated {
-                assert_ne!(current.identity, prior.identity);
-            } else {
-                assert_eq!(current, prior);
+                if !activated && live.with_extension("old-closed").exists() {
+                    assert_eq!(
+                        fs::read(&live).unwrap(),
+                        fs::read(live.with_extension("old-closed")).unwrap()
+                    );
+                }
+                let current = recover_twice(
+                    &live,
+                    mode == "pending" || (activated && reason != ReplaceReason::FullUpload),
+                    if activated || mode == "pending" { 722 } else { 0 },
+                );
+                if activated {
+                    assert_ne!(current.identity, prior.identity);
+                } else {
+                    assert_eq!(current, prior);
+                }
             }
         }
     }
 }
 #[test]
 fn absent_old_and_copy_only_upgrade_recover_from_real_crashes() {
-    for mode in ["absent", "older"] {
-        for point in ["replace.after_pause_recorded", "replace.after_rename"] {
-            let dir = tempfile::tempdir().unwrap();
-            let live = dir.path().join("collection.anki2");
-            if mode == "older" {
-                fs::copy(common::fixture("schema-18.anki2"), &live).unwrap();
-                settled_old(&live);
-            }
-            crash(&live, point, mode);
-            if mode == "absent" && point == "replace.after_pause_recorded" {
-                for _ in 0..2 {
-                    let engine = Engine::new(EngineConfig::default()).unwrap();
-                    assert!(engine.open_raw(&live, config(binding(), 55)).is_err());
-                    assert!(!live.exists());
-                    assert_eq!(publication(&live).decision, PublicationDecision::Clear);
+    for reason in FENCED_REASONS {
+        for mode in ["absent", "older"] {
+            for point in ["replace.after_pause_recorded", "replace.after_rename"] {
+                let dir = tempfile::tempdir().unwrap();
+                let live = dir.path().join("collection.anki2");
+                if mode == "older" {
+                    fs::copy(common::fixture("schema-18.anki2"), &live).unwrap();
+                    settled_old(&live);
                 }
-            } else {
-                recover_twice(
-                    &live,
-                    point == "replace.after_rename",
-                    if point == "replace.after_rename" { 722 } else { 0 },
-                );
+                crash(&live, point, mode, reason);
+                if mode == "absent" && point == "replace.after_pause_recorded" {
+                    for _ in 0..2 {
+                        let engine = Engine::new(EngineConfig::default()).unwrap();
+                        assert!(engine.open_raw(&live, config(binding(), 55)).is_err());
+                        assert!(!live.exists());
+                        assert_eq!(publication(&live).decision, PublicationDecision::Clear);
+                    }
+                } else {
+                    recover_twice(
+                        &live,
+                        point == "replace.after_rename",
+                        if point == "replace.after_rename" { 722 } else { 0 },
+                    );
+                }
             }
         }
     }
 }
 #[test]
 fn invalid_binding_or_unreadable_metadata_preserves_recovery_evidence() {
-    for mode in ["account", "uncertain", "unreadable"] {
-        let (dir, live) = common::copy_fixture("schema-18.anki2");
-        settled_old(&live);
-        crash(&live, "replace.after_pause_recorded", "clear");
-        let sidecar = dir.path().join("meguri-sidecar.json");
-        if mode == "unreadable" {
-            fs::write(&sidecar, b"{\"deviceState\":").unwrap();
+    for reason in FENCED_REASONS {
+        for mode in [
+            "account",
+            "configuration",
+            "environment",
+            "local-only",
+            "uncertain",
+            "unreadable",
+        ] {
+            let (dir, live) = common::copy_fixture("schema-18.anki2");
+            settled_old(&live);
+            crash(&live, "replace.after_pause_recorded", "clear", reason);
+            let sidecar = dir.path().join("meguri-sidecar.json");
+            if mode == "unreadable" {
+                fs::write(&sidecar, b"{\"deviceState\":").unwrap();
+            }
+            let evidence = fs::read(&sidecar).unwrap();
+            let staging: Vec<_> = fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with(".meguri-stage-"))
+                .collect();
+            assert!(!staging.is_empty());
+            let binding = match mode {
+                "account" => AccountBinding::Connected {
+                    account: "another-account".into(),
+                    configuration: "test-app".into(),
+                    environment: "test".into(),
+                },
+                "configuration" => AccountBinding::Connected {
+                    account: "synthetic-account".into(),
+                    configuration: "another-app".into(),
+                    environment: "test".into(),
+                },
+                "environment" => AccountBinding::Connected {
+                    account: "synthetic-account".into(),
+                    configuration: "test-app".into(),
+                    environment: "another-environment".into(),
+                },
+                "local-only" => AccountBinding::LocalOnly,
+                "uncertain" => AccountBinding::Unknown,
+                _ => binding(),
+            };
+            let engine = Engine::new(EngineConfig::default()).unwrap();
+            assert!(engine.open_raw(&live, config(binding.clone(), 55)).is_err());
+            assert!(DeviceState::for_collection(&live).publication_token(&binding).is_err());
+            assert_eq!(fs::read(&sidecar).unwrap(), evidence);
+            assert!(staging.iter().all(|p| p.exists()));
         }
-        let evidence = fs::read(&sidecar).unwrap();
-        let staging: Vec<_> = fs::read_dir(dir.path())
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with(".meguri-stage-"))
-            .collect();
-        assert!(!staging.is_empty());
-        let binding = match mode {
-            "account" => AccountBinding::Connected {
-                account: "another-account".into(),
-                configuration: "test-app".into(),
-                environment: "test".into(),
-            },
-            "uncertain" => AccountBinding::Unknown,
-            _ => binding(),
-        };
-        let engine = Engine::new(EngineConfig::default()).unwrap();
-        assert!(engine.open_raw(&live, config(binding, 55)).is_err());
-        assert_eq!(fs::read(&sidecar).unwrap(), evidence);
-        assert!(staging.iter().all(|p| p.exists()));
     }
 }
 #[test]
-fn identical_closed_bytes_are_ambiguous_and_activated_phase_ignores_later_hash_changes() {
-    let (dir, live) = common::copy_fixture("schema-18.anki2");
-    crash(&live, "replace.after_pause_recorded", "identical");
-    let sidecar = dir.path().join("meguri-sidecar.json");
-    let evidence = fs::read(&sidecar).unwrap();
-    let engine = Engine::new(EngineConfig::default()).unwrap();
-    assert!(engine.open_raw(&live, config(binding(), 55)).is_err());
-    assert_eq!(fs::read(&sidecar).unwrap(), evidence);
-    assert!(
-        DeviceState::for_collection(&live)
-            .publication_token(&binding())
-            .is_err()
-    );
+fn obsolete_clear_download_journals_fail_closed_in_both_phases() {
+    for point in ["replace.after_pause_recorded", "replace.after_durable_activation"] {
+        let (dir, live) = common::copy_fixture("schema-18.anki2");
+        settled_old(&live);
+        crash(&live, point, "clear", ReplaceReason::FullDownload);
+        let sidecar = dir.path().join("meguri-sidecar.json");
+        let mut doc: serde_json::Value = serde_json::from_slice(&fs::read(&sidecar).unwrap()).unwrap();
+        assert_eq!(doc["deviceState"]["intent"]["prior"]["decision"], "Clear");
+        assert_eq!(doc["deviceState"]["intent"]["candidate"]["decision"], "Pending");
+        doc["deviceState"]["intent"]["candidate"]["decision"] = "Clear".into();
+        if point == "replace.after_durable_activation" {
+            doc["deviceState"]["active"]["decision"] = "Clear".into();
+        }
+        fs::write(&sidecar, serde_json::to_vec(&doc).unwrap()).unwrap();
+        let evidence = fs::read(&sidecar).unwrap();
+        let bytes = fs::read(&live).unwrap();
+        for _ in 0..2 {
+            let engine = Engine::new(EngineConfig::default()).unwrap();
+            let generation = engine.generation();
+            assert!(engine.open_raw(&live, config(binding(), 55)).is_err());
+            assert_eq!(engine.generation(), generation);
+            assert_eq!(fs::read(&live).unwrap(), bytes);
+            assert_eq!(fs::read(&sidecar).unwrap(), evidence);
+            assert!(
+                DeviceState::for_collection(&live)
+                    .publication_token(&binding())
+                    .is_err()
+            );
+        }
+    }
+}
 
-    let (_dir, live) = common::copy_fixture("schema-18.anki2");
-    settled_old(&live);
-    crash(&live, "replace.after_durable_activation", "clear");
-    let activated = publication(&live);
-    // Real activated production journal, then a later external write changes
-    // the hash. Activated identity, rather than the old digest, is authoritative.
-    let db = meguri_storage::raw::PlainDatabase::open(&live).unwrap();
-    db.execute_batch("UPDATE col SET dty=999").unwrap();
-    drop(db);
-    assert_eq!(recover_twice(&live, true, 999), activated);
+#[test]
+fn identical_closed_bytes_are_ambiguous_and_activated_phase_ignores_later_hash_changes() {
+    for reason in FENCED_REASONS {
+        let (dir, live) = common::copy_fixture("schema-18.anki2");
+        crash(&live, "replace.after_pause_recorded", "identical", reason);
+        let sidecar = dir.path().join("meguri-sidecar.json");
+        let evidence = fs::read(&sidecar).unwrap();
+        let engine = Engine::new(EngineConfig::default()).unwrap();
+        assert!(engine.open_raw(&live, config(binding(), 55)).is_err());
+        assert_eq!(fs::read(&sidecar).unwrap(), evidence);
+        assert!(
+            DeviceState::for_collection(&live)
+                .publication_token(&binding())
+                .is_err()
+        );
+
+        let (_dir, live) = common::copy_fixture("schema-18.anki2");
+        settled_old(&live);
+        crash(&live, "replace.after_durable_activation", "clear", reason);
+        let activated = publication(&live);
+        // Real activated production journal, then a later external write changes
+        // the hash. Activated identity, rather than the old digest, is authoritative.
+        let db = meguri_storage::raw::PlainDatabase::open(&live).unwrap();
+        db.execute_batch("UPDATE col SET dty=999").unwrap();
+        drop(db);
+        assert_eq!(recover_twice(&live, true, 999), activated);
+    }
 }
 
 #[test]
@@ -718,91 +966,109 @@ fn live_wal_refusal_keeps_the_generation_and_old_collection_integrity() {
 
 #[test]
 fn neither_identity_matching_keeps_real_intent_and_blocks_startup_before_sweep() {
-    let (dir, live) = common::copy_fixture("schema-18.anki2");
-    settled_old(&live);
-    crash(&live, "replace.after_pause_recorded", "clear");
-    let sidecar = dir.path().join("meguri-sidecar.json");
-    let evidence = fs::read(&sidecar).unwrap();
-    fs::write(&live, b"neither final file identity").unwrap();
-    for _ in 0..2 {
-        let engine = Engine::new(EngineConfig::default()).unwrap();
-        assert!(engine.open_raw(&live, config(binding(), 55)).is_err());
-        assert_eq!(fs::read(&sidecar).unwrap(), evidence);
+    for reason in FENCED_REASONS {
+        let (dir, live) = common::copy_fixture("schema-18.anki2");
+        settled_old(&live);
+        crash(&live, "replace.after_pause_recorded", "clear", reason);
+        let sidecar = dir.path().join("meguri-sidecar.json");
+        let evidence = fs::read(&sidecar).unwrap();
+        fs::write(&live, b"neither final file identity").unwrap();
+        for _ in 0..2 {
+            let engine = Engine::new(EngineConfig::default()).unwrap();
+            assert!(engine.open_raw(&live, config(binding(), 55)).is_err());
+            assert_eq!(fs::read(&sidecar).unwrap(), evidence);
+        }
     }
 }
 
 #[test]
-fn repeated_package_timestamps_produce_distinct_stored_ids() {
-    let h = Harness::open();
-    let mut prior = publication(&h.path);
-    for _ in 0..3 {
-        let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
-        let current = slot
-            .replace_verified(stage(h.dir.path(), "schema-18.anki2"), ReplaceReason::Restore, |_| {
-                Ok(())
-            })
-            .unwrap();
-        let col = current.reader(ReaderRole::Query).unwrap().col().unwrap();
-        assert_eq!(col.modified.0, NOW_MS);
-        assert_eq!(col.schema_modified.0, NOW_MS);
-        let active = publication(&h.path);
-        assert_ne!(active.identity, prior.identity);
-        prior = active;
+fn repeated_timestamps_produce_distinct_stored_ids() {
+    for reason in FENCED_REASONS {
+        let h = Harness::open();
+        let mut prior = publication(&h.path);
+        let mut stamps = None;
+        for _ in 0..3 {
+            let slot = h.engine.acquire_slot(replacement_op(reason)).unwrap();
+            let current = slot
+                .replace_verified(stage(h.dir.path(), "schema-18.anki2"), reason, |scope| {
+                    download_change(reason, scope)
+                })
+                .unwrap();
+            let col = current.reader(ReaderRole::Query).unwrap().col().unwrap();
+            let current_stamps = (col.modified, col.schema_modified, col.last_sync);
+            if let Some(previous) = stamps {
+                assert_eq!(current_stamps, previous);
+            }
+            if reason == ReplaceReason::Restore {
+                assert_eq!(col.modified.0, NOW_MS);
+                assert_eq!(col.schema_modified.0, NOW_MS);
+            } else {
+                assert_ne!(col.modified.0, NOW_MS);
+                assert_ne!(col.schema_modified.0, NOW_MS);
+                assert_eq!(col.last_sync, col.modified);
+            }
+            stamps = Some(current_stamps);
+            let active = publication(&h.path);
+            assert_ne!(active.identity, prior.identity);
+            assert_eq!(active.decision, PublicationDecision::Pending);
+            prior = active;
+        }
     }
 }
 
 #[test]
 fn failed_activation_save_refuses_writer_until_restart_proves_the_candidate() {
-    let h = Harness::open();
-    let prior = publication(&h.path);
-    faultpoint::arm(
-        "replace.after_dir_sync",
-        Fault::Callback(|| {
-            faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::Other));
-        }),
-    );
-    let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
-    let result = slot.replace_verified(
-        stage(h.dir.path(), "schema-18.anki2"),
-        ReplaceReason::Restore,
-        |scope| {
+    for reason in FENCED_REASONS {
+        let h = Harness::open();
+        let prior = publication(&h.path);
+        faultpoint::arm(
+            "replace.after_dir_sync",
+            Fault::Callback(|| {
+                faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::Other));
+            }),
+        );
+        let slot = h.engine.acquire_slot(replacement_op(reason)).unwrap();
+        let result = slot.replace_verified(stage(h.dir.path(), "schema-18.anki2"), reason, |scope| {
+            download_change(reason, scope)?;
             let mut col = scope.col()?;
             col.dirty = 722;
             scope.put_col(&col)?;
             Ok(())
-        },
-    );
-    faultpoint::disarm_all();
-    assert!(matches!(
-        result,
-        Err(ReplaceError::AfterActivation { generation: None, .. })
-    ));
-    assert!(matches!(h.engine.state(), meguri_engine::LifecycleState::Failed { .. }));
-    assert_eq!(
-        publication(&h.path),
-        prior,
-        "intent blocks both identities before activation save succeeds"
-    );
-    assert!(
-        DeviceState::for_collection(&h.path)
-            .publication_token(&AccountBinding::LocalOnly)
-            .is_err()
-    );
-    drop(slot);
-    h.engine.close().unwrap();
-    let reopened = h.engine.open_raw(&h.path, common::open_config(&h.clock)).unwrap();
-    assert_eq!(marker(&reopened), 722);
-    assert_eq!(publication(&h.path).decision, PublicationDecision::Pending);
-    assert_ne!(publication(&h.path).identity, prior.identity);
+        });
+        faultpoint::disarm_all();
+        assert!(matches!(
+            result,
+            Err(ReplaceError::AfterActivation { generation: None, .. })
+        ));
+        assert!(matches!(h.engine.state(), meguri_engine::LifecycleState::Failed { .. }));
+        assert_eq!(
+            publication(&h.path),
+            prior,
+            "intent blocks both identities before activation save succeeds"
+        );
+        assert!(
+            DeviceState::for_collection(&h.path)
+                .publication_token(&AccountBinding::LocalOnly)
+                .is_err()
+        );
+        drop(slot);
+        h.engine.close().unwrap();
+        let reopened = h.engine.open_raw(&h.path, common::open_config(&h.clock)).unwrap();
+        assert_eq!(marker(&reopened), 722);
+        assert_eq!(publication(&h.path).decision, PublicationDecision::Pending);
+        assert_ne!(publication(&h.path).identity, prior.identity);
+    }
 }
 
 #[test]
-fn import_rechecks_session_started_during_participant_flush() {
+fn import_and_transfers_recheck_session_started_during_participant_flush() {
     use meguri_engine::{Ports, SuspendParticipant, sched::queue::QueueProvider, session::ReviewService};
     use meguri_model::ids::DeckId;
     struct StartDuringFlush {
         review: Arc<ReviewService>,
         armed: std::sync::atomic::AtomicBool,
+        live: PathBuf,
+        captured: Mutex<Option<(Vec<u8>, Vec<u8>, Publication)>>,
     }
     impl SuspendParticipant for StartDuringFlush {
         fn name(&self) -> &str {
@@ -811,45 +1077,61 @@ fn import_rechecks_session_started_during_participant_flush() {
         fn flush(&self) -> Result<(), EngineError> {
             if self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
                 self.review.start(DeckId(1), None)?;
+                *self.captured.lock().unwrap() = Some((
+                    fs::read(&self.live).unwrap(),
+                    fs::read(self.live.with_extension("anki2-wal")).unwrap(),
+                    publication(&self.live),
+                ));
             }
             Ok(())
         }
     }
-    let fixture = session_support::Harness::new(3);
-    let live = fixture.dir.path().join("collection.anki2");
-    fixture.engine.close().unwrap();
-    let engine = Engine::new(EngineConfig::default()).unwrap();
-    let queues = Arc::new(QueueProvider::default());
-    let review = ReviewService::new(&engine, queues.clone()).unwrap();
-    let race = Arc::new(StartDuringFlush {
-        review: review.clone(),
-        armed: std::sync::atomic::AtomicBool::new(true),
-    });
-    let ports = Ports::new()
-        .observer(queues.clone())
-        .generation_listener(queues)
-        .open_step(review.clone())
-        .observer(review.clone())
-        .generation_listener(review.clone())
-        .suspend_participant(review.clone())
-        .suspend_participant(race);
-    let mut open = common::open_config(&fixture.clock);
-    open.ports = ports;
-    engine.open_raw(&live, open).unwrap();
-    assert!(review.active_session().is_none());
-    let generation = engine.generation();
-    let slot = engine.acquire_slot(LongOp::ColpkgImport).unwrap();
-    let result = slot.replace_verified(
-        stage(fixture.dir.path(), "schema-18.anki2"),
+    for reason in [
         ReplaceReason::ColpkgImport,
-        |_| panic!("review race reached validation transaction"),
-    );
-    assert!(matches!(
-        result,
-        Err(ReplaceError::Lifecycle(EngineError::SessionActive))
-    ));
-    assert!(review.active_session().is_some());
-    assert_eq!(engine.generation(), generation);
+        ReplaceReason::FullDownload,
+        ReplaceReason::FullUpload,
+    ] {
+        let fixture = session_support::Harness::new(3);
+        let live = fixture.dir.path().join("collection.anki2");
+        fixture.engine.close().unwrap();
+        let engine = Engine::new(EngineConfig::default()).unwrap();
+        let queues = Arc::new(QueueProvider::default());
+        let review = ReviewService::new(&engine, queues.clone()).unwrap();
+        let race = Arc::new(StartDuringFlush {
+            review: review.clone(),
+            armed: std::sync::atomic::AtomicBool::new(true),
+            live: live.clone(),
+            captured: Mutex::new(None),
+        });
+        let ports = Ports::new()
+            .observer(queues.clone())
+            .generation_listener(queues)
+            .open_step(review.clone())
+            .observer(review.clone())
+            .generation_listener(review.clone())
+            .suspend_participant(review.clone())
+            .suspend_participant(race.clone());
+        let mut open = common::open_config(&fixture.clock);
+        open.ports = ports;
+        engine.open_raw(&live, open).unwrap();
+        assert!(review.active_session().is_none());
+        let generation = engine.generation();
+        let slot = engine.acquire_slot(replacement_op(reason)).unwrap();
+        let result = slot.replace_verified(stage(fixture.dir.path(), "schema-18.anki2"), reason, |_| {
+            panic!("review race reached validation transaction")
+        });
+        assert!(matches!(
+            result,
+            Err(ReplaceError::Lifecycle(EngineError::SessionActive))
+        ));
+        assert!(review.active_session().is_some());
+        assert_eq!(engine.generation(), generation);
+        let captured = race.captured.lock().unwrap();
+        let (bytes, wal, prior) = captured.as_ref().expect("session started during flush");
+        assert_eq!(&fs::read(&live).unwrap(), bytes);
+        assert_eq!(&fs::read(live.with_extension("anki2-wal")).unwrap(), wal);
+        assert_eq!(&publication(&live), prior);
+    }
 }
 
 #[test]

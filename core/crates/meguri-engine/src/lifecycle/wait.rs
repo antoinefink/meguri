@@ -47,10 +47,12 @@ impl SlotGuard {
         self.op
     }
 
+    /// Early admission check for verified replacement consumers, before any
+    /// write-bearing preparation. Exclusive entry checks again after draining.
     pub fn check_verified_review(&self, reason: crate::replace::ReplaceReason) -> Result<(), EngineError> {
         let state = self.engine.lock_state();
         self.check_held(&state)?;
-        if reason == crate::replace::ReplaceReason::ColpkgImport
+        if reason.refuses_active_review()
             && state
                 .current
                 .as_ref()
