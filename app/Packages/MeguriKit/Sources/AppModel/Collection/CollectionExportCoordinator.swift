@@ -49,17 +49,23 @@ public final class CollectionExportCoordinator {
         stale = false; message = nil; publicationUncertain = false; stage = .preparing; progress = nil
         let generation = owner.generation
         let operation = CollectionExportOperation(); self.operation = operation
-        task = Task {
+        task = Task { [self] in
             do {
-                let output = try await service.prepare(operation: operation) { [weak self] progress in
-                    Task { @MainActor in if self?.stage == .preparing { self?.progress = progress } }
-                }
+                let output = try await service.prepare(operation: operation, progress: progressReceiver())
                 guard !stale, owner.generation == generation, output.metadata.sourceGeneration == generation else {
                     try? await output.discard(); throw BridgeError.staleGeneration(planned: generation, current: owner.generation)
                 }
                 artifact = output; stage = .ready
             } catch { report(error, destination: false) }
             self.operation = nil; task = nil; progress = nil
+        }
+    }
+    private func progressReceiver() -> @Sendable (CoreProgress) -> Void {
+        { [weak self] value in
+            Task { @MainActor in
+                guard let self, self.stage == .preparing else { return }
+                self.progress = value
+            }
         }
     }
     /// Acquires native ownership before presenting. A generation check happens in Rust.
@@ -204,7 +210,7 @@ public final class CollectionExportCoordinator {
     }
     public var availabilityMessage: String? {
         guard owner?.exportAllowed != true else { return nil }
-        switch owner?.state {
+        return switch owner?.state {
         case .noFile?, .unopened?: "Open or import a collection before exporting."
         case .failed?, .unavailable?: "The collection is busy or unavailable. Wait for the current operation to finish, then try again."
         default: "Wait for the collection to finish opening."

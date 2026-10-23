@@ -54,3 +54,13 @@
 - Privacy `20261023T011506Z-46313`: pass for staged source. Earlier failures `20261023T010121Z-39447` and `20261023T011205Z-44480` remain recorded; optional own-source comments were rewritten or removed. No scanner rule changed.
 - Similarity `20261023T011523Z-46857`: failed, one structural flag in `core/crates/meguri-engine/src/lifecycle/state.rs`, lines 84–108. Only the sanitized failure was read. Rewrite this region from Meguri's lifecycle contract; no exemption or acceptance is claimed.
 - Native bridge checks are in progress. This is a WIP source checkpoint; no full gate or parent unit acceptance is claimed.
+
+## Native compilation and lifecycle correction
+
+- Native checks `20261023T011717Z-48107` and `20261023T011841Z-49969` failed compilation. The first used an array where generated digest metadata requires 32-byte Data. The second caught explicit task-capture and returned-switch syntax in the export coordinator. No native behavioral pass is claimed for those runs.
+- Fixer `s-20261023T011846Z-a530e25d`, cleanroom `20261023T011917Z-51403`, corrected those three source issues and rewrote the flagged lifecycle region from Meguri's contract. Operation declarations now keep names and admission flags together through an exhaustive match; all names and flags are preserved.
+- Independent round 4 reviewed the small correction and found no P0–P1 issue or deterministic check blocker. It confirmed admission semantics and Swift callback ownership are unchanged.
+- Docker format `20261023T012214Z-52791`: pass. Lifecycle tests `20261023T012227Z-53096`: pass, seven tests with no skips.
+- Similarity `20261023T012227Z-53095`: pass against the original RF2 base. The earlier similarity failure is resolved without an exemption; no reference source was read.
+- Privacy check `20261023T012325Z-54661` passed. Native bridge run `20261023T012322Z-53917` passed its focused tests. Mac and simulator code compiled with no warnings; the tests covered metadata, cancellation, destination lifetime and save outcomes.
+- Settings/AppModel tests, actual native destination journeys, rendered accessibility/visual checks and the full gate remain pending. Full gate base remains `81c207573c20c337c8834e4ae8b4ee8f29603dbf`.

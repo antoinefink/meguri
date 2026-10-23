@@ -29,7 +29,7 @@ private final class ExportAccessWitness: CollectionExportDestinationAccess {
     @Test func boundedReceiptPreservesAdmissionAndSnapshotFacts() {
         let receipt = CoreBridge.CollectionExportMetadata(MeguriCoreBindings.CollectionExportMetadata(
             operationId: 42, sourceGeneration: 3, admissionSeq: 100, snapshotModifiedMs: 77,
-            byteLength: 3_000_000_000, suggestedName: "Meguri-Collection.colpkg", sha256: Array(repeating: 7, count: 32)))
+            byteLength: 3_000_000_000, suggestedName: "Meguri-Collection.colpkg", sha256: Data(repeating: 7, count: 32)))
         #expect(receipt.operationID == 42 && receipt.sourceGeneration == 3 && receipt.admissionSequence == 100)
         #expect(receipt.snapshotModifiedMilliseconds == 77 && receipt.byteLength == 3_000_000_000)
         #expect(receipt.sha256.count == 32 && receipt.suggestedName.hasSuffix(".colpkg"))

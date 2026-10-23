@@ -91,27 +91,61 @@ pub enum LongOp {
     CollectionExportHandoff,
 }
 
+struct LongOpDeclaration {
+    name: &'static str,
+    replaces_collection: bool,
+    allowed_when_corrupt: bool,
+}
+
 impl LongOp {
-    pub fn name(self) -> &'static str {
+    fn declaration(self) -> LongOpDeclaration {
         match self {
-            LongOp::OneWaySync => "one-way sync",
-            LongOp::Restore => "restore",
-            LongOp::ColpkgImport => ".colpkg import",
-            LongOp::ApkgApply => ".apkg import",
-            LongOp::CheckDatabase => "Check Database",
-            LongOp::CollectionExportHandoff => "collection export destination",
+            Self::OneWaySync => LongOpDeclaration {
+                name: "one-way sync",
+                replaces_collection: true,
+                allowed_when_corrupt: true,
+            },
+            Self::Restore => LongOpDeclaration {
+                name: "restore",
+                replaces_collection: true,
+                allowed_when_corrupt: true,
+            },
+            Self::ColpkgImport => LongOpDeclaration {
+                name: ".colpkg import",
+                replaces_collection: true,
+                allowed_when_corrupt: false,
+            },
+            Self::ApkgApply => LongOpDeclaration {
+                name: ".apkg import",
+                replaces_collection: false,
+                allowed_when_corrupt: false,
+            },
+            Self::CheckDatabase => LongOpDeclaration {
+                name: "Check Database",
+                replaces_collection: false,
+                allowed_when_corrupt: false,
+            },
+            Self::CollectionExportHandoff => LongOpDeclaration {
+                name: "collection export destination",
+                replaces_collection: false,
+                allowed_when_corrupt: false,
+            },
         }
+    }
+
+    pub fn name(self) -> &'static str {
+        self.declaration().name
     }
 
     /// One-way sync, restore and `.colpkg` import replace the collection and
     /// may enter the exclusive phase (L5, KTD17).
     pub fn replaces_collection(self) -> bool {
-        matches!(self, LongOp::OneWaySync | LongOp::Restore | LongOp::ColpkgImport)
+        self.declaration().replaces_collection
     }
 
     /// From `Failed{Corrupt}` only restore and the recovery download may
     /// run (L4).
     pub fn allowed_when_corrupt(self) -> bool {
-        matches!(self, LongOp::OneWaySync | LongOp::Restore)
+        self.declaration().allowed_when_corrupt
     }
 }
