@@ -2,6 +2,16 @@
   "version": 1,
   "suppressions": [
     {
+      "identifier": "settings.importExport.explanation",
+      "auditType": "contrast",
+      "reason": "R1977: iPad run 20261023T041457Z-97877 reports whole-frame contrast for Explanation above the conservative viewport at log lines 676, 896 and 1160. ContrastTests checks textPrimary/backgroundPrimary (R1979). CollectionExportAccessibilityTests removes this exact contrast exception whenever the full frame is visible for the supplemental all-types audit; continuous paragraph coverage remains required. Native verification is pending."
+    },
+    {
+      "identifier": "settings.importExport.choose",
+      "auditType": "contrast",
+      "reason": "R1977: iPad run 20261023T041457Z-97877 reports whole-frame contrast for Choose below the conservative viewport at log lines 901, 1165 and 1471. ContrastTests checks textPrimary/backgroundPrimary (R1979). CollectionExportAccessibilityTests removes this exact contrast exception when the entire enabled, hittable frame is visible for the supplemental all-types audit. Native verification is pending."
+    },
+    {
       "identifier": "settings.importExport.discard",
       "auditType": "contrast",
       "reason": "R1977: iPad AX5 run 20261023T035747Z-85354 reports Discard Prepared Export at 250,1616 440x139 below the current scroll viewport. The existing textPrimary/backgroundPrimary token pair passes ContrastTests (R1979). CollectionExportAccessibilityTests removes this exact contrast exception for the supplemental all-types system audit when the entire enabled, hittable target frame is visible above the padded footer. Native AA verification remains pending."

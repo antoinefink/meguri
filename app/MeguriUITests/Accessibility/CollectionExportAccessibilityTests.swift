@@ -192,7 +192,7 @@ import XCTest
                 continue
             }
             if checked.count == targets.count { return }
-            guard gesture < 24, let next = targets.indices.first(where: { !checked.contains($0) }) else { break }
+            guard gesture < 48, let next = targets.indices.first(where: { !checked.contains($0) }) else { break }
             let offset: CGFloat
             if paragraphs[identifiers[next]] != nil {
                 // First expose the beginning; after observed coverage, advance
@@ -206,13 +206,14 @@ import XCTest
             }
             guard abs(offset) > 1 else { break }
             gesture += 1
+            // A pan of at most 60% of the viewport preserves 40% overlap and
+            // stays wholly inside gestureArea. Short 119pt pans in iPad run
+            // 20261023T041457Z-97877 moved content only 35–50pt per gesture.
+            let distance = min(abs(offset), viewport.height * 0.6) * (offset > 0 ? 1.0 : -1.0)
             #if os(macOS)
-            let gestureArea = viewport.insetBy(dx: viewport.width / 10, dy: viewport.height / 10)
-            let distance = min(abs(offset), gestureArea.height / 3) * (offset > 0 ? 1.0 : -1.0)
             scroll.scroll(byDeltaX: 0, deltaY: -distance)
             #else
             let gestureArea = viewport.insetBy(dx: viewport.width / 10, dy: viewport.height / 10)
-            let distance = min(abs(offset), gestureArea.height / 3) * (offset > 0 ? 1.0 : -1.0)
             let origin = scroll.coordinate(withNormalizedOffset: .zero)
             let start = origin.withOffset(CGVector(dx: gestureArea.midX - scrollFrame.minX,
                 dy: gestureArea.midY + distance / 2 - scrollFrame.minY))
@@ -238,6 +239,6 @@ import XCTest
             }
         }
         let missing = targets.indices.filter { !checked.contains($0) }.map { identifiers[$0] }
-        throw AuditError(description: "Export content needs full frames or continuous beginning-to-end paragraph coverage, and actions must be hittable, after at most 24 scoped scroll gestures and 128 observations: \(missing)\n\(app.debugDescription)")
+        throw AuditError(description: "Export content needs full frames or continuous beginning-to-end paragraph coverage, and actions must be hittable, after at most 48 scoped scroll gestures and 128 observations: \(missing)\n\(app.debugDescription)")
     }
 }
