@@ -38,7 +38,7 @@ serde_json = { workspace = true, features = ["raw_value"] }
 # directory rather than memory (R1852, wire-format.md W17.1); also the status
 # tests' collection files.
 tempfile.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 url.workspace = true
 # The media sync zips (wire-format.md W17).
 zip.workspace = true

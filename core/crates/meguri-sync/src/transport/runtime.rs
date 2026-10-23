@@ -137,7 +137,7 @@ pub(crate) async fn with_cancel<T>(
 
 /// Blocking work must remain visible until it actually ends, even if its
 /// awaiting job is cancelled. Idle pool threads own no SQLite handles.
-pub(super) fn blocking_work<T>(work: impl FnOnce() -> T) -> T {
+pub(crate) fn blocking_work<T>(work: impl FnOnce() -> T) -> T {
     struct IdleOnDrop;
     impl Drop for IdleOnDrop {
         fn drop(&mut self) {

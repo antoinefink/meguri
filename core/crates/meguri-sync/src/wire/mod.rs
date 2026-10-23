@@ -23,9 +23,10 @@ pub use chunk::{
 };
 pub use graves::{Graves, decode_graves, encode_apply_graves, encode_start};
 pub use media::{
-    MediaChange, MediaFile, MediaSanity, UploadChange, decode_begin, decode_download_zip, decode_media_changes,
+    MediaChange, MediaDigest, MediaFile, MediaSanity, MediaSendReceipt, MediaUploadInput, MediaUploadRecord,
+    PreparedMediaUpload, UploadChange, decode_begin, decode_download_zip, decode_media_changes, decode_media_file,
     decode_media_sanity, decode_upload_changes, encode_begin, encode_download_files, encode_media_changes,
-    encode_media_sanity, encode_upload_zip,
+    encode_media_sanity, encode_upload_zip, prepare_media_upload, spool_media_reply,
 };
 pub use meta::{ServerMeta, decode_meta, encode_meta_request};
 pub use sanity::{SanityAnswer, SanityCounts, decode_finish, decode_sanity_answer, encode_sanity_check};

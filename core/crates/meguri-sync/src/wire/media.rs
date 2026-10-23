@@ -3,10 +3,11 @@
 //! sync does with them is U111's.
 
 use std::collections::HashMap;
-use std::io::{self, Cursor, Read, Write};
+use std::io::{self, Cursor, Read, Seek, Write};
 use std::path::Path;
 
 use serde_json::value::RawValue;
+use sha1::{Digest, Sha1};
 use tempfile::TempPath;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -16,6 +17,15 @@ use super::write;
 use crate::error::{ErrorKind, JobError};
 use crate::identity::client_identity;
 use crate::transport::Method;
+
+#[path = "media_directory.rs"]
+mod directory;
+#[path = "media_io.rs"]
+mod file_io;
+pub use file_io::{
+    MediaDigest, MediaSendReceipt, MediaUploadInput, MediaUploadRecord, PreparedMediaUpload, decode_media_file,
+    prepare_media_upload, spool_media_reply,
+};
 
 /// The name of the zip entry that maps the others (W17).
 pub const META_ENTRY: &str = "_meta";
@@ -186,7 +196,8 @@ impl StagedFile {
     }
 
     /// Moves the file to `to`, replacing a file there, and keeps it. When
-    /// the move fails the file is removed.
+    /// the move fails the file is removed. This is NOT the safe production
+    /// media/trash publication primitive; use the store's publication rules.
     pub fn persist(self, to: &Path) -> io::Result<()> {
         self.path.persist(to).map_err(|err| err.error)
     }
@@ -218,6 +229,9 @@ pub const MAX_META_BYTES: u64 = 64 * 1024;
 /// The bytes one read from an entry moves to its staged file.
 const COPY_CHUNK: usize = 64 * 1024;
 
+/// Small slice codec wrapper. Production HTTP replies use [`spool_media_reply`],
+/// which additionally bounds raw ZIP inventory and validates request membership.
+///
 /// The `downloadFiles` answer (W17.1): a zip whose `_meta` maps each entry
 /// name to a real name. Entries may be stored or deflated. A file entry that
 /// `_meta` does not map makes the whole zip a decode failure; a `_meta`
@@ -226,7 +240,7 @@ const COPY_CHUNK: usize = 64 * 1024;
 /// `_meta` is read into memory.
 ///
 /// The zip is a decode failure when `_meta` expands past
-/// [`MAX_META_BYTES`], one file past [`MAX_DOWNLOAD_ENTRY_BYTES`], its files
+/// [`MAX_META_BYTES`], one file is empty or past [`MAX_DOWNLOAD_ENTRY_BYTES`], its files
 /// together past [`MAX_DOWNLOAD_BYTES`], or all its entries (`_meta`
 /// counting) past [`MAX_DOWNLOAD_EXPANSION`] times the body's size. The sizes the zip
 /// declares are checked before anything is staged; the bytes it expands to
@@ -234,38 +248,87 @@ const COPY_CHUNK: usize = 64 * 1024;
 /// limit. A failure leaves nothing in `staging`. A file that cannot be
 /// written there is `disk_full` or `local_storage` (errors.md E7).
 pub fn decode_download_zip(body: &[u8], staging: &Path) -> Result<Vec<MediaFile>, JobError> {
-    let fail = |detail: String| JobError::bad_response(Method::DownloadFiles, detail);
-    let mut archive =
-        ZipArchive::new(Cursor::new(body)).map_err(|err| fail(format!("the body is not a zip: {err}")))?;
+    decode_zip(Cursor::new(body), body.len() as u64, staging, None, &|| false)
+}
+
+fn decode_zip<R: Read + Seek>(
+    source: R,
+    length: u64,
+    staging: &Path,
+    requested: Option<&[String]>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<MediaFile>, JobError> {
+    check_cancel(cancelled, Method::DownloadFiles)?;
+    let mut archive = ZipArchive::new(source).map_err(decode_zip_error)?;
     let mut limits = Limits {
-        all: u64::try_from(body.len())
-            .unwrap_or(u64::MAX)
-            .saturating_mul(MAX_DOWNLOAD_EXPANSION),
+        all: length.saturating_mul(MAX_DOWNLOAD_EXPANSION),
         files: MAX_DOWNLOAD_BYTES,
     };
-    let entries = declared_entries(&archive, limits).map_err(fail)?;
+    let entries = declared_entries(&archive, limits, cancelled)?;
     let meta = match archive.index_for_name(META_ENTRY) {
-        Some(index) => read_meta(&mut archive, index, &mut limits).map_err(fail)?,
-        None => return Err(fail(format!("the zip has no {META_ENTRY} entry"))),
+        Some(index) => read_meta(&mut archive, index, &mut limits, cancelled)?,
+        None => return Err(download_error("zip has no _meta entry")),
     };
     let names: HashMap<String, String> = entry_names(&meta)
-        .map_err(|err| fail(format!("{META_ENTRY}: {err}")))?
+        .map_err(|_| download_error("_meta JSON mapping is invalid"))?
         .into_iter()
         .collect();
     let mut mapped = Vec::with_capacity(entries.len());
     for (index, entry) in entries {
-        let Some(name) = names.get(&entry) else {
-            return Err(fail(format!("zip entry {entry:?} is not in {META_ENTRY}")));
-        };
+        check_cancel(cancelled, Method::DownloadFiles)?;
+        let name = names
+            .get(&entry)
+            .ok_or_else(|| download_error("zip entry is not mapped by _meta"))?;
+        if let Some(requested) = requested {
+            if !requested.contains(name) {
+                return Err(download_error("_meta returned an unrequested real name"));
+            }
+            if mapped.iter().any(|(_, prior)| prior == name) {
+                return Err(download_error("_meta returned a repeated real name"));
+            }
+        }
         mapped.push((index, name.clone()));
+    }
+    if requested.is_some_and(|names| !names.is_empty()) && mapped.is_empty() {
+        return Err(download_error("zip returned no files for a nonempty request"));
     }
     let mut buffer = vec![0u8; COPY_CHUNK];
     let mut files = Vec::with_capacity(mapped.len());
     for (index, name) in mapped {
-        let file = stage_entry(&mut archive, index, &mut limits, staging, &mut buffer)?;
+        check_cancel(cancelled, Method::DownloadFiles)?;
+        let file = stage_entry(&mut archive, index, &mut limits, staging, &mut buffer, cancelled)?;
         files.push(MediaFile { name, file });
     }
+    check_cancel(cancelled, Method::DownloadFiles)?;
     Ok(files)
+}
+
+fn download_error(stage: &str) -> JobError {
+    JobError::bad_response(Method::DownloadFiles, stage)
+}
+
+fn check_cancel(cancelled: &dyn Fn() -> bool, method: Method) -> Result<(), JobError> {
+    if cancelled() {
+        Err(JobError::new(ErrorKind::Cancelled, Some(method), "media ZIP cancelled"))
+    } else {
+        Ok(())
+    }
+}
+
+fn decode_io_error(err: io::Error) -> JobError {
+    match err.kind() {
+        io::ErrorKind::UnexpectedEof | io::ErrorKind::InvalidData | io::ErrorKind::InvalidInput => {
+            download_error("zip entry read or CRC failed")
+        }
+        _ => local_error(Method::DownloadFiles, "reading ZIP", &err),
+    }
+}
+
+fn decode_zip_error(err: zip::result::ZipError) -> JobError {
+    match err {
+        zip::result::ZipError::Io(err) => decode_io_error(err),
+        _ => download_error("zip structure or entry is invalid"),
+    }
 }
 
 /// What a download zip may still expand to.
@@ -281,32 +344,36 @@ struct Limits {
 /// checking what every entry declares against the limits: an entry that is
 /// neither stored nor deflated, or sizes past a limit, fail before anything
 /// expands.
-fn declared_entries(archive: &ZipArchive<Cursor<&[u8]>>, limits: Limits) -> Result<Vec<(usize, String)>, String> {
+fn declared_entries<R: Read + Seek>(
+    archive: &ZipArchive<R>,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<(usize, String)>, JobError> {
     let mut all = 0u64;
     let mut files = 0u64;
     let mut entries = Vec::new();
     for index in 0..archive.len() {
-        let entry = archive
-            .by_index_data(index)
-            .map_err(|err| format!("zip entry {index}: {err}"))?;
+        check_cancel(cancelled, Method::DownloadFiles)?;
+        let entry = archive.by_index_data(index).map_err(decode_zip_error)?;
         let name = entry
             .name()
-            .map_err(|err| format!("zip entry {index}: {err}"))?
+            .map_err(|_| download_error("zip entry name is invalid"))?
             .into_owned();
         if !matches!(
             entry.compression(),
             CompressionMethod::Stored | CompressionMethod::Deflated
         ) {
-            return Err(format!("zip entry {index} is neither stored nor deflated"));
+            return Err(download_error("zip entry is neither stored nor deflated"));
         }
         let size = entry.size();
+        if name != META_ENTRY && size == 0 {
+            return Err(download_error("zip file entry declared size is zero"));
+        }
         if size > MAX_DOWNLOAD_ENTRY_BYTES {
-            return Err(format!(
-                "zip entry {index} declares more than {MAX_DOWNLOAD_ENTRY_BYTES} bytes"
-            ));
+            return Err(download_error("zip entry declared size exceeds file bound"));
         }
         if name == META_ENTRY && size > MAX_META_BYTES {
-            return Err(format!("{META_ENTRY} declares more than {MAX_META_BYTES} bytes"));
+            return Err(download_error("_meta declared size exceeds bound"));
         }
         all = all.saturating_add(size);
         if name != META_ENTRY {
@@ -315,12 +382,10 @@ fn declared_entries(archive: &ZipArchive<Cursor<&[u8]>>, limits: Limits) -> Resu
         }
     }
     if files > limits.files {
-        return Err(format!("the zip's files declare more than {MAX_DOWNLOAD_BYTES} bytes"));
+        return Err(download_error("zip files declared size exceeds total bound"));
     }
     if all > limits.all {
-        return Err(format!(
-            "the zip declares more than {MAX_DOWNLOAD_EXPANSION} times its size"
-        ));
+        return Err(download_error("zip declared size exceeds expansion bound"));
     }
     Ok(entries)
 }
@@ -328,25 +393,32 @@ fn declared_entries(archive: &ZipArchive<Cursor<&[u8]>>, limits: Limits) -> Resu
 /// The bytes of `_meta`, taken from `limits.all`: at most
 /// [`MAX_META_BYTES`] and at most what is left. One byte past either limit
 /// fails, and nothing past it is read, so nothing larger is ever parsed.
-fn read_meta(archive: &mut ZipArchive<Cursor<&[u8]>>, index: usize, limits: &mut Limits) -> Result<Vec<u8>, String> {
-    let entry = archive
-        .by_index(index)
-        .map_err(|err| format!("zip entry {index}: {err}"))?;
+fn read_meta<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    index: usize,
+    limits: &mut Limits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<u8>, JobError> {
+    let entry = archive.by_index(index).map_err(decode_zip_error)?;
     let limit = MAX_META_BYTES.min(limits.all);
-    // The buffer grows with the bytes read, never from the declared size.
+    let mut reader = entry.take(limit.saturating_add(1));
     let mut data = Vec::new();
-    entry
-        .take(limit.saturating_add(1))
-        .read_to_end(&mut data)
-        .map_err(|err| format!("zip entry {index}: {err}"))?;
-    let read = u64::try_from(data.len()).unwrap_or(u64::MAX);
-    if read > MAX_META_BYTES {
-        return Err(format!("{META_ENTRY} expands past {MAX_META_BYTES} bytes"));
+    let mut buffer = [0; 8192];
+    loop {
+        check_cancel(cancelled, Method::DownloadFiles)?;
+        let n = match reader.read(&mut buffer) {
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+            result => result.map_err(decode_io_error)?,
+        };
+        if n == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..n]);
     }
-    if read > limits.all {
-        return Err(format!("the zip expands past {MAX_DOWNLOAD_EXPANSION} times its size"));
+    if data.len() as u64 > limit {
+        return Err(download_error("_meta actual size exceeds metadata or expansion bound"));
     }
-    limits.all -= read;
+    limits.all -= data.len() as u64;
     Ok(data)
 }
 
@@ -354,32 +426,48 @@ fn read_meta(archive: &mut ZipArchive<Cursor<&[u8]>>, index: usize, limits: &mut
 /// from both limits: at most [`MAX_DOWNLOAD_ENTRY_BYTES`] and at most what
 /// either limit has left. One byte past a limit fails, and nothing past it is
 /// read or written. On any failure the file is removed.
-fn stage_entry(
-    archive: &mut ZipArchive<Cursor<&[u8]>>,
+fn stage_entry<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
     index: usize,
     limits: &mut Limits,
     staging: &Path,
     buffer: &mut [u8],
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<StagedFile, JobError> {
-    let fail = |detail: String| JobError::bad_response(Method::DownloadFiles, detail);
-    let entry = archive
-        .by_index(index)
-        .map_err(|err| fail(format!("zip entry {index}: {err}")))?;
+    let entry = archive.by_index(index).map_err(decode_zip_error)?;
     let mut file = tempfile::Builder::new()
         .prefix("download-")
         .tempfile_in(staging)
         .map_err(|err| staging_error(&err))?;
+    let size = copy_entry(entry, index, limits, &mut file, buffer, cancelled)?;
+    file.flush().map_err(|err| staging_error(&err))?;
+    Ok(StagedFile {
+        path: file.into_temp_path(),
+        size,
+    })
+}
+
+fn copy_entry<R: Read, W: Write>(
+    entry: R,
+    index: usize,
+    limits: &mut Limits,
+    output: &mut W,
+    buffer: &mut [u8],
+    cancelled: &dyn Fn() -> bool,
+) -> Result<u64, JobError> {
+    let fail = |detail: String| JobError::bad_response(Method::DownloadFiles, detail);
     let limit = MAX_DOWNLOAD_ENTRY_BYTES.min(limits.all).min(limits.files);
     let mut reader = entry.take(limit.saturating_add(1));
     let mut size = 0u64;
     loop {
+        check_cancel(cancelled, Method::DownloadFiles)?;
         let read = match reader.read(buffer) {
             Ok(0) => break,
             Ok(read) => read,
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) => return Err(fail(format!("zip entry {index}: {err}"))),
+            Err(err) => return Err(decode_io_error(err)),
         };
-        size = size.saturating_add(u64::try_from(read).unwrap_or(u64::MAX));
+        size = size.saturating_add(read as u64);
         if size > MAX_DOWNLOAD_ENTRY_BYTES {
             return Err(fail(format!(
                 "zip entry {index} expands past {MAX_DOWNLOAD_ENTRY_BYTES} bytes"
@@ -393,20 +481,23 @@ fn stage_entry(
                 "the zip expands past {MAX_DOWNLOAD_EXPANSION} times its size"
             )));
         }
-        file.write_all(&buffer[..read]).map_err(|err| staging_error(&err))?;
+        output.write_all(&buffer[..read]).map_err(|err| staging_error(&err))?;
     }
-    file.flush().map_err(|err| staging_error(&err))?;
+    if size == 0 {
+        return Err(download_error("zip file entry actual size is zero"));
+    }
     limits.all -= size;
     limits.files -= size;
-    Ok(StagedFile {
-        path: file.into_temp_path(),
-        size,
-    })
+    Ok(size)
 }
 
 /// E7: a staged file that cannot be created or written. Lack of space is
 /// `disk_full`; anything else is `local_storage`.
 fn staging_error(err: &io::Error) -> JobError {
+    local_error(Method::DownloadFiles, "staging download", err)
+}
+
+fn local_error(method: Method, stage: &str, err: &io::Error) -> JobError {
     let kind = match err.kind() {
         io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => ErrorKind::DiskFull {
             needed_bytes: None,
@@ -414,11 +505,8 @@ fn staging_error(err: &io::Error) -> JobError {
         },
         _ => ErrorKind::LocalStorage,
     };
-    JobError::new(
-        kind,
-        Some(Method::DownloadFiles),
-        format!("staging a downloaded file failed: {err}"),
-    )
+    // An I/O error can contain a caller's path or custom source text.
+    JobError::new(kind, Some(method), format!("{stage}: {:?}", err.kind()))
 }
 
 /// `_meta` of a downloaded zip: an object mapping entry names to real names
@@ -453,43 +541,250 @@ pub enum UploadChange<'a> {
 /// `[<real name>, "<entry name>"]` or `[<real name>, null]` per change. Which
 /// changes form a batch (at most 25, the 2.5 MiB fill) is U111's.
 pub fn encode_upload_zip(batch: &[UploadChange<'_>]) -> Result<Vec<u8>, JobError> {
-    let fail = |err: String| {
-        JobError::new(
-            ErrorKind::Internal,
-            Some(Method::UploadChanges),
-            format!("writing the media zip failed: {err}"),
-        )
-    };
+    let mut sources: Vec<_> = batch
+        .iter()
+        .map(|change| match change {
+            UploadChange::Add { name, data } => EncodeChange::Add {
+                name: (*name).into(),
+                source: Cursor::new(*data),
+            },
+            UploadChange::Delete { name } => EncodeChange::Delete { name: (*name).into() },
+        })
+        .collect();
+    let (output, _) = encode_zip(Cursor::new(Vec::new()), &mut sources, false, &|| false)?;
+    Ok(output.into_inner())
+}
+
+pub(super) enum EncodeChange<R> {
+    Add { name: String, source: R },
+    Delete { name: String },
+}
+
+fn encode_zip<W: Write + Seek, R: Read>(
+    output: W,
+    batch: &mut [EncodeChange<R>],
+    eligible: bool,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(W, Vec<Option<MediaDigest>>), JobError> {
+    let method = Method::UploadChanges;
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+    let mut zip = ZipWriter::new(output);
     let mut meta = String::from("[");
-    for (index, change) in batch.iter().enumerate() {
+    let mut observed = Vec::with_capacity(batch.len());
+    let mut buffer = vec![0; COPY_CHUNK];
+    for (index, change) in batch.iter_mut().enumerate() {
+        check_cancel(cancelled, method)?;
         if index > 0 {
             meta.push(',');
         }
         meta.push('[');
         match change {
-            UploadChange::Add { name, data } => {
+            EncodeChange::Add { name, source } => {
                 let entry = index.to_string();
-                zip.start_file(entry.as_str(), options)
-                    .map_err(|err| fail(err.to_string()))?;
-                zip.write_all(data).map_err(|err| fail(err.to_string()))?;
+                zip.start_file(entry.as_str(), options).map_err(encode_zip_error)?;
+                let mut hash = Sha1::new();
+                let mut length = 0u64;
+                loop {
+                    check_cancel(cancelled, method)?;
+                    let cap = if eligible {
+                        (MAX_DOWNLOAD_ENTRY_BYTES.saturating_sub(length) + 1).min(COPY_CHUNK as u64) as usize
+                    } else {
+                        COPY_CHUNK
+                    };
+                    let n = match source.read(&mut buffer[..cap]) {
+                        Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                        result => result.map_err(|err| local_error(method, "reading upload source", &err))?,
+                    };
+                    if n == 0 {
+                        break;
+                    }
+                    length += n as u64;
+                    if eligible && length > MAX_DOWNLOAD_ENTRY_BYTES {
+                        return Err(upload_source_error(
+                            "upload source exceeds eligible size; register name again",
+                        ));
+                    }
+                    zip.write_all(&buffer[..n])
+                        .map_err(|err| local_error(method, "writing upload ZIP", &err))?;
+                    hash.update(&buffer[..n]);
+                }
+                if eligible && length == 0 {
+                    return Err(upload_source_error("upload source is empty; register name again"));
+                }
+                observed.push(Some(MediaDigest {
+                    length,
+                    sha1: hash.finalize().into(),
+                }));
                 write::string(&mut meta, name);
                 meta.push(',');
                 write::string(&mut meta, &entry);
             }
-            UploadChange::Delete { name } => {
+            EncodeChange::Delete { name } => {
+                observed.push(None);
                 write::string(&mut meta, name);
                 meta.push_str(",null");
             }
         }
         meta.push(']');
+        if meta.len() + 1 > MAX_META_BYTES as usize {
+            return Err(upload_source_error("upload _meta exceeds bound"));
+        }
     }
     meta.push(']');
-    zip.start_file(META_ENTRY, options)
-        .map_err(|err| fail(err.to_string()))?;
-    zip.write_all(meta.as_bytes()).map_err(|err| fail(err.to_string()))?;
-    zip.finish()
-        .map(Cursor::into_inner)
-        .map_err(|err| fail(err.to_string()))
+    check_cancel(cancelled, method)?;
+    zip.start_file(META_ENTRY, options).map_err(encode_zip_error)?;
+    zip.write_all(meta.as_bytes())
+        .map_err(|err| local_error(method, "writing upload _meta", &err))?;
+    let output = zip.finish().map_err(encode_zip_error)?;
+    check_cancel(cancelled, method)?;
+    Ok((output, observed))
+}
+
+fn upload_source_error(stage: &str) -> JobError {
+    JobError::new(ErrorKind::LocalStorage, Some(Method::UploadChanges), stage)
+}
+
+fn encode_zip_error(err: zip::result::ZipError) -> JobError {
+    match err {
+        zip::result::ZipError::Io(err) => local_error(Method::UploadChanges, "writing upload ZIP", &err),
+        _ => JobError::new(
+            ErrorKind::Internal,
+            Some(Method::UploadChanges),
+            "writing upload ZIP structure failed",
+        ),
+    }
+}
+
+#[cfg(test)]
+mod file_copy_tests {
+    use super::*;
+    use std::{
+        cell::Cell,
+        fs::File,
+        io::{Seek, SeekFrom},
+        path::Path,
+    };
+
+    struct FullWriter<W> {
+        inner: W,
+        left: usize,
+    }
+    impl<W: Write> Write for FullWriter<W> {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.left == 0 {
+                return Err(io::Error::from(io::ErrorKind::StorageFull));
+            }
+            let n = self.left.min(bytes.len());
+            let n = self.inner.write(&bytes[..n])?;
+            self.left -= n;
+            Ok(n)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.inner.flush()
+        }
+    }
+    impl<W: Seek> Seek for FullWriter<W> {
+        fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
+            self.inner.seek(from)
+        }
+    }
+    fn entries() -> Vec<EncodeChange<Cursor<Vec<u8>>>> {
+        vec![EncodeChange::Add {
+            name: "a".into(),
+            source: Cursor::new(vec![3; COPY_CHUNK * 2]),
+        }]
+    }
+    fn count(path: &Path) -> usize {
+        std::fs::read_dir(path).unwrap().count()
+    }
+
+    #[test]
+    fn partial_decode_encode_writes_keep_disk_full_typed() {
+        let directory = tempfile::tempdir().unwrap();
+        for stage in 0..2 {
+            let mut output = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+            let mut writer = FullWriter {
+                inner: output.as_file_mut(),
+                left: 100,
+            };
+            let result = if stage == 0 {
+                let mut limits = Limits {
+                    all: MAX_DOWNLOAD_BYTES,
+                    files: MAX_DOWNLOAD_BYTES,
+                };
+                copy_entry(
+                    Cursor::new(vec![1; 1024]),
+                    0,
+                    &mut limits,
+                    &mut writer,
+                    &mut [0; 64],
+                    &|| false,
+                )
+                .map(|_| ())
+            } else {
+                encode_zip(writer, &mut entries(), true, &|| false).map(|_| ())
+            };
+            let err = result.unwrap_err();
+            assert!(matches!(err.kind, ErrorKind::DiskFull { .. }));
+            assert_eq!(
+                err.method,
+                Some(if stage == 0 {
+                    Method::DownloadFiles
+                } else {
+                    Method::UploadChanges
+                })
+            );
+            drop(output);
+            assert_eq!(count(directory.path()), 0);
+        }
+    }
+
+    #[test]
+    fn cancelled_mid_copy_does_not_produce_a_sendable_zip() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut output = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+        let checks = Cell::new(0);
+        let cancelled = || {
+            checks.set(checks.get() + 1);
+            checks.get() >= 3
+        };
+        let result = encode_zip(output.as_file_mut(), &mut entries(), true, &cancelled);
+        assert!(matches!(result, Err(ref e) if e.kind == ErrorKind::Cancelled));
+        drop(result);
+        drop(output);
+        assert_eq!(count(directory.path()), 0);
+    }
+
+    #[test]
+    fn mutation_between_file_reads_hashes_only_bytes_in_the_zip() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("source");
+        let before = vec![1; COPY_CHUNK * 2];
+        std::fs::write(&path, &before).unwrap();
+        let mut batch = vec![EncodeChange::Add {
+            name: "a".into(),
+            source: File::open(&path).unwrap(),
+        }];
+        let reads = Cell::new(0);
+        let check = || {
+            reads.set(reads.get() + 1);
+            if reads.get() == 3 {
+                let mut writer = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+                writer.seek(SeekFrom::Start(COPY_CHUNK as u64)).unwrap();
+                writer.write_all(&vec![2; COPY_CHUNK]).unwrap();
+            }
+            false
+        };
+        let mut output = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+        let (_, observed) = encode_zip(output.as_file_mut(), &mut batch, true, &check).unwrap();
+        let mut expected = before;
+        expected[COPY_CHUNK..].fill(2);
+        let expected_hash: [u8; 20] = Sha1::digest(&expected).into();
+        assert_eq!(observed[0].as_ref().unwrap().sha1, expected_hash);
+        let mut archive = ZipArchive::new(output.as_file_mut()).unwrap();
+        let mut entry = archive.by_name("0").unwrap();
+        let mut actual = Vec::new();
+        entry.read_to_end(&mut actual).unwrap(); // Test fixture only, 128 KiB.
+        assert_eq!(actual, expected);
+    }
 }
