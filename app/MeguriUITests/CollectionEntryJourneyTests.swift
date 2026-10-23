@@ -64,7 +64,16 @@ import notify
         #endif
         XCTAssertTrue(element(app, "settings.importExport.ready").waitForExistence(timeout: 10))
         for replacement in [false, true] {
-            try click(element(app, "settings.importExport.choose"), app, bundle)
+            let choose = app.buttons.matching(identifier: "settings.importExport.choose").firstMatch
+            let chooseReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                choose.exists && choose.isEnabled && choose.isHittable
+            }, object: nil)
+            guard XCTWaiter().wait(for: [chooseReady], timeout: 30) == .completed else {
+                capture(app, "export-native-choose-not-ready")
+                XCTFail("Native export Choose must be enabled and hittable: \(app.debugDescription)")
+                return
+            }
+            try click(choose, app, bundle)
             #if os(macOS)
             XCTAssertTrue(savePanel.waitForExistence(timeout: 10))
             try app.bringToFront(bundleIdentifier: bundle)
