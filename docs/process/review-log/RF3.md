@@ -130,3 +130,5 @@
 - Independent round 6 follow-up on the paragraph correction: no new P0–P1 finding or deterministic blocker beyond the Mac value correction above. Initial paragraph-fit issue is resolved in source; runtime proof remains pending.
 - iPhone `20261023T033607Z-68711`: actual review, restart, Cancel, first Save, completed cleanup and picker reopening passed. Second Save reached native In progress; no app-owned Replace button appeared within the test wait. Capture native conflict ownership before claiming replacement.
 - iPad `20261023T033943Z-71908`: FAIL. Default typical light/dark pass. AX5 stops after Ready: no scroll movement. Other states pending.
+- Mac export audit `20261023T034317Z-75306`: PASS, one test and no skips, including added scroll/content proof.
+- Fixer `s-20261023T034234Z-c79a0d01`, export `20261023T034313Z-75039`: iOS uses native slow swipes and captures failed movement. Replacement still requires the exact native Replace action, now checked in the app and system alert owner with bounded diagnostics. No production changes or replacement pass are claimed.
