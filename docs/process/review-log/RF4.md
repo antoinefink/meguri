@@ -454,3 +454,11 @@ system-window image shows an Open Anyway choice for Meguri, allowing use
 of earlier Meguri app data after the signing change. No button was pressed.
 The opt-in marker was removed. Antoine's standing permission covers this
 VM setup action. The next step is an exact-dialog action and fresh launch proof.
+
+Exact action was prepared in `20261023T173817Z-17544`. Review found a
+Touch Bar duplicate made its global button-count guard too strict. Fix
+`20261023T174207Z-20344` removed only that global count; round 2 found no
+P0–P2 issues. Privacy and UI lint passed. Native action
+`20261023T174434Z-22539` stopped at its text/button match guard, before
+input. The marker was removed. Full value inspection is next; consent and
+native transfer proof remain open.

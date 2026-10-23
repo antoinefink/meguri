@@ -75,6 +75,64 @@ final class VMAccessibilitySetupTests: XCTestCase {
     }
 
     @MainActor
+    func testApproveRecordedMeguriVersionSharing() throws {
+        guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-allow-recorded-meguri-version") else {
+            throw XCTSkip("Recorded Meguri version sharing opt-in absent")
+        }
+        guard CardSwapTimingGate.hypervisorPresent() == true, NSUserName() == "meguri" else {
+            XCTFail("Recorded version sharing approval requires the dedicated VM's meguri account")
+            return
+        }
+        continueAfterFailure = false
+
+        let helper = XCUIApplication(bundleIdentifier: "com.apple.UserNotificationCenter")
+        guard helper.state != .notRunning else {
+            XCTFail("UserNotificationCenter is not already running")
+            return
+        }
+        guard helper.dialogs.firstMatch.waitForExistence(timeout: 5),
+              helper.dialogs.count == 1, helper.secureTextFields.count == 0 else {
+            XCTFail("Expected one existing UserNotificationCenter dialog without secure fields; no input performed")
+            return
+        }
+        let dialog = helper.dialogs.element(boundBy: 0)
+        let heading = "“Meguri” differs from previously opened versions. Are you sure you want to open it?"
+        let explanation = "Opening “Meguri” will allow it to access data from previously used versions of “Meguri”."
+        let headingMatch = NSPredicate(format: "label == %@ OR value == %@", heading, heading)
+        let explanationMatch = NSPredicate(format: "label == %@ OR value == %@", explanation, explanation)
+        let openMatch = NSPredicate(format: "identifier == %@ AND label == %@", "action-button-1", "Open Anyway")
+        let cancelMatch = NSPredicate(format: "identifier == %@ AND label == %@", "action-button-2", "Don’t Open")
+        guard dialog.staticTexts.matching(headingMatch).count == 1,
+              dialog.staticTexts.matching(explanationMatch).count == 1,
+              helper.staticTexts.matching(headingMatch).count == 1,
+              helper.staticTexts.matching(explanationMatch).count == 1,
+              dialog.buttons.count == 2,
+              dialog.buttons.matching(openMatch).count == 1,
+              dialog.buttons.matching(cancelMatch).count == 1 else {
+            XCTFail("Recorded Meguri version sharing text or buttons did not match uniquely; no input performed")
+            return
+        }
+        let open = dialog.buttons.matching(openMatch).element(boundBy: 0)
+        guard open.isEnabled, open.isHittable,
+              helper.state != .notRunning, helper.dialogs.count == 1,
+              helper.secureTextFields.count == 0 else {
+            XCTFail("Recorded Meguri version sharing action is unavailable or ambiguous; no input performed")
+            return
+        }
+        // This opt-in authorizes only this recorded prompt and a single native mouse click.
+        open.click()
+
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            helper.staticTexts.matching(headingMatch).count == 0
+                && helper.staticTexts.matching(explanationMatch).count == 0
+        }, object: nil)
+        guard XCTWaiter().wait(for: [dismissed], timeout: 5) == .completed else {
+            XCTFail("Recorded Meguri version sharing text did not disappear within five seconds; no further input performed")
+            return
+        }
+    }
+
+    @MainActor
     func testEnableRunnerAccessibility() throws {
         guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-ax-enable") else {
             throw XCTSkip("VM setup opt-in absent")
