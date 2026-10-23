@@ -113,3 +113,5 @@
 - Fixer `s-20261023T025922Z-be2bb59e`, cleanroom `20261023T025932Z-29106`: uses direct native controls and bounded observed Back transitions. No production change. Actual Files cancellation, Save, Replace and reimport checks remain required.
 - Independent round 6 test follow-up on `05931fb9`: no new P0–P1 findings or deterministic blockers.
 - iPhone `20261023T030509Z-33509`: actual Back navigation and Cancel passed; native delegate returned Ready. The test failed after reopening Files for Save when an indexed folder query lost its remote element. Save and replacement remain pending.
+- iPhone export accessibility `20261023T030913Z-38005`: pass, one test and no skips.
+- Fixer `s-20261023T030832Z-0a17baf4`, cleanroom `20261023T030902Z-37194`: direct folder targets, native provider readiness and observed folder transitions replace indexed Save navigation. Native Save awaits hittability. Production and cancellation code are unchanged. Earlier runner `20261023T030854Z-36929` refused an incorrect session id before work; the recorded session above ran successfully.

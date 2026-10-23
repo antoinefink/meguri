@@ -89,9 +89,13 @@ import notify
             }
             #else
             try selectLocalExportFolder(app, bundle)
-            let save = app.buttons.matching(NSPredicate(format: "label IN %@", ["Export", "Save", "Move", "Copy"])).firstMatch
-            XCTAssertTrue(save.waitForExistence(timeout: 10), app.debugDescription)
-            capturePicker(app)
+            let save = app.buttons.matching(identifier: "DOCPicker.actionButton").firstMatch
+            let saveReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                save.exists && save.isEnabled && save.isHittable
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter().wait(for: [saveReady], timeout: 10), .completed,
+                "The destination folder must offer an enabled, hittable native Save action")
+            capture(app, "export-native-save-ready")
             try click(save, app, bundle)
             if replacement {
                 let replace = app.buttons.matching(NSPredicate(format: "label == %@", "Replace")).firstMatch
@@ -252,39 +256,78 @@ import notify
     }
 
     private func selectLocalExportFolder(_ app: XCUIApplication, _ bundle: String) throws {
+        let save = app.buttons.matching(identifier: "DOCPicker.actionButton").firstMatch
+        let back = app.buttons.matching(identifier: "BackButton").firstMatch
+        let local = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label IN %@", ["On My iPhone", "On My iPad"])).firstMatch
+        let folderBar = app.navigationBars["RF2 Import Tests"].firstMatch
         let folderActions = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].buttons
             .matching(NSPredicate(format: "label == %@", "RF2 Import Tests, Actions Menu")).firstMatch
-        let isInFolder = { app.navigationBars["RF2 Import Tests"].exists || folderActions.exists }
-        if isInFolder() { return }
         let folder = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@ OR identifier == %@",
-            ["RF2 Import Tests", "RF2 Import Tests, Folder"], "RF2 Import Tests, Folder"))
-        let meguri = app.cells.containing(NSPredicate(format: "label == %@", "Meguri"))
-        if waitForHittable(folder, timeout: 2) == nil {
-            if waitForHittable(meguri, timeout: 2) == nil {
-                let local = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["On My iPhone", "On My iPad"]))
-                if waitForHittable(local, timeout: 2) == nil {
-                    let back = try XCTUnwrap(waitForHittable(app.buttons.matching(identifier: "BackButton")), app.debugDescription)
-                    try click(back, app, bundle)
-                }
-                let location = try XCTUnwrap(waitForHittable(local), app.debugDescription)
-                try click(location, app, bundle)
-                let contents = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                    folder.allElementsBoundByIndex.contains { $0.exists && $0.isHittable }
-                        || meguri.allElementsBoundByIndex.contains { $0.exists && $0.isHittable }
-                }, object: nil)
-                XCTAssertEqual(XCTWaiter().wait(for: [contents], timeout: 10), .completed, app.debugDescription)
-            }
-            if waitForHittable(folder, timeout: 2) == nil {
-                let appFolder = try XCTUnwrap(waitForHittable(meguri), app.debugDescription)
-                try click(appFolder, app, bundle)
-            }
+            ["RF2 Import Tests", "RF2 Import Tests, Folder"], "RF2 Import Tests, Folder")).firstMatch
+        let meguri = app.cells.containing(NSPredicate(format: "label == %@", "Meguri")).firstMatch
+        func actionable(_ target: XCUIElement) -> Bool {
+            target.exists && target.isEnabled && target.isHittable
         }
-        let destination = try XCTUnwrap(waitForHittable(folder), app.debugDescription)
-        let target = destination.images.firstMatch.exists ? destination.images.firstMatch : destination
+        func isInFolder() -> Bool {
+            folderBar.exists || actionable(folderActions)
+        }
+        func folderTarget() -> XCUIElement? {
+            guard folder.exists else { return nil }
+            // Tap the known folder's image when Files exposes one: tapping its
+            // caption can edit the name instead of opening the folder.
+            let image = folder.images.firstMatch
+            if image.exists { return actionable(image) ? image : nil }
+            return actionable(folder) ? folder : nil
+        }
+        func waitForState(_ message: String, _ condition: @escaping () -> Bool) -> Bool {
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
+            guard XCTWaiter().wait(for: [ready], timeout: 10) == .completed else {
+                capture(app, "export-folder-navigation-failed")
+                let diagnostic = XCTAttachment(string: message)
+                diagnostic.name = "export-folder-navigation-state"
+                diagnostic.lifetime = .keepAlways
+                add(diagnostic)
+                XCTFail(message)
+                return false
+            }
+            return true
+        }
+        // First let the newly presented native picker load. Then wait for any
+        // known visible folder state, rather than timing out each deeper path.
+        guard waitForState("Native Save, Back or local location must become actionable", {
+            actionable(save) || actionable(back) || actionable(local)
+        }) else { return }
+        guard waitForState("Files must load the remembered folder or a known local folder location", {
+            isInFolder() || folderTarget() != nil || actionable(meguri) || actionable(local)
+        }) else { return }
+        if isInFolder() { return }
+        if folderTarget() == nil && !actionable(meguri) {
+            guard actionable(local) else {
+                XCTFail("Files must offer the native On My iPhone or On My iPad location")
+                return
+            }
+            try click(local, app, bundle)
+            guard waitForState("The local location must reveal Meguri or RF2 Import Tests", {
+                isInFolder() || folderTarget() != nil || actionable(meguri)
+            }) else { return }
+        }
+        if isInFolder() { return }
+        if folderTarget() == nil {
+            guard actionable(meguri) else {
+                XCTFail("The local location must offer the native Meguri container")
+                return
+            }
+            try click(meguri, app, bundle)
+            guard waitForState("Meguri must reveal the actionable RF2 Import Tests folder", {
+                folderTarget() != nil
+            }) else { return }
+        }
+        let target = try XCTUnwrap(folderTarget(), "RF2 Import Tests must have a hittable native folder target")
         try click(target, app, bundle)
-        let folderReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in isInFolder() }, object: nil)
-        XCTAssertEqual(XCTWaiter().wait(for: [folderReady], timeout: 10), .completed, app.debugDescription)
-        capturePicker(app)
+        _ = waitForState("Opening RF2 Import Tests must show its native folder navigation title", {
+            isInFolder()
+        })
     }
     #endif
     private func exercisePickedPackage(hasLocalCollection: Bool) throws {
