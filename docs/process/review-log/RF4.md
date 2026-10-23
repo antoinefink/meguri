@@ -800,3 +800,18 @@ source corrections above resolve it without another scanner-rule change.
 Parent final review, rendered UI, accessibility, all three native journeys
 and the combined full gate remain required. No Unit trailer is added.
 Gate base remains `81c207573c20c337c8834e4ae8b4ee8f29603dbf`.
+
+Mac Settings reachability; start `663f1a53`.
+
+| Check | Receipt | Outcome |
+| --- | --- | --- |
+| Geometry probe | `ui-test/20261023T231739Z-54407` | FAIL; null app frame |
+| Window clipping | `ui-test/20261023T232026Z-57316` | FAIL; Form did not scroll |
+| Grouped Form | `ui-test/20261023T232439Z-60650` | PASS; one test |
+| Privacy | `private/20261023T232452Z-61817` | PASS; two files |
+
+Filtered patch `cleanroom/20261023T232316Z-59775` retains both failed
+receipts. Independent source review found no P0–P2. The production Mac
+Form now scrolls; the test reaches history and returns to the endpoint.
+No login or server request occurs in this test. Final review remains round 6.
+The real media journeys, rendered checks and combined gate remain open.

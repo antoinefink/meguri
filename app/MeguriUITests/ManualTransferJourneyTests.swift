@@ -1,6 +1,9 @@
 import Foundation
 import CryptoKit
 import XCTest
+#if os(macOS)
+import AppKit
+#endif
 
 /// VM-only, through tools/mg. The controlled rig is seeded with generated
 /// reviewable content; no fixture installs its collection into the app.
@@ -20,6 +23,37 @@ import XCTest
         let deviceSHA256: String
         let wireToken: String
     }
+    #if os(macOS)
+    func testSettingsScrollCarrierPreflight() throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        guard build.hasHooks else { throw XCTSkip("Requires Debug/test hooks") }
+        let bundle = try build.bundleIdentifier
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false).arguments
+        addTeardownBlock { @MainActor in app.terminate() }
+        app.launch()
+
+        try openSettings(app, bundle)
+        let endpoint = element(app, "settings.anki.endpoint")
+        XCTAssertTrue(endpoint.waitForExistence(timeout: 30), "Settings must expose the endpoint before reveal.")
+        attachGeometry(app, "rf4-preflight-before-bringToFront", bundle)
+        try app.bringToFront(bundleIdentifier: bundle)
+        attachGeometry(app, "rf4-preflight-after-bringToFront", bundle)
+
+        // Traverse the production form in both directions at its default size.
+        // Reveal only: refreshing history or editing the endpoint is unnecessary.
+        let history = element(app, "settings.anki.history")
+        try reveal(history, app, bundle)
+        XCTAssertTrue(history.exists, "Settings must expose the Local History refresh control.")
+        XCTAssertTrue(history.exists && history.isHittable, "Local History refresh must be reachable by scrolling down.")
+        attachGeometry(app, "rf4-preflight-history-revealed", bundle)
+        try reveal(endpoint, app, bundle)
+        XCTAssertTrue(endpoint.exists, "Settings must retain the endpoint control.")
+        XCTAssertTrue(endpoint.exists && endpoint.isHittable, "The endpoint must be reachable by scrolling back up.")
+        attachGeometry(app, "rf4-preflight-endpoint-revealed", bundle)
+    }
+    #endif
     func testDistinctAccountRoundTripPreservesImportCooldownAfterRestart() async throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
@@ -110,7 +144,7 @@ import XCTest
         ] {
             XCTAssertFalse(element(app, id).exists, explanation)
         }
-        try reveal(result, app)
+        try reveal(result, app, bundle)
         attachSuccess(app, "rf4-account-a-restored-login-cooldown-enforced")
 
         // Use B for Export at the unchanged endpoint; A's saved history and
@@ -151,7 +185,7 @@ import XCTest
         // Collection activation/adoption must drain before this separate, real
         // both-side decision becomes enabled. No launch hook grants consent.
         let allow = element(app, "settings.anki.startMedia")
-        try reveal(allow, app)
+        try reveal(allow, app, bundle)
         waitUntilReady(allow, app)
         XCTAssertFalse(element(app, "settings.anki.confirm").exists)
         XCTAssertFalse(element(app, "settings.anki.progress").exists)
@@ -218,7 +252,7 @@ import XCTest
             attachSuccess(app, name + "-passive-restart-no-media-requests")
 
             try click(element(app, "settings.anki.resumeMedia.\(original.id)"), app, bundle)
-            try reveal(allow, app)
+            try reveal(allow, app, bundle)
             waitUntilReady(allow, app)
             let decision = try durableOperation(rig, direction: "Import")
             assertSameOperation(original, decision)
@@ -383,7 +417,7 @@ import XCTest
     }
     private func click(_ target: XCUIElement, _ app: XCUIApplication, _ bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
-        try reveal(target, app)
+        try reveal(target, app, bundle)
         waitUntilReady(target, app)
         #if os(macOS)
         target.click()
@@ -391,7 +425,7 @@ import XCTest
         target.tap()
         #endif
     }
-    private func reveal(_ target: XCUIElement, _ app: XCUIApplication) throws {
+    private func reveal(_ target: XCUIElement, _ app: XCUIApplication, _ bundle: String) throws {
         _ = target.waitForExistence(timeout: 30)
         #if os(macOS)
         let containers = [app.scrollViews, app.tables, app.collectionViews]
@@ -400,8 +434,11 @@ import XCTest
                   root.exists, root.isEnabled, root.isHittable else { return false }
             let window = app.windows.firstMatch
             guard window.exists else { return false }
-            let viewport = root.frame.intersection(window.frame).intersection(app.frame)
-            return !viewport.isNull && viewport.width > 0 && viewport.height > 0
+            // macOS can expose a null application frame even for an active window.
+            let viewport = root.frame.intersection(window.frame)
+            return !viewport.isNull && !viewport.isEmpty
+                && viewport.origin.x.isFinite && viewport.origin.y.isFinite
+                && viewport.width.isFinite && viewport.height.isFinite
         }
         var usesSettingsRoot = false
         #else
@@ -458,8 +495,10 @@ import XCTest
             guard app.state == .runningForeground else { break }
             let window = app.windows.firstMatch
             guard window.exists else { break }
-            let viewport = scroll.frame.intersection(window.frame).intersection(app.frame)
-            guard !viewport.isNull, viewport.width > 0, viewport.height > 0 else { break }
+            let viewport = scroll.frame.intersection(window.frame)
+            guard !viewport.isNull, !viewport.isEmpty,
+                  viewport.origin.x.isFinite, viewport.origin.y.isFinite,
+                  viewport.width.isFinite, viewport.height.isFinite else { break }
             let towardsBottom = targetExists ? target.frame.maxY > viewport.maxY : !searchUpward
             scroll.scroll(byDeltaX: 0, deltaY: (towardsBottom ? -1 : 1) * viewport.height / 2)
             #else
@@ -483,7 +522,12 @@ import XCTest
         }
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in target.exists && target.isHittable }, object: nil)
         let outcome = XCTWaiter().wait(for: [visible], timeout: 30)
-        if outcome != .completed { attach(app, "rf4-reveal-failure", target: target, scroll: scroll) }
+        if outcome != .completed {
+            #if os(macOS)
+            attachGeometry(app, "rf4-reveal-failure-geometry", bundle)
+            #endif
+            attach(app, "rf4-reveal-failure", target: target, scroll: scroll)
+        }
         XCTAssertEqual(outcome, .completed, "Element not visible: \(targetIdentifier)")
     }
     private func waitUntilReady(_ target: XCUIElement, _ app: XCUIApplication) {
@@ -502,7 +546,7 @@ import XCTest
     }
     private func waitForText(_ target: XCUIElement, _ text: String, _ app: XCUIApplication, _ bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
-        try reveal(target, app)
+        try reveal(target, app, bundle)
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             target.exists && (target.label + " " + String(describing: target.value ?? "")).contains(text)
         }, object: nil)
@@ -585,6 +629,51 @@ import XCTest
         }
         return "unknown"
     }
+    #if os(macOS)
+    private func attachGeometry(_ app: XCUIApplication, _ name: String, _ bundle: String) {
+        // Numeric/boolean geometry only; never inspect account controls or AX text.
+        let appState = app.state
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
+        let appExists = app.exists
+        let appFrame = appExists ? app.frame : nil
+        let window = app.windows.firstMatch
+        let windowExists = window.exists
+        let windowFrame = windowExists ? window.frame : nil
+        let root = element(app, "settings.root.content")
+        let rootExists = root.exists
+        let rootFrame = rootExists ? root.frame : nil
+        var lines = [
+            "appState=\(appState.rawValue)",
+            "appForeground=\(appState == .runningForeground)",
+            "runningApplicationCount=\(running.count)",
+            "runningApplicationIsActive=\(running.map { $0.isActive })",
+            "appExists=\(appExists)",
+            "windowExists=\(windowExists)",
+            "settingsRootExists=\(rootExists)",
+            "sheetCount=\(app.sheets.count)",
+            "alertCount=\(app.alerts.count)"
+        ]
+        func frame(_ value: CGRect, _ key: String) {
+            lines.append("\(key)=[\(value.origin.x),\(value.origin.y),\(value.width),\(value.height)]")
+            lines.append("\(key)IsNull=\(value.isNull)")
+            lines.append("\(key)IsEmpty=\(value.isEmpty)")
+        }
+        if let appFrame { frame(appFrame, "appFrame") }
+        if let windowFrame { frame(windowFrame, "windowFrame") }
+        if let rootFrame {
+            lines.append("settingsRootEnabled=\(root.isEnabled)")
+            lines.append("settingsRootHittable=\(root.isHittable)")
+            frame(rootFrame, "settingsRootFrame")
+            if let windowFrame {
+                let intersection = rootFrame.intersection(windowFrame)
+                frame(intersection, "rootWindowIntersection")
+                frame(intersection, "viewportIntersection")
+            }
+        }
+        let report = XCTAttachment(string: lines.joined(separator: "\n"))
+        report.name = name; report.lifetime = .keepAlways; add(report)
+    }
+    #endif
     private func attach(_ app: XCUIApplication, _ name: String, target: XCUIElement? = nil, scroll: XCUIElement? = nil) {
         // Whitelist state only: no labels, identifiers read from elements, field
         // contents, screenshots or hierarchy (which can contain credentials).
