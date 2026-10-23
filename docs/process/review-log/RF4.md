@@ -585,3 +585,19 @@ The earlier iPhone app-hosted snapshot failure is now localized: four missing
 `settings.sync/*/dark-xxxLarge-iphoneLarge+hc` baselines on iPhone18,1-24A434.
 The enabled test reported missing files, not image differences. Record only
 these cells, review their images and verify before the fresh combined gate.
+
+VM Info inspection `20261023T193625Z-960` passed one case with no skips.
+Its actual tree and image show Remote Login on and its full-disk-access switch
+off; allowed users remain Administrators only. The marker was removed.
+
+Login diagnostic run `20261023T193858Z-3381` failed. Its input booleans are
+both true. The failure report itself queried an absent result element before
+attaching state; it does not prove a server or Keychain failure. Correction
+`20261023T194335Z-7972` guards missing elements and reveals the result before
+waiting. Independent narrow safety review found no new P0–P1 findings. It
+preserves all expectations and timeouts; native execution remains pending.
+
+The four missing iPhone cells were recorded by `20261023T194344Z-8351`.
+Private scan `20261023T194717Z-13497` flags only one comment in the unapplied
+VM FDA helper; the native diagnostic and four images are clear. Image review
+and fresh comparison remain open. No privacy rule was changed.

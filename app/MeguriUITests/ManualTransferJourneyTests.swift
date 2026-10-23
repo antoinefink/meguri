@@ -65,7 +65,7 @@ import XCTest
             let admission = element(app, "home.policy.enable")
             if admission.waitForExistence(timeout: 2) { try click(admission, app, bundle) }
             try openSettings(app, bundle)
-            waitForText(element(app, "settings.anki.result"), "Collection transfer finished", app)
+            try waitForText(element(app, "settings.anki.result"), "Collection transfer finished", app, bundle)
             attachSuccess(app, "rf4-account-a-import-finished")
         }
 
@@ -77,24 +77,24 @@ import XCTest
                    "review.session.rate.easy", "review.session.close"] {
             try click(element(app, id), app, bundle)
         }
-        waitForText(element(app, "home.session.recorded"), "1 answers recorded", app)
+        try waitForText(element(app, "home.session.recorded"), "1 answers recorded", app, bundle)
         attachSuccess(app, "rf4-account-a-import-real-review-saved")
         app.terminate()
         app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false).arguments
         app.launch()
-        waitForText(element(app, "home.session.recorded"), "1 answers recorded", app)
+        try waitForText(element(app, "home.session.recorded"), "1 answers recorded", app, bundle)
         attachSuccess(app, "rf4-account-a-review-durable-after-restart")
 
         // A's stored login must load without starting work. The next explicit
         // preparation uses system time and must meet A's existing cooldown.
         try openSettings(app, bundle)
-        waitForText(element(app, "settings.anki.loginIdentity"), importUsername, app)
+        try waitForText(element(app, "settings.anki.loginIdentity"), importUsername, app, bundle)
         waitUntilReady(element(app, "settings.anki.logout"), app)
         XCTAssertFalse(element(app, "settings.anki.username").exists, "Restore A's saved login.")
         XCTAssertFalse(element(app, "settings.anki.confirm").exists, "Loading a login must leave preparation untouched.")
         try click(element(app, "settings.anki.prepareImport"), app, bundle)
         let result = element(app, "settings.anki.result")
-        waitForText(result, "cooling down", app)
+        try waitForText(result, "cooling down", app, bundle)
         XCTAssertTrue(element(app, "settings.anki.nextEligible").waitForExistence(timeout: 5), "Record the deadline returned with the cooldown.")
         waitUntilReady(element(app, "settings.anki.prepareImport"), app)
         for (id, explanation) in [
@@ -121,7 +121,7 @@ import XCTest
         }
         attachSuccess(app, "rf4-account-b-export-backup-preview")
         try confirmNative(app, bundle)
-        waitForText(element(app, "settings.anki.result"), "Collection transfer finished", app)
+        try waitForText(element(app, "settings.anki.result"), "Collection transfer finished", app, bundle)
         attachSuccess(app, "rf4-account-b-export-complete-local-activation")
 
         // Evidence covers two accounts: A is still blocked and B completes.
@@ -155,8 +155,8 @@ import XCTest
         try dismissTransferKeyboardIfPresent(app, bundle)
         #endif
         try click(element(app, "settings.anki.login"), app, bundle)
-        waitForText(element(app, "settings.anki.result"), "Logged in", app)
-        waitForText(element(app, "settings.anki.loginIdentity"), username, app)
+        try waitForText(element(app, "settings.anki.result"), "Logged in", app, bundle)
+        try waitForText(element(app, "settings.anki.loginIdentity"), username, app, bundle)
         waitUntilReady(element(app, "settings.anki.logout"), app)
         XCTAssertFalse(element(app, "settings.anki.confirm").exists, "Login must not prepare or transfer.")
     }
@@ -192,8 +192,9 @@ import XCTest
         #else
         let containers = [app.collectionViews, app.tables, app.scrollViews]
         #endif
-        let scroll = containers.map { $0.containing(.any, identifier: target.identifier).firstMatch }
-            .first(where: { !target.identifier.isEmpty && $0.exists })
+        let targetIdentifier = target.exists ? target.identifier : ""
+        let scroll = containers.map { $0.containing(.any, identifier: targetIdentifier).firstMatch }
+            .first(where: { !targetIdentifier.isEmpty && $0.exists })
             ?? containers.map { $0.firstMatch }.first(where: { $0.exists })
         for _ in 0..<16 {
             if target.exists && target.isHittable { break }
@@ -223,13 +224,13 @@ import XCTest
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in target.exists && target.isHittable }, object: nil)
         let outcome = XCTWaiter().wait(for: [visible], timeout: 30)
         if outcome != .completed { attach(app, "rf4-reveal-failure", target: target, scroll: scroll) }
-        XCTAssertEqual(outcome, .completed, "Element not visible: \(target.identifier)")
+        XCTAssertEqual(outcome, .completed, "Element not visible: \(targetIdentifier)")
     }
     private func waitUntilReady(_ target: XCUIElement, _ app: XCUIApplication) {
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in target.exists && target.isEnabled }, object: nil)
         let outcome = XCTWaiter().wait(for: [ready], timeout: 30)
         if outcome != .completed { attach(app, "rf4-ready-failure", target: target) }
-        XCTAssertEqual(outcome, .completed, "Action unavailable: \(target.identifier)")
+        XCTAssertEqual(outcome, .completed, "Action unavailable: \(target.exists ? target.identifier : "absent")")
     }
     private func replaceText(_ field: XCUIElement, app: XCUIApplication, with value: String) {
         #if os(macOS)
@@ -239,7 +240,9 @@ import XCTest
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: count) + value)
         #endif
     }
-    private func waitForText(_ target: XCUIElement, _ text: String, _ app: XCUIApplication) {
+    private func waitForText(_ target: XCUIElement, _ text: String, _ app: XCUIApplication, _ bundle: String) throws {
+        try app.bringToFront(bundleIdentifier: bundle)
+        try reveal(target, app)
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             target.exists && (target.label + " " + String(describing: target.value ?? "")).contains(text)
         }, object: nil)
@@ -278,7 +281,7 @@ import XCTest
         shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
     private func transferResultCategory(_ target: XCUIElement) -> String {
-        guard target.exists else { return "unknown" }
+        guard target.exists else { return "absent" }
         // Compare whole fixed coordinator messages in memory. Never return AX text.
         for text in [target.label, target.value as? String ?? ""] {
             switch text {
@@ -322,9 +325,8 @@ import XCTest
         }
         var lines = [String]()
         if let target { lines.append(state(target, "target")) }
-        if let target, target.identifier == "settings.anki.result" {
-            lines.append("resultCategory=\(transferResultCategory(target))")
-        }
+        let result = element(app, "settings.anki.result")
+        lines.append("resultCategory=\(transferResultCategory(result))")
         if let scroll { lines.append(state(scroll, "scrollContainer")) }
         #if !os(macOS)
         let keyboard = app.keyboards.firstMatch
@@ -343,7 +345,10 @@ import XCTest
         lines.append("secureTextFieldPresent=\(app.secureTextFields.firstMatch.exists)")
         lines.append("operationProgressPresent=\(element(app, "settings.anki.progress").exists)")
         lines.append("progressIndicatorPresent=\(app.progressIndicators.firstMatch.exists)")
-        lines.append("resultPresent=\(element(app, "settings.anki.result").exists)")
+        lines.append("resultPresent=\(result.exists)")
+        lines.append("loginIdentityPresent=\(element(app, "settings.anki.loginIdentity").exists)")
+        lines.append("usernameFieldPresent=\(element(app, "settings.anki.username").exists)")
+        lines.append("passwordFieldPresent=\(element(app, "settings.anki.password").exists)")
         let report = XCTAttachment(string: lines.joined(separator: "\n"))
         report.name = name; report.lifetime = .keepAlways; add(report)
     }
