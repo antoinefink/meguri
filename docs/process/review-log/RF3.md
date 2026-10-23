@@ -153,3 +153,4 @@
 - iPhone `20261023T043429Z-12984`: FAIL, native audit timeout Code -56 in error/light/AX5. Ready passed. Height deltas are +/-1.1368683772161603e-13pt. No contrast finding. Keep the failed receipt; reduce redundant supplemental audit calls while retaining coverage proof.
 - Independent round 6 on `d9c32b08`: no new P0–P1 findings or deterministic blockers. Privacy `20261023T043417Z-12637`: PASS.
 - Round 6: no new P0–P1. Fixer `s-20261023T044129Z-529508e0`; export `20261023T044151Z-17068`. Supplemental audits require new full frames. Initial audits, paragraph coverage and touch checks retained. Native checks pending.
+- iPhone `20261023T044306Z-18435`: FAIL, Code -56 at the scrolled Prepare control in error/light/AX5. Ready passed. Same timeout after fewer calls; audit type diagnosis pending. Round 6 source follow-up on `457fab46`: no new P0–P1. Privacy `20261023T044254Z-18083`: PASS.
