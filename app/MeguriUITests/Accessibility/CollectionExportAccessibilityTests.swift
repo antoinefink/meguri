@@ -18,7 +18,7 @@ import XCTest
                     if state == "loading" {
                         let progress = app.descendants(matching: .any)["settings.importExport.progress"].firstMatch
                         XCTAssertTrue(progress.exists)
-                        XCTAssertEqual(progress.elementType, .progressIndicator)
+                        XCTAssertEqual(progress.elementType, .activityIndicator)
                         XCTAssertGreaterThanOrEqual(progress.frame.width, 44)
                         XCTAssertGreaterThanOrEqual(progress.frame.height, 44)
                         XCTAssertEqual(progress.label, "Preparing collection export…")
