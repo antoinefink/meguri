@@ -54,7 +54,7 @@ impl Harness {
         &self,
         stub: &SyncStub,
         progress: impl FnMut(&MediaSnapshot, &CancelToken) + Send + 'static,
-    ) -> Result<MediaSyncResult, MediaFailure> {
+    ) -> Result<MediaSyncResult, Box<MediaFailure>> {
         self.run_using(
             common::options(&stub.url()),
             |options, random| Job::new(options, Some(meguri_sync::HostKey::new("synthetic")), random).unwrap(),
@@ -66,7 +66,7 @@ impl Harness {
         options: JobOptions,
         make_job: impl FnOnce(&JobOptions, &dyn RandomSource) -> Job + Send + 'static,
         mut progress: impl FnMut(&MediaSnapshot, &CancelToken) + Send + 'static,
-    ) -> Result<MediaSyncResult, MediaFailure> {
+    ) -> Result<MediaSyncResult, Box<MediaFailure>> {
         let service = self.media.clone();
         let generation = self.collection.generation().0;
         let engine = self.engine.clone();
@@ -924,10 +924,10 @@ impl Drop for FaultGuard {
 fn media_arrivals(events: &meguri_engine::Subscription) -> Vec<Vec<String>> {
     let mut names = Vec::new();
     while let Some(event) = events.try_recv() {
-        if let meguri_engine::EventKind::Extension(extension) = &event.kind {
-            if let Some(arrived) = extension.as_any().downcast_ref::<meguri_engine::media::MediaArrived>() {
-                names.push(arrived.names.clone());
-            }
+        if let meguri_engine::EventKind::Extension(extension) = &event.kind
+            && let Some(arrived) = extension.as_any().downcast_ref::<meguri_engine::media::MediaArrived>()
+        {
+            names.push(arrived.names.clone());
         }
     }
     names

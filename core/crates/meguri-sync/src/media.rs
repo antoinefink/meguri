@@ -115,7 +115,7 @@ pub fn reconcile(
     expected_generation: u64,
     owner: &MediaBaselineOwner,
     progress: &mut dyn FnMut(&MediaSnapshot),
-) -> Result<MediaSyncResult, MediaFailure> {
+) -> Result<MediaSyncResult, Box<MediaFailure>> {
     let cancel = job.cancellation();
     let mut stage = Stage {
         job,
@@ -140,10 +140,10 @@ pub fn reconcile(
     };
     match result {
         Ok(()) => Ok(stage.snapshot.totals),
-        Err(error) => Err(MediaFailure {
+        Err(error) => Err(Box::new(MediaFailure {
             error,
             snapshot: stage.snapshot,
-        }),
+        })),
     }
 }
 
@@ -733,7 +733,7 @@ fn digest(hash: &str) -> Option<[u8; 20]> {
         return None;
     }
     let mut result = [0; 20];
-    for (i, pair) in hash.as_bytes().chunks_exact(2).enumerate() {
+    for (i, pair) in hash.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let digit = |b: u8| if b.is_ascii_digit() { b - b'0' } else { b - b'a' + 10 };
         result[i] = digit(pair[0]) * 16 + digit(pair[1]);
     }
