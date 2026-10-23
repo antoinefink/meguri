@@ -43,6 +43,7 @@
 - ReviewCollection owns the entry coordinator and retained-host completion above the shell switch. Ready/CollectionReplaced can precede FFI host retention; defer policy/count/media refresh until completion.
 - Source scope and synchronous NSFileCoordinator access live on CoordinatedSourceOwner’s GCD worker until Rust terminal delivery, including cancellation and tracking failure. Only Rust copies/inspects packages and creates preflighted backup parents.
 - CollectionEntryJourneyTests uses public app/Fixtures/CollectionEntry inputs and the real system picker. ImportSource installs only its dedicated Documents source; it never imports or selects a route.
+- Files replacement belongs to SpringBoard on iOS; tap its exact Replace button without activating Meguri. Wait for enabled, hittable app actions after native completion.
 
 ## Test hooks
 
