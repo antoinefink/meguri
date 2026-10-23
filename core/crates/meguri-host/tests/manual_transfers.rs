@@ -346,9 +346,9 @@ fn rf4_export_preserves_zero_card_nondefault_server_copy_then_activates_exact_up
         .unwrap();
     assert_eq!(evidence.candidate_file.sha256, expected);
     let facts = current_facts(&host);
-    assert_eq!(facts.modified.0, NOW);
-    assert_eq!(facts.schema_modified.0, NOW);
-    assert_eq!(facts.last_sync.0, NOW);
+    assert_eq!(facts.stamps.modified.0, NOW);
+    assert_eq!(facts.stamps.schema_modified.0, NOW);
+    assert_eq!(facts.stamps.last_sync.0, NOW);
     host.collection()
         .unwrap()
         .run(
@@ -385,7 +385,7 @@ fn rf4_export_preserves_zero_card_nondefault_server_copy_then_activates_exact_up
     drop(slot);
     let c = host.collection().unwrap();
     let r = c.reader(ReaderRole::Sync).unwrap();
-    assert_eq!(r.transfer_facts().unwrap().reviews, 1);
+    assert_eq!(r.transfer_facts().unwrap().totals.reviews, 1);
     assert!(r.config_entry("RF4-server-nondefault").unwrap().is_some());
     drop(r);
     host.close().unwrap();
@@ -432,7 +432,7 @@ fn rf4_import_backups_persisted_reviews_and_creates_fresh_pending_cloud_generati
     let now = DeviceState::for_collection(c.path()).publication().unwrap().unwrap();
     assert_ne!(now.identity, prior.identity);
     assert_eq!(now.decision, PublicationDecision::Pending);
-    assert_eq!(current_facts(&host).last_sync.0, NOW - 1000);
+    assert_eq!(current_facts(&host).stamps.last_sync.0, NOW - 1000);
     assert!(matches!(
         c.reader(ReaderRole::Query),
         Err(meguri_engine::EngineError::StaleGeneration { .. })

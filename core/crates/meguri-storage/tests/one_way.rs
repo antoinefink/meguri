@@ -16,7 +16,9 @@ use meguri_model::{
 };
 use meguri_storage::{
     OpenOptions, OpenedCollection, ReadRows, ReaderRole, StampMode, StorageError,
-    one_way::{LocalTransferFacts, PendingRows},
+    one_way::{
+        CollectionStamps, CollectionTotals, LocalTransferFacts, PendingContent, PendingDefinitions, PendingRows,
+    },
     open_collection,
     verified_replace::{self, ReplaceError, ReplacementStage},
 };
@@ -94,21 +96,26 @@ fn seed(collection: &OpenedCollection) {
 
 fn seeded_facts() -> LocalTransferFacts {
     LocalTransferFacts {
-        modified: EpochMillis(3000),
-        schema_modified: EpochMillis(2000),
-        last_sync: EpochMillis(1000),
-        usn: Usn(4),
-        cards: 4,
-        notes: 4,
-        reviews: 4,
+        stamps: CollectionStamps {
+            modified: EpochMillis(3000),
+            schema_modified: EpochMillis(2000),
+            last_sync: EpochMillis(1000),
+            usn: Usn(4),
+        },
+        totals: CollectionTotals {
+            cards: 4,
+            notes: 4,
+            reviews: 4,
+        },
         pending_reviews: 1,
         pending_rows: PendingRows {
-            notes: 1,
-            cards: 1,
-            decks: 1,
-            deck_config: 1,
-            notetypes: 1,
-            tags: 1,
+            content: PendingContent { notes: 1, cards: 1 },
+            definitions: PendingDefinitions {
+                decks: 1,
+                deck_config: 1,
+                notetypes: 1,
+                tags: 1,
+            },
             config: 1,
             graves: 1,
         },
@@ -123,7 +130,12 @@ fn facts_count_without_writes_and_preserve_the_callers_snapshot() {
     let reader = collection.open_reader(ReaderRole::Sync).unwrap();
     let empty = reader.transfer_facts().unwrap();
     assert_eq!(
-        (empty.cards, empty.notes, empty.reviews, empty.pending_reviews),
+        (
+            empty.totals.cards,
+            empty.totals.notes,
+            empty.totals.reviews,
+            empty.pending_reviews
+        ),
         (0, 0, 0, 0)
     );
     assert_eq!(empty.pending_rows, PendingRows::default());
@@ -162,11 +174,19 @@ fn facts_count_without_writes_and_preserve_the_callers_snapshot() {
     let fresh = reader.transfer_facts().unwrap();
     assert!(fresh.has_cards());
     assert_eq!(
-        (fresh.cards, fresh.notes, fresh.reviews, fresh.pending_reviews),
+        (
+            fresh.totals.cards,
+            fresh.totals.notes,
+            fresh.totals.reviews,
+            fresh.pending_reviews
+        ),
         (5, 5, 5, 2)
     );
-    assert_eq!((fresh.pending_rows.cards, fresh.pending_rows.notes), (2, 2));
-    assert_eq!(fresh.modified, EpochMillis(common::NOW_MS));
+    assert_eq!(
+        (fresh.pending_rows.content.cards, fresh.pending_rows.content.notes),
+        (2, 2)
+    );
+    assert_eq!(fresh.stamps.modified, EpochMillis(common::NOW_MS));
     assert_eq!(fresh.last_review, Some(EpochMillis(common::NOW_MS)));
     // A facts read outside a transaction leaves none behind either.
     drop(reader.begin_snapshot().unwrap());
@@ -218,7 +238,7 @@ fn upload_transforms_only_the_copy_includes_wal_and_finalises_transformed_statis
     assert_eq!(fs::read(&path).unwrap(), before);
     assert_eq!(fs::read(&wal_path).unwrap(), wal);
     assert_eq!(fs::read(directory.path().join("meguri-sidecar.json")).unwrap(), sidecar);
-    assert_eq!(pinned.transfer_facts().unwrap().cards, 0);
+    assert_eq!(pinned.transfer_facts().unwrap().totals.cards, 0);
     assert_eq!(sync_reader.transfer_facts().unwrap(), seeded_facts());
     assert_eq!(&fs::read(stage.path()).unwrap()[18..20], &[1, 1]);
     assert_eq!(listing(stage.directory()), ["collection.anki2".to_owned()].into());

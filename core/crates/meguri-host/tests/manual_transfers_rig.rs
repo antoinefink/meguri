@@ -108,7 +108,14 @@ fn rig_rf4_collection_export_import_server_copy_restore_and_declared_transforms(
         },
     )
     .unwrap();
-    let original_usn = c.reader(ReaderRole::Sync).unwrap().transfer_facts().unwrap().usn.0;
+    let original_usn = c
+        .reader(ReaderRole::Sync)
+        .unwrap()
+        .transfer_facts()
+        .unwrap()
+        .stamps
+        .usn
+        .0;
     let access = || TransferAccess::new(endpoint.clone(), &rig.user, key.clone(), rig.options()).unwrap();
     let events = host.engine().stream().subscribe();
     let task = host
@@ -142,10 +149,14 @@ fn rig_rf4_collection_export_import_server_copy_restore_and_declared_transforms(
         .transfer_facts()
         .unwrap();
     assert_eq!(
-        (facts.modified.0, facts.schema_modified.0, facts.last_sync.0),
+        (
+            facts.stamps.modified.0,
+            facts.stamps.schema_modified.0,
+            facts.stamps.last_sync.0
+        ),
         (now, now, now)
     );
-    assert_eq!(facts.usn.0, original_usn + 1);
+    assert_eq!(facts.stamps.usn.0, original_usn + 1);
     assert_eq!(facts.pending_reviews, 0);
     assert_eq!(facts.pending_rows.graves, 0);
     // Independent installation: the successful Export's shared cooldown is
@@ -172,12 +183,12 @@ fn rig_rf4_collection_export_import_server_copy_restore_and_declared_transforms(
     let imported = downloader.collection().unwrap();
     let reader = imported.reader(ReaderRole::Sync).unwrap();
     let facts = reader.transfer_facts().unwrap();
-    assert_eq!(facts.reviews, 1);
+    assert_eq!(facts.totals.reviews, 1);
     assert_eq!(facts.pending_reviews, 0);
     assert_eq!(facts.pending_rows.graves, 0);
-    assert_eq!(facts.schema_modified.0, now);
-    assert_eq!(facts.last_sync, facts.modified);
-    assert_eq!(facts.usn.0, original_usn + 2);
+    assert_eq!(facts.stamps.schema_modified.0, now);
+    assert_eq!(facts.stamps.last_sync, facts.stamps.modified);
+    assert_eq!(facts.stamps.usn.0, original_usn + 2);
     let config = reader.config_entry("RF4-rig-pending-config").unwrap().unwrap();
     assert_eq!(config.entry.usn, Usn(-1));
     assert_eq!(config.entry.mtime, EpochSecs(1234));
@@ -220,6 +231,9 @@ fn rig_rf4_collection_export_import_server_copy_restore_and_declared_transforms(
         .unwrap()
         .transfer_facts()
         .unwrap();
-    assert_eq!((facts.cards, facts.notes, facts.reviews), saved_counts);
+    assert_eq!(
+        (facts.totals.cards, facts.totals.notes, facts.totals.reviews),
+        saved_counts
+    );
     host.close().unwrap();
 }

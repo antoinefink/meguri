@@ -21,14 +21,43 @@ use crate::{
 /// not distinct objects or changes since a local admission sequence.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PendingRows {
+    pub content: PendingContent,
+    pub definitions: PendingDefinitions,
+    pub config: u64,
+    pub graves: u64,
+}
+
+/// Study content includes reviewed cards whose row is still pending.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PendingContent {
     pub notes: u64,
     pub cards: u64,
+}
+
+/// Pending row counts for decks, deck options, note types, and tags.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PendingDefinitions {
     pub decks: u64,
     pub deck_config: u64,
     pub notetypes: u64,
     pub tags: u64,
-    pub config: u64,
-    pub graves: u64,
+}
+
+/// Collection-wide sync stamps, read alongside the O3 row counts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CollectionStamps {
+    pub modified: EpochMillis,
+    pub schema_modified: EpochMillis,
+    pub last_sync: EpochMillis,
+    pub usn: Usn,
+}
+
+/// All rows, regardless of their pending state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CollectionTotals {
+    pub cards: u64,
+    pub notes: u64,
+    pub reviews: u64,
 }
 
 /// Local SQLite facts only. The engine/policy caller supplies remote facts,
@@ -36,13 +65,8 @@ pub struct PendingRows {
 /// timestamps and USNs cannot establish those guards or transfer eligibility.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LocalTransferFacts {
-    pub modified: EpochMillis,
-    pub schema_modified: EpochMillis,
-    pub last_sync: EpochMillis,
-    pub usn: Usn,
-    pub cards: u64,
-    pub notes: u64,
-    pub reviews: u64,
+    pub stamps: CollectionStamps,
+    pub totals: CollectionTotals,
     pub pending_reviews: u64,
     pub pending_rows: PendingRows,
     pub last_review: Option<EpochMillis>,
@@ -50,7 +74,7 @@ pub struct LocalTransferFacts {
 
 impl LocalTransferFacts {
     pub fn has_cards(&self) -> bool {
-        self.cards != 0
+        self.totals.cards != 0
     }
 }
 
@@ -140,21 +164,29 @@ fn facts(conn: &rusqlite::Connection) -> Result<LocalTransferFacts, StorageError
                 u64::try_from(count).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(index, count))
             };
             Ok(LocalTransferFacts {
-                modified: EpochMillis(row.get(0)?),
-                schema_modified: EpochMillis(row.get(1)?),
-                last_sync: EpochMillis(row.get(2)?),
-                usn: Usn(row.get(3)?),
-                cards: count(4)?,
-                notes: count(5)?,
-                reviews: count(6)?,
+                stamps: CollectionStamps {
+                    modified: EpochMillis(row.get(0)?),
+                    schema_modified: EpochMillis(row.get(1)?),
+                    last_sync: EpochMillis(row.get(2)?),
+                    usn: Usn(row.get(3)?),
+                },
+                totals: CollectionTotals {
+                    cards: count(4)?,
+                    notes: count(5)?,
+                    reviews: count(6)?,
+                },
                 pending_reviews: count(7)?,
                 pending_rows: PendingRows {
-                    notes: count(8)?,
-                    cards: count(9)?,
-                    decks: count(10)?,
-                    deck_config: count(11)?,
-                    notetypes: count(12)?,
-                    tags: count(13)?,
+                    content: PendingContent {
+                        notes: count(8)?,
+                        cards: count(9)?,
+                    },
+                    definitions: PendingDefinitions {
+                        decks: count(10)?,
+                        deck_config: count(11)?,
+                        notetypes: count(12)?,
+                        tags: count(13)?,
+                    },
                     config: count(14)?,
                     graves: count(15)?,
                 },
@@ -256,7 +288,7 @@ pub fn verify_prepared_upload(stage: &ReplacementStage, live: &std::path::Path) 
         return Err(ReplaceError::StagingNotFinalised);
     }
     let facts = verify_server_copy(&stage.path())?.ok_or(ReplaceError::StagingNotFinalised)?;
-    if facts.modified != facts.schema_modified || facts.modified != facts.last_sync {
+    if facts.stamps.modified != facts.stamps.schema_modified || facts.stamps.modified != facts.stamps.last_sync {
         return Err(ReplaceError::StagingNotFinalised);
     }
     Ok(())

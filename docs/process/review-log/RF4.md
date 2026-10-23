@@ -9,7 +9,7 @@ Full first-version media support remains required. Parent units stay open.
 Reuse: U105/U106 code, prepared U109 contracts, existing backup and replacement.
 Requirements: R118–R121, R126, R1548, R2060–R2064.
 
-RF3 full gate: pending host setup. RF4 acceptance: pending.
+RF3 full gate: required; host setup is clear. RF4 acceptance: pending.
 
 ## Contracts and engine prerequisite
 
@@ -142,6 +142,35 @@ private field access in the new test helper. Similarity
 `20261023T110927Z-17760` flagged the facts record at storage/one_way.rs25–44.
 Rewrite that owned record from the spec and fix test access through the public
 API; no scanner or guard exception. Runtime and full gate acceptance stay open.
+
+Round 5 found no new P0–P1 issues in the grouped facts and endpoint helper.
+Focused result `20261023T111820Z-23403`: 51 passed, five subprocess helpers
+ignored for direct runs. Similarity `20261023T111823Z-23655` passed. Privacy
+`20261023T111826Z-23906` reports one new documentation paragraph for rewriting.
+Lint `20261023T112157Z-26779` passed.
+
+Live rig result `20261023T112131Z-25947`: the real host collection transfer
+case passed, as did all four routing cases and three other rig cases. Two
+metadata stability tests failed while the host test changed their shared
+server account. Preserve those assertions and isolate the rig tests. Earlier
+attempt `20261023T112116Z-25500` could not reach Docker from the command sandbox;
+the authorized host invocation reached OrbStack. No product endpoint rule was
+changed. Doctor `20261023T112144Z-26269` reports no required setup step missing.
+Free disk space exceeds 250 GB after Antoine removed his backup snapshot.
+
+The final check repair reuses fixer session `s-20261023T111328Z-4f11cfe5`
+with the owned seven-file patch supplied as a seed. It rewrites the new comment
+and serializes shared rig tests. The source remains unaccepted until the new
+checks and required full gate finish.
+
+Final repair `20261023T112248Z-27305` applied. Round 6 found no new P0–P1
+issues. The final source change is the comment and a shared-resource test
+override; production behavior and test assertions are unchanged. Privacy
+`20261023T112439Z-28457` passed. Live local-server result
+`20261023T112440Z-28672`: all 11 selected cases passed, including the host
+round trip, existing status/login cases and four routing cases. Other tests
+were outside this focused selection. The earlier failed receipts are retained.
+Final similarity `20261023T112453Z-29141` passed.
 
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,

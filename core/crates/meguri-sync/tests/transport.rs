@@ -1466,11 +1466,9 @@ fn local_rig_route_pins_loopback_under_a_reserved_name() {
     let server = SyncStub::serve(|_| Reply::ok(b"{}"));
     let (options, route) = common::rig_route(server.addr());
     assert!(route.is_none());
-    assert_eq!(options.base.as_str(), server.url_for("sync-rig.test"));
-    assert_eq!(
-        request(&mut new_job(&options), Method::Meta, Payload::empty()).unwrap(),
-        b"{}"
-    );
+    let mut job = new_job(&options);
+    assert_eq!(job.base().as_str(), server.url_for("sync-rig.test"));
+    assert_eq!(request(&mut job, Method::Meta, Payload::empty()).unwrap(), b"{}");
     assert_eq!(paths(&server.requests()), ["/sync/meta"]);
 }
 
@@ -1481,14 +1479,12 @@ fn local_rig_route_keeps_recording_clients_on_the_explicit_upstream() {
     assert!(route.is_none());
     let proxy = common::rig_proxy(server.addr());
     let options = options.proxy(Proxy::new(proxy.url()));
-    assert_eq!(
-        request(&mut new_job(&options), Method::Meta, Payload::empty()).unwrap(),
-        b"{}"
-    );
+    let mut job = new_job(&options);
+    assert_eq!(request(&mut job, Method::Meta, Payload::empty()).unwrap(), b"{}");
     assert_eq!(paths(&server.requests()), ["/sync/meta"]);
     let sent = proxy.requests();
     assert_eq!(paths(&sent), ["/sync/meta"]);
-    assert_eq!(sent[0].head.target, format!("{}sync/meta", options.base.as_str()));
+    assert_eq!(sent[0].head.target, format!("{}sync/meta", job.base().as_str()));
 }
 
 #[test]
@@ -1497,9 +1493,9 @@ fn local_rig_route_handles_the_orbstack_gateway_without_relaxing_the_guard() {
     assert!(meguri_sync::endpoint_guard::check_endpoint("http://0.250.250.254:27701/").is_err());
     let (options, route) = common::rig_route(host);
     let proxy = route.expect("the synthetic gateway needs an explicit local proxy route");
-    assert_eq!(options.base.as_str(), "http://sync-rig.test:27701/");
     // Client construction checks pins/proxy without connecting to the rig.
-    let _job = new_job(&options);
+    let job = new_job(&options);
+    assert_eq!(job.base().as_str(), "http://sync-rig.test:27701/");
     assert!(proxy.requests().is_empty());
 }
 

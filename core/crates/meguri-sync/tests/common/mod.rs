@@ -128,10 +128,14 @@ impl Rig {
 
 const RIG_HOST: &str = "sync-rig.test";
 
+fn rig_endpoint(host: SocketAddr) -> Endpoint {
+    base(&format!("http://{RIG_HOST}:{}/", host.port()))
+}
+
 /// Only the address resolved locally for Docker's host (or native loopback)
 /// reaches here. Never put OrbStack's synthetic address in a guarded URL/pin.
 pub fn rig_route(host: SocketAddr) -> (JobOptions, Option<SyncStub>) {
-    let options = options(&format!("http://{RIG_HOST}:{}/", host.port()));
+    let options = JobOptions::new(rig_endpoint(host), ServerKind::SelfHosted);
     if meguri_sync::endpoint_guard::check_endpoint(&format!("http://{host}/")).is_ok() {
         return (options.pin_host(RIG_HOST, host), None);
     }
@@ -205,7 +209,7 @@ pub fn rig() -> Rig {
         .unwrap_or_else(|| std::net::SocketAddr::from(([127, 0, 0, 1], port)));
     let (options, route) = rig_route(host);
     Rig {
-        base: options.base.as_str().to_owned(),
+        base: rig_endpoint(host).as_str().to_owned(),
         user,
         password: password.expect("the rig's env files hold the user's password"),
         host,

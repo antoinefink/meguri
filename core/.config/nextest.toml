@@ -1,5 +1,11 @@
 # cargo-nextest configuration (tools/mg core-test).
 
+# Local-server rig tests share an account and read or change its metadata.
+# Run each alone across both packages when explicitly selected.
+[[profile.default.overrides]]
+filter = '(package(meguri-sync) or package(meguri-host)) and test(/^rig_/)'
+threads-required = "num-test-threads"
+
 [[profile.default.overrides]]
 filter = 'package(meguri-storage) and test(=media_unchanged_folder_at_30000_files_does_not_enumerate_or_hash)'
 threads-required = "num-test-threads"
