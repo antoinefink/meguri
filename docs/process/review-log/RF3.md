@@ -168,3 +168,4 @@
 - Doctor `20261023T052133Z-48396`: PASS, 48 GiB free. Catch-up `20261023T052134Z-48660`: PASS, nothing queued.
 - Gate `20261023T052151Z-49236`: CANCELLED after core-lint FAIL. Test lines 1177, 1238, 1280 need lint fixes. Static, pins, canaries and core-deny PASS. Core tests cancelled. Full gate pending.
 - Fixer `s-20261023T052622Z-323314c8`; export `20261023T052647Z-66016`: three test let-chains. Assertions and event filters retained. Focused checks pending; run the full gate before refreshing critic inputs.
+- Round 6 on `999a5e28`: no new P0–P1 or blockers. Privacy `20261023T052733Z-66996`: PASS. Core lint `20261023T052747Z-67411`: PASS. Focused Rust export `20261023T052821Z-67938`: PASS, 19 selected tests. No production change.
