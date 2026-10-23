@@ -484,3 +484,23 @@ startup shows the production Settings row and its expected identifier.
 There is no demonstrated Settings omission or fixture-install failure.
 Final native UI review remains round 6; platform journeys and the combined
 gate remain open.
+
+Activation fix `20261023T181115Z-43521` starts at `e283b751` and moves
+Mac activation before control waits/scrolling. iOS focus calls remain no-ops.
+Privacy passed. Native run `20261023T181302Z-45345` reached Import
+preparation, then failed on the missing confirmation control. Its cause
+remains open; no complete transfer or peer match is claimed.
+
+Local file-entry test `20261023T182902Z-53059` passed one case: the real
+Mac picker imported a generated package, saved a review and preserved it
+across restart. Local review suite `20261023T183147Z-55102` passed two
+cases and failed the native keyboard/Back case on AX permission, with
+`trusted=false` and `AXReadError(-25211)`. The passing cases cover ratings,
+undo, wait, exhaustion and restart. Runner setup `20261023T183658Z-57749`
+failed to restore trust. The old grant for this exact runner was reset in
+the VM before a new setup attempt. Product review behavior is not changed
+by that setup action. Final native UI review is still round 6 and pending.
+
+VM policy metadata could not be read over SSH, including an admin attempt;
+the OS returned PermissionError. Its content was not printed. Remote app
+capture prerequisites and the Import preparation result remain unresolved.

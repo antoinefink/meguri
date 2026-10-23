@@ -147,9 +147,9 @@ import XCTest
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
     private func click(_ target: XCUIElement, _ app: XCUIApplication, _ bundle: String) throws {
+        try app.bringToFront(bundleIdentifier: bundle)
         try reveal(target, app)
         waitUntilReady(target, app)
-        try app.bringToFront(bundleIdentifier: bundle)
         #if os(macOS)
         target.click()
         #else
@@ -223,6 +223,7 @@ import XCTest
         try openSection(app, bundle, name: "home", title: "Decks")
     }
     private func openSection(_ app: XCUIApplication, _ bundle: String, name: String, title: String) throws {
+        try app.bringToFront(bundleIdentifier: bundle)
         let tab = name == "home" ? "decks" : name
         let match = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["shell.root.tab.\(tab)", "shell.root.sidebar.\(name)"])).firstMatch
         if match.waitForExistence(timeout: 5), match.isHittable { try click(match, app, bundle) }
