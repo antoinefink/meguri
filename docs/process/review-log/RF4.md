@@ -621,3 +621,34 @@ attachment reports `resultCategory=logged-in`; the next saved-login row was
 absent above the viewport. It confirms the down-only lazy-row search limitation,
 not an authentication defect. A bounded two-direction search is in preparation.
 No Import/Export or peer-comparison pass is claimed.
+
+The prepared wire patch `20261023T181204Z-44271` compiled locally. Focused
+Docker run `20261023T195937Z-23275` passed all 17 tests, with no skips,
+including streaming heap bounds, cancellation, corrupt ZIPs and send drain.
+Formatting passed. Lint `20261023T200228Z-25600` failed only on one nested
+if in the shared test helper, reported through two targets. The formatted
+nine-file draft is preserved outside master as a patch with SHA-256
+`0ef26dd052df6de756a8240cb9ff43db15ab968b7670ae488d204df145e93727`.
+It was removed from the checkout after testing. Privacy approval remains
+pending; no wire code or guard exception was committed.
+
+Storage draft `20261023T193933Z-6158` has base `bbf45f6e`. Review round 1
+reported two P2 findings: disk payloads survive a crash, and file hashing holds
+the journal mutex needed for card-media lookup. Its 17 checks await the fixed
+export. The component stays unaccepted.
+
+Spec-writer session `s-20261023T200204Z-089c9b2b`, ledger `21ed1c8f`,
+clarifies two technical defaults in `c4cb3a4f`. Zero-byte downloaded members
+reject the whole answer as `downloadFiles` bad response before publication.
+An existing exact-spelling regular file takes precedence over other spellings;
+those other files and journal entries stay intact. Privacy
+`20261023T200624Z-27919` passed. Parent units remain open.
+
+FDA action `20261023T195539Z-20344` stopped at OS authorization after its
+single switch click. It entered no credentials. Its deferred evidence did
+not run after the XCTest failure. The marker was removed. Auth draft
+`20261023T195907Z-22763` is unapplied: final OS-setup review round 6 found
+one P1, because resumed auth was not bound to the underlying Remote Login
+Info state. Its scoped correction is in progress. No credential input is
+authorized by the tool implementation until that finding is resolved and
+checked; Antoine's standing VM permission is retained.
