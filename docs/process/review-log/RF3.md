@@ -111,3 +111,5 @@
 - Mac snapshot verification `20261023T025953Z-29597`: pass, 48 comparisons; 312 cells outside the focused filter remain deferred.
 - iPhone `20261023T025315Z-23574`: failed in the test observer before Back navigation. Indexed navigation bars changed while Files settled. No cancellation result is claimed.
 - Fixer `s-20261023T025922Z-be2bb59e`, cleanroom `20261023T025932Z-29106`: uses direct native controls and bounded observed Back transitions. No production change. Actual Files cancellation, Save, Replace and reimport checks remain required.
+- Independent round 6 test follow-up on `05931fb9`: no new P0–P1 findings or deterministic blockers.
+- iPhone `20261023T030509Z-33509`: actual Back navigation and Cancel passed; native delegate returned Ready. The test failed after reopening Files for Save when an indexed folder query lost its remote element. Save and replacement remain pending.
