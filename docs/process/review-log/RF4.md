@@ -607,3 +607,17 @@ rendered-image review found no visible P0–P2 issues in dark, high-contrast
 XXXLarge. Error details and progress are below the captured first viewport,
 so these images alone do not prove those indicators. Existing approved images
 were not overwritten. A fresh selected comparison is still required.
+
+FDA helper `20261023T193851Z-3052` starts at `bbf45f6e`. OS-setup review
+round 5 found no new P0–P1 findings. The helper targets only the exact observed
+FDA row, verifies Remote Login and allowed users, permits one enabling click,
+and refuses unknown authorization. It reads no credentials. Comment-only
+export `20261023T194905Z-14865` removes the two-line flagged comment; the
+remaining patch is identical. Actual scan `20261023T195528Z-20027` passed.
+The opt-in action is running; no successful setting change is claimed yet.
+
+iPhone `20261023T194914Z-15207` failed after Login succeeded. The safe
+attachment reports `resultCategory=logged-in`; the next saved-login row was
+absent above the viewport. It confirms the down-only lazy-row search limitation,
+not an authentication defect. A bounded two-direction search is in preparation.
+No Import/Export or peer-comparison pass is claimed.
