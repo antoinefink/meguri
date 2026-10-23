@@ -100,3 +100,4 @@
 - Mac accessibility `20261023T022820Z-1981`: failed on the indeterminate spinner role expectation. Cleanroom `20261023T023039Z-5686` changed that single assertion to activityIndicator. Labels, target sizes and system audits remain required; the fresh result is pending.
 - iPhone `20261023T022952Z-3748`: Cancel existed but readiness failed. Cleanroom `20261023T023520Z-9657` adds post-wait picker capture and native control attributes. This is diagnosis; no Files pass is claimed.
 - Mac accessibility `20261023T023306Z-7416`: spinner checks passed; system audit reports contrast for sidebar No decks in all six export cells. This finding remains open.
+- Cleanroom `20261023T023805Z-12686`: sidebar No decks now uses textPrimary. Native contrast verification is pending; no audit exception or token change was added.
