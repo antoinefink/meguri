@@ -8,6 +8,12 @@ TEST_TARGET_NAME = Meguri
 GENERATE_INFOPLIST_FILE = YES
 INFOPLIST_FILE = MeguriUITests/Info.plist
 
+// The nonshipping Mac UI runner has no provisioning profile for the app-ID
+// entitlement added by team signing; keep its existing ad-hoc path.
+CODE_SIGN_STYLE[sdk=macosx*] = Manual
+CODE_SIGN_IDENTITY[sdk=macosx*] = -
+DEVELOPMENT_TEAM[sdk=macosx*] =
+
 // Read the declared app subtree; prepare artifacts in target-owned temp space.
 USE_RECURSIVE_SCRIPT_INPUTS_IN_SCRIPT_PHASES = YES
 // Only device tests copy the prepared folder through the Resources phase.

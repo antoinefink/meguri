@@ -398,3 +398,16 @@ and similarity `20261023T160544Z-92858` passed.
 `20261023T155447Z-81428`: Mac UI did not run; cleanup passed.
 The VM rejected the runner's signing identity: its app identifier has no
 profile. The app's own profile is valid for both Macs. No peer proof ran.
+
+Filtered runner fix `20261023T160922Z-95060` keeps Mac UI tests ad hoc in
+their own target. Review found no new P0–P1 issues; privacy
+`20261023T161422Z-98692` and build `20261023T161419Z-97941` passed.
+Signed products confirm the app retains its team profile and private group;
+the UI runner has no team and its app identifier has no team prefix.
+
+App-hosted run `20261023T160407Z-90264` and runner smoke
+`20261023T161656Z-419` both failed before any test case ran. A one-second VM
+sample found the UI runner waiting in `_libsecinit_appsandbox`, before main.
+No recent Meguri crash report was found. After both jobs and their VM test
+processes ended, the dedicated VM was restarted headlessly under Antoine's
+existing permission. The original failed receipts remain; runtime proof is open.

@@ -61,6 +61,7 @@
 ## Signing and entitlements
 
 - `MEGURI_SIGNING` in `Config/Signing.xcconfig`: `adhoc` until the `xcode-account` user step, then `team`.
+- Mac UI-test runners stay ad hoc via `Config/MeguriUITests.xcconfig`, even with `MEGURI_SIGNING=team`: they have no runner profile. Keep these overrides Mac-only and scoped to the UI-test target.
 - Mac entitlements are `Meguri-macOS[-Dev][-AdHoc].entitlements`: `-Dev` (hook builds) adds read-only access to the checkout, `-AdHoc` drops the App Group. Only team app variants have the private Keychain group `$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)`; ad-hoc and widget variants do not. Keep the other shared keys identical in all four. R2041/KTD22: capabilities are sandbox, network client and server, user-selected files and app-scope bookmarks, plus the App Group when signed and the team's private app Keychain group.
 
 ## Tests
