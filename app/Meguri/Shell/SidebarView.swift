@@ -15,16 +15,24 @@ struct SidebarView: View {
         })) {
             Section {
                 ForEach(features.availableSections, id: \.self) { section in
-                    Label {
-                        // Rows grow with the text size rather than cut it.
-                        Text(section.title)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("shell.root.sidebar.\(section.rawValue)")
-                    } icon: {
-                        // The title names the row; the symbol is decoration.
-                        Image(systemName: section.systemImage)
-                            .accessibilityHidden(true)
+                    Button {
+                        navigation.select(.section(section))
+                    } label: {
+                        Label {
+                            // Rows grow with the text size rather than cut it.
+                            Text(section.title)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            // The title names the row; the symbol is decoration.
+                            Image(systemName: section.systemImage)
+                                .accessibilityHidden(true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("shell.root.sidebar.\(section.rawValue)")
+                    .accessibilityAddTraits(navigation.sidebarSelection == .section(section) ? .isSelected : [])
                     .tag(SidebarItem.section(section))
                 }
             }

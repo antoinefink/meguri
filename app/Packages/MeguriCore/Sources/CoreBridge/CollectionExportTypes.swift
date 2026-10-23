@@ -20,6 +20,9 @@ public struct CollectionExportFailure: Error, Sendable, Equatable {
     public let cause: BridgeError
     public let publicationUncertain: Bool
     public let destination: URL?
+    init(cause: BridgeError, destination: URL) {
+        self.cause = cause; publicationUncertain = false; self.destination = destination
+    }
     init(_ raw: MeguriCoreBindings.CollectionExportFailure) {
         cause = BridgeError(raw.cause); publicationUncertain = raw.publicationUncertain
         destination = raw.destination.map { URL(fileURLWithPath: $0) }

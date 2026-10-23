@@ -9,6 +9,7 @@ public protocol CollectionExportService: Sendable {
 }
 public final class CoreCollectionExportService: CollectionExportService, Sendable {
     private let destination: CoordinatedExportDestination
+    private let publisher = StagedCollectionExportDestination()
     public init(destination: CoordinatedExportDestination = CoordinatedExportDestination()) { self.destination = destination }
     public func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
         try await CoreEventStream.shared.start()
@@ -48,20 +49,26 @@ public final class CoreCollectionExportService: CollectionExportService, Sendabl
         try await withTaskCancellationHandler {
             try await destination.withDestination(url) { coordinatedURL in
                 try operation.check()
-                let started = try await MaintenanceLane.shared.call(.startCollectionExportSave) {
-                    try startCollectionExportSave(artifact: artifact.raw, destination: coordinatedURL.path)
-                }
-                do throws(BridgeError) {
-                    let job = try await Jobs.trackDraining(started.job)
-                    await operation.attach(job)
-                    _ = await job.outcome()
-                } catch {
-                    // The owned result remains authoritative after setup failure.
-                }
-                switch try await MaintenanceLane.shared.call(.collectionExportSaveResultOutcome, { try started.result.outcome() }) {
-                case .saved: return // publication wins cancellation/setup races
-                case .failed(let failure): throw CollectionExportFailure(failure)
-                case .pending: throw BridgeError.internal("Save pending after terminal delivery")
+                try await self.publisher.save(to: coordinatedURL, operation: operation) { stagedURL in
+                    let started = try await MaintenanceLane.shared.call(.startCollectionExportSave) {
+                        try startCollectionExportSave(artifact: artifact.raw, destination: stagedURL.path,
+                                                      finalValidationDestination: coordinatedURL.path)
+                    }
+                    do throws(BridgeError) {
+                        let job = try await Jobs.trackDraining(started.job)
+                        await operation.attach(job)
+                        _ = await job.outcome()
+                    } catch {
+                        // The owned result remains authoritative after setup failure.
+                    }
+                    switch try await MaintenanceLane.shared.call(.collectionExportSaveResultOutcome, { try started.result.outcome() }) {
+                    case .saved: return // Only the staged copy is complete here.
+                    case .failed(let failure):
+                        // Rust never published the native destination. Even a failed
+                        // stage-directory sync is a prepublication destination failure.
+                        throw CollectionExportFailure(cause: BridgeError(failure.cause), destination: coordinatedURL)
+                    case .pending: throw BridgeError.internal("Save pending after terminal delivery")
+                    }
                 }
             }
         } onCancel: { Task { await operation.cancel() } }
@@ -106,7 +113,7 @@ public final class CoordinatedExportDestination: Sendable {
                     continuation.resume(with: result.value.withLock { $0 } ?? .failure(BridgeError.unavailable(reason: "Destination accessor did not run")))
                 } catch {
                     switch result.value.withLock({ $0 }) {
-                    case .success?: continuation.resume(throwing: ExportDestinationCompletionUncertain())
+                    case .success?: continuation.resume(throwing: ExportDestinationCompletionUncertain(underlyingError: error))
                     case .failure(let ioError)?: continuation.resume(throwing: ioError)
                     case nil: continuation.resume(throwing: error)
                     }
@@ -115,4 +122,11 @@ public final class CoordinatedExportDestination: Sendable {
         }
     }
 }
-public struct ExportDestinationCompletionUncertain: Error, Sendable { public init() {} }
+public struct ExportDestinationCompletionUncertain: Error, Sendable {
+    public let destination: URL?
+    public let recoveryDirectory: URL?
+    public let underlyingError: (any Error)?
+    public init(destination: URL? = nil, recoveryDirectory: URL? = nil, underlyingError: (any Error)? = nil) {
+        self.destination = destination; self.recoveryDirectory = recoveryDirectory; self.underlyingError = underlyingError
+    }
+}

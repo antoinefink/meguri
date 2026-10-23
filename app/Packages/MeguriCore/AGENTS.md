@@ -10,3 +10,5 @@
 - Event/progress callbacks only yield into an `AsyncStream`. Clock and disk-capacity callbacks synchronously return host values and never reenter the core. A synchronous call into the core from a callback fails with a Rust debug assertion.
 - Generated error enum cases keep Rust's capitalisation (`.Busy(runningOp:)`); other enums are lowerCamel.
 - Tests call test-only exports (Rust `test-hooks`) through `import MeguriCoreBindings`, so they compile only against Debug or Profile bindings. The event listener is process-wide: tests that replace it belong in the serialized `EventTests` suite and go through `withRawListener`, which restores `CoreEventStream`.
+
+- NSSavePanel grants the selected file, not its parent. Export uses Foundation item-replacement staging on that volume; Rust must validate the final destination as well as staging. Retain coordination and scope through native publication; preserve recovery files on uncertain replacement.

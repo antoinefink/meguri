@@ -72,3 +72,21 @@
 - MeguriKit `20261023T012918Z-60871`: pass, four tests. Coverage includes actual export/reimport/review, blocked replacement, no collection, and all three cleanup retry cases.
 - An earlier session append `20261023T012611Z-58616` failed its privacy hook and was never used by a runner. Only that uncommitted append was removed. The fresh minimal session record above was committed through the normal tool; existing ledger rows and privacy rules were preserved.
 - Next: Mac Save, iPhone/iPad Files, accessibility, image review and full gate from `81c207573c20c337c8834e4ae8b4ee8f29603dbf`.
+
+## Native Settings checks
+
+- Mac `20261023T012954Z-61946`: failed before export; Settings row click did not open the section. Fixer `s-20261023T013335Z-6b330f3f`, cleanroom `20261023T013356Z-66886`, added real section Buttons and kept shared navigation, tags and selected state. Independent round 5 source review found no P0–P1 issue; images remain pending.
+- iPhone `20261023T013332Z-65174`: failed before Settings. Real import, review and restart passed. Native tabs exposed labels with no app IDs after restart. R1964 remains open for the shell. Strict fixture ID tests are unchanged.
+- Commit `2d04309c`: native navigation test correction. R1964 open.
+- Mac `20261023T014104Z-70595`: Settings opened, but Form put the root ID on its child buttons. No export had started. Fixer `s-20261023T014415Z-259c723e`, cleanroom `20261023T014438Z-73254`, added a container around the Form children; labels, actions and layout stay the same.
+- Source includes real route readiness, existing folder selection in Mac Save, and expected saved-file checks. Save/Files, image review and full gate are still pending. Do not accept U150, U152, U162 or U166 from this source checkpoint.
+
+- Mac `20261023T014555Z-74003`: real Save panel cancellation passed. Save failed and retained the prepared export. VM sandbox logs identify denied export temporary sibling creation; destination staging needs an Apple-platform correction. No native save pass is claimed.
+
+## Sandbox publication correction
+
+- Fixer `s-20261023T015555Z-2b662a2e`, cleanroom `20261023T015640Z-79691`, source master `4e67eb02ba54778083c557aebbd83bc77d55375c`. Boundary checks passed. Native checks remain pending.
+- Spec `52e7316e` permits authorized staging on the destination volume. Rust checks staging and final paths. Native publication creates a new file exclusively or replaces an existing file through Foundation. Uncertain results retain recovery files.
+- Fixer session is recorded in `4e67eb02`. Cleanroom boundary checks passed; native checks are pending.
+- Independent round 6 source review: no new P0–P1 findings or deterministic blockers. Native and visual evidence remain pending.
+- Docker format `20261023T020920Z-84629`: pass. Focused export tests `20261023T020954Z-85161`: pass, 19 tests. Privacy `20261023T021045Z-85798`: pass after whole-sentence log rewrites; earlier failure `20261023T020954Z-85121` is preserved.

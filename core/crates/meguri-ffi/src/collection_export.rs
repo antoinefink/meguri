@@ -504,6 +504,7 @@ pub struct CollectionExportSaveJob {
 pub fn start_collection_export_save(
     artifact: Arc<CollectionExportArtifact>,
     destination: String,
+    final_validation_destination: Option<String>,
 ) -> Result<CollectionExportSaveJob, CoreError> {
     callback::enter("start_collection_export_save");
     let lease = artifact.owner.acquire()?;
@@ -512,7 +513,12 @@ pub fn start_collection_export_save(
     });
     let completion = Completion(result.cell.clone());
     let job = runtime::engine()?.start_job(JobKind::Export, move |job| {
-        let outcome = save(&lease.owner, Path::new(&destination), &job.cancel);
+        let outcome = save_validating_final(
+            &lease.owner,
+            Path::new(&destination),
+            final_validation_destination.as_deref().map(Path::new),
+            &job.cancel,
+        );
         // Release destination's reader before terminal result delivery.
         drop(lease);
         let status = outcome.as_ref().map(|_| ()).map_err(|failure| core(&failure.cause));
@@ -552,11 +558,29 @@ fn copy_bounded(
     }
     Ok(())
 }
+#[cfg(any(test, feature = "test-hooks"))]
 fn save(owner: &ArtifactOwner, destination: &Path, cancel: &CancelToken) -> Result<(), CollectionExportFailure> {
-    let before = || -> Result<AtomicFile, EngineError> {
-        cancel.check()?;
+    save_validating_final(owner, destination, None, cancel)
+}
+// Native publication stages on the destination volume. Validate its actual final
+// URL too, on this worker, before any copy and again before staged publication.
+fn save_validating_final(
+    owner: &ArtifactOwner,
+    destination: &Path,
+    final_validation_destination: Option<&Path>,
+    cancel: &CancelToken,
+) -> Result<(), CollectionExportFailure> {
+    let validate = || -> Result<(), EngineError> {
         check_generation(owner)?;
         check_destination(owner, destination)?;
+        if let Some(final_destination) = final_validation_destination {
+            check_destination(owner, final_destination)?;
+        }
+        Ok(())
+    };
+    let before = || -> Result<AtomicFile, EngineError> {
+        cancel.check()?;
+        validate()?;
         require_space(
             owner.space.as_ref(),
             destination.parent().ok_or_else(|| core("destination has no parent"))?,
@@ -580,8 +604,7 @@ fn save(owner: &ArtifactOwner, destination: &Path, cancel: &CancelToken) -> Resu
             if length != owner.metadata.byte_length || hash.as_slice() != owner.metadata.sha256 {
                 return Err(core("destination length or SHA-256 mismatch"));
             }
-            check_generation(owner)?;
-            check_destination(owner, destination)?;
+            validate()?;
             cancel.check()
         })();
         if checked.is_ok() {
@@ -919,6 +942,104 @@ mod tests {
         host.close().unwrap();
     }
     #[test]
+    fn staged_save_validates_final_aliases_and_preflights_only_authorized_staging() {
+        use std::os::unix::fs::symlink;
+        struct Capacity {
+            paths: Mutex<Vec<PathBuf>>,
+            bytes: std::sync::atomic::AtomicU64,
+            redirect: Mutex<Option<(PathBuf, PathBuf)>>,
+        }
+        impl SpaceProvider for Capacity {
+            fn available_bytes(&self, directory: &Path) -> Result<u64, StorageError> {
+                self.paths.lock().unwrap().push(directory.to_owned());
+                if let Some((source, target)) = self.redirect.lock().unwrap().take() {
+                    std::os::unix::fs::symlink(source, target)?;
+                }
+                Ok(self.bytes.load(Ordering::SeqCst))
+            }
+        }
+        let _serial = SERIAL.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let (host, config) = host(root.path());
+        let mut artifact = prepare(&host);
+        fs::create_dir_all(&config.backups_directory).unwrap();
+        let capacity = Arc::new(Capacity {
+            paths: Mutex::new(Vec::new()),
+            bytes: std::sync::atomic::AtomicU64::new(0),
+            redirect: Mutex::new(None),
+        });
+        Arc::get_mut(&mut Arc::get_mut(&mut artifact).unwrap().owner)
+            .unwrap()
+            .space = capacity.clone();
+        let staging_directory = root.path().join("authorized-replacement");
+        fs::create_dir(&staging_directory).unwrap();
+        let staged = staging_directory.join("staged.colpkg");
+        let artifact_link = root.path().join("artifact-alias.colpkg");
+        fs::hard_link(&artifact.owner.path, &artifact_link).unwrap();
+        let source_link = root.path().join("source-alias.colpkg");
+        fs::hard_link(&artifact.owner.source, &source_link).unwrap();
+        let sidecar = PathBuf::from(format!("{}-journal", artifact.owner.source.display()));
+        fs::write(&sidecar, b"protected sidecar").unwrap();
+        let sidecar_link = root.path().join("sidecar-alias.colpkg");
+        fs::hard_link(&sidecar, &sidecar_link).unwrap();
+        let directory_link = root.path().join("collection-alias");
+        symlink(&config.collection_directory, &directory_link).unwrap();
+        let symbolic_artifact = root.path().join("artifact-symlink.colpkg");
+        symlink(&artifact.owner.path, &symbolic_artifact).unwrap();
+        let source_before = fs::read(&artifact.owner.source).unwrap();
+        let output_before = fs::read(&artifact.owner.path).unwrap();
+        for final_destination in [
+            artifact.owner.source.clone(),
+            artifact.owner.path.clone(),
+            artifact_link,
+            source_link,
+            sidecar_link,
+            symbolic_artifact,
+            PathBuf::from(format!("{}-wal", artifact.owner.source.display())),
+            PathBuf::from(format!("{}-shm", artifact.owner.source.display())),
+            directory_link.join("new.colpkg"),
+            config.backups_directory.join("new.colpkg"),
+            artifact.owner.directory.join("new.colpkg"),
+        ] {
+            let failure =
+                save_validating_final(&artifact.owner, &staged, Some(&final_destination), &CancelToken::new())
+                    .unwrap_err();
+            assert!(matches!(failure.cause, CoreError::InvalidArgument { .. }));
+            assert!(!failure.publication_uncertain);
+            assert_eq!(fs::read_dir(&staging_directory).unwrap().count(), 0);
+        }
+        assert!(
+            capacity.paths.lock().unwrap().is_empty(),
+            "refuse before preflight/copy"
+        );
+        assert_eq!(fs::read(&artifact.owner.source).unwrap(), source_before);
+        assert_eq!(fs::read(&artifact.owner.path).unwrap(), output_before);
+        assert_eq!(fs::read(&sidecar).unwrap(), b"protected sidecar");
+        let final_destination = root.path().join("user.colpkg");
+        fs::write(&final_destination, b"user original").unwrap();
+        assert!(
+            save_validating_final(&artifact.owner, &staged, Some(&final_destination), &CancelToken::new(),).is_err()
+        );
+        assert!(!staged.exists());
+        capacity.bytes.store(u64::MAX, Ordering::SeqCst);
+        save_validating_final(&artifact.owner, &staged, Some(&final_destination), &CancelToken::new()).unwrap();
+        assert_eq!(*capacity.paths.lock().unwrap(), vec![staging_directory.clone(); 2]);
+        assert_eq!(fs::read(&staged).unwrap(), output_before);
+        assert_eq!(fs::read(&final_destination).unwrap(), b"user original");
+        fs::remove_file(&staged).unwrap();
+        let late_alias = root.path().join("late-alias.colpkg");
+        *capacity.redirect.lock().unwrap() = Some((artifact.owner.path.clone(), late_alias.clone()));
+        let failure =
+            save_validating_final(&artifact.owner, &staged, Some(&late_alias), &CancelToken::new()).unwrap_err();
+        assert!(matches!(failure.cause, CoreError::InvalidArgument { .. }));
+        assert!(!failure.publication_uncertain && !staged.exists());
+        assert_eq!(fs::read_link(&late_alias).unwrap(), artifact.owner.path);
+        assert_eq!(fs::read(&artifact.owner.path).unwrap(), output_before);
+        fs::remove_file(&sidecar).unwrap();
+        drain_cleanup(&artifact);
+        host.close().unwrap();
+    }
+    #[test]
     fn discard_waits_for_provider_read_and_restart_retains_ambiguous_output() {
         let _serial = SERIAL.lock().unwrap();
         let root = tempfile::tempdir().unwrap();
@@ -1250,6 +1371,12 @@ mod tests {
             .unwrap();
         drop(slot);
         assert!(matches!(artifact.acquire(), Err(CoreError::StaleGeneration { .. })));
+        let staged = root.path().join("staged.colpkg");
+        let final_destination = root.path().join("user.colpkg");
+        let failure =
+            save_validating_final(&artifact.owner, &staged, Some(&final_destination), &CancelToken::new()).unwrap_err();
+        assert!(matches!(failure.cause, CoreError::StaleGeneration { .. }));
+        assert!(!staged.exists() && !final_destination.exists());
         assert!(artifact.owner.path.is_file());
         drain_cleanup(&artifact);
         host.close().unwrap();

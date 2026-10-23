@@ -24,12 +24,20 @@ import notify
         let build = try BuildUnderTest.current()
         let bundle = try build.bundleIdentifier
         let app = XCUIApplication()
-        let settings = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@",
-            ["shell.root.tab.settings", "shell.root.sidebar.settings"])).firstMatch
-        XCTAssertTrue(settings.waitForExistence(timeout: 10), app.debugDescription)
+        let settings = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.settings",
+            sidebarIdentifier: "shell.root.sidebar.settings", compactLabel: "Settings", timeout: 10), app.debugDescription)
         try click(settings, app, bundle)
-        try click(element(app, "settings.root.exportCollection"), app, bundle)
-        try click(element(app, "settings.importExport.prepare"), app, bundle)
+        let settingsContent = element(app, "settings.root.content")
+        XCTAssertTrue(settingsContent.waitForExistence(timeout: 10), "Native navigation must open Settings: \(app.debugDescription)")
+        let export = app.buttons["settings.root.exportCollection"].firstMatch
+        let exportReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            settingsContent.exists && export.exists && export.isEnabled && export.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [exportReady], timeout: 10), .completed, app.debugDescription)
+        capture(app, "export-native-settings-route")
+        try click(export, app, bundle)
+        let prepare = try XCTUnwrap(waitForHittable(app.buttons.matching(identifier: "settings.importExport.prepare")), app.debugDescription)
+        try click(prepare, app, bundle)
         XCTAssertTrue(element(app, "settings.importExport.ready").waitForExistence(timeout: 30), app.debugDescription)
         try click(element(app, "settings.importExport.choose"), app, bundle)
         capturePicker(app)
@@ -59,10 +67,15 @@ import notify
             let path = go.textFields.matching(identifier: "PathTextField").firstMatch
             XCTAssertTrue(path.waitForExistence(timeout: 10), app.debugDescription)
             try app.bringToFront(bundleIdentifier: bundle); path.typeKey("a", modifierFlags: .command)
-            try app.bringToFront(bundleIdentifier: bundle); path.typeText(saved.path)
+            try app.bringToFront(bundleIdentifier: bundle); path.typeText(folder.path)
+            XCTAssertEqual(path.value as? String, folder.path, app.debugDescription)
             try app.bringToFront(bundleIdentifier: bundle); path.typeKey(.return, modifierFlags: [])
-            XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: go)], timeout: 10), .completed)
-            try click(savePanel.buttons.matching(identifier: "OKButton").firstMatch, app, bundle)
+            let save = savePanel.buttons.matching(identifier: "OKButton").firstMatch
+            let saveReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                !go.exists && save.exists && save.isEnabled && save.isHittable
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter().wait(for: [saveReady], timeout: 10), .completed, app.debugDescription)
+            try click(save, app, bundle)
             if replacement {
                 let replace = app.buttons.matching(NSPredicate(format: "title == %@ OR label == %@", "Replace", "Replace")).firstMatch
                 XCTAssertTrue(replace.waitForExistence(timeout: 10), app.debugDescription)
@@ -81,6 +94,9 @@ import notify
             }
             #endif
             XCTAssertTrue(element(app, "settings.importExport.saved").waitForExistence(timeout: 30), app.debugDescription)
+            #if os(macOS)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: saved.path), "NSSavePanel must save the expected collection filename at \(saved.path)")
+            #endif
         }
         try click(element(app, "settings.importExport.discard"), app, bundle)
         try click(element(app, "settings.importExport.close"), app, bundle)
@@ -91,9 +107,9 @@ import notify
         try click(element(app, "onboarding.collectionImport.confirm"), app, bundle)
         let imported = app.buttons.matching(NSPredicate(format: "identifier == %@", "home.deck.row.1788249600212"))
         // Return to Home through the production shell after native replacement.
-        let home = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@",
-            ["shell.root.tab.decks", "shell.root.sidebar.home"])).firstMatch
-        XCTAssertTrue(home.waitForExistence(timeout: 30)); try click(home, app, bundle)
+        let home = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.decks",
+            sidebarIdentifier: "shell.root.sidebar.home", compactLabel: "Decks", timeout: 30), app.debugDescription)
+        try click(home, app, bundle)
         try waitForAdmission(imported, app, bundle)
         let deck = try XCTUnwrap(waitForHittable(imported)); try click(deck, app, bundle)
         try click(element(app, "home.deck.study"), app, bundle)
@@ -406,6 +422,24 @@ import notify
             }, object: nil)
             XCTAssertEqual(XCTWaiter().wait(for: [admitted], timeout: 30), .completed, app.debugDescription)
         }
+    }
+    private func waitForShellSection(_ app: XCUIApplication, tabIdentifier: String, sidebarIdentifier: String,
+                                     compactLabel: String, timeout: TimeInterval) -> XCUIElement? {
+        let identified = app.buttons.matching(NSPredicate(format: "identifier IN %@", [tabIdentifier, sidebarIdentifier]))
+        #if os(iOS)
+        let nativeTab = app.tabBars.buttons.matching(NSPredicate(format: "label == %@", compactLabel))
+        #endif
+        var target: XCUIElement?
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            target = identified.allElementsBoundByIndex.first { $0.exists && $0.isHittable }
+            #if os(iOS)
+            if target == nil {
+                target = nativeTab.allElementsBoundByIndex.first { $0.exists && $0.isHittable }
+            }
+            #endif
+            return target != nil
+        }, object: nil)
+        return XCTWaiter().wait(for: [ready], timeout: timeout) == .completed ? target : nil
     }
     private func waitForHittable(_ query: XCUIElementQuery, timeout: TimeInterval = 20) -> XCUIElement? {
         var target: XCUIElement?

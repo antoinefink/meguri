@@ -23,6 +23,7 @@ public struct SettingsView: View {
             } header: { Text("Collection Files", bundle: .module) }
         }
         .navigationTitle(Text("Settings", bundle: .module))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings.root.content")
     }
 }
