@@ -333,3 +333,24 @@ and no matching Mac development profile. The account/profile user step is
 pending with Antoine. Neither a profile nor a Keychain pass is claimed.
 The failed build remains recorded. Selected-media work continues while this
 setup step is pending; RF4 and its parent units remain unaccepted.
+
+Corrective source checks passed: static/provenance `20261023T140635Z-32693`
+and similarity `20261023T140626Z-32326` (base `f046f949`).
+
+iPhone run `20261023T140703Z-33525` failed before Login. Save Endpoint
+was enabled but not hittable; the endpoint field remained visible while the
+keyboard was present. Build, route and cleanup checks passed; no peer check ran.
+Filtered fix `20261023T141222Z-38321` uses the containing Form scroll view,
+table or collection view and clips iOS gestures above the keyboard. Existing
+assertions and timeouts remain. Independent review found no new P0–P1 issue;
+privacy `20261023T141501Z-40544` passed. Changed iPhone execution is pending.
+
+After Antoine refreshed the account, team build `20261023T141605Z-42995`
+passed. Metadata checks confirmed the app's private group, embedded profile
+and profile authorization. The profile covers one Mac, without the test VM.
+Antoine's device/profile step is pending; actual Mac Keychain proof remains open.
+
+Selected-media storage starts at `d55cda0e`, recorded by session
+`s-20261023T140500Z-c24c8246` before its isolated implementation. Its neutral
+owner/reset contract was prepared earlier and integrated without a new protocol
+implementation. Native and full-gate acceptance remain open.

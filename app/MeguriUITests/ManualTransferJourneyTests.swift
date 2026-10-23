@@ -158,20 +158,42 @@ import XCTest
     }
     private func reveal(_ target: XCUIElement, _ app: XCUIApplication) throws {
         _ = target.waitForExistence(timeout: 30)
-        let scroll = app.scrollViews.firstMatch
+        #if os(macOS)
+        let containers = [app.scrollViews, app.tables, app.collectionViews]
+        #else
+        let containers = [app.collectionViews, app.tables, app.scrollViews]
+        #endif
+        let scroll = containers.map { $0.containing(.any, identifier: target.identifier).firstMatch }
+            .first(where: { !target.identifier.isEmpty && $0.exists })
+            ?? containers.map { $0.firstMatch }.first(where: { $0.exists })
         for _ in 0..<16 {
             if target.exists && target.isHittable { break }
-            guard scroll.exists else { break }
-            let towardsBottom = !target.exists || target.frame.maxY > scroll.frame.maxY
+            guard let scroll, scroll.exists else { break }
             #if os(macOS)
+            let towardsBottom = !target.exists || target.frame.maxY > scroll.frame.maxY
             scroll.scroll(byDeltaX: 0, deltaY: (towardsBottom ? -1 : 1) * scroll.frame.height / 2)
             #else
-            if towardsBottom { scroll.swipeUp() } else { scroll.swipeDown() }
+            var viewport = scroll.frame.intersection(app.frame)
+            let keyboard = app.keyboards.firstMatch
+            if keyboard.exists, viewport.intersects(keyboard.frame) {
+                viewport.size.height = max(0, min(viewport.maxY, keyboard.frame.minY) - viewport.minY)
+            }
+            guard !viewport.isNull, viewport.width > 0, viewport.height > 0 else { break }
+            let towardsBottom = !target.exists || target.frame.maxY > viewport.maxY
+            // Keep the gesture inside the visible Form, above the keyboard.
+            let origin = scroll.coordinate(withNormalizedOffset: .zero)
+            let upper = origin.withOffset(CGVector(dx: viewport.midX - scroll.frame.minX,
+                                                  dy: viewport.minY + viewport.height * 0.2 - scroll.frame.minY))
+            let lower = origin.withOffset(CGVector(dx: viewport.midX - scroll.frame.minX,
+                                                  dy: viewport.minY + viewport.height * 0.8 - scroll.frame.minY))
+            let start = towardsBottom ? lower : upper
+            let end = towardsBottom ? upper : lower
+            start.press(forDuration: 0, thenDragTo: end)
             #endif
         }
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in target.exists && target.isHittable }, object: nil)
         let outcome = XCTWaiter().wait(for: [visible], timeout: 30)
-        if outcome != .completed { attach(app, "rf4-reveal-failure", target: target) }
+        if outcome != .completed { attach(app, "rf4-reveal-failure", target: target, scroll: scroll) }
         XCTAssertEqual(outcome, .completed, "Element not visible: \(target.identifier)")
     }
     private func waitUntilReady(_ target: XCUIElement, _ app: XCUIApplication) {
@@ -223,7 +245,7 @@ import XCTest
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
-    private func attach(_ app: XCUIApplication, _ name: String, target: XCUIElement? = nil) {
+    private func attach(_ app: XCUIApplication, _ name: String, target: XCUIElement? = nil, scroll: XCUIElement? = nil) {
         // Whitelist state only: no labels, identifiers read from elements, field
         // contents, screenshots or hierarchy (which can contain credentials).
         func state(_ item: XCUIElement, _ key: String, field: Bool = false) -> String {
@@ -240,6 +262,15 @@ import XCTest
         }
         var lines = [String]()
         if let target { lines.append(state(target, "target")) }
+        if let scroll { lines.append(state(scroll, "scrollContainer")) }
+        #if !os(macOS)
+        let keyboard = app.keyboards.firstMatch
+        lines.append("keyboardPresent=\(keyboard.exists)")
+        if keyboard.exists {
+            let frame = keyboard.frame
+            lines.append("keyboardFrame=[\(frame.origin.x),\(frame.origin.y),\(frame.width),\(frame.height)]")
+        }
+        #endif
         for id in ["settings.anki.endpoint", "settings.anki.saveEndpoint", "settings.anki.login",
                    "settings.anki.username", "settings.anki.password"] {
             lines.append(state(element(app, id), id, field: id == "settings.anki.username" || id == "settings.anki.password"))
