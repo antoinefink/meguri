@@ -62,8 +62,7 @@ import XCTest
                 try click(element(app, id), app, bundle)
             }
             try confirmNative(app, bundle)
-            let admission = element(app, "home.policy.enable")
-            if admission.waitForExistence(timeout: 2) { try click(admission, app, bundle) }
+            try completeOptionalFsrsAdmission(app, bundle)
             try openSettings(app, bundle)
             try waitForText(element(app, "settings.anki.result"), "Collection transfer finished", app, bundle)
             attachSuccess(app, "rf4-account-a-import-finished")
@@ -71,8 +70,7 @@ import XCTest
 
         // Save an answer in the imported deck before restarting the app.
         try openHome(app, bundle)
-        let admission = element(app, "home.policy.enable")
-        if admission.waitForExistence(timeout: 2) { try click(admission, app, bundle) }
+        try completeOptionalFsrsAdmission(app, bundle)
         for id in ["home.deck.row.\(rig.deckID)", "home.deck.study", "review.session.reveal",
                    "review.session.rate.easy", "review.session.close"] {
             try click(element(app, id), app, bundle)
@@ -260,6 +258,21 @@ import XCTest
         if outcome != .completed { attach(app, "rf4-text-wait-failure", target: target) }
         XCTAssertEqual(outcome, .completed)
     }
+    private func completeOptionalFsrsAdmission(_ app: XCUIApplication, _ bundle: String) throws {
+        try app.bringToFront(bundleIdentifier: bundle)
+        let admission = element(app, "home.policy.enable")
+        if admission.waitForExistence(timeout: 2), admission.isEnabled {
+            try click(admission, app, bundle)
+        }
+        // A disabled button means admission is already running; wait for that
+        // job rather than clicking again or navigating behind its modal sheet.
+        try app.bringToFront(bundleIdentifier: bundle)
+        let sheet = element(app, "home.policy.sheet")
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !sheet.exists }, object: nil)
+        let outcome = XCTWaiter().wait(for: [dismissed], timeout: 30)
+        if outcome != .completed { attach(app, "rf4-policy-admission-failure") }
+        XCTAssertEqual(outcome, .completed, "FSRS admission must finish before continuing.")
+    }
     private func openSettings(_ app: XCUIApplication, _ bundle: String) throws {
         try openSection(app, bundle, name: "settings", title: "Settings")
     }
@@ -268,6 +281,8 @@ import XCTest
     }
     private func openSection(_ app: XCUIApplication, _ bundle: String, name: String, title: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
+        let root = element(app, name == "home" ? "home.collection.screen" : "settings.root.content")
+        if root.exists && root.isHittable { return }
         let tab = name == "home" ? "decks" : name
         let match = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["shell.root.tab.\(tab)", "shell.root.sidebar.\(name)"])).firstMatch
         if match.waitForExistence(timeout: 5), match.isHittable { try click(match, app, bundle) }
@@ -359,6 +374,14 @@ import XCTest
         lines.append("loginIdentityPresent=\(element(app, "settings.anki.loginIdentity").exists)")
         lines.append("usernameFieldPresent=\(element(app, "settings.anki.username").exists)")
         lines.append("passwordFieldPresent=\(element(app, "settings.anki.password").exists)")
+        lines.append("sheetCount=\(app.sheets.count)")
+        lines.append("alertCount=\(app.alerts.count)")
+        lines.append("home.policy.sheetPresent=\(element(app, "home.policy.sheet").exists)")
+        let settingsRoot = element(app, "settings.root.content")
+        let homeRoot = element(app, "home.collection.screen")
+        lines.append("settingsRootHittable=\(settingsRoot.exists && settingsRoot.isHittable)")
+        lines.append("homeRootHittable=\(homeRoot.exists && homeRoot.isHittable)")
+        lines.append("policyErrorPresent=\(element(app, "home.policy.error").exists)")
         let report = XCTAttachment(string: lines.joined(separator: "\n"))
         report.name = name; report.lifetime = .keepAlways; add(report)
     }

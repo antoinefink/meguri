@@ -695,3 +695,23 @@ new wire-test comment. The unchanged six media_io findings remain open.
 Storage similarity `20261023T210417Z-61250` passed after the comment edit.
 This lands the storage component only; RF4 and U111 remain unfinished and
 require their integration gate. Wire/reconciler code is not accepted here.
+
+Native patch `20261023T210219Z-60131`: wait for FSRS completion; visible
+navigation target required. Review: no P0–P1. Privacy:
+`20261023T212335Z-71569`, pass, two files. iPhone check: pending.
+Native round 6: pending. Platform journeys: pending.
+
+Doctor `20261023T212306Z-69351`: VM ready, disk 188 GiB.
+Catch-up `20261023T212325Z-70393`: pass.
+
+Public API draft `20261023T212316Z-69853`: no P0–P2 after review;
+Docker scanner tests `20261023T212637Z-77357`: pass.
+Privacy `20261023T212640Z-77626`: fail, six media_io regions unchanged.
+Draft reverted; no scanner change landed. Wire patch retained.
+The existing fixed-span rule in `tools/AGENTS.md` permits public compiler
+facts. No Antoine approval is claimed. No private values were read.
+
+Reconciler `20261023T204936Z-56052`, round 1: five P2 findings.
+Sanity response race; stale download records; capacity errors;
+interruption errors; deletion counts. Fix `20261023T212318Z-70100`: pending.
+CoreHost fixture seam: authorized in the worker's scope.

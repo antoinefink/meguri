@@ -187,7 +187,10 @@ public struct FsrsAdmissionView: View {
             Text(collection.policy == .needsReEnable
                  ? String(localized: "Another device turned FSRS off. Meguri will turn it on again for this collection.", bundle: .module)
                  : String(localized: "Meguri schedules with FSRS. Enabling it computes memory states from your review history without changing due dates or intervals. The change reaches your other devices when you sync.", bundle: .module))
-            if let error = collection.error { Text(verbatim: error).foregroundStyle(.token(.statusError)) }
+            if let error = collection.error {
+                Text(verbatim: error).foregroundStyle(.token(.statusError))
+                    .accessibilityIdentifier("home.policy.error")
+            }
             if collection.enabling {
                 if let progress = collection.progress, let total = progress.total {
                     ProgressView(value: Double(progress.completed), total: Double(max(1, total)))
