@@ -320,3 +320,16 @@ The existing Apple account and valid development identity were confirmed with
 metadata-only reads. No account login or private-key export was performed.
 
 Visual check: no new P0–P1 finding. Baselines and final UI review remain open.
+
+Filtered fix `20261023T140028Z-26189` starts at `c8ca8406`. Team app
+entitlements now declare only the app's private Keychain group; ad-hoc and
+widget entitlements are unchanged. The two Settings Forms use the existing
+background token. Independent review found no new P0–P1 finding.
+Five focused tests passed (`20261023T140310Z-28186`); privacy passed
+(`20261023T140310Z-28324`).
+
+Team build `20261023T140311Z-28614` failed with Xcode's “No Accounts”
+and no matching Mac development profile. The account/profile user step is
+pending with Antoine. Neither a profile nor a Keychain pass is claimed.
+The failed build remains recorded. Selected-media work continues while this
+setup step is pending; RF4 and its parent units remain unaccepted.

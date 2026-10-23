@@ -23,6 +23,7 @@ public struct SettingsView: View {
             } header: { Text("Collection Files", bundle: .module) }
             ManualTransferSections(model: collection.manualTransfers)
         }
+        .background(.token(.backgroundPrimary))
         .manualTransferPresentation(model: collection.manualTransfers)
         .navigationTitle(Text("Settings", bundle: .module))
         .accessibilityElement(children: .contain)

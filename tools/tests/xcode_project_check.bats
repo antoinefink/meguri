@@ -8,6 +8,45 @@ bats_require_minimum_version 1.5.0
 
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 
+@test "Keychain Sharing uses only the team app's private app-ID group" {
+  python3 - "$REPO_ROOT" <<'PY'
+from pathlib import Path
+import plistlib
+import re
+import sys
+
+app = Path(sys.argv[1]) / "app"
+team_files = {"Meguri-macOS.entitlements", "Meguri-macOS-Dev.entitlements"}
+for directory in ("Meguri", "MeguriWidget"):
+    for path in (app / directory).glob("*.entitlements"):
+        with path.open("rb") as source:
+            entitlements = plistlib.load(source)
+        if directory == "Meguri" and path.name in team_files:
+            assert entitlements.get("keychain-access-groups") == [
+                "$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)"
+            ], path
+        else:
+            assert "keychain-access-groups" not in entitlements, path
+        assert "com.apple.application-identifier" not in entitlements, path
+        assert "com.apple.developer.team-identifier" not in entitlements, path
+for name in team_files:
+    assert (app / "Meguri" / name).is_file(), name
+
+project = (app / "Meguri.xcodeproj/project.pbxproj").read_text()
+attributes = re.search(r"\t{4}TargetAttributes = \{\n(.*?)\n\t{4}\};", project, re.S)[1]
+targets = dict(re.findall(r"\t{5}([A-F0-9]+) = \{\n(.*?)\n\t{5}\};", attributes, re.S))
+app_target = "4D4547555249000000000100"
+assert re.search(
+    r"SystemCapabilities = \{\s*com\.apple\.Keychain = \{\s*enabled = 1;\s*\};\s*\};",
+    targets[app_target],
+)
+assert project.count("com.apple.Keychain") == 1
+for target, settings in targets.items():
+    if target != app_target:
+        assert "com.apple.Keychain" not in settings, target
+PY
+}
+
 setup() {
   SB="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$SB/tools/tests" "$SB/tools/scripts" "$SB/app/Meguri/App"

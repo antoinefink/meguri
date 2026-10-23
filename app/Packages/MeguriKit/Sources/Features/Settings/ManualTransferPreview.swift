@@ -12,6 +12,7 @@ public enum ManualTransferSettingsPreview: PreviewStates {
         let model = ManualTransferCoordinator.renderFixture(state)
         return NavigationStack {
             Form { ManualTransferSections(model: model) }
+                .background(.token(.backgroundPrimary))
                 .accessibilityIdentifier("settings.anki.content")
                 .manualTransferPresentation(model: model)
                 .navigationTitle("Anki Server Import / Export")
