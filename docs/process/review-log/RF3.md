@@ -95,3 +95,4 @@
 - Native CoreBridge `20261023T021528Z-91146`: pass, 12 focused tests plus seven interval tests. Includes real Foundation staging and replacement, exclusive creation, cancellation, uncertain results and coordination lifetime.
 - MeguriKit `20261023T021717Z-92930`: pass, four tests including real saved-file reimport and subsequent review.
 - Mac `20261023T021236Z-88708`: Save, Replace and Cancel passed. Import did not open. Native follow-up pending.
+- Mac `20261023T021906Z-94909`: pass, one test and no skips. Actual import/review/restart, native export cancellation, Save, Replace, reimport, another review and restart all passed. iPhone/iPad, rendered accessibility, critic and full gate are pending.
