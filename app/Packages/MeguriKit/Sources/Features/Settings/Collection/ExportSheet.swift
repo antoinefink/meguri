@@ -99,16 +99,21 @@ struct CollectionExportContent: View {
             .accessibilityIdentifier("settings.importExport.content")
             .background(.token(.backgroundPrimary))
             .safeAreaInset(edge: .bottom) {
-                Button(action: close) {
-                    Text(presentation.busy ? LocalizedStringKey("Cancel Export") : LocalizedStringKey("Done"), bundle: .module)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
+                VStack(alignment: .leading) {
+                    Button(action: close) {
+                        Text(presentation.busy ? LocalizedStringKey("Cancel Export") : LocalizedStringKey("Done"), bundle: .module)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                        .keyboardShortcut(.cancelAction)
+                        .accessibilityIdentifier("settings.importExport.close")
                 }
-                    .keyboardShortcut(.cancelAction)
-                    .accessibilityIdentifier("settings.importExport.close")
                     .padding(Spacing.large)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.token(.backgroundPrimary))
+                    .contentShape(.accessibility, Rectangle())
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("settings.importExport.footer")
             }
             .buttonStyle(.bordered)
             .tint(ColorToken.textPrimary.color)

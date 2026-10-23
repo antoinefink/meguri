@@ -2,6 +2,11 @@
   "version": 1,
   "suppressions": [
     {
+      "identifier": "settings.importExport.discard",
+      "auditType": "contrast",
+      "reason": "R1977: iPad AX5 run 20261023T035747Z-85354 reports Discard Prepared Export at 250,1616 440x139 below the current scroll viewport. The existing textPrimary/backgroundPrimary token pair passes ContrastTests (R1979). CollectionExportAccessibilityTests removes this exact contrast exception for the supplemental all-types system audit when the entire enabled, hittable target frame is visible above the padded footer. Native AA verification remains pending."
+    },
+    {
       "identifier": "settings.importExport.ready",
       "auditType": "contrast",
       "reason": "iPad AX5 light/dark run 20261023T031552Z-43929 reports the entire foreground Ready at 250,905 335x63 below the visible scroll viewport. This is the scroll-edge/whole-frame limitation (R1977); textPrimary/backgroundPrimary is the unchanged declared token pair checked by ContrastTests (R1979). CollectionExportAccessibilityTests adds scrolled full-frame visibility proof and a supplemental all-types system audit with this exact contrast suppression removed while this target is visible; native verification is pending."

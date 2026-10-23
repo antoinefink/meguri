@@ -34,6 +34,7 @@ import XCTest
                     #endif
                     let scroll = app.scrollViews["settings.importExport.content"].firstMatch
                     let close = app.buttons["settings.importExport.close"].firstMatch
+                    let footer = app.descendants(matching: .any)["settings.importExport.footer"].firstMatch
                     XCTAssertTrue(close.exists)
                     XCTAssertEqual(close.label, state == "loading" ? "Cancel Export" : "Done")
                     let required = ["settings.importExport.explanation"] + (state == "typical"
@@ -51,7 +52,7 @@ import XCTest
                     }
                     var findings: [AuditFinding] = []
                     var touchTargets: [TouchTargetViolation] = []
-                    try self.scrollToRequiredContent(scroll, close: close, app: app, build: build,
+                    try self.scrollToRequiredContent(scroll, close: close, footer: footer, app: app, build: build,
                                                      identifiers: required) { visible, viewport, portions in
                         // Only full-frame visibility removes an exact contrast
                         // exception. A paragraph portion retains its exception.
@@ -66,7 +67,7 @@ import XCTest
                         let frames = visible.map {
                             "\($0): \(scroll.descendants(matching: .any)[$0].firstMatch.frame)"
                         }.joined(separator: "\n")
-                        let proof = XCTAttachment(string: "Scroll viewport: \(viewport)\nFull frames:\n\(frames)\nParagraph portions:\n\(portions.joined(separator: "\n"))\nDone/Cancel: \(close.frame)")
+                        let proof = XCTAttachment(string: "Scroll viewport: \(viewport)\nFull frames:\n\(frames)\nParagraph portions:\n\(portions.joined(separator: "\n"))\nFooter: \(footer.frame)\nDone/Cancel: \(close.frame)")
                         proof.name = "export visibility \(label)"
                         proof.lifetime = .keepAlways
                         self.add(proof)
@@ -82,7 +83,8 @@ import XCTest
 
     /// Controls require full frames; tall prose requires continuous observed coverage
     /// from its beginning to its end, with exact accessible text throughout.
-    private func scrollToRequiredContent(_ scroll: XCUIElement, close: XCUIElement, app: XCUIApplication,
+    private func scrollToRequiredContent(_ scroll: XCUIElement, close: XCUIElement, footer: XCUIElement,
+                                         app: XCUIApplication,
                                          build: BuildUnderTest, identifiers: [String],
                                          onVisible: ([String], CGRect, [String]) throws -> Void) throws {
         guard scroll.exists, scroll.elementType == .scrollView else {
@@ -102,13 +104,23 @@ import XCTest
         ]
         var coverage: [Int: (height: CGFloat, end: CGFloat)] = [:]
         var checked: Set<Int> = []
-        for gesture in 0...24 {
-            var viewport = scroll.frame.intersection(app.windows.firstMatch.frame)
+        var gesture = 0
+        while gesture <= 24 {
+            let scrollFrame = scroll.frame
+            var viewport = scrollFrame.intersection(app.windows.firstMatch.frame)
             XCTAssertTrue(close.exists && close.isEnabled && close.isHittable,
                           "The foreground Done/Cancel action must remain reachable")
             XCTAssertFalse(close.frame.isEmpty)
             XCTAssertTrue(app.windows.firstMatch.frame.contains(close.frame),
                           "The entire Done/Cancel frame must remain visible")
+            guard footer.exists else {
+                throw AuditError(description: "Missing the exact settings.importExport.footer container")
+            }
+            let footerFrame = footer.frame
+            guard !footerFrame.isEmpty, footerFrame.contains(close.frame),
+                  footerFrame.minY < close.frame.minY else {
+                throw AuditError(description: "The padded export footer must contain Done/Cancel and begin above it: footer \(footerFrame), button \(close.frame)")
+            }
             var top = viewport.minY
             #if os(iOS)
             let navigationBar = app.navigationBars["Export Collection"].firstMatch
@@ -116,8 +128,8 @@ import XCTest
                 top = max(top, navigationBar.frame.maxY)
             }
             #endif
-            // Native chrome and the pinned Done/Cancel control cannot prove coverage.
-            let bottom = min(viewport.maxY, close.frame.minY)
+            // Native chrome and the entire padded footer cannot prove coverage.
+            let bottom = min(viewport.maxY, footerFrame.minY)
             viewport = CGRect(x: viewport.minX, y: top, width: viewport.width, height: max(0, bottom - top))
             guard !viewport.isEmpty else { throw AuditError(description: "Export scroll viewport is empty") }
             let frames = targets.map(\.frame)
@@ -176,6 +188,9 @@ import XCTest
                 }
                 try onVisible(visible.map { identifiers[$0] }, viewport, portions)
                 checked.formUnion(visible)
+                // The system audit can change native scroll geometry. Only new
+                // coverage enters here; resample before choosing any gesture.
+                continue
             }
             if checked.count == targets.count { return }
             guard gesture < 24, let next = targets.indices.first(where: { !checked.contains($0) }) else { break }
@@ -190,29 +205,36 @@ import XCTest
                 offset = frames[next].midY - viewport.midY
             }
             guard abs(offset) > 1 else { break }
+            gesture += 1
             #if os(macOS)
             let gestureArea = viewport.insetBy(dx: viewport.width / 10, dy: viewport.height / 10)
             let distance = min(abs(offset), gestureArea.height / 3) * (offset > 0 ? 1.0 : -1.0)
             scroll.scroll(byDeltaX: 0, deltaY: -distance)
             #else
-            if offset > 0 { scroll.swipeUp() }
-            else { scroll.swipeDown() }
+            let gestureArea = viewport.insetBy(dx: viewport.width / 10, dy: viewport.height / 10)
+            let distance = min(abs(offset), gestureArea.height / 3) * (offset > 0 ? 1.0 : -1.0)
+            let origin = scroll.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: gestureArea.midX - scrollFrame.minX,
+                dy: gestureArea.midY + distance / 2 - scrollFrame.minY))
+            let end = origin.withOffset(CGVector(dx: gestureArea.midX - scrollFrame.minX,
+                dy: gestureArea.midY - distance / 2 - scrollFrame.minY))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0)
             #endif
             let afterFrames = targets.map(\.frame)
             let movement = frames[next].minY - afterFrames[next].minY
             guard offset > 0 ? movement > 1 : movement < -1 else {
                 let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-                shot.name = "export scroll no progress gesture \(gesture + 1)"
+                shot.name = "export scroll no progress gesture \(gesture)"
                 shot.lifetime = .keepAlways
                 add(shot)
                 let frameChanges = targets.indices.map {
                     "\(identifiers[$0]): before \(frames[$0]), after \(afterFrames[$0])"
                 }.joined(separator: "\n")
-                let proof = XCTAttachment(string: "Target: \(identifiers[next])\nOffset: \(offset), movement: \(movement)\nCoverage viewport before gesture: \(viewport)\nScroll frame after gesture: \(scroll.frame)\n\(frameChanges)")
-                proof.name = "export scroll no progress frames gesture \(gesture + 1)"
+                let proof = XCTAttachment(string: "Target: \(identifiers[next])\nOffset: \(offset), movement: \(movement)\nCoverage viewport before gesture: \(viewport)\nScroll frame before gesture: \(scrollFrame), after: \(scroll.frame)\nFooter frame before gesture: \(footerFrame), after: \(footer.frame)\n\(frameChanges)")
+                proof.name = "export scroll no progress frames gesture \(gesture)"
                 proof.lifetime = .keepAlways
                 add(proof)
-                throw AuditError(description: "No meaningful scoped scroll progress for \(identifiers[next]) after gesture \(gesture + 1)")
+                throw AuditError(description: "No meaningful scoped scroll progress for \(identifiers[next]) after gesture \(gesture)")
             }
         }
         let missing = targets.indices.filter { !checked.contains($0) }.map { identifiers[$0] }
