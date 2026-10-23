@@ -160,3 +160,4 @@
 - Same fixer final export `20261023T045944Z-29138`: Mac uses an immutable audit type; error sign is -56. Privacy `20261023T045912Z-28692`: PASS. Final native checks pending.
 - iPhone `20261023T050054Z-30109`: FAIL, same Code -56 at dark/AX5 Prepare. Light/AX5 now passes, with initial all-types and other supplemental types intact. Dark initial all-types passes. Same full-frame control; extend the recorded limit to both appearances for this exact iPhone error/AX5 supplemental case.
 - Round 6 source follow-up on `84d19d35`: no new P0–P1 or deterministic blockers. Privacy `20261023T050037Z-29693`: PASS.
+- Same fixer export `20261023T050437Z-33910`: exact iPhone/error/AX5 supplemental limit now covers light and dark. Round 6 approves; initial all-types, iPad contrast and other checks remain enabled. Native checks pending.

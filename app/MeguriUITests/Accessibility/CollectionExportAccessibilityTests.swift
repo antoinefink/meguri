@@ -77,7 +77,8 @@ import UIKit
                             #if os(iOS)
                             var types: XCUIAccessibilityAuditType = .all
                             if UIDevice.current.userInterfaceIdiom == .phone,
-                               state == "error", variant == "light, largest accessibility size",
+                               state == "error",
+                               (variant == "light, largest accessibility size" || variant == "dark, largest accessibility size"),
                                visible.contains("settings.importExport.prepare") {
                                 types = .all.subtracting(.contrast)
                             }
