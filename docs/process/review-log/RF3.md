@@ -165,3 +165,5 @@
 - iPhone `20261023T050558Z-35247`: PASS, one test and no skips. All states and variants passed with the exact R1977 limitation recorded above. Final Mac/iPad freshness, gate and critic remain pending.
 - Mac `20261023T051301Z-39885`: PASS, one test and no skips. Final source matches the passing iPhone input. iPad and integration checks remain pending.
 - iPad `20261023T051450Z-42197`: PASS, one test and no skips. All three final export audit inputs match `a334c64ce2fab37bc3e3d05f90d385a789fda89966847d8e5bc7821074060b5e`. Native file round trips remain passed on all platforms. Required gate base: `81c207573c20c337c8834e4ae8b4ee8f29603dbf`.
+- Doctor `20261023T052133Z-48396`: PASS, 48 GiB free. Catch-up `20261023T052134Z-48660`: PASS, nothing queued.
+- Gate `20261023T052151Z-49236`: CANCELLED after core-lint FAIL. Test lines 1177, 1238, 1280 need lint fixes. Static, pins, canaries and core-deny PASS. Core tests cancelled. Full gate pending.
