@@ -665,3 +665,16 @@ P1 closed, with no new P0–P1 findings. Actual scan
 the separate native navigation patch. The credentialed VM action is pending.
 The refused source copy `20261023T200609Z-27517` ran no implementation while
 spec changes were dirty; the later clean run is the correction cited above.
+
+Observed-purpose correction `20261023T202135Z-40696` requires both actual
+Remote Login authorization messages, while retaining the verified Info,
+account and owner guards. Review found no new P0–P1 findings. The earlier
+bound action `20261023T201701Z-37735` refused the different prompt before
+reading credentials; its facts confirmed the underlying Info match.
+
+Action `20261023T203715Z-48356` passed one case, no skips. The supported OS
+setting is now enabled. SSH can read the generated app policy: one complete
+Import, no active operation, and its one cooldown has expired. No receipt,
+clock or deadline was edited. Temporary credential/marker removal and empty
+VM clipboard were confirmed. Full Mac peer capture can now run.
+

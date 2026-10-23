@@ -311,8 +311,12 @@ final class VMAccessibilitySetupTests: XCTestCase {
         let surface = authorization.surface
         let modify = NSPredicate(format: "label == %@", "Modify Settings")
         let cancel = NSPredicate(format: "label == %@", "Cancel")
-        let purpose = NSPredicate(format: "label CONTAINS[c] %@ OR value CONTAINS[c] %@",
-                                  "modify your system settings", "modify your system settings")
+        let purpose = NSPredicate(format: "label == %@ OR value == %@",
+                                  "Remote Login is trying to modify system settings.",
+                                  "Remote Login is trying to modify system settings.")
+        let sharing = NSPredicate(format: "label == %@ OR value == %@",
+                                  "Enter your password to continue with Sharing.",
+                                  "Enter your password to continue with Sharing.")
         guard settings.state != .notRunning, settings.windows.count == 1,
               owner.state != .notRunning, owner.windows.count == 1,
               owner.secureTextFields.count == 1, surface.secureTextFields.count == 1,
@@ -321,7 +325,8 @@ final class VMAccessibilitySetupTests: XCTestCase {
               surface.buttons.count == 2,
               surface.buttons.matching(modify).count == 1, owner.buttons.matching(modify).count == 1,
               surface.buttons.matching(cancel).count == 1, owner.buttons.matching(cancel).count == 1,
-              surface.staticTexts.matching(purpose).count == 1 else { return nil }
+              surface.staticTexts.matching(purpose).count == 1,
+              surface.staticTexts.matching(sharing).count == 1 else { return nil }
         let username = surface.textFields.element(boundBy: 0)
         guard username.placeholderValue == "Username", let account = username.value as? String,
               account.caseInsensitiveCompare(NSUserName()) == .orderedSame else { return nil }
@@ -450,20 +455,48 @@ final class VMAccessibilitySetupTests: XCTestCase {
 
     @MainActor
     private func attachRemoteLoginAuthorizationFacts(_ surface: XCUIElement) {
+        guard surface.exists else { return }
         let infoRow = NSPredicate(format: "label == %@ OR value == %@",
                                   "Allow full disk access for remote users", "Allow full disk access for remote users")
         let embedded = surface.staticTexts.matching(infoRow).count > 0
-        let texts = (0..<(embedded ? 0 : min(16, surface.staticTexts.count))).map { index in
-            let text = surface.staticTexts.element(boundBy: index)
-            return ["label": String(safeDiagnostic(text.label).prefix(512)),
-                    "value": String(safeDiagnostic(text.value as? String ?? "").prefix(512))]
+        let staticTextCount = embedded ? 0 : surface.staticTexts.count
+        let buttonCount = embedded ? 0 : surface.buttons.count
+        let textFieldCount = surface.textFields.count
+        let secureFieldCount = surface.secureTextFields.count
+        guard staticTextCount <= 16, buttonCount <= 16,
+              textFieldCount <= 16, secureFieldCount <= 16 else { return }
+        let staticTexts = embedded ? [] : surface.staticTexts.allElementsBoundByAccessibilityElement
+        let buttonElements = embedded ? [] : surface.buttons.allElementsBoundByAccessibilityElement
+        let textFields = surface.textFields.allElementsBoundByAccessibilityElement
+        let secureFields = surface.secureTextFields.allElementsBoundByAccessibilityElement
+        guard surface.exists, staticTexts.count == staticTextCount, buttonElements.count == buttonCount,
+              textFields.count == textFieldCount, secureFields.count == secureFieldCount else { return }
+        var texts: [[String: String]] = []
+        for text in staticTexts {
+            guard text.exists else { return }
+            texts.append(["label": String(safeDiagnostic(text.label).prefix(512)),
+                          "value": String(safeDiagnostic(text.value as? String ?? "").prefix(512))])
         }
-        let buttons = (0..<(embedded ? 0 : min(16, surface.buttons.count))).map { index in
-            let button = surface.buttons.element(boundBy: index)
-            return ["identifier": String(safeDiagnostic(button.identifier).prefix(256)),
-                    "title": String(safeDiagnostic(button.title).prefix(256))]
+        var buttons: [[String: String]] = []
+        for button in buttonElements {
+            guard button.exists else { return }
+            buttons.append(["identifier": String(safeDiagnostic(button.identifier).prefix(256)),
+                            "title": String(safeDiagnostic(button.title).prefix(256)),
+                            "label": String(safeDiagnostic(button.label).prefix(256))])
         }
-        let facts = ["staticTexts": texts, "buttons": buttons]
+        var facts: [String: Any] = ["staticTexts": texts, "buttons": buttons,
+                                   "textFieldCount": textFieldCount, "secureFieldCount": secureFieldCount]
+        if textFields.count == 1 {
+            let username = textFields[0]
+            guard username.exists else { return }
+            facts["usernameMatchesCurrentAccount"] = (username.value as? String)?.caseInsensitiveCompare(NSUserName()) == .orderedSame
+            facts["usernamePlaceholderIsUsername"] = username.placeholderValue == "Username"
+        }
+        if secureFields.count == 1 {
+            let password = secureFields[0]
+            guard password.exists else { return }
+            facts["passwordLabelIsPassword"] = password.label == "Password"
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: facts, options: [.prettyPrinted, .sortedKeys]) else { return }
         let evidence = XCTAttachment(string: safeDiagnostic(String(decoding: data, as: UTF8.self)))
         evidence.name = "VM Remote Login observed authorization prompt facts"
