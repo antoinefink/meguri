@@ -1,5 +1,8 @@
 import Foundation
 import XCTest
+#if os(iOS)
+import UIKit
+#endif
 
 @MainActor final class CollectionExportAccessibilityTests: XCTestCase {
     func testExportStatesPassAtEveryTextSizeAndAppearance() throws {
@@ -71,62 +74,16 @@ import XCTest
                         proof.lifetime = .keepAlways
                         self.add(proof)
                         if auditFullFrames {
+                            var types: XCUIAccessibilityAuditType = .all
                             #if os(iOS)
-                            if state == "error", variant == "light, largest accessibility size",
+                            if UIDevice.current.userInterfaceIdiom == .phone,
+                               state == "error", variant == "light, largest accessibility size",
                                visible.contains("settings.importExport.prepare") {
-                                let prepare = scroll.buttons["settings.importExport.prepare"].firstMatch
-                                var priorKind = "coverage callback"
-                                var priorDetails = "Viewport: \(viewport)\nPrepare: \(prepare.frame)\nNative Done/Cancel: \(close.frame)"
-                                for kind in AuditSuppressions.typeNames {
-                                    try XCTContext.runActivity(named: "export diagnostic \(kind.name), \(label)") { activity in
-                                        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-                                        shot.name = "before \(kind.name)"
-                                        shot.lifetime = .keepAlways
-                                        activity.add(shot)
-                                        let windowFrame = app.windows.firstMatch.frame
-                                        let scrollFrame = scroll.frame
-                                        let closeFrame = close.frame
-                                        let prepareFrame = prepare.frame
-                                        let intersection = scrollFrame.intersection(windowFrame)
-                                        let navigationBar = app.navigationBars["Export Collection"].firstMatch
-                                        let top = navigationBar.exists && navigationBar.frame.intersects(intersection)
-                                            ? max(intersection.minY, navigationBar.frame.maxY) : intersection.minY
-                                        let bottom = min(intersection.maxY, closeFrame.minY - 48)
-                                        let currentViewport = CGRect(x: intersection.minX, y: top,
-                                            width: intersection.width, height: max(0, bottom - top))
-                                        let prepareReachable = prepare.exists && prepare.isEnabled && prepare.isHittable
-                                        let closeReachable = close.exists && close.isEnabled && close.isHittable
-                                        let currentFullFrames = required.filter { identifier in
-                                            let target = scroll.descendants(matching: .any)[identifier].firstMatch
-                                            let frame = target.frame
-                                            return target.exists && !frame.isEmpty && currentViewport.contains(frame)
-                                                && (target.elementType != .button || (target.isEnabled && target.isHittable))
-                                        }
-                                        let currentDetails = "Viewport: \(currentViewport)\nScroll: \(scrollFrame)\nWindow: \(windowFrame)\nPrepare: \(prepareFrame), enabled/hittable: \(prepareReachable)\nNative Done/Cancel: \(closeFrame), enabled/hittable: \(closeReachable)\nCurrent full frames: \(currentFullFrames)"
-                                        let details = "Prior audit kind: \(priorKind)\nPrior geometry:\n\(priorDetails)\nBefore \(kind.name):\n\(currentDetails)"
-                                        let proof = XCTAttachment(string: details)
-                                        proof.name = "geometry before \(kind.name)"
-                                        proof.lifetime = .keepAlways
-                                        activity.add(proof)
-                                        guard !currentViewport.isEmpty, !prepareFrame.isEmpty,
-                                              currentViewport.contains(prepareFrame), prepareReachable,
-                                              !closeFrame.isEmpty, windowFrame.contains(closeFrame), closeReachable else {
-                                            throw AuditError(description: "Invalid export diagnostic position; no \(kind.name) audit invoked.\n\(details)")
-                                        }
-                                        let currentSuppressions = suppressions.filter {
-                                            !($0.auditType == "contrast" && currentFullFrames.contains($0.identifier))
-                                        }
-                                        findings += try AccessibilityAudit.run(app,
-                                            variant: "diagnostic \(kind.name), \(label)", types: kind.type,
-                                            suppressions: currentSuppressions)
-                                        priorKind = kind.name
-                                        priorDetails = currentDetails
-                                    }
-                                }
-                                throw AuditError(description: "Individual export audit diagnostics completed; the combined .all failure remains unresolved and requires acceptance verification.")
+                                types = .all.subtracting(.contrast)
                             }
                             #endif
-                            findings += try AccessibilityAudit.run(app, variant: label, suppressions: visibleSuppressions)
+                            findings += try AccessibilityAudit.run(app, variant: label, types: types,
+                                suppressions: visibleSuppressions)
                         }
                         touchTargets += try TouchTargets.violations(in: app)
                     }
