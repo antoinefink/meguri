@@ -148,3 +148,4 @@
 - Fixer `s-20261023T041832Z-45dff316`, export `20261023T041859Z-1962`: pans span at most 60% of the safe viewport, with 48 gestures and 128 observations maximum. Two exact contrast entries cover the retained Explanation/Choose findings and are removed for full-frame audits. Production is unchanged; native checks pending.
 - Independent round 6 source follow-up on `7c444fa6`: no new P0–P1 findings or deterministic blockers. Privacy `20261023T042046Z-2822`: PASS.
 - iPad export audit `20261023T042057Z-3184`: PASS, one test and no skips. Ready, error and loading passed in both appearances at default and largest accessibility text sizes, including continuous paragraphs and full-frame controls. iPhone/Mac freshness and integration gate remain pending.
+- iPhone `20261023T042829Z-7018`: FAIL. Paragraph height comparison failed at AX5. Contrast findings: none. Numeric diagnostics and a bounded comparison remain pending.
