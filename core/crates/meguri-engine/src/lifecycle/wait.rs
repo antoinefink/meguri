@@ -48,7 +48,10 @@ impl SlotGuard {
     }
 
     /// Early admission check for verified replacement consumers, before any
-    /// write-bearing preparation. Exclusive entry checks again after draining.
+    /// write-bearing preparation. Verified replacement rechecks after draining.
+    /// Exclusive entry itself does not check: transfer callers must call
+    /// `check_verified_review` again after exclusive entry, before write-bearing
+    /// preparation or remote mutation.
     pub fn check_verified_review(&self, reason: crate::replace::ReplaceReason) -> Result<(), EngineError> {
         let state = self.engine.lock_state();
         self.check_held(&state)?;

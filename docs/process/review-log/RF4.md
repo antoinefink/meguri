@@ -33,6 +33,15 @@ Formatting `20261023T084434Z-23939`: passed. Lint
 `20261023T084528Z-25281`: failed on a complex test evidence tuple; repair open.
 Independent round 1 review is in progress. No UI changed in this prerequisite.
 
+Round 1 found the test tuple lint and a misleading admission comment. The public
+check is valid after drain, but exclusive entry does not call it automatically;
+transfer callers must repeat it before preparation or remote mutation.
+Fixer session `s-20261023T084708Z-2448b237`, isolated run
+`20261023T084720Z-26476`, corrects the comment and names the same test evidence.
+Round 2 review found no P0–P2 issues. No assertion or executable guard was reduced.
+Privacy `20261023T084854Z-27836` passed. Final full engine-package verification
+and lint are pending; the earlier failed lint receipt remains retained.
+
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,
 focused server/native evidence and the required full gate remain open.

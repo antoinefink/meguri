@@ -1064,11 +1064,16 @@ fn failed_activation_save_refuses_writer_until_restart_proves_the_candidate() {
 fn import_and_transfers_recheck_session_started_during_participant_flush() {
     use meguri_engine::{Ports, SuspendParticipant, sched::queue::QueueProvider, session::ReviewService};
     use meguri_model::ids::DeckId;
+    struct CapturedEvidence {
+        collection_bytes: Vec<u8>,
+        wal_bytes: Vec<u8>,
+        publication: Publication,
+    }
     struct StartDuringFlush {
         review: Arc<ReviewService>,
         armed: std::sync::atomic::AtomicBool,
         live: PathBuf,
-        captured: Mutex<Option<(Vec<u8>, Vec<u8>, Publication)>>,
+        captured: Mutex<Option<CapturedEvidence>>,
     }
     impl SuspendParticipant for StartDuringFlush {
         fn name(&self) -> &str {
@@ -1077,11 +1082,11 @@ fn import_and_transfers_recheck_session_started_during_participant_flush() {
         fn flush(&self) -> Result<(), EngineError> {
             if self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
                 self.review.start(DeckId(1), None)?;
-                *self.captured.lock().unwrap() = Some((
-                    fs::read(&self.live).unwrap(),
-                    fs::read(self.live.with_extension("anki2-wal")).unwrap(),
-                    publication(&self.live),
-                ));
+                *self.captured.lock().unwrap() = Some(CapturedEvidence {
+                    collection_bytes: fs::read(&self.live).unwrap(),
+                    wal_bytes: fs::read(self.live.with_extension("anki2-wal")).unwrap(),
+                    publication: publication(&self.live),
+                });
             }
             Ok(())
         }
@@ -1127,10 +1132,13 @@ fn import_and_transfers_recheck_session_started_during_participant_flush() {
         assert!(review.active_session().is_some());
         assert_eq!(engine.generation(), generation);
         let captured = race.captured.lock().unwrap();
-        let (bytes, wal, prior) = captured.as_ref().expect("session started during flush");
-        assert_eq!(&fs::read(&live).unwrap(), bytes);
-        assert_eq!(&fs::read(live.with_extension("anki2-wal")).unwrap(), wal);
-        assert_eq!(&publication(&live), prior);
+        let evidence = captured.as_ref().expect("session started during flush");
+        assert_eq!(&fs::read(&live).unwrap(), &evidence.collection_bytes);
+        assert_eq!(
+            &fs::read(live.with_extension("anki2-wal")).unwrap(),
+            &evidence.wal_bytes
+        );
+        assert_eq!(&publication(&live), &evidence.publication);
     }
 }
 
