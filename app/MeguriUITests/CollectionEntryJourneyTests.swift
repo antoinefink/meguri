@@ -54,7 +54,25 @@ import notify
         let cancelReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             cancel.exists && cancel.isEnabled && cancel.isHittable
         }, object: nil)
-        XCTAssertEqual(XCTWaiter().wait(for: [cancelReady], timeout: 10), .completed, app.debugDescription)
+        let cancelResult = XCTWaiter().wait(for: [cancelReady], timeout: 10)
+        if cancelResult != .completed {
+            capturePicker(app)
+            func attributes(_ target: XCUIElement) -> String {
+                "elementType=\(target.elementType) label=\(target.label.debugDescription) identifier=\(target.identifier.debugDescription) exists=\(target.exists) isEnabled=\(target.isEnabled) isHittable=\(target.isHittable) frame=\(target.frame)"
+            }
+            let cancels = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Cancel"))
+            let buttons = app.buttons.matching(NSPredicate(format: "label IN %@ OR identifier IN %@",
+                ["Cancel", "Close", "Save", "More"], ["Cancel", "Close", "Save", "More", "DOCPicker.actionButton"]))
+            let cancelRows = cancels.allElementsBoundByIndex.map { "exact Cancel: \(attributes($0))" }
+            let buttonRows = buttons.allElementsBoundByIndex.map { "native button: \(attributes($0))" }
+            let rows = (cancelRows.isEmpty ? ["No exact Cancel candidates"] : cancelRows)
+                + (buttonRows.isEmpty ? ["No named native button candidates"] : buttonRows)
+            let diagnostic = XCTAttachment(string: rows.joined(separator: "\n"))
+            diagnostic.name = "export-cancel-postwait-native-attributes"
+            diagnostic.lifetime = .keepAlways
+            add(diagnostic)
+        }
+        XCTAssertEqual(cancelResult, .completed, app.debugDescription)
         try click(cancel, app, bundle)
         // The native local folder is installed by the existing public source hook.
         let saved = URL(fileURLWithPath: "/RF2 Import Tests/Meguri-Collection.colpkg")
