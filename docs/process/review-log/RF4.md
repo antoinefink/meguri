@@ -548,3 +548,18 @@ iPhone transfer check `20261023T191918Z-82563` failed at the Login result
 wait. The build reported zero errors or warnings; the keyboard no longer
 blocked Save Endpoint. Login, transfer and peer proof are not accepted.
 The controller confirmed cleanup. A safe result-category diagnostic is next.
+
+iPhone local review suite `20261023T192549Z-91021` passed both cases, with
+no skips: exhaustion and restart, plus ratings, undo, wait and restart. These
+are production reviews over generated content; the real picker path is next.
+
+Login diagnostic `20261023T192511Z-90396` starts at `5bfd9bca` and adds only
+entry equality booleans, control state and fixed error categories. Its narrow
+independent safety review found no P0–P1 findings; it preserves expectations,
+timeouts and product behavior. Private scan `20261023T192837Z-94294` passed.
+The final native plan/correctness/visual review remains round 6 and open.
+
+Info inspection `20261023T192410Z-88778` reached the exact Info click and
+failed its assumed sheet-title predicate. It changed no settings and its
+marker was removed. The next inspection must capture the actual bounded
+window state before assuming the Info surface's accessibility type.

@@ -52,6 +52,10 @@ import XCTest
             #if os(iOS)
             try dismissTransferKeyboardIfPresent(app, bundle)
             #endif
+            let endpointExactMatch = (address.value as? String) == rig.endpoint
+            let endpointState = XCTAttachment(string: "endpointExactMatch=\(endpointExactMatch)")
+            endpointState.name = "rf4-endpoint-entry-state"; endpointState.lifetime = .keepAlways; add(endpointState)
+            XCTAssertTrue(endpointExactMatch, "Endpoint entry must match the intended draft.")
             try click(element(app, "settings.anki.saveEndpoint"), app, bundle)
             try login(app, bundle, username: importUsername, password: rig.password)
             for id in ["settings.anki.prepareImport", "settings.anki.confirm"] {
@@ -61,7 +65,7 @@ import XCTest
             let admission = element(app, "home.policy.enable")
             if admission.waitForExistence(timeout: 2) { try click(admission, app, bundle) }
             try openSettings(app, bundle)
-            waitForText(element(app, "settings.anki.result"), "Collection transfer finished")
+            waitForText(element(app, "settings.anki.result"), "Collection transfer finished", app)
             attachSuccess(app, "rf4-account-a-import-finished")
         }
 
@@ -73,24 +77,24 @@ import XCTest
                    "review.session.rate.easy", "review.session.close"] {
             try click(element(app, id), app, bundle)
         }
-        waitForText(element(app, "home.session.recorded"), "1 answers recorded")
+        waitForText(element(app, "home.session.recorded"), "1 answers recorded", app)
         attachSuccess(app, "rf4-account-a-import-real-review-saved")
         app.terminate()
         app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false).arguments
         app.launch()
-        waitForText(element(app, "home.session.recorded"), "1 answers recorded")
+        waitForText(element(app, "home.session.recorded"), "1 answers recorded", app)
         attachSuccess(app, "rf4-account-a-review-durable-after-restart")
 
         // A's stored login must load without starting work. The next explicit
         // preparation uses system time and must meet A's existing cooldown.
         try openSettings(app, bundle)
-        waitForText(element(app, "settings.anki.loginIdentity"), importUsername)
+        waitForText(element(app, "settings.anki.loginIdentity"), importUsername, app)
         waitUntilReady(element(app, "settings.anki.logout"), app)
         XCTAssertFalse(element(app, "settings.anki.username").exists, "Restore A's saved login.")
         XCTAssertFalse(element(app, "settings.anki.confirm").exists, "Loading a login must leave preparation untouched.")
         try click(element(app, "settings.anki.prepareImport"), app, bundle)
         let result = element(app, "settings.anki.result")
-        waitForText(result, "cooling down")
+        waitForText(result, "cooling down", app)
         XCTAssertTrue(element(app, "settings.anki.nextEligible").waitForExistence(timeout: 5), "Record the deadline returned with the cooldown.")
         waitUntilReady(element(app, "settings.anki.prepareImport"), app)
         for (id, explanation) in [
@@ -117,7 +121,7 @@ import XCTest
         }
         attachSuccess(app, "rf4-account-b-export-backup-preview")
         try confirmNative(app, bundle)
-        waitForText(element(app, "settings.anki.result"), "Collection transfer finished")
+        waitForText(element(app, "settings.anki.result"), "Collection transfer finished", app)
         attachSuccess(app, "rf4-account-b-export-complete-local-activation")
 
         // Evidence covers two accounts: A is still blocked and B completes.
@@ -140,6 +144,10 @@ import XCTest
         #if os(iOS)
         try dismissTransferKeyboardIfPresent(app, bundle)
         #endif
+        let usernameExactMatch = (userField.value as? String) == username
+        let usernameState = XCTAttachment(string: "usernameExactMatch=\(usernameExactMatch)")
+        usernameState.name = "rf4-username-entry-state"; usernameState.lifetime = .keepAlways; add(usernameState)
+        XCTAssertTrue(usernameExactMatch, "Username entry must match the intended account.")
         let passwordField = element(app, "settings.anki.password")
         try click(passwordField, app, bundle)
         passwordField.typeText(password)
@@ -147,8 +155,8 @@ import XCTest
         try dismissTransferKeyboardIfPresent(app, bundle)
         #endif
         try click(element(app, "settings.anki.login"), app, bundle)
-        waitForText(element(app, "settings.anki.result"), "Logged in")
-        waitForText(element(app, "settings.anki.loginIdentity"), username)
+        waitForText(element(app, "settings.anki.result"), "Logged in", app)
+        waitForText(element(app, "settings.anki.loginIdentity"), username, app)
         waitUntilReady(element(app, "settings.anki.logout"), app)
         XCTAssertFalse(element(app, "settings.anki.confirm").exists, "Login must not prepare or transfer.")
     }
@@ -231,11 +239,13 @@ import XCTest
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: count) + value)
         #endif
     }
-    private func waitForText(_ target: XCUIElement, _ text: String) {
+    private func waitForText(_ target: XCUIElement, _ text: String, _ app: XCUIApplication) {
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             target.exists && (target.label + " " + String(describing: target.value ?? "")).contains(text)
         }, object: nil)
-        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 45), .completed)
+        let outcome = XCTWaiter().wait(for: [ready], timeout: 45)
+        if outcome != .completed { attach(app, "rf4-text-wait-failure", target: target) }
+        XCTAssertEqual(outcome, .completed)
     }
     private func openSettings(_ app: XCUIApplication, _ bundle: String) throws {
         try openSection(app, bundle, name: "settings", title: "Settings")
@@ -267,6 +277,34 @@ import XCTest
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
+    private func transferResultCategory(_ target: XCUIElement) -> String {
+        guard target.exists else { return "unknown" }
+        // Compare whole fixed coordinator messages in memory. Never return AX text.
+        for text in [target.label, target.value as? String ?? ""] {
+            switch text {
+            case "Logged in. Choose a direction, then prepare its preview.":
+                return "logged-in"
+            case "The server request failed. Check the endpoint and login, then inspect the recorded stages.":
+                return "server-failed"
+            case "The transfer could not finish. Inspect the recorded stages and retained copies below.",
+                 "The operation could not finish. Local reviews and Collection Files remain available.",
+                 "Couldn’t save this endpoint. Enter an http or https server URL with an optional path prefix, without credentials, a query or a fragment.":
+                return "generic-failed"
+            case "Saved server login is unavailable. Local reviews and Collection Files remain available.",
+                 "Couldn’t remove the device login. Unlock this device and try again.",
+                 "Local transfer history is unavailable. Reviews and Collection Files remain available.":
+                return "keychain/unavailable"
+            case "This login is cooling down after a completed transfer. Reviews and Collection Files remain available.":
+                return "cooldown"
+            case "A transfer or file operation needs attention. Inspect local history below.",
+                 "Finish the current review or file operation first.",
+                 "Finish the current review before preparing a server transfer.":
+                return "busy"
+            default: continue
+            }
+        }
+        return "unknown"
+    }
     private func attach(_ app: XCUIApplication, _ name: String, target: XCUIElement? = nil, scroll: XCUIElement? = nil) {
         // Whitelist state only: no labels, identifiers read from elements, field
         // contents, screenshots or hierarchy (which can contain credentials).
@@ -284,6 +322,9 @@ import XCTest
         }
         var lines = [String]()
         if let target { lines.append(state(target, "target")) }
+        if let target, target.identifier == "settings.anki.result" {
+            lines.append("resultCategory=\(transferResultCategory(target))")
+        }
         if let scroll { lines.append(state(scroll, "scrollContainer")) }
         #if !os(macOS)
         let keyboard = app.keyboards.firstMatch
