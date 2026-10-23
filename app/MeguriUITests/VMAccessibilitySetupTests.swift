@@ -39,6 +39,69 @@ final class VMAccessibilitySetupTests: XCTestCase {
             return
         }
 
+        let infoIdentifier = "Remote LoginToggle.infoButton"
+        let infoButtons = settings.buttons.matching(identifier: infoIdentifier)
+        guard infoButtons.firstMatch.waitForExistence(timeout: 5) else {
+            XCTFail("Remote Login Info button did not appear; inspection evidence withheld")
+            return
+        }
+        // Only the observed detail pane may scroll; never use the sidebar or toggle.
+        for attempt in 0...3 {
+            guard !settings.secureTextFields.firstMatch.exists,
+                  settings.sheets.count == 0, infoButtons.count == 1 else {
+                XCTFail("Remote Login navigation is ambiguous or has secure fields; inspection evidence withheld")
+                return
+            }
+            let info = settings.buttons[infoIdentifier]
+            guard info.label == "Show Detail", info.isEnabled else {
+                XCTFail("Remote Login Info button did not match; inspection evidence withheld")
+                return
+            }
+            if info.isHittable { break }
+            guard attempt < 3 else {
+                XCTFail("Remote Login Info button remained offscreen after three scrolls; inspection evidence withheld")
+                return
+            }
+            let owners = windows.filter { $0.buttons.matching(identifier: infoIdentifier).count == 1 }
+            guard owners.count == 1 else {
+                XCTFail("Remote Login Info window is ambiguous; inspection evidence withheld")
+                return
+            }
+            let window = owners[0]
+            let buttonFrame = info.frame
+            let panes = window.scrollViews.allElementsBoundByAccessibilityElement.filter { pane in
+                let frame = pane.frame
+                return !frame.isEmpty && window.frame.contains(frame)
+                    && frame.midX > window.frame.midX
+                    && frame.minX <= buttonFrame.minX && frame.maxX >= buttonFrame.maxX
+                    && buttonFrame.minY >= frame.minY
+            }
+            guard panes.count == 1, buttonFrame.maxY > panes[0].frame.maxY else {
+                XCTFail("Remote Login detail scroll view is ambiguous or button is not below it; inspection evidence withheld")
+                return
+            }
+            panes[0].scroll(byDeltaX: 0, deltaY: -180)
+        }
+        guard !settings.secureTextFields.firstMatch.exists,
+              settings.sheets.count == 0, infoButtons.count == 1 else {
+            XCTFail("Remote Login Info navigation changed; inspection evidence withheld")
+            return
+        }
+        let info = settings.buttons[infoIdentifier]
+        guard info.label == "Show Detail", info.isEnabled, info.isHittable else {
+            XCTFail("Exact Remote Login Info button is unavailable; inspection evidence withheld")
+            return
+        }
+        info.click()
+        let sheetContent = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            settings.sheets.count == 1
+                && settings.sheets.element(boundBy: 0).staticTexts["Remote Login"].exists
+        }, object: nil)
+        guard XCTWaiter().wait(for: [sheetContent], timeout: 5) == .completed else {
+            XCTFail("Remote Login Info sheet content did not appear; inspection evidence withheld")
+            return
+        }
+
         var secureFieldsPresent = settings.secureTextFields.firstMatch.exists
         var windowEvidence: [XCTAttachment] = []
         for (index, window) in windows.enumerated() {

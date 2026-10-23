@@ -537,3 +537,14 @@ six locations. Baseline copy `private/20261023T190403Z-73968` used a clean
 committed tree; the counts and findings stayed the same. No private match text was read and no privacy rule changed. A concrete
 42-span public API inventory is awaiting Antoine's policy decision. The draft
 has not compiled or run its focused tests.
+
+Info navigation patch `20261023T192124Z-86465` starts at `b6719823`.
+Independent OS-setup round 3 found no P0–P2 findings. It scrolls only the
+observed right pane, then opens the exact Remote Login Info control; it
+changes no permission. Private scan `20261023T192353Z-88441` passed.
+Native inspection is pending.
+
+iPhone transfer check `20261023T191918Z-82563` failed at the Login result
+wait. The build reported zero errors or warnings; the keyboard no longer
+blocked Save Endpoint. Login, transfer and peer proof are not accepted.
+The controller confirmed cleanup. A safe result-category diagnostic is next.
