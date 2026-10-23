@@ -29,7 +29,7 @@ use meguri_sync::{
     CheckResult, Endpoint, ErrorKind, HostKey, Job, JobError, JobOptions, LocalRecord, Method, OfflineStatus, Payload,
     Proxy, StatusMemory, SyncStatus, login_blocking,
 };
-use meguri_testkit::sync_stub::{ProxyRules, Recorded, Reply, SyncStub};
+use meguri_testkit::sync_stub::{Recorded, Reply, SyncStub};
 
 /// The device's clock in these tests: 2030-01-15T10:03:00Z.
 const NOW_MS: i64 = 1_894_701_780_000;
@@ -719,8 +719,8 @@ fn the_probe_returns_the_servers_record_and_fails_as_the_check_does() {
 /// sent after it.
 fn rig_login() -> (JobOptions, HostKey, SyncStub) {
     let rig = rig();
-    let proxy = SyncStub::proxy(ProxyRules::default());
-    let options = options(&rig.base).proxy(Proxy::new(proxy.url()));
+    let proxy = rig.recording_proxy();
+    let options = rig.options().proxy(Proxy::new(proxy.url()));
     let key = login_blocking(threads(), &options, &random(), &rig.user, &rig.password).unwrap();
     (options, key, proxy)
 }

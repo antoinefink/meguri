@@ -178,12 +178,13 @@ pub(crate) fn prepare_inner(
     }
     meguri_model::faultpoint!("replace.after_check")?;
     if matches!(preparation, Preparation::FullUpload) {
-        // O6.2: statistics must describe the transformed rows, and pages
-        // freed by clearing graves must be reclaimed before finalisation.
+        // O6.2: statistics must describe the transformed rows. ANALYZE can
+        // itself free pages while replacing old statistics, so compact once
+        // more afterward, retaining those statistics, before finalisation.
         opened
             .writer()
             .conn
-            .execute_batch("VACUUM; ANALYZE;")
+            .execute_batch("VACUUM; ANALYZE; VACUUM;")
             .map_err(StorageError::from)?;
     }
     if !opened.writer().checkpoint()?.succeeded() {

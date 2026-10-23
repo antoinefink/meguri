@@ -131,6 +131,18 @@ unchanged and use the existing local test routing facilities. Lint
 `20261023T102308Z-4204` found three style errors; these join the same fix batch.
 No runtime/rig acceptance is claimed while any check remains failed.
 
+Check repair run `20261023T105836Z-9862`, fixer `s-20261023T103018Z-bbae3d27`:
+the final compaction and replacement-error changes pass the original assertions.
+Focused result `20261023T110808Z-15779`: all 51 passed; five subprocess helpers
+remain ignored for direct runs. Privacy `20261023T110811Z-16023` passed.
+Round 4 found no new P0–P1 issues. The endpoint guard and its rules are unchanged.
+
+Rig compile `20261023T110920Z-17250` and lint `20261023T110924Z-17502` found
+private field access in the new test helper. Similarity
+`20261023T110927Z-17760` flagged the facts record at storage/one_way.rs25–44.
+Rewrite that owned record from the spec and fix test access through the public
+API; no scanner or guard exception. Runtime and full gate acceptance stay open.
+
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,
 focused server/native evidence and the required full gate remain open.

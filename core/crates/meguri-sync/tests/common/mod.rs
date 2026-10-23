@@ -5,14 +5,15 @@
 // Each test binary uses its own part of this module.
 #![allow(dead_code)]
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use meguri_engine::{CancelToken, ThreadRegistry};
 use meguri_model::rng::SeededRandom;
 use meguri_sync::transport::runtime;
-use meguri_sync::{Endpoint, HostKey, Job, JobOptions, Method, Payload, ServerKind, SyncError};
-use meguri_testkit::sync_stub::{Reply, SyncStub};
+use meguri_sync::{Endpoint, HostKey, Job, JobOptions, Method, Payload, Proxy, ServerKind, SyncError};
+use meguri_testkit::sync_stub::{ProxyRules, Reply, SyncStub};
 use serde_json::Value;
 
 /// The host key every test job sends.
@@ -107,6 +108,51 @@ pub struct Rig {
     pub base: String,
     pub user: String,
     pub password: String,
+    host: SocketAddr,
+    options: JobOptions,
+    // Keep the synthetic-gateway forwarding route alive through every job.
+    _route: Option<SyncStub>,
+}
+
+impl Rig {
+    pub fn options(&self) -> JobOptions {
+        self.options.clone()
+    }
+
+    /// Recording clients need the same explicit route: an HTTP proxy does
+    /// its own upstream lookup, independent of the job's DNS pins.
+    pub fn recording_proxy(&self) -> SyncStub {
+        rig_proxy(self.host)
+    }
+}
+
+const RIG_HOST: &str = "sync-rig.test";
+
+/// Only the address resolved locally for Docker's host (or native loopback)
+/// reaches here. Never put OrbStack's synthetic address in a guarded URL/pin.
+pub fn rig_route(host: SocketAddr) -> (JobOptions, Option<SyncStub>) {
+    let options = options(&format!("http://{RIG_HOST}:{}/", host.port()));
+    if meguri_sync::endpoint_guard::check_endpoint(&format!("http://{host}/")).is_ok() {
+        return (options.pin_host(RIG_HOST, host), None);
+    }
+    // The existing proxy stub supports explicit upstream socket routes. Limit
+    // this fallback to the source-known OrbStack gateway, never arbitrary 0/8
+    // or public addresses. The job sees only .test and a loopback proxy.
+    assert_eq!(
+        host.ip(),
+        std::net::IpAddr::from([0, 250, 250, 254]),
+        "the Docker host must resolve to a supported local gateway"
+    );
+    let proxy = rig_proxy(host);
+    (options.proxy(Proxy::new(proxy.url())), Some(proxy))
+}
+
+/// The existing recording proxy's sole upstream is the resolved rig gateway.
+pub fn rig_proxy(host: SocketAddr) -> SyncStub {
+    SyncStub::proxy(ProxyRules {
+        routes: vec![(format!("{RIG_HOST}:{}", host.port()), host)],
+        ..ProxyRules::default()
+    })
 }
 
 /// Where the rig listens, from the latest `tools/mg sync-rig` result in this
@@ -157,9 +203,13 @@ pub fn rig() -> Rig {
         .ok()
         .and_then(|mut addresses| addresses.next())
         .unwrap_or_else(|| std::net::SocketAddr::from(([127, 0, 0, 1], port)));
+    let (options, route) = rig_route(host);
     Rig {
-        base: format!("http://{host}/"),
+        base: options.base.as_str().to_owned(),
         user,
         password: password.expect("the rig's env files hold the user's password"),
+        host,
+        options,
+        _route: route,
     }
 }

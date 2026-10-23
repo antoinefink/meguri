@@ -1462,12 +1462,60 @@ fn transfers_report_uncompressed_bytes_against_their_totals() {
 use common::rig;
 
 #[test]
+fn local_rig_route_pins_loopback_under_a_reserved_name() {
+    let server = SyncStub::serve(|_| Reply::ok(b"{}"));
+    let (options, route) = common::rig_route(server.addr());
+    assert!(route.is_none());
+    assert_eq!(options.base.as_str(), server.url_for("sync-rig.test"));
+    assert_eq!(
+        request(&mut new_job(&options), Method::Meta, Payload::empty()).unwrap(),
+        b"{}"
+    );
+    assert_eq!(paths(&server.requests()), ["/sync/meta"]);
+}
+
+#[test]
+fn local_rig_route_keeps_recording_clients_on_the_explicit_upstream() {
+    let server = SyncStub::serve(|_| Reply::ok(b"{}"));
+    let (options, route) = common::rig_route(server.addr());
+    assert!(route.is_none());
+    let proxy = common::rig_proxy(server.addr());
+    let options = options.proxy(Proxy::new(proxy.url()));
+    assert_eq!(
+        request(&mut new_job(&options), Method::Meta, Payload::empty()).unwrap(),
+        b"{}"
+    );
+    assert_eq!(paths(&server.requests()), ["/sync/meta"]);
+    let sent = proxy.requests();
+    assert_eq!(paths(&sent), ["/sync/meta"]);
+    assert_eq!(sent[0].head.target, format!("{}sync/meta", options.base.as_str()));
+}
+
+#[test]
+fn local_rig_route_handles_the_orbstack_gateway_without_relaxing_the_guard() {
+    let host = "0.250.250.254:27701".parse().unwrap();
+    assert!(meguri_sync::endpoint_guard::check_endpoint("http://0.250.250.254:27701/").is_err());
+    let (options, route) = common::rig_route(host);
+    let proxy = route.expect("the synthetic gateway needs an explicit local proxy route");
+    assert_eq!(options.base.as_str(), "http://sync-rig.test:27701/");
+    // Client construction checks pins/proxy without connecting to the rig.
+    let _job = new_job(&options);
+    assert!(proxy.requests().is_empty());
+}
+
+#[test]
+#[should_panic(expected = "the Docker host must resolve to a supported local gateway")]
+fn local_rig_route_refuses_other_zero_net_addresses() {
+    let _ = common::rig_route("0.1.2.3:27701".parse().unwrap());
+}
+
+#[test]
 #[ignore = "needs tools/mg sync-rig up"]
 fn rig_login_returns_a_host_key_for_an_empty_k_and_writes_nothing() {
     let rig = rig();
     // A recording proxy in front of the rig shows what was sent.
-    let proxy = SyncStub::proxy(ProxyRules::default());
-    let options = options(&rig.base).proxy(Proxy::new(proxy.url()));
+    let proxy = rig.recording_proxy();
+    let options = rig.options().proxy(Proxy::new(proxy.url()));
     let scratch = std::env::temp_dir().join(format!("meguri-sync-rig-login-{}", std::process::id()));
     std::fs::create_dir_all(&scratch).unwrap();
     std::env::set_current_dir(&scratch).unwrap();
@@ -1496,7 +1544,7 @@ fn rig_wrong_password_is_an_auth_failure() {
     let rig = rig();
     // sync-ops.md S4.5's derived wrong password, and a user the server does
     // not know (T14: both 403).
-    let options = options(&rig.base);
+    let options = rig.options();
     for (user, password) in [
         (rig.user.clone(), format!("{}-wrong", rig.password)),
         (format!("{}-unknown", rig.user), rig.password.clone()),
@@ -1511,7 +1559,7 @@ fn rig_wrong_password_is_an_auth_failure() {
 #[ignore = "needs tools/mg sync-rig up"]
 fn rig_accepts_the_meguri_identity_and_empty_bodies() {
     let rig = rig();
-    let options = options(&rig.base);
+    let options = rig.options();
     let random = random();
     let key = login_blocking(threads(), &options, &random, &rig.user, &rig.password).unwrap();
     let mut job = Job::new(&options, Some(key), &random).unwrap();

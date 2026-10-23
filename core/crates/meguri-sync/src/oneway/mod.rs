@@ -958,6 +958,23 @@ impl ManualTransfers {
                 if let meguri_engine::replace::ReplaceError::AfterActivation { generation, .. } = &error {
                     op.actual_generation = generation.map(|g| g.0);
                 }
+                // Preparation I/O keeps its storage category. Once the commit
+                // hook has saved activation intent, swap I/O is a typed
+                // replacement failure; failed() retains the fresh-decision
+                // fence and advances the operation revision for recovery.
+                if op.phase == Phase::Activating
+                    && matches!(
+                        &error,
+                        meguri_engine::replace::ReplaceError::Staging(
+                            meguri_storage::verified_replace::ReplaceError::Io(_)
+                        )
+                    )
+                {
+                    return Err(TransferError::Replacement {
+                        activated: false,
+                        generation: None,
+                    });
+                }
                 Err(replacement_error(error))
             }
         }

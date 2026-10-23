@@ -52,7 +52,7 @@ fn rig_rf4_collection_export_import_server_copy_restore_and_declared_transforms(
     let rig = rig_common::rig();
     let endpoint = rig_common::base(&rig.base);
     let random = SeededRandom::new(109);
-    let options = rig_common::options(&rig.base);
+    let options = rig.options();
     let key = login_blocking(rig_common::threads(), &options, &random, &rig.user, &rig.password).unwrap();
     // The official server supplies time; no wall clock or external source.
     let mut probe = Job::new(&options, Some(key.clone()), &random).unwrap();
@@ -109,8 +109,7 @@ fn rig_rf4_collection_export_import_server_copy_restore_and_declared_transforms(
     )
     .unwrap();
     let original_usn = c.reader(ReaderRole::Sync).unwrap().transfer_facts().unwrap().usn.0;
-    let access =
-        || TransferAccess::new(endpoint.clone(), &rig.user, key.clone(), rig_common::options(&rig.base)).unwrap();
+    let access = || TransferAccess::new(endpoint.clone(), &rig.user, key.clone(), rig.options()).unwrap();
     let events = host.engine().stream().subscribe();
     let task = host
         .prepare_manual_transfer(access(), Direction::Export, Scope::CollectionOnly)

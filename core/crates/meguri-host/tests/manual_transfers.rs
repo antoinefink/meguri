@@ -860,10 +860,13 @@ fn rf4_absent_import_recovers_after_durable_intent_with_fresh_confirmation() {
         "replace.after_pause_recorded",
         meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other),
     );
-    assert!(matches!(
-        confirm(&host, &script, prepared),
-        Err(TransferError::Replacement { activated: false, .. })
-    ));
+    let result = confirm(&host, &script, prepared);
+    let error = result.as_ref().err(); // TransferError's Debug is credential/body safe.
+    assert!(
+        matches!(error, Some(TransferError::Replacement { activated: false, .. })),
+        "expected pre-activation replacement failure; success={}, error={error:?}",
+        result.is_ok()
+    );
     meguri_model::faultpoint::disarm_all();
     script.assert_done();
     let interrupted = host.manual_transfer_history().active().unwrap().unwrap();

@@ -257,7 +257,7 @@ impl TransferPolicy {
         }
     }
     fn read(&self) -> Result<State, PolicyError> {
-        sidecar::read_document(&self.path, |doc| decode(doc)).map_err(Into::into)
+        sidecar::read_document(&self.path, decode).map_err(Into::into)
     }
     fn update<T>(&self, f: impl FnOnce(&mut State) -> Result<T, PolicyError>) -> Result<T, PolicyError> {
         // Return the original policy variant when the document update refuses it.
@@ -313,12 +313,12 @@ impl TransferPolicy {
             if let Some(id) = &state.active {
                 return Err(PolicyError::Overlap(id.clone()));
             }
-            if let Some(r) = state.cooldowns.get(&operation.account.0) {
-                if now < r.next_eligible_at {
-                    return Err(PolicyError::Cooldown {
-                        next_eligible_at: r.next_eligible_at,
-                    });
-                }
+            if let Some(r) = state.cooldowns.get(&operation.account.0)
+                && now < r.next_eligible_at
+            {
+                return Err(PolicyError::Cooldown {
+                    next_eligible_at: r.next_eligible_at,
+                });
             }
             state.serial = state.serial.checked_add(1).ok_or(PolicyError::Invalid)?;
             operation.id = OperationId(format!("{:016x}-{:016x}", state.serial, nonce));

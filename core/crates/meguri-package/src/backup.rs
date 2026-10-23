@@ -403,6 +403,13 @@ impl From<WriteError> for BackupFailureCause {
     }
 }
 
+fn corrupt_snapshot(cause: &BackupFailureCause) -> bool {
+    matches!(cause,
+        BackupFailureCause::Engine(error) if matches!(error.as_ref(),
+            EngineError::Storage(StorageError::Sqlite { code: 11 | 26, .. })
+            | EngineError::Open(meguri_storage::OpenError::Corrupt { .. })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,11 +459,4 @@ mod tests {
                 .is_symlink()
         );
     }
-}
-
-fn corrupt_snapshot(cause: &BackupFailureCause) -> bool {
-    matches!(cause,
-        BackupFailureCause::Engine(error) if matches!(error.as_ref(),
-            EngineError::Storage(StorageError::Sqlite { code: 11 | 26, .. })
-            | EngineError::Open(meguri_storage::OpenError::Corrupt { .. })))
 }
