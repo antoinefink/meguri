@@ -653,6 +653,139 @@ class PublicInterfaceTests(unittest.TestCase):
         self.assertEqual(staged, [{"path": "report.txt", "lines": [1]}])
 
 
+class PublicRustPathsTests(unittest.TestCase):
+    """Synthetic matches exercise only the three complete public Rust paths."""
+
+    facts = ("tokio::sync::Semaphore::const_new", "tokio::sync::Semaphore", "tokio::sync::Notify")
+    check_all = PublicInterfaceTests.check_all
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = self.temp.name
+        git(self.repo, "init", "-q")
+        self.matcher = private_scan.Matcher(
+            {(word,) for fact in self.facts for word in private_scan.words(fact)} | {("sentinelprivate",)})
+
+    def test_exactly_three_complete_paths_and_constructor_longest(self):
+        self.assertEqual(private_scan.PUBLIC_RUST_PATHS, self.facts)
+        for fact in self.facts:
+            self.assertEqual([m.group() for m in private_scan.PUBLIC_LITERAL.finditer(fact)], [fact])
+            for text in (fact, "&" + fact, "Option<" + fact + ">", '`"' + fact + '"`'):
+                self.check_all(text, False)
+        constructor = self.facts[0]
+        self.check_all(constructor + "(1)", False,
+                       private_scan.Matcher({tuple(private_scan.words(constructor))}))
+
+    def test_qualification_identifier_continuations_and_combining_marks_are_scanned(self):
+        for fact in self.facts:
+            for prefix in ("x", "_", "custom::", "::", "custom:: ", "::\t", "r#", ".", "-", "\u0301", "\u034f"):
+                self.check_all(prefix + fact, True)
+            for suffix in ("x", "_extra", "::extra", "::", " ::extra", "\t::", ".", "-extra", "\u0301", "\u034f"):
+                self.check_all(fact + suffix, True)
+
+    def test_case_punctuation_near_spellings_and_bare_names_are_scanned(self):
+        replacements = (("tokio", "Tokio"), ("sync", "Sync"),
+                        ("::", "."), ("sync", "syn_c"), ("sync", "sync\u0301"))
+        for fact in self.facts:
+            for text in (fact.upper(), fact.lower(), fact.replace("::", ":", 1)):
+                self.check_all(text, True)
+            for old, new in replacements:
+                self.check_all(fact.replace(old, new), True)
+        for fact in (self.facts[1], self.facts[2], self.facts[0]):
+            self.check_all(fact.rsplit("::", 1)[1], True)
+        for fact, removed in ((self.facts[1], 1), (self.facts[2], 1), (self.facts[0], 2)):
+            self.check_all(fact.split("::", removed)[-1], True)
+        for fact in self.facts[1:]:
+            self.check_all(fact[:-1], True)
+        prefix, separator, name = self.facts[0].rpartition("::")
+        for suffix in (name.replace("_", "-"), name[0].upper() + name[1:]):
+            self.check_all(prefix + separator + suffix, True)
+
+    def test_comments_cannot_hide_extra_qualification_in_either_direction(self):
+        encoders = (lambda text: text,
+                    lambda text: "".join("&#%d;" % ord(c) for c in text),
+                    lambda text: "".join("\\u%04x" % ord(c) for c in text),
+                    lambda text: "".join("%%%02X" % ord(c) for c in text))
+        trivia = (" /* note */ ", " // note\n ", " /* first\n second */\n ",
+                  " /* outer /* inner */ tail */ ",
+                  " /* outer\n /* inner */\n tail */\n ")
+        for fact in self.facts:
+            for gap in trivia:
+                for text in ("custom::" + gap + fact, fact + gap + "::extra"):
+                    for encode in encoders:
+                        encoded = encode(text)
+                        self.assertTrue(any(self.matcher.hit(v) for v in private_scan.variants(encoded)), encoded)
+                        self.check_all(encoded, True)
+
+    def test_decoded_trivia_across_lines_is_scanned(self):
+        # Encoding preserves line breaks, requiring adjacent text for each scan.
+        contexts = (("custom&#58;&#58; &#47;&#47; note\n", ""),
+                    ("custom\\x3a\\x3a \\x2f\\x2f note\n", ""),
+                    ("custom%3A%3A %2F%2F note\n", ""),
+                    ("", "\n&#47;&#42; note &#42;&#47; ::extra"),
+                    ("", "\n\\x2f\\x2a note \\x2a\\x2f ::extra"),
+                    ("", "\n%2F%2A note %2A%2F ::extra"))
+        for fact in self.facts:
+            for prefix, suffix in contexts:
+                self.check_all(prefix + fact + suffix, True)
+
+    def test_clean_working_file_cannot_hide_comment_qualified_private_index_suffix(self):
+        full = os.path.join(self.repo, "report")
+        for fact in self.facts:
+            for gap in (" /* note */ ", " // note\n ", " /* outer\n /* inner */\n tail */\n "):
+                for binary in (False, True):
+                    tail = b"\0" if binary else b"\n"
+                    write(full, (fact + gap + "::sentinelprivate").encode() + tail, "wb")
+                    git(self.repo, "add", "report")
+                    write(full, fact.encode() + tail, "wb")
+                    self.assertFalse(private_scan.scan_paths(self.matcher, [full], self.repo)[0])
+                    self.assertTrue(private_scan.scan_staged(self.matcher, self.repo)[0])
+                    git(self.repo, "reset", "-q")
+
+    def test_surrounding_generics_arguments_and_cross_span_tokens_remain_scanned(self):
+        for fact in self.facts:
+            for text in ("sentinelprivate " + fact, fact + " sentinelprivate",
+                         fact + "<sentinelprivate>", fact + "(sentinelprivate)"):
+                self.check_all(text, True)
+            ws = private_scan.words(fact)
+            for text, token in (("sentinelprivate " + fact, ("sentinelprivate", ws[0])),
+                                (fact + "<sentinelprivate>", (ws[-1], "sentinelprivate")),
+                                (fact + "(sentinelprivate)", (ws[-1], "sentinelprivate")),
+                                (fact + " " + fact, (ws[-1], ws[0]))):
+                self.check_all(text, True, private_scan.Matcher({token}))
+
+    def test_decoded_paths_in_text_binary_and_index_keep_span_boundaries(self):
+        encoders = (lambda text: "".join("&#%d;" % ord(c) for c in text),
+                    lambda text: "".join("\\u%04x" % ord(c) for c in text),
+                    lambda text: "".join("%%%02X" % ord(c) for c in text))
+        for fact in self.facts:
+            for encode in encoders:
+                self.check_all(encode(fact), False)
+                for text in ("custom::" + fact, fact + "::extra", fact + "\u034f",
+                             fact + "(sentinelprivate)", fact + "<sentinelprivate>"):
+                    self.check_all(encode(text), True)
+                ws = private_scan.words(fact)
+                self.check_all(encode(fact + " sentinelprivate"), True,
+                               private_scan.Matcher({(ws[-1], "sentinelprivate")}))
+
+    def test_dirty_working_file_never_hides_staged_text_or_binary(self):
+        for fact in self.facts:
+            for binary in (False, True):
+                full = os.path.join(self.repo, "report")
+                tail = b"\0" if binary else b"\n"
+                write(full, (fact + "(sentinelprivate)").encode() + tail, "wb")
+                git(self.repo, "add", "report")
+                write(full, fact.encode() + tail, "wb")
+                self.assertFalse(private_scan.scan_paths(self.matcher, [full], self.repo)[0])
+                self.assertTrue(private_scan.scan_staged(self.matcher, self.repo)[0])
+                git(self.repo, "add", "report")
+                write(full, (fact + " sentinelprivate").encode() + tail, "wb")
+                self.assertFalse(private_scan.scan_staged(self.matcher, self.repo)[0])
+                self.assertTrue(private_scan.scan_paths(self.matcher, [full], self.repo)[0])
+                git(self.repo, "reset", "-q")
+
+
 class FixedPublicFactsTests(unittest.TestCase):
     def test_xctest_gesture_is_a_complete_fixed_call_only(self):
         call = private_scan.PUBLIC_GESTURE_CALL

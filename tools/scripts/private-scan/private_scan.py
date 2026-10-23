@@ -90,12 +90,21 @@ PUBLIC_IDENTIFIERS = ("ResizeObserver.prototype.disconnect", "MutationObserver.p
 PUBLIC_COMPILER_URL = "https://github.com/sass/dart-sass/releases/download/1.102.0/dart-sass-1.102.0-linux-arm64.tar.gz"
 # Fixed Xcode 27 public interface call. The receiver remains outside its span.
 PUBLIC_GESTURE_CALL = ".pinch(withScale: 2, velocity: 1)"
+# Tokio 1.53.3 public paths, longest first.
+# Only complete paths qualify.
+PUBLIC_RUST_PATHS = (
+    "tokio::sync::Semaphore::const_new",
+    "tokio::sync::Semaphore",
+    "tokio::sync::Notify",
+)
 PUBLIC_LITERAL = re.compile(
     r"(?<![^\s\"'`<>()\[\]{},;:=|])(?:" + "|".join(map(re.escape, PUBLIC_IDENTIFIERS)) +
     r")(?=$|[\s\"'`<>()\[\]{},;:=|])"
     r"|(?<![^\s\"'`<>()\[\]{},;=|])" + re.escape(PUBLIC_COMPILER_URL) +
     r"(?=$|[\s\"'`<>()\[\]{},;|])"
     r"|(?<=\.)" + re.escape(PUBLIC_GESTURE_CALL[1:]) + r"(?=$|[\s;\"'])"
+    r"|(?<![^\s\"'`<>()\[\]{},;=|&])(?:" + "|".join(map(re.escape, PUBLIC_RUST_PATHS)) +
+    r")(?=$|[\s\"'`<>()\[\]{},;=|&])"
 )
 
 
@@ -116,6 +125,27 @@ def tokens_of(kind, text):
         return [(w,) for w in words(text) if keep_word(w)]
     token = tuple(words(text))
     return [token] if token else []
+
+
+def rust_path_context(text, start, end, context):
+    """Refuse extra qualification or ambiguous adjacent Rust comments.
+
+    Do not parse comments: even a nested block ends in */, and a preceding
+    line containing // may continue qualification across a line break.
+    Context supplies the surrounding file when scanning one line or run.
+    """
+    befores, afters = [text[:start]], [text[end:]]
+    if context is not None:
+        source, first, stop = context
+        prefix, suffix = source[:first], source[stop:]
+        if isinstance(source, bytes):
+            prefix = prefix.decode("utf-8", errors="replace")
+            suffix = suffix.decode("utf-8", errors="replace")
+        befores = [v + text[:start] for v in variants(prefix)]
+        afters = [text[end:] + v for v in variants(suffix)]
+    return (any(before.rstrip().endswith(("::", "*/")) or
+                "//" in before.rstrip().rsplit("\n", 1)[-1] for before in befores) or
+            any(after.lstrip().startswith(("::", "/*", "//")) for after in afters))
 
 
 class Matcher:
@@ -148,11 +178,14 @@ class Matcher:
         for token, _, _ in self.occurrences(ws):
             yield token
 
-    def scan_tokens(self, text):
+    def scan_tokens(self, text, rust_context=None):
         """Retain every match except those fully inside fixed public facts."""
         text = unicodedata.normalize("NFC", text)
+        # Whitespace and comments do not establish a complete Rust path.
         spans = [(len(text[:m.start()].casefold()), len(text[:m.end()].casefold()))
-                 for m in PUBLIC_LITERAL.finditer(text)]
+                 for m in PUBLIC_LITERAL.finditer(text)
+                 if m.group() not in PUBLIC_RUST_PATHS or not
+                 rust_path_context(text, m.start(), m.end(), rust_context)]
         if not spans:
             yield from self.find(words(text))
             return
@@ -163,8 +196,8 @@ class Matcher:
             if not any(start <= start_char and end_char <= stop for start, stop in spans):
                 yield token
 
-    def hit(self, text):
-        for _ in self.scan_tokens(text):
+    def hit(self, text, rust_context=None):
+        for _ in self.scan_tokens(text, rust_context):
             return True
         return False
 
@@ -199,9 +232,12 @@ def variants(line):
 def line_hits(matcher, text, first=1):
     """Line numbers (from `first`) of the lines of `text` holding a token."""
     hits = []
-    for n, line in enumerate(text.splitlines(), first):
-        if any(matcher.hit(v) for v in variants(line)):
+    offset = 0
+    for n, line in enumerate(text.splitlines(keepends=True), first):
+        stop = offset + len(line)
+        if any(matcher.hit(v, (text, offset, stop)) for v in variants(line)):
             hits.append(n)
+        offset = stop
     return hits
 
 
@@ -451,7 +487,7 @@ def _runs_hit(matcher, data, start, end, run, min_bytes):
             continue
         text = m.group(0).decode("utf-8")
         for v in variants(text):
-            for token in matcher.scan_tokens(v):
+            for token in matcher.scan_tokens(v, (data, m.start(), m.end())):
                 if sum(len(w.encode("utf-8")) for w in token) >= min_bytes:
                     return True
     return False
@@ -775,7 +811,7 @@ def scan_staged(matcher, repo):
         data = git(repo, "cat-file", "blob", ":" + path)
         public_lines[path] = {n: raw for n, raw in enumerate(source_lines(data), 1)
                               if public_source_line(path, raw)}
-    found = {}
+    found, index_context = {}, {}
     if len(binary) < len(staged):
         diff = git(
             repo,
@@ -806,7 +842,18 @@ def scan_staged(matcher, repo):
                 line_no = int(m.group(1)) if m else 0
             elif not header and line.startswith("+") and path is not None:
                 exact_public_line = public_lines.get(path, {}).get(line_no) == raw[1:] + b"\n"
-                if path not in public and not exact_public_line and any(matcher.hit(v) for v in variants(line[1:])):
+                decoded = variants(line[1:])
+                context = None
+                if any(fact in v for fact in PUBLIC_RUST_PATHS for v in decoded):
+                    if path not in index_context:
+                        source = git(repo, "cat-file", "blob", ":" + path).decode("utf-8", errors="replace")
+                        offsets = [0] + [m.end() for m in re.finditer("\n", source)]
+                        if offsets[-1] != len(source):
+                            offsets.append(len(source))
+                        index_context[path] = source, offsets
+                    source, offsets = index_context[path]
+                    context = (source, offsets[line_no - 1], offsets[line_no])
+                if path not in public and not exact_public_line and any(matcher.hit(v, context) for v in decoded):
                     found.setdefault(path, []).append(line_no)
                 line_no += 1
     out = [{"path": p, "lines": found[p]} for p in sorted(found)]
