@@ -104,7 +104,7 @@ fn access(script: &Arc<Script>, user: &str, key: &str) -> TransferAccess {
         JobOptions::new(endpoint, ServerKind::SelfHosted),
     )
     .unwrap()
-    .with_transport_for_testing(Box::new(script.clone()))
+    .with_transport_for_testing(Box::new(ScriptTransport(script.clone())))
 }
 fn digest(path: &Path) -> [u8; 32] {
     Sha256::digest(fs::read(path).unwrap()).into()
@@ -232,10 +232,12 @@ impl RawBody for Body {
         Box::pin(async move { Ok(self.0.take()) })
     }
 }
-impl SyncTransport for Arc<Script> {
+struct ScriptTransport(Arc<Script>);
+impl SyncTransport for ScriptTransport {
     fn post(&self, mut request: TransportRequest) -> BoxFuture<'_, Result<TransportResponse, SyncError>> {
         Box::pin(async move {
             let step = self
+                .0
                 .steps
                 .lock()
                 .unwrap()
@@ -248,7 +250,7 @@ impl SyncTransport for Arc<Script> {
                 compressed.extend_from_slice(&bytes.unwrap());
             }
             let decoded = zstd::stream::decode_all(compressed.as_slice()).unwrap();
-            self.calls.lock().unwrap().push((request.url, decoded));
+            self.0.calls.lock().unwrap().push((request.url, decoded));
             match step.reply {
                 Reply::Cancelled => Err(SyncError::Cancelled),
                 Reply::Lost => Err(SyncError::Network(meguri_sync::NetworkError {

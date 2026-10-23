@@ -897,18 +897,15 @@ impl ManualTransfers {
         }
     }
     fn backup(&self, op: &mut Operation, collection: Option<&Collection>, cancel: &CancelToken) -> Result<()> {
-        let backup = self.inputs.backup.before_manual_transfer(
-            if (if op.recovery_guard.is_some() {
-                op.recovery_local.is_none()
-            } else {
-                op.local.is_none()
-            }) {
-                None
-            } else {
-                collection
-            },
-            cancel,
-        )?;
+        let local_absent = if op.recovery_guard.is_some() {
+            op.recovery_local.is_none()
+        } else {
+            op.local.is_none()
+        };
+        let backup = self
+            .inputs
+            .backup
+            .before_manual_transfer(if local_absent { None } else { collection }, cancel)?;
         let names = match backup {
             TransferBackup::Collection(receipt) => vec![receipt.name],
             TransferBackup::Raw { main, wal, .. } => std::iter::once(main).chain(wal).collect(),

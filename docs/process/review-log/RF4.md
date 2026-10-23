@@ -117,6 +117,20 @@ keeping the existing test cases and assertions. No acceptance is claimed.
 Server rig `20261023T100850Z-95458` passed eight setup checks. Free disk space
 is now over 250 GB after the backup snapshot was removed.
 
+Compile fixer `s-20261023T101509Z-4b27a32b`, run
+`20261023T101648Z-729`, adds a local test transport type and removes the warning
+without changing the recovery condition. Round 3 found no new P0–P1 issues.
+Privacy `20261023T101846Z-2450` passed. Focused test result
+`20261023T101843Z-2208`: 49 passed, two failed, five helper tests ignored.
+The two failures are final upload freelist count and the initial Import error
+assertion. Preserve both failures and assertions for the next repair.
+
+Rig test `20261023T102305Z-3958` failed before login: the endpoint guard refused
+the container host address produced by the current rig helper. Keep the guard
+unchanged and use the existing local test routing facilities. Lint
+`20261023T102308Z-4204` found three style errors; these join the same fix batch.
+No runtime/rig acceptance is claimed while any check remains failed.
+
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,
 focused server/native evidence and the required full gate remain open.
