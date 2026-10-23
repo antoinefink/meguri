@@ -67,7 +67,15 @@ Never construct Swift Data, an in-memory FileWrapper, or a FileDocument snapshot
 Copy through bounded streams or a proven file-to-file platform API off the main actor.
 Keep destination security scope and synchronous file-coordination access alive until all I/O ends.
 Use the coordinator's returned URL, not the initially selected URL.
-For app-controlled save, preflight, write a temporary sibling, verify length/digest, sync, then atomically publish.
+For app-controlled save, preflight space on the destination volume using an authorized location.
+Stage output on that volume in an authorized temporary sibling or Foundation item replacement directory
+chosen for the coordinated destination. A selected-file grant does not imply access to its parent directory.
+Verify staged length/digest and sync before publication; validate both staging and final destination paths and aliases,
+even when the Rust writer receives only the staging path.
+Use safe atomic publication: create a new destination without overwriting a concurrently created item,
+or replace an existing destination through the platform's safe replacement operation.
+Foundation replacement may use its same-volume staging directory; preserve any original-item recovery location on error.
+Keep the E5 cancellation boundary and uncertain-publication result; an error during replacement does not prove the old path is unchanged.
 Never truncate/delete an existing destination before the replacement is ready.
 Reject any destination aliasing the collection, SQLite sidecars or the private export artifact.
 If a provider cannot safely replace an existing file, offer a new copy or refuse replacement.
