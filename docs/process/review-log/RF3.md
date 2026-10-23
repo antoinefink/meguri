@@ -96,3 +96,4 @@
 - MeguriKit `20261023T021717Z-92930`: pass, four tests including real saved-file reimport and subsequent review.
 - Mac `20261023T021236Z-88708`: Save, Replace and Cancel passed. Import did not open. Native follow-up pending.
 - Mac `20261023T021906Z-94909`: pass, one test and no skips. Actual import/review/restart, native export cancellation, Save, Replace, reimport, another review and restart all passed. iPhone/iPad, rendered accessibility, critic and full gate are pending.
+- iPhone `20261023T022347Z-97809`: failed before Cancel; native picker exposed that control as Other. Import, review, restart and export preparation passed. Fixer session is recorded on master; cleanroom `20261023T022801Z-1529` corrected Cancel and folder-title selectors. Native Files behavior remains pending.

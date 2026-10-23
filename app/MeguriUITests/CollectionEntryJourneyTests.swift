@@ -50,8 +50,11 @@ import notify
         defer { try? FileManager.default.removeItem(at: folder) }
         let saved = folder.appending(path: "Meguri-Collection.colpkg")
         #else
-        let cancel = app.buttons.matching(NSPredicate(format: "label == %@", "Cancel")).firstMatch
-        XCTAssertTrue(cancel.waitForExistence(timeout: 10), app.debugDescription)
+        let cancel = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Cancel")).firstMatch
+        let cancelReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            cancel.exists && cancel.isEnabled && cancel.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [cancelReady], timeout: 10), .completed, app.debugDescription)
         try click(cancel, app, bundle)
         // The native local folder is installed by the existing public source hook.
         let saved = URL(fileURLWithPath: "/RF2 Import Tests/Meguri-Collection.colpkg")
@@ -155,7 +158,10 @@ import notify
     }
     #if os(iOS)
     private func selectLocalExportFolder(_ app: XCUIApplication, _ bundle: String) throws {
-        if app.navigationBars["RF2 Import Tests"].exists { return }
+        let folderActions = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].buttons
+            .matching(NSPredicate(format: "label == %@", "RF2 Import Tests, Actions Menu")).firstMatch
+        let isInFolder = { app.navigationBars["RF2 Import Tests"].exists || folderActions.exists }
+        if isInFolder() { return }
         let folder = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@ OR identifier == %@",
             ["RF2 Import Tests", "RF2 Import Tests, Folder"], "RF2 Import Tests, Folder")).firstMatch
         if !folder.waitForExistence(timeout: 2) {
@@ -172,7 +178,8 @@ import notify
             let target = folder.images.firstMatch.exists ? folder.images.firstMatch : folder
             try click(target, app, bundle)
         }
-        XCTAssertTrue(app.navigationBars["RF2 Import Tests"].waitForExistence(timeout: 10), app.debugDescription)
+        let folderReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in isInFolder() }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [folderReady], timeout: 10), .completed, app.debugDescription)
         capturePicker(app)
     }
     #endif
