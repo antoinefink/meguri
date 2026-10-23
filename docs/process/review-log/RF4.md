@@ -504,3 +504,36 @@ by that setup action. Final native UI review is still round 6 and pending.
 VM policy metadata could not be read over SSH, including an admin attempt;
 the OS returned PermissionError. Its content was not printed. Remote app
 capture prerequisites and the Import preparation result remain unresolved.
+
+VM runner accessibility setup `20261023T184308Z-62300` passed after a
+bundle-specific reset and normal System Settings authorization. The temporary
+marker and credential file were removed. Keyboard/Back review case
+`20261023T184556Z-64607` then passed one case with no skips. Together with
+the prior two review passes and file-entry pass, the focused Mac local-review
+checkpoint is proven. The failed combined suite remains failed. A stable signed
+preview is copied under `build/previews/mac-local-reviews-eedd4e85/`; it is a
+local checkpoint, not full-plan acceptance.
+
+Read-only Remote Login inspector `20261023T190525Z-75337` starts at
+`eedd4e85`, owns only VMAccessibilitySetupTests and retains VM/account/marker
+guards. Independent round 2 found no P0–P2 findings. It replaces an unstable
+indexed child inventory after inspection `20261023T185357Z-69504` failed on a
+rebuilding Settings hierarchy. Privacy passed. Corrected inspection
+`20261023T191355Z-79348` passed one case, with no skips. It shows Sharing with
+Remote Login already enabled; its Info sheet is not yet open. No setting was
+changed. Its marker was removed. Supported Remote Login full-disk access
+inspection remains pending for generated app-state/peer capture.
+
+The iOS keyboard-toolbar fix is prepared in `20261023T185253Z-68569`, seeded
+from `20261023T184503Z-64000`, both starting at `eedd4e85`. It adds a standard
+Done action to dismiss field focus; Save Endpoint and Login remain explicit.
+The test dismisses the keyboard before advancing. The private check passed.
+Native checks and final UI review round 6 remain open. Transfer and milestone
+acceptance are pending.
+
+Media-wire draft `20261023T181204Z-44271` remains unapplied and unaccepted.
+Independent round 4 found no P0–P1 findings, but actual private scans still flag
+six locations. Baseline copy `private/20261023T190403Z-73968` used a clean
+committed tree; the counts and findings stayed the same. No private match text was read and no privacy rule changed. A concrete
+42-span public API inventory is awaiting Antoine's policy decision. The draft
+has not compiled or run its focused tests.

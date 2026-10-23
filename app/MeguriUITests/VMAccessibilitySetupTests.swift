@@ -9,6 +9,68 @@ final class VMAccessibilitySetupTests: XCTestCase {
     @MainActor private var vmConsentValue: String?
 
     @MainActor
+    func testInspectRemoteLoginSettings() throws {
+        guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-remote-login-inspect") else {
+            throw XCTSkip("VM Remote Login inspection opt-in absent")
+        }
+        guard CardSwapTimingGate.hypervisorPresent() == true, NSUserName() == "meguri" else {
+            XCTFail("Remote Login inspection requires the dedicated VM's meguri account")
+            return
+        }
+
+        let settings = XCUIApplication(bundleIdentifier: "com.apple.systempreferences")
+        defer {
+            if settings.state != .notRunning { settings.terminate() }
+        }
+        let url = URL(string: "x-apple.systempreferences:com.apple.Sharing-Settings.extension?RemoteLogin")!
+        guard NSWorkspace.shared.open(url), settings.wait(for: .runningForeground, timeout: 5) else {
+            XCTFail("Could not open System Settings Remote Login pane")
+            return
+        }
+        do {
+            try settings.bringToFront(bundleIdentifier: "com.apple.systempreferences", timeout: 4)
+        } catch {
+            XCTFail("Could not bring System Settings forward for Remote Login inspection")
+            return
+        }
+        let windows = settings.windows.allElementsBoundByAccessibilityElement
+        guard (1...2).contains(windows.count) else {
+            XCTFail("Expected one or two System Settings windows; inspection evidence withheld")
+            return
+        }
+
+        var secureFieldsPresent = settings.secureTextFields.firstMatch.exists
+        var windowEvidence: [XCTAttachment] = []
+        for (index, window) in windows.enumerated() {
+            if secureFieldsPresent { break }
+            let outline = XCTAttachment(string: String(window.debugDescription.prefix(64_000)))
+            outline.name = "VM Remote Login window \(index) tree (up to 64000 characters)"
+            outline.lifetime = .keepAlways
+            windowEvidence.append(outline)
+            secureFieldsPresent = settings.secureTextFields.firstMatch.exists
+            if secureFieldsPresent { break }
+            let pixels = XCTAttachment(screenshot: window.screenshot())
+            pixels.name = "VM Remote Login System Settings window \(index)"
+            pixels.lifetime = .keepAlways
+            windowEvidence.append(pixels)
+            secureFieldsPresent = settings.secureTextFields.firstMatch.exists
+        }
+        // Hold all pixels and hierarchy until the final secure-field check has passed.
+        secureFieldsPresent = settings.secureTextFields.firstMatch.exists || secureFieldsPresent
+        let report: [String: Any] = ["windowCount": windows.count,
+                                   "secureFieldsPresent": secureFieldsPresent,
+                                   "pixelsAndHierarchyWithheld": secureFieldsPresent]
+        let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+        let diagnostic = XCTAttachment(string: String(decoding: data, as: UTF8.self))
+        diagnostic.name = "VM Remote Login inspection status"
+        diagnostic.lifetime = .keepAlways
+        add(diagnostic)
+        if !secureFieldsPresent {
+            for attachment in windowEvidence { add(attachment) }
+        }
+    }
+
+    @MainActor
     func testInspectSandboxSharingConsent() throws {
         guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-sharing-consent-inspect") else {
             throw XCTSkip("VM sharing consent inspection opt-in absent")
