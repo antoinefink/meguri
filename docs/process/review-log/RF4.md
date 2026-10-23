@@ -462,3 +462,25 @@ P0–P2 issues. Privacy and UI lint passed. Native action
 `20261023T174434Z-22539` stopped at its text/button match guard, before
 input. The marker was removed. Full value inspection is next; consent and
 native transfer proof remain open.
+
+Full-value inspection `20261023T174957Z-27098` passed one case. Both text
+values matched; the system buttons had empty labels and separate titles.
+Fix `20261023T175205Z-29010` uses the observed title attribute with the
+same exact identifiers and guards. Round 3 found no new P0–P1 findings.
+Privacy passed. Consent action `20261023T175338Z-30152` passed one case;
+its marker was removed. Fresh team app route `20261023T175439Z-31632`
+passed one case. The pre-main consent blocker is repaired.
+
+Transfer run `20261023T175644Z-33869` stopped at preflight because its SSH
+attestation was omitted. The documented wrapper contract was checked again
+without key output. Run `20261023T175750Z-34414` then reached native UI,
+but failed on the Settings navigation target before its first checkpoint.
+No peer proof ran. Its safe attachment shows a present, enabled sidebar
+item outside the visible area, while Settings endpoint controls are visible.
+The helper waits and scrolls before Mac activation; that ordering needs repair.
+
+VM drive `20261023T180527Z-39495` passed both steps. Its generated empty
+startup shows the production Settings row and its expected identifier.
+There is no demonstrated Settings omission or fixture-install failure.
+Final native UI review remains round 6; platform journeys and the combined
+gate remain open.

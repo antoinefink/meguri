@@ -38,10 +38,44 @@ final class VMAccessibilitySetupTests: XCTestCase {
             return
         }
 
+        let helperStaticTextCount = helper.staticTexts.count
+        let helperButtonCount = helper.buttons.count
+        let dialogs = (0..<dialogCount).map { helper.dialogs.element(boundBy: $0) }
+        let dialogCounts = dialogs.map { (staticTexts: $0.staticTexts.count, buttons: $0.buttons.count) }
+        guard dialogCounts.allSatisfy({ $0.staticTexts <= 8 && $0.buttons <= 8 }) else {
+            XCTFail("Too many UserNotificationCenter dialog texts or buttons; sharing consent evidence withheld")
+            return
+        }
+        var dialogFacts: [[String: Any]] = []
+        for (index, dialog) in dialogs.enumerated() {
+            guard !helper.secureTextFields.firstMatch.exists, dialog.exists else {
+                XCTFail("Secure fields present or UserNotificationCenter dialog changed; sharing consent evidence withheld")
+                return
+            }
+            let counts = dialogCounts[index]
+            let staticTexts = (0..<counts.staticTexts).map { textIndex in
+                let text = dialog.staticTexts.element(boundBy: textIndex)
+                return ["label": text.label, "value": text.value as? String ?? "<non-string>"]
+            }
+            let buttons: [[String: Any]] = (0..<counts.buttons).map { buttonIndex in
+                let button = dialog.buttons.element(boundBy: buttonIndex)
+                return ["identifier": button.identifier, "label": button.label, "title": button.title,
+                        "isEnabled": button.isEnabled, "isHittable": button.isHittable]
+            }
+            dialogFacts.append(["index": index, "staticTextCount": counts.staticTexts,
+                                "buttonCount": counts.buttons, "staticTexts": staticTexts, "buttons": buttons])
+        }
+        let facts: [String: Any] = ["helperStaticTextCount": helperStaticTextCount,
+                                   "helperButtonCount": helperButtonCount, "dialogCount": dialogCount,
+                                   "dialogs": dialogFacts]
+        let factsData = try JSONSerialization.data(withJSONObject: facts, options: [.prettyPrinted, .sortedKeys])
+        let matchingFacts = XCTAttachment(string: String(decoding: factsData, as: UTF8.self))
+        matchingFacts.name = "VM sharing consent matching facts"
+        matchingFacts.lifetime = .keepAlways
         let outline = XCTAttachment(string: helper.debugDescription)
         outline.name = "VM sharing consent helper tree"
         outline.lifetime = .keepAlways
-        var evidence = [outline]
+        var evidence = [outline, matchingFacts]
         let surfaces = windowCount > 0 ? helper.windows : helper.dialogs
         let surfaceCount = windowCount > 0 ? windowCount : dialogCount
         for index in 0..<surfaceCount {
@@ -100,8 +134,8 @@ final class VMAccessibilitySetupTests: XCTestCase {
         let explanation = "Opening “Meguri” will allow it to access data from previously used versions of “Meguri”."
         let headingMatch = NSPredicate(format: "label == %@ OR value == %@", heading, heading)
         let explanationMatch = NSPredicate(format: "label == %@ OR value == %@", explanation, explanation)
-        let openMatch = NSPredicate(format: "identifier == %@ AND label == %@", "action-button-1", "Open Anyway")
-        let cancelMatch = NSPredicate(format: "identifier == %@ AND label == %@", "action-button-2", "Don’t Open")
+        let openMatch = NSPredicate(format: "identifier == %@ AND title == %@", "action-button-1", "Open Anyway")
+        let cancelMatch = NSPredicate(format: "identifier == %@ AND title == %@", "action-button-2", "Don’t Open")
         guard dialog.staticTexts.matching(headingMatch).count == 1,
               dialog.staticTexts.matching(explanationMatch).count == 1,
               helper.staticTexts.matching(headingMatch).count == 1,
