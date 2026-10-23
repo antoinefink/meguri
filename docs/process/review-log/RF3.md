@@ -135,3 +135,4 @@
 - Fix21 export `20261023T034723Z-78395`: standard native swipe calls; optional comment removed. Privacy `20261023T034837Z-79134`: PASS. Earlier `20261023T034626Z-77702`: FAIL on new source. Checks pending.
 - iPhone `20261023T034854Z-79513`: PASS, one test and no skips. Actual import/review/restart, native Cancel, Save, Replace, reimport, another review and restart all passed.
 - Independent round 6 follow-up on `0042e125`: no new P0–P1 finding or deterministic blocker. Actual native Replace remains mandatory and scroll coverage is unchanged.
+- iPad `20261023T035313Z-82363`: PASS, one test and no skips. Actual import/review/restart, native Cancel, Save, Replace, reimport, another review and restart all passed. Native round trips now pass on Mac, iPhone and iPad. Mobile audits and the required combined gate remain pending.
