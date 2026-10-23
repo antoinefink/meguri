@@ -411,3 +411,46 @@ sample found the UI runner waiting in `_libsecinit_appsandbox`, before main.
 No recent Meguri crash report was found. After both jobs and their VM test
 processes ended, the dedicated VM was restarted headlessly under Antoine's
 existing permission. The original failed receipts remain; runtime proof is open.
+
+### VM startup consent diagnosis
+
+Candidate `f6d61f3f` ran the replacement full gate from original base
+`81c207573c20c337c8834e4ae8b4ee8f29603dbf`. Core tests passed all 2,806
+cases. Native durability, conformance, goldens, tooling tests, Swift Core
+Debug/Profile, Swift Kit and both app builds passed. Xcode checks passed
+all Mac configurations, hidden VM routes and iPhone/iPad Debug builds.
+Mac Unit passed 437 cases, with zero failures and four skips.
+
+The audio queue test passed in this run. This is not closure of R554;
+its required repair and evidence remain open.
+
+No Mac app-hosted case ran. Two stack samples of one PID, more than 30 s
+apart, put main in the OS sandbox call. Its secinitd request waits in
+`displaySharingConsentPrompt` and `CFUserNotificationReceiveResponse`.
+VM consent is still needed. Product code and entitlements stay as they are.
+
+The iPhone app-hosted run passed 62 cases and failed one, with two skips.
+The failure is `ScreenSnapshots/screen(_:)`, with baseline validation
+reported. It remains open; no native transfer pass is claimed.
+
+After these failures, the owned gate was stopped cleanly to repair VM setup.
+Gate `20261023T162740Z-8042` is cancelled/incomplete, not passing. The child
+failures and completed checks remain recorded. A fresh required gate remains.
+
+Runner-only test `20261023T162737Z-7272` passed one case after reboot.
+The Mac run `20261023T162957Z-25363` and route check
+`20261023T163855Z-32590` failed at app launch. Logs have a live app PID
+throughout that wait. Neither run reached Login or the peer check.
+
+Filtered setup helper `20261023T172454Z-8567` starts at `f6d61f3f` and
+adds only an opt-in read of existing UserNotificationCenter windows. It
+requires the dedicated VM account and hypervisor, withholds evidence for
+secure fields, and performs no input. Independent review found no P0–P2
+issues. Privacy `20261023T172812Z-10545` and UI lint
+`20261023T172812Z-10757` passed. Its native inspection is pending.
+
+Inspection `20261023T172834Z-11375` passed one case, without skips. Its
+system-window image shows an Open Anyway choice for Meguri, allowing use
+of earlier Meguri app data after the signing change. No button was pressed.
+The opt-in marker was removed. Antoine's standing permission covers this
+VM setup action. The next step is an exact-dialog action and fresh launch proof.

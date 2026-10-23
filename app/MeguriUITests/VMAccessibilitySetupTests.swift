@@ -9,6 +9,72 @@ final class VMAccessibilitySetupTests: XCTestCase {
     @MainActor private var vmConsentValue: String?
 
     @MainActor
+    func testInspectSandboxSharingConsent() throws {
+        guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-sharing-consent-inspect") else {
+            throw XCTSkip("VM sharing consent inspection opt-in absent")
+        }
+        guard CardSwapTimingGate.hypervisorPresent() == true, NSUserName() == "meguri" else {
+            XCTFail("Sharing consent inspection requires the dedicated VM's meguri account")
+            return
+        }
+
+        let helper = XCUIApplication(bundleIdentifier: "com.apple.UserNotificationCenter")
+        guard helper.state != .notRunning else {
+            XCTFail("UserNotificationCenter is not already running")
+            return
+        }
+        let appeared = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            helper.windows.firstMatch.exists || helper.dialogs.firstMatch.exists
+        }, object: nil)
+        let result = XCTWaiter().wait(for: [appeared], timeout: 5)
+        guard !helper.secureTextFields.firstMatch.exists else {
+            XCTFail("Secure text fields present; sharing consent evidence withheld")
+            return
+        }
+        let windowCount = helper.windows.count
+        let dialogCount = helper.dialogs.count
+        guard windowCount <= 4, dialogCount <= 4 else {
+            XCTFail("Too many UserNotificationCenter surfaces; sharing consent evidence withheld")
+            return
+        }
+
+        let outline = XCTAttachment(string: helper.debugDescription)
+        outline.name = "VM sharing consent helper tree"
+        outline.lifetime = .keepAlways
+        var evidence = [outline]
+        let surfaces = windowCount > 0 ? helper.windows : helper.dialogs
+        let surfaceCount = windowCount > 0 ? windowCount : dialogCount
+        for index in 0..<surfaceCount {
+            let surface = surfaces.element(boundBy: index)
+            guard !helper.secureTextFields.firstMatch.exists else {
+                XCTFail("Secure text fields present; sharing consent evidence withheld")
+                return
+            }
+            guard surface.exists else {
+                XCTFail("UserNotificationCenter surface changed; sharing consent evidence withheld")
+                return
+            }
+            let pixels = XCTAttachment(screenshot: surface.screenshot())
+            pixels.name = "VM sharing consent system window"
+            pixels.lifetime = .keepAlways
+            evidence.append(pixels)
+        }
+        // Hold all evidence until the final secure-field check has passed.
+        guard !helper.secureTextFields.firstMatch.exists else {
+            XCTFail("Secure text fields present; sharing consent evidence withheld")
+            return
+        }
+        for attachment in evidence { add(attachment) }
+        guard result == .completed, surfaceCount > 0 else {
+            XCTFail("No existing UserNotificationCenter window or dialog appeared within five seconds")
+            return
+        }
+        if surfaceCount > 1 {
+            XCTFail("Multiple UserNotificationCenter surfaces require manual inspection")
+        }
+    }
+
+    @MainActor
     func testEnableRunnerAccessibility() throws {
         guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-ax-enable") else {
             throw XCTSkip("VM setup opt-in absent")
