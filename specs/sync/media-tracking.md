@@ -57,6 +57,12 @@ The journal also holds, once per media folder:
 | change marker | the folder's own modification time at full precision, or unset (initially, and after a reset). T4 and `media/media-files#M7.3` set it. |
 | last check report | the report of the most recent check (T6), kept for diagnostics and tests. |
 
+Persist the media baseline's owner with its USN and sync state, using the opaque configured-endpoint/account
+reference of `sync/anki-transfers#M6`. Do not store credentials or a raw username here. Equality follows M6's
+case-sensitive logical identity and its alias limits; redirects or key rotation do not create another owner.
+An absent or different owner makes the old cursor and clean/awaiting state unusable for the selected account,
+even if the USN values happen to match. Apply T11 before reconciliation under that account.
+
 ## T4. The change check (R1573, R1855)
 
 ### T4.1 When it runs
@@ -171,6 +177,12 @@ Reset makes the next media sync compare every file with the server from the star
   2. puts every other entry in `none`, not pending, with a new change stamp, keeping its file facts;
   3. sets the media USN to 0;
   4. unsets the change marker.
+- Before reconciling an unknown or changed baseline owner, require the separate M5 consent for the selected
+  endpoint/account and both-side effects. Cancel and drain prior media work. Under the media lock, perform the
+  T11 reset and persist the new opaque owner in the same journal transaction; a crash cannot expose a new owner
+  with an old cursor. Keep file facts, media files, manual history, receipts, cooldown and unresolved-operation
+  guards. Reset alone starts no requests. Logout invalidates the active binding; an unbound baseline must be
+  initialized this way before later use. A same-owner sanity reset may retain its binding within the authorized job.
 - The next check is therefore a full comparison. By T4.3 it makes every syncable file a pending `live` entry, hashing only files whose size or time changed since they were last registered, and removes the entries of files that are gone, without recording a deletion for them.
 - Media sync then receives the server's whole change list from USN 0 and applies U111's decision rules (R1576): a pending file whose content equals the server's becomes clean without a transfer; a file the server holds and the folder lacks is downloaded; a pending file the server does not hold is uploaded.
 - A deletion that was pending at reset time is forgotten: the server still holds the file, so the next media sync downloads it again (as R1585 says for deletions made before media is in sync).
