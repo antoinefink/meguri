@@ -92,3 +92,6 @@
 - Docker format `20261023T020920Z-84629`: pass. Focused export tests `20261023T020954Z-85161`: pass, 19 tests. Privacy `20261023T021045Z-85798`: pass after whole-sentence log rewrites; earlier failure `20261023T020954Z-85121` is preserved.
 - Native `20261023T021111Z-86248`: production compiled; test compilation failed on an async thread assertion. Fixer `s-20261023T021214Z-66c2fd6c`, cleanroom `20261023T021235Z-88520`, removed that single assertion. Synchronous publication checks remain. Native results are pending.
 - Similarity `20261023T021132Z-87399`: pass against the original RF2 base.
+- Native CoreBridge `20261023T021528Z-91146`: pass, 12 focused tests plus seven interval tests. Includes real Foundation staging and replacement, exclusive creation, cancellation, uncertain results and coordination lifetime.
+- MeguriKit `20261023T021717Z-92930`: pass, four tests including real saved-file reimport and subsequent review.
+- Mac `20261023T021236Z-88708`: Save, Replace and Cancel passed. Import did not open. Native follow-up pending.

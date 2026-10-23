@@ -103,11 +103,11 @@ struct CollectionExportContent: View {
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("settings.importExport.close")
                     .padding(Spacing.large)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.token(.backgroundPrimary))
-                    .accessibilityIdentifier("settings.importExport.close")
-                    .keyboardShortcut(.cancelAction)
             }
             .buttonStyle(.bordered)
             .tint(ColorToken.textPrimary.color)

@@ -98,10 +98,38 @@ import notify
             XCTAssertTrue(FileManager.default.fileExists(atPath: saved.path), "NSSavePanel must save the expected collection filename at \(saved.path)")
             #endif
         }
-        try click(element(app, "settings.importExport.discard"), app, bundle)
-        try click(element(app, "settings.importExport.close"), app, bundle)
-        try click(element(app, "settings.root.importCollection"), app, bundle)
-        try click(element(app, "onboarding.collectionImport.choose"), app, bundle)
+        let discard = app.buttons["settings.importExport.discard"].firstMatch
+        try click(discard, app, bundle)
+        let discarded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            prepare.exists && prepare.isEnabled && prepare.isHittable && !discard.exists
+        }, object: nil)
+        let discardResult = XCTWaiter().wait(for: [discarded], timeout: 10)
+        if discardResult != .completed { capturePicker(app) }
+        XCTAssertEqual(discardResult, .completed, app.debugDescription)
+        let done = waitForHittable(app.buttons.matching(identifier: "settings.importExport.close"))
+        if done == nil { capturePicker(app) }
+        try click(try XCTUnwrap(done, app.debugDescription), app, bundle)
+        let exportContent = element(app, "settings.importExport.content")
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: exportContent)
+        let dismissResult = XCTWaiter().wait(for: [dismissed], timeout: 10)
+        if dismissResult != .completed { capturePicker(app) }
+        XCTAssertEqual(dismissResult, .completed, app.debugDescription)
+        let importCollection = app.buttons["settings.root.importCollection"].firstMatch
+        let importReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            settingsContent.exists && importCollection.exists && importCollection.isEnabled && importCollection.isHittable
+        }, object: nil)
+        let importResult = XCTWaiter().wait(for: [importReady], timeout: 10)
+        if importResult != .completed { capturePicker(app) }
+        XCTAssertEqual(importResult, .completed, app.debugDescription)
+        try click(importCollection, app, bundle)
+        let chooseFile = app.buttons["onboarding.collectionImport.choose"].firstMatch
+        let chooseReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            chooseFile.exists && chooseFile.isEnabled && chooseFile.isHittable
+        }, object: nil)
+        let chooseResult = XCTWaiter().wait(for: [chooseReady], timeout: 10)
+        if chooseResult != .completed { capturePicker(app) }
+        XCTAssertEqual(chooseResult, .completed, app.debugDescription)
+        try click(chooseFile, app, bundle)
         try pick(saved, app, bundle)
         XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.counts"), "6 notes · 11 cards · 7 reviews"))
         try click(element(app, "onboarding.collectionImport.confirm"), app, bundle)
