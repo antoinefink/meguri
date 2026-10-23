@@ -601,3 +601,9 @@ The four missing iPhone cells were recorded by `20261023T194344Z-8351`.
 Private scan `20261023T194717Z-13497` flags only one comment in the unapplied
 VM FDA helper; the native diagnostic and four images are clear. Image review
 and fresh comparison remain open. No privacy rule was changed.
+
+The four new `settings.sync` image files total 1,125,517 bytes. Independent
+rendered-image review found no visible P0–P2 issues in dark, high-contrast
+XXXLarge. Error details and progress are below the captured first viewport,
+so these images alone do not prove those indicators. Existing approved images
+were not overwritten. A fresh selected comparison is still required.
