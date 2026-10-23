@@ -116,7 +116,9 @@ The answer is a zip (`wire-format#W17.1`): file entries named `0`, `1`, … and 
 
 - every real name is one of the names asked for in this request, and no real name appears twice;
 - the zip holds at least one file when at least one name was asked for (without this a server could make the job repeat a request forever);
-- no file entry holds more than 104,857,600 bytes: the reader stops at that limit plus one byte and refuses the answer.
+- every file entry holds at least 1 byte and at most 104,857,600 bytes: the reader stops at the upper limit plus one byte and refuses the answer. A zero-byte file entry is not a deletion.
+
+Reject the complete zip as `bad_response` (`downloadFiles`) if any file member has length 0. Do this before any publication or batch commit. This extra Meguri check leaves `media/media-files#M7.1`'s local empty-file rules intact; `wire-format#W17.2` already disallows empty uploads.
 
 Zip entry names and real names are never used as paths: a file reaches the folder only under a name chosen by Y9.
 
@@ -136,7 +138,9 @@ After the files of one answer are in the folder, one journal transaction, holdin
 
 ## Y9. Saving a downloaded file: names (R1578)
 
-Let N be the real name, B the bytes and H their SHA-1. N is **usable** when it is normalized (`text/media-filenames#F1` leaves it unchanged), not ignored (`media/media-files#M8`), and no present file is a case variant of N with a different spelling.
+Let N be the real name, B the bytes and H their SHA-1. N is **usable** when it is normalized (`text/media-filenames#F1` leaves it unchanged), not ignored (`media/media-files#M8`), and either a regular file with exactly the spelling N is present or no present file is a case variant of N with a different spelling.
+
+For this rule, use the directory entry's spelling. Merely opening N on a case-insensitive volume does not prove exact spelling. An existing exact regular N is the sole comparison/replacement target. Other variants keep both their bytes and journal state, and N is not tombstoned. Without an exact regular N, use the case-collision add path as before. This tie choice is Meguri policy.
 
 | N | Folder | Journal |
 |---|---|---|
@@ -147,7 +151,7 @@ Let N be the real name, B the bytes and H their SHA-1. N is **usable** when it i
 - So a server file whose name Meguri cannot keep is renamed everywhere: the next push sends the deletion of N and, when the add wrote a file, the upload of S, and other clients receive S (R1578). Fields that reference N are never rewritten by sync; Check Media (U130) reports their references.
 - Examples: `clip:1.mp3` is saved as `clip1.mp3`; `notes.` as `notes._`; `Thumbs.db` and `???` are not kept. Each sends the deletion of its server name.
 - A server name not in NFC cannot be recorded (`media-tracking#T2`), and the official server refuses a deletion of it (400). Meguri saves the file as above but records no deletion for such a name. The official server never holds one; on a server that does, the sanity check then disagrees on every sync (Y11).
-- A case variant with a different spelling exists only when the server holds two names that differ only in case, which a case-insensitive volume cannot hold side by side. Meguri keeps the file it already has and renames the incoming one (M3 row a or c). Anki on a case-insensitive volume writes the second file over the first, then uploads the merged state; on a case-sensitive one it keeps both (Y17). This is a default chosen without a product decision (open point of `docs/plans/research/coverage/sync.md`, gap 8).
+- When the exact incoming spelling is absent but another case spelling is present, Meguri keeps the existing file and renames the incoming one (M3 row a or c). This includes two server names that differ only in case, which a case-insensitive volume cannot hold side by side. Anki on a case-insensitive volume writes the second file over the first, then uploads the merged state; on a case-sensitive one it keeps both (Y17). This is a default chosen without a product decision (open point of `docs/plans/research/coverage/sync.md`, gap 8).
 - Bytes are written by rename from a temporary file (`media/media-files#M9`). A file a download replaces always goes to the trash first (R2018); Anki overwrites it.
 - `downloaded_files` counts every file received, whichever row applies.
 
