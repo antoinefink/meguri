@@ -43,3 +43,25 @@ lastUsn
 sk
 _meta
 _pad
+# One-way sync (one-way.md, U109): the collection file and package
+# extension, the tables and columns an upload resets or a download stamps,
+# and the SQLite pragmas and objects the upload's compaction and the
+# download's checks name
+collection.anki2
+colpkg
+graves
+deck_config
+notetypes
+templates
+mtime_secs
+scm
+usn
+ls
+ver
+unicase
+integrity_check
+immutable
+freelist_count
+sqlite_stat1
+page_count
+page_size

@@ -7,6 +7,10 @@ Scenarios: conformance/scenarios/sync/meta/
 
 Every collection sync starts with the status check: a `meta` request whose answer decides whether the sync stops, runs normally or needs a one-way transfer. The same check, with an offline shortcut and a short memory, answers "what is the sync status?" for the app's indicator (R1558, U113). This file says what the check sends, what it refuses, how it compares the two sides, how the status is computed, and the meta probe the optimizer gate uses (KTD8). The `meta` body is `wire-format.md` W3; the request, its redirect and its errors are `transport.md`; error kinds are `errors.md`.
 
+This status API describes protocol facts, not authority to transfer. For manual delivery, all network probes
+are explicit Settings actions under `sync/anki-transfers` M1–M2. No status or remembered outcome starts
+a collection/media job, and lifecycle/timer events never call this server probe automatically.
+
 ## M1. The local record
 
 The check compares the server's `meta` answer (`wire-format.md` W3) with these local values, read from the open collection when the job builds the `meta` request:
@@ -49,7 +53,7 @@ The first row that matches decides:
 | otherwise | normal sync required |
 
 - Equal `mod` wins over differing `scm`: a collection whose schema time moved locally (without its `mod` moving) still gets "no changes" (oracle, `sync/meta/outcomes`).
-- A one-way sync offers upload when the local collection has cards or the server's is `empty`, and download when the server's collection is not `empty` or the local one has no cards:
+- Historical protocol direction hints offer upload when the local collection has cards or the server's is `empty`, and download when the server's collection is not `empty` or the local one has no cards:
 
   | Local has cards | Server `empty` | Upload | Download | Outcome |
   |---|---|---|---|---|
@@ -65,13 +69,17 @@ Two facts of Anki's stamps that make this table behave as it does (oracle, `sync
 - A new, never-changed collection has `mod` 0, and so has the server's collection of a new account, so their first check finds no changes.
 - A downloaded collection carries the `mod` the server gave its collection when it served the download, and the download sets the local `ls` to it, so the next check finds no changes until either side changes something.
 
+Manual Import/Export direction and confirmation follow `sync/anki-transfers#M2`, not automatic dispatch
+from the hints above. `empty` means zero cards and never exempts a server-copy backup. Downloading that copy
+changes mod/usn; fresh post-copy observations must be the final upload preview baseline (`one-way#O6.1`).
+
 ## M4. What a check returns
 
 | Field | Value |
 |---|---|
 | result | no changes, normal sync (with `local_is_newer`) or one-way (with upload and download allowed) |
 | `server_message` | the answer's `msg` when not empty, exactly as received; the core never sanitizes, trims or shows it (R1516: the app shows it after the sync as sanitized rich text, R168, U151) |
-| server `mod`, `scm`, `usn`, `media_usn`, `ts` | from the answer; `usn` is what the normal sync sends back as each sent object's `usn` (`wire-format.md` W6.2), `media_usn` starts the media sync (R1534, R1575) |
+| server `mod`, `scm`, `usn`, `media_usn`, `ts` | from the answer; `usn` is what the normal sync sends back as each sent object's `usn` (`wire-format.md` W6.2), `media_usn` is an input only to a separately authorized media stage (R1534, R1575; `anki-transfers#M5`) |
 | local `usn` | sent as `minUsn` in `start` |
 | `newEndpoint` | the new base when the check followed a redirect (`transport.md` T7) |
 

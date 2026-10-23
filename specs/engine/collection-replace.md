@@ -13,7 +13,7 @@ The only way Meguri swaps the collection file for another file: a full download 
 |---|---|---|---|---|
 | `Restore` | U127 | inspecting a backup (`package/container#P12`) | the primitive's package stamps: `scm` and `mod` set to the replace instant (R7) | set |
 | `ColpkgImport` | U166 minimal caller; U124 full flow | inspecting a `.colpkg` | the package stamps, then any change U124 passes | set |
-| `FullDownload` | U109 | the server's file, streamed into staging | U109's change: `ls` = `mod` (R1543) | preserve the cloud decision; manual policy remains separate |
+| `FullDownload` | U109 | the server's file, streamed into staging | U109's change: `ls` = `mod` (R1543) | manual Import: fresh publication identity and pending fence under R6, even if the old decision was clear |
 | `FullUpload` | U109 | the file U109 transformed and uploaded | none (U109 changed it before the upload) | preserve the cloud decision; manual policy remains separate |
 
 The package stamps are Anki's behavior (R7), so the primitive applies them itself for both package reasons; U127 passes no change, and U124 passes only what its own spec adds. `ColpkgImport` exists in the type from this unit on; U166 supplies its minimal collection-only caller; U124 supplies the full flow.
@@ -68,7 +68,9 @@ Keep `deviceState` in U32's `meguri-sidecar.json`. It is app-private, never sync
 All sidecar writers share one lock and preserve other members. Publish changes through U32's durable atomic write.
 
 A publication generation is a persistent opaque identity, independent of the process's lifecycle generation counter.
-Give the existing local collection an identity before its first replacement. An import or restore gets a fresh identity.
+Give the existing local collection an identity before its first replacement. Restore, ColpkgImport and manual Import through FullDownload each get a fresh persistent publication identity.
+The candidate captures the account/configuration/environment binding explicitly, including unbound local-only use.
+Manual Import always sets cloudPublicationPending=true; an old clear decision never authorizes the imported data.
 Bind each publication decision to its collection identity and account identity. Include the app configuration and cloud environment when connected.
 An explicit unbound account means local-only.
 Local-only use needs no Apple account or network. Connecting later must not reinterpret an unbound decision as permission to upload.
@@ -92,7 +94,8 @@ Their accessor owns no CloudKit transport, record format, account discovery or n
 
 ### R6.2 Before activation
 
-Restore and ColpkgImport use this handshake after validation/finalisation and after all live writes drain.
+Restore, ColpkgImport and FullDownload used for manual Import use this handshake after validation/finalisation
+and after all live writes drain. FullDownload retains its ls=mod caller transform, not R7 package stamps.
 An in-progress replacement blocks publication for both the old and candidate generations.
 
 The durable intent records:
@@ -128,6 +131,10 @@ Prior-clear returns to clear; prior-pending remains pending. The captured accoun
 An account mismatch or uncertain binding keeps publication paused. It never transfers authorization to another account.
 Ambiguity may allow validated local review, but never automatic publication or silent replacement of recovery evidence.
 Legacy manual-transfer bookkeeping follows its own contract. A manual transfer cannot remove this fence.
+Manual Import is pending after proven candidate activation, regardless of the old decision. Proven old-file
+recovery restores its exact prior decision; uncertain file/account identity stays paused. Old-generation cloud
+callbacks and queued work cannot publish the imported generation. Only U113/U114's separate cloud/local decision
+may resolve it. FullUpload/manual success never clears an existing cloud decision.
 
 ### R6.4 Scope and verification
 
@@ -135,6 +142,9 @@ RF2 implements this local durable boundary only. Future CloudKit integration mus
 Test old clear/pending states, no old file, account mismatch, identical timestamps, identical file bytes, unreadable metadata,
 and kills before intent, after intent, after rename, after directory sync and after durable activation.
 Prove old queued work stays isolated and a later manual transfer cannot resolve a pending cloud decision.
+Include manual Import from prior-clear and prior-pending decisions, explicitly unbound/changed accounts and no
+old file, with the same identical-time/bytes and journal fault cases. A successful collection/media transfer
+cannot clear the imported generation's pending fence.
 
 ## R7. What a replacement from a collection package stamps (Anki 26.9.3)
 

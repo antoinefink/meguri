@@ -311,7 +311,7 @@ Example (oracle): request `{"client":[[0,0,0],4,3,2,3,9,4,2]}`, answer `{"status
 
 ## W14. `upload` and `download`
 
-Raw collection bytes, not JSON (`transport.md` T5, T6.2). The `upload` answer is plain text: exactly `OK` on success, any other text being the server's refusal (U109).
+Raw collection bytes, not JSON (`transport.md` T5, T6.2). The `upload` answer is plain text: exactly `OK` on success, any other text being the server's refusal (`one-way#O6.4`). The `download` request body is `{}`; its answer is the server's collection file (`one-way#O7`). OK supplies no accepted-file hash, request receipt or transaction id; `anki-transfers#M4` governs lost/uncertain acknowledgement.
 
 ## W15. Media result envelope
 
