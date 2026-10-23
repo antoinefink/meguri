@@ -49,6 +49,9 @@ import XCTest
             let address = element(app, "settings.anki.endpoint")
             try click(address, app, bundle)
             replaceText(address, app: app, with: rig.endpoint)
+            #if os(iOS)
+            try dismissTransferKeyboardIfPresent(app, bundle)
+            #endif
             try click(element(app, "settings.anki.saveEndpoint"), app, bundle)
             try login(app, bundle, username: importUsername, password: rig.password)
             for id in ["settings.anki.prepareImport", "settings.anki.confirm"] {
@@ -134,15 +137,33 @@ import XCTest
         let userField = element(app, "settings.anki.username")
         try click(userField, app, bundle)
         replaceText(userField, app: app, with: username)
+        #if os(iOS)
+        try dismissTransferKeyboardIfPresent(app, bundle)
+        #endif
         let passwordField = element(app, "settings.anki.password")
         try click(passwordField, app, bundle)
         passwordField.typeText(password)
+        #if os(iOS)
+        try dismissTransferKeyboardIfPresent(app, bundle)
+        #endif
         try click(element(app, "settings.anki.login"), app, bundle)
         waitForText(element(app, "settings.anki.result"), "Logged in")
         waitForText(element(app, "settings.anki.loginIdentity"), username)
         waitUntilReady(element(app, "settings.anki.logout"), app)
         XCTAssertFalse(element(app, "settings.anki.confirm").exists, "Login must not prepare or transfer.")
     }
+    #if os(iOS)
+    private func dismissTransferKeyboardIfPresent(_ app: XCUIApplication, _ bundle: String) throws {
+        let keyboard = app.keyboards.firstMatch
+        guard keyboard.exists else { return }
+        let done = element(app, "settings.anki.keyboardDone")
+        try click(done, app, bundle)
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !keyboard.exists }, object: nil)
+        let outcome = XCTWaiter().wait(for: [dismissed], timeout: 30)
+        if outcome != .completed { attach(app, "rf4-keyboard-dismissal-failure", target: done) }
+        XCTAssertEqual(outcome, .completed, "Done must dismiss the transfer field keyboard before the next action.")
+    }
+    #endif
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }

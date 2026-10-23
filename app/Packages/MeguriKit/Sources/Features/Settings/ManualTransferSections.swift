@@ -7,6 +7,10 @@ import UniformTypeIdentifiers
 /// System Form content shared by the production Settings shell and render hooks.
 public struct ManualTransferSections: View {
     @Bindable private var model: ManualTransferCoordinator
+    #if os(iOS)
+    private enum Field: Hashable { case endpoint, username, password }
+    @FocusState private var focusedField: Field?
+    #endif
     public init(model: ManualTransferCoordinator) { self.model = model }
     public var body: some View {
         Group {
@@ -15,6 +19,9 @@ public struct ManualTransferSections: View {
                     .foregroundStyle(.token(.textSecondary))
                 TextField("Self-hosted endpoint, including optional prefix", text: $model.endpointDraft)
                     .textContentType(.URL)
+                    #if os(iOS)
+                    .focused($focusedField, equals: .endpoint)
+                    #endif
                     .disabled(model.busy || model.preview != nil)
                     .accessibilityIdentifier("settings.anki.endpoint")
                 action("Save Endpoint", id: "saveEndpoint", disabled: model.busy || model.preview != nil) { await model.applyEndpoint() }
@@ -26,10 +33,16 @@ public struct ManualTransferSections: View {
                 } else {
                     TextField("Username", text: $model.username)
                         .textContentType(.username)
+                        #if os(iOS)
+                        .focused($focusedField, equals: .username)
+                        #endif
                         .disabled(model.busy)
                         .accessibilityIdentifier("settings.anki.username")
                     SecureField("Password", text: $model.password)
                         .textContentType(.password)
+                        #if os(iOS)
+                        .focused($focusedField, equals: .password)
+                        #endif
                         .disabled(model.busy)
                         .accessibilityIdentifier("settings.anki.password")
                     action("Log In", id: "login", disabled: model.busy || model.endpoint.isEmpty || model.password.isEmpty) { await model.login() }
@@ -105,6 +118,17 @@ public struct ManualTransferSections: View {
                 }
             }
         }
+        #if os(iOS)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                if focusedField != nil {
+                    Spacer()
+                    Button { focusedField = nil } label: { Text("Done", bundle: .module) }
+                        .accessibilityIdentifier("settings.anki.keyboardDone")
+                }
+            }
+        }
+        #endif
     }
     @ViewBuilder private var operationProgress: some View {
         if model.busy {
