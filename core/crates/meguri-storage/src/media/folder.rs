@@ -5,7 +5,7 @@ use sha1::{Digest, Sha1};
 use std::{
     collections::BTreeSet,
     fs::{self, Metadata, OpenOptions},
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     os::fd::{AsRawFd, FromRawFd},
     os::unix::{fs::MetadataExt, fs::OpenOptionsExt},
     path::Path,
@@ -77,6 +77,109 @@ fn open_regular(path: &Path) -> Result<fs::File> {
         return Err(MediaError::InvalidName);
     }
     Ok(file)
+}
+
+/// Keep the descriptor, not a borrowed temporary path. The caller retains its
+/// path and cleanup responsibility; publication always uses independent bytes.
+pub(super) struct DownloadSource {
+    file: fs::File,
+    metadata: Metadata,
+    pub hash: String,
+}
+/// Use U32's owned staging namespace on the media volume. Launch sweeps these
+/// directories under the engine's advisory lock after a crash. M13 recovery
+/// skips directories, keeping a live copy private without the journal mutex.
+pub(super) struct DownloadFile {
+    _directory: tempfile::TempDir,
+    pub path: std::path::PathBuf,
+}
+pub(super) fn unchanged_file(before: &Metadata, after: &Metadata) -> bool {
+    before.dev() == after.dev()
+        && before.ino() == after.ino()
+        && before.len() == after.len()
+        && stamp(before) == stamp(after)
+        && before.ctime() == after.ctime()
+        && before.ctime_nsec() == after.ctime_nsec()
+}
+impl DownloadSource {
+    pub fn open(path: &Path) -> Result<Self> {
+        let mut file = open_regular(path)?;
+        let metadata = file.metadata()?;
+        if !(1..=104_857_600).contains(&metadata.len()) {
+            return Err(MediaError::Io("download payload is not syncable".into()));
+        }
+        let hash = Self::copy_bounded(&mut file, &mut std::io::sink())?;
+        if !unchanged_file(&metadata, &file.metadata()?) {
+            return Err(MediaError::Io("download payload changed".into()));
+        }
+        Ok(Self { file, metadata, hash })
+    }
+    fn copy_bounded(file: &mut fs::File, output: &mut impl Write) -> Result<String> {
+        let mut hash = Sha1::new();
+        let mut bytes = [0_u8; 65_536];
+        let mut size = 0_u64;
+        loop {
+            // Read at most the bound plus one, including a concurrently grown
+            // input. Never trust the caller's size or the initial stat alone.
+            let limit = bytes.len().min((104_857_601 - size) as usize);
+            let n = file.read(&mut bytes[..limit])?;
+            if n == 0 {
+                break;
+            }
+            size += n as u64;
+            if size > 104_857_600 {
+                return Err(MediaError::Io("download payload exceeds media size limit".into()));
+            }
+            output.write_all(&bytes[..n])?;
+            hash.update(&bytes[..n]);
+        }
+        if size == 0 {
+            return Err(MediaError::Io("download payload is empty".into()));
+        }
+        Ok(format!("{:x}", hash.finalize()))
+    }
+    pub fn stage(&mut self, staging: &Path) -> Result<DownloadFile> {
+        if !unchanged_file(&self.metadata, &self.file.metadata()?) {
+            return Err(MediaError::Io("download payload changed".into()));
+        }
+        self.file.rewind()?;
+        let directory = crate::leftovers::staging_directory(staging)?;
+        let path = directory.path().join("payload");
+        let mut staged = AtomicFile::new(&path, Purpose::Media)?;
+        let hash = Self::copy_bounded(&mut self.file, staged.file_mut())?;
+        if hash != self.hash || !unchanged_file(&self.metadata, &self.file.metadata()?) {
+            return Err(MediaError::Io("download payload changed".into()));
+        }
+        // U32 synchronizes the independently owned bytes and directory before
+        // any existing media can be trashed. Its final same-volume move goes
+        // through install_existing_locked, while this directory stays owned.
+        staged.publish_new(|_| Ok(()))?;
+        Ok(DownloadFile {
+            _directory: directory,
+            path,
+        })
+    }
+}
+
+pub(super) struct FileInstallation {
+    pub name: String,
+    pub write: bool,
+    pub replacements: Vec<(String, String)>,
+}
+
+/// A short journal snapshot followed by descriptor-based filesystem reads.
+/// The publisher checks both again before using these hashes under its guard.
+pub(super) struct DownloadObservation {
+    counter: u64,
+    staged: Vec<(String, String)>,
+    directory: Metadata,
+    files: Vec<(String, Metadata, String)>,
+}
+fn staged_candidates(db: &Connection) -> Result<Vec<(String, String)>> {
+    Ok(db
+        .prepare("SELECT name,sha1 FROM staged_files ORDER BY name,sha1")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<std::result::Result<_, _>>()?)
 }
 fn same_stat(entry: &MediaEntry, m: &Metadata) -> bool {
     entry.live
@@ -513,6 +616,7 @@ impl MediaStore {
                     let entry = self.trash_one_locked(db, old, old_hash, &m)?;
                     moved.push((old.clone(), entry));
                 }
+                meguri_model::faultpoint!("media.install.before_publish")?;
                 publication.publish(&target)?;
                 live(db, name, hash.clone(), &fs::symlink_metadata(&target)?, true)?;
                 self.advance_marker(db, marker)?;
@@ -561,42 +665,217 @@ impl MediaStore {
         }
         outcome
     }
+    pub(super) fn add_installation_locked(
+        &self,
+        db: &mut Connection,
+        desired: &str,
+        hash: &str,
+        force_hash: bool,
+    ) -> Result<FileInstallation> {
+        let hashed = hash_name(
+            &lowercase_candidate(&meguri_text::media_name::safe_media_name(desired)),
+            hash,
+        );
+        let (name, write) = if force_hash {
+            (hashed.clone(), true)
+        } else {
+            self.choose(db, desired, hash)?
+        };
+        let mut plan = FileInstallation {
+            name,
+            write,
+            replacements: Vec::new(),
+        };
+        if !write && regular(&self.media_dir().join(&plan.name))?.is_some() {
+            return Ok(plan);
+        }
+        plan.write = true;
+        if plan.name == hashed {
+            let mut variants = self.candidates(db, &plan.name)?;
+            if regular(&self.media_dir().join(&plan.name))?.is_some() && !variants.iter().any(|(n, _)| n == &plan.name)
+            {
+                variants.push((plan.name.clone(), hash_file(&self.media_dir().join(&plan.name))?));
+            }
+            if let Some((found, _)) = variants
+                .iter()
+                .filter(|(_, h)| h == hash)
+                .min_by_key(|(n, _)| (n != &plan.name, n.as_bytes()))
+                && regular(&self.media_dir().join(found))?.is_some()
+            {
+                plan.name = found.clone();
+                plan.write = false;
+            } else {
+                plan.replacements = variants.into_iter().filter(|(_, h)| h != hash).collect();
+            }
+        }
+        Ok(plan)
+    }
+    pub(super) fn observe_download(&self, desired: &str, hash: &str) -> Result<DownloadObservation> {
+        let (counter, staged) = {
+            let db = self.db()?;
+            (journal_db::counter(&db)?, staged_candidates(&db)?)
+        };
+        let safe = meguri_text::media_name::safe_media_name(desired);
+        let lower = lowercase_candidate(&safe);
+        let hashed = hash_name(&lower, hash);
+        let keys = [case_key(desired), case_key(&safe), case_key(&lower), case_key(&hashed)];
+        let directory = fs::symlink_metadata(self.media_dir())?;
+        if !directory.is_dir() {
+            return Err(MediaError::InvalidName);
+        }
+        let mut files = Vec::new();
+        for entry in fs::read_dir(self.media_dir())? {
+            let entry = entry?;
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if !keys.contains(&case_key(&name)) || !entry.file_type()?.is_file() {
+                continue;
+            }
+            // Opening an alias does not establish spelling on Apple volumes.
+            // Only names observed in this directory listing become candidates.
+            let mut file = open_regular(&entry.path())?;
+            let before = file.metadata()?;
+            let mut digest = Sha1::new();
+            let mut bytes = [0_u8; 65_536];
+            loop {
+                let n = file.read(&mut bytes)?;
+                if n == 0 {
+                    break;
+                }
+                meguri_model::faultpoint!("media.download.existing_hash")?;
+                digest.update(&bytes[..n]);
+            }
+            if !unchanged_file(&before, &file.metadata()?) {
+                return Err(MediaError::NameTaken);
+            }
+            files.push((name, before, format!("{:x}", digest.finalize())));
+        }
+        Ok(DownloadObservation {
+            counter,
+            staged,
+            directory,
+            files,
+        })
+    }
+    pub(super) fn download_installation_locked(
+        &self,
+        db: &Connection,
+        desired: &str,
+        hash: &str,
+        force_hash: bool,
+        observed: &DownloadObservation,
+    ) -> Result<FileInstallation> {
+        // No hashing here, including the M3 fallback and hash-name collisions.
+        // Re-decide after any journal or filesystem change during observation.
+        if journal_db::counter(db)? != observed.counter
+            || staged_candidates(db)? != observed.staged
+            || !unchanged_file(&observed.directory, &fs::symlink_metadata(self.media_dir())?)
+        {
+            return Err(MediaError::NameTaken);
+        }
+        for (name, before, _) in &observed.files {
+            if regular(&self.media_dir().join(name))?.is_none_or(|after| !unchanged_file(before, &after)) {
+                return Err(MediaError::NameTaken);
+            }
+        }
+        let actual = |name: &str| observed.files.iter().find(|(n, _, _)| n == name).map(|(_, _, h)| h);
+        if normalized(desired) && !ignored(desired) {
+            let exact = actual(desired);
+            if exact.is_some() || !observed.files.iter().any(|(n, _, _)| case_key(n) == case_key(desired)) {
+                return Ok(FileInstallation {
+                    name: desired.into(),
+                    write: exact.is_none_or(|h| h != hash),
+                    replacements: exact
+                        .filter(|h| *h != hash)
+                        .map(|h| vec![(desired.into(), h.clone())])
+                        .unwrap_or_default(),
+                });
+            }
+        }
+        let safe = meguri_text::media_name::safe_media_name(desired);
+        let lower = lowercase_candidate(&safe);
+        let hashed = hash_name(&lower, hash);
+        let candidates = |name: &str| {
+            let key = case_key(name);
+            let mut values = observed
+                .files
+                .iter()
+                .filter(|(n, _, _)| case_key(n) == key)
+                .map(|(n, _, h)| (n.clone(), h.clone()))
+                .collect::<Vec<_>>();
+            for (n, h) in &observed.staged {
+                if case_key(n) == key && !values.contains(&(n.clone(), h.clone())) {
+                    values.push((n.clone(), h.clone()));
+                }
+            }
+            values
+        };
+        let mut variants = candidates(&safe);
+        for value in candidates(&lower) {
+            if !variants.contains(&value) {
+                variants.push(value);
+            }
+        }
+        let same = variants.iter().filter(|(_, h)| h == hash).min_by_key(|(n, _)| {
+            (
+                if n == &safe {
+                    0
+                } else if n == &lower {
+                    1
+                } else {
+                    2
+                },
+                n.as_bytes(),
+            )
+        });
+        let name = if force_hash {
+            hashed.clone()
+        } else if let Some((name, _)) = same {
+            name.clone()
+        } else if !variants.iter().any(|(n, _)| case_key(n) == case_key(&lower)) {
+            lower
+        } else {
+            hashed.clone()
+        };
+        let mut plan = FileInstallation {
+            write: actual(&name).is_none_or(|h| h != hash),
+            name,
+            replacements: Vec::new(),
+        };
+        if plan.write && plan.name == hashed {
+            let variants = candidates(&hashed);
+            if let Some((found, _)) = variants
+                .iter()
+                .filter(|(n, h)| h == hash && actual(n) == Some(h))
+                .min_by_key(|(n, _)| (n != &hashed, n.as_bytes()))
+            {
+                plan.name = found.clone();
+                plan.write = false;
+            } else {
+                plan.replacements = observed
+                    .files
+                    .iter()
+                    .filter(|(n, _, h)| case_key(n) == case_key(&hashed) && h != hash)
+                    .map(|(n, _, h)| (n.clone(), h.clone()))
+                    .collect();
+            }
+        }
+        Ok(plan)
+    }
     pub fn add(&self, desired: &str, bytes: &[u8]) -> Result<String> {
         self.check_changes()?;
         let hash = hash_bytes(bytes);
-        let hashed = hash_name(
-            &lowercase_candidate(&meguri_text::media_name::safe_media_name(desired)),
-            &hash,
-        );
         // M9: decide again after registration, then use the hash name.
         for attempt in 0..3 {
             let result = {
                 let mut db = self.db()?;
-                let (name, write) = if attempt == 2 {
-                    (hashed.clone(), true)
-                } else {
-                    self.choose(&mut db, desired, &hash)?
-                };
-                if !write && regular(&self.media_dir().join(&name))?.is_some() {
-                    return Ok(name);
+                let plan = self.add_installation_locked(&mut db, desired, &hash, attempt == 2)?;
+                if !plan.write {
+                    return Ok(plan.name);
                 }
-                let mut replacements = Vec::new();
-                if name == hashed {
-                    let mut variants = self.candidates(&mut db, &name)?;
-                    if regular(&self.media_dir().join(&name))?.is_some() && !variants.iter().any(|(n, _)| n == &name) {
-                        variants.push((name.clone(), hash_file(&self.media_dir().join(&name))?));
-                    }
-                    if let Some((found, _)) = variants
-                        .iter()
-                        .filter(|(_, h)| h == &hash)
-                        .min_by_key(|(n, _)| (n != &name, n.as_bytes()))
-                        && regular(&self.media_dir().join(found))?.is_some()
-                    {
-                        return Ok(found.clone());
-                    }
-                    replacements = variants.into_iter().filter(|(_, h)| h != &hash).collect();
-                }
-                self.install_locked(&mut db, &name, bytes, &replacements).map(|_| name)
+                self.install_locked(&mut db, &plan.name, bytes, &plan.replacements)
+                    .map(|_| plan.name)
             };
             match result {
                 Err(MediaError::NameTaken) if attempt < 2 => self.register_full(|_, _| true)?,

@@ -678,3 +678,20 @@ Import, no active operation, and its one cooldown has expired. No receipt,
 clock or deadline was edited. Temporary credential/marker removal and empty
 VM clipboard were confirmed. Full Mac peer capture can now run.
 
+
+Storage review round 2 (`20261023T201012Z-29936`) closed both P2 findings,
+with no P0–P2 findings remaining. The exact-name rule is implemented.
+Combined checks: `core-test/20261023T202212Z-41540` passed 57, no skips;
+`core-test/20261023T202956Z-45117` passed 428, with six existing ignored
+cases. `core-lint/20261023T202452Z-43228` passed. Fuzz
+`20261023T202451Z-43011` passed 104,936 sync_json inputs in the 30-second
+smoke run, seed 20261023. Full scheduled fuzz suites remain required.
+
+Similarity `20261023T202450Z-42539` passed 14 source files with no flags or
+allowlist matches; three manifests were outside its code scope. Comment export
+`20261023T203644Z-47562` changes only the three requested comment regions.
+Actual privacy `20261023T210317Z-60697` clears all five storage files and the
+new wire-test comment. The unchanged six media_io findings remain open.
+Storage similarity `20261023T210417Z-61250` passed after the comment edit.
+This lands the storage component only; RF4 and U111 remain unfinished and
+require their integration gate. Wire/reconciler code is not accepted here.

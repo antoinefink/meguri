@@ -7,6 +7,25 @@ pub fn cleanup(directory: &Path) -> Result<Vec<PathBuf>, StorageError> {
     for entry in std::fs::read_dir(directory)? {
         let entry = entry?;
         let kind = entry.file_type()?;
+        if kind.is_dir() && entry.file_name() == "media.staging" {
+            // Startup cleanup runs with collection advisory ownership. Media
+            // recovery can overlap downloads, so it leaves active copy directories
+            // untouched.
+            for copy in std::fs::read_dir(entry.path())? {
+                let copy = copy?;
+                if copy.file_type()?.is_dir()
+                    && copy.file_name().to_str().is_some_and(|name| {
+                        [".meguri-stage-", ".meguri-tmp-media-"]
+                            .iter()
+                            .any(|prefix| name.strip_prefix(*prefix).is_some_and(|suffix| !suffix.is_empty()))
+                    })
+                {
+                    std::fs::remove_dir_all(copy.path())?;
+                    removed.push(copy.path());
+                }
+            }
+            continue;
+        }
         if kind.is_dir()
             && entry
                 .file_name()
@@ -46,8 +65,8 @@ fn reserved(name: &str) -> bool {
         || (name.starts_with("meguri-backup-") && name.ends_with(".partial"))
 }
 
-/// The only namespace launch cleanup recursively sweeps. U124a and import
-/// consumers keep all unpublished package entries inside this directory.
+/// Launch cleanup sweeps this namespace at the collection root and inside
+/// media.staging. Consumers keep only unpublished, independently owned bytes.
 pub fn staging_directory(directory: &Path) -> Result<tempfile::TempDir, StorageError> {
     Ok(tempfile::Builder::new()
         .prefix(".meguri-stage-")

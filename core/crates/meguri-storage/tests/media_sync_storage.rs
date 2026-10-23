@@ -45,6 +45,7 @@ fn save(store: &MediaStore, name: &str, bytes: &[u8]) {
             &[MediaDownloadRecord {
                 intent,
                 stored_name: Some(name.into()),
+                publication: None,
             }],
         )
         .unwrap();
@@ -77,7 +78,8 @@ fn cursor_never_passes_an_unsaved_file_and_download_batches_survive_reopen() {
                 &store.sync_baseline().unwrap(),
                 &[MediaDownloadRecord {
                     intent,
-                    stored_name: Some("first.png".into())
+                    stored_name: Some("first.png".into()),
+                    publication: None,
                 }]
             )
             .is_err()
@@ -147,7 +149,8 @@ fn page_and_download_faults_roll_back_state_and_cursor_together() {
                 &before,
                 &[MediaDownloadRecord {
                     intent: intent.clone(),
-                    stored_name: Some("clip.png".into())
+                    stored_name: Some("clip.png".into()),
+                    publication: None,
                 }]
             )
             .is_err()
@@ -195,6 +198,7 @@ fn two_repaired_download_names_share_one_file_and_commit_all_intents_atomically(
         .map(|intent| MediaDownloadRecord {
             intent,
             stored_name: Some(stored.clone()),
+            publication: None,
         })
         .collect::<Vec<_>>();
     assert_eq!(records.len(), 2);
@@ -251,6 +255,7 @@ fn shared_download_destination_rejects_conflicting_hashes_without_journal_change
         .map(|intent| MediaDownloadRecord {
             intent,
             stored_name: Some(stored.clone()),
+            publication: None,
         })
         .collect::<Vec<_>>();
     let before = store.sync_baseline().unwrap();

@@ -8,7 +8,9 @@ use super::{
 use rusqlite::{Connection, OptionalExtension, params};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fs::Metadata,
     os::unix::fs::MetadataExt,
+    path::Path,
 };
 
 /// Supply the opaque M6 identifier issued for the configured account and
@@ -64,6 +66,24 @@ pub struct MediaDownloadRecord {
     /// Already published via the store's file/staging APIs. None is Y9's
     /// ignored/transform-empty case. Renamed files retain their pending state.
     pub stored_name: Option<String>,
+    /// Produced by save_downloaded_file. Keeps the received hash separate from
+    /// the listed intent and refuses edits between publication and batch commit.
+    /// Legacy callers of the byte/staging APIs use None and the intent's hash.
+    pub publication: Option<MediaDownloadPublication>,
+}
+#[derive(Clone, Debug)]
+pub struct MediaDownloadPublication {
+    sha1: String,
+    original_entry: Option<MediaEntry>,
+    stored_entry: Option<MediaEntry>,
+    metadata: Option<Metadata>,
+}
+#[derive(Clone, Debug)]
+pub struct SavedMediaDownload {
+    pub record: MediaDownloadRecord,
+    /// True only when this call published bytes; dedupe and ignored names are
+    /// false. Emit MediaArrived only after the whole answer commits.
+    pub changed: bool,
 }
 fn invalid(message: &str) -> MediaError {
     MediaError::Database(message.into())
@@ -156,6 +176,26 @@ fn forget_download(db: &Connection, name: &str) -> Result<()> {
     }
     Ok(())
 }
+fn require_download(db: &Connection, expected: &MediaSyncBaseline, download: &MediaDownloadIntent) -> Result<()> {
+    require_baseline(db, expected)?;
+    if intent(db, &download.name)?.as_ref() != Some(download) {
+        return Err(invalid("download intent changed"));
+    }
+    Ok(())
+}
+fn require_publication(db: &Connection, record: &MediaDownloadRecord) -> Result<()> {
+    if let Some(saved) = &record.publication {
+        if journal_db::entry(db, &record.intent.name)? != saved.original_entry {
+            return Err(invalid("download original changed after save"));
+        }
+        if let Some(name) = &record.stored_name
+            && journal_db::entry(db, name)? != saved.stored_entry
+        {
+            return Err(invalid("download destination changed after save"));
+        }
+    }
+    Ok(())
+}
 /// The cursor cannot pass a durable unsaved download (including unknown v1
 /// intents). Listed waterline survives a restart; it is not the applied USN.
 fn advance_cursor(db: &Connection, high: u64) -> Result<u64> {
@@ -205,6 +245,113 @@ fn reset(db: &mut Connection, owner: Option<&MediaBaselineOwner>) -> Result<()> 
     Ok(())
 }
 impl MediaStore {
+    fn saved_download_locked(
+        &self,
+        db: &Connection,
+        download: &MediaDownloadIntent,
+        stored_name: Option<String>,
+        hash: &str,
+        changed: bool,
+    ) -> Result<SavedMediaDownload> {
+        let (stored_entry, metadata) = match &stored_name {
+            Some(name) => (
+                journal_db::entry(db, name)?,
+                Some(folder::regular(&self.media_dir().join(name))?.ok_or_else(|| invalid("download disappeared"))?),
+            ),
+            None => (None, None),
+        };
+        Ok(SavedMediaDownload {
+            record: MediaDownloadRecord {
+                intent: download.clone(),
+                stored_name,
+                publication: Some(MediaDownloadPublication {
+                    sha1: hash.into(),
+                    original_entry: journal_db::entry(db, &download.name)?,
+                    stored_entry,
+                    metadata,
+                }),
+            },
+            changed,
+        })
+    }
+    /// Save a caller-owned regular temporary FILE without taking ownership of
+    /// its path. Never rename a borrowed TempPath: its later destructor could
+    /// unlink a different file recreated at that path. Instead make a bounded,
+    /// independently owned, same-volume AtomicFile and sync it before trashing
+    /// prior media. Source size/hash are read from actual bytes, not wire facts.
+    /// The payload must be 1..=104,857,600 bytes. Y8.2 requires the wire caller
+    /// to reject an answer containing an empty member before calling storage.
+    ///
+    /// The caller must retain its media job lease and collect all records for
+    /// the answer before calling commit_media_downloads. Saving alone neither
+    /// marks media clean nor advances the USN. Suspension and reset are rechecked
+    /// once copying finishes. Network I/O and callbacks must happen outside the
+    /// journal guard.
+    pub fn save_downloaded_file(
+        &self,
+        expected: &MediaSyncBaseline,
+        download: &MediaDownloadIntent,
+        payload: &Path,
+    ) -> Result<SavedMediaDownload> {
+        require_download(&*self.db()?, expected, download)?;
+        let mut source = folder::DownloadSource::open(payload)?;
+        meguri_model::faultpoint!("media.download.after_hash")?;
+        let transformed = meguri_text::media_name::safe_media_name(&download.name);
+        if ignored(&download.name) || transformed.is_empty() || ignored(&transformed) {
+            let db = self.db()?;
+            require_download(&db, expected, download)?;
+            return self.saved_download_locked(&db, download, None, &source.hash, false);
+        }
+        self.check_changes()?;
+        for attempt in 0..3 {
+            let result = (|| {
+                let observed = self.observe_download(&download.name, &source.hash)?;
+                let db = self.db()?;
+                require_download(&db, expected, download)?;
+                let plan = self.download_installation_locked(&db, &download.name, &source.hash, false, &observed)?;
+                if plan.write {
+                    Ok(None)
+                } else {
+                    self.saved_download_locked(&db, download, Some(plan.name), &source.hash, false)
+                        .map(Some)
+                }
+            })();
+            match result {
+                Ok(Some(saved)) => return Ok(saved),
+                Ok(None) => break,
+                Err(MediaError::NameTaken) if attempt < 2 => self.register_full(|_, _| true)?,
+                Err(error) => return Err(error),
+            }
+        }
+        // The independent copy lives outside the media folder and outside the
+        // journal guard, in U32's startup-swept namespace on the media volume.
+        // No borrowed TempPath survives publication; caller cleanup stays intact.
+        let staged = source.stage(self.staging_dir())?;
+        meguri_model::faultpoint!("media.download.after_stage")?;
+        self.check_changes()?;
+        for attempt in 0..3 {
+            let result = (|| {
+                let observed = self.observe_download(&download.name, &source.hash)?;
+                let mut db = self.db()?;
+                require_download(&db, expected, download)?;
+                // Y8.4/Y6 against CURRENT facts and the actual received hash:
+                // equal content is kept; different local content loses to the
+                // server, with its bytes preserved by the common installer.
+                let plan =
+                    self.download_installation_locked(&db, &download.name, &source.hash, attempt == 2, &observed)?;
+                if !plan.write {
+                    return self.saved_download_locked(&db, download, Some(plan.name), &source.hash, false);
+                }
+                self.install_existing_locked(&mut db, &plan.name, &staged.path, &source.hash, &plan.replacements)
+                    .and_then(|()| self.saved_download_locked(&db, download, Some(plan.name), &source.hash, true))
+            })();
+            match result {
+                Err(MediaError::NameTaken) if attempt < 2 => self.register_full(|_, _| true)?,
+                other => return other,
+            }
+        }
+        Err(MediaError::NameTaken)
+    }
     pub fn sync_baseline(&self) -> Result<MediaSyncBaseline> {
         baseline(&*self.db()?)
     }
@@ -435,7 +582,7 @@ impl MediaStore {
                 return Err(invalid("duplicate recorded download"));
             }
             if let Some(name) = record.stored_name.as_deref() {
-                if !normalized(name) || ignored(name) {
+                if (!normalized(name) && !(record.publication.is_some() && journal_name(name))) || ignored(name) {
                     return Err(MediaError::InvalidName);
                 }
                 groups.entry(name).or_default().push(record);
@@ -463,6 +610,7 @@ impl MediaStore {
                 if intent(&db, &record.intent.name)?.as_ref() != Some(&record.intent) {
                     return Err(invalid("download intent changed"));
                 }
+                require_publication(&db, record)?;
             }
             groups
                 .keys()
@@ -477,7 +625,20 @@ impl MediaStore {
                 return Err(invalid("download file is not syncable"));
             }
             let hash = folder::hash_file(&path)?;
-            if group.iter().any(|record| record.intent.sha1.as_ref() != Some(&hash)) {
+            if group.iter().any(|record| {
+                let expected_hash = record
+                    .publication
+                    .as_ref()
+                    .map(|saved| &saved.sha1)
+                    .or(record.intent.sha1.as_ref());
+                expected_hash != Some(&hash)
+                    || record.publication.as_ref().is_some_and(|saved| {
+                        saved
+                            .metadata
+                            .as_ref()
+                            .is_none_or(|saved| !folder::unchanged_file(saved, &m))
+                    })
+            }) {
                 return Err(invalid("download file hash differs"));
             }
             let has_exact = group.iter().any(|record| record.intent.name == name);
@@ -490,6 +651,7 @@ impl MediaStore {
             if intent(&tx, &record.intent.name)?.as_ref() != Some(&record.intent) {
                 return Err(invalid("download intent changed"));
             }
+            require_publication(&tx, record)?;
         }
         // Revalidate each shared row and file before any journal mutation.
         for (name, old, m, _, _) in &observations {
@@ -498,11 +660,7 @@ impl MediaStore {
             }
             let after =
                 folder::regular(&self.media_dir().join(name))?.ok_or_else(|| invalid("download disappeared"))?;
-            if m.ino() != after.ino()
-                || m.dev() != after.dev()
-                || m.len() != after.len()
-                || folder::stamp(m) != folder::stamp(&after)
-            {
+            if !folder::unchanged_file(m, &after) {
                 return Err(invalid("download file changed"));
             }
         }
