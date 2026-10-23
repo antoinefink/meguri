@@ -19,6 +19,7 @@ setup_file() {
 }
 
 setup() {
+  unset MEGURI_APP_SIGNING
   SB="$BATS_TEST_TMPDIR/repo"
   cp -R "$BATS_FILE_TMPDIR/template" "$SB"
   SB="$(cd "$SB" && pwd -P)"
@@ -120,6 +121,65 @@ phone_run() { mg ui-test --physical-device "$PHONE" --config Profile --suite Med
 test_tree() {
   jq -n "{testNodes:[{nodeType:\"Test Plan\", children:[{nodeType:\"UI test bundle\",
     subTestNodes:[{nodeType:\"Test Suite\", name:\"MediaTests\", subTestNodes:$1}]}]}]}" >"$FX_TESTS"
+}
+
+@test "app builds keep adhoc defaults without provisioning arguments" {
+  local platform mode
+  for platform in mac ios-sim; do
+    for mode in default adhoc; do
+      unset MEGURI_APP_SIGNING
+      [ "$mode" != adhoc ] || export MEGURI_APP_SIGNING=adhoc
+      : >"$STUB_LOG"
+      mg build-app --platform "$platform"
+      [ "$status" -eq 0 ]
+      [ "$(field .status)" = pass ]
+      called '^xcodebuild build-for-testing .* -testPlan UI -configuration Debug '
+      not_called 'MEGURI_SIGNING=|allowProvisioning'
+    done
+  done
+}
+
+@test "app team opt-in adds provisioning arguments to host and nested Snapshot builds" {
+  export MEGURI_APP_SIGNING=team
+  local platform
+  for platform in mac ios-sim; do
+    : >"$STUB_LOG"
+    mg build-app --platform "$platform"
+    [ "$status" -eq 0 ]
+    called '^xcodebuild build-for-testing .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration$'
+  done
+  cat >>"$SB/tools/mg.d/zz-physical-fakes.sh" <<'EOF'
+mg_job fx-snapshot-build host fx_snapshot_build "fake caller of the shared Snapshot build"
+fx_snapshot_build() {
+  mg_app_build mac Debug Snapshot Meguri ARCHS=arm64 || return 0
+  mg_status pass
+}
+EOF
+  : >"$STUB_LOG"
+  mg fx-snapshot-build
+  [ "$status" -eq 0 ]
+  called '^xcodebuild build-for-testing .* -testPlan Snapshot .* ARCHS=arm64 MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration$'
+}
+
+@test "invalid app signing is rejected before lint or any build" {
+  local mode
+  for mode in '' automatic 'adhoc team'; do
+    export MEGURI_APP_SIGNING="$mode"
+    : >"$STUB_LOG"
+    mg build-app --platform mac
+    [ "$status" -eq 2 ]
+    [ "$(field .status)" = error ]
+    [ "$(field '.failures[0].id')" = usage ]
+    [ ! -s "$STUB_LOG" ]
+  done
+}
+
+@test "app team opt-in keeps explicit physical build signing arguments single" {
+  export MEGURI_APP_SIGNING=team
+  mg ui-test --physical-device "$PHONE" --suite MediaTests/testAudio
+  [ "$status" -eq 0 ]
+  called "^xcodebuild build-for-testing .* -destination platform=iOS,id=$PHONE .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration$"
+  [ "$(grep '^xcodebuild build-for-testing ' "$STUB_LOG" | grep -o 'MEGURI_SIGNING=team' | wc -l | tr -d ' ')" -eq 1 ]
 }
 
 @test "physical ui inventory uses xcdevice array keys and excludes personal fields, Mac and simulator identifiers" {

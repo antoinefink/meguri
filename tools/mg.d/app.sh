@@ -34,9 +34,15 @@ mg_app_products() {
 # by default; snapshots build Snapshot; perf-ui builds Performance with the
 # Meguri-Profile scheme; unit-sim builds Unit with ARCHS=arm64, since package
 # test products do not take the app's arm64-only setting). On failure
-# records it and returns 1.
+# records it and returns 1. MEGURI_APP_SIGNING=team opts host builds into
+# Xcode-managed team provisioning; the default remains adhoc.
 mg_app_build() {
-  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" dest result log rc counts sdk xctestrun policy settings=() core_args=()
+  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" signing="${MEGURI_APP_SIGNING-adhoc}" dest result log rc counts sdk xctestrun policy settings=() core_args=()
+  if ! mg_word_in "$signing" "adhoc team"; then
+    mg_failure usage "MEGURI_APP_SIGNING takes adhoc or team"
+    mg_status error
+    return 1
+  fi
   [ "$#" -le 4 ] || settings=("${@:5}")
   if [ "$platform" = ios-device ]; then
     if ! mg_word_in "$config" "Debug Profile"; then
@@ -55,12 +61,15 @@ mg_app_build() {
       return 1
     fi
     core_args=(--slices mac,sim,device)
-    settings=(${settings[0]+"${settings[@]}"} MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration)
+    signing=team
   fi
   if [ "$platform" = mac ] && ! mg_word_in "$config" "Debug Profile"; then
     mg_failure usage "the Mac builds only Debug and Profile here: $config carries the daily-driver ids (tools/mg xcode-check builds and unregisters it)"
     mg_status error
     return 1
+  fi
+  if [ "$signing" = team ]; then
+    settings=(${settings[0]+"${settings[@]}"} MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration)
   fi
   mg_lint_ui_first || return 1
   if ! mg__xcframework "$MG_RUN_DIR/xcframework.json" --configuration "$config" ${core_args[0]+"${core_args[@]}"}; then

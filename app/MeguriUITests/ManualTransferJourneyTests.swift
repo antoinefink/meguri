@@ -59,7 +59,7 @@ import XCTest
             if admission.waitForExistence(timeout: 2) { try click(admission, app, bundle) }
             try openSettings(app, bundle)
             waitForText(element(app, "settings.anki.result"), "Collection transfer finished")
-            attach(app, "rf4-account-a-import-finished")
+            attachSuccess(app, "rf4-account-a-import-finished")
         }
 
         // Save an answer in the imported deck before restarting the app.
@@ -71,25 +71,25 @@ import XCTest
             try click(element(app, id), app, bundle)
         }
         waitForText(element(app, "home.session.recorded"), "1 answers recorded")
-        attach(app, "rf4-account-a-import-real-review-saved")
+        attachSuccess(app, "rf4-account-a-import-real-review-saved")
         app.terminate()
         app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false).arguments
         app.launch()
         waitForText(element(app, "home.session.recorded"), "1 answers recorded")
-        attach(app, "rf4-account-a-review-durable-after-restart")
+        attachSuccess(app, "rf4-account-a-review-durable-after-restart")
 
         // A's stored login must load without starting work. The next explicit
         // preparation uses system time and must meet A's existing cooldown.
         try openSettings(app, bundle)
         waitForText(element(app, "settings.anki.loginIdentity"), importUsername)
-        waitUntilReady(element(app, "settings.anki.logout"))
+        waitUntilReady(element(app, "settings.anki.logout"), app)
         XCTAssertFalse(element(app, "settings.anki.username").exists, "Restore A's saved login.")
         XCTAssertFalse(element(app, "settings.anki.confirm").exists, "Loading a login must leave preparation untouched.")
         try click(element(app, "settings.anki.prepareImport"), app, bundle)
         let result = element(app, "settings.anki.result")
         waitForText(result, "cooling down")
         XCTAssertTrue(element(app, "settings.anki.nextEligible").waitForExistence(timeout: 5), "Record the deadline returned with the cooldown.")
-        waitUntilReady(element(app, "settings.anki.prepareImport"))
+        waitUntilReady(element(app, "settings.anki.prepareImport"), app)
         for (id, explanation) in [
             ("settings.anki.progress", "Wait for preparation to finish before checking its outcome."),
             ("settings.anki.confirm", "A's cooldown must leave no replacement preview.")
@@ -97,7 +97,7 @@ import XCTest
             XCTAssertFalse(element(app, id).exists, explanation)
         }
         try reveal(result, app)
-        attach(app, "rf4-account-a-restored-login-cooldown-enforced")
+        attachSuccess(app, "rf4-account-a-restored-login-cooldown-enforced")
 
         // Use B for Export at the unchanged endpoint; A's saved history and
         // deadline remain in place while credentials change.
@@ -112,10 +112,10 @@ import XCTest
         for id in ["settings.anki.prepareExport", "settings.anki.confirm"] {
             try click(element(app, id), app, bundle)
         }
-        attach(app, "rf4-account-b-export-backup-preview")
+        attachSuccess(app, "rf4-account-b-export-backup-preview")
         try confirmNative(app, bundle)
         waitForText(element(app, "settings.anki.result"), "Collection transfer finished")
-        attach(app, "rf4-account-b-export-complete-local-activation")
+        attachSuccess(app, "rf4-account-b-export-complete-local-activation")
 
         // Evidence covers two accounts: A is still blocked and B completes.
         // A later successful transfer by A is outside this run. Acceptance also
@@ -140,7 +140,7 @@ import XCTest
         try click(element(app, "settings.anki.login"), app, bundle)
         waitForText(element(app, "settings.anki.result"), "Logged in")
         waitForText(element(app, "settings.anki.loginIdentity"), username)
-        waitUntilReady(element(app, "settings.anki.logout"))
+        waitUntilReady(element(app, "settings.anki.logout"), app)
         XCTAssertFalse(element(app, "settings.anki.confirm").exists, "Login must not prepare or transfer.")
     }
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
@@ -148,7 +148,7 @@ import XCTest
     }
     private func click(_ target: XCUIElement, _ app: XCUIApplication, _ bundle: String) throws {
         try reveal(target, app)
-        waitUntilReady(target)
+        waitUntilReady(target, app)
         try app.bringToFront(bundleIdentifier: bundle)
         #if os(macOS)
         target.click()
@@ -170,11 +170,15 @@ import XCTest
             #endif
         }
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in target.exists && target.isHittable }, object: nil)
-        XCTAssertEqual(XCTWaiter().wait(for: [visible], timeout: 30), .completed, "Element not visible: \(target.identifier)")
+        let outcome = XCTWaiter().wait(for: [visible], timeout: 30)
+        if outcome != .completed { attach(app, "rf4-reveal-failure", target: target) }
+        XCTAssertEqual(outcome, .completed, "Element not visible: \(target.identifier)")
     }
-    private func waitUntilReady(_ target: XCUIElement) {
+    private func waitUntilReady(_ target: XCUIElement, _ app: XCUIApplication) {
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in target.exists && target.isEnabled }, object: nil)
-        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 30), .completed, "Action unavailable: \(target.identifier)")
+        let outcome = XCTWaiter().wait(for: [ready], timeout: 30)
+        if outcome != .completed { attach(app, "rf4-ready-failure", target: target) }
+        XCTAssertEqual(outcome, .completed, "Action unavailable: \(target.identifier)")
     }
     private func replaceText(_ field: XCUIElement, app: XCUIApplication, with value: String) {
         #if os(macOS)
@@ -210,8 +214,43 @@ import XCTest
         let button = app.buttons.matching(NSPredicate(format: "label == %@", "Replace Collection")).firstMatch
         try click(button, app, bundle)
     }
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
-        let tree = XCTAttachment(string: app.debugDescription); tree.name = name + "-hierarchy"; tree.lifetime = .keepAlways; add(tree)
+    private func attachSuccess(_ app: XCUIApplication, _ name: String) {
+        attach(app, name + "-state")
+        // These existing checkpoints follow login. Never capture a login form
+        // or any other secure field, even if a preceding action regresses.
+        guard !element(app, "settings.anki.password").exists,
+              !app.secureTextFields.firstMatch.exists else { return }
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = name; shot.lifetime = .keepAlways; add(shot)
+    }
+    private func attach(_ app: XCUIApplication, _ name: String, target: XCUIElement? = nil) {
+        // Whitelist state only: no labels, identifiers read from elements, field
+        // contents, screenshots or hierarchy (which can contain credentials).
+        func state(_ item: XCUIElement, _ key: String, field: Bool = false) -> String {
+            guard item.exists else { return "\(key): exists=false enabled=unavailable hittable=unavailable type=unavailable frame=unavailable valueLength=unavailable" }
+            let frame = item.frame
+            var line = "\(key): exists=true enabled=\(item.isEnabled) hittable=\(item.isHittable) type=\(item.elementType.rawValue) frame=[\(frame.origin.x),\(frame.origin.y),\(frame.width),\(frame.height)]"
+            if field {
+                // Secure fields may expose masking characters; this is AX value
+                // length, not proof of the underlying password's exact length.
+                let length = (item.value as? String).map { String($0.count) } ?? "unavailable"
+                line += " valueLength=\(length)"
+            }
+            return line
+        }
+        var lines = [String]()
+        if let target { lines.append(state(target, "target")) }
+        for id in ["settings.anki.endpoint", "settings.anki.saveEndpoint", "settings.anki.login",
+                   "settings.anki.username", "settings.anki.password"] {
+            lines.append(state(element(app, id), id, field: id == "settings.anki.username" || id == "settings.anki.password"))
+        }
+        let configured = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Configured endpoint")).firstMatch.exists
+        lines.append("configuredEndpointRowPresent=\(configured)")
+        lines.append("secureTextFieldPresent=\(app.secureTextFields.firstMatch.exists)")
+        lines.append("operationProgressPresent=\(element(app, "settings.anki.progress").exists)")
+        lines.append("progressIndicatorPresent=\(app.progressIndicators.firstMatch.exists)")
+        lines.append("resultPresent=\(element(app, "settings.anki.result").exists)")
+        let report = XCTAttachment(string: lines.joined(separator: "\n"))
+        report.name = name; report.lifetime = .keepAlways; add(report)
     }
 }

@@ -9,7 +9,7 @@ import Testing
 /// Launch routes (U7, R1963), in the app process.
 @MainActor
 @Suite struct RouteRegistryTests {
-    static let standardRoutes = "card/behaviors, card/behaviors/fallback, card/behaviors/graphic, card/behaviors/separator, collection/import/empty, collection/import/error, collection/import/loading, collection/import/overflow, collection/import/typical, designsystem/gallery, home/deck-list/empty, home/deck-list/typical, perf/probe, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets, settings/import-export/error, settings/import-export/loading, settings/import-export/typical, shell/root/browse-pushed, shell/root/deck-page, shell/root/error, shell/root/loading, shell/root/review-answer, shell/root/typical, spike/card-swap, spike/card-swap/capture, spike/card-swap/typein, spike/media-seek, spike/media-seek/audio, spike/storage/read, spike/storage/write"
+    static let standardRoutes = "card/behaviors, card/behaviors/fallback, card/behaviors/graphic, card/behaviors/separator, collection/import/empty, collection/import/error, collection/import/loading, collection/import/overflow, collection/import/typical, designsystem/gallery, home/deck-list/empty, home/deck-list/typical, perf/probe, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets, settings/anki-transfer/empty, settings/anki-transfer/error, settings/anki-transfer/loading, settings/anki-transfer/typical, settings/import-export/error, settings/import-export/loading, settings/import-export/typical, shell/root/browse-pushed, shell/root/deck-page, shell/root/error, shell/root/loading, shell/root/review-answer, shell/root/typical, spike/card-swap, spike/card-swap/capture, spike/card-swap/typein, spike/media-seek, spike/media-seek/audio, spike/storage/read, spike/storage/write"
 
     @Test func theStandardRegistryHasTheSampleGalleryPerfShellAndSpikeRoutes() {
         #expect(TestHooks.RouteRegistry.standard.routes.map(\.path).joined(separator: ", ") == Self.standardRoutes)
@@ -30,6 +30,10 @@ import Testing
         ("collection/import/loading", .sheet),
         ("home/deck-list/empty", .screen),
         ("home/deck-list/typical", .screen),
+        ("settings/anki-transfer/empty", .screen),
+        ("settings/anki-transfer/error", .screen),
+        ("settings/anki-transfer/loading", .screen),
+        ("settings/anki-transfer/typical", .screen),
         ("settings/import-export/error", .sheet),
         ("settings/import-export/loading", .sheet),
         ("settings/import-export/typical", .sheet),

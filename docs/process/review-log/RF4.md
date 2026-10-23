@@ -289,3 +289,34 @@ the three helper types without changing its checks. Rust lint
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,
 focused server/native evidence and the required full gate remain open.
+
+### Mac signing prerequisite and corrective checks
+
+VM run `20261023T133904Z-99285`: one failed test, before Login.
+The route checks passed and cleanup passed. The peer check did not run.
+Mac render run `20261023T134530Z-6140`: Keychain returned `-34018`;
+two route tests failed; 24 new images lack baselines. Neither run passed.
+
+Filtered fix `20261023T135332Z-16766`, starting at `f046f949`, updates both
+strict route lists and adds credential-free failure diagnostics. Existing
+post-login screenshots remain, guarded against any secure field; raw hierarchy
+attachments are removed. It also adds explicit `MEGURI_APP_SIGNING=team`
+support to shared app builds without changing the default or Keychain policy.
+Independent corrective review found no new P0–P1 issues.
+
+| Check | Receipt | Result |
+| --- | --- | --- |
+| Signing option tests | `20261023T135605Z-19301` | 4 passed |
+| Privacy, six corrective files | `20261023T135628Z-20711` | Passed |
+| First team build | `20261023T135605Z-19390` | Failed: stale embedded ad-hoc widget |
+| Team build after stale-copy cleanup | `20261023T135727Z-21644` | Passed |
+
+The current widget product and parent had the team certificate, while the
+embedded widget retained its old ad-hoc signature. Only that generated embedded
+copy was removed before the passing build. No entitlement or signature check
+was bypassed. The built team app still lacks an app-identifier entitlement and
+embedded profile, so the Data Protection Keychain prerequisite remains open.
+The existing Apple account and valid development identity were confirmed with
+metadata-only reads. No account login or private-key export was performed.
+
+Visual check: no new P0–P1 finding. Baselines and final UI review remain open.
