@@ -388,3 +388,13 @@ Build `20261023T155213Z-78613` passed with the previous profile. A backup
 of that cache entry is kept outside Git. Removing that entry let automatic
 signing refresh it: `20261023T155353Z-80293` passed with both Macs covered.
 VM runtime checks remain pending. Existing signing keys are unchanged.
+
+Filtered lint fix `20261023T160101Z-87529` starts at `7b79baff` and changes
+only shared borrows and equivalent let chains. Round 3 found no new P0–P1
+issues. Rust lint `20261023T160317Z-89272` passed; focused tests
+`20261023T160321Z-89531` passed all 54; privacy `20261023T160324Z-89783`
+and similarity `20261023T160544Z-92858` passed.
+
+`20261023T155447Z-81428`: Mac UI did not run; cleanup passed.
+The VM rejected the runner's signing identity: its app identifier has no
+profile. The app's own profile is valid for both Macs. No peer proof ran.

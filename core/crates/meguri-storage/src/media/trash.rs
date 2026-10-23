@@ -145,7 +145,7 @@ impl MediaStore {
                     self.trash_one_locked(&mut db, &name, &hash, &m)?;
                 }
             } else {
-                folder::deleted(&mut db, requested)?;
+                folder::deleted(&db, requested)?;
             }
             self.advance_marker(&db, &marker)?;
         }

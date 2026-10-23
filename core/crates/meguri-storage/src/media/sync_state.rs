@@ -304,30 +304,30 @@ impl MediaStore {
             {
                 return Err(invalid("only a saved live file can be confirmed"));
             }
-            if let MediaPageDecision::Download { sha1, usn, .. } = decision {
-                if !hash_valid(sha1) || *usn <= expected.usn || *usn > highest_usn {
-                    return Err(invalid("invalid media download intent"));
-                }
+            if let MediaPageDecision::Download { sha1, usn, .. } = decision
+                && (!hash_valid(sha1) || *usn <= expected.usn || *usn > highest_usn)
+            {
+                return Err(invalid("invalid media download intent"));
             }
         }
         // Files are independently recoverable in the existing self-describing
         // trash if a later journal transaction fails or the process stops.
         for decision in decisions {
-            if let MediaPageDecision::Remove { name, .. } = decision {
-                if let Some(entry) = journal_db::entry(&db, name)?.filter(|e| e.live) {
-                    if !normalized(name) || ignored(name) {
-                        return Err(MediaError::InvalidName);
-                    }
-                    if let Some(m) = folder::regular(&self.media_dir().join(name))? {
-                        self.move_to_trash_locked(
-                            &mut db,
-                            name,
-                            entry.sha1.as_deref().ok_or_else(|| invalid("missing media hash"))?,
-                            m.len(),
-                            &self.media_dir().join(name),
-                            false,
-                        )?;
-                    }
+            if let MediaPageDecision::Remove { name, .. } = decision
+                && let Some(entry) = journal_db::entry(&db, name)?.filter(|e| e.live)
+            {
+                if !normalized(name) || ignored(name) {
+                    return Err(MediaError::InvalidName);
+                }
+                if let Some(m) = folder::regular(&self.media_dir().join(name))? {
+                    self.move_to_trash_locked(
+                        &mut db,
+                        name,
+                        entry.sha1.as_deref().ok_or_else(|| invalid("missing media hash"))?,
+                        m.len(),
+                        &self.media_dir().join(name),
+                        false,
+                    )?;
                 }
             }
         }

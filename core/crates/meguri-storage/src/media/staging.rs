@@ -295,7 +295,7 @@ impl MediaStore {
                 fs::remove_file(&source)?;
             }
             folder::live(
-                &mut db,
+                &db,
                 &file.name,
                 file.sha1.clone(),
                 &fs::symlink_metadata(&target)?,
