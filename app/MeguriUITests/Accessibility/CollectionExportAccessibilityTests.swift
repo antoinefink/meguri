@@ -190,19 +190,28 @@ import XCTest
                 offset = frames[next].midY - viewport.midY
             }
             guard abs(offset) > 1 else { break }
+            #if os(macOS)
             let gestureArea = viewport.insetBy(dx: viewport.width / 10, dy: viewport.height / 10)
             let distance = min(abs(offset), gestureArea.height / 3) * (offset > 0 ? 1.0 : -1.0)
-            #if os(macOS)
             scroll.scroll(byDeltaX: 0, deltaY: -distance)
             #else
-            let origin = scroll.coordinate(withNormalizedOffset: .zero)
-            let start = origin.withOffset(CGVector(dx: gestureArea.midX - scroll.frame.minX,
-                                                   dy: gestureArea.midY - scroll.frame.minY + distance / 2))
-            let end = start.withOffset(CGVector(dx: 0, dy: -distance))
-            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0)
+            if offset > 0 { scroll.swipeUp() }
+            else { scroll.swipeDown() }
             #endif
-            let movement = frames[next].minY - targets[next].frame.minY
+            let afterFrames = targets.map(\.frame)
+            let movement = frames[next].minY - afterFrames[next].minY
             guard offset > 0 ? movement > 1 : movement < -1 else {
+                let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+                shot.name = "export scroll no progress gesture \(gesture + 1)"
+                shot.lifetime = .keepAlways
+                add(shot)
+                let frameChanges = targets.indices.map {
+                    "\(identifiers[$0]): before \(frames[$0]), after \(afterFrames[$0])"
+                }.joined(separator: "\n")
+                let proof = XCTAttachment(string: "Target: \(identifiers[next])\nOffset: \(offset), movement: \(movement)\nCoverage viewport before gesture: \(viewport)\nScroll frame after gesture: \(scroll.frame)\n\(frameChanges)")
+                proof.name = "export scroll no progress frames gesture \(gesture + 1)"
+                proof.lifetime = .keepAlways
+                add(proof)
                 throw AuditError(description: "No meaningful scoped scroll progress for \(identifiers[next]) after gesture \(gesture + 1)")
             }
         }

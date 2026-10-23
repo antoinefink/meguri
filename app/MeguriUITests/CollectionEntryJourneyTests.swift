@@ -107,9 +107,7 @@ import notify
             capture(app, "export-native-save-ready")
             try click(save, app, bundle)
             if replacement {
-                let replace = app.buttons.matching(NSPredicate(format: "label == %@", "Replace")).firstMatch
-                XCTAssertTrue(replace.waitForExistence(timeout: 10), app.debugDescription)
-                try click(replace, app, bundle)
+                guard confirmNativeExportReplacement(app) else { return }
             }
             #endif
             XCTAssertTrue(element(app, "settings.importExport.saved").waitForExistence(timeout: 30), app.debugDescription)
@@ -175,6 +173,70 @@ import notify
         capture(app, "export-reimport-durable-review")
     }
     #if os(iOS)
+    private func confirmNativeExportReplacement(_ app: XCUIApplication) -> Bool {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let exactReplace = NSPredicate(format: "label == %@", "Replace")
+        let appAlertReplace = app.alerts.buttons.matching(exactReplace)
+        let appReplace = app.buttons.matching(exactReplace)
+        let systemReplace = springboard.alerts.buttons.matching(exactReplace)
+        func actionable(_ query: XCUIElementQuery) -> XCUIElement? {
+            query.allElementsBoundByIndex.first { $0.exists && $0.isEnabled && $0.isHittable }
+        }
+        var replace: XCUIElement?
+        let offered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            replace = actionable(appAlertReplace) ?? actionable(appReplace) ?? actionable(systemReplace)
+            return replace != nil
+        }, object: nil)
+        guard XCTWaiter().wait(for: [offered], timeout: 30) == .completed, let replace else {
+            #if targetEnvironment(simulator)
+            // Public synthetic picker evidence only; never capture a host screen.
+            func captureWindowAndHierarchy(_ owner: XCUIApplication, _ name: String) {
+                guard owner.exists else { return }
+                let window = owner.windows.firstMatch
+                if window.exists {
+                    let shot = XCTAttachment(screenshot: window.screenshot())
+                    shot.name = "export-replace-timeout-\(name)-window"
+                    shot.lifetime = .keepAlways
+                    add(shot)
+                }
+                let hierarchy = XCTAttachment(string: owner.debugDescription)
+                hierarchy.name = "export-replace-timeout-\(name)-hierarchy"
+                hierarchy.lifetime = .keepAlways
+                add(hierarchy)
+            }
+            captureWindowAndHierarchy(app, "app")
+            captureWindowAndHierarchy(springboard, "springboard")
+            func attributes(_ query: XCUIElementQuery) -> String {
+                let targets = query.allElementsBoundByIndex
+                guard !targets.isEmpty else { return "exists=false isHittable=false" }
+                return targets.map { target in
+                    guard target.exists else { return "exists=false isHittable=false" }
+                    return "exists=true isEnabled=\(target.isEnabled) isHittable=\(target.isHittable) label=\(target.label.debugDescription) identifier=\(target.identifier.debugDescription) frame=\(target.frame)"
+                }.joined(separator: "\n")
+            }
+            let exactSave = NSPredicate(format: "label == %@", "Save")
+            let rows = [
+                "App exact Save Buttons: \(attributes(app.buttons.matching(exactSave)))",
+                "App picker Save Button: \(attributes(app.buttons.matching(identifier: "DOCPicker.actionButton")))",
+                "App alert exact Replace Buttons: \(attributes(appAlertReplace))",
+                "App exact Replace Buttons: \(attributes(appReplace))",
+                "App activityIndicators: \(attributes(app.activityIndicators))",
+                "SpringBoard alert exact Save Buttons: \(attributes(springboard.alerts.buttons.matching(exactSave)))",
+                "SpringBoard alert exact Replace Buttons: \(attributes(systemReplace))",
+                "SpringBoard activityIndicators: \(attributes(springboard.activityIndicators))"
+            ]
+            let diagnostic = XCTAttachment(string: rows.joined(separator: "\n"))
+            diagnostic.name = "export-replace-timeout-native-attributes"
+            diagnostic.lifetime = .keepAlways
+            add(diagnostic)
+            #endif
+            XCTFail("Native replacement must offer an existing, enabled, hittable exact Replace Button in Meguri or a SpringBoard alert within 30 seconds")
+            return false
+        }
+        replace.tap()
+        return true
+    }
+
     private func cancelNativeExportPicker(_ app: XCUIApplication, _ bundle: String) throws {
         let exactCancel = NSPredicate(format: "label == %@", "Cancel")
         let cancelButton = app.buttons.matching(exactCancel).firstMatch
