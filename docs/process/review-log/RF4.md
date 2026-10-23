@@ -573,3 +573,15 @@ OS-setup review round 4 found no new P0–P1 findings. It captures bounded
 Settings windows after the existing exact Info click, even when the surface
 type differs from the prior predicate. It adds no input or permission change.
 Private scan `20261023T193127Z-97133` passed. Runtime evidence remains open.
+
+iPad checkpoint `20261023T193135Z-97428` passed all three selected cases,
+without skips: native file import followed by saved review/restart, exhaustion
+and restart, and ratings/undo/wait/restart. The focused local review checkpoint
+now has actual native proof on all three platforms. RF3 already retains its
+separate file-export round-trip evidence; these focused checks do not close
+RF4, the full gate or a milestone.
+
+The earlier iPhone app-hosted snapshot failure is now localized: four missing
+`settings.sync/*/dark-xxxLarge-iphoneLarge+hc` baselines on iPhone18,1-24A434.
+The enabled test reported missing files, not image differences. Record only
+these cells, review their images and verify before the fresh combined gate.
