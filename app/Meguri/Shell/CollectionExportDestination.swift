@@ -1,4 +1,5 @@
 import AppModel
+import CoreBridge
 import Settings
 import SwiftUI
 import UniformTypeIdentifiers

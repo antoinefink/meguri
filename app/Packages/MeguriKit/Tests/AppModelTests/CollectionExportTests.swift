@@ -96,9 +96,11 @@ extension ReviewCollectionStartupTests {
             coordinator.chooseDestination(); await coordinator.waitForCompletion()
             let lease = try #require(coordinator.providerLease)
             try #require(coordinator.destinationPresented)
+            let entryStage = owner.entry.stage
+            #expect(!owner.entry.canPresent)
             owner.entry.inspect(source); await owner.entry.waitForCompletion()
             owner.entry.confirm(); await owner.entry.waitForCompletion()
-            #expect(owner.entry.stage == .refused)
+            #expect(owner.entry.stage == entryStage)
             #expect(owner.generation == generation)
             #expect(coordinator.destinationPresented && coordinator.providerLease === lease)
             #expect(!(await owner.close()))

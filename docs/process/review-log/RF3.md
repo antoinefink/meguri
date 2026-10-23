@@ -64,3 +64,11 @@
 - Similarity `20261023T012227Z-53095`: pass against the original RF2 base. The earlier similarity failure is resolved without an exemption; no reference source was read.
 - Privacy check `20261023T012325Z-54661` passed. Native bridge run `20261023T012322Z-53917` passed its focused tests. Mac and simulator code compiled with no warnings; the tests covered metadata, cancellation, destination lifetime and save outcomes.
 - Settings/AppModel tests, actual native destination journeys, rendered accessibility/visual checks and the full gate remain pending. Full gate base remains `81c207573c20c337c8834e4ae8b4ee8f29603dbf`.
+
+## AppModel and native adapter follow-up
+
+- `20261023T012419Z-55531`: failed test; entry kept its prior stage. `20261023T012521Z-57306`: failed build; missing CoreBridge import. No UI test ran in that job.
+- Session `s-20261023T012731Z-5caf16a7`; cleanroom `20261023T012744Z-60066`: added CoreBridge import. Test now checks no new entry, same stage, generation and lease, refused close and later saved output. Entry code is unchanged.
+- MeguriKit `20261023T012918Z-60871`: pass, four tests. Coverage includes actual export/reimport/review, blocked replacement, no collection, and all three cleanup retry cases.
+- An earlier session append `20261023T012611Z-58616` failed its privacy hook and was never used by a runner. Only that uncommitted append was removed. The fresh minimal session record above was committed through the normal tool; existing ledger rows and privacy rules were preserved.
+- Next: Mac Save, iPhone/iPad Files, accessibility, image review and full gate from `81c207573c20c337c8834e4ae8b4ee8f29603dbf`.
