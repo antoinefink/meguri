@@ -31,7 +31,7 @@ Privacy `20261023T084457Z-24600`: passed. Similarity
 `20261023T084509Z-24867`: 5 files, no flags or allowlisted matches.
 Formatting `20261023T084434Z-23939`: passed. Lint
 `20261023T084528Z-25281`: failed on a complex test evidence tuple; repair open.
-Independent round 1 review is in progress. No UI changed in this prerequisite.
+Independent round 1 review follows below. No UI changed in this prerequisite.
 
 Round 1 found the test tuple lint and a misleading admission comment. The public
 check is valid after drain, but exclusive entry does not call it automatically;
@@ -41,6 +41,25 @@ Fixer session `s-20261023T084708Z-2448b237`, isolated run
 Round 2 review found no P0–P2 issues. No assertion or executable guard was reduced.
 Privacy `20261023T084854Z-27836` passed. Final full engine-package verification
 and lint are pending; the earlier failed lint receipt remains retained.
+
+Final engine checks passed:
+
+- `core-test 20261023T084851Z-27593`: 720 passed, no failures; the existing ignored
+  `undo_holdback_props::ten_thousand_random_histories` remains ignored for its
+  separate U25 run. The enabled 10,000-session prediction stress test passed.
+- `core-lint 20261023T085540Z-31118`: formatting, clippy, layering and binary scan
+  passed; the earlier type-complexity finding is closed.
+- `similarity 20261023T085543Z-31361`: five files scanned, no flags/allowlist.
+- `static-checks 20261023T085617Z-31900`: passed.
+- `catch-up 20261023T085646Z-32650`: passed, nothing queued. Disk: 63 GB free.
+
+The engine prerequisite has no unresolved P0–P2 review findings. RF4 acceptance
+and the required full integration gate remain open, including the host setup
+block already recorded for RF3. No milestone or parent unit is accepted here.
+
+Next isolated patch: typed transfer facts and staged-upload storage preparation.
+Starting commit `8f227ed0dfead33aab8ebedb05a63a9fddbf9a04`; implementer session
+`s-20261023T085242Z-6179d829`. It does not mutate the checkout while running.
 
 This is incomplete RF4 work, without a Unit trailer. Transfer orchestration,
 native configuration/login/preview, collection/media execution and recovery,
