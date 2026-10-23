@@ -106,3 +106,8 @@
 - Cleanroom `20261023T024441Z-16867`: bounded native Back navigation seeks a visible Cancel; actual delegate completion must restore Ready. Mac modal background leaves the AX tree, with explicit foreground assertions. Reverted the unsuccessful text-color candidate. All native follow-ups are pending.
 - Mac snapshots `20261023T024654Z-17865`: 18 export baselines recorded, 30 comparisons passed, 312 cells deferred outside this focused run. Native-window context, image review, mobile renders and critic remain pending.
 - Independent round 6 follow-up: no new P0–P1 findings or deterministic blockers in modal ownership and bounded Files navigation. Native audits and rendered acceptance remain pending.
+- Mac accessibility `20261023T025133Z-21775`: pass, six export cells and no skips. Foreground labels and controls remain accessible; covered shell content is excluded while the modal is active.
+- Mac drive `20261023T025618Z-25947`: pass, 17 steps. Actual export sheet shows native title and frame; Prepare, Discard and Done work, and Settings actions return after dismissal.
+- Mac snapshot verification `20261023T025953Z-29597`: pass, 48 comparisons; 312 cells outside the focused filter remain deferred.
+- iPhone `20261023T025315Z-23574`: failed in the test observer before Back navigation. Indexed navigation bars changed while Files settled. No cancellation result is claimed.
+- Fixer `s-20261023T025922Z-be2bb59e`, cleanroom `20261023T025932Z-29106`: uses direct native controls and bounded observed Back transitions. No production change. Actual Files cancellation, Save, Replace and reimport checks remain required.

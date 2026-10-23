@@ -161,37 +161,44 @@ import notify
     }
     #if os(iOS)
     private func cancelNativeExportPicker(_ app: XCUIApplication, _ bundle: String) throws {
-        let cancels = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Cancel"))
-        let backs = app.buttons.matching(identifier: "BackButton")
-        let more = app.buttons.matching(identifier: "OverflowBarButtonItem")
-        func actionable(_ query: XCUIElementQuery) -> XCUIElement? {
-            query.allElementsBoundByIndex.first { $0.exists && $0.isEnabled && $0.isHittable }
+        let exactCancel = NSPredicate(format: "label == %@", "Cancel")
+        let cancelButton = app.buttons.matching(exactCancel).firstMatch
+        let cancelMenuItem = app.menuItems.matching(exactCancel).firstMatch
+        let cancelOther = app.otherElements.matching(exactCancel).firstMatch
+        let back = app.buttons.matching(identifier: "BackButton").firstMatch
+        let more = app.buttons.matching(identifier: "OverflowBarButtonItem").firstMatch
+        let save = app.buttons.matching(identifier: "DOCPicker.actionButton").firstMatch
+        func actionable(_ target: XCUIElement) -> Bool {
+            target.exists && target.isEnabled && target.isHittable
         }
-        func navigationTitles() -> [String] {
-            let bars = app.navigationBars.allElementsBoundByIndex
-            return bars.map(\.identifier)
-                + app.navigationBars.staticTexts.allElementsBoundByIndex.map(\.label)
-                + app.navigationBars.buttons.matching(NSPredicate(format: "label ENDSWITH %@", ", Actions Menu"))
-                    .allElementsBoundByIndex.map(\.label)
+        func actionableCancel() -> XCUIElement? {
+            if actionable(cancelButton) { return cancelButton }
+            if actionable(cancelMenuItem) { return cancelMenuItem }
+            return actionable(cancelOther) ? cancelOther : nil
+        }
+        func completedRoot() -> Bool {
+            !back.exists && (actionable(save) || actionable(more))
         }
         func captureFailure(_ reason: String) {
-            capturePicker(app)
+            capture(app, "export-cancel-postwait")
             func attributes(_ target: XCUIElement) -> String {
                 guard target.exists else { return "exists=false" }
                 return "elementType=\(target.elementType) label=\(target.label.debugDescription) identifier=\(target.identifier.debugDescription) exists=true isEnabled=\(target.isEnabled) isHittable=\(target.isHittable) frame=\(target.frame)"
             }
-            let buttons = app.buttons.matching(NSPredicate(format: "label IN %@ OR identifier IN %@",
-                ["Cancel", "Close", "Save", "More"], ["BackButton", "OverflowBarButtonItem", "DOCPicker.actionButton"]))
-            let rows = [reason, "navigation titles: \(navigationTitles())"]
-                + cancels.allElementsBoundByIndex.prefix(8).map { "exact Cancel: \(attributes($0))" }
-                + buttons.allElementsBoundByIndex.prefix(12).map { "native button: \(attributes($0))" }
+            let rows = [reason,
+                "Cancel Button: \(attributes(cancelButton))",
+                "Cancel MenuItem: \(attributes(cancelMenuItem))",
+                "Cancel Other: \(attributes(cancelOther))",
+                "Back: \(attributes(back))",
+                "More: \(attributes(more))",
+                "Save: \(attributes(save))"]
             let diagnostic = XCTAttachment(string: rows.joined(separator: "\n"))
             diagnostic.name = "export-cancel-postwait-native-attributes"
             diagnostic.lifetime = .keepAlways
             add(diagnostic)
         }
         let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            actionable(cancels) != nil || actionable(backs) != nil || actionable(more) != nil
+            actionableCancel() != nil || actionable(back) || completedRoot()
         }, object: nil)
         guard XCTWaiter().wait(for: [loaded], timeout: 10) == .completed else {
             captureFailure("No actionable native Cancel, Back or More after loading")
@@ -201,16 +208,15 @@ import notify
         // Files may replace Cancel with Back inside RF2 Import Tests → Meguri
         // → On My Device → Browse. Each tap must produce an observed transition.
         var steps = 0
-        var visited: Set<[String]> = []
-        while actionable(cancels) == nil, let back = actionable(backs), steps < 4 {
+        var visited: Set<String> = []
+        while actionableCancel() == nil, actionable(back), steps < 4 {
             let label = back.label
-            guard ["Meguri", "On My iPhone", "On My iPad", "Browse", "Back"].contains(label) else {
+            guard ["Meguri", "On My iPhone", "On My iPad", "Browse"].contains(label) else {
                 captureFailure("Unexpected native Back destination: \(label)")
                 XCTFail("Native export picker left the known local folder hierarchy")
                 return
             }
-            let titles = navigationTitles()
-            guard visited.insert([label] + titles).inserted else {
+            guard visited.insert(label).inserted else {
                 captureFailure("Native Back returned to an unchanged navigation state")
                 XCTFail("Native export picker must not retry the same Back state")
                 return
@@ -218,25 +224,25 @@ import notify
             try click(back, app, bundle)
             steps += 1
             let navigated = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                actionable(cancels) != nil
-                    || backs.allElementsBoundByIndex.contains { $0.exists && $0.label != label }
-                    || { let current = navigationTitles(); return !current.isEmpty && current != titles }()
+                actionableCancel() != nil
+                    || (actionable(back) && back.label != label)
+                    || completedRoot()
             }, object: nil)
             guard XCTWaiter().wait(for: [navigated], timeout: 10) == .completed else {
-                captureFailure("Native Back did not change its label or navigation title at step \(steps)")
+                captureFailure("Native Back did not reveal Cancel, change its actionable label or reach the root at step \(steps)")
                 XCTFail("Native export picker Back navigation did not advance")
                 return
             }
         }
-        if let cancel = actionable(cancels) {
+        if let cancel = actionableCancel() {
             try click(cancel, app, bundle)
             return
         }
         // Only inspect the native overflow once, after Back navigation ends.
-        if !backs.firstMatch.exists, let overflow = actionable(more) {
-            try click(overflow, app, bundle)
-            let offered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in actionable(cancels) != nil }, object: nil)
-            if XCTWaiter().wait(for: [offered], timeout: 5) == .completed, let cancel = actionable(cancels) {
+        if !back.exists, actionable(more) {
+            try click(more, app, bundle)
+            let offered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in actionableCancel() != nil }, object: nil)
+            if XCTWaiter().wait(for: [offered], timeout: 5) == .completed, let cancel = actionableCancel() {
                 try click(cancel, app, bundle)
                 return
             }
