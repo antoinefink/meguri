@@ -74,13 +74,15 @@ import UIKit
                         proof.lifetime = .keepAlways
                         self.add(proof)
                         if auditFullFrames {
-                            var types: XCUIAccessibilityAuditType = .all
                             #if os(iOS)
+                            var types: XCUIAccessibilityAuditType = .all
                             if UIDevice.current.userInterfaceIdiom == .phone,
                                state == "error", variant == "light, largest accessibility size",
                                visible.contains("settings.importExport.prepare") {
                                 types = .all.subtracting(.contrast)
                             }
+                            #else
+                            let types: XCUIAccessibilityAuditType = .all
                             #endif
                             findings += try AccessibilityAudit.run(app, variant: label, types: types,
                                 suppressions: visibleSuppressions)
