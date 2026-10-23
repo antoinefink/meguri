@@ -141,3 +141,6 @@
 - Catch-up `20261023T040307Z-89697`: PASS, nothing queued.
 - iPad `20261023T040534Z-90977`: FAIL. Footer and close Button share the same AX frame. Revert that annotation; preserve the proven button and use a conservative audit viewport. No new native pass is claimed.
 - Fixer `s-20261023T040945Z-1941ce7d`, export `20261023T041001Z-94415`: restored the proven footer Button. The audit uses a conservative 48pt inset, fresh geometry and overlapping paragraph coverage. No production appearance change; checks pending.
+- Independent round 6 follow-up on `4db82cf3`: no new P0–P1 findings or deterministic blockers. Native audit proof remains pending.
+- Privacy `20261023T041419Z-96560`: PASS. Run `20261023T041429Z-96967` could not access Tart from the sandbox; no test ran. Doctor `20261023T041503Z-98751` confirms VM SSH, Docker and 46 GiB free with host access.
+- iPad `20261023T041457Z-97877`: FAIL. Paragraph coverage completed, but 24 short pans did not reach Choose/Discard after system audits changed scroll position. Scrolled audits also report explanation and Choose contrast while those targets are outside the safe viewport. Preserve findings and correct the bounded test movement; production remains unchanged.
