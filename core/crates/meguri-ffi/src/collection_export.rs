@@ -1174,11 +1174,11 @@ mod tests {
             release.wait();
             loop {
                 let event = events.recv_timeout(Duration::from_secs(20)).unwrap();
-                if let EventKind::JobFinished { id, outcome } = &event.kind {
-                    if id.0 == finish.id {
-                        assert_eq!(outcome, &meguri_engine::JobOutcome::Cancelled);
-                        break;
-                    }
+                if let EventKind::JobFinished { id, outcome } = &event.kind
+                    && id.0 == finish.id
+                {
+                    assert_eq!(outcome, &meguri_engine::JobOutcome::Cancelled);
+                    break;
                 }
             }
             if let Some(suspending) = suspending {
@@ -1235,11 +1235,11 @@ mod tests {
             let finish = lease.clone().finish().unwrap();
             loop {
                 let event = events.recv_timeout(Duration::from_secs(20)).unwrap();
-                if let EventKind::JobFinished { id, outcome } = &event.kind {
-                    if id.0 == finish.id {
-                        assert!(matches!(outcome, meguri_engine::JobOutcome::Failed { .. }));
-                        break;
-                    }
+                if let EventKind::JobFinished { id, outcome } = &event.kind
+                    && id.0 == finish.id
+                {
+                    assert!(matches!(outcome, meguri_engine::JobOutcome::Failed { .. }));
+                    break;
                 }
             }
             meguri_model::faultpoint::disarm(point);
@@ -1277,11 +1277,11 @@ mod tests {
             let failed = artifact.discard().unwrap().unwrap();
             loop {
                 let event = events.recv_timeout(Duration::from_secs(20)).unwrap();
-                if let EventKind::JobFinished { id, outcome } = &event.kind {
-                    if id.0 == failed.id {
-                        assert!(matches!(outcome, meguri_engine::JobOutcome::Failed { .. }));
-                        break;
-                    }
+                if let EventKind::JobFinished { id, outcome } = &event.kind
+                    && id.0 == failed.id
+                {
+                    assert!(matches!(outcome, meguri_engine::JobOutcome::Failed { .. }));
+                    break;
                 }
             }
             meguri_model::faultpoint::disarm(point);
