@@ -228,7 +228,10 @@ impl std::error::Error for StorageError {}
 impl From<std::io::Error> for StorageError {
     fn from(error: std::io::Error) -> Self {
         if matches!(error.raw_os_error(), Some(libc::ENOSPC | libc::EDQUOT))
-            || error.kind() == std::io::ErrorKind::StorageFull
+            || matches!(
+                error.kind(),
+                std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded
+            )
         {
             Self::InsufficientSpace {
                 required: 1,

@@ -60,6 +60,16 @@ pub enum MediaPageDecision {
         stamp: Option<u64>,
     },
 }
+/// Actual retained effects, including file moves before a later page failure.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MediaPageEffects {
+    pub downloaded_deletions: u64,
+}
+#[derive(Clone, Debug)]
+pub struct MediaPageFailure {
+    pub error: MediaError,
+    pub effects: MediaPageEffects,
+}
 #[derive(Clone, Debug)]
 pub struct MediaDownloadRecord {
     pub intent: MediaDownloadIntent,
@@ -186,12 +196,12 @@ fn require_download(db: &Connection, expected: &MediaSyncBaseline, download: &Me
 fn require_publication(db: &Connection, record: &MediaDownloadRecord) -> Result<()> {
     if let Some(saved) = &record.publication {
         if journal_db::entry(db, &record.intent.name)? != saved.original_entry {
-            return Err(invalid("download original changed after save"));
+            return Err(MediaError::StaleDownload);
         }
         if let Some(name) = &record.stored_name
             && journal_db::entry(db, name)? != saved.stored_entry
         {
-            return Err(invalid("download destination changed after save"));
+            return Err(MediaError::StaleDownload);
         }
     }
     Ok(())
@@ -245,6 +255,78 @@ fn reset(db: &mut Connection, owner: Option<&MediaBaselineOwner>) -> Result<()> 
     Ok(())
 }
 impl MediaStore {
+    /// Y10.3 registration of one captured pending name, including same-stat
+    /// edits. A newer stamp or reset wins. Hashing/cancellation hold no journal
+    /// guard; no other pending deletion is reset or removed.
+    pub fn register_sync_file(
+        &self,
+        expected: &MediaSyncBaseline,
+        captured: &PendingChange,
+        mut keep_going: impl FnMut() -> bool,
+    ) -> Result<bool> {
+        use sha1::{Digest, Sha1};
+        use std::io::Read;
+        let old = {
+            let db = self.db()?;
+            require_baseline(&db, expected)?;
+            let entry = journal_db::entry(&db, &captured.name)?;
+            if entry.as_ref().map(|e| e.change_counter) != Some(captured.change_counter) {
+                return Ok(false);
+            }
+            entry
+        };
+        let directory = std::fs::metadata(self.media_dir())?;
+        let exact = std::fs::read_dir(self.media_dir())?
+            .collect::<std::io::Result<Vec<_>>>()?
+            .iter()
+            .any(|e| e.file_name() == std::ffi::OsStr::new(&captured.name));
+        let path = self.media_dir().join(&captured.name);
+        let observed = if exact { folder::regular(&path)? } else { None };
+        let facts = if let Some(before) = observed.as_ref() {
+            let Some(mut file) = self.open_file(&captured.name)? else {
+                return Ok(false);
+            };
+            if !folder::unchanged_file(before, &file.metadata()?) {
+                return Ok(false);
+            }
+            let mut hash = Sha1::new();
+            let mut bytes = [0u8; 65_536];
+            loop {
+                if !keep_going() {
+                    return Err(MediaError::Cancelled);
+                }
+                let n = file.read(&mut bytes)?;
+                if n == 0 {
+                    break;
+                }
+                hash.update(&bytes[..n]);
+            }
+            if !folder::unchanged_file(before, &file.metadata()?) {
+                return Ok(false);
+            }
+            Some(format!("{:x}", hash.finalize()))
+        } else {
+            None
+        };
+        if !keep_going() {
+            return Err(MediaError::Cancelled);
+        }
+        let db = self.db()?;
+        require_baseline(&db, expected)?;
+        if journal_db::entry(&db, &captured.name)? != old
+            || !folder::unchanged_file(&directory, &std::fs::metadata(self.media_dir())?)
+        {
+            return Ok(false);
+        }
+        match (observed, facts, folder::regular(&path)?) {
+            (Some(before), Some(hash), Some(after)) if folder::unchanged_file(&before, &after) => {
+                folder::live(&db, &captured.name, hash, &after, true)?;
+            }
+            (None, None, after) if !exact || after.is_none() => folder::deleted(&db, &captured.name)?,
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
     fn saved_download_locked(
         &self,
         db: &Connection,
@@ -254,10 +336,13 @@ impl MediaStore {
         changed: bool,
     ) -> Result<SavedMediaDownload> {
         let (stored_entry, metadata) = match &stored_name {
-            Some(name) => (
-                journal_db::entry(db, name)?,
-                Some(folder::regular(&self.media_dir().join(name))?.ok_or_else(|| invalid("download disappeared"))?),
-            ),
+            Some(name) => {
+                meguri_model::faultpoint!("media.download.before_receipt")?;
+                (
+                    journal_db::entry(db, name)?,
+                    Some(folder::regular(&self.media_dir().join(name))?.ok_or(MediaError::StaleDownload)?),
+                )
+            }
             None => (None, None),
         };
         Ok(SavedMediaDownload {
@@ -428,6 +513,31 @@ impl MediaStore {
         highest_usn: u64,
         decisions: &[MediaPageDecision],
     ) -> Result<u64> {
+        self.apply_media_page(expected, highest_usn, decisions)
+            .map(|(usn, _)| usn)
+            .map_err(|f| f.error)
+    }
+    /// Unlike the legacy cursor-only boundary, returns actual deletion effects
+    /// on both success and failure. No callbacks run under the journal guard.
+    pub fn apply_media_page(
+        &self,
+        expected: &MediaSyncBaseline,
+        highest_usn: u64,
+        decisions: &[MediaPageDecision],
+    ) -> std::result::Result<(u64, MediaPageEffects), MediaPageFailure> {
+        let mut effects = MediaPageEffects::default();
+        match self.apply_media_page_inner(expected, highest_usn, decisions, &mut effects) {
+            Ok(usn) => Ok((usn, effects)),
+            Err(error) => Err(MediaPageFailure { error, effects }),
+        }
+    }
+    fn apply_media_page_inner(
+        &self,
+        expected: &MediaSyncBaseline,
+        highest_usn: u64,
+        decisions: &[MediaPageDecision],
+        effects: &mut MediaPageEffects,
+    ) -> Result<u64> {
         let mut db = self.db()?;
         require_baseline(&db, expected)?;
         if highest_usn < expected.usn {
@@ -459,6 +569,7 @@ impl MediaStore {
         }
         // Files are independently recoverable in the existing self-describing
         // trash if a later journal transaction fails or the process stops.
+        let mut moved_names = BTreeSet::new();
         for decision in decisions {
             if let MediaPageDecision::Remove { name, .. } = decision
                 && let Some(entry) = journal_db::entry(&db, name)?.filter(|e| e.live)
@@ -467,18 +578,27 @@ impl MediaStore {
                     return Err(MediaError::InvalidName);
                 }
                 if let Some(m) = folder::regular(&self.media_dir().join(name))? {
-                    self.move_to_trash_locked(
+                    let mut moved = false;
+                    let outcome = self.move_to_trash_observed_locked(
                         &mut db,
                         name,
                         entry.sha1.as_deref().ok_or_else(|| invalid("missing media hash"))?,
                         m.len(),
                         &self.media_dir().join(name),
                         false,
-                    )?;
+                        &mut moved,
+                    );
+                    if moved {
+                        moved_names.insert(name.clone());
+                        effects.downloaded_deletions += 1;
+                    }
+                    outcome?;
+                    meguri_model::faultpoint!("media.sync.page.after_trash")?;
                 }
             }
         }
         let tx = db.savepoint()?;
+        let mut removed_records = 0;
         for decision in decisions {
             match decision {
                 MediaPageDecision::Clean { name, stamp } => {
@@ -490,6 +610,11 @@ impl MediaStore {
                     forget_download(&tx, name)?;
                 }
                 MediaPageDecision::Remove { name, .. } => {
+                    if !moved_names.contains(name)
+                        && journal_db::entry(&tx, name)?.is_some_and(|e| e.sync_state == MediaSyncState::Deleted)
+                    {
+                        removed_records += 1;
+                    }
                     journal_db::remove(&tx, name)?;
                     tx.execute("DELETE FROM media_downloads WHERE name=?1", [name])?;
                 }
@@ -522,6 +647,7 @@ impl MediaStore {
         let usn = advance_cursor(&tx, highest_usn)?;
         meguri_model::faultpoint!("media.sync.page.before_commit")?;
         tx.commit()?;
+        effects.downloaded_deletions += removed_records;
         Ok(usn)
     }
     /// Y5 empty-page cleanup. The caller supplies all names seen during this
@@ -620,9 +746,9 @@ impl MediaStore {
         let mut observations = Vec::new();
         for ((name, group), old) in groups.into_iter().zip(old_entries) {
             let path = self.media_dir().join(name);
-            let m = folder::regular(&path)?.ok_or_else(|| invalid("download file not saved"))?;
+            let m = folder::regular(&path)?.ok_or(MediaError::StaleDownload)?;
             if !(1..=104_857_600).contains(&m.len()) {
-                return Err(invalid("download file is not syncable"));
+                return Err(MediaError::StaleDownload);
             }
             let hash = folder::hash_file(&path)?;
             if group.iter().any(|record| {
@@ -639,7 +765,7 @@ impl MediaStore {
                             .is_none_or(|saved| !folder::unchanged_file(saved, &m))
                     })
             }) {
-                return Err(invalid("download file hash differs"));
+                return Err(MediaError::StaleDownload);
             }
             let has_exact = group.iter().any(|record| record.intent.name == name);
             observations.push((name, old, m, hash, has_exact));
@@ -656,12 +782,11 @@ impl MediaStore {
         // Revalidate each shared row and file before any journal mutation.
         for (name, old, m, _, _) in &observations {
             if journal_db::entry(&tx, name)? != *old {
-                return Err(invalid("download entry changed"));
+                return Err(MediaError::StaleDownload);
             }
-            let after =
-                folder::regular(&self.media_dir().join(name))?.ok_or_else(|| invalid("download disappeared"))?;
+            let after = folder::regular(&self.media_dir().join(name))?.ok_or(MediaError::StaleDownload)?;
             if !folder::unchanged_file(m, &after) {
-                return Err(invalid("download file changed"));
+                return Err(MediaError::StaleDownload);
             }
         }
         for (name, old, m, hash, has_exact) in observations {

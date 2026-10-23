@@ -126,3 +126,21 @@ pub fn open(path: &Path) -> Result<OpenedCollection, OpenError> {
     let random = SeededRandom::new(SEED);
     open_collection(path, &OpenOptions::new(&clock, &random))
 }
+
+/// Open an isolated generated engine collection through the production host.
+/// Sync tests use this instead of naming the engine's raw open entry point.
+pub fn open_engine_collection(
+    path: &Path,
+    clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+) -> Result<meguri_host::CoreHost, meguri_engine::EngineError> {
+    let directory = path.parent().expect("generated collection directory");
+    let root = directory.parent().expect("isolated test root");
+    meguri_host::CoreHost::open(meguri_host::HostConfig::new(
+        directory.into(),
+        root.join("backups"),
+        root.join("snapshot"),
+        clock,
+        std::sync::Arc::new(SeededRandom::new(SEED)),
+        std::sync::Arc::new(meguri_storage::space::StatvfsSpace),
+    ))
+}

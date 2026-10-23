@@ -527,7 +527,7 @@ impl Engine {
         }
         self.jobs().pause(true);
         for job in self.jobs().running() {
-            job.cancel.cancel();
+            job.cancel.interrupt();
         }
         let deadline = crate::monotonic::now() + Duration::from_secs(5);
         if self.lock_state().current.is_some() {

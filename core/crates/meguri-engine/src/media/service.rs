@@ -61,6 +61,18 @@ impl MediaService {
     pub fn store(&self) -> &MediaStore {
         &self.state.store
     }
+    /// Recheck an admitted media operation's generation and lifecycle without
+    /// reading the collection or retaining a reader across network/callbacks.
+    pub fn check_generation(&self, expected: u64) -> Result<(), EngineError> {
+        let _reader = self.collection.operation_reader(ReaderRole::Query)?;
+        if self.collection.generation().0 != expected {
+            return Err(EngineError::StaleGeneration {
+                planned: crate::Generation(expected),
+                current: self.collection.generation(),
+            });
+        }
+        Ok(())
+    }
     pub fn try_job(&self, kind: MediaJobKind) -> Result<MediaJobLease, EngineError> {
         let _reader = self.collection.operation_reader(ReaderRole::Query)?;
         self.state.jobs.try_acquire(kind)

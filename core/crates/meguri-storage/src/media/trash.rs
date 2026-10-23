@@ -78,7 +78,22 @@ impl MediaStore {
         source: &Path,
         record_deletion: bool,
     ) -> Result<TrashEntry> {
-        use std::os::unix::fs::OpenOptionsExt;
+        self.move_to_trash_observed_locked(db, name, hash, size, source, record_deletion, &mut false)
+    }
+    // Report a retained file move even if a subsequent directory sync fails.
+    // A vanished source alone is not evidence: match the held inode in trash.
+    #[allow(clippy::too_many_arguments)] // Extends the common move with its retained effect.
+    pub(super) fn move_to_trash_observed_locked(
+        &self,
+        db: &mut Connection,
+        name: &str,
+        hash: &str,
+        size: u64,
+        source: &Path,
+        record_deletion: bool,
+        moved: &mut bool,
+    ) -> Result<TrashEntry> {
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
         let file = fs::OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
@@ -113,7 +128,12 @@ impl MediaStore {
                 path,
             };
         };
-        if let Err(e) = move_new(source, &self.trash_dir().join(&entry.path)) {
+        let destination = self.trash_dir().join(&entry.path);
+        let identity = file.metadata()?;
+        let outcome = move_new(source, &destination);
+        *moved = outcome.is_ok()
+            || fs::symlink_metadata(&destination).is_ok_and(|m| m.dev() == identity.dev() && m.ino() == identity.ino());
+        if let Err(e) = outcome {
             if source.exists() {
                 db.execute("DELETE FROM trash_entries WHERE id=?1", [entry.id])?;
                 remove_empty_parent(self.trash_dir(), &entry.path)?;

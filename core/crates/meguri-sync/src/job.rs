@@ -219,6 +219,10 @@ impl Job {
         self.kind
     }
 
+    pub(crate) fn cancellation(&self) -> Arc<CancelToken> {
+        Arc::clone(&self.cancel)
+    }
+
     /// The host key the job sends as `k` (`None` for a login).
     pub(crate) fn host_key(&self) -> Option<&HostKey> {
         self.host_key.as_ref()

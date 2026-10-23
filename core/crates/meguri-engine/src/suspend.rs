@@ -105,7 +105,7 @@ impl Engine {
         let jobs = self.jobs().running();
         for job in &jobs {
             if !job.continued_processing {
-                job.cancel.cancel();
+                job.cancel.interrupt();
             }
         }
         if let Some(job) = jobs.iter().find(|j| j.continued_processing) {

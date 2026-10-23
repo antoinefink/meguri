@@ -50,7 +50,7 @@ pub mod tags;
 pub mod threads;
 pub mod undo;
 
-pub use cancel::CancelToken;
+pub use cancel::{CancelToken, StopCause};
 pub use changes::observers::{CardDelta, ConfigDelta, ObservedCommit};
 pub use changes::stream::{ChangeStream, Event, EventKind, ExtensionEvent, Reservation, Seq, Subscription};
 pub use collection::Collection;

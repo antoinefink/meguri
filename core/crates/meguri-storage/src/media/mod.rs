@@ -30,6 +30,9 @@ pub enum MediaError {
     IgnoredName,
     NameTaken,
     Cancelled,
+    DiskFull,
+    /// A published download receipt no longer describes the current row/file.
+    StaleDownload,
     Io(String),
     Database(String),
     InvalidManifest(String),
@@ -41,6 +44,8 @@ impl fmt::Display for MediaError {
             Self::IgnoredName => f.write_str("ignored media name"),
             Self::NameTaken => f.write_str("media name is occupied"),
             Self::Cancelled => f.write_str("media scan cancelled"),
+            Self::DiskFull => f.write_str("media storage is full"),
+            Self::StaleDownload => f.write_str("download publication changed"),
             Self::Io(s) | Self::Database(s) | Self::InvalidManifest(s) => f.write_str(s),
         }
     }
@@ -48,18 +53,24 @@ impl fmt::Display for MediaError {
 impl std::error::Error for MediaError {}
 impl From<std::io::Error> for MediaError {
     fn from(e: std::io::Error) -> Self {
-        Self::Io(e.to_string())
+        Self::from(crate::StorageError::from(e))
     }
 }
 impl From<rusqlite::Error> for MediaError {
     fn from(e: rusqlite::Error) -> Self {
-        Self::Database(e.to_string())
+        if e.sqlite_error_code() == Some(rusqlite::ErrorCode::DiskFull) {
+            Self::DiskFull
+        } else {
+            Self::Database(e.to_string())
+        }
     }
 }
 impl From<crate::StorageError> for MediaError {
     fn from(e: crate::StorageError) -> Self {
         match e {
             crate::StorageError::DestinationExists => Self::NameTaken,
+            crate::StorageError::InsufficientSpace { .. } => Self::DiskFull,
+            crate::StorageError::Sqlite { code, .. } if code == rusqlite::ffi::SQLITE_FULL => Self::DiskFull,
             other => Self::Io(other.to_string()),
         }
     }

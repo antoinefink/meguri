@@ -728,3 +728,42 @@ Reconciler correction `20261023T213704Z-83672`: pending.
 Native iPad check: pending. Native Mac check: pending. Final native review:
 pending. Selected-media integration started at `4d6a4c3f` in
 `20261023T213146Z-80044`; no completion claim.
+
+| Check | Receipt | Outcome |
+| --- | --- | --- |
+| Reconciler round 3 | `20261023T213704Z-83672` | No P0–P1; earlier P2 closed |
+| Scanner round 2 | `20261023T213730Z-84602` | No P0–P2; qualification fix checked |
+| Scanner focused tests | `20261023T214718Z-93536` | PASS |
+| Formatted media/privacy scan | `20261023T215933Z-3938` | PASS, 29 files |
+| Focused Rust checks | `20261023T215647Z-2105` | 273 passed; 707 excluded/ignored |
+| Explicit 19k case | `20261023T215834Z-3417` | One passed; 36 excluded |
+| Rust formatting | `20261023T215544Z-1346` | PASS |
+
+Prefix fixture `20261023T214945Z-95017` uses current change stamps and
+captured ZIP members. Independent verification found no weakened assertions.
+The production code is unchanged. The earlier failed receipts remain retained.
+
+Only three fixed Tokio paths landed in `c6514363`; the 42-path trial remains
+reverted. Review covered comment trivia, decoded data and staged contents.
+The scanner correction in `20261023T214426Z-91329` changes only a comment
+and test construction; its production Python AST matches the reviewed draft.
+Wire correction there changes only its test; production wire bytes match.
+Wire final round 6 has no P0–P1 findings. Lint, similarity, fuzz, host/native
+integration and the combined full gate remain pending. No Unit is accepted.
+
+| Native check | Receipt | Outcome |
+| --- | --- | --- |
+| iPad | `20261023T213755Z-85257` | FAIL; wrong column |
+| Mac | `20261023T215005Z-95784` | FAIL; scroll=nil |
+| Helper | `20261023T215516Z-817` | No P0–P1; runtime pending |
+| Final review | — | Pending (round 6) |
+| iPhone | `20261023T212333Z-70740` | PASS at recorded source |
+
+| Media attachment | Receipt | Outcome |
+| --- | --- | --- |
+| Initial draft | `20261023T213146Z-80044` | 15 files |
+| Round 1 | `20261023T213146Z-80044` | Three P2 findings |
+| Correction | `20261023T215356Z-99859` | Pending |
+
+Publication binding, unknown counts and exclusions need correction.
+RF4/U111 acceptance and the full gate remain pending.
