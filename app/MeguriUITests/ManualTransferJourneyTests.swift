@@ -196,11 +196,21 @@ import XCTest
         let scroll = containers.map { $0.containing(.any, identifier: targetIdentifier).firstMatch }
             .first(where: { !targetIdentifier.isEmpty && $0.exists })
             ?? containers.map { $0.firstMatch }.first(where: { $0.exists })
-        for _ in 0..<16 {
-            if target.exists && target.isHittable { break }
+        var upwardSearchesRemaining = 8
+        var searchesRemaining = 16
+        for _ in 0..<24 {
+            let targetExists = target.exists
+            if targetExists && target.isHittable { break }
             guard let scroll, scroll.exists else { break }
+            let searchUpward = !targetExists && upwardSearchesRemaining > 0
+            if searchUpward {
+                upwardSearchesRemaining -= 1
+            } else {
+                guard searchesRemaining > 0 else { break }
+                searchesRemaining -= 1
+            }
             #if os(macOS)
-            let towardsBottom = !target.exists || target.frame.maxY > scroll.frame.maxY
+            let towardsBottom = targetExists ? target.frame.maxY > scroll.frame.maxY : !searchUpward
             scroll.scroll(byDeltaX: 0, deltaY: (towardsBottom ? -1 : 1) * scroll.frame.height / 2)
             #else
             var viewport = scroll.frame.intersection(app.frame)
@@ -209,7 +219,7 @@ import XCTest
                 viewport.size.height = max(0, min(viewport.maxY, keyboard.frame.minY) - viewport.minY)
             }
             guard !viewport.isNull, viewport.width > 0, viewport.height > 0 else { break }
-            let towardsBottom = !target.exists || target.frame.maxY > viewport.maxY
+            let towardsBottom = targetExists ? target.frame.maxY > viewport.maxY : !searchUpward
             // Keep the gesture inside the visible Form, above the keyboard.
             let origin = scroll.coordinate(withNormalizedOffset: .zero)
             let upper = origin.withOffset(CGVector(dx: viewport.midX - scroll.frame.minX,
