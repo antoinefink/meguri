@@ -259,8 +259,59 @@ import UIKit
         try guardFixture(app)
         let window = app.windows.firstMatch
         guard surface.exists, window.exists else { throw AuditError(description: "Synthetic viewport unavailable") }
-        let clipped = surface.frame.intersection(window.frame).insetBy(dx: 4, dy: 8)
-        guard valid(clipped), clipped.width > 24, clipped.height > 48 else { throw AuditError(description: "Synthetic viewport is empty") }
+        let windowFrame = window.frame
+        let surfaceFrame = surface.frame
+        let intersection = surfaceFrame.intersection(windowFrame)
+        var content = intersection
+        func geometry(_ name: String, _ frame: CGRect) -> String {
+            let values = [frame.origin.x, frame.origin.y, frame.width, frame.height]
+            return "\(name).finite=\(values.allSatisfy(\.isFinite)) " +
+                "\(name).x=\(frame.origin.x.isFinite ? frame.origin.x : 0) " +
+                "\(name).y=\(frame.origin.y.isFinite ? frame.origin.y : 0) " +
+                "\(name).width=\(frame.width.isFinite ? frame.width : 0) " +
+                "\(name).height=\(frame.height.isFinite ? frame.height : 0)"
+        }
+        var barGeometry = ""
+        #if !os(macOS)
+        var barCount = 0, ignoredCarrierCount = 0
+        var bars: [String] = []
+        var top = content.minY, bottom = content.maxY
+        let types: [XCUIElement.ElementType] = [.navigationBar, .toolbar, .tabBar, .statusBar, .keyboard]
+        for type in types {
+            for element in app.descendants(matching: type).allElementsBoundByIndex {
+                guard element.exists else { continue }
+                let frame = element.frame
+                let frameValid = valid(frame) && [frame.minX, frame.minY, frame.maxX, frame.maxY].allSatisfy(\.isFinite)
+                let ignoredCarrier = type == .toolbar && frameValid && valid(windowFrame) &&
+                    [windowFrame.minX, windowFrame.minY, windowFrame.maxX, windowFrame.maxY].allSatisfy(\.isFinite) &&
+                    frame.contains(windowFrame)
+                barCount += 1
+                if ignoredCarrier { ignoredCarrierCount += 1 }
+                if bars.count < 20 {
+                    bars.append("bar.type=\(type.rawValue) bar.valid=\(frameValid) bar.ignoredCarrier=\(ignoredCarrier) " +
+                        geometry("bar.frame", frame))
+                }
+                guard frameValid, !ignoredCarrier else { continue }
+                let occlusion = frame.intersection(windowFrame).intersection(content)
+                guard valid(occlusion) else { continue }
+                if type != .keyboard && occlusion.midY < windowFrame.midY {
+                    top = max(top, occlusion.maxY)
+                } else {
+                    bottom = min(bottom, occlusion.minY)
+                }
+            }
+        }
+        content = CGRect(x: content.minX, y: top, width: content.width, height: max(0, bottom - top))
+        barGeometry = " barCount=\(barCount) ignoredCarrierCount=\(ignoredCarrierCount) recordedBarCount=\(bars.count) " +
+            bars.joined(separator: " ")
+        #endif
+        let clipped = content.insetBy(dx: 4, dy: 8)
+        guard valid(clipped), clipped.width > 24, clipped.height > 48 else {
+            throw AuditError(description: "Synthetic viewport is empty " +
+                geometry("window", windowFrame) + " " + geometry("surface", surfaceFrame) + " " +
+                geometry("intersection", intersection) + " " + geometry("content", content) + " " +
+                geometry("clipped", clipped) + barGeometry)
+        }
         return clipped
     }
     static func scroll(_ surface: XCUIElement, down: Bool, app: XCUIApplication, bundle: String, step: CGFloat = 0.5) throws {
