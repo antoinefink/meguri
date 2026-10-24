@@ -978,3 +978,82 @@ observer and deterministic namespace changes during resolution and reads.
 `private/20261024T022232Z-46896` passed all five files. Commit: `72eac584`.
 The actual mobile run is still required; the historical unavailable error is not
 claimed resolved. The native M8 assertions remain enabled and unchanged.
+
+Mobile runtime corrections; start `1700ed8a`.
+
+The next iPhone run, `manual-transfer-check/20261024T022658Z-49372`,
+failed before media consent. Its bounded diagnostic identified the marker
+reader stage (503, child exit 1, script line 525). It did not identify an
+underlying errno. The initial collection import had completed. This failed
+receipt remains retained.
+
+Commit `c1fc0a29` moves the mobile fixture bootstrap to the first app launch,
+before login or import. The fixed leased simulator and exact app bundle are
+resolved once, their namespace is checked before and after setup, and that
+context is frozen for subsequent reads. The reader cannot restage or rebind.
+Replay, concurrent setup and protocol traffic during setup fail closed.
+Only reserved synthetic media and its ownership marker are staged; collection,
+policy, clock and cooldown data are unchanged. Mac staging guards remain.
+
+Filtered exports: `024216Z-56968`, final `025513Z-62899`. The latter deletes
+two comments only; AST and executable tokens match and the other six files
+are unchanged. The two preceding no-op handoffs, `025206Z-61232` and
+`025318Z-62034`, remain retained. Focused checks:
+`selftest/20261024T025031Z-60441`, 34 passed. Privacy:
+`private/20261024T025634Z-63654`, seven files passed. Independent component
+review round 3 found no P0–P1.
+
+The resulting iPhone run `manual-transfer-check/20261024T025707Z-64165`
+passed bootstrap, collection import and the initial native-state read,
+then started media and activated Cancel. The partial result appeared and
+progress disappeared. The subsequent readiness check failed because history
+was absent from the virtualized Form. This is not proof of a transfer defect.
+
+Commit `8127b428` adds the existing bounded reveal call before the two
+post-Cancel and completion history readiness checks. All persistence, drain,
+hash, counter, receipt and cooldown assertions remain enabled. Independent
+review found no P0–P1; privacy `private/20261024T031042Z-80985` passed.
+
+Parent integrated native review round 6 is clear of P0–P1 source findings at
+`8127b428`, against `81c207573c20c337c8834e4ae8b4ee8f29603dbf`. It covers
+plan conformance, correctness and clean-room boundaries, using the previously
+independent 34 Mac and six iPhone largest-text visual assessments. Native
+mobile proof, explicit audits, critic and the combined full gate remain
+verification requirements. No Unit is accepted by this review.
+
+Run `manual-transfer-check/20261024T031104Z-81436` reached Cancel, the
+partial result, history and durable-state checks. It failed the observer's
+zero-error assertion at the subsequent abort control. Cleanup passed.
+History traversal had delayed that control until test time 442 seconds;
+the observer permits a held request for 90 seconds. The failed result is
+retained and is not counted as native acceptance.
+
+Correction starts at `8127b428`, filtered export `032030Z-87710`, commit
+`09b0bfe9`. The two post-Cancel history calls now follow abort, drain and
+the cancelled checkpoint. Before abort, the test still requires the partial
+result, no progress or cooldown, durable Cancelled state, matching operation
+identity, no receipt, retained unknown effects, zero file counters, absent
+server file and unchanged device bytes. The observer, its error assertion
+and every timeout are unchanged. Targeted independent review found no
+P0–P1. Privacy `private/20261024T032140Z-88499` passed. Actual runtime proof
+is required before treating this correction as verified.
+
+iPhone native M8; source `09b0bfe9`.
+
+`manual-transfer-check/20261024T032159Z-88906`: PASS.
+
+| Evidence | Result |
+| --- | --- |
+| Native completion and cleanup | true; one UI pass, zero skips; 1,132 seconds |
+| Peer collection comparison | all logical cells, identity, saved Easy review and scheduling match |
+| Media in each direction | exact device and server bytes; typed counters; empty file excluded |
+| Stored cooldowns | real hour, Import and Export |
+| Unknown prior effects | retained by resumed Import; absent for fresh Export |
+| Recovery | real Cancel, durable partial, passive restart, renewed consent and Resume |
+
+Bootstrap similarity `20261024T030037Z-67794` and combined static checks
+`20261024T030038Z-67991` passed. The tiny later history changes remain
+covered by their independent reviews and privacy checks; the combined full
+gate is still required against base
+`81c207573c20c337c8834e4ae8b4ee8f29603dbf`. iPad M8, supplemental mobile
+rendering, explicit audits and critic remain open. No Unit is accepted.
