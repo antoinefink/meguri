@@ -10,7 +10,7 @@ use crate::{
 use meguri_host::{HostConfig, ManualTransferTask};
 use meguri_model::rng::SeededRandom;
 use meguri_sync::{
-    Endpoint, HostKey, JobOptions, ServerKind,
+    Endpoint, HostKey, JobOptions, Method, ServerKind,
     oneway::{Confirmation, MediaConfirmation, MediaPreview, Preview, TransferAccess, TransferError},
     policy::{self, Operation},
 };
@@ -296,6 +296,8 @@ pub struct TransferFailure {
     pub next_eligible_ms: Option<i64>,
     /// Safe stable category only; never raw server bodies/details.
     pub server_kind: Option<String>,
+    /// Static qualified method name only; never error prose.
+    pub request_method: Option<String>,
     pub redirect: Option<TransferRedirectDiagnostic>,
 }
 impl From<TransferError> for TransferFailure {
@@ -307,6 +309,7 @@ impl From<TransferError> for TransferFailure {
             candidate_active: false,
             next_eligible_ms: None,
             server_kind: None,
+            request_method: None,
             redirect: None,
         };
         f.issue = match e {
@@ -331,6 +334,7 @@ impl From<TransferError> for TransferFailure {
             TransferError::InvalidDownload(_) => TransferIssue::InvalidDownload,
             TransferError::Server(e) => {
                 f.server_kind = Some(e.kind.id().into());
+                f.request_method = e.method.map(Method::qualified_name).map(str::to_owned);
                 if matches!(e.kind, meguri_sync::ErrorKind::RedirectRefused { .. }) {
                     f.redirect = e.redirect.map(|redirect| TransferRedirectDiagnostic {
                         destination: redirect.destination,
@@ -1224,6 +1228,24 @@ mod tests {
         assert_eq!(failure.issue, TransferIssue::Storage);
         assert_eq!(failure.next_eligible_ms, None);
         assert!(!failure.candidate_active);
+    }
+    #[test]
+    fn manual_failure_preserves_only_the_structured_request_method() {
+        for (method, expected) in [
+            (Some(Method::Meta), Some("meta")),
+            (Some(Method::Download), Some("download")),
+            (None, None),
+        ] {
+            let failure: TransferFailure = TransferError::Server(meguri_sync::JobError::new(
+                meguri_sync::ErrorKind::BadResponse,
+                method,
+                "SECRET detail mentions upload",
+            ))
+            .into();
+            assert_eq!(failure.request_method.as_deref(), expected);
+        }
+        let failure: TransferFailure = TransferError::Unavailable.into();
+        assert_eq!(failure.request_method, None);
     }
     #[test]
     fn manual_failure_exports_only_structured_redirect_facts() {

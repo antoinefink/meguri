@@ -96,6 +96,7 @@ public final class ManualTransferCoordinator {
     public private(set) var result: ManualTransferRecord?
     public private(set) var redirectDiagnostic: ManualTransferRedirectDiagnostic?
     public private(set) var failureCategory: FailureCategory?
+    public private(set) var failureRequestMethod: ManualTransferRequestMethod?
     public private(set) var message: String? {
         didSet { if let message, message != oldValue { recordConnectionEvent(message) } }
     }
@@ -536,11 +537,13 @@ public final class ManualTransferCoordinator {
     private func clearFailureDiagnostics() {
         redirectDiagnostic = nil
         failureCategory = nil
+        failureRequestMethod = nil
     }
     private func report(_ error: any Error, operation: ManualTransferOperation?) async {
         clearFailureDiagnostics()
         if let failure = error as? ManualTransferFailure {
             failureCategory = failure.serverKind.flatMap(FailureCategory.init(rawValue:))
+            failureRequestMethod = failure.requestMethod
             nextEligibleMilliseconds = failure.nextEligibleMilliseconds
             if failure.serverKind == "auth_failed" {
                 credentials = nil; authenticated = false; password = ""

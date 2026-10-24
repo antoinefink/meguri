@@ -162,6 +162,9 @@ public struct MacSettingsView: View {
                 if let category = collection.manualTransfers.failureCategory {
                     ManualTransferFailureCategoryDetails(category: category)
                 }
+                if let method = collection.manualTransfers.failureRequestMethod {
+                    ManualTransferFailureRequestDetails(method: method)
+                }
                 if let diagnostic = collection.manualTransfers.redirectDiagnostic {
                     ManualTransferRedirectDetails(diagnostic: diagnostic)
                 }
@@ -272,6 +275,9 @@ private struct ConnectionMetadata: View {
         }
         if let category = model.failureCategory {
             ManualTransferFailureCategoryDetails(category: category)
+        }
+        if let method = model.failureRequestMethod {
+            ManualTransferFailureRequestDetails(method: method)
         }
         if let diagnostic = model.redirectDiagnostic {
             ManualTransferRedirectDetails(diagnostic: diagnostic)

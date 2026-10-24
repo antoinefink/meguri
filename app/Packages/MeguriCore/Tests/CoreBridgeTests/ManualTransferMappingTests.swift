@@ -4,6 +4,35 @@ import Testing
 @testable import CoreBridge
 
 @Suite struct ManualTransferMappingTests {
+    @Test func requestMethodsAreExactlyAllowlisted() {
+        let methods: [(String, ManualTransferRequestMethod)] = [
+            ("hostKey", .hostKey), ("meta", .meta), ("start", .start), ("applyGraves", .applyGraves),
+            ("applyChanges", .applyChanges), ("chunk", .chunk), ("applyChunk", .applyChunk),
+            ("sanityCheck2", .sanityCheck2), ("finish", .finish), ("abort", .abort),
+            ("upload", .upload), ("download", .download), ("msync/begin", .mediaBegin),
+            ("msync/mediaChanges", .mediaChanges), ("msync/uploadChanges", .uploadChanges),
+            ("msync/downloadFiles", .downloadFiles), ("msync/mediaSanity", .mediaSanity)
+        ]
+        for (raw, expected) in methods {
+            let failure = CoreBridge.ManualTransferFailure(MeguriCoreBindings.TransferFailure(issue: .server,
+                boundary: nil, generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "bad_response",
+                requestMethod: raw, redirect: nil))
+            #expect(failure.requestMethod == expected)
+        }
+        for raw in [nil, "", "Meta", " meta", "meta\n", "download\r\nSECRET", "sync/meta", "begin",
+                    "mediaChanges", "msync/DownloadFiles", "msync/downloadFiles/", "meta?SECRET", "unknown_SECRET",
+                    "https://example.test/meta", "meta: SECRET response"] as [String?] {
+            let failure = CoreBridge.ManualTransferFailure(MeguriCoreBindings.TransferFailure(issue: .server,
+                boundary: nil, generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "bad_response",
+                requestMethod: raw, redirect: nil))
+            #expect(failure.requestMethod == nil)
+        }
+        let unrelated = CoreBridge.ManualTransferFailure(MeguriCoreBindings.TransferFailure(issue: .unavailable,
+            boundary: nil, generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: nil,
+            requestMethod: "meta", redirect: nil))
+        #expect(unrelated.requestMethod == nil)
+    }
+
     @Test func redirectReasonsAreAllowlistedAndDestinationsAreSafe() {
         let reasons: [(String, ManualTransferRedirectReason)] = [
             ("not_meta", .notMeta), ("not_308", .notPermanent), ("missing_location", .missingLocation),
@@ -13,27 +42,27 @@ import Testing
         ]
         for (id, reason) in reasons {
             let failure = CoreBridge.ManualTransferFailure(MeguriCoreBindings.TransferFailure(issue: .server,
-                boundary: nil, generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "redirect_refused",
+                boundary: nil, generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "redirect_refused", requestMethod: nil,
                 redirect: .init(destination: "https://USER:SECRET@example.test/prefix/?token=SECRET#SECRET", reason: id)))
             #expect(failure.redirect?.reason == reason)
             #expect(failure.redirect?.destination == "https://example.test/prefix/")
         }
         for target in [nil, "broken SECRET", "/relative?SECRET", "//example.test/SECRET", "ftp://example.test/SECRET", "file:///SECRET", "https://"] as [String?] {
             let failure = CoreBridge.ManualTransferFailure(MeguriCoreBindings.TransferFailure(issue: .server,
-                boundary: nil, generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "redirect_refused",
+                boundary: nil, generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "redirect_refused", requestMethod: nil,
                 redirect: .init(destination: target, reason: "host")))
             #expect(failure.redirect?.reason == .host)
             #expect(failure.redirect?.destination == nil)
         }
         for reason in ["HOST", " host", "host\n", "unknown_SECRET", "server_message: SECRET"] {
             let failure = CoreBridge.ManualTransferFailure(MeguriCoreBindings.TransferFailure(issue: .server,
-                boundary: nil, generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "redirect_refused",
+                boundary: nil, generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "redirect_refused", requestMethod: nil,
                 redirect: .init(destination: "https://example.test/", reason: reason)))
             #expect(failure.redirect == nil)
         }
         for kind in [nil, "server_message", "unknown_SECRET", "redirect_refused: SECRET"] as [String?] {
             let failure = CoreBridge.ManualTransferFailure(MeguriCoreBindings.TransferFailure(issue: .server,
-                boundary: nil, generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: kind,
+                boundary: nil, generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: kind, requestMethod: nil,
                 redirect: .init(destination: "https://example.test/", reason: "host")))
             #expect(failure.redirect == nil)
         }
@@ -41,14 +70,14 @@ import Testing
 
     @Test func activatedPartialAndUnknownRemainDistinct() {
         let partial = CoreBridge.ManualTransferFailure(MeguriCoreBindings.TransferFailure(issue: .mediaIncomplete,
-            boundary: .mediaProviderUnavailable, generation: 42, candidateActive: true, nextEligibleMs: nil, serverKind: nil, redirect: nil))
+            boundary: .mediaProviderUnavailable, generation: 42, candidateActive: true, nextEligibleMs: nil, serverKind: nil, requestMethod: nil, redirect: nil))
         #expect(partial.candidateActive && partial.generation == 42 && partial.issue == .mediaIncomplete)
         let unknown = CoreBridge.ManualTransferFailure(MeguriCoreBindings.TransferFailure(issue: .needsDecision,
-            boundary: .remoteCompletionUnknown, generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: nil, redirect: nil))
+            boundary: .remoteCompletionUnknown, generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: nil, requestMethod: nil, redirect: nil))
         #expect(unknown.issue == .needsDecision && unknown.boundary == .remoteCompletionUnknown)
         #expect(unknown.generation == nil && unknown.nextEligibleMilliseconds == nil)
         let cooldown = CoreBridge.ManualTransferFailure(MeguriCoreBindings.TransferFailure(issue: .cooldown,
-            boundary: nil, generation: nil, candidateActive: false, nextEligibleMs: 12345, serverKind: nil, redirect: nil))
+            boundary: nil, generation: nil, candidateActive: false, nextEligibleMs: 12345, serverKind: nil, requestMethod: nil, redirect: nil))
         #expect(cooldown.nextEligibleMilliseconds == 12345 && cooldown.issue == .cooldown)
     }
     @Test func terminalBeforeRegistrationAndUnrelatedJobCannotReplaceMatchedOutcome() async {

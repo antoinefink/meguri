@@ -19,6 +19,20 @@ struct ManualTransferFailureCategoryDetails: View {
     }
 }
 
+struct ManualTransferFailureRequestDetails: View {
+    let method: ManualTransferRequestMethod
+    var body: some View {
+        LabeledContent {
+            Text(verbatim: method.rawValue)
+        } label: {
+            Text("Failed request", bundle: .module)
+        }
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier("settings.anki.failureRequestMethod")
+    }
+}
+
 /// Informational text only; the destination never becomes a navigation action.
 struct ManualTransferRedirectDetails: View {
     let diagnostic: ManualTransferRedirectDiagnostic
@@ -210,6 +224,9 @@ public struct ManualTransferSections: View {
                         Text(message).accessibilityIdentifier("settings.anki.result")
                         if let category = model.failureCategory {
                             ManualTransferFailureCategoryDetails(category: category)
+                        }
+                        if let method = model.failureRequestMethod {
+                            ManualTransferFailureRequestDetails(method: method)
                         }
                         if let diagnostic = model.redirectDiagnostic {
                             ManualTransferRedirectDetails(diagnostic: diagnostic)

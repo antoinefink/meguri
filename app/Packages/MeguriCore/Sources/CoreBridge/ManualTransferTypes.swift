@@ -170,6 +170,13 @@ public struct ManualTransferRedirectDiagnostic: Sendable, Equatable {
         } else { destination = nil }
     }
 }
+public enum ManualTransferRequestMethod: String, Sendable, Equatable {
+    case hostKey, meta, start, applyGraves, applyChanges, chunk, applyChunk, sanityCheck2
+    case finish, abort, upload, download
+    case mediaBegin = "msync/begin", mediaChanges = "msync/mediaChanges"
+    case uploadChanges = "msync/uploadChanges", downloadFiles = "msync/downloadFiles"
+    case mediaSanity = "msync/mediaSanity"
+}
 public struct ManualTransferFailure: Error, Sendable {
     public let issue: ManualTransferIssue
     public let boundary: ManualTransferBoundary?
@@ -177,11 +184,13 @@ public struct ManualTransferFailure: Error, Sendable {
     public let candidateActive: Bool
     public let nextEligibleMilliseconds: Int64?
     public let serverKind: String?
+    public let requestMethod: ManualTransferRequestMethod?
     public let redirect: ManualTransferRedirectDiagnostic?
     init(_ raw: MeguriCoreBindings.TransferFailure) {
         issue = .init(raw.issue); boundary = raw.boundary.map(ManualTransferBoundary.init)
         generation = raw.generation; candidateActive = raw.candidateActive
         nextEligibleMilliseconds = raw.nextEligibleMs; serverKind = raw.serverKind
+        requestMethod = raw.issue == .server ? raw.requestMethod.flatMap(ManualTransferRequestMethod.init(rawValue:)) : nil
         redirect = raw.issue == .server && raw.serverKind == "redirect_refused"
             ? raw.redirect.flatMap(ManualTransferRedirectDiagnostic.init) : nil
     }

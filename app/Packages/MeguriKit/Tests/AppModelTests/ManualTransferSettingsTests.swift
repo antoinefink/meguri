@@ -93,7 +93,7 @@ extension ManualTransferSettingsTests {
             + unknownKinds.map { ($0, fallback, nil) }
         for (serverKind, expected, category) in cases {
             let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
-                generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: serverKind, redirect: nil))
+                generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: serverKind, requestMethod: "hostKey", redirect: nil))
             let service = SettingsTransferService(loginFailure: failure)
             let keys = SettingsTransferKeys()
             let model = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: nil)
@@ -102,6 +102,7 @@ extension ManualTransferSettingsTests {
             await model.login()
             #expect(model.message == expected)
             #expect(model.failureCategory?.rawValue == category)
+            #expect(model.failureRequestMethod == .hostKey)
             #expect(model.connectionEvents.filter { $0.detail == expected }.count == 1)
             let diagnostics = ([model.message ?? "", model.failureCategory?.rawValue ?? ""] + model.connectionEvents.map(\.detail)).joined(separator: "\n")
             #expect(!diagnostics.contains("example.test"))
@@ -124,7 +125,7 @@ extension ManualTransferSettingsTests {
         await owner.start()
         try #require(owner.state == .noFile)
         let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
-            generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: kind, redirect: nil))
+            generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: kind, requestMethod: "download", redirect: nil))
         let service = SettingsTransferService(suspendPreparation: true, preparationFailure: failure)
         let keys = SettingsTransferKeys()
         let model = ManualTransferCoordinator(owner: owner, service: service, keychain: keys, defaults: nil)
@@ -135,6 +136,7 @@ extension ManualTransferSettingsTests {
         await model.prepare()
         let known = ["db_check_required", "download_invalid", "local_storage", "internal", "offline"].contains(kind ?? "")
         #expect(model.failureCategory?.rawValue == (known ? kind : nil))
+        #expect(model.failureRequestMethod == .download)
         #expect(model.message == (kind == "offline"
             ? "The server could not be reached. Check your network connection and server address."
             : "The server request failed. Check the endpoint and login, then inspect the recorded stages."))
@@ -151,9 +153,11 @@ extension ManualTransferSettingsTests {
         let nextAttempt = Task { await model.prepare() }
         await service.waitUntilPreparing()
         #expect(model.busy && model.message == nil && model.failureCategory == nil && model.redirectDiagnostic == nil)
+        #expect(model.failureRequestMethod == nil)
         await model.cancel()
         await nextAttempt.value
         #expect(model.failureCategory == nil && model.authenticated && !model.busy)
+        #expect(model.failureRequestMethod == nil)
         #expect(await service.calls == ["normalize", "login", "prepare", "history", "prepare", "history"])
         #expect(await owner.close())
     }
@@ -174,7 +178,7 @@ extension ManualTransferSettingsTests {
     @Test func refusedRedirectIsInformationalAndClearsWithIdentityOrNewAttempts() async {
         for action in ["endpoint", "username", "applyEndpoint", "logout", "retry", "testConnection", "refreshHistory"] {
             let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
-                generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "redirect_refused",
+                generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "redirect_refused", requestMethod: "meta",
                 redirect: .init(destination: "https://USER:SECRET@destination.test/prefix/?token=SECRET#SECRET", reason: "host")))
             let service = SettingsTransferService(loginFailure: failure)
             let model = ManualTransferCoordinator(owner: nil, service: service, keychain: SettingsTransferKeys(),
@@ -185,6 +189,7 @@ extension ManualTransferSettingsTests {
             #expect(model.redirectDiagnostic?.destination == "https://destination.test/prefix/")
             #expect(model.redirectDiagnostic?.reason == .host)
             #expect(model.failureCategory == .redirectRefused)
+            #expect(model.failureRequestMethod == .meta)
             #expect(model.message == "The server redirected the request in an unsupported way. Check the server address.")
             #expect(model.endpoint == "https://configured.test/" && model.endpointDraft == model.endpoint)
             #expect(model.preview == nil && !model.authenticated)
@@ -205,6 +210,7 @@ extension ManualTransferSettingsTests {
             default: await model.testConnection()
             }
             #expect(model.redirectDiagnostic == nil && model.failureCategory == nil)
+            #expect(model.failureRequestMethod == nil)
             let expectedCalls = ["normalize", "login"] + (action == "retry" ? ["normalize", "login"]
                 : (action == "refreshHistory" ? ["history"]
                    : (action == "applyEndpoint" || action == "testConnection" ? ["normalize"] : [])))
@@ -216,7 +222,7 @@ extension ManualTransferSettingsTests {
     @Test func unknownRedirectReasonsAndUnrelatedServerFailuresExposeNoDiagnostic() async {
         for (kind, reason) in [("redirect_refused", "unknown_SECRET"), ("server_message", "host"), ("raw_SECRET", "host")] {
             let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
-                generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: kind,
+                generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: kind, requestMethod: nil,
                 redirect: .init(destination: "https://USER:SECRET@example.test/?token=SECRET#SECRET", reason: reason)))
             let service = SettingsTransferService(loginFailure: failure)
             let model = ManualTransferCoordinator(owner: nil, service: service, keychain: SettingsTransferKeys(), defaults: nil)
@@ -232,7 +238,7 @@ extension ManualTransferSettingsTests {
     @Test func aRefusalFromAnEditedLoginIdentityDoesNotRestoreStaleDiagnostics() async {
         let suspension = SettingsLoginSuspension(.login)
         let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
-            generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "redirect_refused",
+            generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "redirect_refused", requestMethod: "meta",
             redirect: .init(destination: "https://destination.test/", reason: "host")))
         let service = SettingsTransferService(suspension: suspension, loginFailure: failure)
         let model = ManualTransferCoordinator(owner: nil, service: service, keychain: SettingsTransferKeys(), defaults: nil)
@@ -244,6 +250,7 @@ extension ManualTransferSettingsTests {
         await suspension.release()
         await attempt.value
         #expect(model.redirectDiagnostic == nil && model.failureCategory == nil)
+        #expect(model.failureRequestMethod == nil)
         #expect(await service.calls == ["normalize", "login"])
         #expect(await service.loginRequests.first?.username == "Synthetic User")
     }
@@ -799,7 +806,7 @@ private actor SelectedMediaSettingsService: ManualTransferService {
     func confirm(endpoint: String, credentials: ManualTransferCredentials, preview: PreparedManualTransfer, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) throws -> ManualTransferRecord {
         calls.append("confirm"); record = mediaDecisionRecord(generation: record.generation ?? 0)
         if activationError { throw ManualTransferFailure(.init(issue: .needsDecision, boundary: .activationInterrupted,
-            generation: record.generation, candidateActive: true, nextEligibleMs: nil, serverKind: nil, redirect: nil)) }
+            generation: record.generation, candidateActive: true, nextEligibleMs: nil, serverKind: nil, requestMethod: nil, redirect: nil)) }
         return record
     }
     func prepareMedia(_ entry: ManualTransferHistory, endpoint: String, credentials: ManualTransferCredentials, operation: ManualTransferOperation) async -> PreparedManualMedia {
