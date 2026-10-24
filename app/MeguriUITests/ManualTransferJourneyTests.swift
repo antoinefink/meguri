@@ -214,8 +214,6 @@ import AppKit
             XCTAssertGreaterThan(held.media, before.media)
             try click(element(app, "settings.anki.cancel"), app, bundle)
             try waitForText(element(app, "settings.anki.result"), "operation is partial", app, bundle)
-            try reveal(element(app, "settings.anki.history"), app, bundle)
-            waitUntilReady(element(app, "settings.anki.history"), app)
             XCTAssertFalse(element(app, "settings.anki.progress").exists)
             XCTAssertFalse(element(app, "settings.anki.nextEligible").exists)
 
@@ -236,6 +234,8 @@ import AppKit
             _ = try await waitForWire(rig) { $0.active == 0 && $0.aborted == 1 }
             let stopped = try await wire(rig, "mark/cancelled")
             XCTAssertEqual(stopped.collectionTransfers, before.collectionTransfers)
+            try reveal(element(app, "settings.anki.history"), app, bundle)
+            waitUntilReady(element(app, "settings.anki.history"), app)
             attachSuccess(app, name + "-native-cancel-drained-durable-partial-no-cooldown")
 
             app.terminate()
