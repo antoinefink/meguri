@@ -140,6 +140,46 @@
           }
         }
       }
+    },
+    "Your decks will appear here when the collection opens.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your decks will appear here when the collection opens."
+          }
+        }
+      }
+    },
+    "Import a collection in Settings to see your decks here.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import a collection in Settings to see your decks here."
+          }
+        }
+      }
+    },
+    "Your collection couldn’t open. See Decks for details, or import a collection in Settings.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your collection couldn’t open. See Decks for details, or import a collection in Settings."
+          }
+        }
+      }
+    },
+    "Your decks will appear when the current collection operation finishes.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your decks will appear when the current collection operation finishes."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

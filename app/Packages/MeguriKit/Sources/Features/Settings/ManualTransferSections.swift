@@ -11,181 +11,185 @@ public struct ManualTransferSections: View {
     private enum Field: Hashable { case endpoint, username, password }
     @FocusState private var focusedField: Field?
     #endif
-    public init(model: ManualTransferCoordinator) { self.model = model }
+    enum Area: Equatable { case all, connectionAndTransfers, history }
+    private let area: Area
+    public init(model: ManualTransferCoordinator) { self.init(model: model, area: .all) }
+    init(model: ManualTransferCoordinator, area: Area) { self.model = model; self.area = area }
     public var body: some View {
         Group {
-            Section {
-                TextField("Server URL", text: $model.endpointDraft, axis: .vertical)
-                    .font(.body)
-                    .textContentType(.URL)
-                    #if os(macOS)
-                    .textFieldStyle(.roundedBorder)
-                    #endif
-                    #if os(iOS)
-                    .focused($focusedField, equals: .endpoint)
-                    #endif
-                    .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
-                    .accessibilityIdentifier("settings.anki.endpoint")
-                    .accessibilityHint("Self-hosted server URL, including an optional path prefix.")
-                action("Save Endpoint", id: "saveEndpoint", disabled: model.busy || model.preview != nil) { await model.applyEndpoint() }
-                if !model.endpoint.isEmpty {
-                    LabeledContent {
-                        Text(model.endpoint)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("settings.anki.configuredEndpointValue")
-                    } label: {
-                        Text("Configured endpoint")
-                            .accessibilityIdentifier("settings.anki.configuredEndpointLabel")
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Configured endpoint")
-                    .accessibilityValue(Text(verbatim: model.endpoint))
-                    .accessibilityIdentifier("settings.anki.configuredEndpoint")
-                }
-                if model.authenticated {
-                    LabeledContent("Login", value: model.username)
-                        .accessibilityIdentifier("settings.anki.loginIdentity")
-                    action("Log Out", id: "logout", disabled: model.busy || model.preview != nil) { await model.logout() }
-                } else {
-                    TextField("Username", text: $model.username)
-                        .textContentType(.username)
+            if area != .history {
+                Section {
+                    TextField("Server URL", text: $model.endpointDraft, axis: .vertical)
+                        .font(.body)
+                        .textContentType(.URL)
                         #if os(macOS)
                         .textFieldStyle(.roundedBorder)
                         #endif
                         #if os(iOS)
-                        .focused($focusedField, equals: .username)
+                        .focused($focusedField, equals: .endpoint)
                         #endif
-                        .disabled(model.busy)
-                        .accessibilityIdentifier("settings.anki.username")
-                    SecureField("Password", text: $model.password)
-                        .textContentType(.password)
-                        #if os(macOS)
-                        .textFieldStyle(.roundedBorder)
-                        #endif
-                        #if os(iOS)
-                        .focused($focusedField, equals: .password)
-                        #endif
-                        .disabled(model.busy)
-                        .accessibilityIdentifier("settings.anki.password")
-                    action("Log In", id: "login", disabled: !model.canLogin) { await model.login() }
-                }
-                Picker("Direction", selection: Binding(get: { model.direction }, set: { model.select($0) })) {
-                    Text("Import from Anki").tag(ManualTransferDirection.import)
-                    Text("Export to Anki").tag(ManualTransferDirection.export)
-                }
-                .font(.body)
-                .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
-                .accessibilityIdentifier("settings.anki.direction")
-                Picker("Transfer scope", selection: Binding(get: { model.scope }, set: { model.selectScope($0) })) {
-                    Text("Collection only").tag(ManualTransferScope.collectionOnly)
-                    Text("Collection and media").tag(ManualTransferScope.collectionAndMedia)
-                }
-                .font(.body)
-                .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
-                .accessibilityIdentifier("settings.anki.scope")
-                Text(model.scope == .collectionOnly
-                    ? "Collection only. Images, audio and other media stay unchanged on both sides."
-                    : "After the collection finishes, a separate decision lets you reconcile media on this device and server. Media can change both sides in either collection direction.")
-                if model.direction == .import {
-                    Text("Preparation downloads and validates a candidate. Final confirmation replaces this device’s collection after making its required safety copy. It does not merge collections.")
-                    action("Download and Prepare Import Preview", id: "prepareImport", disabled: !model.canPrepare) { await model.prepare() }
-                } else {
-                    Text("Preparation makes a local safety copy, downloads and retains the server’s current collection, and prepares an upload. Downloading changes the server’s bookkeeping. Nothing is uploaded until final confirmation. Export replaces the server collection and activates the prepared version locally.")
-                    action("Make Copies and Prepare Export Preview", id: "prepareExport", disabled: !model.canPrepare) { await model.prepare() }
-                }
-            } header: {
-                Text("Anki Server")
-                    .font(.headline)
-                    .foregroundStyle(.token(.textPrimary))
-                    .accessibilityIdentifier("settings.anki.sectionTitle")
-            } footer: {
-                VStack(alignment: .leading, spacing: Spacing.small) {
-                    Text("Routine sync uses CloudKit. These separate, explicit server transfers replace a collection. Collection Files and local reviews do not require a server login.")
-                        .accessibilityIdentifier("settings.anki.intro")
-                    if !model.authenticated {
-                        Text("Login only saves a device-only login key. It does not prepare or transfer a collection. The password is not saved.")
-                            .accessibilityIdentifier("settings.anki.loginNotice")
+                        .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
+                        .accessibilityIdentifier("settings.anki.endpoint")
+                        .accessibilityHint("Self-hosted server URL, including an optional path prefix.")
+                    if model.authenticated {
+                        action("Save Endpoint", id: "saveEndpoint", disabled: model.busy || model.preview != nil) { await model.applyEndpoint() }
                     }
-                }
-                .font(.body)
-                .foregroundStyle(.token(.textSecondary))
-            }
-            if let preview = model.preview {
-                Section(model.isRecoveryPreview ? "Local Recovery Decision" : "Final Replacement Preview") {
-                    recordFacts(preview.record)
-                    LabeledContent("Login", value: model.previewLoginLabel)
-                    Text("Other clients can change the server after its retained copy was made. Export can discard those later edits; the server does not reserve this preview.")
-                    Button(role: .destructive) { model.confirmationPresented = true } label: {
-                        Text(model.isRecoveryPreview ? "Confirm Local Recovery…" : (preview.record.direction == .import ? "Replace This Device’s Collection…" : "Replace Server Collection…"))
-                            .font(.body)
-                            .foregroundStyle(.token(model.canConfirm ? .destructive : .textSecondary))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(minWidth: minimumActionSize, minHeight: minimumActionSize, alignment: .leading)
-                            .contentShape(Rectangle())
+                    if !model.endpoint.isEmpty {
+                        LabeledContent {
+                            Text(model.endpoint)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("settings.anki.configuredEndpointValue")
+                        } label: {
+                            Text("Configured endpoint")
+                                .accessibilityIdentifier("settings.anki.configuredEndpointLabel")
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Configured endpoint")
+                        .accessibilityValue(Text(verbatim: model.endpoint))
+                        .accessibilityIdentifier("settings.anki.configuredEndpoint")
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!model.canConfirm)
-                    .accessibilityIdentifier("settings.anki.confirm")
-                    action("Close Preview", id: "closePreview", disabled: model.busy) { await model.discardPreview() }
-                }
-            }
-            if let media = model.mediaPreview {
-                Section("Reconcile Media on This Device and Server") {
-                    recordFacts(media.record)
-                    Text("Import and export both reconcile media in both directions. Server files are downloaded and pending local files are uploaded, even when the collection does not reference them. Counts become available after the media check.")
-                    Text("A server file can overwrite a pending local edit, moving the previous local file to trash. A server deletion can move an unchanged local file to trash. Files marked for local deletion may return through download; local deletions may also be sent to the server.")
-                    Text("Repairing names and resolving case conflicts may rename files or remove server names. References in collection fields are not rewritten. Files that are empty or larger than 100 MiB are left out.")
-                    Text("Allowing media applies these effects across every supported file and batch, including changes that occur during the run. Stopping keeps saved changes and does not restore either side. Reviews remain available during media transfer.")
-                    mediaDecisionActions
-                }
-            }
-            operationProgress
-            if let message = model.message {
-                Section("Result") {
-                    Text(message).accessibilityIdentifier("settings.anki.result")
-                    if let instant = model.nextEligibleMilliseconds {
-                        LabeledContent("Next eligible", value: date(instant))
-                            .accessibilityIdentifier("settings.anki.nextEligible")
-                    }
-                }
-            }
-            Section("Local Transfer History and Copies") {
-                Text("This history loads offline. Restart never resumes a server request. A copy saved below is independent of the retained original; unverified files must be inspected before use.")
-                    .foregroundStyle(.token(.textSecondary))
-                action("Refresh Local History", id: "history", disabled: model.busy) { await model.refreshOfflineHistory() }
-                if model.records.isEmpty { Text("No recorded server transfers.") }
-                ForEach(model.records) { entry in
-                    VStack(alignment: .leading, spacing: Spacing.small) {
-                        Text(entry.record.direction == .import ? "Import from Anki" : "Export to Anki").font(.headline)
-                        Text(status(entry.record))
-                        recordFacts(entry.record)
-                        if entry.record.canResumeMedia {
-                            action("Review Media Decision / Resume…", id: "resumeMedia.\(entry.id)", disabled: model.busy || model.preview != nil || model.mediaPreview != nil || !model.authenticated) { await model.prepareMedia(entry) }
-                        }
-                        if entry.record.acceptance == .possiblyAccepted {
-                            Text("Upload completion is unknown. Another transfer remains blocked. A retry or risk-acceptance clear is not available.")
-                        } else if entry.record.canInspectRecovery {
-                            action("Inspect Local Recovery", id: "recover.\(entry.id)", disabled: model.busy || model.preview != nil) { await model.recover(entry) }
-                        }
-                        if !entry.record.collectionComplete, [.preparing, .preview, .needsDecision].contains(entry.record.phase), entry.record.acceptance == .notSent {
-                            action("Cancel Unfinished Preparation", id: "cancelPreparation.\(entry.id)", disabled: model.busy || model.preview != nil) { await model.cancelPreparation(entry) }
-                        }
-                        ForEach(Array(entry.record.copies.enumerated()), id: \.offset) { index, copy in
-                            Text("Save a separate copy of \(copy.name)")
-                            Button { model.chooseCopy(entry, index: index) } label: {
-                                Text("Save Copy to Folder…")
-                                    .font(.body)
-                                    .foregroundStyle(.token(model.busy ? .textSecondary : .statusAccent))
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(minWidth: minimumActionSize, minHeight: minimumActionSize, alignment: .leading)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
+                    if model.authenticated {
+                        LabeledContent("Login", value: model.username)
+                            .accessibilityIdentifier("settings.anki.loginIdentity")
+                        action("Log Out", id: "logout", disabled: model.busy || model.preview != nil) { await model.logout() }
+                    } else {
+                        TextField("Username", text: $model.username)
+                            .textContentType(.username)
+                            #if os(macOS)
+                            .textFieldStyle(.roundedBorder)
+                            #endif
+                            #if os(iOS)
+                            .focused($focusedField, equals: .username)
+                            #endif
                             .disabled(model.busy)
-                            .accessibilityIdentifier("settings.anki.copy.\(entry.id).\(index)")
+                            .accessibilityIdentifier("settings.anki.username")
+                        SecureField("Password", text: $model.password)
+                            .textContentType(.password)
+                            #if os(macOS)
+                            .textFieldStyle(.roundedBorder)
+                            #endif
+                            #if os(iOS)
+                            .focused($focusedField, equals: .password)
+                            #endif
+                            .disabled(model.busy)
+                            .accessibilityIdentifier("settings.anki.password")
+                        Text("Login only saves a device-only login key. It does not prepare or transfer a collection. The password is not saved.", bundle: .module)
+                            .foregroundStyle(.token(.textSecondary))
+                            .accessibilityIdentifier("settings.anki.loginNotice")
+                        action("Log In", id: "login", disabled: !model.canLogin) { await model.login() }
+                    }
+                } header: {
+                    Text("Connection", bundle: .module)
+                        .accessibilityIdentifier("settings.anki.sectionTitle")
+                }
+                Section {
+                    Text("Server transfers replace a collection. Collection Files and local reviews do not require a server login.", bundle: .module)
+                        .foregroundStyle(.token(.textSecondary))
+                        .accessibilityIdentifier("settings.anki.intro")
+                    Picker("Direction", selection: Binding(get: { model.direction }, set: { model.select($0) })) {
+                        Text("Import from Anki").tag(ManualTransferDirection.import)
+                        Text("Export to Anki").tag(ManualTransferDirection.export)
+                    }
+                    .font(.body)
+                    .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
+                    .accessibilityIdentifier("settings.anki.direction")
+                    Picker("Transfer scope", selection: Binding(get: { model.scope }, set: { model.selectScope($0) })) {
+                        Text("Collection only").tag(ManualTransferScope.collectionOnly)
+                        Text("Collection and media").tag(ManualTransferScope.collectionAndMedia)
+                    }
+                    .font(.body)
+                    .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
+                    .accessibilityIdentifier("settings.anki.scope")
+                    Text(model.scope == .collectionOnly
+                        ? "Collection only. Images, audio and other media stay unchanged on both sides."
+                        : "After the collection finishes, a separate decision lets you reconcile media on this device and server. Media can change both sides in either collection direction.")
+                    if model.direction == .import {
+                        Text("Preparation downloads and validates a candidate. Final confirmation replaces this device’s collection after making its required safety copy. It does not merge collections.")
+                        action("Download and Prepare Import Preview", id: "prepareImport", disabled: !model.canPrepare) { await model.prepare() }
+                    } else {
+                        Text("Preparation makes a local safety copy, downloads and retains the server’s current collection, and prepares an upload. Downloading changes the server’s bookkeeping. Nothing is uploaded until final confirmation. Export replaces the server collection and activates the prepared version locally.")
+                        action("Make Copies and Prepare Export Preview", id: "prepareExport", disabled: !model.canPrepare) { await model.prepare() }
+                    }
+                } header: { Text("Server Transfers", bundle: .module) }
+                if let preview = model.preview {
+                    Section(model.isRecoveryPreview ? "Local Recovery Decision" : "Final Replacement Preview") {
+                        recordFacts(preview.record)
+                        LabeledContent("Login", value: model.previewLoginLabel)
+                        Text("Other clients can change the server after its retained copy was made. Export can discard those later edits; the server does not reserve this preview.")
+                        Button(role: .destructive) { model.confirmationPresented = true } label: {
+                            Text(model.isRecoveryPreview ? "Confirm Local Recovery…" : (preview.record.direction == .import ? "Replace This Device’s Collection…" : "Replace Server Collection…"))
+                                .font(.body)
+                                .foregroundStyle(.token(model.canConfirm ? .destructive : .textSecondary))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(minWidth: minimumActionSize, minHeight: minimumActionSize, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!model.canConfirm)
+                        .accessibilityIdentifier("settings.anki.confirm")
+                        action("Close Preview", id: "closePreview", disabled: model.busy) { await model.discardPreview() }
+                    }
+                }
+                if let media = model.mediaPreview {
+                    Section("Reconcile Media on This Device and Server") {
+                        recordFacts(media.record)
+                        Text("Import and export both reconcile media in both directions. Server files are downloaded and pending local files are uploaded, even when the collection does not reference them. Counts become available after the media check.")
+                        Text("A server file can overwrite a pending local edit, moving the previous local file to trash. A server deletion can move an unchanged local file to trash. Files marked for local deletion may return through download; local deletions may also be sent to the server.")
+                        Text("Repairing names and resolving case conflicts may rename files or remove server names. References in collection fields are not rewritten. Files that are empty or larger than 100 MiB are left out.")
+                        Text("Allowing media applies these effects across every supported file and batch, including changes that occur during the run. Stopping keeps saved changes and does not restore either side. Reviews remain available during media transfer.")
+                        mediaDecisionActions
+                    }
+                }
+                operationProgress
+                if let message = model.message {
+                    Section("Result") {
+                        Text(message).accessibilityIdentifier("settings.anki.result")
+                        if let instant = model.nextEligibleMilliseconds {
+                            LabeledContent("Next eligible", value: date(instant))
+                                .accessibilityIdentifier("settings.anki.nextEligible")
                         }
                     }
                 }
+            }
+            if area != .connectionAndTransfers {
+                Section {
+                    Text("This history loads offline. Restart never resumes a server request. Safety copies contain collection data, without media. A copy saved below is independent of the retained original; unverified files must be inspected before use.", bundle: .module)
+                        .foregroundStyle(.token(.textSecondary))
+                    action("Refresh Local History", id: "history", disabled: model.busy) { await model.refreshOfflineHistory() }
+                    if model.records.isEmpty { Text("No recorded server transfers.") }
+                    ForEach(model.records) { entry in
+                        VStack(alignment: .leading, spacing: Spacing.small) {
+                            Text(entry.record.direction == .import ? "Import from Anki" : "Export to Anki").font(.headline)
+                            Text(status(entry.record))
+                            recordFacts(entry.record)
+                            if entry.record.canResumeMedia {
+                                action("Review Media Decision / Resume…", id: "resumeMedia.\(entry.id)", disabled: model.busy || model.preview != nil || model.mediaPreview != nil || !model.authenticated) { await model.prepareMedia(entry) }
+                            }
+                            if entry.record.acceptance == .possiblyAccepted {
+                                Text("Upload completion is unknown. Another transfer remains blocked. A retry or risk-acceptance clear is not available.")
+                            } else if entry.record.canInspectRecovery {
+                                action("Inspect Local Recovery", id: "recover.\(entry.id)", disabled: model.busy || model.preview != nil) { await model.recover(entry) }
+                            }
+                            if !entry.record.collectionComplete, [.preparing, .preview, .needsDecision].contains(entry.record.phase), entry.record.acceptance == .notSent {
+                                action("Cancel Unfinished Preparation", id: "cancelPreparation.\(entry.id)", disabled: model.busy || model.preview != nil) { await model.cancelPreparation(entry) }
+                            }
+                            ForEach(Array(entry.record.copies.enumerated()), id: \.offset) { index, copy in
+                                Text("Save a separate copy of \(copy.name)")
+                                Button { model.chooseCopy(entry, index: index) } label: {
+                                    Text("Save Copy to Folder…")
+                                        .font(.body)
+                                        .foregroundStyle(.token(model.busy ? .textSecondary : .statusAccent))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(minWidth: minimumActionSize, minHeight: minimumActionSize, alignment: .leading)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(model.busy)
+                                .accessibilityIdentifier("settings.anki.copy.\(entry.id).\(index)")
+                            }
+                        }
+                    }
+                } header: { Text("Safety Copies and History", bundle: .module) }
             }
         }
         .font(.body)

@@ -23,9 +23,13 @@ public enum ManualTransferSettingsPreview: PreviewStates {
                             .accessibilityIdentifier("settings.anki.fixture")
                     }
                 }
-                ManualTransferSections(model: model)
+                ManualTransferSections(model: model, area: .connectionAndTransfers)
+                SettingsCollectionFilesSection(collection: nil)
+                ManualTransferSections(model: model, area: .history)
             }
                 .formStyle(.grouped)
+                .frame(maxWidth: ContentWidth.readable)
+                .frame(maxWidth: .infinity)
                 .background(.token(.backgroundPrimary))
                 .accessibilityIdentifier("settings.anki.content")
                 .manualTransferPresentation(model: model)

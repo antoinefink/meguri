@@ -82,7 +82,7 @@ public final class ReviewCollection {
         let restored: State
         switch current {
         case .noCollection: restored = .noFile
-        case .failed: restored = .failed("The local collection requires recovery or replacement.")
+        case .failed(let reason): restored = .failed(Self.explanation(reason))
         default: return
         }
         releasedManualHostState = restored
@@ -136,7 +136,10 @@ public final class ReviewCollection {
             guard await Self.exists(configuration.collectionLocation.collectionFile) else { state = .noFile; return }
             try await collection.startOpen(location, randomSeed: UInt64.random(in: 0...UInt64.max)).value()
             try await completeOpenedHost(loadRecord: true)
-        } catch { state = .failed(String(describing: error)); self.error = String(describing: error) }
+        } catch {
+            let message = Self.openExplanation(error)
+            state = .failed(message); self.error = message
+        }
     }
     private func subscribe() async throws {
         try await CoreEventStream.shared.start()
@@ -211,7 +214,57 @@ public final class ReviewCollection {
                 }
             }
             return state == .ready && error == nil
-        } catch { self.error = String(describing: error); state = .failed(String(describing: error)); return false }
+        } catch {
+            let message = Self.openExplanation(error)
+            self.error = message; state = .failed(message); return false
+        }
+    }
+    // Open/lifecycle presentation accepts typed failures only; diagnostic detail
+    // can contain paths or internal messages and must never reach Home.
+    static func openExplanation(_ error: any Error) -> String {
+        if let bridge = error as? BridgeError {
+            switch bridge {
+            case .open(let failure): return explanation(failure)
+            case .busy, .unavailable:
+                return "The collection is busy or unavailable. Wait for the current operation to finish, then try again."
+            default: break
+            }
+        }
+        return "Meguri couldn’t open this collection. Try again, or import a collection in Settings."
+    }
+    static func explanation(_ reason: CollectionFailedReason) -> String {
+        switch reason {
+        case .open(let failure): return explanation(failure)
+        case .corrupt: return explanation(CollectionOpenFailure.corrupt(detail: ""))
+        case .openStep:
+            return "Meguri couldn’t finish opening this collection. Try again, or quit and reopen Meguri."
+        case .replace:
+            return "Meguri couldn’t finish replacing this collection. Try opening it again, or import a collection in Settings."
+        }
+    }
+    static func explanation(_ failure: CollectionOpenFailure) -> String {
+        switch failure {
+        case .openInAnotherProgram:
+            return "This collection is open in another app. Close it there, then try again."
+        case .tooOld:
+            return "This collection uses an older format that Meguri can’t open. Update it in a compatible app, then import a latest-format collection-only .colpkg in Settings."
+        case .tooNew:
+            return "This collection uses a newer format than Meguri supports. Check for a Meguri update."
+        case .v1Scheduler:
+            return "This collection uses an unsupported older scheduler. Update its scheduler in a compatible app before opening it in Meguri."
+        case .notACollection:
+            return "This file isn’t a supported collection. Import a latest-format collection-only .colpkg in Settings."
+        case .corrupt:
+            return "This collection appears to be damaged or incomplete. Import a known-good collection-only .colpkg in Settings."
+        case .upgradeFailed:
+            return "Meguri couldn’t finish updating this collection’s format. Check free space and file access, then try again."
+        case .connectionInit:
+            return "Meguri couldn’t prepare this collection for use. Quit and reopen Meguri, then try again."
+        case .notFound:
+            return "The collection file is no longer available. Try again, or import a collection in Settings."
+        case .io:
+            return "Meguri couldn’t read this collection. Check free space and file access, then try again."
+        }
     }
     private var isFailed: Bool { if case .failed = state { return true }; return false }
 
@@ -233,7 +286,7 @@ public final class ReviewCollection {
                 }
             case .opening, .upgrading: state = .loading
             case .exclusiveBusy: state = .unavailable; review?.requestRefresh()
-            case .failed(let reason): state = .failed(String(describing: reason))
+            case .failed(let reason): state = .failed(Self.explanation(reason))
             case .noCollection: state = releasedManualHostState ?? .unopened
             }
         case .nextDayAtChanged(let instant): if !opening { day?.event(nextDayAt: instant) }

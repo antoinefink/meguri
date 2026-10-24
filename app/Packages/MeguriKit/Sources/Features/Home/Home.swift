@@ -17,7 +17,7 @@ public struct HomeView: View {
                             .accessibilityIdentifier("home.session.recorded")
                     }
                 }
-                if let error = collection.error {
+                if let error = collection.error, !hasFailed {
                     Text(verbatim: error).foregroundStyle(.token(.statusError))
                         .accessibilityIdentifier("home.collection.error")
                 }
@@ -34,6 +34,10 @@ public struct HomeView: View {
         .navigationScrollPosition(collection.navigation, .section(.home), idType: Int64.self)
         .navigationTitle(deckID.flatMap { collection.deck($0)?.name } ?? String(localized: "Decks", bundle: .module))
         .accessibilityIdentifier("home.collection.screen")
+    }
+    private var hasFailed: Bool {
+        if case .failed = collection.state { return true }
+        return false
     }
     @ViewBuilder private var content: some View {
         switch collection.state {
@@ -151,15 +155,39 @@ public struct HomeSidebarDecks: View {
     public let collection: ReviewCollection
     public init(collection: ReviewCollection) { self.collection = collection }
     public var body: some View {
-        ForEach(Self.flatten(collection.decks), id: \.id) { deck in
-            Text(verbatim: deck.path)
-            .foregroundStyle(.token(.textPrimary))
-            .lineLimit(nil)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityIdentifier("home.sidebar.deck.\(deck.id)")
-            .listRowBackground(ColorToken.surface.color)
-            .tag(SidebarItem.deck(DeckID(deck.id)))
+        if collection.decks.isEmpty {
+            emptyGuidance
+                .font(.subheadline)
+                .foregroundStyle(.token(.textSecondary))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("home.sidebar.guidance")
+        } else {
+            ForEach(Self.flatten(collection.decks), id: \.id) { deck in
+                Text(verbatim: deck.path)
+                .foregroundStyle(.token(.textPrimary))
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("home.sidebar.deck.\(deck.id)")
+                .listRowBackground(ColorToken.surface.color)
+                .tag(SidebarItem.deck(DeckID(deck.id)))
+            }
+        }
+    }
+
+    private var emptyGuidance: Text {
+        switch collection.state {
+        case .unopened, .loading:
+            Text("Your decks will appear here when the collection opens.", bundle: .module)
+        case .noFile:
+            Text("Import a collection in Settings to see your decks here.", bundle: .module)
+        case .failed:
+            Text("Your collection couldn’t open. See Decks for details, or import a collection in Settings.", bundle: .module)
+        case .unavailable:
+            Text("Your decks will appear when the current collection operation finishes.", bundle: .module)
+        case .ready:
+            Text("This collection has no decks to study.", bundle: .module)
         }
     }
 

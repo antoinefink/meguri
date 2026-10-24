@@ -360,6 +360,66 @@
           }
         }
       }
+    },
+    "Connection": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connection"
+          }
+        }
+      }
+    },
+    "Server Transfers": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server Transfers"
+          }
+        }
+      }
+    },
+    "Safety Copies and History": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Safety Copies and History"
+          }
+        }
+      }
+    },
+    "Server transfers replace a collection. Collection Files and local reviews do not require a server login.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server transfers replace a collection. Collection Files and local reviews do not require a server login."
+          }
+        }
+      }
+    },
+    "Login only saves a device-only login key. It does not prepare or transfer a collection. The password is not saved.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Login only saves a device-only login key. It does not prepare or transfer a collection. The password is not saved."
+          }
+        }
+      }
+    },
+    "This history loads offline. Restart never resumes a server request. Safety copies contain collection data, without media. A copy saved below is independent of the retained original; unverified files must be inspected before use.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This history loads offline. Restart never resumes a server request. Safety copies contain collection data, without media. A copy saved below is independent of the retained original; unverified files must be inspected before use."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

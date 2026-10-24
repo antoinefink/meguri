@@ -1316,3 +1316,30 @@ hashes. Instructions and build metadata passed privacy before sharing.
 This is an intermediate build; the file exporter still excludes media.
 Catch-up `063505Z-41619` passed. Doctor `065916Z-58738` reports reachable
 VM and 163 GiB free; the locked host does not prevent VM checks.
+
+User UI revision (2026-10-24); start `abea0c9c`.
+
+Filtered `071133Z-67482` reorganized the existing native sections and
+readable form width. Connection precedes transfers, Files and history.
+Signed-out login needs no Save action. Empty sidebar states give guidance;
+typed collection failures use human copy without a duplicate failed banner.
+All existing transfer actions, guards and critical disclosures remain.
+Media file export remains explicitly collection-only until implemented.
+R1 source review found no P0-P2; renders and audits were not graded.
+
+Swift `072116Z-75309` passed 26 of 27 tests. The new invalid-file test
+preserved its input and showed human copy, but its cleanup left the engine's
+failed-open state. Fixer `072551Z-78108`, from `6df6a6ca`, corrected only
+that test: preserve/archive the synthetic input, cancel its consumer, then
+open and close a real valid schema-18 fixture. R2 found no P0-P2.
+Swift `073011Z-82456` passed all 27 with zero failures or skips.
+
+Privacy `073013Z-83172` flagged one new test comment. Filtered cleanup
+`073152Z-84216` removed six nonessential comment lines; noncomment bytes
+and all other seven files were verified identical. Final eight-file privacy
+`073407Z-85373` passed. Runtime checks were not repeated for comment deletion.
+
+VM runner refresh `ui-test/072714Z-78914` and fresh trust check
+`ui-test/072841Z-80728` each passed one test with zero failures or skips.
+These verify the runner prerequisite, not the new UI or transfer cycle.
+Actual native execution, rendered review, audits and full gate remain pending.
