@@ -653,6 +653,52 @@ class PublicInterfaceTests(unittest.TestCase):
         self.assertEqual(staged, [{"path": "report.txt", "lines": [1]}])
 
 
+APPROVED_MEDIA_IO_RUST_PATHS = (
+    "std::fs::File",
+    "std::cell::Cell",
+    "std::fs::read_dir",
+    "std::future::Future::poll",
+    "std::future::poll_fn",
+    "std::pin::Pin",
+    "std::sync::mpsc",
+    "Arc::clone",
+    "Arc::new",
+    "AtomicBool::new",
+    "Box::pin",
+    "Cell::new",
+    "Ordering::Acquire",
+    "Ordering::Release",
+    "PoisonError::into_inner",
+    "Poll::Pending",
+    "Poll::Ready",
+    "Vec::with_capacity",
+    "mpsc::channel",
+    "io::Error::from",
+    "io::Error::new",
+    "io::ErrorKind::Interrupted",
+    "io::ErrorKind::Other",
+    "io::ErrorKind::StorageFull",
+    "io::Result",
+    "io::sink",
+    "bytes::Bytes",
+    "Bytes::from",
+    "futures_core::Stream",
+    "Sha256::digest",
+    "Sha256::new",
+    "tempfile::NamedTempFile",
+    "tempfile::NamedTempFile::new",
+    "tempfile::NamedTempFile::new_in",
+    "tempfile::Builder::new",
+    "tempfile::tempdir",
+    "Semaphore::const_new",
+    "tokio::task::spawn_blocking",
+    "tokio::pin!",
+    "tokio::select!",
+    "ZipWriter::new",
+    "SimpleFileOptions::default",
+)
+
+
 class PublicRustPathsTests(unittest.TestCase):
     """Synthetic matches exercise only the three complete public Rust paths."""
 
@@ -667,8 +713,16 @@ class PublicRustPathsTests(unittest.TestCase):
         self.matcher = private_scan.Matcher(
             {(word,) for fact in self.facts for word in private_scan.words(fact)} | {("sentinelprivate",)})
 
-    def test_exactly_three_complete_paths_and_constructor_longest(self):
-        self.assertEqual(private_scan.PUBLIC_RUST_PATHS, self.facts)
+    def test_exactly_45_complete_paths_and_constructor_longest(self):
+        actual = private_scan.PUBLIC_RUST_PATHS
+        approved = APPROVED_MEDIA_IO_RUST_PATHS
+        self.assertEqual(len(approved), 42)
+        self.assertEqual(len(set(approved)), 42)
+        self.assertTrue(set(self.facts).isdisjoint(approved))
+        self.assertEqual(set(actual), set(self.facts) | set(approved))
+        self.assertEqual(len(actual), 45)
+        self.assertEqual(len(set(actual)), 45)
+        self.assertEqual(list(map(len, actual)), sorted(map(len, actual), reverse=True))
         for fact in self.facts:
             self.assertEqual([m.group() for m in private_scan.PUBLIC_LITERAL.finditer(fact)], [fact])
             for text in (fact, "&" + fact, "Option<" + fact + ">", '`"' + fact + '"`'):
@@ -694,7 +748,7 @@ class PublicRustPathsTests(unittest.TestCase):
                 self.check_all(fact.replace(old, new), True)
         for fact in (self.facts[1], self.facts[2], self.facts[0]):
             self.check_all(fact.rsplit("::", 1)[1], True)
-        for fact, removed in ((self.facts[1], 1), (self.facts[2], 1), (self.facts[0], 2)):
+        for fact, removed in ((self.facts[1], 1), (self.facts[2], 1)):
             self.check_all(fact.split("::", removed)[-1], True)
         for fact in self.facts[1:]:
             self.check_all(fact[:-1], True)
@@ -784,6 +838,134 @@ class PublicRustPathsTests(unittest.TestCase):
                 self.assertFalse(private_scan.scan_staged(self.matcher, self.repo)[0])
                 self.assertTrue(private_scan.scan_paths(self.matcher, [full], self.repo)[0])
                 git(self.repo, "reset", "-q")
+
+
+class PublicMediaIoRustPathsTests(unittest.TestCase):
+    """Only the finite approved public spans may contain synthetic matches."""
+
+    facts = APPROVED_MEDIA_IO_RUST_PATHS
+    setUp = PublicRustPathsTests.setUp
+    check_all = PublicInterfaceTests.check_all
+
+    def check_plain_and_files(self, text, expected, matcher=None):
+        matcher = matcher or self.matcher
+        self.assertEqual(any(matcher.hit(v) for v in private_scan.variants(text)), expected, text)
+        self.assertEqual(bool(private_scan.line_hits(matcher, text)), expected, text)
+        self.check_all(text, expected, matcher)
+
+    def test_all_42_exact_spans_contain_single_and_whole_multiword_matches(self):
+        for fact in self.facts:
+            ws = private_scan.words(fact)
+            singles = private_scan.Matcher({(word,) for word in ws})
+            whole = private_scan.Matcher({tuple(ws)})
+            with self.subTest(fact=fact):
+                self.assertEqual([m.group() for m in private_scan.PUBLIC_LITERAL.finditer(fact)], [fact])
+                for matcher in (singles, whole):
+                    for text in (fact, "&" + fact, "Option<" + fact + ">", fact + "()"):
+                        self.check_plain_and_files(text, False, matcher)
+
+    def test_overlapping_tempfile_paths_use_the_complete_longest_span(self):
+        for fact in ("tempfile::NamedTempFile", "tempfile::NamedTempFile::new",
+                     "tempfile::NamedTempFile::new_in"):
+            with self.subTest(fact=fact):
+                self.assertEqual([m.group() for m in private_scan.PUBLIC_LITERAL.finditer(fact)], [fact])
+                # A shorter type-only exception would leave the constructor words scanned.
+                self.check_plain_and_files(fact, False)
+                self.check_plain_and_files(fact + "::extra", True)
+
+    def test_case_punctuation_and_bare_terminal_names_are_not_facts(self):
+        for fact in self.facts:
+            near = (fact[0].swapcase() + fact[1:], fact.replace("::", ":", 1),
+                    fact.replace("::", ".", 1), fact.rsplit("::", 1)[1])
+            if fact.endswith("!"):
+                near += (fact[:-1], fact[:-1] + "?", fact[:-1] + "!!")
+            for text in near:
+                with self.subTest(fact=fact, text=text):
+                    self.check_plain_and_files(text, True)
+
+    def test_extra_qualification_longer_identifiers_and_unicode_remain_scanned(self):
+        for fact in self.facts:
+            for prefix in ("custom::", "::", "custom:: \t", "x", "_", "r#", ".",
+                           "\u0301", "\u034f", "\u03bb"):
+                with self.subTest(fact=fact, prefix=prefix):
+                    self.check_plain_and_files(prefix + fact, True)
+            for suffix in ("::extra", " ::", "\t::extra", "x", "_extra", ".",
+                           "\u0301", "\u034f", "\u03bb"):
+                with self.subTest(fact=fact, suffix=suffix):
+                    self.check_plain_and_files(fact + suffix, True)
+
+    def test_outside_inventory_imports_types_and_receiver_methods_stay_scanned(self):
+        excluded = ("Read", "PathBuf", "Arc", "AtomicBool", "File", "Bytes", "Digest", "Sha256",
+                    "NamedTempFile", "Builder", "Notify", "Semaphore", "ZipWriter",
+                    "write::SimpleFileOptions", "Stream::Item", "Stream::poll_next", "Self::Item",
+                    "as_file", "prefix", "tempfile_in", "update", "finalize", "notify_waiters",
+                    "start_file", "finish", "clone", "read", "write_all", "assert!", "vec!")
+        self.assertTrue(set(self.facts).isdisjoint(excluded))
+        for text in excluded:
+            with self.subTest(text=text):
+                matcher = private_scan.Matcher({tuple(private_scan.words(text))})
+                self.check_plain_and_files(text, True, matcher)
+
+    def test_receivers_arguments_generics_and_surrounding_text_are_scanned(self):
+        sentinel = private_scan.Matcher({("sentinelprivate",)})
+        for fact in self.facts:
+            for text in ("sentinelprivate " + fact, fact + " sentinelprivate",
+                         "sentinelprivate." + fact + "()", fact + "(sentinelprivate)",
+                         fact + "<sentinelprivate>", fact + "::<sentinelprivate>"):
+                with self.subTest(fact=fact, text=text):
+                    self.check_plain_and_files(text, True, sentinel)
+
+    def test_matches_crossing_one_or_two_public_spans_are_scanned(self):
+        for fact in self.facts:
+            ws = private_scan.words(fact)
+            cases = (("sentinelprivate " + fact, ("sentinelprivate", ws[0])),
+                     (fact + " sentinelprivate", (ws[-1], "sentinelprivate")),
+                     (fact + "(sentinelprivate)", (ws[-1], "sentinelprivate")),
+                     (fact + "<sentinelprivate>", (ws[-1], "sentinelprivate")),
+                     (fact + " " + fact, (ws[-1], ws[0])))
+            for text, token in cases:
+                with self.subTest(fact=fact, text=text):
+                    self.check_plain_and_files(text, True, private_scan.Matcher({token}))
+
+    def test_decoded_paths_in_text_binary_and_index_keep_span_boundaries(self):
+        encoders = (lambda text: "".join("&#%d;" % ord(c) for c in text),
+                    lambda text: "".join("\\u%04x" % ord(c) for c in text),
+                    lambda text: "".join("%%%02X" % ord(c) for c in text))
+        for fact in self.facts:
+            ws = private_scan.words(fact)
+            for encode in encoders:
+                with self.subTest(fact=fact, encoded=encode(fact)):
+                    for matcher in (private_scan.Matcher({(word,) for word in ws}),
+                                    private_scan.Matcher({tuple(ws)})):
+                        self.check_plain_and_files(encode(fact), False, matcher)
+                    for text in ("custom::" + fact, fact + "::extra", fact + "\u034f",
+                                 fact + "(sentinelprivate)", fact + "<sentinelprivate>"):
+                        self.check_plain_and_files(encode(text), True)
+                    cross = private_scan.Matcher({(ws[-1], "sentinelprivate")})
+                    self.check_plain_and_files(encode(fact + " sentinelprivate"), True, cross)
+
+    def test_comment_and_whitespace_qualification_remains_conservative(self):
+        # Comments adjacent to facts are deliberately ambiguous to the scanner.
+        facts = ("tempfile::NamedTempFile::new_in", "tokio::select!", "io::ErrorKind::Other")
+        encoders = (lambda text: text,
+                    lambda text: "".join("&#%d;" % ord(c) for c in text),
+                    lambda text: "".join("\\u%04x" % ord(c) for c in text),
+                    lambda text: "".join("%%%02X" % ord(c) for c in text))
+        gaps = (" \t", "\n ", " /* note */ ", " // note\n ",
+                " /* first\n second */\n ", " /* outer /* inner */ tail */ ")
+        for fact in facts:
+            for gap in gaps:
+                for text in ("custom::" + gap + fact, fact + gap + "::extra"):
+                    for encode in encoders:
+                        self.check_plain_and_files(encode(text), True)
+            contexts = (("custom&#58;&#58; &#47;&#47; note\n", ""),
+                        ("custom\\x3a\\x3a \\x2f\\x2f note\n", ""),
+                        ("custom%3A%3A %2F%2F note\n", ""),
+                        ("", "\n&#47;&#42; note &#42;&#47; ::extra"),
+                        ("", "\n\\x2f\\x2a note \\x2a\\x2f ::extra"),
+                        ("", "\n%2F%2A note %2A%2F ::extra"))
+            for prefix, suffix in contexts:
+                self.check_plain_and_files(prefix + fact + suffix, True)
 
 
 class FixedPublicFactsTests(unittest.TestCase):

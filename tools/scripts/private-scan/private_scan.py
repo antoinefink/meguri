@@ -90,12 +90,54 @@ PUBLIC_IDENTIFIERS = ("ResizeObserver.prototype.disconnect", "MutationObserver.p
 PUBLIC_COMPILER_URL = "https://github.com/sass/dart-sass/releases/download/1.102.0/dart-sass-1.102.0-linux-arm64.tar.gz"
 # Fixed Xcode 27 public interface call. The receiver remains outside its span.
 PUBLIC_GESTURE_CALL = ".pinch(withScale: 2, velocity: 1)"
-# Tokio 1.53.3 public paths, longest first.
-# Only complete paths qualify.
+# Fixed public Rust API spans, longest first; only complete paths qualify.
+# Media I/O additions: approved in E-20261024T045314Z-f655.
 PUBLIC_RUST_PATHS = (
     "tokio::sync::Semaphore::const_new",
+    "tempfile::NamedTempFile::new_in",
+    "tempfile::NamedTempFile::new",
+    "tokio::task::spawn_blocking",
+    "io::ErrorKind::Interrupted",
+    "io::ErrorKind::StorageFull",
+    "SimpleFileOptions::default",
+    "std::future::Future::poll",
+    "PoisonError::into_inner",
+    "tempfile::NamedTempFile",
     "tokio::sync::Semaphore",
+    "tempfile::Builder::new",
+    "std::future::poll_fn",
+    "io::ErrorKind::Other",
+    "futures_core::Stream",
+    "Semaphore::const_new",
     "tokio::sync::Notify",
+    "Vec::with_capacity",
+    "std::fs::read_dir",
+    "Ordering::Acquire",
+    "Ordering::Release",
+    "tempfile::tempdir",
+    "std::cell::Cell",
+    "std::sync::mpsc",
+    "AtomicBool::new",
+    "io::Error::from",
+    "io::Error::new",
+    "Sha256::digest",
+    "tokio::select!",
+    "ZipWriter::new",
+    "std::fs::File",
+    "std::pin::Pin",
+    "Poll::Pending",
+    "mpsc::channel",
+    "bytes::Bytes",
+    "Poll::Ready",
+    "Bytes::from",
+    "Sha256::new",
+    "tokio::pin!",
+    "Arc::clone",
+    "io::Result",
+    "Cell::new",
+    "Arc::new",
+    "Box::pin",
+    "io::sink",
 )
 PUBLIC_LITERAL = re.compile(
     r"(?<![^\s\"'`<>()\[\]{},;:=|])(?:" + "|".join(map(re.escape, PUBLIC_IDENTIFIERS)) +
