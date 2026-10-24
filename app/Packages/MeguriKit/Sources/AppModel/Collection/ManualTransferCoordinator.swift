@@ -8,6 +8,7 @@ import Observation
 public final class ManualTransferCoordinator {
     public enum Stage: Equatable {
         case ready
+        case testingConnection
         case authenticating
         case buildingDecision
         case awaitingConfirmation
@@ -19,9 +20,28 @@ public final class ManualTransferCoordinator {
         case awaitingMediaConsent
         case transferringMedia
     }
-    public private(set) var stage: Stage = .ready
+    public private(set) var stage: Stage = .ready {
+        didSet {
+            if stage != oldValue { recordConnectionEvent("Observed stage: " + stage.description) }
+        }
+    }
     public private(set) var endpoint: String
-    public var endpointDraft: String
+    public var endpointDraft: String {
+        didSet { if endpointDraft != oldValue { connectionTestResult = nil } }
+    }
+    public private(set) var connectionTestResult: String?
+    private let reachability: @Sendable (String) async -> EndpointReachabilityResult
+    private var connectionTestTask: Task<EndpointReachabilityResult, Never>?
+    public struct ConnectionEvent: Identifiable {
+        public let id = UUID()
+        public let instant: Date
+        public let detail: String
+    }
+    public private(set) var connectionEvents: [ConnectionEvent] = []
+    private func recordConnectionEvent(_ detail: String) {
+        connectionEvents.append(.init(instant: owner?.configuration.clock.now() ?? Date(), detail: detail))
+        if connectionEvents.count > 30 { connectionEvents.removeFirst(connectionEvents.count - 30) }
+    }
     public var username = ""
     public var password = ""
     public private(set) var authenticated = false
@@ -33,7 +53,9 @@ public final class ManualTransferCoordinator {
     private var mediaUsername: String?
     public private(set) var records: [ManualTransferHistory] = []
     public private(set) var result: ManualTransferRecord?
-    public private(set) var message: String?
+    public private(set) var message: String? {
+        didSet { if let message, message != oldValue { recordConnectionEvent(message) } }
+    }
     public private(set) var progress: CoreProgress?
     public private(set) var nextEligibleMilliseconds: Int64?
     public private(set) var loaded = false
@@ -72,7 +94,8 @@ public final class ManualTransferCoordinator {
     public var canPrepare: Bool { !busy && preview == nil && mediaPreview == nil && authenticated && owner?.manualAllowed == true }
     public var canConfirm: Bool { !busy && preview != nil && authenticated && previewUsername == credentials?.username && endpoint == preview?.record.configuredEndpoint && owner?.manualAllowed == true }
 
-    public init(owner: ReviewCollection?, service: any ManualTransferService, keychain: any ManualTransferCredentialStore = DeviceManualTransferCredentialStore(), defaults: UserDefaults? = .standard) {
+    public init(owner: ReviewCollection?, service: any ManualTransferService, keychain: any ManualTransferCredentialStore = DeviceManualTransferCredentialStore(), defaults: UserDefaults? = .standard, reachability: @escaping @Sendable (String) async -> EndpointReachabilityResult = EndpointReachability.check) {
+        self.reachability = reachability
         self.owner = owner; self.service = service; self.keychain = keychain; self.defaults = defaults
         let restoredEndpoint = defaults?.string(forKey: "manualTransfer.endpoint") ?? ""
         endpoint = restoredEndpoint
@@ -89,6 +112,37 @@ public final class ManualTransferCoordinator {
             authenticated = credentials != nil; username = credentials?.username ?? ""
         } catch { message = "Saved server login is unavailable. Local reviews and Collection Files remain available." }
         await refreshHistory()
+    }
+    public var canTestConnection: Bool {
+        !busy && preview == nil && mediaPreview == nil && owner?.navigation.sheet == nil
+            && owner?.entry.busy != true && owner?.collectionExport.busy != true
+            && !endpointDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    public func testConnection() async {
+        guard canTestConnection else { return }
+        let draft = endpointDraft
+        revision &+= 1
+        let expected = revision
+        stage = .testingConnection; connectionTestResult = nil
+        recordConnectionEvent("Connection test started. No credentials are sent.")
+        defer { connectionTestTask = nil; stage = .ready; finishWaiters() }
+        let normalized: String
+        do { normalized = try await service.normalizeEndpoint(draft) }
+        catch {
+            guard expected == revision, endpointDraft == draft, !Task.isCancelled else { return }
+            let detail = "Address validation failed. Use an eligible self-hosted HTTP or HTTPS address without credentials, query or fragment. AnkiWeb cannot be tested here."
+            connectionTestResult = detail
+            recordConnectionEvent(detail)
+            return
+        }
+        guard expected == revision, endpointDraft == draft, !Task.isCancelled else { return }
+        connectionTestResult = "Address validated. Checking for an HTTP response…"
+        let task = Task { await reachability(normalized) }
+        connectionTestTask = task
+        let result = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        guard expected == revision, endpointDraft == draft, !Task.isCancelled else { return }
+        connectionTestResult = result.description
+        recordConnectionEvent(result.description)
     }
     public func selectScope(_ scope: ManualTransferScope) { guard !busy, preview == nil, mediaPreview == nil else { return }; self.scope = scope; result = nil }
     public func select(_ direction: ManualTransferDirection) { guard !busy, preview == nil, mediaPreview == nil else { return }; self.direction = direction; result = nil }
@@ -235,7 +289,9 @@ public final class ManualTransferCoordinator {
         activated = activated || owner.generation != before
         let adopted = await owner.finishEntryActivation(candidateActive: activated)
         if let cause = operation.cancellation { recordCancellation(cause, id: prepared.record.id) }
+        #if !os(macOS)
         owner.navigation.show(.settings)
+        #endif
         self.operation = nil; progress = nil; stage = .ready
         await refreshHistory()
         if !activated { await owner.releaseEmptyManualHost() }
@@ -348,6 +404,7 @@ public final class ManualTransferCoordinator {
     }
     public func cancelAndDrain() async {
         password = ""
+        if stage == .testingConnection { revision &+= 1; connectionTestTask?.cancel() }
         await operation?.cancel(.system)
         if busy { await withCheckedContinuation { waiters.append($0) } }
         // An unstarted category decision has no network effects. Its durable
@@ -371,7 +428,14 @@ public final class ManualTransferCoordinator {
         let pending = waiters; waiters.removeAll()
         for waiter in pending { waiter.resume() }
     }
-    public func cancel() async { await operation?.cancel(.user); password = "" }
+    public func cancel() async {
+        if stage == .testingConnection {
+            revision &+= 1; connectionTestTask?.cancel()
+            connectionTestResult = "Connection test cancelled."
+            recordConnectionEvent("Connection test cancelled.")
+        }
+        await operation?.cancel(.user); password = ""
+    }
     public func clearPassword() { password = "" }
     public func refreshOfflineHistory() async {
         guard !busy else { return }
@@ -552,4 +616,23 @@ private actor UnavailableManualTransferService: ManualTransferService {
     func cancelPreparation(_ entry: ManualTransferHistory, operation: ManualTransferOperation) throws { throw BridgeError.unavailable(reason: "Rendering fixture") }
     func discard(_ preview: PreparedManualTransfer, interrupted: Bool, operation: ManualTransferOperation) throws { throw BridgeError.unavailable(reason: "Rendering fixture") }
     func saveCopy(_ entry: ManualTransferHistory, index: UInt32, to: URL, operation: ManualTransferOperation) throws { throw BridgeError.unavailable(reason: "Rendering fixture") }
+}
+
+public extension ManualTransferCoordinator.Stage {
+    var description: String {
+        switch self {
+        case .ready: "Idle"
+        case .testingConnection: "Testing connection"
+        case .authenticating: "Logging in"
+        case .buildingDecision: "Preparing replacement preview"
+        case .awaitingConfirmation: "Awaiting replacement decision"
+        case .applyingDecision: "Applying replacement"
+        case .readingRecords: "Reading offline history"
+        case .inspectingCandidate: "Inspecting local recovery"
+        case .writingCopy: "Saving retained copy"
+        case .preparingMedia: "Preparing media decision"
+        case .awaitingMediaConsent: "Awaiting media decision"
+        case .transferringMedia: "Transferring media"
+        }
+    }
 }

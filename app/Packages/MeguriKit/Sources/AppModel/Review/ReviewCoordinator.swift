@@ -57,6 +57,9 @@ public final class ReviewCoordinator {
         surface.onRecovery = { [weak self] in self?.requestRefresh(question: true) }
     }
     public var pair: CardPagePair? { surface.pair }
+    public var canFinish: Bool { !busy && phase != .ended }
+    public var canReveal: Bool { phase == .question && !busy && !paused }
+    public var canRate: Bool { phase == .answer && !busy && !paused }
     public var canUndo: Bool { if case .available = undoStatus { return !busy && !paused && phase != .ended }; return false }
     public var canRedo: Bool { if case .available = redoStatus { return !busy && !paused && phase != .ended }; return false }
     public var progress: Double {

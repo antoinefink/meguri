@@ -10,6 +10,17 @@ public enum ReviewInputOwnership {
     public static func admits(cardFocused: Bool, editing: Bool, paused: Bool, repeated: Bool) -> Bool {
         cardFocused && !editing && !paused && !repeated
     }
+    #if os(macOS)
+    /// Menu commands use exactly the card input admission boundary, including
+    /// native focus, behavior dialogs, DOM editing and repeated key events.
+    public static func admitsNativeCommand(_ model: ReviewCoordinator) -> Bool {
+        guard let pair = model.pair, let pages = model.surface as? ReviewPages,
+              pages.presenter.isAvailable else { return false }
+        let repeated = NSApp.currentEvent.map { $0.type == .keyDown && $0.isARepeat } ?? false
+        return admits(cardFocused: cardFocused(in: pair.current.webView), editing: model.surface.editing,
+            paused: model.paused, repeated: repeated)
+    }
+    #endif
     static func contains(_ view: CardPlatformView, in container: CardPlatformView) -> Bool {
         view === container || view.isDescendant(of: container)
     }

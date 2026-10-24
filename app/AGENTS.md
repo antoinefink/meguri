@@ -28,6 +28,8 @@
 
 ## Shell (U150)
 
+- Mac Settings is a separate native scene sharing the collection. `AppNavigation.sheetHost` assigns file sheets to main or Settings; an inactive or nonmatching host must not dismiss another host's sheet. FSRS admission remains on main. Original in-window Settings rules are superseded by `docs/design/native-interface-contract.md`.
+
 - `AppNavigation` (AppModel) is the only navigation state, above the layout switch; views read it and never keep their own section, selection, path or open sheet. A feature model that must survive a layout switch (drafts, a review session, Browse's search) is held by it (`featureState`, `ReviewPresentation.session`), never by a view.
 - Features replace their placeholders in `ShellFeatures.standard` (`Shell/SectionDestinationView.swift`). Push only `Destination` cases; a section root's `ScrollView` takes `navigationScrollPosition(_:_:idType:)`. A bound `ScrollPosition` does not report user scrolling (its `viewID` stays nil), and a scroll view built hidden (a root under a pushed screen) neither scrolls to a position nor stays at it: the modifier tracks the rows on screen and scrolls back on appear.
 - Sheets go through `AppNavigation.present(_:)` (`PresentationHost`); in the tab layout a review's full-screen cover presents them itself.

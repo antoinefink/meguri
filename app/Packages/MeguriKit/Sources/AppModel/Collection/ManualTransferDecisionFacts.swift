@@ -21,8 +21,8 @@ public extension ManualTransferRecord {
             formatter.timeStyle = .short
             return formatter.string(from: Date(timeIntervalSince1970: Double(recordedInstant) / 1_000))
         }
-        add("endpoint", "Configured endpoint", configuredEndpoint)
-        if targetEndpoint != configuredEndpoint { add("target", "Approved destination", targetEndpoint) }
+        add("endpoint", "Configured endpoint", sanitizedTransferEndpoint(configuredEndpoint))
+        if targetEndpoint != configuredEndpoint { add("target", "Approved destination", sanitizedTransferEndpoint(targetEndpoint)) }
         add("direction", "Replacement", direction == .import ? "Server collection replaces this device’s collection." : "Prepared collection replaces the server collection and becomes active on this device.")
         add("prepared", "Prepared", date(preparedMilliseconds))
         if let local {
@@ -93,4 +93,12 @@ public extension ManualTransferRecord {
         if let nextEligibleMilliseconds { add("next", "Next eligible", date(nextEligibleMilliseconds)) }
         return facts
     }
+}
+
+/// A display value only. Eligibility remains the service's authority.
+public func sanitizedTransferEndpoint(_ endpoint: String) -> String {
+    guard var parts = URLComponents(string: endpoint),
+          let scheme = parts.scheme?.lowercased(), ["https", "http"].contains(scheme), parts.host != nil else { return "Not recorded" }
+    parts.user = nil; parts.password = nil; parts.query = nil; parts.fragment = nil
+    return parts.string ?? "Not recorded"
 }

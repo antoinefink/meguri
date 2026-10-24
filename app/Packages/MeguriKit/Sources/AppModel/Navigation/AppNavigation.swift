@@ -29,6 +29,8 @@ public final class AppNavigation {
     /// its own root. Only a relaunch in the tab layout hides the page of a
     /// selected deck; leaving the page (Home, a pop) deselects the deck.
     private var showsDeckPage = false
+    public enum SheetHost: Equatable { case main, settings }
+    public var sheetHost: SheetHost = .main
     public var sheet: SheetRoute?
     public private(set) var review: ReviewPresentation?
     /// The sidebar layout's columns. The sidebar's own toggle, ⌃⌘S and the
@@ -279,6 +281,7 @@ public final class AppNavigation {
     // MARK: Sheets (R25)
 
     public func present(_ sheet: SheetRoute) {
+        if self.sheet != sheet { sheetHost = .main }
         self.sheet = sheet
     }
 

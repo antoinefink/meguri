@@ -170,6 +170,16 @@
           }
         }
       }
+    },
+    "Back to Decks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back to Decks"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

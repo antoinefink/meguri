@@ -13,6 +13,7 @@ import SwiftUI
 /// Note Types U200, Add U195, the collection's decks U151/U152). Snapshot
 /// fixtures and test-hook routes pass their own.
 struct ShellFeatures {
+    var nativeMacWorkspace = false
     var availableSections: [AppSection] = AppSection.sidebar
     var sectionRoot: (AppSection, AppNavigation) -> AnyView
     var deckPage: (DeckID, AppNavigation) -> AnyView
@@ -27,7 +28,12 @@ struct ShellFeatures {
     /// available to isolated shell fixtures that replace every review slot.
     static func standard(collection: ReviewCollection) -> ShellFeatures {
         var features = standard
+        #if os(macOS)
+        features.nativeMacWorkspace = true
+        features.availableSections = [.home]
+        #else
         features.availableSections = [.home, .settings]
+        #endif
         features.sectionRoot = { section, _ in
             if section == .settings { AnyView(SettingsView(collection: collection)) }
             else { AnyView(HomeView(collection: collection)) }
@@ -36,7 +42,7 @@ struct ShellFeatures {
         features.sidebarDecks = { _ in AnyView(HomeSidebarDecks(collection: collection)) }
         features.review = { presentation, _ in
             if let model = presentation.session as? ReviewCoordinator {
-                AnyView(ReviewView(model: model, visibilityChanged: collection.setReviewVisible) { Task { await collection.finishReview() } })
+                AnyView(ReviewView(model: model, status: AnyView(ConnectionStatusView(model: collection.manualTransfers)), visibilityChanged: collection.setReviewVisible) { Task { await collection.finishReview() } })
             } else { AnyView(EmptyView()) }
         }
         features.sheet = { route, navigation in

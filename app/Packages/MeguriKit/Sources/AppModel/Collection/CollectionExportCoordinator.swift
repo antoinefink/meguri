@@ -46,7 +46,11 @@ public final class CollectionExportCoordinator {
          finishLease: @escaping @Sendable (CollectionExportReadLease) async throws -> Void = { try await $0.finish() }) {
         self.owner = owner; self.service = service; self.finishLease = finishLease
     }
-    public func present() { owner?.navigation.present(.collectionExport) }
+    public var canPresent: Bool { owner?.exportAllowed == true && !busy }
+    public func present() {
+        guard canPresent else { return }
+        owner?.navigation.present(.collectionExport)
+    }
     public func prepare() {
         guard canPrepare, let owner else { return }
         stale = false; message = nil; publicationUncertain = false; stage = .preparing; progress = nil

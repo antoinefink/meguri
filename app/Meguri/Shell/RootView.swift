@@ -67,6 +67,7 @@ struct RootView: View {
             }
         }
         #if os(macOS)
+        .focusedSceneValue(\.nativeCommandContext, collection.map { NativeCommandContext(collection: $0, host: .main) })
         // Hide only the presenting shell; sheets and alerts own their AX tree.
         .accessibilityHidden(launchSheet || launchAlert || linkRefusal != nil || navigation.sheet != nil)
         #endif
@@ -127,7 +128,10 @@ struct RootView: View {
                 #endif
             }
         }
-        .onChange(of: navigation.sheet) { _, _ in
+        .onChange(of: navigation.sheet) { _, sheet in
+            #if os(macOS)
+            if sheet == .fsrsAdmission { openWindow(id: WindowMetrics.mainWindowID) }
+            #endif
             updateReviewObscuration()
             collection?.entry.presentationChanged()
         }

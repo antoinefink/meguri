@@ -660,3 +660,79 @@ extension ManualTransferSettingsTests {
         }
     }
 }
+
+extension ManualTransferSettingsTests {
+    @Test func connectionTestNormalizesDraftWithoutSavingOrAuthenticating() async {
+        let service = SettingsTransferService(normalizedEndpoint: "http://example.test/prefix/")
+        let keys = SettingsTransferKeys()
+        let probe = SettingsReachabilityProbe()
+        let model = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: nil,
+            reachability: { await probe.check($0) })
+        let draft = "  HTTP://Example.Test:80/prefix "
+        model.endpointDraft = draft
+        model.username = "Synthetic User"; model.password = "not-for-the-test"
+        let work = Task { await model.testConnection() }
+        await probe.waitUntilStarted()
+        #expect(model.busy && !model.canTestConnection && !model.canLogin && !model.canPrepare)
+        await probe.finish(.response(401)); await work.value
+        #expect(await probe.endpoints == ["http://example.test/prefix/"])
+        #expect(await service.calls == ["normalize"])
+        #expect(await service.normalizationInputs == [draft])
+        #expect(await service.invalidations == 0)
+        #expect(await keys.saved == nil)
+        #expect(await keys.clears == 0)
+        #expect(model.endpoint.isEmpty && model.endpointDraft == draft)
+        #expect(!model.authenticated && model.password == "not-for-the-test" && model.preview == nil)
+        #expect(model.connectionTestResult == EndpointReachabilityResult.response(401).description)
+        #expect(!model.busy)
+    }
+
+    @Test func rejectedEndpointEligibilityNeverReachesNetworkProbe() async {
+        let service = SettingsTransferService(rejectNormalization: true)
+        let probe = SettingsReachabilityProbe()
+        let model = ManualTransferCoordinator(owner: nil, service: service, defaults: nil,
+            reachability: { await probe.check($0) })
+        model.endpointDraft = "https://ankiweb.net/"
+        await model.testConnection()
+        #expect(await service.calls == ["normalize"])
+        #expect(await probe.endpoints.isEmpty)
+        #expect(model.connectionTestResult?.contains("Address validation failed") == true)
+        #expect(model.endpoint.isEmpty && !model.authenticated && !model.busy)
+    }
+
+    @Test(arguments: [false, true])
+    func staleConnectionCompletionCannotPublishOrChangeAccount(cancel: Bool) async {
+        let service = SettingsTransferService()
+        let probe = SettingsReachabilityProbe()
+        let model = ManualTransferCoordinator(owner: nil, service: service, defaults: nil,
+            reachability: { await probe.check($0) })
+        model.endpointDraft = "https://example.test/old/"
+        let work = Task { await model.testConnection() }
+        await probe.waitUntilStarted()
+        if cancel { await model.cancel() }
+        model.endpointDraft = "https://example.test/new/"
+        model.username = "Synthetic User"; model.password = "transient"
+        await model.login(); await model.applyEndpoint(); await model.logout(); await model.prepare()
+        await probe.finish(.response(200)); await work.value
+        #expect(await service.calls == ["normalize"])
+        #expect(model.connectionTestResult == nil && model.endpoint.isEmpty && !model.authenticated)
+        #expect(!model.busy && model.preview == nil)
+        #expect(!model.connectionEvents.contains { $0.detail.contains("HTTP response received") })
+    }
+}
+
+private actor SettingsReachabilityProbe {
+    private(set) var endpoints: [String] = []
+    private let starts: AsyncStream<Void>
+    private let started: AsyncStream<Void>.Continuation
+    private var pending: CheckedContinuation<EndpointReachabilityResult, Never>?
+    init() { (starts, started) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1)) }
+    func check(_ endpoint: String) async -> EndpointReachabilityResult {
+        endpoints.append(endpoint)
+        return await withCheckedContinuation { continuation in
+            pending = continuation; started.yield(())
+        }
+    }
+    func waitUntilStarted() async { var iterator = starts.makeAsyncIterator(); _ = await iterator.next() }
+    func finish(_ result: EndpointReachabilityResult) { pending?.resume(returning: result); pending = nil }
+}

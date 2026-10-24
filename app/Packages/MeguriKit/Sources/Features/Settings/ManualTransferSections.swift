@@ -11,43 +11,56 @@ public struct ManualTransferSections: View {
     private enum Field: Hashable { case endpoint, username, password }
     @FocusState private var focusedField: Field?
     #endif
-    enum Area: Equatable { case all, connectionAndTransfers, history }
+    enum Area: Equatable { case all, connectionAndTransfers, connection, transfers, history }
     private let area: Area
     public init(model: ManualTransferCoordinator) { self.init(model: model, area: .all) }
     init(model: ManualTransferCoordinator, area: Area) { self.model = model; self.area = area }
     public var body: some View {
         Group {
-            if area != .history {
+            if area == .all || area == .connectionAndTransfers || area == .connection {
                 Section {
-                    TextField("Server URL", text: $model.endpointDraft, axis: .vertical)
-                        .font(.body)
-                        .textContentType(.URL)
-                        #if os(macOS)
-                        .textFieldStyle(.roundedBorder)
-                        #endif
-                        #if os(iOS)
-                        .focused($focusedField, equals: .endpoint)
-                        #endif
-                        .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
-                        .accessibilityIdentifier("settings.anki.endpoint")
-                        .accessibilityHint("Self-hosted server URL, including an optional path prefix.")
+                    LabeledContent {
+                        HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
+                            TextField("Server URL", text: $model.endpointDraft, axis: .vertical)
+                                .font(.body)
+                                .textContentType(.URL)
+                                #if os(macOS)
+                                .textFieldStyle(.roundedBorder)
+                                #endif
+                                #if os(iOS)
+                                .focused($focusedField, equals: .endpoint)
+                                #endif
+                                .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
+                                .accessibilityIdentifier("settings.anki.endpoint")
+                                .accessibilityHint("Self-hosted server URL, including an optional path prefix.")
+                            Button { Task { await model.testConnection() } } label: {
+                                Text("Test", bundle: .module)
+                                    .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                            }
+                            .disabled(!model.canTestConnection)
+                            .accessibilityLabel(Text("Test Connection", bundle: .module))
+                            .accessibilityIdentifier("settings.anki.testConnection")
+                        }
+                    } label: {
+                        Text("Server URL", bundle: .module)
+                    }
+                    if let result = model.connectionTestResult {
+                        Text(verbatim: result)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("settings.anki.testResult")
+                    }
+                    if model.endpointDraft.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("http:") {
+                        Text("HTTP sends data without encryption. Use it only for a server and network you trust.", bundle: .module)
+                            .foregroundStyle(.token(.textSecondary))
+                    }
                     if model.authenticated {
                         action("Save Endpoint", id: "saveEndpoint", disabled: model.busy || model.preview != nil) { await model.applyEndpoint() }
                     }
-                    if !model.endpoint.isEmpty {
-                        LabeledContent {
-                            Text(model.endpoint)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .accessibilityIdentifier("settings.anki.configuredEndpointValue")
-                        } label: {
-                            Text("Configured endpoint")
-                                .accessibilityIdentifier("settings.anki.configuredEndpointLabel")
-                        }
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Configured endpoint")
-                        .accessibilityValue(Text(verbatim: model.endpoint))
-                        .accessibilityIdentifier("settings.anki.configuredEndpoint")
-                    }
+                } header: {
+                    Text("Server Address", bundle: .module)
+                        .accessibilityIdentifier("settings.anki.sectionTitle")
+                }
+                Section {
                     if model.authenticated {
                         LabeledContent("Login", value: model.username)
                             .accessibilityIdentifier("settings.anki.loginIdentity")
@@ -79,9 +92,10 @@ public struct ManualTransferSections: View {
                         action("Log In", id: "login", disabled: !model.canLogin) { await model.login() }
                     }
                 } header: {
-                    Text("Connection", bundle: .module)
-                        .accessibilityIdentifier("settings.anki.sectionTitle")
+                    Text("Account", bundle: .module)
                 }
+            }
+            if area == .all || area == .connectionAndTransfers || area == .transfers {
                 Section {
                     Text("Server transfers replace a collection. Collection Files and local reviews do not require a server login.", bundle: .module)
                         .foregroundStyle(.token(.textSecondary))
@@ -111,6 +125,9 @@ public struct ManualTransferSections: View {
                         action("Make Copies and Prepare Export Preview", id: "prepareExport", disabled: !model.canPrepare) { await model.prepare() }
                     }
                 } header: { Text("Server Transfers", bundle: .module) }
+            }
+            // Pending decisions and their remedies remain available in either native pane.
+            if area != .history {
                 if let preview = model.preview {
                     Section(model.isRecoveryPreview ? "Local Recovery Decision" : "Final Replacement Preview") {
                         recordFacts(preview.record)
@@ -121,7 +138,7 @@ public struct ManualTransferSections: View {
                                 .font(.body)
                                 .foregroundStyle(.token(model.canConfirm ? .destructive : .textSecondary))
                                 .fixedSize(horizontal: false, vertical: true)
-                                .frame(minWidth: minimumActionSize, minHeight: minimumActionSize, alignment: .leading)
+                                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -151,7 +168,7 @@ public struct ManualTransferSections: View {
                     }
                 }
             }
-            if area != .connectionAndTransfers {
+            if area == .all || area == .history {
                 Section {
                     Text("This history loads offline. Restart never resumes a server request. Safety copies contain collection data, without media. A copy saved below is independent of the retained original; unverified files must be inspected before use.", bundle: .module)
                         .foregroundStyle(.token(.textSecondary))
@@ -161,6 +178,10 @@ public struct ManualTransferSections: View {
                         VStack(alignment: .leading, spacing: Spacing.small) {
                             Text(entry.record.direction == .import ? "Import from Anki" : "Export to Anki").font(.headline)
                             Text(status(entry.record))
+                            LabeledContent("Last persisted phase", value: entry.record.phase.rawValue)
+                            LabeledContent("Recorded boundary", value: entry.record.boundary?.rawValue ?? "Not recorded")
+                            LabeledContent("Attempt time", value: "Not recorded")
+                            LabeledContent("Completion time", value: "Not recorded")
                             recordFacts(entry.record)
                             if entry.record.canResumeMedia {
                                 action("Review Media Decision / Resume…", id: "resumeMedia.\(entry.id)", disabled: model.busy || model.preview != nil || model.mediaPreview != nil || !model.authenticated) { await model.prepareMedia(entry) }
@@ -180,7 +201,7 @@ public struct ManualTransferSections: View {
                                         .font(.body)
                                         .foregroundStyle(.token(model.busy ? .textSecondary : .statusAccent))
                                         .fixedSize(horizontal: false, vertical: true)
-                                        .frame(minWidth: minimumActionSize, minHeight: minimumActionSize, alignment: .leading)
+                                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
@@ -189,7 +210,7 @@ public struct ManualTransferSections: View {
                             }
                         }
                     }
-                } header: { Text("Safety Copies and History", bundle: .module) }
+                } header: { Text("Sync Logs", bundle: .module) }
             }
         }
         .font(.body)
@@ -203,7 +224,7 @@ public struct ManualTransferSections: View {
                             .font(.body)
                             .foregroundStyle(.token(.statusAccent))
                             .fixedSize(horizontal: false, vertical: true)
-                            .frame(minWidth: minimumActionSize, minHeight: minimumActionSize)
+                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
                             .contentShape(Rectangle())
                     }
                         .buttonStyle(.plain)
@@ -261,6 +282,7 @@ public struct ManualTransferSections: View {
         switch (model.stage, model.progress?.cancellable) {
         case (.applyingDecision, .some(false)): "Activating the confirmed collection…"
         case (.applyingDecision, _): "Transferring the collection…"
+        case (.testingConnection, _): "Testing the entered address without credentials…"
         case (.authenticating, _): "Getting a login key for this device…"
         case (.buildingDecision, _): "Saving safety copies and preparing the preview…"
         case (.inspectingCandidate, _): "Inspecting the local recovery collection…"
@@ -277,19 +299,13 @@ public struct ManualTransferSections: View {
                 .font(.body)
                 .foregroundStyle(.token(disabled ? .textSecondary : .statusAccent))
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(minWidth: minimumActionSize, minHeight: minimumActionSize, alignment: .leading)
+                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
                 .contentShape(Rectangle())
         }
             .buttonStyle(.plain)
             .disabled(disabled).accessibilityIdentifier("settings.anki.\(id)")
     }
-    private var minimumActionSize: CGFloat {
-        #if os(macOS)
-        28
-        #else
-        44
-        #endif
-    }
+
     @ViewBuilder private func recordFacts(_ record: ManualTransferRecord) -> some View {
         ForEach(record.decisionFacts) { fact in
             LabeledContent(fact.label, value: fact.value)

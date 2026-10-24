@@ -67,7 +67,9 @@ Supporting requirements: R131, R134, R135, R1975, R1976, R1980–R1982.
 - Give Settings a persistent sidebar with exactly Connection and Collection for this preview.
 - Restore the last selected section as a device-local preference.
 - Connection groups the server address and its test separately from account credentials and account actions.
+- Show one visible Server URL label. Show Save Endpoint only after an address change.
 - Collection contains the existing file import and export actions and their real presentations.
+- Keep Collection's first view to simple action rows. A chosen server action opens its full preparation/decision flow before any request starts; keep all effect warnings before their corresponding preparation or confirmation action.
 - Keep normal actions, progress and actionable errors visible. Secondary diagnostics belong in N7.
 - Keep other Apple platforms' existing Settings navigation functional.
 - Preserve storage boundaries and write-on-change behavior (R112, R114).

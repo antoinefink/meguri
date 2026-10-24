@@ -8,6 +8,28 @@ public struct HomeView: View {
     public let deckID: Int64?
     public init(collection: ReviewCollection, deckID: Int64? = nil) { self.collection = collection; self.deckID = deckID }
     public var body: some View {
+        Group {
+            #if os(macOS)
+            GeometryReader { geometry in
+                scrollContent(availableHeight: geometry.size.height)
+            }
+            #else
+            scrollContent()
+            #endif
+        }
+        .navigationTitle(deckID == nil ? String(localized: "Decks", bundle: .module) : "")
+        .accessibilityIdentifier("home.collection.screen")
+    }
+    private var centersContent: Bool {
+        #if os(macOS)
+        if case .ready = collection.state {
+            return collection.decks.isEmpty || deckID.flatMap { collection.deck($0) } != nil
+        }
+        if case .noFile = collection.state { return true }
+        #endif
+        return false
+    }
+    private func scrollContent(availableHeight: CGFloat = 0) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.large) {
                 if let record = collection.previousRecord, !record.answers.isEmpty {
@@ -22,18 +44,14 @@ public struct HomeView: View {
                         .accessibilityIdentifier("home.collection.error")
                 }
                 content
-                if collection.state == .ready {
-                    HomeCollectionImportButton(canPresent: collection.entry.canPresent) { collection.entry.present() }
-                }
             }
             .padding(Spacing.medium)
             .frame(maxWidth: ContentWidth.readable, alignment: .leading)
             .frame(maxWidth: .infinity)
+            .frame(minHeight: centersContent ? availableHeight : 0, alignment: centersContent ? .center : .top)
             .scrollTargetLayout()
         }
         .navigationScrollPosition(collection.navigation, .section(.home), idType: Int64.self)
-        .navigationTitle(deckID.flatMap { collection.deck($0)?.name } ?? String(localized: "Decks", bundle: .module))
-        .accessibilityIdentifier("home.collection.screen")
     }
     private var hasFailed: Bool {
         if case .failed = collection.state { return true }
@@ -52,24 +70,66 @@ public struct HomeView: View {
                 retryIdentifier: "home.collection.retry", retry: { Task { await collection.start() } })
         case .ready:
             if let deckID, let deck = collection.deck(deckID) {
-                VStack(alignment: .leading, spacing: Spacing.large) {
+                VStack(spacing: Spacing.large) {
+                    Text(verbatim: deck.name)
+                        .font(.largeTitle.bold())
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                    #if os(macOS)
+                    HStack(spacing: Spacing.large) {
+                        VStack(spacing: Spacing.xSmall) {
+                            Text(deck.counts.new, format: .number)
+                                .font(.title2)
+                                .foregroundStyle(.token(deck.counts.new == 0 ? .countZero : .countNew))
+                            Text("New", bundle: .module).font(.subheadline)
+                        }
+                        .accessibilityElement(children: .combine)
+                        VStack(spacing: Spacing.xSmall) {
+                            Text(deck.counts.learning, format: .number)
+                                .font(.title2)
+                                .foregroundStyle(.token(deck.counts.learning == 0 ? .countZero : .countLearn))
+                            Text("Learning", bundle: .module).font(.subheadline)
+                        }
+                        .accessibilityElement(children: .combine)
+                        VStack(spacing: Spacing.xSmall) {
+                            Text(deck.counts.review, format: .number)
+                                .font(.title2)
+                                .foregroundStyle(.token(deck.counts.review == 0 ? .countZero : .countDue))
+                            Text("Due", bundle: .module).font(.subheadline)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                    .accessibilityIdentifier("home.deck.counts")
+                    #else
                     DeckCounts(counts: deck.counts)
                         .accessibilityIdentifier("home.deck.counts")
+                    #endif
                     Button { Task { await collection.startStudy(deckID: deck.id) } } label: {
                         Label {
-                            Text("Study Now", bundle: .module)
+                            Text("Study", bundle: .module)
                                 .fixedSize(horizontal: false, vertical: true)
                         } icon: { Image(systemName: "play.fill") }
                             .font(.headline)
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                            #if os(macOS)
+                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                            #else
+                            .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget)
+                            #endif
                     }
-                    .buttonStyle(.bordered)
-                    .tint(ColorToken.textPrimary.color)
+                    .buttonStyle(.borderedProminent)
+                    #if os(macOS)
+                    .controlSize(.regular)
+                    #else
                     .controlSize(.large)
-                    .disabled(!collection.canStudy)
                     .frame(maxWidth: ContentWidth.primaryAction)
+                    #endif
+                    .disabled(!collection.canStudy)
                     .accessibilityIdentifier("home.deck.study")
                 }
+                .frame(maxWidth: .infinity)
+                #if !os(macOS)
+                .padding(.vertical, Spacing.xxLarge)
+                #endif
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("home.deck.page.\(deck.id)")
             } else if collection.decks.isEmpty {
@@ -88,7 +148,7 @@ struct HomeCollectionEmptyContent: View {
 
     var body: some View {
         EmptyStateView(Text("No Collection", bundle: .module), systemImage: "rectangle.stack",
-            description: Text("Import a collection-only .colpkg to study your own cards on this device.", bundle: .module)) {
+            description: Text("Import a collection to start studying.", bundle: .module)) {
             if let importAction {
                 HomeCollectionImportButton(canPresent: canPresent, action: importAction)
             }
@@ -173,7 +233,24 @@ public struct HomeSidebarDecks: View {
                 .accessibilityIdentifier("home.sidebar.guidance")
         } else {
             ForEach(Self.flatten(collection.decks), id: \.id) { deck in
-                Text(verbatim: deck.path)
+                Group {
+                    #if os(macOS)
+                    HStack(spacing: Spacing.small) {
+                        Text(verbatim: deck.path)
+                        Spacer(minLength: 0)
+                        if let node = collection.deck(deck.id) {
+                            Text("\(Text(node.counts.review, format: .number)) due", bundle: .module)
+                                .font(.subheadline)
+                                .foregroundStyle(.token(node.counts.review == 0 ? .countZero : .textSecondary))
+                        }
+                    }
+                    #else
+                    VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+                        Text(verbatim: deck.path)
+                        if let node = collection.deck(deck.id) { DeckCounts(counts: node.counts) }
+                    }
+                    #endif
+                }
                 .foregroundStyle(.token(.textPrimary))
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
@@ -185,20 +262,7 @@ public struct HomeSidebarDecks: View {
         }
     }
 
-    private var emptyGuidance: Text {
-        switch collection.state {
-        case .unopened, .loading:
-            Text("Your decks will appear here when the collection opens.", bundle: .module)
-        case .noFile:
-            Text("Import a collection in Settings to see your decks here.", bundle: .module)
-        case .failed:
-            Text("Your collection couldn’t open. See Decks for details, or import a collection in Settings.", bundle: .module)
-        case .unavailable:
-            Text("Your decks will appear when the current collection operation finishes.", bundle: .module)
-        case .ready:
-            Text("This collection has no decks to study.", bundle: .module)
-        }
-    }
+    private var emptyGuidance: Text { Text("No decks", bundle: .module) }
 
     private struct Row {
         let id: Int64

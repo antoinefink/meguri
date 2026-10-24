@@ -4,8 +4,8 @@ import SwiftUI
 
 /// The sidebar layout (R4, R17, R20–R22), at regular width and always on the
 /// Mac: the sections and the deck tree in the sidebar, the selection's
-/// screen in the detail column. A review fills the detail column and the
-/// sidebar collapses until it ends; selecting another row ends it. Every
+/// screen in the detail column. Production Mac review replaces the split
+/// view entirely; adaptive and fixture shells retain their layout. Every
 /// piece of state lives in `AppNavigation`, so the tab layout can take over
 /// at any moment (R5).
 struct SidebarRootView: View {
@@ -14,6 +14,19 @@ struct SidebarRootView: View {
     let configuration: LaunchConfiguration
 
     var body: some View {
+        #if os(macOS)
+        if features.nativeMacWorkspace, let review = navigation.review {
+            features.review(review, navigation)
+                .toolbar(removing: .sidebarToggle)
+        } else {
+            workspace
+        }
+        #else
+        workspace
+        #endif
+    }
+
+    private var workspace: some View {
         NavigationSplitView(columnVisibility: $navigation.columnVisibility) {
             SidebarView(navigation: navigation, features: features)
                 #if os(macOS)

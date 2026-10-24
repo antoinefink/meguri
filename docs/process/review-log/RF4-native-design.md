@@ -34,3 +34,19 @@ the Connection setup page; proper pane-height centering. The compact Mac Study
 and sidebar composition is now explicit in N2. The existing Sync Logs heading
 was confirmed; it is not missing. These changes are WIP pending the fixer and
 the running native preview. Full acceptance checks remain deferred as above.
+
+R2 filtered fixer `cleanroom/20261024T114346Z-48138` closed the source review
+items. `build-app/20261024T114842Z-53154` passed lint and the team-signed normal
+Mac build with zero warnings. Independent R2 source review was clear of P0–P2.
+Privacy retained one explanatory-comment match; filtered comment-only run
+`cleanroom/20261024T115258Z-58286` removed those two comment lines without
+behavior changes. No guard exception was added.
+
+Antoine approved normal quit of the two older previews. Both quit through their
+normal application handlers. The new checked product was copied to a stable
+preview path; app and widget hashes matched its receipt. PID 59001 opened that
+exact product. Direct inspection of its Settings found a duplicated URL label,
+an unchanged-address Save action and too much initial transfer setup content.
+Antoine requested ongoing direct visual inspection and Apple-quality results.
+URL row, a Save action with no draft change, and a long transfer form.
+was made during inspection. Full acceptance is still pending.

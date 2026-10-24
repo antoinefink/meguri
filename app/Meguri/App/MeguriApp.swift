@@ -5,8 +5,8 @@ import SwiftUI
 /// On the Mac a `Window` scene (no New Window, Window > Meguri reopens it)
 /// with the app delegate that keeps Meguri running while an integration is
 /// on (R11); on iPhone and iPad a `WindowGroup` limited to one scene by
-/// Info-iOS.plist. There is no `Settings` scene: Settings is a section of
-/// the window, and ⌘, selects it (U159).
+/// Info-iOS.plist. The native Mac Settings scene shares the app-owned
+/// collection (native interface contract N5, Antoine's override of R6/R110).
 ///
 /// Normal launches use the default launch configuration and restore the
 /// device's UI state. In Debug and Profile builds the test hooks first
@@ -82,6 +82,12 @@ struct MeguriApp: App {
         .commands {
             SidebarCommands()
             MainWindowCommands()
+            StudyCommands()
+        }
+        SwiftUI.Settings {
+            if let collection {
+                SettingsWindow(collection: collection, features: features, configuration: configuration)
+            }
         }
         #else
         WindowGroup {

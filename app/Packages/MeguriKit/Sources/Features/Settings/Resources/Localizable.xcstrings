@@ -121,16 +121,6 @@
         }
       }
     },
-    "Export Collection — Without Media": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Export Collection — Without Media"
-          }
-        }
-      }
-    },
     "Import Collection": {
       "localizations": {
         "en": {
@@ -417,6 +407,146 @@
           "stringUnit": {
             "state": "translated",
             "value": "This history loads offline. Restart never resumes a server request. Safety copies contain collection data, without media. A copy saved below is independent of the retained original; unverified files must be inspected before use."
+          }
+        }
+      }
+    },
+    "Test": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test"
+          }
+        }
+      }
+    },
+    "Test Connection": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test Connection"
+          }
+        }
+      }
+    },
+    "HTTP sends data without encryption. Use it only for a server and network you trust.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HTTP sends data without encryption. Use it only for a server and network you trust."
+          }
+        }
+      }
+    },
+    "Server Address": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server Address"
+          }
+        }
+      }
+    },
+    "Account": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account"
+          }
+        }
+      }
+    },
+    "Sync Logs": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Logs"
+          }
+        }
+      }
+    },
+    "Collection": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collection"
+          }
+        }
+      }
+    },
+    "Connection details": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connection details"
+          }
+        }
+      }
+    },
+    "Configured endpoint": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configured endpoint"
+          }
+        }
+      }
+    },
+    "Remote freshness is unknown. A prior transfer or saved login does not establish the server’s current state.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remote freshness is unknown. A prior transfer or saved login does not establish the server’s current state."
+          }
+        }
+      }
+    },
+    "Connection status": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connection status"
+          }
+        }
+      }
+    },
+    "Last recorded preparation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last recorded preparation"
+          }
+        }
+      }
+    },
+    "No recorded server transfer.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No recorded server transfer."
+          }
+        }
+      }
+    },
+    "Remote freshness is unknown. Review Connection settings for details.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remote freshness is unknown. Review Connection settings for details."
           }
         }
       }

@@ -6,9 +6,11 @@ import SwiftUI
 public struct ReviewView: View {
     public let model: ReviewCoordinator
     public let close: () -> Void
+    public let status: AnyView?
     public let visibilityChanged: (Bool) -> Void
     @Environment(\.colorScheme) private var colorScheme
-    public init(model: ReviewCoordinator, visibilityChanged: @escaping (Bool) -> Void = { _ in }, close: @escaping () -> Void) {
+    public init(model: ReviewCoordinator, status: AnyView? = nil, visibilityChanged: @escaping (Bool) -> Void = { _ in }, close: @escaping () -> Void) {
+        self.status = status
         self.model = model; self.visibilityChanged = visibilityChanged; self.close = close
     }
     public var body: some View {
@@ -17,7 +19,7 @@ public struct ReviewView: View {
             phase: model.phase, states: model.item?.nextStates, enabled: !model.paused,
             close: close, undo: { model.restore() }, redo: { model.restore(redo: true) },
             reveal: model.reveal, rate: model.rate,
-            timerText: model.item?.homePreset.showTimer == true ? { model.timerText } : nil) {
+            status: status, timerText: model.item?.homePreset.showTimer == true ? { model.timerText } : nil) {
             ZStack {
                 if let pair = model.pair {
                     #if os(macOS)
@@ -93,6 +95,7 @@ struct ReviewLayout<Card: View>: View {
     let redo: () -> Void
     let reveal: () -> Void
     let rate: (ReviewRating) -> Void
+    var status: AnyView? = nil
     var timerText: (() -> String)? = nil
     @Environment(\.appClock) var clock
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -100,12 +103,29 @@ struct ReviewLayout<Card: View>: View {
     @ViewBuilder let card: () -> Card
     var body: some View {
         VStack(spacing: 0) {
+            #if os(macOS)
+            HStack(spacing: Spacing.small) {
+                Button(action: close) {
+                    Label { Text("Back to Decks", bundle: .module) } icon: { Image(systemName: "chevron.backward") }
+                        .frame(minHeight: ControlMetrics.minimumTarget)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("review.session.close")
+                Spacer(minLength: Spacing.small)
+                timer
+                status
+            }
+            .buttonStyle(.borderless)
+            .padding(Spacing.small)
+            .fixedSize(horizontal: false, vertical: true)
+            #else
             header
                 .buttonStyle(.bordered)
                 .controlSize(.large)
                 .padding(.horizontal, Spacing.small)
                 .fixedSize(horizontal: false, vertical: true)
                 .layoutPriority(1)
+            #endif
             GeometryReader { middle in
                 VStack(spacing: 0) {
                     if let notice {
@@ -130,6 +150,8 @@ struct ReviewLayout<Card: View>: View {
         .accessibilityIdentifier("review.session.screen")
         #if os(macOS)
         .accessibilityAction(named: Text("Show Answer", bundle: .module)) { reveal() }
+        .accessibilityAction(named: Text(verbatim: undoDescription)) { if canUndo { undo() } }
+        .accessibilityAction(named: Text("Redo Answer", bundle: .module)) { if canRedo { redo() } }
         #endif
     }
     @ViewBuilder private var header: some View {
