@@ -192,7 +192,8 @@ screens:
         y: 150
         width: 820
         height: 320
-      summary: "Light rows have no list background or separators. Dark rows are separate cards. Use the same system list style in both appearances."
+      summary: Light rows have no list background or separators. Dark rows are separate cards. Use the
+        same system list style in both appearances.
       image: screens/home.deckList/typical/light-standard-iphoneLarge.png
       run: 20261022T215823Z-82548
     - platform: iphone
@@ -304,7 +305,8 @@ screens:
     - rule: platform-system-components
       state: typical
       variant: light-standard-iphoneLarge
-      summary: "Light rows have no list background or separators. Dark rows are separate cards. Use the same system list style in both appearances."
+      summary: Light rows have no list background or separators. Dark rows are separate cards. Use the
+        same system list style in both appearances.
       from: 20261022T215823Z-82548
       open: true
       since: 20261022T215823Z-82548
@@ -443,8 +445,479 @@ screens:
     status: sketch
     fix_rounds: 0
   settings.sync:
-    status: sketch
+    status: built
     fix_rounds: 0
+    platforms:
+    - iphone
+    - ipad
+    - mac
+    evidence:
+      lint:
+        run: 20261024T044917Z-37476
+        status: pass
+      iphone:
+        snapshots:
+          run: 20261024T044917Z-37212
+          commit: dfad1944326b5e40561d3de546ad98e51103ff3d
+          status: fail
+          digest: 1eb8c35df43a49891379693d9db1867e724ecffae886cfe9bd6035df3c17a4a8
+          input: 719c7bfb66315e9dd4e559f3cf5ae05f8a97fbc283a1d27689e0f633f1fe7531
+        critic:
+          run: 20261024T051821Z-68221
+          session: s-20261024T051825Z-4b60c0d7
+          commit: 6af221ee7d2ad97d25db03deef2ffadd2092e650
+          status: fail
+          high: 13
+          medium: 3
+          low: 1
+          dropped: 0
+          date: '2026-10-24T05:21:11Z'
+      ipad:
+        snapshots:
+          run: 20261024T044917Z-37212
+          commit: dfad1944326b5e40561d3de546ad98e51103ff3d
+          status: fail
+          digest: f636cd5d8194994dee775a64c8707281650e9cc0dd23dcd4893017176d6db25b
+          input: 719c7bfb66315e9dd4e559f3cf5ae05f8a97fbc283a1d27689e0f633f1fe7531
+        critic:
+          run: 20261024T051821Z-68221
+          session: s-20261024T051825Z-4b60c0d7
+          commit: 6af221ee7d2ad97d25db03deef2ffadd2092e650
+          status: fail
+          high: 1
+          medium: 4
+          low: 2
+          dropped: 0
+          date: '2026-10-24T05:21:11Z'
+      mac:
+        snapshots:
+          run: 20261024T044917Z-37212
+          commit: dfad1944326b5e40561d3de546ad98e51103ff3d
+          status: fail
+          digest: 7ee53cbb8b85dc023afa21bc58ffb640731236d72c3c10d27d76081affa9b0ee
+          input: 719c7bfb66315e9dd4e559f3cf5ae05f8a97fbc283a1d27689e0f633f1fe7531
+        critic:
+          run: 20261024T051821Z-68221
+          session: s-20261024T051825Z-4b60c0d7
+          commit: 6af221ee7d2ad97d25db03deef2ffadd2092e650
+          status: pass
+          high: 0
+          medium: 1
+          low: 0
+          dropped: 0
+          date: '2026-10-24T05:21:11Z'
+    issues:
+    - platform: iphone
+      state: typical
+      variant: light-standard-iphoneLarge+rt
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 240
+        width: 800
+        height: 85
+      summary: The large navigation title is cut to 'Anki Server Import / Exp…' at the default text size
+        on a large iPhone; shorten the title or let it wrap.
+      image: screens/settings.sync/typical/light-standard-iphoneLarge+rt.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: empty
+      variant: light-standard-iphoneLarge+rt
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 240
+        width: 800
+        height: 85
+      summary: The large title is cut to 'Anki Server Import / Exp…' at the default text size.
+      image: screens/settings.sync/empty/light-standard-iphoneLarge+rt.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: error
+      variant: light-standard-iphoneLarge+rt
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 240
+        width: 800
+        height: 85
+      summary: The large title is cut to 'Anki Server Import / Exp…' at the default text size.
+      image: screens/settings.sync/error/light-standard-iphoneLarge+rt.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: loading
+      variant: light-standard-iphoneLarge+rt
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 240
+        width: 800
+        height: 85
+      summary: The large title is cut to 'Anki Server Import / Exp…' at the default text size.
+      image: screens/settings.sync/loading/light-standard-iphoneLarge+rt.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: overflow
+      variant: light-standard-iphoneLarge+rt
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 240
+        width: 800
+        height: 85
+      summary: The large title is cut to 'Anki Server Import / Exp…' at the default text size.
+      image: screens/settings.sync/overflow/light-standard-iphoneLarge+rt.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: typical
+      variant: dark-ax5-iphoneSmall
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 720
+        height: 115
+      summary: At AX5 on a small iPhone the large title is cut to 'Anki Server…'.
+      image: screens/settings.sync/typical/dark-ax5-iphoneSmall.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: empty
+      variant: dark-ax5-iphoneSmall
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 720
+        height: 115
+      summary: At AX5 on a small iPhone the large title is cut to 'Anki Server…'.
+      image: screens/settings.sync/empty/dark-ax5-iphoneSmall.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: error
+      variant: dark-ax5-iphoneSmall
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 720
+        height: 115
+      summary: At AX5 on a small iPhone the large title is cut to 'Anki Server…'.
+      image: screens/settings.sync/error/dark-ax5-iphoneSmall.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: loading
+      variant: dark-ax5-iphoneSmall
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 720
+        height: 115
+      summary: At AX5 on a small iPhone the large title is cut to 'Anki Server…'.
+      image: screens/settings.sync/loading/dark-ax5-iphoneSmall.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: overflow
+      variant: dark-ax5-iphoneSmall
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 215
+        width: 720
+        height: 115
+      summary: At AX5 on a small iPhone the large title is cut to 'Anki Server…'.
+      image: screens/settings.sync/overflow/dark-ax5-iphoneSmall.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: typical
+      variant: light-xxxLarge-iphoneSmall+hc+tmax
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 205
+        width: 720
+        height: 95
+      summary: At xxxLarge on a small iPhone the large title is cut to 'Anki Server Impor…'.
+      image: screens/settings.sync/typical/light-xxxLarge-iphoneSmall+hc+tmax.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: overflow
+      variant: dark-ax4-iphoneResizable+rt+rm
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 245
+        width: 980
+        height: 110
+      summary: At AX4 in a resizable iPhone window the large title is cut to 'Anki Server Impor…'.
+      image: screens/settings.sync/overflow/dark-ax4-iphoneResizable+rt+rm.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: overflow
+      variant: dark-standard-iphoneSmall+rt+rm+tmin
+      rule: text-truncation
+      severity: high
+      region:
+        x: 30
+        y: 210
+        width: 720
+        height: 80
+      summary: At the default text size on a small iPhone the large title is cut to 'Anki Server Import
+        / E…'.
+      image: screens/settings.sync/overflow/dark-standard-iphoneSmall+rt+rm+tmin.png
+      run: 20261024T051821Z-68221
+    - platform: ipad
+      state: typical
+      variant: dark-xxxLarge-ipadCompact+rt+tmin
+      rule: text-truncation
+      severity: high
+      region:
+        x: 40
+        y: 175
+        width: 930
+        height: 90
+      summary: At xxxLarge in a compact iPad window the large title is cut to 'Anki Server Import / Exp…'.
+      image: screens/settings.sync/typical/dark-xxxLarge-ipadCompact+rt+tmin.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: typical
+      variant: light-standard-iphoneLarge+rt
+      rule: type-hierarchy
+      severity: medium
+      region:
+        x: 40
+        y: 240
+        width: 800
+        height: 160
+      summary: The first section header repeats the navigation title word for word ('Anki Server Import
+        / Export'), so the screen shows two competing titles; give the section a header of its own or
+        drop it.
+      image: screens/settings.sync/typical/light-standard-iphoneLarge+rt.png
+      run: 20261024T051821Z-68221
+    - platform: ipad
+      state: typical
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      rule: type-hierarchy
+      severity: medium
+      region:
+        x: 41
+        y: 179
+        width: 860
+        height: 160
+      summary: On iPad the section header repeats the navigation title word for word.
+      image: screens/settings.sync/typical/light-standard-ipadRegular+rt+rm+tmax.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: typical
+      variant: dark-ax5-iphoneSmall
+      rule: type-hierarchy
+      severity: medium
+      region:
+        x: 30
+        y: 380
+        width: 720
+        height: 1300
+      summary: At AX5 the whole first screenful is the duplicated header and a long explanatory paragraph,
+        and no control is visible; move the explanation into a footer or shorten it so the form comes
+        first.
+      image: screens/settings.sync/typical/dark-ax5-iphoneSmall.png
+      run: 20261024T051821Z-68221
+    - platform: ipad
+      state: typical
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      rule: platform-adaptivity
+      severity: medium
+      region:
+        x: 41
+        y: 358
+        width: 1982
+        height: 1932
+      summary: In a regular iPad window the form stretches edge to edge, so long help text runs past a
+        readable line length and short values sit far from their labels; hold the form to a readable width.
+      image: screens/settings.sync/typical/light-standard-ipadRegular+rt+rm+tmax.png
+      run: 20261024T051821Z-68221
+    - platform: ipad
+      state: error
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      rule: platform-adaptivity
+      severity: medium
+      region:
+        x: 41
+        y: 358
+        width: 1982
+        height: 2350
+      summary: In a regular iPad window the form stretches edge to edge with no readable-width limit.
+      image: screens/settings.sync/error/light-standard-ipadRegular+rt+rm+tmax.png
+      run: 20261024T051821Z-68221
+    - platform: ipad
+      state: error
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      rule: layout-states
+      severity: medium
+      region:
+        x: 41
+        y: 2028
+        width: 1982
+        height: 160
+      summary: The error ('Upload completion is unknown. Further server transfers are blocked.') is a
+        plain body-text row under a neutral 'Result' header, with no warning symbol and no next step;
+        mark it as an error and give a way forward.
+      image: screens/settings.sync/error/light-standard-ipadRegular+rt+rm+tmax.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: error
+      variant: light-standard-iphoneLarge+rt
+      rule: layout-states
+      severity: medium
+      region:
+        x: 40
+        y: 416
+        width: 800
+        height: 1496
+      summary: On iPhone the error state's first screenful shows no sign of the error, because the message
+        sits below the entire form; surface it near the top or beside the action that failed.
+      image: screens/settings.sync/error/light-standard-iphoneLarge+rt.png
+      run: 20261024T051821Z-68221
+    - platform: ipad
+      state: loading
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      rule: layout-alignment
+      severity: low
+      region:
+        x: 80
+        y: 2084
+        width: 1910
+        height: 210
+      summary: The progress spinner sits alone in its own row, apart from the 'Saving safety copies…'
+        label it describes; put the spinner and the label in one row.
+      image: screens/settings.sync/loading/light-standard-ipadRegular+rt+rm+tmax.png
+      run: 20261024T051821Z-68221
+    - platform: iphone
+      state: typical
+      variant: light-standard-iphoneLarge+rt
+      rule: layout-alignment
+      severity: low
+      region:
+        x: 80
+        y: 900
+        width: 720
+        height: 440
+      summary: Separators under the button rows start further in than the other row separators, so the
+        dividers don't share one leading line.
+      image: screens/settings.sync/typical/light-standard-iphoneLarge+rt.png
+      run: 20261024T051821Z-68221
+    - platform: mac
+      state: error
+      variant: dark-standard-macMinimum
+      rule: platform-idioms
+      severity: medium
+      region:
+        x: 116
+        y: 445
+        width: 1368
+        height: 145
+      summary: On the Mac the empty Username and Password rows show no field outline or placeholder, so
+        they read as static labels rather than inputs.
+      image: screens/settings.sync/error/dark-standard-macMinimum.png
+      run: 20261024T051821Z-68221
+    - platform: ipad
+      state: overflow
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      rule: copy-plain
+      severity: low
+      region:
+        x: 41
+        y: 276
+        width: 1982
+        height: 104
+      summary: 'A ''Fixture only: simulated media effects. No server work or acceptance.'' banner leads
+        the screen; check that it never ships, and keep its copy out of the design''s hierarchy.'
+      image: screens/settings.sync/overflow/light-standard-ipadRegular+rt+rm+tmax.png
+      run: 20261024T051821Z-68221
+    tasks:
+    - rule: type-hierarchy
+      state: typical
+      variant: light-standard-iphoneLarge+rt
+      summary: The first section header repeats the navigation title word for word ('Anki Server Import
+        / Export'), so the screen shows two competing titles; give the section a header of its own or
+        drop it.
+      from: 20261024T051821Z-68221
+      open: true
+      since: 20261024T051821Z-68221
+    - rule: type-hierarchy
+      state: typical
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      summary: On iPad the section header repeats the navigation title word for word.
+      from: 20261024T051821Z-68221
+      open: true
+      since: 20261024T051821Z-68221
+    - rule: type-hierarchy
+      state: typical
+      variant: dark-ax5-iphoneSmall
+      summary: At AX5 the whole first screenful is the duplicated header and a long explanatory paragraph,
+        and no control is visible; move the explanation into a footer or shorten it so the form comes
+        first.
+      from: 20261024T051821Z-68221
+      open: true
+      since: 20261024T051821Z-68221
+    - rule: platform-adaptivity
+      state: typical
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      summary: In a regular iPad window the form stretches edge to edge, so long help text runs past a
+        readable line length and short values sit far from their labels; hold the form to a readable width.
+      from: 20261024T051821Z-68221
+      open: true
+      since: 20261024T051821Z-68221
+    - rule: platform-adaptivity
+      state: error
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      summary: In a regular iPad window the form stretches edge to edge with no readable-width limit.
+      from: 20261024T051821Z-68221
+      open: true
+      since: 20261024T051821Z-68221
+    - rule: layout-states
+      state: error
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      summary: The error ('Upload completion is unknown. Further server transfers are blocked.') is a
+        plain body-text row under a neutral 'Result' header, with no warning symbol and no next step;
+        mark it as an error and give a way forward.
+      from: 20261024T051821Z-68221
+      open: true
+      since: 20261024T051821Z-68221
+    - rule: layout-states
+      state: error
+      variant: light-standard-iphoneLarge+rt
+      summary: On iPhone the error state's first screenful shows no sign of the error, because the message
+        sits below the entire form; surface it near the top or beside the action that failed.
+      from: 20261024T051821Z-68221
+      open: true
+      since: 20261024T051821Z-68221
+    - rule: platform-idioms
+      state: error
+      variant: dark-standard-macMinimum
+      summary: On the Mac the empty Username and Password rows show no field outline or placeholder, so
+        they read as static labels rather than inputs.
+      from: 20261024T051821Z-68221
+      open: true
+      since: 20261024T051821Z-68221
+    history:
+    - date: '2026-10-24T05:21:11Z'
+      from: sketch
+      to: built
+      by: tools/mg critic
+      reason: critic run 20261024T051821Z-68221 graded its snapshots
   settings.importExport:
     status: sketch
     fix_rounds: 0

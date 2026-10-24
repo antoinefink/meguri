@@ -1071,3 +1071,102 @@ iPad native M8; source `21b61196`.
 
 M8 now passes on Mac, iPhone and iPad. The required supplemental rendering,
 explicit audits, critic and combined full gate remain open; no Unit is accepted.
+
+Transfer accessibility correction; start `17be807f`.
+
+All three native M8 receipts remain passing. The first explicit iPhone audit,
+`a11y/20261024T040339Z-9892`, failed after 256 seconds while revealing the
+diagnostic fixture marker in overflow. Its row frame began at y=168 and the
+navigation-clipped viewport at y=176. The marker text was readable in the
+boundary capture. The audit also collected contrast, Dynamic Type and endpoint
+clipping findings. Neither iPad nor Mac explicit audit ran after this failure.
+
+UI correction round 1: filtered `041156Z-14029`, commit `936c3c9a`.
+Two files changed. Native control styling and semantic fonts, a local heading,
+vertical endpoint input and a wrapped stored endpoint were added. Supplemental
+traversal starts at real product text; the initial all-types audit still covers
+the diagnostic marker. All real content, controls, limits and disabled guards
+remain. Independent source review found no P0–P2; privacy
+`private/20261024T041420Z-15231` passed.
+
+Run `a11y/20261024T041520Z-15838` continued to report findings. The controller
+stopped it with SIGTERM after repetition to measure the rendered screen. Its
+ERROR/cancelled receipt and log remain; it is incomplete, not a pass.
+
+Fresh synthetic capture `ui-tree/20261024T042117Z-19419` failed its structural
+identifier check on the introductory text cell. Its screenshot and hierarchy
+were retained. Save Endpoint was enabled; Log In was disabled. The visible
+text was dark on light native button fills. No pixel ratio was measured.
+
+Diagnostic probe starts at `936c3c9a`; final export `043128Z-25376`, commit
+`cd479831`. It adds one iOS-only diagnostic test, with four fresh light app
+launches: default and AX5, each with contrast and Dynamic Type separately.
+It captures window images before auditing and bounded geometry for two fixed
+controls. Findings remain failures; there is no acceptance screen report.
+The invalid empty-route marker guard was removed before execution. Two fixed
+diagnostic strings were rewritten after private scan `043028Z-24784`; no
+private values were read. Independent review found no P0–P2.
+
+`ui-test/20261024T043324Z-26727` failed after 36.6 seconds. The isolated default
+contrast check reported Save Endpoint and Log In. The isolated default Dynamic
+Type check reported those controls and the login notice. At AX5 the controls
+were offscreen/absent; the body text visibly grew. This is not control-scaling
+proof. All four probes ran; measurements remain diagnostic evidence only.
+
+UI correction round 2; start `cd479831`, export `044253Z-32497`, commit
+`dfad1944`. The native action pattern now matches the existing status actions;
+extra label framing and foreground overrides were removed. The feature has a
+semantic body font, stable informational IDs and a human endpoint label with
+its full verbatim URL value. Independent review found no P0–P2. Privacy
+`private/20261024T044543Z-33937` passed.
+
+Sample calibration `a11y/20261024T044159Z-30658` passed all states and variants
+in its selected case. The same four-case transfer probe
+`ui-test/20261024T044601Z-34337` still failed. This did not justify a general
+VM or SDK workaround, or a suppression.
+
+One pixel analysis, `image-tools-selftest/20261024T050017Z-55256`, measured
+the synthetic native default/light capture. The wrapper repeated its cached
+calculation; those repeats are not independent coverage. Save Endpoint text
+against its native fill measured 12.73:1. Disabled Log In text measured 1.55:1.
+The latter remains a legibility defect. The report makes no dark-mode,
+AX5-control-growth or overall accessibility-pass claim.
+
+Snapshots `20261024T044917Z-37212` completed: 171 missing baselines, four
+changed images, 490 deferred cells and 23 other captures. No images were
+recorded as approved by this run. Critic `20261024T051821Z-68221` produced a
+valid warning report: 14 high truncation issues, eight medium and three low.
+Packet: 175 images. Coverage: partial, per the critic's notes.
+Visual acceptance remains open.
+The high issues concern the long preview navigation title. Production Settings
+already uses the shorter Settings title; preview parity needs correction.
+Medium findings cover form hierarchy, width, error presentation and Mac field
+affordance. UI correction round 3 and fresh required checks remain open.
+
+Approved exact API facts; start `cdc3ae09`.
+
+Antoine approved the 42 exact spans from the prepared public-facts packet on
+2026-10-24. Decision `E-20261024T045314Z-f655` retains the exact list and packet
+digest. Commit `31dea575` adds only those spans to the existing three. No
+matcher, decoder, corpus or token-set behavior changed. Independent security
+review found no P0–P2.
+
+| Check | Receipt | Result |
+| --- | --- | --- |
+| Vault synthetic checks | `private-selftest/20261024T050144Z-56051` | Seven passed |
+| Scanner final | `selftest/20261024T051514Z-65014` | Unit-test wrapper passed; 63 registered tests |
+| File scan | `private/20261024T051516Z-65241` | Four files passed |
+| Historical candidate before | `private/20261024T045703Z-53056` | Failed; retained |
+| Same candidate after | `private/20261024T050349Z-57333` | Failed; four flagged lines remain |
+
+The historical module remains byte-identical to the packet digest and is not
+accepted. No extra facts were inferred. The initial scanner failure
+`050347Z-57078` and detailed reproduction `050558Z-58158` were a stale negative
+expectation for the now-approved exact Semaphore constructor. The independent
+42-positive inventory still covers it; other shortened names stay negative.
+Private scan `051033Z-60540` required removal of an unnecessary comment and
+renaming one custom test method. Bodies, assertions, registration count and
+production bytes were verified unchanged by `051327Z-62628`. The rejected
+approval-resolution prose remains in `escalation/20261024T051641Z-66369`;
+the replacement records only author, counts, commit and result IDs. The
+approval is resolved in `cb6c5cb2`. No Unit is accepted by these changes.
