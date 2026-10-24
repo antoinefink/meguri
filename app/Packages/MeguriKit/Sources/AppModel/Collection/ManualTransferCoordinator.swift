@@ -64,6 +64,11 @@ public final class ManualTransferCoordinator {
     private var cancellationCauses: [String: ManualTransferCancellation] = [:]
     private var waiters: [CheckedContinuation<Void, Never>] = []
     public var busy: Bool { stage != .ready && stage != .awaitingConfirmation && stage != .awaitingMediaConsent }
+    public var canLogin: Bool {
+        !busy && (preview == nil || recoveryPreview)
+            && !endpointDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty
+    }
     public var canPrepare: Bool { !busy && preview == nil && mediaPreview == nil && authenticated && owner?.manualAllowed == true }
     public var canConfirm: Bool { !busy && preview != nil && authenticated && previewUsername == credentials?.username && endpoint == preview?.record.configuredEndpoint && owner?.manualAllowed == true }
 
@@ -122,26 +127,65 @@ public final class ManualTransferCoordinator {
         catch { message = "Couldn’t remove the device login. Unlock this device and try again." }
     }
     public func login() async {
-        guard !busy, (preview == nil || recoveryPreview), !endpoint.isEmpty, !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !password.isEmpty else { return }
+        guard canLogin else { return }
+        // Bind this explicit attempt before the first suspension. Draft edits
+        // cannot redirect a request or replace the credentials it authenticates.
+        let suppliedEndpoint = endpointDraft
+        let suppliedUsername = username
+        let suppliedPassword = password; password = ""
         revision &+= 1
         stage = .authenticating; message = nil
-        let suppliedPassword = password; password = ""
         let operation = ManualTransferOperation(); self.operation = operation
         let expected = revision
+        func current() -> Bool { revision == expected && operation.cancellation == nil && !Task.isCancelled }
         defer { self.operation = nil; stage = preview != nil ? .awaitingConfirmation : (mediaPreview != nil ? .awaitingMediaConsent : .ready); password = ""; finishWaiters() }
+        let normalized: String
         do {
-            try await service.invalidateMediaOwner(operation: ManualTransferOperation())
+            normalized = try await service.normalizeEndpoint(suppliedEndpoint)
+        } catch {
+            guard current() else { return }
+            message = "Couldn’t save this endpoint. Enter an http or https server URL with an optional path prefix, without credentials, a query or a fragment."
+            return
+        }
+        guard current() else { return }
+        if let preview {
+            guard recoveryPreview, normalized == endpoint, normalized == preview.record.configuredEndpoint else {
+                message = "Login must use the endpoint recorded for this recovery preview. Close the preview before changing servers."
+                return
+            }
+        }
+        do {
+            try await service.invalidateMediaOwner(operation: operation)
+            guard current() else { return }
             mediaPreview = nil; mediaUsername = nil
             credentials = nil; authenticated = false
             try await keychain.clear()
-            let value = try await service.login(endpoint: endpoint, username: username, password: suppliedPassword, operation: operation)
-            guard revision == expected, operation.cancellation == nil else { return }
-            try await keychain.save(value, endpoint: endpoint)
+            guard current() else { return }
+            if normalized != endpoint {
+                result = nil; nextEligibleMilliseconds = nil
+                endpoint = normalized; defaults?.set(normalized, forKey: "manualTransfer.endpoint")
+            }
+            endpointDraft = normalized
+            let value = try await service.login(endpoint: normalized, username: suppliedUsername, password: suppliedPassword, operation: operation)
+            guard current() else { return }
+            try await keychain.save(value, endpoint: normalized)
+            // Cancellation can arrive during Keychain persistence too. Keep
+            // ownership through cleanup and report its failure even when stale.
+            guard current() else {
+                do { try await keychain.clear() }
+                catch {
+                    message = "Couldn’t remove the cancelled device login. It may return after restart. Unlock this device and retry Log In to replace it."
+                }
+                return
+            }
             credentials = value; authenticated = true; username = value.username
             if recoveryPreview { previewUsername = value.username }
             message = "Logged in. Choose a direction, then prepare its preview."
             // Deliberately no prepare, meta probe or transfer here.
-        } catch { await report(error, operation: operation) }
+        } catch {
+            guard current() else { return }
+            await report(error, operation: operation)
+        }
     }
     public func prepare() async {
         guard canPrepare, let owner, let credentials else { return }

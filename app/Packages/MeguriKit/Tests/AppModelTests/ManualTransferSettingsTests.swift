@@ -18,7 +18,6 @@ import Testing
         let keys = SettingsTransferKeys()
         let model = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: nil)
         model.endpointDraft = "http://127.0.0.1:28711/prefix/"
-        await model.applyEndpoint()
         model.select(.export)
         model.username = "Synthetic User"; model.password = "ephemeral-only"
         await model.login()
@@ -38,7 +37,7 @@ import Testing
         #expect(!model.authenticated && model.username.isEmpty && model.password.isEmpty)
         #expect(await keys.saved == nil)
         await model.logout(); await model.refreshOfflineHistory()
-        #expect(await service.calls == ["normalize", "login", "normalize", "history"])
+        #expect(await service.calls == ["normalize", "normalize", "login", "normalize", "history"])
     }
     @Test func defaultsContainOnlyEndpointAndLoginCancellationDoesNotPrepare() async throws {
         let suite = "meguri.manual-transfer.tests.\(UUID().uuidString)"
@@ -51,22 +50,261 @@ import Testing
         #expect(defaults.persistentDomain(forName: suite)?.keys.sorted() == ["manualTransfer.endpoint"])
         model.password = "clear-on-background"; await model.cancelAndDrain()
         #expect(model.password.isEmpty)
-        #expect(await service.calls == ["normalize", "login"])
+        #expect(await service.calls == ["normalize", "normalize", "login"])
     }
 }
+extension ManualTransferSettingsTests {
+    @Test func loginEligibilityUsesEnteredFields() {
+        let model = ManualTransferCoordinator(owner: nil, service: SettingsTransferService(), defaults: nil)
+        model.endpointDraft = "https://example.test/prefix"
+        model.password = "transient"
+        #expect(!model.canLogin)
+        model.username = "   "
+        #expect(!model.canLogin)
+        model.username = "Synthetic User"
+        #expect(model.endpoint.isEmpty && model.canLogin)
+        model.endpointDraft = " \n "
+        #expect(!model.canLogin)
+    }
+
+    @Test func enteredEndpointLoginPersistsNormalizedIdentityAndRestoresOffline() async throws {
+        let suite = "meguri.entered-login.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let normalized = "https://example.test/Anki/"
+        let draft = "  HTTPS://Example.Test:443/Anki  "
+        let service = SettingsTransferService(normalizedEndpoint: normalized)
+        let keys = SettingsTransferKeys()
+        let model = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: defaults)
+        model.endpointDraft = draft
+        model.username = "Synthetic User"; model.password = "transient"
+        model.select(.export)
+        try #require(model.canLogin && model.endpoint.isEmpty)
+        await model.login()
+        #expect(await service.normalizationInputs == [draft])
+        #expect(await service.loginRequests == [.init(endpoint: normalized, username: "Synthetic User", password: "transient")])
+        #expect(await service.calls == ["normalize", "login"])
+        #expect(await service.invalidations == 1)
+        #expect(await keys.clears == 1)
+        #expect(await keys.savedEndpoint == normalized)
+        #expect(await keys.saved?.username == "Synthetic User")
+        #expect(await keys.saved?.hostKey == "synthetic-host-key")
+        #expect(model.endpoint == normalized && model.endpointDraft == normalized)
+        #expect(model.authenticated && model.password.isEmpty && model.direction == .export && model.preview == nil)
+        #expect(defaults.persistentDomain(forName: suite)?.keys.sorted() == ["manualTransfer.endpoint"])
+        #expect(defaults.string(forKey: "manualTransfer.endpoint") == normalized)
+        let restarted = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: defaults)
+        await restarted.loadOffline()
+        #expect(restarted.endpoint == normalized && restarted.endpointDraft == normalized)
+        #expect(restarted.authenticated && restarted.username == "Synthetic User" && restarted.password.isEmpty)
+        #expect(await service.calls == ["normalize", "login", "history"])
+    }
+
+    @Test func invalidEnteredEndpointNeverSendsCredentialsAndCanBeCorrected() async {
+        let service = SettingsTransferService(rejectNormalization: true)
+        let keys = SettingsTransferKeys()
+        let model = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: nil)
+        let invalid = "https://example.test/prefix?query=invalid"
+        model.endpointDraft = invalid
+        model.username = "Synthetic User"; model.password = "transient"
+        await model.login()
+        #expect(await service.calls == ["normalize"])
+        #expect(await service.loginRequests.isEmpty)
+        #expect(await service.invalidations == 0)
+        #expect(await keys.clears == 0)
+        #expect(await keys.saved == nil)
+        #expect(model.endpoint.isEmpty && model.endpointDraft == invalid && model.username == "Synthetic User")
+        #expect(!model.authenticated && !model.busy && model.password.isEmpty && model.message != nil)
+        await service.acceptNormalization()
+        model.endpointDraft = "https://example.test/prefix/"; model.password = "corrected"
+        #expect(model.canLogin)
+        await model.login()
+        #expect(model.authenticated && model.password.isEmpty && model.preview == nil)
+        #expect(await service.calls == ["normalize", "normalize", "login"])
+    }
+
+    @Test(arguments: SettingsLoginPoint.allCases)
+    func cancelledLoginCannotPublishLateCredentials(point: SettingsLoginPoint) async throws {
+        let suite = "meguri.cancel-login.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let suspension = SettingsLoginSuspension(point)
+        let normalized = "https://example.test/prefix/"
+        let service = SettingsTransferService(normalizedEndpoint: normalized, suspension: suspension)
+        let keys = SettingsTransferKeys(suspension: suspension)
+        let model = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: defaults)
+        model.endpointDraft = "https://example.test/prefix"
+        model.username = "Synthetic User"; model.password = "transient"
+        let attempt = Task { await model.login(); await suspension.finished() }
+        #expect(await suspension.waitUntilPaused())
+        #expect(model.busy && !model.canLogin)
+        await model.cancel()
+        model.endpointDraft = "https://other.example.test/"
+        model.username = "Other User"; model.password = "other-transient"
+        await model.login(); await model.applyEndpoint(); await model.logout()
+        #expect(model.busy)
+        await suspension.release(); await attempt.value
+        #expect(!model.authenticated && !model.busy && model.password.isEmpty)
+        #expect(await keys.saved == nil)
+        #expect(await keys.savedEndpoint == nil)
+        if point == .normalization {
+            #expect(model.endpoint.isEmpty)
+            #expect(defaults.string(forKey: "manualTransfer.endpoint") == nil)
+            #expect(await service.calls == ["normalize"])
+            #expect(await service.invalidations == 0)
+        } else {
+            // Explicit configuration completed before the credential request;
+            // cancellation must never replace it with the later draft edits.
+            #expect(model.endpoint == normalized)
+            #expect(defaults.string(forKey: "manualTransfer.endpoint") == normalized)
+            #expect(await service.loginRequests == [.init(endpoint: normalized, username: "Synthetic User", password: "transient")])
+        }
+        #expect(model.message == nil)
+    }
+
+    @Test func cancelledSavedLoginReportsFailedCleanupAndCanBeReplaced() async throws {
+        let suite = "meguri.cancel-login-cleanup.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let suspension = SettingsLoginSuspension(.save)
+        let normalized = "https://example.test/prefix/"
+        let service = SettingsTransferService(normalizedEndpoint: normalized, suspension: suspension)
+        let keys = SettingsTransferKeys(suspension: suspension, failingClearAt: 2)
+        let model = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: defaults)
+        model.endpointDraft = "https://example.test/prefix"
+        model.username = "Synthetic User"; model.password = "transient"
+        let attempt = Task { await model.login(); await suspension.finished() }
+        #expect(await suspension.waitUntilPaused())
+        // Save has already changed the store before cancellation is delivered.
+        #expect(await keys.saved?.username == "Synthetic User")
+        #expect(await keys.savedEndpoint == normalized)
+        await model.cancel()
+        await suspension.release(); await attempt.value
+        #expect(!model.authenticated && !model.busy && model.password.isEmpty && model.preview == nil)
+        #expect(await keys.clears == 2)
+        #expect(await keys.saved?.username == "Synthetic User")
+        #expect(await keys.saved?.hostKey == "synthetic-host-key")
+        #expect(await keys.savedEndpoint == normalized)
+        #expect(model.message == "Couldn’t remove the cancelled device login. It may return after restart. Unlock this device and retry Log In to replace it.")
+        #expect(await service.calls == ["normalize", "login"])
+
+        // Failed deletion really can restore the login, without a network call.
+        let restarted = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: defaults)
+        await restarted.loadOffline()
+        #expect(restarted.authenticated && restarted.username == "Synthetic User" && restarted.password.isEmpty)
+        #expect(restarted.endpoint == normalized && restarted.message == nil)
+        #expect(await service.calls == ["normalize", "login", "history"])
+
+        // The warning's existing explicit retry path clears and replaces it.
+        model.username = "Replacement User"; model.password = "replacement-transient"
+        #expect(model.canLogin)
+        await model.login()
+        #expect(model.authenticated && model.username == "Replacement User" && model.password.isEmpty)
+        #expect(model.message == "Logged in. Choose a direction, then prepare its preview.")
+        #expect(await keys.clears == 3)
+        #expect(await keys.saved?.username == "Replacement User")
+        #expect(await keys.savedEndpoint == normalized)
+        #expect(await service.calls == ["normalize", "login", "history", "normalize", "login"])
+    }
+
+    @Test(arguments: SettingsLoginPoint.allCases)
+    func liveLoginKeepsCapturedInputsAndBusyOwnership(point: SettingsLoginPoint) async {
+        let suspension = SettingsLoginSuspension(point)
+        let normalized = "https://example.test/prefix/"
+        let draft = "https://example.test/prefix"
+        let service = SettingsTransferService(normalizedEndpoint: normalized, suspension: suspension)
+        let keys = SettingsTransferKeys(suspension: suspension)
+        let model = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: nil)
+        model.endpointDraft = draft
+        model.username = "Synthetic User"; model.password = "transient"
+        let attempt = Task { await model.login(); await suspension.finished() }
+        #expect(await suspension.waitUntilPaused())
+        model.endpointDraft = "https://other.example.test/"
+        model.username = "Other User"; model.password = "other-transient"
+        await model.login(); await model.applyEndpoint(); await model.logout()
+        model.select(.export); model.selectScope(.collectionAndMedia)
+        #expect(model.busy && !model.canLogin && model.direction == .import && model.scope == .collectionOnly)
+        await suspension.release(); await attempt.value
+        #expect(model.authenticated && !model.busy && model.password.isEmpty)
+        #expect(model.endpoint == normalized && model.username == "Synthetic User")
+        #expect(await keys.savedEndpoint == normalized)
+        #expect(await keys.saved?.username == "Synthetic User")
+        #expect(await service.normalizationInputs == [draft])
+        #expect(await service.loginRequests == [.init(endpoint: normalized, username: "Synthetic User", password: "transient")])
+        #expect(await service.calls == ["normalize", "login"])
+        #expect(await service.invalidations == 1)
+    }
+}
+
 private actor SettingsTransferKeys: ManualTransferCredentialStore {
     private(set) var saved: ManualTransferCredentials?
-    func load(endpoint: String) -> ManualTransferCredentials? { saved }
-    func save(_ credentials: ManualTransferCredentials, endpoint: String) { saved = credentials }
-    func clear() { saved = nil }
+    private(set) var savedEndpoint: String?
+    private(set) var clears = 0
+    private let suspension: SettingsLoginSuspension?
+    private let failingClearAt: Int?
+    init(suspension: SettingsLoginSuspension? = nil, failingClearAt: Int? = nil) {
+        self.suspension = suspension; self.failingClearAt = failingClearAt
+    }
+    func load(endpoint: String) -> ManualTransferCredentials? { endpoint == savedEndpoint ? saved : nil }
+    func save(_ credentials: ManualTransferCredentials, endpoint: String) async {
+        saved = credentials; savedEndpoint = endpoint
+        await suspension?.pause(at: .save)
+    }
+    func clear() throws {
+        clears += 1
+        if clears == failingClearAt { throw BridgeError.unavailable(reason: "Scripted device login deletion failure") }
+        saved = nil; savedEndpoint = nil
+    }
+}
+
+nonisolated enum SettingsLoginPoint: Sendable, CaseIterable { case normalization, login, save }
+/// One explicit release per attempt; no polling, clocks or external services.
+private actor SettingsLoginSuspension {
+    private let point: SettingsLoginPoint
+    private let entered: AsyncStream<Void>
+    private let enteredContinuation: AsyncStream<Void>.Continuation
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+    private var paused = false
+    init(_ point: SettingsLoginPoint) {
+        self.point = point
+        (entered, enteredContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
+    }
+    func pause(at point: SettingsLoginPoint) async {
+        guard self.point == point, !paused else { return }
+        paused = true
+        await withCheckedContinuation { continuation in
+            releaseContinuation = continuation
+            enteredContinuation.yield(())
+            enteredContinuation.finish()
+        }
+    }
+    func waitUntilPaused() async -> Bool { var iterator = entered.makeAsyncIterator(); return await iterator.next() != nil }
+    func finished() { enteredContinuation.finish() }
+    func release() { releaseContinuation?.resume(); releaseContinuation = nil }
+}
+private nonisolated struct SettingsLoginRequest: Equatable, Sendable {
+    let endpoint: String
+    let username: String
+    let password: String
 }
 private actor SettingsTransferService: ManualTransferService {
     private(set) var calls: [String] = []
+    private(set) var normalizationInputs: [String] = []
+    private(set) var loginRequests: [SettingsLoginRequest] = []
+    private(set) var invalidations = 0
+    private let normalizedEndpoint: String?
+    private var rejectNormalization: Bool
+    private let recoveryRecord: ManualTransferRecord?
+    private let suspension: SettingsLoginSuspension?
     private let historyUnavailable: Bool
     private let suspendPreparation: Bool
     private let entered: AsyncStream<Void>
     private let enteredContinuation: AsyncStream<Void>.Continuation
-    init(historyUnavailable: Bool = false, suspendPreparation: Bool = false) {
+    init(historyUnavailable: Bool = false, suspendPreparation: Bool = false,
+         normalizedEndpoint: String? = nil, rejectNormalization: Bool = false,
+         recoveryRecord: ManualTransferRecord? = nil, suspension: SettingsLoginSuspension? = nil) {
+        self.normalizedEndpoint = normalizedEndpoint; self.rejectNormalization = rejectNormalization
+        self.recoveryRecord = recoveryRecord; self.suspension = suspension
         self.historyUnavailable = historyUnavailable
         self.suspendPreparation = suspendPreparation
         (entered, enteredContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -75,9 +313,18 @@ private actor SettingsTransferService: ManualTransferService {
         var iterator = entered.makeAsyncIterator()
         _ = await iterator.next()
     }
-    func normalizeEndpoint(_ text: String) -> String { calls.append("normalize"); return text }
-    func login(endpoint: String, username: String, password: String, operation: ManualTransferOperation) -> ManualTransferCredentials {
-        calls.append("login"); return .init(username: username, hostKey: "synthetic-host-key")
+    func normalizeEndpoint(_ text: String) async throws -> String {
+        calls.append("normalize"); normalizationInputs.append(text)
+        await suspension?.pause(at: .normalization)
+        if rejectNormalization { throw BridgeError.unavailable(reason: "Scripted invalid endpoint") }
+        return normalizedEndpoint ?? text
+    }
+    func acceptNormalization() { rejectNormalization = false }
+    func invalidateMediaOwner(operation: ManualTransferOperation) { invalidations += 1 }
+    func login(endpoint: String, username: String, password: String, operation: ManualTransferOperation) async -> ManualTransferCredentials {
+        calls.append("login"); loginRequests.append(.init(endpoint: endpoint, username: username, password: password))
+        await suspension?.pause(at: .login)
+        return .init(username: username, hostKey: "synthetic-host-key")
     }
     func history(operation: ManualTransferOperation) throws -> [ManualTransferHistory] {
         calls.append("history")
@@ -97,7 +344,11 @@ private actor SettingsTransferService: ManualTransferService {
         throw BridgeError.cancelled
     }
     func confirm(endpoint: String, credentials: ManualTransferCredentials, preview: PreparedManualTransfer, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) throws -> ManualTransferRecord { calls.append("confirm"); throw BridgeError.unavailable(reason: "No scripted confirmation") }
-    func recover(_ entry: ManualTransferHistory, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) throws -> PreparedManualTransfer { calls.append("recover"); throw BridgeError.unavailable(reason: "No scripted recovery") }
+    func recover(_ entry: ManualTransferHistory, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) throws -> PreparedManualTransfer {
+        calls.append("recover")
+        if let recoveryRecord { return .init(record: recoveryRecord) }
+        throw BridgeError.unavailable(reason: "No scripted recovery")
+    }
     func cancelPreparation(_ entry: ManualTransferHistory, operation: ManualTransferOperation) { calls.append("cancelPreparation") }
     func discard(_ preview: PreparedManualTransfer, interrupted: Bool, operation: ManualTransferOperation) { calls.append("discard") }
     func saveCopy(_ entry: ManualTransferHistory, index: UInt32, to: URL, operation: ManualTransferOperation) { calls.append("saveCopy") }
@@ -178,6 +429,67 @@ extension ManualTransferSettingsTests {
 }
 
 extension ReviewCollectionStartupTests {
+    @Test func recoveryLoginCannotChangeItsBoundEndpoint() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        await owner.start()
+        try #require(owner.state == .noFile)
+        let record = decisionRecord()
+        let service = SettingsTransferService(recoveryRecord: record)
+        let keys = SettingsTransferKeys()
+        let model = ManualTransferCoordinator(owner: owner, service: service, keychain: keys, defaults: nil)
+        model.endpointDraft = record.configuredEndpoint; await model.applyEndpoint()
+        await model.recover(.init(record: record))
+        try #require(model.isRecoveryPreview && model.preview?.record.id == record.id)
+        model.endpointDraft = "https://other.example.test/"
+        model.username = "Synthetic User"; model.password = "transient"
+        let invalidations = await service.invalidations
+        let clears = await keys.clears
+        await model.applyEndpoint(); await model.login()
+        #expect(model.endpoint == record.configuredEndpoint)
+        #expect(model.preview?.record.configuredEndpoint == record.configuredEndpoint)
+        #expect(model.isRecoveryPreview && !model.authenticated && model.password.isEmpty)
+        #expect(await service.loginRequests.isEmpty)
+        #expect(await service.invalidations == invalidations)
+        #expect(await keys.clears == clears)
+        // Login at the bound endpoint still works without closing recovery.
+        model.endpointDraft = record.configuredEndpoint; model.password = "transient"
+        await model.login()
+        #expect(model.authenticated && model.canConfirm && model.isRecoveryPreview)
+        #expect(model.previewLoginLabel == "Synthetic User")
+        #expect(await service.loginRequests == [.init(endpoint: record.configuredEndpoint, username: "Synthetic User", password: "transient")])
+        #expect(await service.calls == ["normalize", "recover", "history", "normalize", "normalize", "login"])
+        await model.discardPreview()
+        #expect(await owner.close())
+    }
+
+    @Test func recoveryCannotRebindASuspendedLogin() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        await owner.start()
+        try #require(owner.state == .noFile)
+        let suspension = SettingsLoginSuspension(.normalization)
+        let record = decisionRecord()
+        let service = SettingsTransferService(recoveryRecord: record, suspension: suspension)
+        let model = ManualTransferCoordinator(owner: owner, service: service, keychain: SettingsTransferKeys(), defaults: nil)
+        model.endpointDraft = "https://other.example.test/"
+        model.username = "Synthetic User"; model.password = "transient"
+        let attempt = Task { await model.login(); await suspension.finished() }
+        #expect(await suspension.waitUntilPaused())
+        await model.recover(.init(record: record))
+        #expect(model.busy && model.preview == nil)
+        await suspension.release(); await attempt.value
+        #expect(model.authenticated && model.endpoint == "https://other.example.test/")
+        #expect(await service.calls == ["normalize", "login"])
+        #expect(await owner.close())
+    }
+
     @Test(arguments: [false, true])
     func historyFailureDuringLifecycleCancellationKeepsFirstCauseAcrossRestart(userFirst: Bool) async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -207,7 +519,7 @@ extension ReviewCollectionStartupTests {
         #expect(model.cancellationCause(for: "scripted-policy-operation") == expected)
         // The refresh following cancellation fails too. No pair of successful
         // history reads is available to correlate this operation.
-        #expect(await service.calls == ["history", "normalize", "login", "prepare", "history"])
+        #expect(await service.calls == ["history", "normalize", "normalize", "login", "prepare", "history"])
         let restarted = ManualTransferCoordinator(owner: nil, service: service, defaults: defaults)
         #expect(restarted.cancellationCause(for: "scripted-policy-operation") == expected)
         #expect(restarted.cancellationDescription(for: decisionRecord(phase: .cancelled)) == (userFirst ? "Cancelled by you before completion." : "Interrupted by the system."))

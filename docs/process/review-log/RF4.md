@@ -1265,3 +1265,25 @@ test-only; tooling added one `serde_json` lock entry.
 
 Native checks and the full gate are pending. The native proof helpers still
 need the new receipt format and the same-login review/export check.
+
+Login action; start `8f8e2b79`.
+
+Implementer `063336Z-40689` added login from entered fields. R1 found one
+P2 in failed credential removal after cancellation. Fixer `064514Z-47343`
+now reports that failure and keeps explicit login retry available. R2 found
+no P0-P2. The URL and login inputs are captured before normalization;
+recovery bindings, cancellation and passive restoration remain checked.
+
+| Check | Receipt | Result |
+| --- | --- | --- |
+| Initial Swift build | `064036Z-44170` | Test compilation failed; retained |
+| Existing test with separate Save removed | `064804Z-49229` | One test failed at runtime; original login guard retained |
+| Complete corrected settings suite | `064858Z-51233` | 17 passed; zero failed or skipped |
+| Three-file privacy | `064858Z-51007` | Passed |
+
+The initial test errors were a missing DTO equality conformance and actor
+isolation in a test helper. Tests now compare existing fields and use
+appropriate isolation. The runtime failure proves the unsaved-URL case;
+the corrected suite includes retained login after restart, rejected URLs,
+captured inputs and cancellation/credential-removal failures. Native proof,
+the remaining UI feedback and the final integration gate are still pending.

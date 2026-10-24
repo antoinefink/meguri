@@ -67,7 +67,7 @@ public struct ManualTransferSections: View {
                         #endif
                         .disabled(model.busy)
                         .accessibilityIdentifier("settings.anki.password")
-                    action("Log In", id: "login", disabled: model.busy || model.endpoint.isEmpty || model.password.isEmpty) { await model.login() }
+                    action("Log In", id: "login", disabled: !model.canLogin) { await model.login() }
                 }
                 Picker("Direction", selection: Binding(get: { model.direction }, set: { model.select($0) })) {
                     Text("Import from Anki").tag(ManualTransferDirection.import)
