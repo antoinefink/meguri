@@ -165,7 +165,7 @@ mg_mt_cleanup_repair() {
 
 mg_mt_archive_stale_fixture_state() {
   # Dedicated environment repair: source provenance BEFORE any VM lease.
-  local evidence="$MG_RUN_DIR/repair-source.json" receipt="$MG_RUN_DIR/repair-receipt.json" rc
+  local evidence="$MG_RUN_DIR/repair-source.json" receipt="$MG_RUN_DIR/repair-receipt.json" rc expected_status
   mg_detail purpose '"environment-repair-not-M8"'
   if [ "$#" -ne 5 ] || [ "$1" != --archive-stale-fixture-state ] || \
       [ "$2" != --platform ] || [ "$3" != mac ] || [ "$4" != --source-run ] || \
@@ -216,8 +216,13 @@ mg_mt_archive_stale_fixture_state() {
   rc=$?
   mg_detail repair_ssh_exit_code "$rc"
   case "$rc" in
+    0) expected_status=archived ;;
+    3) expected_status=blocked ;;
+    4) expected_status=preservation-unconfirmed ;;
+  esac
+  case "$rc" in
     0|3|4)
-      if ! jq -e --arg status "$(case "$rc" in 0) echo archived ;; 3) echo blocked ;; 4) echo preservation-unconfirmed ;; esac)" \
+      if ! jq -e --arg status "$expected_status" \
           '.purpose == "environment-repair-not-M8" and .source_run == "20261023T234838Z-84101"
           and .status == $status and (.archived == ($status == "archived"))' "$receipt" >/dev/null 2>&1; then
         rc=255

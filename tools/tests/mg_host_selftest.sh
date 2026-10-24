@@ -995,6 +995,108 @@ $dir/ipad Snapshot iphonesimulator id=FAKE-IPAD Debug -only-testing:MeguriSnapsh
 fetch $dir/ipad"
 }
 
+# Receipt classification must parse AND run on the actual Apple Bash. All
+# utility/VM boundaries below are nonmutating doubles; no archive is executed.
+t_manual_transfer_repair_receipts_on_macos_bash() {
+  local dir="$SB/manual-transfer-receipts-bash"
+  [ "$(uname -s)" = Darwin ] && /bin/bash -c \
+    '[ "${BASH_VERSINFO[0]}" = 3 ] && [ "${BASH_VERSINFO[1]}" = 2 ]' || {
+    echo "requires macOS /bin/bash 3.2; unsupported host is not coverage"
+    return 1
+  }
+  /bin/bash -n "$SB/tools/mg.d/manual-transfer-check.sh" || return 1
+  mkdir -p "$dir" || return 1
+  cat >"$dir/classify.sh" <<'EOF'
+#!/bin/bash
+set -u
+MG_TOOLS="$1/tools" MG_ROOT="$2"
+mg_job() { :; }
+. "$MG_TOOLS/mg.d/manual-transfer-check.sh" || exit 1
+# No real provenance utility, SSH, VM, lease, or cleanup registration runs.
+python3() {
+  [ "$#" -eq 4 ] && [ "$1" = "$MG_TOOLS/scripts/manual-transfer-config.py" ] &&
+    [ "$2" = repair-source ] && [ "$3" = "$MG_ROOT" ] &&
+    [ "$4" = 20261023T234838Z-84101 ] || return 97
+  printf '{}\n'
+}
+mg_mac_ui_begin() { MG_MAC_RUNNER=vm; MG_MAC_VMS='[{"name":"meguri-mac"}]'; }
+mg_mac_vm_take() {
+  [ "$#" -eq 1 ] && [ "$1" = --no-copy ] || return 97
+  MG_MAC_VM='{"name":"meguri-mac"}' MG_LEASE_DIR="$MG_ROOT/fake-lease"
+}
+mvl_lease_held() { [ "$1" = "$MG_ROOT/fake-lease" ]; }
+mvl_q() { printf '%q' "$1"; }
+mg_mac_vm_copy_in() { [ "$1" = "$MG_RUN_DIR/repair-config.py" ]; }
+mg_on_exit() { [ "$1" = mg_mt_cleanup_repair ]; }
+mg_mac_vm_ssh_in() {
+  [ "$1" = "/usr/bin/python3 $(mvl_q "$MG_RUN_DIR/repair-config.py") archive-stale-fixture-state" ] &&
+    [ "$(cat)" = '{}' ] || return 97
+  printf 'called\n' >>"$MG_RUN_DIR/utility-calls"
+  # Only emit synthetic aggregate JSON; never invoke the archive utility.
+  if [ "$reply_status" != missing ]; then
+    jq -nc --arg status "$reply_status" --argjson archived "$reply_archived" \
+      --arg purpose "$reply_purpose" --arg source "$reply_source" \
+      '{purpose:$purpose,source_run:$source,status:$status,archived:$archived}' || return 97
+  fi
+  return "$reply_rc"
+}
+mg_detail() { printf '%s\n' "$2" >"$MG_RUN_DIR/$1.json"; }
+mg_status() { printf '%s\n' "$1" >"$MG_RUN_DIR/status"; }
+mg_failure() { printf '%s\n' "$1" >"$MG_RUN_DIR/failure"; }
+mg_artifact() { printf '%s\n' "$1" >"$MG_RUN_DIR/artifact"; }
+mg_word_in() { local word; for word in $2; do [ "$1" != "$word" ] || return 0; done; return 1; }
+
+check() {
+  local label="$1" outcome="$5"
+  reply_rc="$2" reply_status="$3" reply_archived="$4"
+  reply_purpose="${6:-environment-repair-not-M8}" reply_source="${7:-20261023T234838Z-84101}"
+  MG_RUN_DIR="$MG_ROOT/$label"
+  mkdir -p "$MG_RUN_DIR" || return 1
+  mg_mt_archive_stale_fixture_state --archive-stale-fixture-state --platform mac --source-run 20261023T234838Z-84101 || return 1
+  [ "$(cat "$MG_RUN_DIR/repair_ssh_exit_code.json")" = "$reply_rc" ] &&
+    [ "$(cat "$MG_RUN_DIR/purpose.json")" = '"environment-repair-not-M8"' ] &&
+    [ "$(cat "$MG_RUN_DIR/utility-calls")" = called ] &&
+    [ ! -e "$MG_RUN_DIR/native_transfer_complete.json" ] || return 1
+  if [ "$outcome" = unknown ]; then
+    [ "$(cat "$MG_RUN_DIR/status")" = error ] &&
+      [ "$(cat "$MG_RUN_DIR/failure")" = manual-transfer/repair-uncertain ] &&
+      [ "$(cat "$MG_RUN_DIR/repair_status.json")" = '"preservation-unknown"' ] &&
+      [ ! -e "$MG_RUN_DIR/environment_repair.json" ] && [ ! -e "$MG_RUN_DIR/artifact" ]
+  else
+    [ ! -e "$MG_RUN_DIR/repair_status.json" ] &&
+      [ "$(cat "$MG_RUN_DIR/artifact")" = repair-receipt ] &&
+      cmp -s "$MG_RUN_DIR/repair-receipt.json" "$MG_RUN_DIR/environment_repair.json" || return 1
+    case "$outcome" in
+      archived) [ "$(cat "$MG_RUN_DIR/status")" = pass ] && [ ! -e "$MG_RUN_DIR/failure" ] ;;
+      *) [ "$(cat "$MG_RUN_DIR/status")" = error ] &&
+        [ "$(cat "$MG_RUN_DIR/failure")" = "manual-transfer/$outcome" ] ;;
+    esac
+  fi
+}
+while read -r label rc status archived outcome; do
+  check "$label" "$rc" "$status" "$archived" "$outcome" || { echo "classification failed: $label"; exit 1; }
+done <<'CASES'
+archived 0 archived true archived
+blocked 3 blocked false repair-blocked
+unconfirmed 4 preservation-unconfirmed false repair-preservation
+status-mismatch-0 0 blocked false unknown
+status-mismatch-3 3 archived true unknown
+status-mismatch-4 4 archived true unknown
+flag-mismatch-0 0 archived false unknown
+flag-mismatch-3 3 blocked true unknown
+flag-mismatch-4 4 preservation-unconfirmed true unknown
+lost 255 archived true unknown
+missing-0 0 missing false unknown
+missing-3 3 missing false unknown
+missing-4 4 missing false unknown
+unexpected-rc 97 blocked false unknown
+CASES
+check wrong-purpose 0 archived true unknown other-purpose || exit 1
+check wrong-source 0 archived true unknown environment-repair-not-M8 other-run || exit 1
+EOF
+  /bin/bash "$dir/classify.sh" "$SB" "$dir"
+}
+
 t_results_validate_against_schema() {
   [ -n "$RESULTS" ] || { echo "no results collected"; return 1; }
   # shellcheck disable=SC2086 # RESULTS is a space-separated list of relative paths
@@ -1011,7 +1113,8 @@ t_similarity_nightly_runs_jplag t_sync_rig_publishes_on_loopback_only_and_down_r
 t_sync_rig_probes_ignore_proxy_variables t_sync_rig_records_decoded_exchanges
 t_sync_rig_up_fails_when_the_recording_is_unwritable t_actor_scenario_proxies_are_internal_only
 t_recorder_attributes_exchanges_to_actors_and_steps t_sim_pool_on_macos_bash t_host_lease_gate_and_sim_setup_on_macos_bash
-t_fixtures_check_on_macos_bash t_bench_mac_on_macos_bash t_catch_up_reuses_passing_results_on_macos_bash t_snapshot_vm_dispatch_on_macos_bash t_results_validate_against_schema"
+t_fixtures_check_on_macos_bash t_bench_mac_on_macos_bash t_catch_up_reuses_passing_results_on_macos_bash t_snapshot_vm_dispatch_on_macos_bash
+t_manual_transfer_repair_receipts_on_macos_bash t_results_validate_against_schema"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 if ! setup_sandbox >"$SB/setup.log" 2>&1; then
