@@ -932,3 +932,49 @@ The 87,721 candidates and 82,948 tokens were unchanged. No private values were
 read and no exemption was added. The final neutral contract passed its privacy
 check and independent review round 3 found no P0–P1. Earlier contract candidates
 and their failed receipts remain retained; no scanner exception was introduced.
+
+Mac native M8; source `619459f7`.
+
+`manual-transfer-check/20261024T014136Z-11499` passed. Native completion and
+cleanup are true. Peer comparison covers all logical cells, saved review and
+scheduling data, exact device/server media bytes and both real-hour cooldowns.
+Import retains its unknown prior effects after cancellation/restart/resume;
+Export completes under the second account. No controller evidence is substituted
+for the native actions.
+
+The iPhone run `manual-transfer-check/20261024T014935Z-17500` failed at its
+first native-state read, before media consent. The reader returned unavailable.
+The failed reader stage was not recorded. Investigation continues. The
+corrective tooling keeps the fixed device and bundle, and checks the frozen
+container identity. Review and runtime proof remain pending. Both failed focused receipts are retained: `selftest/20261024T021510Z-43189`
+and its diagnostic reproduction `selftest/20261024T021711Z-44074`. The latter
+exposed a test attribute shadowing unittest's run method.
+
+Standalone preview; start `619459f7`.
+
+| Check | Receipt | Outcome |
+| --- | --- | --- |
+| Focused build tooling | `selftest/20261024T020921Z-38645` | Eight passed |
+| Privacy | `private/20261024T020919Z-38398` | PASS; three files |
+| Normal signed Mac build | `build-app/20261024T021052Z-39318` | PASS; zero warnings |
+
+Independent review round 1 found no P0–P2. Intake corrected the core stamp's
+existing 32-character format before verification. Commit: `de3c2f89`.
+The standalone product uses normal sandbox entitlements and isolated products;
+the copied app and widget hashes match the verified build. Preview:
+`build/previews/mac-reviews-and-anki-transfer-619459f7/Meguri.app`.
+The earlier `build-app/20261024T015625Z-31579` was a test build and is not the
+standalone preview. All remaining native, audit, visual, review and gate work
+stays open. No Unit is accepted.
+
+Mobile reader correction; first source `619459f7`, corrective source `de3c2f89`.
+Filtered exports: `020331Z-35316`, `021940Z-45395`. Round 1 found one P2
+namespace race; round 2 found no P0–P2. The initial resolver and full read now
+share a before/after namespace check, with the original context and marker
+rechecked. No second resolution or fixture restaging is allowed.
+
+`selftest/20261024T022235Z-47152` passed 33 focused checks, including the socket
+observer and deterministic namespace changes during resolution and reads.
+`private/20261024T022232Z-46896` passed all five files. Commit: `72eac584`.
+The actual mobile run is still required; the historical unavailable error is not
+claimed resolved. The native M8 assertions remain enabled and unchanged.
