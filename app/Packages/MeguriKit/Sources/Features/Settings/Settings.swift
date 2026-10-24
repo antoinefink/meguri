@@ -122,8 +122,11 @@ public struct MacSettingsView: View {
                     if hasActiveTransfer { continueTransfer }
                     Section {
                         DisclosureGroup {
-                            ConnectionMetadata(model: collection.manualTransfers)
-                            ManualTransferSections(model: collection.manualTransfers, area: .history)
+                            VStack(alignment: .leading, spacing: Spacing.small) {
+                                ConnectionMetadata(model: collection.manualTransfers)
+                                ManualTransferSections(model: collection.manualTransfers, area: .history, inlineHistory: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         } label: { Text("Connection details", bundle: .module) }
                         .accessibilityIdentifier("settings.anki.details")
                     }
@@ -259,6 +262,7 @@ private struct ConnectionMetadata: View {
                 Text(verbatim: event.detail)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         LabeledContent("Historical attempt time", value: "Not recorded")
         LabeledContent("Historical completion time", value: "Not recorded")

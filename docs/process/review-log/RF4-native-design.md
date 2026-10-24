@@ -133,3 +133,19 @@ and the answer buttons remain at the bottom. Both baseline comparisons fail
 for the changed pixels; no baseline approval was recorded. The expanded
 Connection details view still needs left-aligned log text. That layout
 correction follows.
+
+The final details pass `cleanroom/20261024T125048Z-32828` shares the same
+history body between its Form section and the inline Mac disclosure. Source
+review confirmed the extraction leaves data, remedies and guards unchanged.
+`build-app/20261024T125320Z-34133` passed. Its copied app executable matched
+the receipt, and the exact product opened normally. Direct native inspection
+confirmed leading metadata/events and Sync Logs inside the single disclosure.
+The app remains open in Connection settings. Source input:
+`59f886ca77bff8a2324e08827c39e43cc842dc8832569959134c0b957ae6423a`.
+
+No server operation was started by this visual pass. The larger goal remains
+paused. Full native accessibility and regression checks, baseline decisions,
+milestone gates and human acceptance remain pending. The exported Mac AX
+view still gives history descendants their disclosure's identifier; preserve
+this and the account-text identifier limitation for the later native checks.
+This preview carries no Unit trailer and accepts no milestone or RF4 unit.

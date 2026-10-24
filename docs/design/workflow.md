@@ -40,6 +40,8 @@ Native SwiftUI is the implementation medium. HTML can help choose hierarchy and 
 
 ## Feedback and evidence
 
+Inspect both collapsed and expanded disclosures. Use leading content inside a disclosure; a Form Section belongs in its Form context.
+
 Inspect empty, normal, loading, busy, error and long-content states. Check the main action, alignment, groups, text wrapping and control placement. No clipping does not mean the screen is clear.
 
 Then inspect the exact native build. Record its source commit or input digest and product path. Replacing the wrong running copy invalidates the review; choose the built product by path and confirm its identity. Never use an older prototype as evidence for current production behavior.

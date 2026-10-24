@@ -13,8 +13,11 @@ public struct ManualTransferSections: View {
     #endif
     enum Area: Equatable { case all, connectionAndTransfers, connection, transfers, history }
     private let area: Area
+    private let inlineHistory: Bool
     public init(model: ManualTransferCoordinator) { self.init(model: model, area: .all) }
-    init(model: ManualTransferCoordinator, area: Area) { self.model = model; self.area = area }
+    init(model: ManualTransferCoordinator, area: Area, inlineHistory: Bool = false) {
+        self.model = model; self.area = area; self.inlineHistory = inlineHistory
+    }
     public var body: some View {
         Group {
             if area == .all || area == .connectionAndTransfers || area == .connection {
@@ -170,48 +173,17 @@ public struct ManualTransferSections: View {
                 }
             }
             if area == .all || area == .history {
-                Section {
-                    Text("This history loads offline. Restart never resumes a server request. Safety copies contain collection data, without media. A copy saved below is independent of the retained original; unverified files must be inspected before use.", bundle: .module)
-                        .foregroundStyle(.token(.textSecondary))
-                    action("Refresh Local History", id: "history", disabled: model.busy) { await model.refreshOfflineHistory() }
-                    if model.records.isEmpty { Text("No recorded server transfers.") }
-                    ForEach(model.records) { entry in
-                        VStack(alignment: .leading, spacing: Spacing.small) {
-                            Text(entry.record.direction == .import ? "Import from Anki" : "Export to Anki").font(.headline)
-                            Text(status(entry.record))
-                            LabeledContent("Last persisted phase", value: entry.record.phase.rawValue)
-                            LabeledContent("Recorded boundary", value: entry.record.boundary?.rawValue ?? "Not recorded")
-                            LabeledContent("Attempt time", value: "Not recorded")
-                            LabeledContent("Completion time", value: "Not recorded")
-                            recordFacts(entry.record)
-                            if entry.record.canResumeMedia {
-                                action("Review Media Decision / Resume…", id: "resumeMedia.\(entry.id)", disabled: model.busy || model.preview != nil || model.mediaPreview != nil || !model.authenticated) { await model.prepareMedia(entry) }
-                            }
-                            if entry.record.acceptance == .possiblyAccepted {
-                                Text("Upload completion is unknown. Another transfer remains blocked. A retry or risk-acceptance clear is not available.")
-                            } else if entry.record.canInspectRecovery {
-                                action("Inspect Local Recovery", id: "recover.\(entry.id)", disabled: model.busy || model.preview != nil) { await model.recover(entry) }
-                            }
-                            if !entry.record.collectionComplete, [.preparing, .preview, .needsDecision].contains(entry.record.phase), entry.record.acceptance == .notSent {
-                                action("Cancel Unfinished Preparation", id: "cancelPreparation.\(entry.id)", disabled: model.busy || model.preview != nil) { await model.cancelPreparation(entry) }
-                            }
-                            ForEach(Array(entry.record.copies.enumerated()), id: \.offset) { index, copy in
-                                Text("Save a separate copy of \(copy.name)")
-                                Button { model.chooseCopy(entry, index: index) } label: {
-                                    Text("Save Copy to Folder…")
-                                        .font(.body)
-                                        .foregroundStyle(.token(model.busy ? .textSecondary : .statusAccent))
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(model.busy)
-                                .accessibilityIdentifier("settings.anki.copy.\(entry.id)-\(index)")
-                            }
-                        }
+                if inlineHistory {
+                    VStack(alignment: .leading, spacing: Spacing.small) {
+                        Text("Sync Logs", bundle: .module).font(.headline)
+                        historyBody
                     }
-                } header: { Text("Sync Logs", bundle: .module) }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Section {
+                        historyBody
+                    } header: { Text("Sync Logs", bundle: .module) }
+                }
             }
         }
         .font(.body)
@@ -234,6 +206,48 @@ public struct ManualTransferSections: View {
             }
         }
         #endif
+    }
+    @ViewBuilder private var historyBody: some View {
+        Text("This history loads offline. Restart never resumes a server request. Safety copies contain collection data, without media. A copy saved below is independent of the retained original; unverified files must be inspected before use.", bundle: .module)
+            .foregroundStyle(.token(.textSecondary))
+        action("Refresh Local History", id: "history", disabled: model.busy) { await model.refreshOfflineHistory() }
+        if model.records.isEmpty { Text("No recorded server transfers.") }
+        ForEach(model.records) { entry in
+            VStack(alignment: .leading, spacing: Spacing.small) {
+                Text(entry.record.direction == .import ? "Import from Anki" : "Export to Anki").font(.headline)
+                Text(status(entry.record))
+                LabeledContent("Last persisted phase", value: entry.record.phase.rawValue)
+                LabeledContent("Recorded boundary", value: entry.record.boundary?.rawValue ?? "Not recorded")
+                LabeledContent("Attempt time", value: "Not recorded")
+                LabeledContent("Completion time", value: "Not recorded")
+                recordFacts(entry.record)
+                if entry.record.canResumeMedia {
+                    action("Review Media Decision / Resume…", id: "resumeMedia.\(entry.id)", disabled: model.busy || model.preview != nil || model.mediaPreview != nil || !model.authenticated) { await model.prepareMedia(entry) }
+                }
+                if entry.record.acceptance == .possiblyAccepted {
+                    Text("Upload completion is unknown. Another transfer remains blocked. A retry or risk-acceptance clear is not available.")
+                } else if entry.record.canInspectRecovery {
+                    action("Inspect Local Recovery", id: "recover.\(entry.id)", disabled: model.busy || model.preview != nil) { await model.recover(entry) }
+                }
+                if !entry.record.collectionComplete, [.preparing, .preview, .needsDecision].contains(entry.record.phase), entry.record.acceptance == .notSent {
+                    action("Cancel Unfinished Preparation", id: "cancelPreparation.\(entry.id)", disabled: model.busy || model.preview != nil) { await model.cancelPreparation(entry) }
+                }
+                ForEach(Array(entry.record.copies.enumerated()), id: \.offset) { index, copy in
+                    Text("Save a separate copy of \(copy.name)")
+                    Button { model.chooseCopy(entry, index: index) } label: {
+                        Text("Save Copy to Folder…")
+                            .font(.body)
+                            .foregroundStyle(.token(model.busy ? .textSecondary : .statusAccent))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.busy)
+                    .accessibilityIdentifier("settings.anki.copy.\(entry.id)-\(index)")
+                }
+            }
+        }
     }
     private var endpointField: some View {
         Group {
