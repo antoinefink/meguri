@@ -35,6 +35,11 @@ extension EventTests {
         let tags = CoreTagService(), undo = CoreUndoService(), media = CoreMediaService()
         do {
             try await collectionService.open(location, randomSeed: 37)
+            if try await Core.fsrsPolicyStatus() != .ok {
+                let admission = try await Core.enableFsrs()
+                try await admission.value()
+            }
+            try #require(try await Core.fsrsPolicyStatus() == .ok)
             let generation = try await collectionService.waitAvailable(timeoutMilliseconds: 0)
             let deck = try await decks.addDeck(name: "Mutation services")
             #expect(deck.summary.generation == generation)
@@ -117,6 +122,80 @@ extension EventTests {
             }
             #expect(try await decks.deckDeletionSummary(ids: [deck.id]) == beforeDelete)
             #expect(try await notes.readNote(id: note.id) == noteBeforeDelete)
+
+            // The successful deletion must publish its own populated pre-delete backup.
+            let generationBeforeDelete = try await collectionService.waitAvailable(timeoutMilliseconds: 0)
+            #expect(generationBeforeDelete == generation)
+            #expect(beforeDelete == CoreBridge.DeckDeletionSummary(decks: 1, cards: 1))
+            let treeBeforeDelete = try await decks.treeWithCounts()
+            let deckBeforeDelete = try #require(treeBeforeDelete.nodes.first { $0.id == deck.id })
+            #expect(deckBeforeDelete.name == "Mutation services renamed")
+            #expect(deckBeforeDelete.counts == CoreBridge.ReviewCounts(new: 1, learning: 0, review: 0))
+            let excerptsBeforeDelete = try await Core.cardExcerpts(note.cards)
+            guard case .card(let cardBeforeDelete) = try await Core.peekFirstCard(deckID: deck.id) else {
+                Issue.record("Populated deck has no pre-delete card witness")
+                try await collectionService.close(); return
+            }
+            #expect(cardBeforeDelete.cardId == note.cards[0] && cardBeforeDelete.noteId == note.id)
+            #expect(cardBeforeDelete.flag == 5)
+            let backupNamesBeforeDelete = Set(try FileManager.default.contentsOfDirectory(atPath: backups.path))
+            let deletingDeck = try await decks.startDeleteDecks(ids: [deck.id])
+            let deletedDeck = try await deletingDeck.value()
+            #expect(deletedDeck.deleted == beforeDelete)
+            #expect(deletedDeck.summary.generation == generationBeforeDelete)
+            #expect(deletedDeck.summary.seq > saved.summary.seq)
+            #expect(deletedDeck.summary.changes.decks.filter { $0.change == .removed } == [
+                .init(id: deck.id, change: .removed)
+            ])
+            #expect(deletedDeck.summary.changes.cards == [
+                .init(id: cardBeforeDelete.cardId, noteID: note.id, change: .removed, memoryStateOnly: false)
+            ])
+            #expect(deletedDeck.summary.changes.notes == [.init(id: note.id, change: .removed)])
+            #expect(try await decks.treeWithCounts().nodes.allSatisfy { $0.id != deck.id })
+            #expect(try await Core.cardExcerpts(note.cards) == [.missing(cardID: cardBeforeDelete.cardId)])
+            await #expect(throws: BridgeError.noteNotFound(id: note.id)) { try await notes.readNote(id: note.id) }
+
+            let backupNamesAfterDelete = Set(try FileManager.default.contentsOfDirectory(atPath: backups.path))
+            let newBackupNames = backupNamesAfterDelete.subtracting(backupNamesBeforeDelete)
+            try #require(newBackupNames.count == 1)
+            let backupName = try #require(newBackupNames.first)
+            let backupURL = backups.appending(path: backupName)
+            #expect(backupURL.pathExtension == "colpkg")
+            let backupFile = try backupURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            try #require(backupFile.isRegularFile == true && (backupFile.fileSize ?? 0) > 0)
+            let entryService = CoreCollectionEntryService(clock: clock, diskSpace: capacity)
+            let inspection = try await entryService.inspect(source: backupURL, location: location,
+                operation: CollectionEntryOperation(), progress: { _ in })
+            let activation: CoreBridge.CollectionActivation
+            do {
+                try #require(inspection.facts.notes == 1 && inspection.facts.cards == UInt64(note.cards.count))
+                #expect(inspection.facts.replacingExisting)
+                activation = try await entryService.activate(inspection,
+                    operation: CollectionEntryOperation(), progress: { _ in })
+            } catch {
+                try? await inspection.discard()
+                throw error
+            }
+            #expect(activation.generation == generationBeforeDelete + 1)
+            #expect(try await collectionService.waitAvailable(timeoutMilliseconds: 0) == activation.generation)
+            // NoteRecord equality covers identity, fields, tags, guid and notetype.
+            #expect(try await notes.readNote(id: note.id) == noteBeforeDelete)
+            let restoredTree = try await decks.treeWithCounts()
+            #expect(restoredTree.generation == activation.generation)
+            #expect(restoredTree.nodes == treeBeforeDelete.nodes)
+            #expect(restoredTree.nodes.first { $0.id == deck.id } == deckBeforeDelete)
+            #expect(try await decks.deckDeletionSummary(ids: [deck.id]) == beforeDelete)
+            #expect(try await Core.cardExcerpts(note.cards) == excerptsBeforeDelete)
+            guard case .card(let restoredCard) = try await Core.peekFirstCard(deckID: deck.id) else {
+                Issue.record("New pre-delete backup did not restore the generated card")
+                try await collectionService.close(); return
+            }
+            #expect(restoredCard.cardId == cardBeforeDelete.cardId && restoredCard.noteId == cardBeforeDelete.noteId)
+            #expect(restoredCard.kind == cardBeforeDelete.kind)
+            #expect(restoredCard.nextStates == cardBeforeDelete.nextStates)
+            #expect(restoredCard.predictedNext == cardBeforeDelete.predictedNext)
+            #expect(restoredCard.flag == cardBeforeDelete.flag && restoredCard.marked == cardBeforeDelete.marked)
+            #expect(restoredCard.homePreset == cardBeforeDelete.homePreset)
             try await collectionService.flushForBackground()
             #expect(try await collectionService.suspend(timeoutMilliseconds: 5_000) == .suspended)
             let resumed = try await collectionService.resume()
