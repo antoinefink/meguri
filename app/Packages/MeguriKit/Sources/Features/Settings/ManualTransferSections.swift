@@ -17,7 +17,8 @@ public struct ManualTransferSections: View {
             Section {
                 Text("Routine sync uses CloudKit. These separate, explicit server transfers replace a collection. Collection Files and local reviews do not require a server login.")
                     .foregroundStyle(.token(.textSecondary))
-                TextField("Self-hosted endpoint, including optional prefix", text: $model.endpointDraft, axis: .vertical)
+                    .accessibilityIdentifier("settings.anki.intro")
+                TextField("Server URL", text: $model.endpointDraft, axis: .vertical)
                     .font(.body)
                     .textContentType(.URL)
                     #if os(iOS)
@@ -25,14 +26,21 @@ public struct ManualTransferSections: View {
                     #endif
                     .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
                     .accessibilityIdentifier("settings.anki.endpoint")
+                    .accessibilityHint("Self-hosted server URL, including an optional path prefix.")
                 action("Save Endpoint", id: "saveEndpoint", disabled: model.busy || model.preview != nil) { await model.applyEndpoint() }
                 if !model.endpoint.isEmpty {
                     LabeledContent {
                         Text(model.endpoint)
                             .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("settings.anki.configuredEndpointValue")
                     } label: {
                         Text("Configured endpoint")
+                            .accessibilityIdentifier("settings.anki.configuredEndpointLabel")
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Configured endpoint")
+                    .accessibilityValue(Text(verbatim: model.endpoint))
+                    .accessibilityIdentifier("settings.anki.configuredEndpoint")
                 }
                 if model.authenticated {
                     LabeledContent("Login", value: model.username)
@@ -56,6 +64,7 @@ public struct ManualTransferSections: View {
                     action("Log In", id: "login", disabled: model.busy || model.endpoint.isEmpty || model.password.isEmpty) { await model.login() }
                     Text("Login only saves a device-only login key. It does not prepare or transfer a collection. The password is not saved.")
                         .foregroundStyle(.token(.textSecondary))
+                        .accessibilityIdentifier("settings.anki.loginNotice")
                 }
                 Picker("Direction", selection: Binding(get: { model.direction }, set: { model.select($0) })) {
                     Text("Import from Anki").tag(ManualTransferDirection.import)
@@ -154,6 +163,7 @@ public struct ManualTransferSections: View {
                 }
             }
         }
+        .font(.body)
         #if os(iOS)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -228,9 +238,6 @@ public struct ManualTransferSections: View {
         Button { Task { await run() } } label: {
             Text(title)
                 .font(.body)
-                .foregroundStyle(.token(.textPrimary))
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
         }
             .buttonStyle(.bordered)
             .controlSize(.large)
