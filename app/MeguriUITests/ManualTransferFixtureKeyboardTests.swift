@@ -210,7 +210,7 @@ import UIKit
         try guardFixture(app)
         let roots = app.descendants(matching: .any).matching(identifier: "settings.anki.content")
         let root = roots.firstMatch
-        guard root.exists, root.isEnabled else {
+        guard root.exists else {
             let rootExists = root.exists
             let window = app.windows.firstMatch
             let windowExists = window.exists
@@ -226,12 +226,15 @@ import UIKit
                 "rootCollectionViews=\(rootExists ? root.collectionViews.count : -1) " +
                 "sheets=\(app.sheets.count) alerts=\(app.alerts.count)")
         }
-        if root.elementType == .scrollView || root.elementType == .collectionView { return root }
+        let window = app.windows.firstMatch
+        guard window.exists else { throw AuditError(description: "E_RC_01") }
+        if (root.elementType == .scrollView || root.elementType == .collectionView),
+           valid(root.frame.intersection(window.frame)) { return root }
         for candidate in [root.scrollViews.firstMatch, root.collectionViews.firstMatch] where candidate.exists {
-            if candidate.isEnabled, valid(candidate.frame.intersection(app.windows.firstMatch.frame)) { return candidate }
+            if valid(candidate.frame.intersection(window.frame)) { return candidate }
         }
         #if os(macOS)
-        if valid(root.frame.intersection(app.windows.firstMatch.frame)) { return root }
+        if valid(root.frame.intersection(window.frame)) { return root }
         #endif
         throw AuditError(description: "E_RC_01")
     }
@@ -241,7 +244,7 @@ import UIKit
     static func viewport(_ surface: XCUIElement, app: XCUIApplication) throws -> CGRect {
         try guardFixture(app)
         let window = app.windows.firstMatch
-        guard surface.exists, surface.isEnabled, window.exists else { throw AuditError(description: "Synthetic viewport unavailable") }
+        guard surface.exists, window.exists else { throw AuditError(description: "Synthetic viewport unavailable") }
         let clipped = surface.frame.intersection(window.frame).insetBy(dx: 4, dy: 8)
         guard valid(clipped), clipped.width > 24, clipped.height > 48 else { throw AuditError(description: "Synthetic viewport is empty") }
         return clipped
@@ -268,7 +271,7 @@ import UIKit
     private static func visibleContent(_ surface: XCUIElement, app: XCUIApplication) throws -> [VisibleContent] {
         let visible = try viewport(surface, app: app)
         let root = app.descendants(matching: .any).matching(identifier: "settings.anki.content").firstMatch
-        guard root.exists, root.isEnabled else { throw AuditError(description: "Synthetic Settings Form unavailable") }
+        guard root.exists else { throw AuditError(description: "Synthetic Settings Form unavailable") }
         let content = root.descendants(matching: .any).matching(NSPredicate(format: "elementType == %d OR elementType == %d",
             XCUIElement.ElementType.staticText.rawValue, XCUIElement.ElementType.button.rawValue))
         var result: [VisibleContent] = []
