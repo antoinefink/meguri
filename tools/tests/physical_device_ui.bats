@@ -86,6 +86,16 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 mkdir -p "$result"
+if [ "$action" = build ]; then
+  p="$dd/Build/Products/$config/Meguri.app"
+  w="$p/Contents/PlugIns/MeguriWidget.appex"
+  mkdir -p "$p/Contents/MacOS" "$w/Contents/MacOS"
+  echo "synthetic app" >"$p/Contents/MacOS/Meguri"
+  echo "synthetic widget" >"$w/Contents/MacOS/MeguriWidget"
+  echo "{\"CFBundleIdentifier\":\"com.antoinefink.meguri.dev\",\"CFBundleExecutable\":\"Meguri\",\"MeguriCardInspectionBuild\":\"debug\",\"LSUIElement\":true}" >"$p/Contents/Info.plist"
+  echo "{\"CFBundleIdentifier\":\"com.antoinefink.meguri.dev.widget\",\"CFBundleExecutable\":\"MeguriWidget\"}" >"$w/Contents/Info.plist"
+  exit "${FX_BUILD_RC:-0}"
+fi
 if [ "$action" = build-for-testing ]; then
   sdk=iphonesimulator
   case "$dest" in platform=iOS,id=*) sdk=iphoneos ;; esac
@@ -171,6 +181,157 @@ EOF
     [ "$(field .status)" = error ]
     [ "$(field '.failures[0].id')" = usage ]
     [ ! -s "$STUB_LOG" ]
+  done
+}
+
+# Synthetic signed facts for the normal build path; never consult OS signing,
+# provisioning profiles or hardware. Keep the real entitlement predicate in use.
+standalone_facts() {
+  export FX_APP_ENT="$BATS_TEST_TMPDIR/app-entitlements.json"
+  export FX_WIDGET_ENT="$BATS_TEST_TMPDIR/widget-entitlements.json"
+  jq -n --arg fixture "$SB/" '{
+    "com.apple.security.app-sandbox":true, "com.apple.security.get-task-allow":true,
+    "com.apple.security.network.client":true, "com.apple.security.network.server":true,
+    "com.apple.security.files.user-selected.read-write":true, "com.apple.security.files.bookmarks.app-scope":true,
+    "com.apple.security.temporary-exception.files.absolute-path.read-only":[$fixture],
+    "com.apple.security.application-groups":["fixture.dev"], "keychain-access-groups":["FIXTURE.dev"],
+    "com.apple.private.security.storage.AppDataContainers":["fixture.dev"]}' >"$FX_APP_ENT"
+  echo '{"com.apple.security.app-sandbox":true,"com.apple.security.get-task-allow":true,"com.apple.security.application-groups":["fixture.dev"]}' >"$FX_WIDGET_ENT"
+  mkdir -p "$SB/app/Packages/MeguriCore/Binaries"
+  printf 'hash=%s\nconfiguration=Debug\nprofile=dev\nfeatures=ankiweb,test-hooks\nslices=mac,sim\n' \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"$SB/app/Packages/MeguriCore/Binaries/.stamp"
+  stub codesign 'echo "codesign $*" >>"$STUB_LOG"
+case "$1" in
+  --verify) exit "${FX_SIGNATURE_RC:-0}" ;;
+  -d)
+    [ "${FX_ENTITLEMENTS_RC:-0}" -eq 0 ] || exit 1
+    case "$*" in *.appex) cat "$FX_WIDGET_ENT" ;; *) cat "$FX_APP_ENT" ;; esac ;;
+  *) exit 97 ;;
+esac'
+  stub plutil 'echo "plutil $*" >>"$STUB_LOG"
+[ "$1 $2 $3 $4" = "-convert json -o -" ] || exit 97
+case "$5" in -) cat ;; *) cat "$5" ;; esac'
+  stub lipo 'echo "lipo $*" >>"$STUB_LOG"; echo "${FX_ARCH:-arm64}"'
+}
+
+@test "standalone app admits only mac Debug and refuses all other pairs before work" {
+  local platform config
+  for platform in mac ios-sim; do
+    for config in Debug Profile Release AppStore; do
+      [ "$platform/$config" != mac/Debug ] || continue
+      : >"$STUB_LOG"
+      mg build-app --platform "$platform" --config "$config" --standalone
+      [ "$status" -eq 2 ]
+      [ "$(field '.failures[0].id')" = usage ]
+      [ ! -s "$STUB_LOG" ]
+      [ ! -d "$SB/build/app" ]
+    done
+  done
+  mg build-app --platform ios-device --standalone
+  [ "$status" -eq 2 ]
+  [ ! -s "$STUB_LOG" ]
+  MEGURI_APP_SIGNING=invalid mg build-app --platform mac --standalone
+  [ "$status" -eq 2 ]
+  [ ! -s "$STUB_LOG" ]
+}
+
+@test "standalone app uses normal build independent products and checked metadata then defaults remain test builds" {
+  standalone_facts
+  local mode candidate="$SB/build/app/StandaloneDerivedData/Build/Products/Debug/Meguri.app"
+  for mode in adhoc team; do
+    export MEGURI_APP_SIGNING="$mode"
+    : >"$STUB_LOG"
+    mg build-app --platform mac --config Debug --standalone
+    [ "$status" -eq 0 ]
+    [ "$(field .status)" = pass ]
+    called '^lint$'
+    called '^xcframework .* --configuration Debug$'
+    called '^xcodebuild build -project app/Meguri.xcodeproj -scheme Meguri -configuration Debug -destination platform=macOS,arch=arm64 -derivedDataPath build/app/StandaloneDerivedData '
+    not_called 'build-for-testing|-testPlan|test-without-building|^(sim-|vm-test|host-lease)|xcrun (simctl|devicectl)'
+    if [ "$mode" = team ]; then
+      called '^xcodebuild build .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration$'
+    else
+      not_called 'MEGURI_SIGNING=|allowProvisioning'
+    fi
+    called "^codesign --verify --deep --strict $candidate$"
+    called "^codesign --verify --strict $candidate/Contents/PlugIns/MeguriWidget.appex$"
+    not_called '^codesign .*--(sign|remove-signature)'
+    [ "$(field '.artifacts[] | select(.kind == "app") | .path')" = "$candidate" ]
+    [ "$(field .details.build.app)" = "$candidate" ]
+    [ "$(field .details.build.action)" = build ]
+    [ "$(field .details.build.standalone)" = true ]
+    [ "$(field '.details.standalone_product.architecture | .app + "/" + .widget')" = arm64/arm64 ]
+    [ "$(field .details.standalone_product.signature_verified)" = true ]
+    [ "$(field .details.standalone_product.executable_sha256)" = "$(shasum -a 256 "$candidate/Contents/MacOS/Meguri" | cut -c1-64)" ]
+    [ "$(field '.details.standalone_product.normal_entitlements.app["com.apple.security.temporary-exception.files.absolute-path.read-only"][0]')" = "$SB/" ]
+    [[ "$(field .details.input)" =~ ^[0-9a-f]{64}$ ]]
+    if [ "$mode" = adhoc ]; then [ ! -d "$SB/build/app/DerivedData" ]; fi
+    python3 "$SB/tools/tests/validate_result.py" "$result"
+    : >"$STUB_LOG"
+    mg build-app --platform mac
+    [ "$status" -eq 0 ]
+    called '^xcodebuild build-for-testing .* -testPlan UI .* -derivedDataPath build/app/DerivedData '
+    not_called '^codesign '
+    [ "$(field .details.build.action)" = build-for-testing ]
+    [ "$(field .details.build.standalone)" = false ]
+    [ "$(field '.details.standalone_product // "absent"')" = absent ]
+    [ "$(cat "$candidate/Contents/MacOS/Meguri")" = 'synthetic app' ]
+  done
+}
+
+@test "standalone app propagates lint core and normal build failures without publication" {
+  standalone_facts
+  cat >>"$SB/tools/mg.d/zz-physical-fakes.sh" <<'EOF'
+mg_lint_ui_first() {
+  echo lint >>"$STUB_LOG"
+  [ "${FX_STOP:-}" != lint ] || { mg_failure lint-ui "synthetic lint failure"; mg_status fail; return 1; }
+}
+mg__xcframework() { echo "xcframework $*" >>"$STUB_LOG"; [ "${FX_STOP:-}" != core ]; }
+EOF
+  local phase
+  for phase in lint core build; do
+    : >"$STUB_LOG"
+    FX_STOP="$phase" FX_BUILD_RC=1 mg build-app --platform mac --standalone
+    [ "$status" -eq 1 ]
+    [ "$(field .status)" = fail ]
+    [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
+    not_called '^codesign '
+    case "$phase" in
+      lint) not_called '^xcframework |^xcodebuild '; [ "$(field '.failures[0].id')" = lint-ui ] ;;
+      core) not_called '^xcodebuild '; [ "$(field '.failures[0].id')" = xcframework ] ;;
+      build) called '^xcodebuild build '; [ "$(field '.failures[0].id')" = build ] ;;
+    esac
+  done
+}
+
+@test "standalone app rejects actual root read extra paths write exceptions invalid shapes and missing signed facts" {
+  standalone_facts
+  cp "$FX_APP_ENT" "$BATS_TEST_TMPDIR/normal.json"
+  local mutation
+  for mutation in \
+    '.["com.apple.security.temporary-exception.files.absolute-path.read-only"] = ["/"]' \
+    '.["com.apple.security.temporary-exception.files.absolute-path.read-only"] += ["/"]' \
+    '.["com.apple.security.temporary-exception.files.absolute-path.read-only"] = "/"' \
+    '.["com.apple.security.temporary-exception.files.absolute-path.read-write"] = ["/"]' \
+    '.["com.apple.security.app-sandbox"] = false'; do
+    jq "$mutation" "$BATS_TEST_TMPDIR/normal.json" >"$FX_APP_ENT"
+    mg build-app --platform mac --standalone
+    [ "$status" -eq 1 ]
+    [ "$(field '.failures[0].id')" = standalone-product ]
+    [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
+  done
+  cp "$BATS_TEST_TMPDIR/normal.json" "$FX_APP_ENT"
+  local fault
+  for fault in signature entitlements arch stamp; do
+    case "$fault" in
+      signature) FX_SIGNATURE_RC=1 mg build-app --platform mac --standalone ;;
+      entitlements) FX_ENTITLEMENTS_RC=1 mg build-app --platform mac --standalone ;;
+      arch) FX_ARCH='arm64 x86_64' mg build-app --platform mac --standalone ;;
+      stamp) rm "$SB/app/Packages/MeguriCore/Binaries/.stamp"; mg build-app --platform mac --standalone ;;
+    esac
+    [ "$status" -eq 1 ]
+    [ "$(field '.failures[0].id')" = standalone-product ]
+    [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
   done
 }
 

@@ -1,6 +1,6 @@
 # App builds and launches (U8, R1961, R1962). Sourced by tools/mg; host jobs.
 #
-# Builds go to build/app/DerivedData (build-for-testing of the UI plan, so
+# Default builds go to build/app/DerivedData (build-for-testing of the UI plan, so
 # drive, ui-tree and screenshot reuse them). Simulators come from the pool
 # (tools/scripts/sim-pool.sh), which lives in the macOS test VM (U8c,
 # mac-vm.sh): simulator jobs call mg_sim_begin before they build and
@@ -13,7 +13,7 @@
 # daily driver's ids (app/AGENTS.md).
 
 mg_job build-app host mg_build_app \
-  "Build the app and its UI tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] (lint-ui first, core XCFramework, xcodebuild build-for-testing into build/app/DerivedData; Mac: Debug and Profile only)"
+  "Build the app and its UI tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] [--standalone] (lint-ui first, core XCFramework; default build-for-testing with UI plan in build/app/DerivedData; --standalone: Mac Debug normal build only, checked signed preview in build/app/StandaloneDerivedData; no launch)"
 mg_job run host mg_run \
   "Install and launch with test-hook options: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid>] [--config Debug|Profile] [--route r] [--window-size s] [--seconds N] [-- launch args]; a simulator keeps running the app (and its lease), the Mac app (Debug only) runs hidden for N s (5), out of the Dock and never active (checked with lsappinfo every second), and quits"
 
@@ -37,7 +37,27 @@ mg_app_products() {
 # records it and returns 1. MEGURI_APP_SIGNING=team opts host builds into
 # Xcode-managed team provisioning; the default remains adhoc.
 mg_app_build() {
+  mg_app_build_action build-for-testing "$@"
+}
+
+# Explicit action keeps every nested UI/snapshot/perf caller on its test plan.
+# Only build-app --standalone selects build; no ambient switch changes callers.
+mg_app_build_action() {
+  local action="$1" standalone_arg="" test_args=()
+  shift
   local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" signing="${MEGURI_APP_SIGNING-adhoc}" dest result log rc counts sdk xctestrun policy settings=() core_args=()
+  case "$action" in
+    build)
+      standalone_arg=" --standalone"
+      if [ "$platform/$config/$plan/$scheme" != mac/Debug/UI/Meguri ]; then
+        mg_failure usage "--standalone requires --platform mac --config Debug and the normal Meguri scheme"
+        mg_status error
+        return 1
+      fi
+      ;;
+    build-for-testing) test_args=(-testPlan "$plan") ;;
+    *) mg_failure usage "unsupported app build action: $action"; mg_status error; return 1 ;;
+  esac
   if ! mg_word_in "$signing" "adhoc team"; then
     mg_failure usage "MEGURI_APP_SIGNING takes adhoc or team"
     mg_status error
@@ -86,18 +106,19 @@ mg_app_build() {
   result="$MG_RUN_DIR/build-$platform-$config-$plan.xcresult"
   log="$MG_RUN_DIR/build-$platform-$config-$plan.log"
   rm -rf "$result"
-  echo "$MG_JOB: xcodebuild build-for-testing ($platform, $config, $plan plan)" >&2
-  xcodebuild build-for-testing -project app/Meguri.xcodeproj -scheme "$scheme" -testPlan "$plan" -configuration "$config" \
+  echo "$MG_JOB: xcodebuild $action ($platform, $config)" >&2
+  xcodebuild "$action" -project app/Meguri.xcodeproj -scheme "$scheme" ${test_args[0]+"${test_args[@]}"} -configuration "$config" \
     -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$result" ${settings[0]+"${settings[@]}"} >"$log" 2>&1
   rc=$?
-  mg_artifact log "$log" "xcodebuild build-for-testing ($platform, $config, $plan plan)"
+  mg_artifact log "$log" "xcodebuild $action ($platform, $config)"
   counts="$(xcrun xcresulttool get build-results --path "$result" 2>/dev/null |
     jq -c '{errors: .errorCount, warnings: .warningCount, messages: [(.errors[]?, .warnings[]?) | .message] | .[:10]}')" || counts=null
   mg_detail build "$(jq -nc --arg p "$platform" --arg c "$config" --arg app "$(mg_app_products "$platform" "$config")/Meguri.app" \
-    --argjson counts "${counts:-null}" '{platform: $p, config: $c, app: $app} + ($counts // {})')"
+    --arg action "$action" --arg dd "$MG_APP_DD" --argjson counts "${counts:-null}" \
+    '{platform: $p, config: $c, app: $app, action: $action, standalone: ($action == "build"), derived_data: $dd} + ($counts // {})')"
   if [ "$rc" -ne 0 ]; then
-    mg_failure build "xcodebuild build-for-testing failed ($platform, $config): $(grep -E 'error:' "$log" | head -n 3 | tr '\n' ' ')" \
-      "tools/mg build-app --platform $platform --config $config"
+    mg_failure build "xcodebuild $action failed ($platform, $config): $(grep -E 'error:' "$log" | head -n 3 | tr '\n' ' ')" \
+      "tools/mg build-app --platform $platform --config $config$standalone_arg"
     mg_message "$MG_JOB: the $platform $config build failed; see $log"
     mg_status fail
     return 1
@@ -140,6 +161,67 @@ mg_app_input_digest() {
   rm -f "$index"
   [ -n "$tree" ] || return 0
   git -C "$MG_ROOT" ls-tree -r "$tree" -- app core 2>/dev/null | grep -v "$(printf '\t')app/Snapshots/" | shasum -a 256 | cut -c1-64
+}
+
+# Read signed facts, never repair or re-sign a product. These are the normal
+# Debug checks from xcode_project_check.sh (KTD22, fixture scope, stamp, arm64),
+# without that script's ad-hoc-only key inventory: team/profile/Keychain/App
+# Group keys must survive. No test runner or xctestrun is needed here.
+mg_app_standalone_check() {
+  local app="$1" widget="$1/Contents/PlugIns/MeguriWidget.appex" bundle xml ent info app_ent="" widget_ent=""
+  local stamp hash slices executable_hash widget_hash
+  codesign --verify --deep --strict "$app" && codesign --verify --strict "$widget" || return 1
+  for bundle in "$app" "$widget"; do
+    xml="$(codesign -d --entitlements - --xml "$bundle")" || return 1
+    ent="$(plutil -convert json -o - - <<<"$xml")" || return 1
+    jq -e 'type == "object" and .["com.apple.security.app-sandbox"] == true
+      and .["com.apple.security.get-task-allow"] == true' <<<"$ent" >/dev/null || return 1
+    if [ "$bundle" = "$app" ]; then
+      # Exact array equality rejects root read, extra paths and invalid shape.
+      # Reject every other filesystem exception, including write variants.
+      jq -e --arg fixture "$MG_ROOT/" '
+        .["com.apple.security.network.client"] == true
+        and .["com.apple.security.network.server"] == true
+        and .["com.apple.security.files.user-selected.read-write"] == true
+        and .["com.apple.security.files.bookmarks.app-scope"] == true
+        and .["com.apple.security.temporary-exception.files.absolute-path.read-only"] == [$fixture]
+        and ([keys[] | select(startswith("com.apple.security.temporary-exception.files."))]
+          == ["com.apple.security.temporary-exception.files.absolute-path.read-only"])' <<<"$ent" >/dev/null || return 1
+      app_ent="$ent"
+    else
+      jq -e '[keys[] | select(startswith("com.apple.security.temporary-exception.files."))] == []' \
+        <<<"$ent" >/dev/null || return 1
+      widget_ent="$ent"
+    fi
+  done
+  [ "$(lipo -archs "$app/Contents/MacOS/Meguri")" = arm64 ] &&
+    [ "$(lipo -archs "$widget/Contents/MacOS/MeguriWidget")" = arm64 ] || return 1
+  info="$(plutil -convert json -o - "$app/Contents/Info.plist")" || return 1
+  jq -e '.CFBundleIdentifier == "com.antoinefink.meguri.dev" and .CFBundleExecutable == "Meguri"
+    and .MeguriCardInspectionBuild == "debug" and .LSUIElement == true' <<<"$info" >/dev/null || return 1
+  info="$(plutil -convert json -o - "$widget/Contents/Info.plist")" || return 1
+  jq -e '.CFBundleIdentifier == "com.antoinefink.meguri.dev.widget" and .CFBundleExecutable == "MeguriWidget"' \
+    <<<"$info" >/dev/null || return 1
+  stamp="$(cat "$MG_ROOT/app/Packages/MeguriCore/Binaries/.stamp")" || return 1
+  grep -qx 'configuration=Debug' <<<"$stamp" && grep -qx 'profile=dev' <<<"$stamp" &&
+    grep -qx 'features=ankiweb,test-hooks' <<<"$stamp" || return 1
+  hash="$(sed -n 's/^hash=//p' <<<"$stamp")"
+  printf '%s\n' "$hash" | grep -Eq '^[0-9a-f]{32}$' || return 1
+  slices="$(sed -n 's/^slices=//p' <<<"$stamp")"
+  printf '%s\n' "$slices" | tr ',' '\n' | grep -qx mac || return 1
+  executable_hash="$(shasum -a 256 "$app/Contents/MacOS/Meguri" | cut -c1-64)"
+  widget_hash="$(shasum -a 256 "$widget/Contents/MacOS/MeguriWidget" | cut -c1-64)"
+  printf '%s\n' "$executable_hash" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  printf '%s\n' "$widget_hash" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  mg_detail standalone_product "$(jq -nc --arg hash "$executable_hash" --arg widget_hash "$widget_hash" \
+    --arg core_hash "$hash" --arg slices "$slices" --argjson app "$app_ent" --argjson widget "$widget_ent" '
+    def normal: with_entries(select(.key | startswith("com.apple.security.")))
+      | del(.["com.apple.security.application-groups"]);
+    {signature_verified: true, architecture: {app: "arm64", widget: "arm64"},
+     executable_sha256: $hash, widget_executable_sha256: $widget_hash,
+     bundle_id: "com.antoinefink.meguri.dev", card_inspection_build: "debug",
+     core: {hash: $core_hash, configuration: "Debug", profile: "dev", features: "ankiweb,test-hooks", slices: $slices},
+     normal_entitlements: {app: ($app | normal), widget: ($widget | normal)}}')"
 }
 
 # mg_app_xcodebuild_test <out prefix> <mac|ios|ios-device> <destination> <config> [xcodebuild args]:
@@ -571,7 +653,10 @@ mg_app_quit_mac() {
 # Jobs
 
 mg_build_app() {
-  local platform="" config=Debug
+  local platform="" config=Debug standalone=false input="" app
+  # Bash dynamic scope constrains this override to this CLI build and its
+  # product lookup; later/nested test jobs retain the default DerivedData.
+  local MG_APP_DD="$MG_APP_DD"
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --platform)
@@ -582,13 +667,30 @@ mg_build_app() {
         [ "$#" -ge 2 ] && mg_word_in "$2" "Debug Profile Release AppStore" || { mg_drive__usage "--config takes Debug, Profile, Release or AppStore"; return 0; }
         config="$2" && shift 2
         ;;
-      *) mg_drive__usage "usage: tools/mg build-app --platform ios-sim|mac [--config C]"; return 0 ;;
+      --standalone) standalone=true; shift ;;
+      *) mg_drive__usage "usage: tools/mg build-app --platform ios-sim|mac [--config C] [--standalone]"; return 0 ;;
     esac
   done
-  [ -n "$platform" ] || { mg_drive__usage "usage: tools/mg build-app --platform ios-sim|mac [--config C]"; return 0; }
-  mg_app_build "$platform" "$config" || return 0
-  mg_artifact app "$(mg_app_products "$platform" "$config")/Meguri.app"
-  mg_message "build-app: $platform $config built: $(mg_app_products "$platform" "$config")/Meguri.app"
+  [ -n "$platform" ] || { mg_drive__usage "usage: tools/mg build-app --platform ios-sim|mac [--config C] [--standalone]"; return 0; }
+  if [ "$standalone" = true ]; then
+    [ "$platform/$config" = mac/Debug ] || { mg_drive__usage "--standalone requires --platform mac --config Debug"; return 0; }
+    MG_APP_DD=build/app/StandaloneDerivedData
+    input="$(mg_app_input_digest)"
+    mg_app_build_action build "$platform" "$config" || return 0
+    app="$(mg_app_products "$platform" "$config")/Meguri.app"
+    if ! printf '%s\n' "$input" | grep -Eq '^[0-9a-f]{64}$' ||
+        [ "$input" != "$(mg_app_input_digest)" ] || ! mg_app_standalone_check "$app"; then
+      mg_failure standalone-product "normal Debug preview validation failed: require stable source digest, valid app/widget signatures, normal sandbox entitlements with only checkout fixture read access, arm64 dev products and the Debug/dev core stamp; see log.txt"
+      mg_status fail
+      return 0
+    fi
+    mg_detail input "$(jq -nc --arg input "$input" '$input')"
+  else
+    mg_app_build "$platform" "$config" || return 0
+    app="$(mg_app_products "$platform" "$config")/Meguri.app"
+  fi
+  mg_artifact app "$app"
+  mg_message "build-app: $platform $config built: $app"
   mg_status pass
 }
 
