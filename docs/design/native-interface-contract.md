@@ -19,6 +19,8 @@ The HTML specifies hierarchy and behavior. It does not specify native control me
 
 - Deck selection is the main workspace. Show the real collection's deck tree and available counts.
 - Make Study the selected deck's primary action. Use `ReviewCollection.startStudy(deckID:)` and its existing availability guard.
+- Center the selected deck and empty state in the available detail pane. Overflow content remains scrollable; fixed top padding is not the centering mechanism.
+- On Mac, use a content-sized Study button and simple deck-name/due-count sidebar rows. The selected deck shows the three labeled counts without filling the sidebar with that full sentence.
 - The sidebar shows deck names and counts. With no deck rows, show “No decks”.
 - Keep import in File, Collection settings and empty-state onboarding.
 - Remove permanent sidebar import actions, routine deck-page import buttons and standalone shortcut links below Study.
@@ -130,7 +132,7 @@ Supporting requirements: R1496–R1504, R2046, R2048–R2050, R2054–R2063, lim
 ## N9. Pending backend work
 
 The agreed destination is collection file export with media. Its prepared backend patch is paused and unverified.
-Keep the current export label and explanation honest: the active file export excludes media.
+Use plain Export Collection labels. Explain before export that the active file export excludes media.
 The UI must describe the implemented export. Backend media work and its checks remain separate.
 This limitation does not remove the existing explicit server media-transfer workflow.
 

@@ -21,3 +21,16 @@ gate as required acceptance work after visual agreement.
 
 Implementation, independent review, fixes and actual receipts will be recorded
 below. No completed-unit trailer is authorized by this checkpoint.
+
+Implementation session: `s-20261024T112011Z-6ad2db2e`.
+Filtered run `cleanroom/20261024T112121Z-31871` passed its boundaries and
+exported 23 app files. Parent applied the reviewed patch without conflicts.
+`build-app/20261024T113555Z-40409` passed UI lint and the team-signed standalone
+Mac Debug build. `swift-test/20261024T113705Z-42383` passed 20 focused tests.
+
+Round 1 independent review found no P0/P1. Three P2 items remain: plain export
+labels with honest detail copy; transfer decisions in Collection rather than
+the Connection setup page; proper pane-height centering. The compact Mac Study
+and sidebar composition is now explicit in N2. The existing Sync Logs heading
+was confirmed; it is not missing. These changes are WIP pending the fixer and
+the running native preview. Full acceptance checks remain deferred as above.
