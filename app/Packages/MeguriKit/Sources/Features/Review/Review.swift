@@ -128,8 +128,8 @@ struct ReviewLayout<Card: View>: View {
             .fixedSize(horizontal: false, vertical: true)
             #else
             header
-                .buttonStyle(.bordered)
-                .controlSize(.large)
+                .buttonStyle(.borderless)
+                .controlSize(.regular)
                 .padding(.horizontal, Spacing.small)
                 .fixedSize(horizontal: false, vertical: true)
                 .layoutPriority(1)
@@ -189,9 +189,9 @@ struct ReviewLayout<Card: View>: View {
         Button(action: close) {
             Label { Text("Close Review", bundle: .module) } icon: { Image(systemName: "xmark") }
                 .labelStyle(.iconOnly)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
         }
+        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+        .contentShape(Rectangle())
         .accessibilityLabel(Text("Close Review", bundle: .module))
         .help(Text("Close Review", bundle: .module))
         .accessibilityIdentifier("review.session.close")
@@ -226,9 +226,9 @@ struct ReviewLayout<Card: View>: View {
         } label: {
             Label { Text(verbatim: undoDescription) } icon: { Image(systemName: "arrow.uturn.backward") }
                 .labelStyle(.iconOnly)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
         }
+        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+        .contentShape(Rectangle())
         .accessibilityLabel(undoDescription)
         .help(undoDescription)
         .accessibilityIdentifier("review.session.back")
@@ -242,9 +242,9 @@ struct ReviewLayout<Card: View>: View {
             } label: {
                 Label { Text("Redo Answer", bundle: .module) } icon: { Image(systemName: "arrow.uturn.forward") }
                     .labelStyle(.iconOnly)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
             }
+            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+            .contentShape(Rectangle())
             .accessibilityLabel(Text("Redo Answer", bundle: .module))
             .help(Text("Redo Answer", bundle: .module))
             .accessibilityIdentifier("review.session.redo")

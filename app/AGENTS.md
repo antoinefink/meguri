@@ -47,6 +47,10 @@
 - CollectionEntryJourneyTests uses public app/Fixtures/CollectionEntry inputs and the real system picker. ImportSource installs only its dedicated Documents source; it never imports or selects a route.
 - Files replacement belongs to SpringBoard on iOS; tap its exact Replace button without activating Meguri. Wait for enabled, hittable app actions after native completion.
 
+## Native build cache
+
+- Changing an opaque SwiftUI helper can leave stale generic callers in incremental package output. A `swift_retain` crash from `EmptyStateView` actions cleared with the same source/input in fresh Meguri standalone DerivedData (2026-10-24). Compare that before changing behavior; compile/signature checks alone do not prove launch.
+
 ## Test hooks
 
 - Launch options are `-Meguri<Name> <value>` (table in `TestHooks/LaunchOptions.swift`); UI tests build them with `MeguriUITests/Support/MeguriLaunch.swift`. A bad option replaces the UI with `testhooks.error.message`.

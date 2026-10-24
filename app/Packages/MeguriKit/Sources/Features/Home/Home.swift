@@ -162,10 +162,6 @@ struct HomeCollectionImportButton: View {
     var body: some View {
         Button(action: action) {
             Text("Import Collection")
-                #if !os(macOS)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
-                #endif
         }
         .buttonStyle(.bordered)
         #if os(macOS)
@@ -176,6 +172,8 @@ struct HomeCollectionImportButton: View {
         .contentShape(Rectangle())
         #else
         .tint(ColorToken.textPrimary.color)
+        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+        .contentShape(Rectangle())
         #endif
         .disabled(!canPresent)
         .accessibilityIdentifier("home.collection.import")

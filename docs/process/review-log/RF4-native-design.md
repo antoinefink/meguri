@@ -103,3 +103,33 @@ startup also failed before connection. Preserve this failed receipt and
 all returned output. No baseline was changed and no full gate was run.
 `similarity/20261024T123055Z-1894` scanned 28 files with zero flags.
 `static-checks/20261024T123058Z-2222` passed the commit trailer check.
+
+The standard iPhone/iPad answer render check
+`snapshots/20261024T123659Z-12242` passed both selected answer cells. Their
+matching baseline images were inspected; passing cells do not export a second
+PNG. The touch header utility buttons still looked too large, so a bounded
+touch-control correction follows. These are ReviewLayout samples, not a live
+WebKit/core session or the whole iPad shell.
+
+The latest incremental standalone product crashed on launch in
+`EmptyStateView` actions, at `swift_retain`. The style helper's Mac opaque
+result type had changed. A fresh Meguri-only standalone build
+`build-app/20261024T124002Z-18726` with the identical source/input digest
+`0570b7f1d9b3c345aeef1df57d7791e2dbf73144fcd83540f2cf1609970036f0`
+opened normally. No app behavior change was needed. The failed product and
+report remain available. The live fresh-build Settings view confirms aligned
+rows, no sidebar toggle and a distinct Sign Out action identifier. Account
+identity text is still combined with its Login label in the exported AX view;
+its content remains readable, but its separate test identifier is not proven.
+Keep that limitation for later native accessibility checks.
+
+The final touch pass `cleanroom/20261024T124217Z-21732` moves interaction
+minimums outside labels and uses regular borderless review utility buttons.
+Independent source review found no new P0–P2 issue.
+`build-app/20261024T124340Z-23123` passed and its exact copied product opened
+as PID 27698. `snapshots/20261024T124512Z-24790` returned both changed standard
+iPhone/iPad answer images. They were inspected: utility controls are smaller
+and the answer buttons remain at the bottom. Both baseline comparisons fail
+for the changed pixels; no baseline approval was recorded. The expanded
+Connection details view still needs left-aligned log text. That layout
+correction follows.
