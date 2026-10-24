@@ -41,7 +41,7 @@ BODY_LIMIT = 16 * 1024 * 1024  # synthetic C/D fixtures only, never arbitrary da
 GATE_SECONDS = 90
 IO_SECONDS = 10
 REQUEST_SECONDS = 120
-LIFETIME_SECONDS = 1800
+LIFETIME_SECONDS = 3600
 READER_SECONDS = 8  # plus <=2 seconds to kill, drain and reap
 READER_LIMIT = 65536
 _spec = importlib.util.spec_from_file_location('rf4_reducer', Path(__file__).with_name('manual-transfer-config.py'))

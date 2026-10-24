@@ -186,7 +186,7 @@ case "${1:-}" in
     shift
     mg_manual_transfer_check "$@"
     ;;
-  forward|terminate)
+  forward|forward-eof|terminate)
     operation="$1"
     mg_mac_vm_take
     MG_MT_VM_PORT=18765
@@ -198,6 +198,29 @@ case "${1:-}" in
     mg_mt_start_wire
     if [ "$operation" = forward ]; then
       mg_mt_open_forward
+    elif [ "$operation" = forward-eof ]; then
+      mg_mt_open_forward && mg_mt_write_manifest || exit 1
+      # Wait only for the fake timer to record its scheduled duration.
+      for attempt in 1 2 3; do
+        [ ! -s "$FX_WATCHDOG" ] || break
+        mg_sleep 1
+      done
+      [ -s "$FX_WATCHDOG" ] || exit 1
+      exec 8>&-
+      MG_MT_ROUTE_FD=""
+      for attempt in 1 2 3; do
+        kill -0 "$MG_MT_ROUTE_PID" 2>/dev/null || break
+        mg_sleep 1
+      done
+      ! kill -0 "$MG_MT_ROUTE_PID" 2>/dev/null || exit 1
+      wait "$MG_MT_ROUTE_PID" || exit 1
+      MG_MT_ROUTE_PID=""
+      for attempt in 1 2 3; do
+        [ ! -s "$FX_WATCHDOG.cancelled" ] || break
+        mg_sleep 1
+      done
+      [ -s "$FX_WATCHDOG.cancelled" ] || exit 1
+      [ ! -e "${MG_MT_MANIFEST/"$MG_ROOT"/"$FX_VM"}" ] || exit 1
     else
       mg_mt_open_forward && mg_mt_write_manifest
       kill -TERM $$

@@ -1129,6 +1129,39 @@ def request(port, path, token=None, method='POST', body=b'', host=None, chunked=
         connection.close()
 
 
+class WatchdogTests(unittest.TestCase):
+    def test_observer_schedules_one_hour_and_eof_cancels_watchdog(self):
+        server = mock.Mock(server_port=19090, token='synthetic')
+        threads = []
+        def thread(*, target, daemon):
+            child = mock.Mock()
+            threads.append((target, child))
+            return child
+        with mock.patch.object(sys, 'argv', ['manual-transfer-wire.py', '19091']), \
+                mock.patch.object(wire, 'RigServer', return_value=server), \
+                mock.patch.object(wire.signal, 'signal'), \
+                mock.patch.object(wire.threading, 'Thread', side_effect=thread), \
+                mock.patch.object(wire.threading, 'Timer') as timer, \
+                mock.patch.object(wire.os, 'read', return_value=b'') as read, \
+                contextlib.redirect_stdout(io.StringIO()):
+            def eof(**_kwargs):
+                timer.assert_called_once_with(3600, mock.ANY)
+                timer.return_value.start.assert_called_once_with()
+                self.assertTrue(timer.return_value.daemon)
+                server.stop.assert_not_called()
+                threads[0][1].start.assert_called_once_with()
+                threads[0][0]()  # controller EOF, before the watchdog fires
+                read.assert_called_once_with(0, 1)
+                threads[1][1].start.assert_called_once_with()
+                threads[1][0]()  # run the scheduled immediate shutdown
+                server.stop.assert_called_once_with()
+            server.serve_forever.side_effect = eof
+            wire.main()
+            timer.return_value.cancel.assert_called_once_with()
+            server.stop_reader.assert_called_once_with()
+            server.server_close.assert_called_once_with()
+
+
 class WireTests(unittest.TestCase):
     def setUp(self):
         self.upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)

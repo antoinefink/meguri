@@ -1361,3 +1361,28 @@ Whole paragraphs were rewritten, then duplicate test prose became an E6
 cross-reference. All normative requirements remain. `075851Z-4606` passed
 both specs. Implementation, focused checks and native media-file saves remain
 pending; internal copies keep their collection-only contract.
+
+iPhone `manual-transfer-check/074757Z-94338` failed after 1927 seconds.
+A completed import, saved review, restart and same-login export. B reached
+cancelled media history; a later observer request failed. Both test routes
+had fixed 1800-second lifetimes. Teardown passed. This is not native acceptance.
+The earlier `074725Z-93209` invocation lacked sandbox socket access and ran
+no tests. Doctor `075021Z-98711` checked the actual VM and Docker access.
+
+Watchdog fixer `082827Z-20448` changes both lifetimes to 3600 seconds;
+R1 found no P0-P2. New focused test `selftest/083631Z-27432` failed before
+the duration assertion. Full focused `083738Z-28092` passed 38 of 39; the
+same new fixture failed. R2 traced missing fake VM initialization before
+lease acquisition. The earlier red result does not prove the duration check.
+Fixture correction and final verification remain pending. The new runbook
+paragraph also needs a complete rewrite after its privacy check failed;
+its earlier wording remains until that fix.
+
+Normal Mac preview `build-app/082629Z-18519` passed, source `1a9f083f`.
+Copied app and widget executable hashes match its receipt. Its packet passed
+privacy after a full prose rewrite. Media file export remains excluded.
+VM drive `082948Z-21901` passed all 12 steps but failed hierarchy checking:
+70 repeats of seven five-part retained-copy identifiers. Actual captures also
+showed clipped sidebar guidance and an unaligned empty-state import action.
+Filtered UI fix `083459Z-25942` is held with the media-export copy until
+backend verification; its tests and rendered review are still pending.

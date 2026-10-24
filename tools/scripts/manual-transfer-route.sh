@@ -60,7 +60,7 @@ mg_mt_open_forward() {
   lifetime="$(mvl_q /bin/bash -c 'file=$1; input=$2; code=$3
 trap '\''exit 143'\'' TERM HUP
 trap '\''rm -f "$file" "$input" "$code"; kill "$timer" "$reader" 2>/dev/null || true'\'' EXIT
-(sleep 1800 & sleeper=$!; trap '\''kill "$sleeper" 2>/dev/null; exit'\'' TERM HUP; wait "$sleeper"; kill -TERM $$) </dev/null >/dev/null 2>&1 &
+(sleep 3600 & sleeper=$!; trap '\''kill "$sleeper" 2>/dev/null; exit'\'' TERM HUP; wait "$sleeper"; kill -TERM $$) </dev/null >/dev/null 2>&1 &
 timer=$!
 rm -f "$file"
 printf "mg-transfer-forward-ready\\n"
@@ -139,7 +139,7 @@ mg_mt_cleanup() {
   rm -f "$MG_RUN_DIR/wire-input.fifo" "$MG_RUN_DIR/wire-ready.fifo"
   rm -f "$MG_RUN_DIR/route.fifo" "$MG_RUN_DIR/route.log"
   if [ "$errors" -ne 0 ]; then
-    mg_mt_error cleanup "VM teardown is unconfirmed; the manifest watchdog expires at thirty minutes and the next VM fixture copy replaces it"
+    mg_mt_error cleanup "VM teardown is unconfirmed; the manifest watchdog expires at one hour and the next VM fixture copy replaces it"
     return 1
   fi
   mg_detail native_transfer_cleanup true

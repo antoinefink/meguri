@@ -29,6 +29,16 @@ while [ "$#" -gt 1 ]; do
 done
 [ "$forward" = '127.0.0.1:18765:127.0.0.1:19090' ] || exit 98
 printf 'reverse-forward-loopback-only\n' >>"$FX_EVENTS"
+if [ -n "${FX_WATCHDOG:-}" ]; then
+  # Observe the real remote timer's scheduling without sleeping for its duration.
+  sleep() {
+    trap 'printf "cancelled\n" >"$FX_WATCHDOG.cancelled"; exit 0' TERM HUP
+    exec 6<>"$FX_WATCHDOG.wait"
+    printf '%s\n' "$1" >"$FX_WATCHDOG"
+    IFS= read -r -t 10 <&6
+  }
+  export -f sleep
+fi
 # This parser asserts requested options without opening a network connection.
 exec /bin/bash -c "${1//"$FX_ROOT"/"$FX_VM"}"
 SH
@@ -299,6 +309,23 @@ PYFIXTURE
   [ ! -e "$(guest_manifest)" ]
   [ ! -e "$FX_ROOT/build/mg/manual-transfer-check/20261024T010101Z-17/route.fifo" ]
   [ "$(tail -n 1 "$FX_EVENTS")" = release ]
+}
+
+@test "manual transfer: remote watchdog matches observer and EOF cancels it immediately" {
+  export FX_WATCHDOG="$BATS_TEST_TMPDIR/watchdog"
+  mkfifo "$FX_WATCHDOG.wait"
+  run invoke_fake forward-eof
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FX_WATCHDOG")" = 3600 ]
+  [ "$(cat "$FX_WATCHDOG.cancelled")" = cancelled ]
+  [ ! -e "$(guest_manifest)" ]
+  python3 - "$FX_REPO/tools/tests" "$FX_WATCHDOG" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from manual_transfer_wire_test import wire
+assert wire.LIFETIME_SECONDS == int(Path(sys.argv[2]).read_text())
+PY
 }
 
 @test "manual transfer: refused account configuration never echoes its supplied secret" {
