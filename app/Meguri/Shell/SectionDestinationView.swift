@@ -50,6 +50,12 @@ struct ShellFeatures {
             case .collectionEntry: AnyView(CollectionEntryView(coordinator: collection.entry))
             case .collectionExport: AnyView(CollectionExportDestination(coordinator: collection.collectionExport))
             case .fsrsAdmission: AnyView(FsrsAdmissionView(collection: collection))
+            case .manualTransfer:
+                AnyView(ManualTransferWorkflowView(model: collection.manualTransfers, close: navigation.dismissSheet)
+                    #if os(macOS)
+                    .frame(idealWidth: ContentWidth.readable, minHeight: WindowMetrics.minimum.height)
+                    #endif
+                )
             case .add: AnyView(SheetPlaceholder(sheet: route, navigation: navigation))
             }
         }

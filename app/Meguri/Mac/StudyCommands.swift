@@ -13,14 +13,19 @@ struct NativeCommandContext {
             && collection.manualTransfers.preview == nil && collection.manualTransfers.mediaPreview == nil
     }
     func present(_ route: SheetRoute) {
-        guard fileActionsAvailable else { return }
+        guard collection.navigation.sheet == nil else { return }
         switch route {
         case .collectionEntry:
-            guard collection.entry.canPresent else { return }
+            guard fileActionsAvailable, collection.entry.canPresent else { return }
             collection.entry.present()
         case .collectionExport:
-            guard collection.collectionExport.canPresent else { return }
+            guard fileActionsAvailable, collection.collectionExport.canPresent else { return }
             collection.collectionExport.present()
+        case .manualTransfer:
+            // Reopening must also admit an active operation or authoritative
+            // preview. Only the workflow's explicit actions start work.
+            guard !collection.entry.busy, !collection.collectionExport.busy else { return }
+            collection.navigation.present(.manualTransfer)
         default: return
         }
         collection.navigation.sheetHost = host

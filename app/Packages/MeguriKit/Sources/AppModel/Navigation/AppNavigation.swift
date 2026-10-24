@@ -230,13 +230,14 @@ public final class AppNavigation {
     }
 
     /// Drop presentation bound to the old generation. Entry keeps its progress
-    /// sheet until its FFI result confirms that the new host is retained.
+    /// sheet until its FFI result confirms that the new host is retained. The
+    /// server workflow survives adoption to show its outcome and media decision.
     public func collectionReplaced(keepingEntrySheet: Bool = false) {
         endReview()
         selectedDeck = nil; showsDeckPage = false; restoredDeckPagePending = false
         paths.removeAll(); scrollPositions.removeAll(); featureStates.removeAll()
         browseSearch = ""; section = .home; settingsTabSection = .settings
-        if !keepingEntrySheet || sheet != .collectionEntry { dismissSheet() }
+        if sheet != .manualTransfer, !keepingEntrySheet || sheet != .collectionEntry { dismissSheet() }
     }
 
     // MARK: Scroll positions (R5, R19)

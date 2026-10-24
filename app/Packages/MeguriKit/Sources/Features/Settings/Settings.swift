@@ -1,4 +1,5 @@
 import AppModel
+import CoreBridge
 import DesignSystem
 import SwiftUI
 
@@ -18,7 +19,7 @@ public struct SettingsView: View {
         .frame(maxWidth: ContentWidth.readable)
         .frame(maxWidth: .infinity)
         .background(.token(.backgroundPrimary))
-        .manualTransferPresentation(model: collection.manualTransfers)
+        .manualTransferPresentation(model: collection.manualTransfers, isActive: collection.navigation.sheet != .manualTransfer)
         .navigationTitle(Text("Settings", bundle: .module))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings.root.content")
@@ -36,20 +37,36 @@ struct SettingsCollectionFilesSection: View {
     }
     var body: some View {
         Section {
-            Button { if let present { present(.collectionEntry) } else { collection?.entry.present() } } label: {
-                Text("Import Collection", bundle: .module).fixedSize(horizontal: false, vertical: true).frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget).contentShape(Rectangle())
-            }
+            LabeledContent {
+                Button { if let present { present(.collectionEntry) } else { collection?.entry.present() } } label: {
+                    Text("Import Collection", bundle: .module)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                .contentShape(Rectangle())
                 .disabled(!fileActionsAvailable || collection?.entry.canPresent != true)
                 .accessibilityIdentifier("settings.root.importCollection")
-            Button { if let present { present(.collectionExport) } else { collection?.collectionExport.present() } } label: {
-                Text("Export Collection", bundle: .module).fixedSize(horizontal: false, vertical: true).frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget).contentShape(Rectangle())
+            } label: {
+                Label { Text("From a file", bundle: .module) } icon: { Image(systemName: "square.and.arrow.down") }
             }
+            LabeledContent {
+                Button { if let present { present(.collectionExport) } else { collection?.collectionExport.present() } } label: {
+                    Text("Export Collection", bundle: .module)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                .contentShape(Rectangle())
                 .disabled(!fileActionsAvailable || collection?.collectionExport.canPresent != true)
                 .accessibilityIdentifier("settings.root.exportCollection")
-            Text("Save a latest-format .colpkg containing every deck, note, card and saved review. Images, audio and other media are excluded. No account or connection is needed.", bundle: .module)
-                .foregroundStyle(.token(.textSecondary))
-                .fixedSize(horizontal: false, vertical: true)
+            } label: {
+                Label { Text("To a file", bundle: .module) } icon: { Image(systemName: "square.and.arrow.up") }
+            }
         } header: { Text("Collection Files", bundle: .module) }
+        footer: {
+            Text("File export excludes images, audio and other media. No account or connection is needed.", bundle: .module)
+        }
     }
 
 }
@@ -78,9 +95,10 @@ public struct MacSettingsView: View {
             Form {
                 if selectedSection == "collection" {
                     SettingsCollectionFilesSection(collection: collection, present: present)
-                    ManualTransferSections(model: collection.manualTransfers, area: .transfers)
+                    serverActions
                 } else {
                     ManualTransferSections(model: collection.manualTransfers, area: .connection)
+                    if hasActiveTransfer { continueTransfer }
                     Section {
                         DisclosureGroup {
                             ConnectionMetadata(model: collection.manualTransfers)
@@ -96,11 +114,94 @@ public struct MacSettingsView: View {
             .detailColumnChrome()
         }
         .toolbar(removing: .sidebarToggle)
-        .manualTransferPresentation(model: collection.manualTransfers)
+        .manualTransferPresentation(model: collection.manualTransfers, isActive: collection.navigation.sheet != .manualTransfer)
         .accessibilityIdentifier("settings.root.content")
+    }
+    private var hasActiveTransfer: Bool {
+        let model = collection.manualTransfers
+        return model.busy || model.preview != nil || model.mediaPreview != nil
+    }
+    private var canOpenTransfer: Bool {
+        collection.navigation.sheet == nil && !collection.entry.busy && !collection.collectionExport.busy
+    }
+    private var serverActions: some View {
+        Section {
+            serverAction(.import)
+            serverAction(.export)
+            if hasActiveTransfer { continueButton }
+        } header: { Text("Server Transfers", bundle: .module) }
+        footer: { Text("A transfer replaces the destination collection. Review preparation and media decisions before continuing.", bundle: .module) }
+    }
+    private func serverAction(_ direction: ManualTransferDirection) -> some View {
+        LabeledContent {
+            Button {
+                guard canOpenTransfer, !hasActiveTransfer else { return }
+                collection.manualTransfers.select(direction)
+                present(.manualTransfer)
+            } label: {
+                Text(direction == .import ? "Import…" : "Export…", bundle: .module)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+            .contentShape(Rectangle())
+            .disabled(!canOpenTransfer || hasActiveTransfer)
+            .accessibilityIdentifier(direction == .import ? "settings.anki.openImport" : "settings.anki.openExport")
+        } label: {
+            Label {
+                Text(direction == .import ? "From the server" : "To the server", bundle: .module)
+            } icon: { Image(systemName: direction == .import ? "arrow.down.circle" : "arrow.up.circle") }
+        }
+    }
+    private var continueTransfer: some View {
+        Section { continueButton }
+    }
+    private var continueButton: some View {
+        LabeledContent {
+            Button { present(.manualTransfer) } label: { Text("Continue…", bundle: .module) }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                .contentShape(Rectangle())
+                .disabled(!canOpenTransfer)
+                .accessibilityIdentifier("settings.anki.continueTransfer")
+        } label: { Text("Current transfer", bundle: .module) }
     }
 }
 #endif
+
+/// Opening or closing this workflow has no transfer effect. The shared model
+/// retains work and decisions when the sheet is closed.
+public struct ManualTransferWorkflowView: View {
+    private let model: ManualTransferCoordinator
+    private let close: () -> Void
+    public init(model: ManualTransferCoordinator, close: @escaping () -> Void) {
+        self.model = model; self.close = close
+    }
+    public var body: some View {
+        NavigationStack {
+            Form {
+                ManualTransferSections(model: model)
+                Section {} footer: {
+                    Text("Closing this sheet keeps active work and pending decisions. Continue from Collection settings.", bundle: .module)
+                }
+            }
+            #if os(macOS)
+            .formStyle(.grouped)
+            #endif
+            .manualTransferPresentation(model: model)
+            .navigationTitle(Text("Server Transfer", bundle: .module))
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(action: close) { Text("Done", bundle: .module) }
+                        .accessibilityIdentifier("settings.anki.closeTransfer")
+                }
+            }
+        }
+        .interactiveDismissDisabled(model.confirmationPresented || model.copyDestinationPresented)
+        .accessibilityIdentifier("settings.anki.transferWorkflow")
+    }
+}
 
 private struct ConnectionMetadata: View {
     let model: ManualTransferCoordinator

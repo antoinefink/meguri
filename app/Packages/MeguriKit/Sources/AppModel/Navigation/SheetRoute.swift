@@ -8,6 +8,8 @@ nonisolated public enum SheetRoute: Hashable, Identifiable, Sendable {
     case fsrsAdmission
     case collectionEntry
     case collectionExport
+    /// Explicit server-transfer preparation, decisions and retained history.
+    case manualTransfer
 
     public var id: Self { self }
 }

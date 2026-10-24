@@ -22,6 +22,8 @@ public struct ManualTransferSections: View {
                     LabeledContent {
                         HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
                             TextField("Server URL", text: $model.endpointDraft, axis: .vertical)
+                                .labelsHidden()
+                                .frame(maxWidth: .infinity)
                                 .font(.body)
                                 .textContentType(.URL)
                                 #if os(macOS)
@@ -32,15 +34,20 @@ public struct ManualTransferSections: View {
                                 #endif
                                 .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
                                 .accessibilityIdentifier("settings.anki.endpoint")
+                                .accessibilityLabel(Text("Server URL", bundle: .module))
                                 .accessibilityHint("Self-hosted server URL, including an optional path prefix.")
                             Button { Task { await model.testConnection() } } label: {
                                 Text("Test", bundle: .module)
-                                    .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
                             }
+                            .buttonStyle(.bordered)
+                            .controlSize(.regular)
+                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                            .contentShape(Rectangle())
                             .disabled(!model.canTestConnection)
                             .accessibilityLabel(Text("Test Connection", bundle: .module))
                             .accessibilityIdentifier("settings.anki.testConnection")
                         }
+                        .frame(maxWidth: .infinity)
                     } label: {
                         Text("Server URL", bundle: .module)
                     }
@@ -53,8 +60,16 @@ public struct ManualTransferSections: View {
                         Text("HTTP sends data without encryption. Use it only for a server and network you trust.", bundle: .module)
                             .foregroundStyle(.token(.textSecondary))
                     }
-                    if model.authenticated {
-                        action("Save Endpoint", id: "saveEndpoint", disabled: model.busy || model.preview != nil) { await model.applyEndpoint() }
+                    if model.authenticated, model.endpointDraft.trimmingCharacters(in: .whitespacesAndNewlines) != model.endpoint {
+                        Button { Task { await model.applyEndpoint() } } label: {
+                            Text("Save Endpoint", bundle: .module)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                        .contentShape(Rectangle())
+                        .disabled(model.busy || model.preview != nil)
+                        .accessibilityIdentifier("settings.anki.saveEndpoint")
                     }
                 } header: {
                     Text("Server Address", bundle: .module)
@@ -62,9 +77,23 @@ public struct ManualTransferSections: View {
                 }
                 Section {
                     if model.authenticated {
-                        LabeledContent("Login", value: model.username)
-                            .accessibilityIdentifier("settings.anki.loginIdentity")
-                        action("Log Out", id: "logout", disabled: model.busy || model.preview != nil) { await model.logout() }
+                        LabeledContent {
+                            HStack(spacing: Spacing.small) {
+                                Text(verbatim: model.username)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer()
+                                Button { Task { await model.logout() } } label: {
+                                    Text("Sign Out", bundle: .module)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.regular)
+                                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                                .contentShape(Rectangle())
+                                .disabled(model.busy || model.preview != nil)
+                                .accessibilityIdentifier("settings.anki.logout")
+                            }
+                        } label: { Text("Login", bundle: .module) }
+                        .accessibilityIdentifier("settings.anki.loginIdentity")
                     } else {
                         TextField("Username", text: $model.username)
                             .textContentType(.username)
@@ -335,20 +364,24 @@ public struct ManualTransferSections: View {
 }
 
 public extension View {
-    func manualTransferPresentation(model: ManualTransferCoordinator) -> some View {
-        modifier(ManualTransferPresentation(model: model))
+    func manualTransferPresentation(model: ManualTransferCoordinator, isActive: Bool = true) -> some View {
+        modifier(ManualTransferPresentation(model: model, isActive: isActive))
     }
 }
 private struct ManualTransferPresentation: ViewModifier {
     @Bindable var model: ManualTransferCoordinator
+    let isActive: Bool
+    private func presentation(_ value: ReferenceWritableKeyPath<ManualTransferCoordinator, Bool>) -> Binding<Bool> {
+        Binding(get: { isActive && model[keyPath: value] }, set: { if isActive { model[keyPath: value] = $0 } })
+    }
     func body(content: Content) -> some View {
         content
-        .destructiveConfirmation(Text("Confirm collection replacement?"), isPresented: $model.confirmationPresented,
+        .destructiveConfirmation(Text("Confirm collection replacement?"), isPresented: presentation(\.confirmationPresented),
             actionTitle: Text(model.isRecoveryPreview ? "Recover Locally" : "Replace Collection"),
             message: Text("\(model.endpoint)\nLogin: \(model.previewLoginLabel)\n\(model.isRecoveryPreview ? "The retained candidate replaces this device’s collection. Nothing is uploaded." : (model.preview?.record.direction == .import ? "The prepared collection replaces this device’s collection." : "The prepared collection replaces the server collection and this device’s active version.")) \(model.preview?.record.mediaSelected == true ? "Media needs a separate decision after collection completion." : "Media is excluded.")")) {
                 Task { await model.confirm() }
             }
-        .fileImporter(isPresented: $model.copyDestinationPresented, allowedContentTypes: [.folder]) { result in
+        .fileImporter(isPresented: presentation(\.copyDestinationPresented), allowedContentTypes: [.folder]) { result in
             Task { await model.copyDestination(result.map { [$0] }) }
         }
         .task { await model.loadOffline() }

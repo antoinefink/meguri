@@ -274,6 +274,23 @@ import AppModel
 
     // MARK: Sheets (R25)
 
+    @Test func serverWorkflowKeepsItsHostAcrossCollectionAdoptionUntilExplicitlyClosed() {
+        let navigation = AppNavigation()
+        navigation.openDeckPage(spanishMining)
+        navigation.push(.noteTypes)
+        navigation.present(.manualTransfer)
+        navigation.sheetHost = .settings
+
+        navigation.collectionReplaced()
+
+        #expect(navigation.sheet == .manualTransfer)
+        #expect(navigation.sheetHost == .settings)
+        #expect(navigation.selectedDeck == nil)
+        #expect(navigation.detailPath.isEmpty)
+        navigation.dismissSheet()
+        #expect(navigation.sheet == nil)
+    }
+
     @Test func addOpensOverTheDeckPageAndClosingItReturnsToIt() {
         let navigation = AppNavigation()
         navigation.openDeckPage(spanishMining)

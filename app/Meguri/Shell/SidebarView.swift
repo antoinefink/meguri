@@ -20,11 +20,11 @@ struct SidebarView: View {
                     } label: {
                         Label {
                             // Rows grow with the text size rather than cut it.
-                            Text(section.title)
+                            Text(features.nativeMacWorkspace && section == .home ? CompactTab.decks.title : section.title)
                                 .fixedSize(horizontal: false, vertical: true)
                         } icon: {
                             // The title names the row; the symbol is decoration.
-                            Image(systemName: section.systemImage)
+                            Image(systemName: features.nativeMacWorkspace && section == .home ? CompactTab.decks.systemImage : section.systemImage)
                                 .accessibilityHidden(true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)

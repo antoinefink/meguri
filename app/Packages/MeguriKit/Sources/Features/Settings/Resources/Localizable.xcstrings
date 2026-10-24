@@ -550,6 +550,136 @@
           }
         }
       }
+    },
+    "Sign Out": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign Out"
+          }
+        }
+      }
+    },
+    "From a file": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "From a file"
+          }
+        }
+      }
+    },
+    "To a file": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To a file"
+          }
+        }
+      }
+    },
+    "File export excludes images, audio and other media. No account or connection is needed.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File export excludes images, audio and other media. No account or connection is needed."
+          }
+        }
+      }
+    },
+    "A transfer replaces the destination collection. Review preparation and media decisions before continuing.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A transfer replaces the destination collection. Review preparation and media decisions before continuing."
+          }
+        }
+      }
+    },
+    "Import…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import…"
+          }
+        }
+      }
+    },
+    "Export…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export…"
+          }
+        }
+      }
+    },
+    "From the server": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "From the server"
+          }
+        }
+      }
+    },
+    "To the server": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To the server"
+          }
+        }
+      }
+    },
+    "Continue…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue…"
+          }
+        }
+      }
+    },
+    "Current transfer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current transfer"
+          }
+        }
+      }
+    },
+    "Closing this sheet keeps active work and pending decisions. Continue from Collection settings.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Closing this sheet keeps active work and pending decisions. Continue from Collection settings."
+          }
+        }
+      }
+    },
+    "Server Transfer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server Transfer"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
