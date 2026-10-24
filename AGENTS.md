@@ -29,6 +29,8 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 ## Agent docs
 
+- UI work starts with `docs/design/workflow.md` and the active screen contract; a passing build alone is not design agreement. Verify the exact built app when showing a preview.
+
 - Add or update an `AGENTS.md` in a subdirectory when it has conventions or traps the code doesn't make obvious.
 - Keep every `AGENTS.md` terse. Readers are highly capable agents: write only what they can't infer. No restating code, no tutorials, no obvious advice.
 

@@ -1,6 +1,6 @@
 # Meguri design brief
 
-Version 1 (U9, R2001). This file says what Meguri should feel like and why. `rubric.md` turns it into rules with ids, `screen-inventory.yaml` lists the screens, `decisions.md` logs Antoine's picks and vetoes, and the component gallery (`designsystem/gallery` route) shows the parts screens are built from.
+Version 2 (2026-10-24; U9, R2001). This file says what Meguri should feel like and why. `workflow.md` defines the design work before and after code. `rubric.md` turns the brief into rules with ids, `screen-inventory.yaml` lists the screens, `decisions.md` logs Antoine's picks and vetoes, and the component gallery (`designsystem/gallery` route) shows the parts screens are built from.
 
 ## Feel
 
@@ -8,7 +8,7 @@ Meguri feels like an app Apple would ship on each platform: calm, quick and quie
 
 ## Principles
 
-1. **Content first, controls above it.** Card faces, lists and charts are content. Navigation and controls sit on a separate layer in Liquid Glass: the sidebar, tab bar, toolbars, the answer button bar and floating controls (R1996). Content never gets glass, and glass is never stacked on glass.
+1. **Content first, controls separate.** Card faces, lists and charts are content. Navigation and controls sit on a separate layer in Liquid Glass: the sidebar, tab bar, toolbars, the answer button bar and floating controls (R1996). This describes layers, not a requirement for controls at the top. Content never gets glass, and glass is never stacked on glass.
 2. **System components first.** Lists, forms, split views, tab bars, toolbars, tables, search fields, sheets, inspectors and menus are used wherever they fit (R1995). A custom view is built only when no system component does the job, and then from the gallery's components.
 3. **One vocabulary.** Colours, spacing, corner radii and motion come from named tokens; text uses system text styles; icons are SF Symbols (R1992, R1993, R1998). The same token means the same thing everywhere: New is blue, Learn red, Due green (R32), Again red and Good green (R355).
 4. **Accessible by construction.** Every screen works at the largest Dynamic Type sizes, in dark mode and with Increase Contrast, Reduce Transparency, Reduce Motion, VoiceOver, Voice Control, Switch Control and Full Keyboard Access (R1977–R1982). Colour is never the only cue. Text wraps before it truncates.
@@ -16,6 +16,7 @@ Meguri feels like an app Apple would ship on each platform: calm, quick and quie
 6. **Each platform on its own terms.** The Mac has menus, keyboard shortcuts, pointer hover and resizable windows; iPad has the sidebar, inspector, pointer and keyboard; iPhone puts the frequent actions within thumb reach. One design, adapted, never a phone layout stretched to a window.
 7. **Quiet status.** Routine confirmations are short toasts; errors appear where they happened, with a way forward. Modal alerts are kept for decisions that cannot wait.
 8. **Anki's behaviour, Meguri's own interface.** Meguri does what Anki does, in its own words and layout (R1959). Card templates render exactly as Anki renders them.
+9. **A clear task before more controls.** Define the main action and secondary content. Put related actions together. Keep one disclosure for connection details and logs. Native controls still need a clear layout.
 
 ## Anti-goals
 
@@ -33,3 +34,5 @@ Home and deck list, deck page, review (question and answer sides), browser, edit
 ## How a screen is judged
 
 Deterministic checks come first and are the source of truth for what they measure (R1986): the UI lint gate (`tools/mg lint-ui`), the contrast and token tests, the accessibility audit, hit-target and hierarchy checks. The critic then grades screenshots against `rubric.md` and the references in `references/` (R1983). High-severity issues keep a screen out of "verified"; taste alone never blocks a merge (R1985).
+
+Functional checks, user design agreement and final verification are separate outcomes. Inspect the exact native build and resolve task, grouping and alignment problems before requesting design agreement. The early-preview path and platform-specific work are in `workflow.md`; it does not waive the final gates.
