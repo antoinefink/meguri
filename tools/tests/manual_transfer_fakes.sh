@@ -6,7 +6,7 @@ mg_job() { :; }
 initialize_manual_transfer_fakes() {
   MG_ROOT="$FX_ROOT"
   MG_TOOLS="$FX_REPO/tools"
-  MG_RUN_DIR="$MG_ROOT/build/mg/manual-transfer-check/fake-run"
+  MG_RUN_DIR="$MG_ROOT/build/mg/manual-transfer-check/20261024T010101Z-17"
   MG_STATE="$MG_RUN_DIR/.mg"
   mkdir -p "$MG_STATE" "$FX_VM"
   # Retain real exit handling and VM quoting; replace external operations below.
@@ -26,8 +26,8 @@ mg_artifact() { printf 'artifact %s\n' "$1" >>"$FX_EVENTS"; }
 mg_word_in() { local word; for word in $2; do [ "$1" != "$word" ] || return 0; done; return 1; }
 mg_mac_ui_begin() {
   [ "${FX_MISSING_VM:-0}" = 0 ] || { mg_status warn; return 1; }
-  MG_MAC_RUNNER=vm
-  MG_MAC_VMS="$(jq -nc --arg ssh "$FX_WRAPPER" '[{name:"dedicated",ssh:$ssh}]')"
+  MG_MAC_RUNNER="${FX_RUNNER:-vm}"
+  MG_MAC_VMS="$(jq -nc --arg ssh "$FX_WRAPPER" '[{name:"meguri-mac",ssh:$ssh}]')"
 }
 mg_mt_prepare_data() {
   printf 'seed\n' >>"$FX_EVENTS"
@@ -62,6 +62,7 @@ mg_mac_vm_copy_in() {
 mg_app_build() { printf 'build %s\n' "$*" >>"$FX_EVENTS"; }
 mg_mac_vm_take() {
   printf 'lease\n' >>"$FX_EVENTS"
+  [ "${1:-}" != --no-copy ] || printf 'lease-no-copy\n' >>"$FX_EVENTS"
   MG_LEASE_DIR="$MG_ROOT/fake-lease"
   MG_MAC_VM="$(jq -c '.[0]' <<<"$MG_MAC_VMS")"
   mg_on_exit 'printf "release\n" >>"$FX_EVENTS"'
@@ -73,6 +74,10 @@ mg_app_mac_input_result() { return "${FX_INPUT_RESULT:-3}"; }
 mg__mac_vm_stop_orphans() { printf 'stop-orphans\n' >>"$FX_EVENTS"; }
 mg_mac_vm_ssh() {
   case "$1" in
+    *' stage-media '*)
+      printf 'install-reserved-media\n' >>"$FX_EVENTS"
+      [ "${FX_RESERVED_COLLISION:-0}" = 0 ]
+      ;;
     *lsof*)
       printf 'loopback-probe\n' >>"$FX_EVENTS"
       [ "${FX_BAD_ROUTE:-0}" = 0 ]
@@ -81,6 +86,25 @@ mg_mac_vm_ssh() {
   esac
 }
 mg_mac_vm_ssh_in() {
+  case "$1" in
+    *' archive-stale-fixture-state')
+      printf 'archive-helper\n' >>"$FX_EVENTS"
+      [ "${FX_REPAIR_SSH_FAIL:-0}" = 0 ] || return 255
+      # Run the real utility on synthetic data, replacing ONLY VM metadata.
+      # stdin is still the real controller's bounded source provenance proof.
+      python3 -c '
+import importlib.util, sys
+from pathlib import Path
+from unittest import mock
+spec = importlib.util.spec_from_file_location("repair", sys.argv[1])
+module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+with mock.patch.object(module, "dedicated_fixture_vm", return_value=Path(sys.argv[2])):
+    sys.argv = [sys.argv[1], "archive-stale-fixture-state"]
+    module.main()
+' "$MG_TOOLS/scripts/manual-transfer-config.py" "$FX_VM"
+      return $?
+      ;;
+  esac
   printf 'stage-manifest\n' >>"$FX_EVENTS"
   /bin/bash -c "${1//"$MG_ROOT"/"$FX_VM"}"
 }

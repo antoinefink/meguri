@@ -1,6 +1,6 @@
 # Explicit RF4 evidence utility; ordinary gates never start this workflow.
 mg_job manual-transfer-check host mg_manual_transfer_check \
-  "Run RF4 in the pool VM: --platform mac|iphone|ipad; require native results, peer data and cleanup"
+  "Run RF4 in the pool VM: --platform mac|iphone|ipad; or explicit --archive-stale-fixture-state lossless VM repair"
 mg_job manual-transfer-data docker:dev mg_manual_transfer_data \
   "RF4 controller data helper: seed|verify <controller build directory>"
 
@@ -142,10 +142,100 @@ mg_mt_cleanup_media() {
 }
 
 mg_mt_stage_media() {
+  # The fixture launch hook replaces Collection. Stage ONLY reserved media,
+  # through the selected container seam and under the retained pool leases.
+  mvl_lease_held "$MG_LEASE_DIR" || return 1
+  [ "$(jq -r .name <<<"$MG_MAC_VM")" = meguri-mac ] || return 1
   cp "$MG_TOOLS/scripts/manual-transfer-config.py" "$MG_RUN_DIR/media-proof-config.py" || return 1
   MG_MT_MEDIA_STAGED=1
   mg_on_exit mg_mt_cleanup
-  mg_mac_vm_copy_in "$MG_RUN_DIR/device-fixture" "$MG_RUN_DIR/media-proof-config.py"
+  mg_mac_vm_copy_in "$MG_RUN_DIR/media-proof-config.py" || return $?
+  mg_mac_vm_ssh "/usr/bin/python3 $(mvl_q "$MG_RUN_DIR/media-proof-config.py") stage-media $(mvl_q "$MG_MT_SUPPORT" "${MG_RUN_DIR##*/}")" >/dev/null 2>&1
+}
+
+mg_mt_cleanup_repair() {
+  # Only the transient helper. The persistent archive is never a trap target.
+  rm -f "$MG_RUN_DIR/repair-config.py"
+  if [ -n "${MG_MT_REPAIR_STAGED:-}" ]; then
+    mg_mac_vm_ssh "rm -f $(mvl_q "$MG_RUN_DIR/repair-config.py")" >/dev/null 2>&1 || \
+      mg_mt_error repair-cleanup "transient helper cleanup is unconfirmed"
+    MG_MT_REPAIR_STAGED=""
+  fi
+}
+
+mg_mt_archive_stale_fixture_state() {
+  # Dedicated environment repair: source provenance BEFORE any VM lease.
+  local evidence="$MG_RUN_DIR/repair-source.json" receipt="$MG_RUN_DIR/repair-receipt.json" rc
+  mg_detail purpose '"environment-repair-not-M8"'
+  if [ "$#" -ne 5 ] || [ "$1" != --archive-stale-fixture-state ] || \
+      [ "$2" != --platform ] || [ "$3" != mac ] || [ "$4" != --source-run ] || \
+      [ "$5" != 20261023T234838Z-84101 ]; then
+    mg_mt_error repair-usage "use --archive-stale-fixture-state --platform mac --source-run 20261023T234838Z-84101"
+    return 0
+  fi
+  if ! python3 "$MG_TOOLS/scripts/manual-transfer-config.py" repair-source "$MG_ROOT" "$5" >"$evidence"; then
+    mg_detail repair_status '"blocked"'
+    mg_mt_error repair-source "owned failed-run result and synthetic seed provenance could not be established"
+    return 0
+  fi
+  unset MEGURI_SIM_ALLOW_HOST MEGURI_MAC_UI_ALLOW_HOST
+  mg_mac_ui_begin || return 0
+  if [ "$MG_MAC_RUNNER" != vm ]; then
+    mg_detail repair_status '"blocked"'
+    mg_mt_error repair-runner "repair requires the dedicated VM"
+    return 0
+  fi
+  MG_MAC_VMS="$(jq -c '[.[] | select(.name == "meguri-mac")]' <<<"$MG_MAC_VMS")"
+  if [ "$(jq length <<<"$MG_MAC_VMS")" != 1 ]; then
+    mg_detail repair_status '"blocked"'
+    mg_mt_error repair-runner "repair requires exactly one dedicated VM"
+    return 0
+  fi
+  mg_mac_vm_take --no-copy || return 0
+  if [ "$(jq -r .name <<<"$MG_MAC_VM")" != meguri-mac ] || ! mvl_lease_held "$MG_LEASE_DIR"; then
+    mg_detail repair_status '"blocked"'
+    mg_mt_error repair-lease "dedicated VM lease is required"
+    return 0
+  fi
+  if ! cp "$MG_TOOLS/scripts/manual-transfer-config.py" "$MG_RUN_DIR/repair-config.py"; then
+    mg_mt_error repair-helper "repair helper could not be prepared"
+    return 0
+  fi
+  mg_on_exit mg_mt_cleanup_repair
+  MG_MT_REPAIR_STAGED=1
+  mg_mac_vm_copy_in "$MG_RUN_DIR/repair-config.py" || return 0
+  # The host owns this lease throughout the remote operation; no host execution
+  # fallback. Only the aggregate receipt crosses SSH, never archive contents.
+  if ! mvl_lease_held "$MG_LEASE_DIR"; then
+    mg_detail repair_status '"blocked"'
+    mg_mt_error repair-lease "dedicated VM lease was lost before repair"
+    return 0
+  fi
+  mg_mac_vm_ssh_in "/usr/bin/python3 $(mvl_q "$MG_RUN_DIR/repair-config.py") archive-stale-fixture-state" \
+    <"$evidence" >"$receipt" 2>/dev/null
+  rc=$?
+  case "$rc" in
+    0|3|4)
+      if ! jq -e --arg status "$(case "$rc" in 0) echo archived ;; 3) echo blocked ;; 4) echo preservation-unconfirmed ;; esac)" \
+          '.purpose == "environment-repair-not-M8" and .source_run == "20261023T234838Z-84101"
+          and .status == $status and (.archived == ($status == "archived"))' "$receipt" >/dev/null 2>&1; then
+        rc=255
+      fi
+      ;;
+  esac
+  if [ "$rc" = 255 ] || ! mg_word_in "$rc" "0 3 4"; then
+    # SSH loss can follow the rename. Never claim the source was untouched.
+    mg_detail repair_status '"preservation-unknown"'
+    mg_mt_error repair-uncertain "repair outcome unknown; preserve ~/MeguriTestArchives/ManualTransferSupport-20261023T234838Z-84101 in the VM"
+    return 0
+  fi
+  mg_detail environment_repair "$(cat "$receipt")"
+  mg_artifact repair-receipt "$receipt" "environment repair only; aggregate preservation receipt"
+  case "$rc" in
+    0) mg_status pass ;;
+    3) mg_mt_error repair-blocked "archive preconditions blocked; support was not moved" ;;
+    4) mg_mt_error repair-preservation "support moved; preservation unconfirmed at ~/MeguriTestArchives/ManualTransferSupport-20261023T234838Z-84101 in the VM" ;;
+  esac
 }
 
 mg_mt_stage_reader() {
@@ -249,6 +339,10 @@ mg_mt_compare_peer() {
 }
 
 mg_manual_transfer_check() {
+  if [ "${1:-}" = --archive-stale-fixture-state ]; then
+    mg_mt_archive_stale_fixture_state "$@"
+    return 0
+  fi
   local selected_platform="${2:-}" build_platform test_destination leased_device="" test_status started_at media_stage_status
   if [ "$#" -ne 2 ] || [ "$1" != --platform ] || ! mg_word_in "$selected_platform" "mac iphone ipad"; then
     mg_mt_error usage "use manual-transfer-check --platform mac|iphone|ipad"

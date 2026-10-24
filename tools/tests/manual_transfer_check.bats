@@ -37,7 +37,7 @@ SH
 
 invoke_fake() { /bin/bash "$FX_REPO/tools/tests/manual_transfer_fakes.sh" "$@"; }
 recorded_status() {
-  cat "$FX_ROOT/build/mg/manual-transfer-check/fake-run/.mg/status"
+  cat "$FX_ROOT/build/mg/manual-transfer-check/20261024T010101Z-17/.mg/status"
 }
 guest_manifest() { printf '%s/app/Fixtures/ManualTransfer/controlled-rig.json' "$FX_VM"; }
 
@@ -54,7 +54,7 @@ from pathlib import Path
 import sys
 events = Path(sys.argv[1]).read_text().splitlines()
 sequence = (
-    "seed", "build mac Debug", "lease", "native-container", "stage-media", "stage-reader", "start-wire",
+    "seed", "build mac Debug", "lease", "native-container", "stage-media", "install-reserved-media", "stage-reader", "start-wire",
     "reverse-forward-loopback-only", "loopback-probe", "stage-manifest", "test mac", "wire-proof", "capture", "peer",
     "native_transfer_cleanup true", "release",
 )
@@ -183,8 +183,8 @@ PY
   [ "$(recorded_status)" = fail ]
   grep -qx 'failure manual-transfer/peer-proof' "$FX_EVENTS"
   ! grep -qx 'native_transfer_complete true' "$FX_EVENTS"
-  [ ! -e "$FX_VM/build/mg/manual-transfer-check/fake-run/device-fixture" ]
-  [ ! -e "$FX_VM/build/mg/manual-transfer-check/fake-run/media-proof-config.py" ]
+  [ ! -e "$FX_VM/build/mg/manual-transfer-check/20261024T010101Z-17/device-fixture" ]
+  [ ! -e "$FX_VM/build/mg/manual-transfer-check/20261024T010101Z-17/media-proof-config.py" ]
 }
 
 @test "manual transfer: failed device fixture copy prevents native work and cleans inputs" {
@@ -195,14 +195,14 @@ PY
   ! grep -q '^test ' "$FX_EVENTS"
   ! grep -qx peer "$FX_EVENTS"
   [ ! -e "$(guest_manifest)" ]
-  [ ! -e "$FX_ROOT/build/mg/manual-transfer-check/fake-run/device-fixture" ]
+  [ ! -e "$FX_ROOT/build/mg/manual-transfer-check/20261024T010101Z-17/device-fixture" ]
 }
 
-@test "manual transfer: manifest names the generated fixture without installing a collection" {
-  run bash -c 'printf '\''{"port":19090,"token":"0000000000000000000000000000000000000000000000000000000000000000","nativeContext":"1111111111111111111111111111111111111111111111111111111111111111"}'\'' | python3 "$1/tools/scripts/manual-transfer-config.py" manifest "$2/docker/syncserver.env.example" 18765 "$2/build/mg/manual-transfer-check/fake-run/device-fixture" "$3/native-support"' _ "$FX_REPO" "$FX_ROOT" "$FX_VM"
+@test "manual transfer: manifest omits the destructive fixture launch input" {
+  run bash -c 'printf '\''{"port":19090,"token":"0000000000000000000000000000000000000000000000000000000000000000","nativeContext":"1111111111111111111111111111111111111111111111111111111111111111"}'\'' | python3 "$1/tools/scripts/manual-transfer-config.py" manifest "$2/docker/syncserver.env.example" 18765 "$2/build/mg/manual-transfer-check/20261024T010101Z-17/device-fixture" "$3/native-support"' _ "$FX_REPO" "$FX_ROOT" "$FX_VM"
   [ "$status" -eq 0 ]
   # Do not echo the manifest or assert on its credential values.
-  python3 -c 'import json,sys; assert json.load(sys.stdin)["fixturePath"].endswith("/fake-run/device-fixture")' <<<"$output"
+  python3 -c 'import json,sys; p=json.load(sys.stdin); assert "fixturePath" not in p; assert len(p["deviceSHA256"]) == 64' <<<"$output"
 }
 
 @test "manual transfer: wire evidence failure cannot pass on native text or peer bytes" {
@@ -267,7 +267,7 @@ PY
   run invoke_fake terminate
   [ "$status" -eq 143 ]
   [ ! -e "$(guest_manifest)" ]
-  [ ! -e "$FX_ROOT/build/mg/manual-transfer-check/fake-run/route.fifo" ]
+  [ ! -e "$FX_ROOT/build/mg/manual-transfer-check/20261024T010101Z-17/route.fifo" ]
   [ "$(tail -n 1 "$FX_EVENTS")" = release ]
 }
 
@@ -284,7 +284,152 @@ PY
   [ "$(recorded_status)" = error ]
   ! grep -qx start-wire "$FX_EVENTS"
   ! grep -q '^test ' "$FX_EVENTS"
-  [ ! -e "$FX_ROOT/build/mg/manual-transfer-check/fake-run/native-reader-command.json" ]
-  [ ! -e "$FX_VM/build/mg/manual-transfer-check/fake-run/native-reader-input.json" ]
+  [ ! -e "$FX_ROOT/build/mg/manual-transfer-check/20261024T010101Z-17/native-reader-command.json" ]
+  [ ! -e "$FX_VM/build/mg/manual-transfer-check/20261024T010101Z-17/native-reader-input.json" ]
   [ "$(tail -n 1 "$FX_EVENTS")" = release ]
+}
+
+@test "manual transfer: reserved media collision prevents native work without changing proof rules" {
+  export FX_RESERVED_COLLISION=1
+  run invoke_fake check --platform mac
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = error ]
+  grep -qx install-reserved-media "$FX_EVENTS"
+  ! grep -Eq '^(stage-reader|start-wire|test |peer|native_transfer_complete true)' "$FX_EVENTS"
+  [ "$(tail -n 1 "$FX_EVENTS")" = release ]
+}
+
+@test "manual transfer: media installation requires the retained lease" {
+  export FX_NO_LEASE=1
+  run invoke_fake check --platform ipad
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = error ]
+  ! grep -Eq '^(stage-media|install-reserved-media|start-wire|test |peer)' "$FX_EVENTS"
+}
+
+@test "manual transfer: repair is exact Mac-only source-run syntax with no recovery alias" {
+  for arguments in \
+      '--archive-stale-fixture-state --platform ipad --source-run 20261023T234838Z-84101' \
+      '--archive-stale-fixture-state --platform mac --source-run 20261024T010101Z-17' \
+      '--archive-stale-fixture-state --platform mac' \
+      '--platform mac --source-run 20261023T234838Z-84101' \
+      '--recover-media --platform mac'; do
+    run invoke_fake check $arguments
+    [ "$status" -eq 0 ]
+    [ "$(recorded_status)" = error ]
+  done
+  ! grep -Eq '^(seed|build |lease|install-reserved-media|test |peer|native_transfer_complete)' "$FX_EVENTS"
+}
+
+@test "manual transfer: missing repair provenance fails before acquiring any VM" {
+  run invoke_fake check --archive-stale-fixture-state --platform mac --source-run 20261023T234838Z-84101
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = error ]
+  grep -qx 'failure manual-transfer/repair-source' "$FX_EVENTS"
+  ! grep -Eq '^(seed|build |lease|test |peer|native_transfer_complete)' "$FX_EVENTS"
+}
+
+prepare_repair_fixture() {
+  python3 - "$FX_ROOT" "$FX_VM" "$FX_REPO" <<'PYFIXTURE'
+import importlib.util, json, sys
+from pathlib import Path
+root, home, repo = map(Path, sys.argv[1:])
+spec = importlib.util.spec_from_file_location('fixtures', repo / 'tools/tests/manual_transfer_wire_test.py')
+fixtures = importlib.util.module_from_spec(spec); spec.loader.exec_module(fixtures)
+config = fixtures.config
+run_id = config.FAILED_FIXTURE_RUN
+run = root / 'build/mg/manual-transfer-check' / run_id
+run.mkdir(parents=True)
+(run / 'result.json').write_text(json.dumps(dict(
+    root=str(root), job='manual-transfer-check', run_id=run_id, args=['--platform', 'mac'],
+    status='fail', dry_run=False, failures=[dict(id='manual-transfer/execution')],
+    details=dict(native_transfer_complete=False), message='never-print-this')))
+(run / 'seed.json').write_text(json.dumps(dict(
+    notes=1, cards=1, reviews=0, deckID=1, noteID=123, cardID=456, server_time_ms=1000,
+    distinct_accounts=True, empty_nondefault_b=True, media_seeded=True,
+    media_names=list(config.MEDIA_NAMES))))
+support, policy, history = fixtures.synthetic_native(home)
+active = history['operations'][history['active']]
+active.update(phase='MediaIncomplete', account=config.repair_account(),
+              configured_endpoint=config.REPAIR_ENDPOINT, target_endpoint=config.REPAIR_ENDPOINT)
+policy.write_text(json.dumps(dict(manualTransfers=history)))
+(support / 'Collection/collection.media/rf4-device.bin').write_bytes(config.recipe_bytes(run_id, 'device', 6144))
+(support / '.DS_Store').write_bytes(b'unknown-os-file-retained')
+(support / 'unknown-link').symlink_to(home / 'external-never-read')
+(root / 'before.json').write_text(json.dumps(dict(inode=support.stat().st_ino,
+    policy=policy.read_text(), policy_inode=policy.stat().st_ino)))
+PYFIXTURE
+}
+
+@test "manual transfer: explicit repair archives losslessly under one no-copy lease without M8 actions" {
+  prepare_repair_fixture
+  run invoke_fake check --archive-stale-fixture-state --platform mac --source-run 20261023T234838Z-84101
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = pass ]
+  grep -qx 'purpose "environment-repair-not-M8"' "$FX_EVENTS"
+  grep -qx lease-no-copy "$FX_EVENTS"
+  [ "$(grep -cx lease "$FX_EVENTS")" -eq 1 ]
+  grep -qx archive-helper "$FX_EVENTS"
+  grep -qx release "$FX_EVENTS"
+  ! grep -Eq '^(seed|build |install-reserved-media|test |peer|start-wire|stage-manifest|native_transfer_complete|native_transfer_cleanup)' "$FX_EVENTS"
+  [[ "$output" != *never-print-this* ]]
+  [ ! -e "$FX_ROOT/build/mg/manual-transfer-check/20261024T010101Z-17/repair-config.py" ]
+  [ ! -e "$FX_VM/build/mg/manual-transfer-check/20261024T010101Z-17/repair-config.py" ]
+  python3 - "$FX_ROOT" "$FX_VM" <<'PYPROOF'
+import json, os, sys
+from pathlib import Path
+root, home = map(Path, sys.argv[1:])
+proof = json.loads((root / 'build/mg/manual-transfer-check/20261024T010101Z-17/repair-receipt.json').read_text())
+assert proof['purpose'] == 'environment-repair-not-M8' and proof['archived'] is True
+assert proof['state_guards_proven'] and proof['cooldown_guards_proven']
+archive = home / 'MeguriTestArchives/ManualTransferSupport-20261023T234838Z-84101'
+before = json.loads((root / 'before.json').read_text())
+assert archive.stat().st_ino == before['inode']
+policy = archive / 'ManualTransfers/manual-transfers.json'
+assert policy.stat().st_ino == before['policy_inode'] and policy.read_text() == before['policy']
+assert (archive / '.DS_Store').read_bytes() == b'unknown-os-file-retained'
+assert os.readlink(archive / 'unknown-link') == str(home / 'external-never-read')
+assert not (home / 'Library/Containers/com.antoinefink.meguri.dev/Data/Library/Application Support').exists()
+assert proof['policy_sha256_before'] == proof['policy_sha256_after']
+assert 'native_transfer_complete' not in proof
+PYPROOF
+}
+
+@test "manual transfer: nonVM and lost lease block repair before helper execution" {
+  prepare_repair_fixture
+  export FX_RUNNER=host
+  run invoke_fake check --archive-stale-fixture-state --platform mac --source-run 20261023T234838Z-84101
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = error ]
+  ! grep -qx lease "$FX_EVENTS"
+  export FX_RUNNER=vm FX_NO_LEASE=1
+  run invoke_fake check --archive-stale-fixture-state --platform mac --source-run 20261023T234838Z-84101
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = error ]
+  ! grep -qx archive-helper "$FX_EVENTS"
+  [ -d "$FX_VM/Library/Containers/com.antoinefink.meguri.dev/Data/Library/Application Support" ]
+}
+
+@test "manual transfer: blocked utility preconditions retain support and give distinct safe receipt" {
+  prepare_repair_fixture
+  touch "$FX_VM/Library/Containers/com.antoinefink.meguri.dev/Data/Library/Application Support/Collection/collection.anki2-wal"
+  run invoke_fake check --archive-stale-fixture-state --platform mac --source-run 20261023T234838Z-84101
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = error ]
+  grep -qx 'failure manual-transfer/repair-blocked' "$FX_EVENTS"
+  grep -q '"status":"blocked"\|"status": "blocked"' "$FX_ROOT/build/mg/manual-transfer-check/20261024T010101Z-17/repair-receipt.json"
+  [ -d "$FX_VM/Library/Containers/com.antoinefink.meguri.dev/Data/Library/Application Support" ]
+  [ ! -e "$FX_VM/MeguriTestArchives/ManualTransferSupport-20261023T234838Z-84101" ]
+  ! grep -Eq '^(seed|build |test |peer|native_transfer_complete)' "$FX_EVENTS"
+}
+
+@test "manual transfer: archive SSH failure records unknown preservation" {
+  prepare_repair_fixture
+  export FX_REPAIR_SSH_FAIL=1
+  run invoke_fake check --archive-stale-fixture-state --platform mac --source-run 20261023T234838Z-84101
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = error ]
+  grep -qx 'repair_status "preservation-unknown"' "$FX_EVENTS"
+  grep -qx 'failure manual-transfer/repair-uncertain' "$FX_EVENTS"
+  ! grep -q 'repair-blocked\|native_transfer_complete' "$FX_EVENTS"
 }

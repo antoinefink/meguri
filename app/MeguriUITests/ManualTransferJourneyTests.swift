@@ -15,7 +15,6 @@ import AppKit
         let exportUsername: String
         let exportPassword: String
         let deckID: Int64
-        let fixturePath: String
         let serverImportSHA256: String
         let serverExportSHA256: String
         let deviceSHA256: String
@@ -75,9 +74,9 @@ import AppKit
 
         let app = XCUIApplication()
         let bundle = try build.bundleIdentifier
-        app.launchArguments = MeguriLaunch(
-            fixture: URL(filePath: rig.fixturePath),
-            timeZone: "UTC", locale: "en_US", animations: false).arguments
+        // The leased-VM controller stages only its reserved media files. A
+        // MeguriFixture launch would replace Collection, including activation.
+        app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false).arguments
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
 

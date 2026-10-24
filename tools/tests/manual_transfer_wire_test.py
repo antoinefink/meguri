@@ -193,6 +193,393 @@ class NativeStateTests(unittest.TestCase):
                 config.validate_native_state(bad, config.fingerprint(self.context))
 
 
+class MediaStagingTests(unittest.TestCase):
+    """Only made-up directories; no VM, application process, clocks or policy edits."""
+    old_run = '20261023T010101Z-11'
+    new_run = '20261024T010101Z-17'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name).resolve()
+        self.support = self.home / 'Library/Containers/com.antoinefink.meguri.dev/Data/Library/Application Support'
+        self.media = self.support / 'Collection/collection.media'
+        self.media.mkdir(parents=True)
+        (self.support / 'ManualTransfers').mkdir()
+        self.sentinels = []
+        for name in ('Collection/collection.anki2', 'Collection/collection.anki2-wal',
+                     'Collection/collection.anki2-shm', 'Collection/collection.anki2-journal',
+                     'Collection/meguri-sidecar.json', 'ManualTransfers/manual-transfers.json',
+                     'ManualTransfers/retained-receipt', 'Collection/collection.media/unrelated.bin'):
+            path = self.support / name
+            path.write_bytes(('made-up-untouched:' + name).encode())
+            self.sentinels.append(path)
+        guard = mock.patch.object(config, 'dedicated_fixture_vm', return_value=self.home)
+        guard.start()
+        self.addCleanup(guard.stop)
+
+    def facts(self):
+        return {str(path.relative_to(self.support)): (path.read_bytes(), path.stat().st_ino)
+                for path in self.sentinels}
+
+    def storage(self):
+        return self.home / 'MeguriTestArchives/ManualTransferFixtureMedia' / config.fingerprint(config.native_context(self.support))
+
+    def test_stage_and_repeat_preserve_db_wal_sidecar_policy_receipts_and_unrelated_media(self):
+        before = self.facts()
+        config.stage_media(self.support, self.old_run)
+        # Independent reference recipe, rather than adopting observed bytes.
+        expected = b''.join(hashlib.sha256(('RF4:%s:device:%d' % (self.old_run, block)).encode()).digest()
+                            for block in range(192))
+        self.assertEqual((self.media / 'rf4-device.bin').read_bytes(), expected)
+        self.assertEqual((self.media / 'rf4-zero.bin').read_bytes(), b'')
+        self.assertFalse((self.media / 'rf4-server.bin').exists())
+        inode = (self.media / 'rf4-device.bin').stat().st_ino
+        config.stage_media(self.support, self.old_run)
+        self.assertEqual((self.media / 'rf4-device.bin').stat().st_ino, inode)
+        self.assertEqual(self.facts(), before)
+        self.assertNotIn('MeguriTestArchives', str(self.support))
+
+    def test_recipe_matching_bytes_without_prior_marker_are_not_adopted(self):
+        path = self.media / 'rf4-device.bin'
+        path.write_bytes(config.recipe_bytes(self.old_run, 'device', 6144))
+        before = path.read_bytes(), path.stat().st_ino, self.facts()
+        with self.assertRaises(ValueError):
+            config.stage_media(self.support, self.old_run)
+        self.assertEqual((path.read_bytes(), path.stat().st_ino, self.facts()), before)
+        self.assertFalse((self.home / 'MeguriTestArchives').exists())
+
+    def test_known_prior_device_and_server_are_archived_with_bytes_inode_and_marker_preserved(self):
+        config.stage_media(self.support, self.old_run)
+        (self.media / 'rf4-server.bin').write_bytes(config.recipe_bytes(self.old_run, 'server-c', 4096))
+        originals = {name: ((self.media / name).read_bytes(), (self.media / name).stat().st_ino)
+                     for name in ('rf4-server.bin', 'rf4-device.bin')}
+        marker = self.storage() / 'ownership' / (self.old_run + '.json')
+        marker_before = marker.read_bytes(), marker.stat().st_ino
+        before = self.facts()
+        config.stage_media(self.support, self.new_run)
+        for name, (data, inode) in originals.items():
+            archive = self.storage() / 'originals' / self.new_run / (name + '-' + hashlib.sha256(data).hexdigest())
+            self.assertEqual((archive.read_bytes(), archive.stat().st_ino), (data, inode))
+        self.assertEqual((marker.read_bytes(), marker.stat().st_ino), marker_before)
+        self.assertFalse((self.media / 'rf4-server.bin').exists())
+        self.assertEqual(self.facts(), before)
+
+    def test_unknown_collision_symlink_and_inconsistent_marker_refuse_without_replacement(self):
+        config.stage_media(self.support, self.old_run)
+        device = self.media / 'rf4-device.bin'
+        device.write_bytes(b'unknown-do-not-print')
+        before = device.read_bytes(), device.stat().st_ino, self.facts()
+        with self.assertRaises(ValueError):
+            config.stage_media(self.support, self.new_run)
+        self.assertEqual((device.read_bytes(), device.stat().st_ino, self.facts()), before)
+        device.unlink()  # Synthetic test setup only.
+        device.symlink_to(self.sentinels[0])
+        with self.assertRaises((OSError, ValueError)):
+            config.stage_media(self.support, self.new_run)
+        device.unlink()
+        marker = self.storage() / 'ownership' / (self.old_run + '.json')
+        marker.chmod(0o600)
+        marker.write_text('{"purpose":"invented"}')
+        with self.assertRaises(ValueError):
+            config.stage_media(self.support, self.new_run)
+        self.assertEqual(self.facts(), before[2])
+
+    def test_interruption_after_archiving_retains_original_and_retry_uses_recipe(self):
+        config.stage_media(self.support, self.old_run)
+        original = (self.media / 'rf4-device.bin').read_bytes()
+        rename = config.rename_new
+
+        def interrupt(source_fd, source, destination_fd, destination):
+            if destination == 'rf4-device.bin':
+                raise OSError('synthetic interruption')
+            return rename(source_fd, source, destination_fd, destination)
+
+        with mock.patch.object(config, 'rename_new', side_effect=interrupt):
+            with self.assertRaises(OSError):
+                config.stage_media(self.support, self.new_run)
+        retained = self.storage() / 'originals' / self.new_run / ('rf4-device.bin-' + hashlib.sha256(original).hexdigest())
+        self.assertEqual(retained.read_bytes(), original)
+        config.stage_media(self.support, self.new_run)
+        self.assertEqual(retained.read_bytes(), original)
+        self.assertEqual((self.media / 'rf4-device.bin').read_bytes(), config.recipe_bytes(self.new_run, 'device', 6144))
+
+    def test_existing_archive_target_and_unsupported_atomic_rename_never_overwrite_original(self):
+        config.stage_media(self.support, self.old_run)
+        original = (self.media / 'rf4-device.bin').read_bytes()
+        saved = self.storage() / 'originals' / self.new_run
+        saved.mkdir()
+        target = saved / ('rf4-device.bin-' + hashlib.sha256(original).hexdigest())
+        target.write_bytes(b'preexisting-archive')
+        with self.assertRaises(OSError):
+            config.stage_media(self.support, self.new_run)
+        self.assertEqual(target.read_bytes(), b'preexisting-archive')
+        self.assertEqual((self.media / 'rf4-device.bin').read_bytes(), original)
+        with mock.patch.object(config, 'rename_new', side_effect=ValueError('unavailable')):
+            with self.assertRaises(ValueError):
+                config.stage_media(self.support, self.new_run)
+        self.assertEqual((self.media / 'rf4-device.bin').read_bytes(), original)
+
+
+class RepairArchiveTests(unittest.TestCase):
+    """Synthetic VM metadata only; archive reads/writes stay in temporary data."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.run = self.root / 'build/mg/manual-transfer-check' / config.FAILED_FIXTURE_RUN
+        self.run.mkdir(parents=True)
+        self.result = dict(root=str(self.root), job='manual-transfer-check', run_id=config.FAILED_FIXTURE_RUN,
+                           args=['--platform', 'mac'], dry_run=False, status='fail',
+                           failures=[dict(id='manual-transfer/execution')],
+                           details=dict(native_transfer_complete=False), message='never-print-this')
+        self.seed = dict(notes=1, cards=1, reviews=0, deckID=1, noteID=123, cardID=456,
+                         server_time_ms=1000, distinct_accounts=True, empty_nondefault_b=True,
+                         media_seeded=True, media_names=list(config.MEDIA_NAMES))
+        self.save()
+
+    def save(self):
+        (self.run / 'result.json').write_text(json.dumps(self.result))
+        (self.run / 'seed.json').write_text(json.dumps(self.seed))
+
+    def fixture(self):
+        self.home = self.root / 'home'
+        self.support, self.policy, self.history = synthetic_native(self.home)
+        self.media = self.support / 'Collection/collection.media'
+        (self.media / 'rf4-device.bin').write_bytes(config.recipe_bytes(config.FAILED_FIXTURE_RUN, 'device', 6144))
+        active = self.history['operations'][self.history['active']]
+        active.update(phase='MediaIncomplete', account=config.repair_account(),
+                      configured_endpoint=config.REPAIR_ENDPOINT, target_endpoint=config.REPAIR_ENDPOINT)
+        old = copy.deepcopy(active)
+        old.update(id='0000000000000002-0000000000000003', direction='Export', phase='Complete',
+                   account='b' * 64, receipt=dict(completed_at=1, next_eligible_at=2))
+        old['media']['stage'] = 'Complete'
+        self.history['operations'][old['id']] = old
+        self.history['serial'] = 2
+        self.history['cooldowns']['b' * 64] = old['receipt']
+        self.write_policy()
+        self.target = self.home / config.REPAIR_ARCHIVE
+        self.patcher = mock.patch.object(config, 'dedicated_fixture_vm', return_value=self.home)
+        self.patcher.start()
+        self.addCleanup(self.patcher.stop)
+
+    def write_policy(self):
+        self.policy.write_text(json.dumps(dict(manualTransfers=self.history)))
+
+    def archive(self):
+        return config.archive_stale_fixture_state(config.repair_source(self.root, config.FAILED_FIXTURE_RUN))
+
+    def assert_blocked(self):
+        before = (self.support.stat().st_ino, self.policy.read_bytes())
+        with self.assertRaises((ValueError, OSError)):
+            self.archive()
+        self.assertEqual((self.support.stat().st_ino, self.policy.read_bytes()), before)
+
+    def test_lossless_whole_directory_rename_retains_unknown_files_links_receipts_and_inode(self):
+        self.fixture()
+        outside = self.root / 'outside'
+        outside.write_bytes(b'never-follow-external-link')
+        link = self.support / 'unknown-link'
+        link.symlink_to(outside)
+        (self.support / 'unknown-directory-link').symlink_to(self.root, target_is_directory=True)
+        (self.support / '.DS_Store').write_bytes(b'unknown-OS-metadata')
+        (self.support / 'ManualTransfers/old-artifact').write_bytes(b'old-artifact-unchanged')
+        before = {}
+        # Test-only snapshot; never follow a link, including directory links.
+        for parent, directories, files in os.walk(self.support, followlinks=False):
+            for name in directories + files:
+                path = Path(parent) / name
+                info = path.lstat()
+                before[str(path.relative_to(self.support))] = (
+                    info.st_ino, info.st_mode, info.st_mtime_ns,
+                    os.readlink(path) if path.is_symlink() else None if path.is_dir() else path.read_bytes())
+        inode, policy = self.support.stat().st_ino, self.policy.read_bytes()
+        real_open = config.os.open
+        def guarded_open(path, *args, **kwargs):
+            self.assertNotIn(str(path), (str(outside), 'unknown-link', 'unknown-directory-link', '.DS_Store', 'old-artifact'))
+            return real_open(path, *args, **kwargs)
+        with mock.patch.object(config.os, 'open', side_effect=guarded_open), mock.patch.object(
+                config, 'rename_new', wraps=config.rename_new) as rename:
+            proof = self.archive()
+        self.assertEqual(rename.call_count, 1)
+        self.assertTrue(proof['archived'])
+        self.assertEqual(proof['purpose'], 'environment-repair-not-M8')
+        self.assertEqual(proof['status'], 'archived')
+        self.assertEqual(self.target.stat().st_ino, inode)
+        self.assertFalse(self.support.exists())
+        self.assertEqual((self.target / 'ManualTransfers/manual-transfers.json').read_bytes(), policy)
+        for name, fact in before.items():
+            path = self.target / name
+            info = path.lstat()
+            self.assertEqual((info.st_ino, info.st_mode, info.st_mtime_ns,
+                              os.readlink(path) if path.is_symlink() else None if path.is_dir() else path.read_bytes()), fact)
+        self.assertEqual(proof['policy_sha256_before'], proof['policy_sha256_after'])
+        self.assertEqual(proof['support_inode'], proof['archived_inode'])
+        self.assertTrue(proof['state_guards_proven'] and proof['cooldown_guards_proven'])
+        self.assertEqual(proof['archive_location'], '~/' + config.REPAIR_ARCHIVE)
+        self.assertEqual(outside.read_bytes(), b'never-follow-external-link')
+        for forbidden in (str(self.root), 'meguri-c', config.REPAIR_ENDPOINT,
+                          'native_transfer_complete', 'peer_proof', 'Resume'):
+            self.assertNotIn(forbidden, json.dumps(proof))
+        # No cleanup hook has the persistent archive; source absence is retained.
+        self.assertTrue(self.target.is_dir())
+
+    def test_unexpired_malformed_or_unknown_cooldown_and_old_receipt_refuse(self):
+        self.fixture()
+        expired = copy.deepcopy(self.history)
+        bad = (dict(completed_at=1, next_eligible_at=time.time_ns() // 1_000_000 + 3600000),
+               dict(completed_at=1, next_eligible_at='unknown'),
+               dict(completed_at=1, next_eligible_at=2, injected_clock=0), None)
+        for value in bad:
+            with self.subTest(value=value):
+                self.history = copy.deepcopy(expired)
+                self.history['cooldowns']['b' * 64] = value
+                self.write_policy(); self.assert_blocked()
+        self.history = copy.deepcopy(expired)
+        old = self.history['operations']['0000000000000002-0000000000000003']
+        old['receipt']['next_eligible_at'] = time.time_ns() // 1_000_000 + 3600000
+        self.write_policy(); self.assert_blocked()
+
+    def test_exact_active_import_account_endpoint_and_zero_effects_required(self):
+        self.fixture()
+        original = copy.deepcopy(self.history)
+        for field, value in (('phase', 'CollectionComplete'), ('scope', 'CollectionOnly'),
+                             ('account', 'c' * 64), ('direction', 'Export'),
+                             ('configured_endpoint', 'http://unowned.invalid/'),
+                             ('collection_complete', False), ('receipt', dict(completed_at=1, next_eligible_at=2))):
+            with self.subTest(field=field):
+                self.history = copy.deepcopy(original)
+                self.history['operations'][self.history['active']][field] = value
+                self.write_policy(); self.assert_blocked()
+        for field, value in (('stage', 'Cancelled'), ('remote_outcome_unknown', True),
+                             ('consent', dict(revision=5, generation=1, categories=1,
+                                              account=config.repair_account(), configured_endpoint=config.REPAIR_ENDPOINT))):
+            self.history = copy.deepcopy(original)
+            self.history['operations'][self.history['active']]['media'][field] = value
+            self.write_policy(); self.assert_blocked()
+        for field in config.NUMERIC_COUNTERS:
+            self.history = copy.deepcopy(original)
+            self.history['operations'][self.history['active']]['media']['counters'][field] = 1
+            self.write_policy(); self.assert_blocked()
+        self.history = copy.deepcopy(original)
+        self.history['active'] = None
+        self.write_policy(); self.assert_blocked()
+
+    def test_database_sidecar_leftovers_and_unknown_media_refuse(self):
+        self.fixture()
+        for name in ('collection.anki2', 'collection.anki2-wal', 'collection.anki2-shm',
+                     'collection.anki2-journal', 'meguri-sidecar.json'):
+            path = self.support / 'Collection' / name
+            path.write_bytes(b'untouched-synthetic-evidence')
+            self.assert_blocked()
+            self.assertEqual(path.read_bytes(), b'untouched-synthetic-evidence')
+            path.unlink()
+        for name in ('rf4-server.bin', 'unknown.bin'):
+            path = self.media / name
+            path.write_bytes(b'unknown')
+            self.assert_blocked(); path.unlink()
+        (self.media / 'rf4-zero.bin').write_bytes(b'nonempty')
+        self.assert_blocked()
+        (self.media / 'rf4-zero.bin').write_bytes(b'')
+        (self.media / 'rf4-device.bin').write_bytes(config.recipe_bytes('20261024T010101Z-17', 'device', 6144))
+        self.assert_blocked()
+
+    def test_existing_archive_symlink_parent_and_unavailable_atomic_rename_refuse(self):
+        self.fixture()
+        self.target.mkdir(parents=True)
+        (self.target / 'receipt').write_bytes(b'existing-archive')
+        self.assert_blocked()
+        self.assertEqual((self.target / 'receipt').read_bytes(), b'existing-archive')
+        (self.target / 'receipt').unlink(); self.target.rmdir()
+        with mock.patch.object(config, 'rename_new', side_effect=ValueError('unavailable')):
+            self.assert_blocked()
+        archives = self.target.parent
+        archives.rmdir()
+        elsewhere = self.root / 'elsewhere'; elsewhere.mkdir()
+        archives.symlink_to(elsewhere, target_is_directory=True)
+        self.assert_blocked()
+        self.assertEqual(list(elsewhere.iterdir()), [])
+
+    def test_support_symlink_and_wrong_source_proof_refuse_without_moving(self):
+        self.fixture()
+        proof = config.repair_source(self.root, config.FAILED_FIXTURE_RUN)
+        proof['source_run'] = '20261024T010101Z-17'
+        with self.assertRaises(ValueError):
+            config.archive_stale_fixture_state(proof)
+        original = self.support.with_name('retained-support')
+        self.support.rename(original)
+        self.support.symlink_to(original, target_is_directory=True)
+        self.assert_blocked()
+        self.assertTrue(self.support.is_symlink())
+        self.assertFalse(self.target.exists())
+
+    def test_running_app_and_nonvm_metadata_refuse_without_touching_support(self):
+        self.fixture()
+        # DedicatedFixtureVMTests exercises platform, account, model and process checks.
+        for reason in ('fixture app must be stopped', 'fixture dedicated VM hardware'):
+            with mock.patch.object(config, 'dedicated_fixture_vm', side_effect=ValueError(reason)):
+                self.assert_blocked()
+
+    def test_postrename_verification_failure_reports_moved_and_never_removes_archive(self):
+        self.fixture()
+        real_read = config.bounded_read
+        def fail_after_move(*args, **kwargs):
+            if self.target.exists():
+                raise ValueError('never-print-this')
+            return real_read(*args, **kwargs)
+        with mock.patch.object(config, 'bounded_read', side_effect=fail_after_move):
+            proof = self.archive()
+        self.assertFalse(proof['archived'])
+        self.assertTrue(proof['moved'])
+        self.assertEqual(proof['status'], 'preservation-unconfirmed')
+        self.assertTrue(self.target.is_dir())
+        self.assertFalse(self.support.exists())
+        self.assertNotIn('never-print-this', json.dumps(proof))
+
+    def test_missing_bad_or_symlinked_source_provenance_refuses(self):
+        self.fixture()
+        original = (self.support.stat().st_ino, self.policy.read_bytes())
+        with self.assertRaises(ValueError):
+            config.repair_source(self.root, '20261024T010101Z-17')
+        for field, value in (('status', 'pass'), ('root', '/unowned'), ('dry_run', True),
+                             ('args', ['--platform', 'ipad']), ('failures', [])):
+            with self.subTest(field=field):
+                saved = self.result[field]
+                self.result[field] = value
+                self.save()
+                with self.assertRaises(ValueError):
+                    config.repair_source(self.root, config.FAILED_FIXTURE_RUN)
+                self.result[field] = saved
+        self.save()
+        self.seed['invented_operation_binding'] = 'never-accepted'
+        self.save()
+        with self.assertRaises(ValueError):
+            config.repair_source(self.root, config.FAILED_FIXTURE_RUN)
+        path = self.run / 'seed.json'
+        path.unlink()
+        path.symlink_to(self.run / 'result.json')
+        with self.assertRaises(OSError):
+            config.repair_source(self.root, config.FAILED_FIXTURE_RUN)
+        path.unlink()
+        with self.assertRaises(ValueError):
+            config.repair_source(self.root, config.FAILED_FIXTURE_RUN)
+        self.assertEqual((self.support.stat().st_ino, self.policy.read_bytes()), original)
+
+
+class DedicatedFixtureVMTests(unittest.TestCase):
+    def test_host_other_user_hardware_and_running_app_are_refused_without_ui_or_env(self):
+        user = mock.Mock(pw_name='meguri', pw_dir='/Users/meguri')
+        for platform, username, model, processes in (
+                ('linux', 'meguri', b'VirtualMac2,1', b''),
+                ('darwin', 'someone-else', b'VirtualMac2,1', b''),
+                ('darwin', 'meguri', b'Mac15,9', b''),
+                ('darwin', 'meguri', b'VirtualMac2,1', b'/fixture/processes/Meguri.app/Contents/MacOS/Meguri\n')):
+            user.pw_name = username
+            with mock.patch.object(config.sys, 'platform', platform), mock.patch.object(config.pwd, 'getpwuid', return_value=user), mock.patch.object(config.subprocess, 'run', side_effect=[mock.Mock(stdout=model), mock.Mock(stdout=processes)]):
+                with self.assertRaises(ValueError):
+                    config.dedicated_fixture_vm()
+
+
 class Upstream(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
