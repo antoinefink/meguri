@@ -64,3 +64,18 @@ Workflow repair start: `23d903ea`; filtered export
 accessibility container before its identifier, retaining native children.
 Independent review: no P0–P2. Privacy: pass. Similarity: pass.
 Native verification: pending. Shared full gate: pending. Unit acceptance: pending.
+
+The outer-stack attempt failed in
+`manual-transfer-check/20261024T223545Z-96642`: the sheet and children existed,
+but the root was still absent. Filtered export
+`cleanroom/20261024T224114Z-3821`, base `5b882a56`, moves the single container
+and identifier to the rendered Form. Independent review: no P0–P2.
+Privacy and similarity passed.
+
+`ui-test/20261024T224236Z-4715`: one pass, one failure, zero skips. The new
+native Import/Done test proves one sheet, one workflow root, the Done control
+and actual dismissal. The original Settings disclosure test remains failed.
+Bounded facts identify a native disclosure triangle (type 13), no child nodes,
+enabled/hittable state and a collapsed value. No history control was exposed.
+Pointer delivery and disclosure behavior still require diagnosis. The full
+gate remains pending; no unit is accepted.

@@ -233,6 +233,8 @@ public struct ManualTransferWorkflowView: View {
             #if os(macOS)
             .formStyle(.grouped)
             #endif
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("settings.anki.transferWorkflow")
             .manualTransferPresentation(model: model)
             .navigationTitle(Text("Server Transfer", bundle: .module))
             .toolbar {
@@ -243,8 +245,6 @@ public struct ManualTransferWorkflowView: View {
             }
         }
         .interactiveDismissDisabled(model.confirmationPresented || model.copyDestinationPresented)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("settings.anki.transferWorkflow")
     }
 }
 

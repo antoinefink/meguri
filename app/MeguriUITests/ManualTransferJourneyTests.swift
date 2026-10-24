@@ -22,6 +22,32 @@ import AppKit
         let nativeContext: String
     }
     #if os(macOS)
+    func testNativeTransferSheetIdentityPreflight() throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        guard build.hasHooks else { throw XCTSkip("Requires Debug/test hooks") }
+        let bundle = try build.bundleIdentifier
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false).arguments
+        addTeardownBlock { @MainActor in app.terminate() }
+        app.launch()
+
+        try selectImport(app, bundle)
+        XCTAssertEqual(app.sheets.count, 1, "Import must open exactly one app-owned native sheet.")
+        let sheets = app.sheets.containing(.any, identifier: "settings.anki.transferWorkflow")
+        XCTAssertEqual(sheets.count, 1, "The workflow root must belong to exactly one native sheet.")
+        let sheet = sheets.firstMatch
+        XCTAssertEqual(sheet.descendants(matching: .any)
+            .matching(identifier: "settings.anki.transferWorkflow").count, 1,
+            "The native sheet must expose exactly one workflow root.")
+        XCTAssertEqual(sheet.buttons.matching(identifier: "settings.anki.closeTransfer").count, 1,
+                       "The native sheet must expose its Done control.")
+
+        try closeTransfer(app, bundle)
+        XCTAssertFalse(element(app, "settings.anki.transferWorkflow").exists,
+                       "Done must remove the workflow root.")
+        XCTAssertEqual(app.sheets.count, 0, "Done must dismiss the native transfer sheet.")
+    }
     func testSettingsScrollCarrierPreflight() throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
@@ -1065,6 +1091,14 @@ import AppKit
         if detailsExists {
             lines.append("detailsEnabled=\(details.isEnabled)")
             lines.append("detailsHittable=\(details.isHittable)")
+            lines.append("detailsElementType=\(details.elementType.rawValue)")
+            let immediateChildren = details.children(matching: .any)
+            let immediateChildCount = immediateChildren.count
+            lines.append("detailsImmediateChildCount=\(immediateChildCount)")
+            let immediateChildTypes = (0..<min(immediateChildCount, 8)).map {
+                immediateChildren.element(boundBy: $0).elementType.rawValue
+            }
+            lines.append("detailsImmediateChildElementTypes=\(immediateChildTypes)")
             frame(details.frame, "detailsFrame")
             // Compare allowed values in memory; never stringify the AX value.
             switch details.value {
