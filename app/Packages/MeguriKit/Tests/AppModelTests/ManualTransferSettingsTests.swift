@@ -584,6 +584,8 @@ extension ReviewCollectionStartupTests {
         try #require(model.canPrepare)
         #expect(await service.preparedScopes.isEmpty)
         await model.prepare()
+        #expect(!model.canTestConnection)
+        await model.testConnection()
         #expect(await service.preparedScopes == [.collectionAndMedia])
         #expect(await service.preparedDirections == [direction])
         #expect(model.preview?.record.mediaSelected == true)
@@ -783,6 +785,10 @@ extension ReviewCollectionStartupTests {
         #expect(await service.scopeReceived == .collectionAndMedia)
         #expect(await service.consentAfterAdoption)
         #expect(model.mediaPreview != nil && model.result?.nextEligibleMilliseconds == nil)
+        #expect(!model.canTestConnection)
+        let callsBeforeTest = await service.calls
+        await model.testConnection()
+        #expect(await service.calls == callsBeforeTest)
         #expect(await service.calls.filter { $0 == "media" }.isEmpty)
         await model.refreshOfflineHistory()
         #expect(model.stage == .awaitingMediaConsent && model.mediaPreview != nil)
@@ -830,11 +836,69 @@ extension ManualTransferSettingsTests {
 }
 
 extension ManualTransferSettingsTests {
+    @Test func connectionTestAllowsOnlyItsOwnWorkflowAcrossWindowHosts() async {
+        let routes: [SheetRoute?] = [nil, .manualTransfer, .add(deck: nil), .fsrsAdmission, .collectionEntry, .collectionExport]
+        for host in [AppNavigation.SheetHost.main, .settings] {
+            for route in routes {
+                var configuration = LaunchConfiguration()
+                configuration.collectionLocation = AppModel.CollectionLocation(directory:
+                    FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
+                let navigation = AppNavigation()
+                let owner = ReviewCollection(configuration: configuration, navigation: navigation)
+                let service = SettingsTransferService()
+                let model = ManualTransferCoordinator(owner: owner, service: service,
+                    keychain: SettingsTransferKeys(), defaults: nil, reachability: { _ in .response(204) })
+                model.endpointDraft = "https://example.test/prefix/"
+                navigation.sheet = route; navigation.sheetHost = host
+                let allowed = route == nil || route == .manualTransfer
+                #expect(model.canTestConnection == allowed)
+                await model.testConnection()
+                #expect(await service.calls == (allowed ? ["normalize"] : []))
+                #expect(model.connectionTestResult == (allowed ? EndpointReachabilityResult.response(204).description : nil))
+                #expect(navigation.sheet == route && navigation.sheetHost == host)
+                #expect(!model.authenticated && model.preview == nil && model.endpoint.isEmpty)
+            }
+        }
+    }
+
+    @Test func workflowConnectionTestStillExcludesNativeModals() async {
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory:
+            FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
+        let navigation = AppNavigation()
+        let owner = ReviewCollection(configuration: configuration, navigation: navigation)
+        let service = SettingsTransferService()
+        let probe = SettingsReachabilityProbe()
+        let model = ManualTransferCoordinator(owner: owner, service: service,
+            keychain: SettingsTransferKeys(), defaults: nil, reachability: { await probe.check($0) })
+        navigation.present(.manualTransfer)
+        model.endpointDraft = "https://example.test/"
+        model.confirmationPresented = true
+        #expect(!model.canTestConnection)
+        await model.testConnection()
+        model.confirmationPresented = false; model.copyDestinationPresented = true
+        #expect(!model.canTestConnection)
+        await model.testConnection()
+        model.copyDestinationPresented = false; owner.entry.pickerPresented = true
+        #expect(!model.canTestConnection)
+        await model.testConnection()
+        owner.entry.pickerPresented = false
+        #expect(model.canTestConnection)
+        #expect(await service.calls.isEmpty)
+        #expect(await probe.endpoints.isEmpty)
+    }
+
     @Test func connectionTestNormalizesDraftWithoutSavingOrAuthenticating() async {
         let service = SettingsTransferService(normalizedEndpoint: "http://example.test/prefix/")
         let keys = SettingsTransferKeys()
         let probe = SettingsReachabilityProbe()
-        let model = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: nil,
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory:
+            FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
+        let navigation = AppNavigation()
+        let owner = ReviewCollection(configuration: configuration, navigation: navigation)
+        navigation.present(.manualTransfer); navigation.sheetHost = .settings
+        let model = ManualTransferCoordinator(owner: owner, service: service, keychain: keys, defaults: nil,
             reachability: { await probe.check($0) })
         let draft = "  HTTP://Example.Test:80/prefix "
         model.endpointDraft = draft

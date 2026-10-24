@@ -89,10 +89,12 @@ public struct ManualTransferSections: View {
                         #if os(macOS)
                         HStack(alignment: .center) {
                             Text("Login", bundle: .module)
+                                .accessibilityHidden(true)
                             Spacer()
                             accountIdentity
                             signOutButton
                         }
+                        .accessibilityElement(children: .contain)
                         #else
                         LabeledContent {
                             HStack(spacing: Spacing.small) {
@@ -322,7 +324,12 @@ public struct ManualTransferSections: View {
         Text(verbatim: model.username)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityElement(children: .ignore)
+            #if os(macOS)
+            .accessibilityLabel(Text("Login", bundle: .module))
+            .accessibilityValue(Text(verbatim: model.username))
+            #else
             .accessibilityLabel(Text(verbatim: model.username))
+            #endif
             .accessibilityAddTraits(.isStaticText)
             .accessibilityIdentifier("settings.anki.loginIdentity")
     }

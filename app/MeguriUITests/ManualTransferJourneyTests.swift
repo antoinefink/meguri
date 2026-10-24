@@ -39,8 +39,9 @@ import AppKit
         try app.bringToFront(bundleIdentifier: bundle)
         attachGeometry(app, "rf4-preflight-after-bringToFront", bundle)
 
-        // Traverse the production form in both directions at its default size.
+        // Traverse Connection's existing details disclosure at its default size.
         // Reveal only: refreshing history or editing the endpoint is unnecessary.
+        try showHistory(app, bundle)
         let history = element(app, "settings.anki.history")
         try reveal(history, app, bundle)
         XCTAssertTrue(history.exists, "Settings must expose the Local History refresh control.")
@@ -109,6 +110,7 @@ import AppKit
             XCTAssertEqual(startup.media, 0, "Passive launch and login must send zero media requests.")
             XCTAssertEqual(startup.collectionTransfers, 0, "Direct URL Login must not transfer a collection.")
             XCTAssertTrue((address.value as? String) == rig.endpoint, "Login must preserve the exact entered URL.")
+            try selectImport(app, bundle)
             try selectMediaScope(app, bundle)
             try click(element(app, "settings.anki.prepareImport"), app, bundle)
             try reveal(element(app, "settings.anki.confirm"), app, bundle)
@@ -175,7 +177,7 @@ import AppKit
 
         // Independent B coverage follows A's completed cycle. Arm only B's real payload.
         _ = try await wire(rig, "arm-export")
-        try click(element(app, "settings.anki.logout"), app, bundle)
+        try logout(app, bundle)
         try login(app, bundle, username: exportUsername, password: rig.exportPassword)
         try selectExport(app, bundle)
         try selectMediaScope(app, bundle)
@@ -199,11 +201,22 @@ import AppKit
         // The rig independently downloads A and B and compares the saved review
         // and scheduling with replay. Native state alone cannot establish that.
     }
-    private func selectExport(_ app: XCUIApplication, _ bundle: String) throws {
-        try click(element(app, "settings.anki.direction"), app, bundle)
+    private func selectImport(_ app: XCUIApplication, _ bundle: String) throws {
         #if os(macOS)
-        try click(app.menuItems["Export to Anki"].firstMatch, app, bundle)
+        try openSettings(app, bundle)
+        try click(element(app, "settings.root.collection"), app, bundle)
+        try click(element(app, "settings.anki.openImport"), app, bundle)
+        XCTAssertTrue(element(app, "settings.anki.transferWorkflow").waitForExistence(timeout: 30))
+        #endif
+    }
+    private func selectExport(_ app: XCUIApplication, _ bundle: String) throws {
+        #if os(macOS)
+        try openSettings(app, bundle)
+        try click(element(app, "settings.root.collection"), app, bundle)
+        try click(element(app, "settings.anki.openExport"), app, bundle)
+        XCTAssertTrue(element(app, "settings.anki.transferWorkflow").waitForExistence(timeout: 30))
         #else
+        try click(element(app, "settings.anki.direction"), app, bundle)
         try click(app.buttons["Export to Anki"].firstMatch, app, bundle)
         #endif
     }
@@ -213,6 +226,7 @@ import AppKit
     }
     private func allowAndFinishMedia(_ app: XCUIApplication, _ bundle: String, rig: Rig, stage: String,
                                      baseline: DurableOperation.Receipt?, name: String) async throws -> DurableOperation {
+        try continueTransfer(app, bundle)
         let importing = stage == "Import"
         let cancelledStage = stage != "AExport"
         let prefix = importing ? "" : "export-"
@@ -281,6 +295,7 @@ import AppKit
             try completeOptionalFsrsAdmission(app, bundle)
             try openSettings(app, bundle)
             try waitForText(element(app, "settings.anki.loginIdentity"), importing ? rig.username : rig.exportUsername, app, bundle)
+            try showHistory(app, bundle)
             try click(element(app, "settings.anki.history"), app, bundle)
             waitUntilReady(element(app, "settings.anki.history"), app)
             XCTAssertFalse(element(app, "settings.anki.startMedia").exists)
@@ -297,6 +312,7 @@ import AppKit
             attachSuccess(app, name + "-passive-restart-no-media-requests")
 
             try click(element(app, "settings.anki.resumeMedia.\(original.id)"), app, bundle)
+            try continueTransfer(app, bundle)
             try reveal(allow, app, bundle)
             waitUntilReady(allow, app)
             let decision = try durableOperation(try await nativeState(rig), direction: direction)
@@ -602,7 +618,16 @@ import AppKit
     }
     #endif
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: id).firstMatch
+        #if os(macOS)
+        let workflow = app.descendants(matching: .any).matching(identifier: "settings.anki.transferWorkflow").firstMatch
+        if id != "settings.anki.transferWorkflow", id.hasPrefix("settings.anki."), workflow.exists {
+            // Native toolbar items can be siblings of the identified content.
+            let sheet = app.sheets.containing(.any, identifier: "settings.anki.transferWorkflow").firstMatch
+            let scope = sheet.exists ? sheet : workflow
+            return scope.descendants(matching: .any).matching(identifier: id).firstMatch
+        }
+        #endif
+        return app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
     private func click(_ target: XCUIElement, _ app: XCUIApplication, _ bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
@@ -617,11 +642,18 @@ import AppKit
     private func reveal(_ target: XCUIElement, _ app: XCUIApplication, _ bundle: String) throws {
         _ = target.waitForExistence(timeout: 30)
         #if os(macOS)
-        let containers = [app.scrollViews, app.tables, app.collectionViews]
+        let workflow = element(app, "settings.anki.transferWorkflow")
+        let settingsRoot = element(app, "settings.root.content")
+        let surface = workflow.exists ? workflow : settingsRoot
+        let containers = surface.exists
+            ? [surface.scrollViews, surface.tables, surface.collectionViews]
+            : [app.scrollViews, app.tables, app.collectionViews]
+        let window = surface.exists
+            ? app.windows.containing(.any, identifier: surface.identifier).firstMatch
+            : app.windows.firstMatch
         func canScrollSettingsRoot(_ root: XCUIElement) -> Bool {
-            guard app.state == .runningForeground, !app.sheets.firstMatch.exists, !app.alerts.firstMatch.exists,
+            guard app.state == .runningForeground, (!app.sheets.firstMatch.exists || workflow.exists), !app.alerts.firstMatch.exists,
                   root.exists, root.isEnabled, root.isHittable else { return false }
-            let window = app.windows.firstMatch
             guard window.exists else { return false }
             // macOS can expose a null application frame even for an active window.
             let viewport = root.frame.intersection(window.frame)
@@ -649,7 +681,11 @@ import AppKit
             for id in settingsIDs {
                 if let detail = container(owning: id) { return detail }
             }
+            #if os(macOS)
+            let root = surface
+            #else
             let root = element(app, "settings.root.content")
+            #endif
             if root.exists {
                 if let detail = [root.scrollViews, root.tables, root.collectionViews]
                     .map({ $0.firstMatch }).first(where: { $0.exists }) { return detail }
@@ -682,7 +718,6 @@ import AppKit
             #if os(macOS)
             if usesSettingsRoot && !canScrollSettingsRoot(scroll) { break }
             guard app.state == .runningForeground else { break }
-            let window = app.windows.firstMatch
             guard window.exists else { break }
             let viewport = scroll.frame.intersection(window.frame)
             guard !viewport.isNull, !viewport.isEmpty,
@@ -744,6 +779,11 @@ import AppKit
         XCTAssertEqual(outcome, .completed)
     }
     private func completeOptionalFsrsAdmission(_ app: XCUIApplication, _ bundle: String) throws {
+        #if os(macOS)
+        // Admission belongs to the main window, even when Settings initiated
+        // replacement. Closing the workflow neither cancels nor grants consent.
+        try closeSettings(app, bundle)
+        #endif
         try app.bringToFront(bundleIdentifier: bundle)
         let admission = element(app, "home.policy.enable")
         if admission.waitForExistence(timeout: 2), admission.isEnabled {
@@ -759,11 +799,74 @@ import AppKit
         XCTAssertEqual(outcome, .completed, "FSRS admission must finish before continuing.")
     }
     private func openSettings(_ app: XCUIApplication, _ bundle: String) throws {
+        #if os(macOS)
+        try closeTransfer(app, bundle)
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey(",", modifierFlags: .command)
+        XCTAssertTrue(element(app, "settings.root.content").waitForExistence(timeout: 30),
+                      "Command-comma must open the native Settings scene.")
+        try click(element(app, "settings.root.connection"), app, bundle)
+        #else
         try openSection(app, bundle, name: "settings", title: "Settings")
+        #endif
     }
     private func openHome(_ app: XCUIApplication, _ bundle: String) throws {
+        #if os(macOS)
+        try closeSettings(app, bundle)
+        #endif
         try openSection(app, bundle, name: "home", title: "Decks")
     }
+    private func continueTransfer(_ app: XCUIApplication, _ bundle: String) throws {
+        #if os(macOS)
+        if element(app, "settings.anki.transferWorkflow").exists { return }
+        try openSettings(app, bundle)
+        let resume = element(app, "settings.anki.continueTransfer")
+        if resume.exists {
+            try click(resume, app, bundle)
+        } else {
+            try click(element(app, "settings.root.collection"), app, bundle)
+            try click(element(app, "settings.anki.transferDetails"), app, bundle)
+        }
+        XCTAssertTrue(element(app, "settings.anki.transferWorkflow").waitForExistence(timeout: 30),
+                      "The retained transfer must open in the real workflow sheet.")
+        #endif
+    }
+    private func showHistory(_ app: XCUIApplication, _ bundle: String) throws {
+        #if os(macOS)
+        if !element(app, "settings.anki.transferWorkflow").exists {
+            try click(element(app, "settings.root.connection"), app, bundle)
+            let history = element(app, "settings.anki.history")
+            if !history.exists { try click(element(app, "settings.anki.details"), app, bundle) }
+        }
+        #endif
+        try reveal(element(app, "settings.anki.history"), app, bundle)
+    }
+    private func logout(_ app: XCUIApplication, _ bundle: String) throws {
+        #if os(macOS)
+        try openSettings(app, bundle)
+        #endif
+        try click(element(app, "settings.anki.logout"), app, bundle)
+    }
+    #if os(macOS)
+    private func closeTransfer(_ app: XCUIApplication, _ bundle: String) throws {
+        let workflow = element(app, "settings.anki.transferWorkflow")
+        guard workflow.exists else { return }
+        try click(element(app, "settings.anki.closeTransfer"), app, bundle)
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !workflow.exists }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [dismissed], timeout: 30), .completed,
+                       "Done must close the transfer sheet before navigating Settings.")
+    }
+    private func closeSettings(_ app: XCUIApplication, _ bundle: String) throws {
+        try closeTransfer(app, bundle)
+        let settings = app.windows.containing(.any, identifier: "settings.root.content").firstMatch
+        guard settings.exists else { return }
+        // Target this window's native close control, never the review window.
+        try click(settings.buttons["_XCUI:CloseWindow"].firstMatch, app, bundle)
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !settings.exists }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [dismissed], timeout: 30), .completed,
+                       "Settings must close before admission or real local reviews.")
+    }
+    #endif
     private func openSection(_ app: XCUIApplication, _ bundle: String, name: String, title: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         let root = element(app, name == "home" ? "home.collection.screen" : "settings.root.content")

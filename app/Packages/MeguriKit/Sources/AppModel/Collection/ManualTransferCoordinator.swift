@@ -120,7 +120,9 @@ public final class ManualTransferCoordinator {
         await refreshHistory()
     }
     public var canTestConnection: Bool {
-        !busy && preview == nil && mediaPreview == nil && owner?.navigation.sheet == nil
+        !busy && preview == nil && mediaPreview == nil
+            && (owner?.navigation.sheet == nil || owner?.navigation.sheet == .manualTransfer)
+            && !confirmationPresented && !copyDestinationPresented && owner?.entry.pickerPresented != true
             && owner?.entry.busy != true && owner?.collectionExport.busy != true
             && !endpointDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
