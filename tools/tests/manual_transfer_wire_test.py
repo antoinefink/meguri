@@ -348,11 +348,11 @@ class RepairArchiveTests(unittest.TestCase):
         self.media = self.support / 'Collection/collection.media'
         (self.media / 'rf4-device.bin').write_bytes(config.recipe_bytes(config.FAILED_FIXTURE_RUN, 'device', 6144))
         active = self.history['operations'][self.history['active']]
-        active.update(phase='MediaIncomplete', account=config.repair_account(),
+        active.update(phase='MediaIncomplete', acceptance='NotSent', account=config.repair_account(),
                       configured_endpoint=config.REPAIR_ENDPOINT, target_endpoint=config.REPAIR_ENDPOINT)
         old = copy.deepcopy(active)
         old.update(id='0000000000000002-0000000000000003', direction='Export', phase='Complete',
-                   account='b' * 64, receipt=dict(completed_at=1, next_eligible_at=2))
+                   acceptance='ExactOk', account='b' * 64, receipt=dict(completed_at=1, next_eligible_at=2))
         old['media']['stage'] = 'Complete'
         self.history['operations'][old['id']] = old
         self.history['serial'] = 2
@@ -375,8 +375,9 @@ class RepairArchiveTests(unittest.TestCase):
             self.archive()
         self.assertEqual((self.support.stat().st_ino, self.policy.read_bytes()), before)
 
-    def test_lossless_whole_directory_rename_retains_unknown_files_links_receipts_and_inode(self):
+    def test_import_notsent_lossless_rename_retains_unknown_files_links_receipts_and_inode(self):
         self.fixture()
+        self.assertEqual(self.history['operations'][self.history['active']]['acceptance'], 'NotSent')
         outside = self.root / 'outside'
         outside.write_bytes(b'never-follow-external-link')
         link = self.support / 'unknown-link'
@@ -439,6 +440,15 @@ class RepairArchiveTests(unittest.TestCase):
         old = self.history['operations']['0000000000000002-0000000000000003']
         old['receipt']['next_eligible_at'] = time.time_ns() // 1_000_000 + 3600000
         self.write_policy(); self.assert_blocked()
+
+    def test_other_import_acceptance_states_refuse_without_moving_support(self):
+        self.fixture()
+        for acceptance in ('PossiblyAccepted', 'Refused', 'ExactOk'):
+            with self.subTest(acceptance=acceptance):
+                self.history['operations'][self.history['active']]['acceptance'] = acceptance
+                self.write_policy()
+                self.assert_blocked()
+                self.assertFalse(self.target.exists())
 
     def test_exact_active_import_account_endpoint_and_zero_effects_required(self):
         self.fixture()

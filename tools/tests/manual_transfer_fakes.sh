@@ -90,6 +90,20 @@ mg_mac_vm_ssh_in() {
     *' archive-stale-fixture-state')
       printf 'archive-helper\n' >>"$FX_EVENTS"
       [ "${FX_REPAIR_SSH_FAIL:-0}" = 0 ] || return 255
+      # Explicit nonmutating transport doubles; never run/retry the utility.
+      if [ -n "${FX_REPAIR_REPLY:-}" ]; then
+        local repair_rc=3 repair_status=blocked repair_archived=false
+        case "$FX_REPAIR_REPLY" in
+          blocked) ;;
+          mismatched) repair_status=archived; repair_archived=true ;;
+          missing) return 3 ;;
+          ssh-loss-blocked) repair_rc=255 ;;
+          *) return 97 ;;
+        esac
+        jq -nc --arg status "$repair_status" --argjson archived "$repair_archived" \
+          '{purpose:"environment-repair-not-M8",source_run:"20261023T234838Z-84101",status:$status,archived:$archived}'
+        return "$repair_rc"
+      fi
       # Run the real utility on synthetic data, replacing ONLY VM metadata.
       # stdin is still the real controller's bounded source provenance proof.
       python3 -c '

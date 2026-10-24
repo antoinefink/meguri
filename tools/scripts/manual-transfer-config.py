@@ -270,7 +270,7 @@ def repair_policy(support):
             active["direction"] != "Import" or active["scope"] != "CollectionAndMedia" or
             active["phase"] != "MediaIncomplete" or active["collection_complete"] is not True or
             active["account"] != repair_account() or active["configured_endpoint"] != REPAIR_ENDPOINT or
-            active["target_endpoint"] != REPAIR_ENDPOINT or active["acceptance"] != "ExactOk" or
+            active["target_endpoint"] != REPAIR_ENDPOINT or active["acceptance"] != "NotSent" or
             active["boundary"] is not None or active["receipt"] is not None):
         raise ValueError("repair exact active import required")
     media = active["media"]

@@ -350,7 +350,7 @@ run.mkdir(parents=True)
     media_names=list(config.MEDIA_NAMES))))
 support, policy, history = fixtures.synthetic_native(home)
 active = history['operations'][history['active']]
-active.update(phase='MediaIncomplete', account=config.repair_account(),
+active.update(phase='MediaIncomplete', acceptance='NotSent', account=config.repair_account(),
               configured_endpoint=config.REPAIR_ENDPOINT, target_endpoint=config.REPAIR_ENDPOINT)
 policy.write_text(json.dumps(dict(manualTransfers=history)))
 (support / 'Collection/collection.media/rf4-device.bin').write_bytes(config.recipe_bytes(run_id, 'device', 6144))
@@ -417,6 +417,9 @@ PYPROOF
   [ "$status" -eq 0 ]
   [ "$(recorded_status)" = error ]
   grep -qx 'failure manual-transfer/repair-blocked' "$FX_EVENTS"
+  grep -qx 'repair_ssh_exit_code 3' "$FX_EVENTS"
+  ! grep -q 'repair-uncertain\|preservation-unknown' "$FX_EVENTS"
+  [ "$(grep -cx archive-helper "$FX_EVENTS")" -eq 1 ]
   grep -q '"status":"blocked"\|"status": "blocked"' "$FX_ROOT/build/mg/manual-transfer-check/20261024T010101Z-17/repair-receipt.json"
   [ -d "$FX_VM/Library/Containers/com.antoinefink.meguri.dev/Data/Library/Application Support" ]
   [ ! -e "$FX_VM/MeguriTestArchives/ManualTransferSupport-20261023T234838Z-84101" ]
@@ -431,5 +434,42 @@ PYPROOF
   [ "$(recorded_status)" = error ]
   grep -qx 'repair_status "preservation-unknown"' "$FX_EVENTS"
   grep -qx 'failure manual-transfer/repair-uncertain' "$FX_EVENTS"
+  grep -qx 'repair_ssh_exit_code 255' "$FX_EVENTS"
+  [ "$(grep -cx archive-helper "$FX_EVENTS")" -eq 1 ]
   ! grep -q 'repair-blocked\|native_transfer_complete' "$FX_EVENTS"
+}
+
+@test "manual transfer: wrapper rc3 with valid blocked receipt is a pre-move refusal" {
+  prepare_repair_fixture
+  export FX_REPAIR_REPLY=blocked
+  run invoke_fake check --archive-stale-fixture-state --platform mac --source-run 20261023T234838Z-84101
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = error ]
+  grep -qx 'repair_ssh_exit_code 3' "$FX_EVENTS"
+  grep -qx 'failure manual-transfer/repair-blocked' "$FX_EVENTS"
+  ! grep -q 'repair-uncertain\|preservation-unknown' "$FX_EVENTS"
+  [ "$(grep -cx archive-helper "$FX_EVENTS")" -eq 1 ]
+  [ -d "$FX_VM/Library/Containers/com.antoinefink.meguri.dev/Data/Library/Application Support" ]
+  [ ! -e "$FX_VM/MeguriTestArchives/ManualTransferSupport-20261023T234838Z-84101" ]
+}
+
+@test "manual transfer: mismatched missing and transport-lost blocked receipts stay unknown" {
+  prepare_repair_fixture
+  for reply in mismatched missing ssh-loss-blocked; do
+    : >"$FX_EVENTS"
+    export FX_REPAIR_REPLY="$reply"
+    run invoke_fake check --archive-stale-fixture-state --platform mac --source-run 20261023T234838Z-84101
+    [ "$status" -eq 0 ]
+    [ "$(recorded_status)" = error ]
+    case "$reply" in
+      ssh-loss-blocked) grep -qx 'repair_ssh_exit_code 255' "$FX_EVENTS" ;;
+      *) grep -qx 'repair_ssh_exit_code 3' "$FX_EVENTS" ;;
+    esac
+    grep -qx 'repair_status "preservation-unknown"' "$FX_EVENTS"
+    grep -qx 'failure manual-transfer/repair-uncertain' "$FX_EVENTS"
+    ! grep -q 'repair-blocked\|native_transfer_complete\|^environment_repair ' "$FX_EVENTS"
+    [ "$(grep -cx archive-helper "$FX_EVENTS")" -eq 1 ]
+    [ -d "$FX_VM/Library/Containers/com.antoinefink.meguri.dev/Data/Library/Application Support" ]
+    [ ! -e "$FX_VM/MeguriTestArchives/ManualTransferSupport-20261023T234838Z-84101" ]
+  done
 }

@@ -214,6 +214,7 @@ mg_mt_archive_stale_fixture_state() {
   mg_mac_vm_ssh_in "/usr/bin/python3 $(mvl_q "$MG_RUN_DIR/repair-config.py") archive-stale-fixture-state" \
     <"$evidence" >"$receipt" 2>/dev/null
   rc=$?
+  mg_detail repair_ssh_exit_code "$rc"
   case "$rc" in
     0|3|4)
       if ! jq -e --arg status "$(case "$rc" in 0) echo archived ;; 3) echo blocked ;; 4) echo preservation-unconfirmed ;; esac)" \
