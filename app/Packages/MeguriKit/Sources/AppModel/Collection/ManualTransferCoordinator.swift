@@ -6,6 +6,42 @@ import Observation
 /// Constructing this model never starts work. Loading is offline only.
 @Observable @MainActor
 public final class ManualTransferCoordinator {
+    /// Exact core ErrorKind::id allowlist (meguri-sync/src/error.rs), including
+    /// feature-gated kinds. Diagnostic data only; never authorizes recovery.
+    public enum FailureCategory: String, CaseIterable, Sendable {
+        case authFailed = "auth_failed"
+        case conflict
+        case clientTooOld = "client_too_old"
+        case serverError = "server_error"
+        case dbCheckRequired = "db_check_required"
+        case proxyAuth = "proxy_auth"
+        case unexpectedStatus = "unexpected_status"
+        case offline
+        case network
+        case timeout
+        case tls
+        case redirectRefused = "redirect_refused"
+        case badResponse = "bad_response"
+        case invalidEndpoint = "invalid_endpoint"
+        case invalidInput = "invalid_input"
+        case proxyUnusable = "proxy_unusable"
+        case endpointRefused = "endpoint_refused"
+        case serverMessage = "server_message"
+        case clockIncorrect = "clock_incorrect"
+        case uploadTooLarge = "upload_too_large"
+        case sanityCheckFailed = "sanity_check_failed"
+        case notetypeSchemaChanged = "notetype_schema_changed"
+        case missingNotetype = "missing_notetype"
+        case downloadInvalid = "download_invalid"
+        case mediaResyncFailed = "media_resync_failed"
+        case diskFull = "disk_full"
+        case localStorage = "local_storage"
+        case sessionActive = "session_active"
+        case exclusiveBusy = "exclusive_busy"
+        case cancelled
+        case interrupted
+        case `internal`
+    }
     public enum Stage: Equatable {
         case ready
         case testingConnection
@@ -23,14 +59,14 @@ public final class ManualTransferCoordinator {
     public private(set) var stage: Stage = .ready {
         didSet {
             if stage != oldValue {
-                if busy { redirectDiagnostic = nil }
+                if busy { clearFailureDiagnostics() }
                 recordConnectionEvent("Observed stage: " + stage.description)
             }
         }
     }
     public private(set) var endpoint: String
     public var endpointDraft: String {
-        didSet { if endpointDraft != oldValue { connectionTestResult = nil; redirectDiagnostic = nil } }
+        didSet { if endpointDraft != oldValue { connectionTestResult = nil; clearFailureDiagnostics() } }
     }
     public private(set) var connectionTestResult: String?
     private let reachability: @Sendable (String) async -> EndpointReachabilityResult
@@ -46,7 +82,7 @@ public final class ManualTransferCoordinator {
         if connectionEvents.count > 30 { connectionEvents.removeFirst(connectionEvents.count - 30) }
     }
     public var username = "" {
-        didSet { if username != oldValue { redirectDiagnostic = nil } }
+        didSet { if username != oldValue { clearFailureDiagnostics() } }
     }
     public var password = ""
     public private(set) var authenticated = false
@@ -59,6 +95,7 @@ public final class ManualTransferCoordinator {
     public private(set) var records: [ManualTransferHistory] = []
     public private(set) var result: ManualTransferRecord?
     public private(set) var redirectDiagnostic: ManualTransferRedirectDiagnostic?
+    public private(set) var failureCategory: FailureCategory?
     public private(set) var message: String? {
         didSet { if let message, message != oldValue { recordConnectionEvent(message) } }
     }
@@ -177,7 +214,7 @@ public final class ManualTransferCoordinator {
     public func logout() async {
         if stage == .transferringMedia { await cancelAndDrain() }
         guard !busy, preview == nil else { return }
-        redirectDiagnostic = nil
+        clearFailureDiagnostics()
         do { try await service.invalidateMediaOwner(operation: ManualTransferOperation()) }
         catch { message = "Couldn’t finish stopping media. Try logging out again."; return }
         mediaPreview = nil; mediaUsername = nil
@@ -247,12 +284,12 @@ public final class ManualTransferCoordinator {
         } catch {
             guard current() else { return }
             await report(error, operation: operation)
-            if endpointDraft != normalized || username != suppliedUsername { redirectDiagnostic = nil }
+            if endpointDraft != normalized || username != suppliedUsername { clearFailureDiagnostics() }
         }
     }
     public func prepare() async {
         guard canPrepare, let owner, let credentials else { return }
-        redirectDiagnostic = nil
+        clearFailureDiagnostics()
         do { try owner.beginManualActivation() } catch { message = "Finish the current review or file operation first."; return }
         revision &+= 1
         defer { finishWaiters() }
@@ -277,7 +314,7 @@ public final class ManualTransferCoordinator {
     }
     public func confirm() async {
         guard canConfirm, let owner, let credentials, let prepared = preview else { return }
-        redirectDiagnostic = nil
+        clearFailureDiagnostics()
         do { try owner.beginManualActivation() } catch { message = "Finish the current review or file operation first."; return }
         let before = owner.generation
         revision &+= 1
@@ -496,9 +533,14 @@ public final class ManualTransferCoordinator {
             self.progress = value
         } }
     }
-    private func report(_ error: any Error, operation: ManualTransferOperation?) async {
+    private func clearFailureDiagnostics() {
         redirectDiagnostic = nil
+        failureCategory = nil
+    }
+    private func report(_ error: any Error, operation: ManualTransferOperation?) async {
+        clearFailureDiagnostics()
         if let failure = error as? ManualTransferFailure {
+            failureCategory = failure.serverKind.flatMap(FailureCategory.init(rawValue:))
             nextEligibleMilliseconds = failure.nextEligibleMilliseconds
             if failure.serverKind == "auth_failed" {
                 credentials = nil; authenticated = false; password = ""

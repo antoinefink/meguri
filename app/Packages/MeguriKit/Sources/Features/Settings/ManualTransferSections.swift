@@ -4,6 +4,21 @@ import DesignSystem
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// A stable allowlisted code, separate from the curated recovery guidance.
+struct ManualTransferFailureCategoryDetails: View {
+    let category: ManualTransferCoordinator.FailureCategory
+    var body: some View {
+        LabeledContent {
+            Text(verbatim: category.rawValue)
+        } label: {
+            Text("Failure category", bundle: .module)
+        }
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier("settings.anki.failureCategory")
+    }
+}
+
 /// Informational text only; the destination never becomes a navigation action.
 struct ManualTransferRedirectDetails: View {
     let diagnostic: ManualTransferRedirectDiagnostic
@@ -193,6 +208,9 @@ public struct ManualTransferSections: View {
                 if let message = model.message {
                     Section("Result") {
                         Text(message).accessibilityIdentifier("settings.anki.result")
+                        if let category = model.failureCategory {
+                            ManualTransferFailureCategoryDetails(category: category)
+                        }
                         if let diagnostic = model.redirectDiagnostic {
                             ManualTransferRedirectDetails(diagnostic: diagnostic)
                         }

@@ -59,7 +59,7 @@ extension ManualTransferSettingsTests {
         let sensitive = ["Synthetic User", "synthetic-transient", "synthetic-host-key", "synthetic-token",
             "ephemeral-only", "never-persist-me", "clear-on-background",
             "https://synthetic-user:synthetic-password@example.test/private?token=synthetic-token#secret"]
-        let cases: [(String?, String)] = [
+        let knownCases: [(String, String)] = [
             ("auth_failed", "The server rejected the login. Check your username and password, then log in again."),
             ("offline", "The server could not be reached. Check your network connection and server address."),
             ("network", "A network problem interrupted the request. Check your connection and server availability."),
@@ -77,12 +77,21 @@ extension ManualTransferSettingsTests {
             ("client_too_old", "The server requires a newer client. Update Meguri before preparing a new decision."),
             ("clock_incorrect", "The device and server clocks differ. Check the date, time and time zone on both."),
             ("endpoint_refused", "This build permits local test servers. Remote use requires a personal preview build."),
-            (nil, fallback), ("", fallback), ("synthetic_other_failure", fallback),
-            ("AUTH_FAILED", fallback), (" auth_failed", fallback), ("auth_failed\n", fallback),
-            ("endpoint_refused_extra", fallback),
-            ("server_message: " + sensitive.joined(separator: "\n"), fallback)
+            ("db_check_required", fallback), ("invalid_input", fallback), ("upload_too_large", fallback),
+            ("sanity_check_failed", fallback), ("notetype_schema_changed", fallback), ("missing_notetype", fallback),
+            ("download_invalid", fallback), ("media_resync_failed", fallback), ("disk_full", fallback),
+            ("local_storage", fallback), ("session_active", fallback), ("exclusive_busy", fallback),
+            ("cancelled", fallback), ("interrupted", fallback), ("internal", fallback)
         ]
-        for (serverKind, expected) in cases {
+        let unknownKinds: [String?] = [
+            nil, "", "synthetic_other_failure",
+            "AUTH_FAILED", " auth_failed", "auth_failed\n", "endpoint_refused_extra",
+            "server_message: " + sensitive.joined(separator: "\n")
+        ]
+        #expect(Set(knownCases.map { $0.0 }) == Set(ManualTransferCoordinator.FailureCategory.allCases.map(\.rawValue)))
+        let cases: [(String?, String, String?)] = knownCases.map { ($0.0, $0.1, $0.0) }
+            + unknownKinds.map { ($0, fallback, nil) }
+        for (serverKind, expected, category) in cases {
             let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
                 generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: serverKind, redirect: nil))
             let service = SettingsTransferService(loginFailure: failure)
@@ -92,8 +101,9 @@ extension ManualTransferSettingsTests {
             model.username = sensitive[0]; model.password = sensitive[1]
             await model.login()
             #expect(model.message == expected)
+            #expect(model.failureCategory?.rawValue == category)
             #expect(model.connectionEvents.filter { $0.detail == expected }.count == 1)
-            let diagnostics = ([model.message ?? ""] + model.connectionEvents.map(\.detail)).joined(separator: "\n")
+            let diagnostics = ([model.message ?? "", model.failureCategory?.rawValue ?? ""] + model.connectionEvents.map(\.detail)).joined(separator: "\n")
             #expect(!diagnostics.contains("example.test"))
             for value in sensitive { #expect(!diagnostics.contains(value)) }
             #expect(!model.authenticated && model.password.isEmpty && model.preview == nil && !model.busy)
@@ -101,6 +111,51 @@ extension ManualTransferSettingsTests {
             #expect(await keys.clears == (serverKind == "auth_failed" ? 2 : 1))
             #expect(await service.calls == ["normalize", "login"])
         }
+    }
+
+    @Test(arguments: ["db_check_required", "download_invalid", "local_storage", "internal", "offline",
+                      "internal\nAuthorization: synthetic-secret", "download_invalid_extra", " internal", "", nil] as [String?])
+    func preparationFailureExposesOnlyAnExactSafeCategory(kind: String?) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        await owner.start()
+        try #require(owner.state == .noFile)
+        let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
+            generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: kind, redirect: nil))
+        let service = SettingsTransferService(suspendPreparation: true, preparationFailure: failure)
+        let keys = SettingsTransferKeys()
+        let model = ManualTransferCoordinator(owner: owner, service: service, keychain: keys, defaults: nil)
+        model.endpointDraft = "https://example.test/"
+        model.username = "Synthetic User"; model.password = "synthetic-transient"
+        await model.login()
+        try #require(model.canPrepare)
+        await model.prepare()
+        let known = ["db_check_required", "download_invalid", "local_storage", "internal", "offline"].contains(kind ?? "")
+        #expect(model.failureCategory?.rawValue == (known ? kind : nil))
+        #expect(model.message == (kind == "offline"
+            ? "The server could not be reached. Check your network connection and server address."
+            : "The server request failed. Check the endpoint and login, then inspect the recorded stages."))
+        let exposed = ([model.message ?? "", model.failureCategory?.rawValue ?? ""] + model.connectionEvents.map(\.detail)).joined(separator: "\n")
+        #expect(!exposed.contains("synthetic-secret") && !exposed.contains("Authorization"))
+        if !known, let kind, !kind.isEmpty { #expect(!exposed.contains(kind)) }
+        #expect(model.authenticated && model.preview == nil && model.result == nil && !model.busy)
+        #expect(await keys.saved?.hostKey == "synthetic-host-key")
+        #expect(await keys.clears == 1)
+        #expect(await service.calls == ["normalize", "login", "prepare", "history"])
+
+        // Clear before the next attempt completes, even when it is cancelled.
+        await service.clearPreparationFailure()
+        let nextAttempt = Task { await model.prepare() }
+        await service.waitUntilPreparing()
+        #expect(model.busy && model.message == nil && model.failureCategory == nil && model.redirectDiagnostic == nil)
+        await model.cancel()
+        await nextAttempt.value
+        #expect(model.failureCategory == nil && model.authenticated && !model.busy)
+        #expect(await service.calls == ["normalize", "login", "prepare", "history", "prepare", "history"])
+        #expect(await owner.close())
     }
 
     @Test func loginEligibilityUsesEnteredFields() {
@@ -117,7 +172,7 @@ extension ManualTransferSettingsTests {
     }
 
     @Test func refusedRedirectIsInformationalAndClearsWithIdentityOrNewAttempts() async {
-        for action in ["endpoint", "username", "applyEndpoint", "logout", "retry", "testConnection"] {
+        for action in ["endpoint", "username", "applyEndpoint", "logout", "retry", "testConnection", "refreshHistory"] {
             let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
                 generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "redirect_refused",
                 redirect: .init(destination: "https://USER:SECRET@destination.test/prefix/?token=SECRET#SECRET", reason: "host")))
@@ -129,6 +184,7 @@ extension ManualTransferSettingsTests {
             await model.login()
             #expect(model.redirectDiagnostic?.destination == "https://destination.test/prefix/")
             #expect(model.redirectDiagnostic?.reason == .host)
+            #expect(model.failureCategory == .redirectRefused)
             #expect(model.message == "The server redirected the request in an unsupported way. Check the server address.")
             #expect(model.endpoint == "https://configured.test/" && model.endpointDraft == model.endpoint)
             #expect(model.preview == nil && !model.authenticated)
@@ -145,11 +201,13 @@ extension ManualTransferSettingsTests {
                 model.password = "retry-transient"
                 await model.login()
                 #expect(model.authenticated)
+            case "refreshHistory": await model.refreshOfflineHistory()
             default: await model.testConnection()
             }
-            #expect(model.redirectDiagnostic == nil)
+            #expect(model.redirectDiagnostic == nil && model.failureCategory == nil)
             let expectedCalls = ["normalize", "login"] + (action == "retry" ? ["normalize", "login"]
-                : (action == "applyEndpoint" || action == "testConnection" ? ["normalize"] : []))
+                : (action == "refreshHistory" ? ["history"]
+                   : (action == "applyEndpoint" || action == "testConnection" ? ["normalize"] : [])))
             #expect(await service.calls == expectedCalls)
             #expect(!model.connectionEvents.contains { $0.detail.contains("SECRET") || $0.detail.contains("destination.test") })
         }
@@ -185,7 +243,7 @@ extension ManualTransferSettingsTests {
         model.username = "Edited Synthetic User"
         await suspension.release()
         await attempt.value
-        #expect(model.redirectDiagnostic == nil)
+        #expect(model.redirectDiagnostic == nil && model.failureCategory == nil)
         #expect(await service.calls == ["normalize", "login"])
         #expect(await service.loginRequests.first?.username == "Synthetic User")
     }
@@ -425,17 +483,20 @@ private actor SettingsTransferService: ManualTransferService {
     private let suspendPreparation: Bool
     private let preparationRecord: ManualTransferRecord?
     private var loginFailure: ManualTransferFailure?
+    private var preparationFailure: ManualTransferFailure?
     private let entered: AsyncStream<Void>
     private let enteredContinuation: AsyncStream<Void>.Continuation
     init(historyUnavailable: Bool = false, suspendPreparation: Bool = false,
          normalizedEndpoint: String? = nil, rejectNormalization: Bool = false,
          recoveryRecord: ManualTransferRecord? = nil, suspension: SettingsLoginSuspension? = nil,
-         preparationRecord: ManualTransferRecord? = nil, loginFailure: ManualTransferFailure? = nil) {
+         preparationRecord: ManualTransferRecord? = nil, loginFailure: ManualTransferFailure? = nil,
+         preparationFailure: ManualTransferFailure? = nil) {
         self.normalizedEndpoint = normalizedEndpoint; self.rejectNormalization = rejectNormalization
         self.recoveryRecord = recoveryRecord; self.suspension = suspension
         self.historyUnavailable = historyUnavailable
         self.suspendPreparation = suspendPreparation
         self.preparationRecord = preparationRecord; self.loginFailure = loginFailure
+        self.preparationFailure = preparationFailure
         (entered, enteredContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }
     func waitUntilPreparing() async {
@@ -450,6 +511,7 @@ private actor SettingsTransferService: ManualTransferService {
     }
     func acceptNormalization() { rejectNormalization = false }
     func clearLoginFailure() { loginFailure = nil }
+    func clearPreparationFailure() { preparationFailure = nil }
     func invalidateMediaOwner(operation: ManualTransferOperation) { invalidations += 1 }
     func login(endpoint: String, username: String, password: String, operation: ManualTransferOperation) async throws -> ManualTransferCredentials {
         calls.append("login"); loginRequests.append(.init(endpoint: endpoint, username: username, password: password))
@@ -468,6 +530,7 @@ private actor SettingsTransferService: ManualTransferService {
     func prepare(endpoint: String, credentials: ManualTransferCredentials, direction: ManualTransferDirection, scope: ManualTransferScope, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> PreparedManualTransfer {
         calls.append("prepare")
         preparedScopes.append(scope); preparedDirections.append(direction)
+        if let preparationFailure { throw preparationFailure }
         if let preparationRecord { return .init(record: preparationRecord) }
         guard suspendPreparation else { throw BridgeError.unavailable(reason: "No scripted preparation") }
         // The host regression verifies the real worker-to-policy mapping. This

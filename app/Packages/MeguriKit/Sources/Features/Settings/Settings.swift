@@ -159,6 +159,9 @@ public struct MacSettingsView: View {
                 Text(verbatim: message)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("settings.anki.result")
+                if let category = collection.manualTransfers.failureCategory {
+                    ManualTransferFailureCategoryDetails(category: category)
+                }
                 if let diagnostic = collection.manualTransfers.redirectDiagnostic {
                     ManualTransferRedirectDetails(diagnostic: diagnostic)
                 }
@@ -266,6 +269,9 @@ private struct ConnectionMetadata: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        if let category = model.failureCategory {
+            ManualTransferFailureCategoryDetails(category: category)
         }
         if let diagnostic = model.redirectDiagnostic {
             ManualTransferRedirectDetails(diagnostic: diagnostic)
