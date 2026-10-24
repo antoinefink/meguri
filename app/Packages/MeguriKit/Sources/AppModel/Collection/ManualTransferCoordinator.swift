@@ -22,12 +22,15 @@ public final class ManualTransferCoordinator {
     }
     public private(set) var stage: Stage = .ready {
         didSet {
-            if stage != oldValue { recordConnectionEvent("Observed stage: " + stage.description) }
+            if stage != oldValue {
+                if busy { redirectDiagnostic = nil }
+                recordConnectionEvent("Observed stage: " + stage.description)
+            }
         }
     }
     public private(set) var endpoint: String
     public var endpointDraft: String {
-        didSet { if endpointDraft != oldValue { connectionTestResult = nil } }
+        didSet { if endpointDraft != oldValue { connectionTestResult = nil; redirectDiagnostic = nil } }
     }
     public private(set) var connectionTestResult: String?
     private let reachability: @Sendable (String) async -> EndpointReachabilityResult
@@ -42,7 +45,9 @@ public final class ManualTransferCoordinator {
         connectionEvents.append(.init(instant: owner?.configuration.clock.now() ?? Date(), detail: detail))
         if connectionEvents.count > 30 { connectionEvents.removeFirst(connectionEvents.count - 30) }
     }
-    public var username = ""
+    public var username = "" {
+        didSet { if username != oldValue { redirectDiagnostic = nil } }
+    }
     public var password = ""
     public private(set) var authenticated = false
     public private(set) var direction: ManualTransferDirection = .import
@@ -53,6 +58,7 @@ public final class ManualTransferCoordinator {
     private var mediaUsername: String?
     public private(set) var records: [ManualTransferHistory] = []
     public private(set) var result: ManualTransferRecord?
+    public private(set) var redirectDiagnostic: ManualTransferRedirectDiagnostic?
     public private(set) var message: String? {
         didSet { if let message, message != oldValue { recordConnectionEvent(message) } }
     }
@@ -169,6 +175,7 @@ public final class ManualTransferCoordinator {
     public func logout() async {
         if stage == .transferringMedia { await cancelAndDrain() }
         guard !busy, preview == nil else { return }
+        redirectDiagnostic = nil
         do { try await service.invalidateMediaOwner(operation: ManualTransferOperation()) }
         catch { message = "Couldn’t finish stopping media. Try logging out again."; return }
         mediaPreview = nil; mediaUsername = nil
@@ -238,10 +245,12 @@ public final class ManualTransferCoordinator {
         } catch {
             guard current() else { return }
             await report(error, operation: operation)
+            if endpointDraft != normalized || username != suppliedUsername { redirectDiagnostic = nil }
         }
     }
     public func prepare() async {
         guard canPrepare, let owner, let credentials else { return }
+        redirectDiagnostic = nil
         do { try owner.beginManualActivation() } catch { message = "Finish the current review or file operation first."; return }
         revision &+= 1
         defer { finishWaiters() }
@@ -266,6 +275,7 @@ public final class ManualTransferCoordinator {
     }
     public func confirm() async {
         guard canConfirm, let owner, let credentials, let prepared = preview else { return }
+        redirectDiagnostic = nil
         do { try owner.beginManualActivation() } catch { message = "Finish the current review or file operation first."; return }
         let before = owner.generation
         revision &+= 1
@@ -485,6 +495,7 @@ public final class ManualTransferCoordinator {
         } }
     }
     private func report(_ error: any Error, operation: ManualTransferOperation?) async {
+        redirectDiagnostic = nil
         if let failure = error as? ManualTransferFailure {
             nextEligibleMilliseconds = failure.nextEligibleMilliseconds
             if failure.serverKind == "auth_failed" {
@@ -512,6 +523,7 @@ public final class ManualTransferCoordinator {
             case .invalidDownload: message = "The server collection could not be validated. It was not activated."
             case .busy: message = "A transfer or file operation needs attention. Inspect local history below."
             case .server:
+                redirectDiagnostic = failure.redirect
                 switch failure.serverKind {
                 case "auth_failed": message = "The server rejected the login. Check your username and password, then log in again."
                 case "offline": message = "The server could not be reached. Check your network connection and server address."

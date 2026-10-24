@@ -30,7 +30,7 @@ pub mod wire;
 pub use endpoint::{Endpoint, EndpointRule, SERVER_CHOICES, ServerKind, follow_redirect};
 pub use error::{
     DbCheckOrigin, ErrorClass, ErrorKind, InvalidInput, JobError, NetworkCause, NetworkError, ProtocolError,
-    RedirectError, RedirectRefusal, Retry, SyncError,
+    RedirectDiagnostic, RedirectError, RedirectRefusal, Retry, SyncError,
 };
 pub use identity::client_identity;
 pub use job::{HostKey, Job, JobOptions, Proxy, ResponseBody};

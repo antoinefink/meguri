@@ -308,6 +308,57 @@ fn a_refused_redirect_carries_its_code() {
 }
 
 #[test]
+fn refused_redirect_diagnostics_are_structured_and_sanitized() {
+    use meguri_sync::{RedirectError, RedirectRefusal};
+    for (location, destination) in [
+        (
+            Some("https://example.test/prefix/"),
+            Some("https://example.test/prefix/"),
+        ),
+        (
+            Some("https://USER:SECRET@example.test/next?token=SECRET#SECRET"),
+            Some("https://example.test/next"),
+        ),
+        (
+            Some("http://USER:SECRET@example.test:8080/next?token=SECRET#SECRET"),
+            Some("http://example.test:8080/next"),
+        ),
+        (Some("not a URL, USER:SECRET@"), None),
+        (Some("//USER:SECRET@example.test/"), None),
+        (Some("/next?token=SECRET"), None),
+        (Some("ftp://USER:SECRET@example.test/"), None),
+        (Some("file:///SECRET"), None),
+        (None, None),
+    ] {
+        let error = JobError::from_transport(
+            SyncError::Redirect(RedirectError {
+                code: 308,
+                location: location.map(str::to_owned),
+                refusal: RedirectRefusal::Target(EndpointRule::Credentials),
+            }),
+            Some(Method::Meta),
+            ServerKind::SelfHosted,
+        );
+        let diagnostic = error.redirect.as_ref().unwrap();
+        assert_eq!(diagnostic.destination.as_deref(), destination);
+        assert_eq!(diagnostic.reason, RedirectRefusal::Target(EndpointRule::Credentials));
+        assert!(!error.detail.contains("SECRET"));
+        assert!(!error.detail.contains("USER"));
+    }
+    let error = JobError::new(ErrorKind::RedirectRefused { code: 308 }, None, "redirect: raw SECRET");
+    assert!(error.redirect.is_none());
+    let error = JobError::from_transport(
+        SyncError::Status {
+            code: 500,
+            reason: "SECRET".into(),
+        },
+        None,
+        ServerKind::SelfHosted,
+    );
+    assert!(error.redirect.is_none());
+}
+
+#[test]
 fn a_refused_redirects_detail_holds_no_credentials_from_its_location() {
     // E1: `detail` never holds a URL with credentials. transport.md T7
     // refuses such a target; the `Location` text is the server's to choose.

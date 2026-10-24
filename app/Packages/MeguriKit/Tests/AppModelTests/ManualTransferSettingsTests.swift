@@ -84,7 +84,7 @@ extension ManualTransferSettingsTests {
         ]
         for (serverKind, expected) in cases {
             let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
-                generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: serverKind))
+                generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: serverKind, redirect: nil))
             let service = SettingsTransferService(loginFailure: failure)
             let keys = SettingsTransferKeys()
             let model = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: nil)
@@ -114,6 +114,80 @@ extension ManualTransferSettingsTests {
         #expect(model.endpoint.isEmpty && model.canLogin)
         model.endpointDraft = " \n "
         #expect(!model.canLogin)
+    }
+
+    @Test func refusedRedirectIsInformationalAndClearsWithIdentityOrNewAttempts() async {
+        for action in ["endpoint", "username", "applyEndpoint", "logout", "retry", "testConnection"] {
+            let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
+                generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "redirect_refused",
+                redirect: .init(destination: "https://USER:SECRET@destination.test/prefix/?token=SECRET#SECRET", reason: "host")))
+            let service = SettingsTransferService(loginFailure: failure)
+            let model = ManualTransferCoordinator(owner: nil, service: service, keychain: SettingsTransferKeys(),
+                defaults: nil, reachability: { _ in .response(200) })
+            model.endpointDraft = "https://configured.test/"
+            model.username = "Synthetic User"; model.password = "transient"
+            await model.login()
+            #expect(model.redirectDiagnostic?.destination == "https://destination.test/prefix/")
+            #expect(model.redirectDiagnostic?.reason == .host)
+            #expect(model.message == "The server redirected the request in an unsupported way. Check the server address.")
+            #expect(model.endpoint == "https://configured.test/" && model.endpointDraft == model.endpoint)
+            #expect(model.preview == nil && !model.authenticated)
+            #expect(await service.calls == ["normalize", "login"])
+            #expect(await service.loginRequests.count == 1)
+            #expect(await service.loginRequests.first?.endpoint == "https://configured.test/")
+            switch action {
+            case "endpoint": model.endpointDraft = "https://edited.test/"
+            case "username": model.username = "Another Synthetic User"
+            case "applyEndpoint": await model.applyEndpoint()
+            case "logout": await model.logout()
+            case "retry":
+                await service.clearLoginFailure()
+                model.password = "retry-transient"
+                await model.login()
+                #expect(model.authenticated)
+            default: await model.testConnection()
+            }
+            #expect(model.redirectDiagnostic == nil)
+            let expectedCalls = ["normalize", "login"] + (action == "retry" ? ["normalize", "login"]
+                : (action == "applyEndpoint" || action == "testConnection" ? ["normalize"] : []))
+            #expect(await service.calls == expectedCalls)
+            #expect(!model.connectionEvents.contains { $0.detail.contains("SECRET") || $0.detail.contains("destination.test") })
+        }
+    }
+
+    @Test func unknownRedirectReasonsAndUnrelatedServerFailuresExposeNoDiagnostic() async {
+        for (kind, reason) in [("redirect_refused", "unknown_SECRET"), ("server_message", "host"), ("raw_SECRET", "host")] {
+            let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
+                generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: kind,
+                redirect: .init(destination: "https://USER:SECRET@example.test/?token=SECRET#SECRET", reason: reason)))
+            let service = SettingsTransferService(loginFailure: failure)
+            let model = ManualTransferCoordinator(owner: nil, service: service, keychain: SettingsTransferKeys(), defaults: nil)
+            model.endpointDraft = "https://configured.test/"
+            model.username = "Synthetic User"; model.password = "transient"
+            await model.login()
+            #expect(model.redirectDiagnostic == nil)
+            #expect(!model.connectionEvents.contains { $0.detail.contains("SECRET") || $0.detail.contains("example.test") })
+            #expect(await service.calls == ["normalize", "login"])
+        }
+    }
+
+    @Test func aRefusalFromAnEditedLoginIdentityDoesNotRestoreStaleDiagnostics() async {
+        let suspension = SettingsLoginSuspension(.login)
+        let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
+            generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: "redirect_refused",
+            redirect: .init(destination: "https://destination.test/", reason: "host")))
+        let service = SettingsTransferService(suspension: suspension, loginFailure: failure)
+        let model = ManualTransferCoordinator(owner: nil, service: service, keychain: SettingsTransferKeys(), defaults: nil)
+        model.endpointDraft = "https://configured.test/"
+        model.username = "Synthetic User"; model.password = "transient"
+        let attempt = Task { await model.login() }
+        #expect(await suspension.waitUntilPaused())
+        model.username = "Edited Synthetic User"
+        await suspension.release()
+        await attempt.value
+        #expect(model.redirectDiagnostic == nil)
+        #expect(await service.calls == ["normalize", "login"])
+        #expect(await service.loginRequests.first?.username == "Synthetic User")
     }
 
     @Test func enteredEndpointLoginPersistsNormalizedIdentityAndRestoresOffline() async throws {
@@ -350,7 +424,7 @@ private actor SettingsTransferService: ManualTransferService {
     private let historyUnavailable: Bool
     private let suspendPreparation: Bool
     private let preparationRecord: ManualTransferRecord?
-    private let loginFailure: ManualTransferFailure?
+    private var loginFailure: ManualTransferFailure?
     private let entered: AsyncStream<Void>
     private let enteredContinuation: AsyncStream<Void>.Continuation
     init(historyUnavailable: Bool = false, suspendPreparation: Bool = false,
@@ -375,6 +449,7 @@ private actor SettingsTransferService: ManualTransferService {
         return normalizedEndpoint ?? text
     }
     func acceptNormalization() { rejectNormalization = false }
+    func clearLoginFailure() { loginFailure = nil }
     func invalidateMediaOwner(operation: ManualTransferOperation) { invalidations += 1 }
     func login(endpoint: String, username: String, password: String, operation: ManualTransferOperation) async throws -> ManualTransferCredentials {
         calls.append("login"); loginRequests.append(.init(endpoint: endpoint, username: username, password: password))
@@ -659,7 +734,7 @@ private actor SelectedMediaSettingsService: ManualTransferService {
     func confirm(endpoint: String, credentials: ManualTransferCredentials, preview: PreparedManualTransfer, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) throws -> ManualTransferRecord {
         calls.append("confirm"); record = mediaDecisionRecord(generation: record.generation ?? 0)
         if activationError { throw ManualTransferFailure(.init(issue: .needsDecision, boundary: .activationInterrupted,
-            generation: record.generation, candidateActive: true, nextEligibleMs: nil, serverKind: nil)) }
+            generation: record.generation, candidateActive: true, nextEligibleMs: nil, serverKind: nil, redirect: nil)) }
         return record
     }
     func prepareMedia(_ entry: ManualTransferHistory, endpoint: String, credentials: ManualTransferCredentials, operation: ManualTransferOperation) async -> PreparedManualMedia {

@@ -150,6 +150,26 @@ public enum ManualTransferIssue: String, Sendable, Equatable {
         }
     }
 }
+public enum ManualTransferRedirectReason: String, Sendable, Equatable {
+    case notMeta = "not_meta", notPermanent = "not_308", missingLocation = "missing_location"
+    case empty, unparseable, unsupportedScheme = "unsupported_scheme", missingHost = "missing_host"
+    case credentials, queryOrFragment = "query_or_fragment", lostHttps = "https_lost"
+    case host, repeated, notResendable = "not_resendable"
+}
+public struct ManualTransferRedirectDiagnostic: Sendable, Equatable {
+    public let destination: String?
+    public let reason: ManualTransferRedirectReason
+    init?(_ raw: MeguriCoreBindings.TransferRedirectDiagnostic) {
+        guard let reason = ManualTransferRedirectReason(rawValue: raw.reason) else { return nil }
+        self.reason = reason
+        if let target = raw.destination, var parts = URLComponents(string: target),
+           let scheme = parts.scheme?.lowercased(), ["http", "https"].contains(scheme),
+           let host = parts.host, !host.isEmpty {
+            parts.user = nil; parts.password = nil; parts.query = nil; parts.fragment = nil
+            destination = parts.string
+        } else { destination = nil }
+    }
+}
 public struct ManualTransferFailure: Error, Sendable {
     public let issue: ManualTransferIssue
     public let boundary: ManualTransferBoundary?
@@ -157,10 +177,13 @@ public struct ManualTransferFailure: Error, Sendable {
     public let candidateActive: Bool
     public let nextEligibleMilliseconds: Int64?
     public let serverKind: String?
+    public let redirect: ManualTransferRedirectDiagnostic?
     init(_ raw: MeguriCoreBindings.TransferFailure) {
         issue = .init(raw.issue); boundary = raw.boundary.map(ManualTransferBoundary.init)
         generation = raw.generation; candidateActive = raw.candidateActive
         nextEligibleMilliseconds = raw.nextEligibleMs; serverKind = raw.serverKind
+        redirect = raw.issue == .server && raw.serverKind == "redirect_refused"
+            ? raw.redirect.flatMap(ManualTransferRedirectDiagnostic.init) : nil
     }
 }
 public struct ManualTransferCounts: Sendable, Equatable {

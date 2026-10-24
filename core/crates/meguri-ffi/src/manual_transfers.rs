@@ -282,6 +282,12 @@ pub enum TransferIssue {
     Cooldown,
 }
 #[derive(Clone, Debug, uniffi::Record)]
+pub struct TransferRedirectDiagnostic {
+    pub destination: Option<String>,
+    /// Stable RedirectRefusal id; native presentation allowlists known ids.
+    pub reason: String,
+}
+#[derive(Clone, Debug, uniffi::Record)]
 pub struct TransferFailure {
     pub issue: TransferIssue,
     pub boundary: Option<TransferBoundary>,
@@ -290,6 +296,7 @@ pub struct TransferFailure {
     pub next_eligible_ms: Option<i64>,
     /// Safe stable category only; never raw server bodies/details.
     pub server_kind: Option<String>,
+    pub redirect: Option<TransferRedirectDiagnostic>,
 }
 impl From<TransferError> for TransferFailure {
     fn from(e: TransferError) -> Self {
@@ -300,6 +307,7 @@ impl From<TransferError> for TransferFailure {
             candidate_active: false,
             next_eligible_ms: None,
             server_kind: None,
+            redirect: None,
         };
         f.issue = match e {
             TransferError::Policy(policy::PolicyError::Overlap(_)) | TransferError::Busy => TransferIssue::Busy,
@@ -323,6 +331,12 @@ impl From<TransferError> for TransferFailure {
             TransferError::InvalidDownload(_) => TransferIssue::InvalidDownload,
             TransferError::Server(e) => {
                 f.server_kind = Some(e.kind.id().into());
+                if matches!(e.kind, meguri_sync::ErrorKind::RedirectRefused { .. }) {
+                    f.redirect = e.redirect.map(|redirect| TransferRedirectDiagnostic {
+                        destination: redirect.destination,
+                        reason: redirect.reason.as_str().into(),
+                    });
+                }
                 TransferIssue::Server
             }
             TransferError::Replacement { activated, generation } => {
@@ -1210,6 +1224,59 @@ mod tests {
         assert_eq!(failure.issue, TransferIssue::Storage);
         assert_eq!(failure.next_eligible_ms, None);
         assert!(!failure.candidate_active);
+    }
+    #[test]
+    fn manual_failure_exports_only_structured_redirect_facts() {
+        use meguri_sync::{EndpointRule, JobError, RedirectError, RedirectRefusal, ServerKind, SyncError};
+        for (reason, id) in [
+            (RedirectRefusal::NotMeta, "not_meta"),
+            (RedirectRefusal::NotPermanent, "not_308"),
+            (RedirectRefusal::MissingLocation, "missing_location"),
+            (RedirectRefusal::Target(EndpointRule::Empty), "empty"),
+            (RedirectRefusal::Target(EndpointRule::Unparseable), "unparseable"),
+            (
+                RedirectRefusal::Target(EndpointRule::UnsupportedScheme),
+                "unsupported_scheme",
+            ),
+            (RedirectRefusal::Target(EndpointRule::MissingHost), "missing_host"),
+            (RedirectRefusal::Target(EndpointRule::Credentials), "credentials"),
+            (
+                RedirectRefusal::Target(EndpointRule::QueryOrFragment),
+                "query_or_fragment",
+            ),
+            (RedirectRefusal::LostHttps, "https_lost"),
+            (RedirectRefusal::Host, "host"),
+            (RedirectRefusal::Repeated, "repeated"),
+            (RedirectRefusal::NotResendable, "not_resendable"),
+        ] {
+            let error = JobError::from_transport(
+                SyncError::Redirect(RedirectError {
+                    code: 308,
+                    location: Some("https://USER:SECRET@example.test/prefix/?token=SECRET#SECRET".into()),
+                    refusal: reason,
+                }),
+                None,
+                ServerKind::SelfHosted,
+            );
+            let failure: TransferFailure = TransferError::Server(error).into();
+            assert_eq!(failure.server_kind.as_deref(), Some("redirect_refused"));
+            let diagnostic = failure.redirect.unwrap();
+            assert_eq!(diagnostic.destination.as_deref(), Some("https://example.test/prefix/"));
+            assert_eq!(diagnostic.reason, id);
+        }
+        for kind in [
+            meguri_sync::ErrorKind::ServerMessage {
+                text: "SECRET server body".into(),
+            },
+            meguri_sync::ErrorKind::RedirectRefused { code: 308 },
+            meguri_sync::ErrorKind::BadResponse,
+        ] {
+            let failure: TransferFailure = TransferError::Server(JobError::new(kind, None, "SECRET raw detail")).into();
+            assert!(failure.redirect.is_none());
+            assert!(!failure.server_kind.unwrap().contains("SECRET"));
+        }
+        let failure: TransferFailure = TransferError::Unavailable.into();
+        assert!(failure.redirect.is_none());
     }
     #[test]
     fn manual_custom_history_projects_no_wait_and_preserves_old_and_immediate_receipts() {

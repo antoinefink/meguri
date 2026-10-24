@@ -4,6 +4,39 @@ import DesignSystem
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Informational text only; the destination never becomes a navigation action.
+struct ManualTransferRedirectDetails: View {
+    let diagnostic: ManualTransferRedirectDiagnostic
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            Text(reason, bundle: .module)
+            if let destination = diagnostic.destination {
+                Text(verbatim: "Redirect destination: " + destination)
+            }
+        }
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier("settings.anki.redirectDiagnostic")
+    }
+    private var reason: LocalizedStringKey {
+        switch diagnostic.reason {
+        case .notMeta: "Refusal reason: This request does not support redirects."
+        case .notPermanent: "Refusal reason: The redirect status is not supported."
+        case .missingLocation: "Refusal reason: The server provided no redirect destination."
+        case .empty: "Refusal reason: The redirect destination is empty."
+        case .unparseable: "Refusal reason: The redirect destination is not an absolute URL."
+        case .unsupportedScheme: "Refusal reason: The redirect destination must use HTTP or HTTPS."
+        case .missingHost: "Refusal reason: The redirect destination has no host."
+        case .credentials: "Refusal reason: The redirect destination contains credentials."
+        case .queryOrFragment: "Refusal reason: The redirect destination contains a query or fragment."
+        case .lostHttps: "Refusal reason: The redirect would lose HTTPS protection."
+        case .host: "Refusal reason: The redirect host is not permitted for this request."
+        case .repeated: "Refusal reason: The request already followed one redirect."
+        case .notResendable: "Refusal reason: The request body cannot be sent again."
+        }
+    }
+}
+
 /// System Form content shared by the production Settings shell and render hooks.
 public struct ManualTransferSections: View {
     @Bindable private var model: ManualTransferCoordinator
@@ -158,6 +191,9 @@ public struct ManualTransferSections: View {
                 if let message = model.message {
                     Section("Result") {
                         Text(message).accessibilityIdentifier("settings.anki.result")
+                        if let diagnostic = model.redirectDiagnostic {
+                            ManualTransferRedirectDetails(diagnostic: diagnostic)
+                        }
                         if let instant = model.nextEligibleMilliseconds {
                             LabeledContent("Next eligible", value: date(instant))
                                 .accessibilityIdentifier("settings.anki.nextEligible")

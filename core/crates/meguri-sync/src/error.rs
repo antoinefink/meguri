@@ -180,27 +180,44 @@ impl fmt::Display for RedirectError {
 }
 
 impl RedirectError {
+    /// Informational only: this destination never authorizes another request.
+    fn diagnostic(&self) -> RedirectDiagnostic {
+        let destination = self.location.as_deref().and_then(|location| {
+            let mut url = url::Url::parse(location).ok()?;
+            if !matches!(url.scheme(), "http" | "https") {
+                return None;
+            }
+            url.host_str()?;
+            url.set_username("").ok()?;
+            url.set_password(None).ok()?;
+            url.set_query(None);
+            url.set_fragment(None);
+            Some(url.into())
+        });
+        RedirectDiagnostic {
+            destination,
+            reason: self.refusal,
+        }
+    }
+
     /// The text a job error's `detail` holds (errors.md E1): the status, the
     /// refusal and, when `Location` is an absolute URL with a host, that URL
     /// without user name, password, query or fragment. A `Location` that is
     /// not such a URL is left out, since it may hold credentials anywhere.
     fn job_detail(&self) -> String {
         let mut text = format!("redirect: HTTP {} ({})", self.code, self.refusal.as_str());
-        let target = self.location.as_deref().and_then(|location| {
-            let mut url = url::Url::parse(location).ok()?;
-            url.host_str()?;
-            url.set_username("").ok()?;
-            url.set_password(None).ok()?;
-            url.set_query(None);
-            url.set_fragment(None);
-            Some(url)
-        });
-        if let Some(url) = target {
+        if let Some(destination) = self.diagnostic().destination {
             use fmt::Write as _;
-            let _ = write!(text, " to {:?}", url.as_str());
+            let _ = write!(text, " to {destination:?}");
         }
         text
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedirectDiagnostic {
+    pub destination: Option<String>,
+    pub reason: RedirectRefusal,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -527,6 +544,8 @@ pub struct JobError {
     /// the user. Never a host key, a password, a body (but the server's own
     /// message) or a URL with credentials.
     pub detail: String,
+    /// Sanitized redirect facts, separate from unrestricted log text.
+    pub redirect: Option<RedirectDiagnostic>,
 }
 
 impl JobError {
@@ -535,6 +554,7 @@ impl JobError {
             kind,
             method,
             detail: detail.into(),
+            redirect: None,
         }
     }
 
@@ -553,6 +573,10 @@ impl JobError {
 
     /// E4 and E5: a transport failure of a job on a server of kind `server`.
     pub fn from_transport(error: SyncError, method: Option<Method>, server: ServerKind) -> JobError {
+        let redirect = match &error {
+            SyncError::Redirect(error) => Some(error.diagnostic()),
+            _ => None,
+        };
         // A status's reason is the start of the answer's body, and a
         // redirect's `Location` may carry credentials: E1 keeps both out of
         // the detail.
@@ -583,7 +607,9 @@ impl JobError {
             #[cfg(feature = "test-hooks")]
             SyncError::EndpointRefused(_) => ErrorKind::EndpointRefused,
         };
-        JobError::new(kind, method, detail)
+        let mut error = JobError::new(kind, method, detail);
+        error.redirect = redirect;
+        error
     }
 
     /// E6: an answer of `method` that does not decode; `detail` names the

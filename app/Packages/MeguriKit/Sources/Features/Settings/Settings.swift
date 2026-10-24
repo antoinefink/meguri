@@ -159,6 +159,9 @@ public struct MacSettingsView: View {
                 Text(verbatim: message)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("settings.anki.result")
+                if let diagnostic = collection.manualTransfers.redirectDiagnostic {
+                    ManualTransferRedirectDetails(diagnostic: diagnostic)
+                }
             }
             if hasTransferDetails {
                 transferButton("Details…", id: "settings.anki.transferDetails")
@@ -263,6 +266,9 @@ private struct ConnectionMetadata: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        if let diagnostic = model.redirectDiagnostic {
+            ManualTransferRedirectDetails(diagnostic: diagnostic)
         }
         LabeledContent("Historical attempt time", value: "Not recorded")
         LabeledContent("Historical completion time", value: "Not recorded")
