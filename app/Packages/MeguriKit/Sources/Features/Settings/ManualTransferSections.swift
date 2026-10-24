@@ -111,16 +111,9 @@ public struct ManualTransferSections: View {
                     .font(.body)
                     .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
                     .accessibilityIdentifier("settings.anki.direction")
-                    Picker("Transfer scope", selection: Binding(get: { model.scope }, set: { model.selectScope($0) })) {
-                        Text("Collection only").tag(ManualTransferScope.collectionOnly)
-                        Text("Collection and media").tag(ManualTransferScope.collectionAndMedia)
-                    }
-                    .font(.body)
-                    .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
-                    .accessibilityIdentifier("settings.anki.scope")
-                    Text(model.scope == .collectionOnly
-                        ? "Collection only. Images, audio and other media stay unchanged on both sides."
-                        : "After the collection finishes, a separate decision lets you reconcile media on this device and server. Media can change both sides in either collection direction.")
+                    Text("Imports and exports include collection and media. After the collection finishes, media needs a separate decision and can change both sides. Unfinished media leaves the operation partial.", bundle: .module)
+                        .foregroundStyle(.token(.textSecondary))
+                        .accessibilityIdentifier("settings.anki.mediaIncluded")
                     if model.direction == .import {
                         Text("Preparation downloads and validates a candidate. Final confirmation replaces this device’s collection after making its required safety copy. It does not merge collections.")
                         action("Download and Prepare Import Preview", id: "prepareImport", disabled: !model.canPrepare) { await model.prepare() }

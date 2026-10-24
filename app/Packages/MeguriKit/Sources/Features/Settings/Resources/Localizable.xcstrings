@@ -1,6 +1,16 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Imports and exports include collection and media. After the collection finishes, media needs a separate decision and can change both sides. Unfinished media leaves the operation partial.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imports and exports include collection and media. After the collection finishes, media needs a separate decision and can change both sides. Unfinished media leaves the operation partial."
+          }
+        }
+      }
+    },
     "Retry Export Cleanup": {
       "localizations": {
         "en": {

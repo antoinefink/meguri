@@ -54,6 +54,24 @@ import Testing
     }
 }
 extension ManualTransferSettingsTests {
+    @Test(arguments: ["endpoint_refused", "synthetic_other_failure"])
+    func serverFailureUsesCuratedBuildGuidance(serverKind: String) async {
+        let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
+            generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: serverKind))
+        let service = SettingsTransferService(loginFailure: failure)
+        let model = ManualTransferCoordinator(owner: nil, service: service, keychain: SettingsTransferKeys(), defaults: nil)
+        model.endpointDraft = "https://example.test/"
+        model.username = "Synthetic User"; model.password = "synthetic-transient"
+        await model.login()
+        let expected = serverKind == "endpoint_refused"
+            ? "This build permits local test servers. Remote use requires a personal preview build."
+            : "The server request failed. Check the endpoint and login, then inspect the recorded stages."
+        #expect(model.message == expected)
+        #expect(model.connectionEvents.filter { $0.detail == expected }.count == 1)
+        #expect(!model.authenticated && model.password.isEmpty && model.preview == nil)
+        #expect(await service.calls == ["normalize", "login"])
+    }
+
     @Test func loginEligibilityUsesEnteredFields() {
         let model = ManualTransferCoordinator(owner: nil, service: SettingsTransferService(), defaults: nil)
         model.endpointDraft = "https://example.test/prefix"
@@ -222,8 +240,8 @@ extension ManualTransferSettingsTests {
         model.endpointDraft = "https://other.example.test/"
         model.username = "Other User"; model.password = "other-transient"
         await model.login(); await model.applyEndpoint(); await model.logout()
-        model.select(.export); model.selectScope(.collectionAndMedia)
-        #expect(model.busy && !model.canLogin && model.direction == .import && model.scope == .collectionOnly)
+        model.select(.export)
+        #expect(model.busy && !model.canLogin && model.direction == .import && model.scope == .collectionAndMedia)
         await suspension.release(); await attempt.value
         #expect(model.authenticated && !model.busy && model.password.isEmpty)
         #expect(model.endpoint == normalized && model.username == "Synthetic User")
@@ -292,21 +310,27 @@ private actor SettingsTransferService: ManualTransferService {
     private(set) var normalizationInputs: [String] = []
     private(set) var loginRequests: [SettingsLoginRequest] = []
     private(set) var invalidations = 0
+    private(set) var preparedScopes: [ManualTransferScope] = []
+    private(set) var preparedDirections: [ManualTransferDirection] = []
     private let normalizedEndpoint: String?
     private var rejectNormalization: Bool
     private let recoveryRecord: ManualTransferRecord?
     private let suspension: SettingsLoginSuspension?
     private let historyUnavailable: Bool
     private let suspendPreparation: Bool
+    private let preparationRecord: ManualTransferRecord?
+    private let loginFailure: ManualTransferFailure?
     private let entered: AsyncStream<Void>
     private let enteredContinuation: AsyncStream<Void>.Continuation
     init(historyUnavailable: Bool = false, suspendPreparation: Bool = false,
          normalizedEndpoint: String? = nil, rejectNormalization: Bool = false,
-         recoveryRecord: ManualTransferRecord? = nil, suspension: SettingsLoginSuspension? = nil) {
+         recoveryRecord: ManualTransferRecord? = nil, suspension: SettingsLoginSuspension? = nil,
+         preparationRecord: ManualTransferRecord? = nil, loginFailure: ManualTransferFailure? = nil) {
         self.normalizedEndpoint = normalizedEndpoint; self.rejectNormalization = rejectNormalization
         self.recoveryRecord = recoveryRecord; self.suspension = suspension
         self.historyUnavailable = historyUnavailable
         self.suspendPreparation = suspendPreparation
+        self.preparationRecord = preparationRecord; self.loginFailure = loginFailure
         (entered, enteredContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }
     func waitUntilPreparing() async {
@@ -321,9 +345,10 @@ private actor SettingsTransferService: ManualTransferService {
     }
     func acceptNormalization() { rejectNormalization = false }
     func invalidateMediaOwner(operation: ManualTransferOperation) { invalidations += 1 }
-    func login(endpoint: String, username: String, password: String, operation: ManualTransferOperation) async -> ManualTransferCredentials {
+    func login(endpoint: String, username: String, password: String, operation: ManualTransferOperation) async throws -> ManualTransferCredentials {
         calls.append("login"); loginRequests.append(.init(endpoint: endpoint, username: username, password: password))
         await suspension?.pause(at: .login)
+        if let loginFailure { throw loginFailure }
         return .init(username: username, hostKey: "synthetic-host-key")
     }
     func history(operation: ManualTransferOperation) throws -> [ManualTransferHistory] {
@@ -332,7 +357,12 @@ private actor SettingsTransferService: ManualTransferService {
         return []
     }
     func prepare(endpoint: String, credentials: ManualTransferCredentials, direction: ManualTransferDirection, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> PreparedManualTransfer {
+        throw BridgeError.internal("Scope required")
+    }
+    func prepare(endpoint: String, credentials: ManualTransferCredentials, direction: ManualTransferDirection, scope: ManualTransferScope, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> PreparedManualTransfer {
         calls.append("prepare")
+        preparedScopes.append(scope); preparedDirections.append(direction)
+        if let preparationRecord { return .init(record: preparationRecord) }
         guard suspendPreparation else { throw BridgeError.unavailable(reason: "No scripted preparation") }
         // The host regression verifies the real worker-to-policy mapping. This
         // service scripts its delivered id, independently of optional history.
@@ -429,6 +459,35 @@ extension ManualTransferSettingsTests {
 }
 
 extension ReviewCollectionStartupTests {
+    @Test(arguments: [ManualTransferDirection.import, .export])
+    func newPreparationIncludesMediaWithoutOptIn(direction: ManualTransferDirection) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        await owner.start()
+        try #require(owner.state == .noFile)
+        let record = mediaDecisionRecord(generation: owner.generation, completeCollection: false, direction: direction)
+        let service = SettingsTransferService(preparationRecord: record)
+        let model = ManualTransferCoordinator(owner: owner, service: service, keychain: SettingsTransferKeys(), defaults: nil)
+        model.endpointDraft = record.configuredEndpoint
+        model.username = "Synthetic User"; model.password = "transient"
+        await model.login()
+        model.select(direction)
+        try #require(model.canPrepare)
+        #expect(await service.preparedScopes.isEmpty)
+        await model.prepare()
+        #expect(await service.preparedScopes == [.collectionAndMedia])
+        #expect(await service.preparedDirections == [direction])
+        #expect(model.preview?.record.mediaSelected == true)
+        #expect(model.preview?.record.direction == direction)
+        #expect(model.stage == .awaitingConfirmation && model.mediaPreview == nil)
+        #expect(await service.calls == ["normalize", "login", "prepare", "history"])
+        await model.discardPreview()
+        #expect(await owner.close())
+    }
+
     @Test func recoveryLoginCannotChangeItsBoundEndpoint() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -444,6 +503,9 @@ extension ReviewCollectionStartupTests {
         model.endpointDraft = record.configuredEndpoint; await model.applyEndpoint()
         await model.recover(.init(record: record))
         try #require(model.isRecoveryPreview && model.preview?.record.id == record.id)
+        #expect(model.scope == .collectionAndMedia && model.preview?.record.mediaSelected == false)
+        #expect(model.preview?.record.decisionFacts.contains { $0.id == "scope" && $0.value == "Collection only. Media is excluded and unchanged on both sides." } == true)
+        #expect(await service.preparedScopes.isEmpty)
         model.endpointDraft = "https://other.example.test/"
         model.username = "Synthetic User"; model.password = "transient"
         let invalidations = await service.invalidations
@@ -528,9 +590,9 @@ extension ReviewCollectionStartupTests {
     }
 }
 
-nonisolated private func mediaDecisionRecord(generation: UInt64, completeCollection: Bool = true, stopped: Bool = false) -> ManualTransferRecord {
+nonisolated private func mediaDecisionRecord(generation: UInt64, completeCollection: Bool = true, stopped: Bool = false, direction: ManualTransferDirection = .export) -> ManualTransferRecord {
     ManualTransferRecord(.init(id: "synthetic-selected-media", configuredEndpoint: "http://127.0.0.1:28711/prefix/",
-        targetEndpoint: "http://127.0.0.1:28711/prefix/", direction: .export,
+        targetEndpoint: "http://127.0.0.1:28711/prefix/", direction: direction == .import ? .import : .export,
         phase: completeCollection ? .mediaIncomplete : .preview, acceptance: completeCollection ? .exactOk : .notSent,
         boundary: stopped ? .cancelled : nil, local: nil, remoteHasNoCards: nil, remote: nil, servedCounts: nil,
         preparedMs: 1_894_701_600_000, generation: generation, collectionComplete: completeCollection,
@@ -610,8 +672,8 @@ extension ReviewCollectionStartupTests {
         await model.loadOffline()
         model.endpointDraft = "http://127.0.0.1:28711/prefix/"; await model.applyEndpoint()
         model.username = "Synthetic User"; model.password = "transient"; await model.login()
-        #expect(model.scope == .collectionOnly)
-        model.selectScope(.collectionAndMedia); await model.prepare(); await model.confirm()
+        #expect(model.scope == .collectionAndMedia)
+        await model.prepare(); await model.confirm()
         #expect(await service.scopeReceived == .collectionAndMedia)
         #expect(await service.consentAfterAdoption)
         #expect(model.mediaPreview != nil && model.result?.nextEligibleMilliseconds == nil)

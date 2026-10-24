@@ -208,12 +208,8 @@ import AppKit
         #endif
     }
     private func selectMediaScope(_ app: XCUIApplication, _ bundle: String) throws {
-        try click(element(app, "settings.anki.scope"), app, bundle)
-        #if os(macOS)
-        try click(app.menuItems["Collection and media"].firstMatch, app, bundle)
-        #else
-        try click(app.buttons["Collection and media"].firstMatch, app, bundle)
-        #endif
+        let included = element(app, "settings.anki.mediaIncluded")
+        try waitForText(included, "Imports and exports include collection and media.", app, bundle)
     }
     private func allowAndFinishMedia(_ app: XCUIApplication, _ bundle: String, rig: Rig, stage: String,
                                      baseline: DurableOperation.Receipt?, name: String) async throws -> DurableOperation {

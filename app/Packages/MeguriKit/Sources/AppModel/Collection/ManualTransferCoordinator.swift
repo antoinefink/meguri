@@ -48,7 +48,7 @@ public final class ManualTransferCoordinator {
     public private(set) var direction: ManualTransferDirection = .import
     public private(set) var preview: PreparedManualTransfer?
     public private(set) var mediaPreview: PreparedManualMedia?
-    public private(set) var scope: ManualTransferScope = .collectionOnly
+    public let scope: ManualTransferScope = .collectionAndMedia
     public private(set) var mediaProgress: ManualMediaSnapshot?
     private var mediaUsername: String?
     public private(set) var records: [ManualTransferHistory] = []
@@ -144,7 +144,6 @@ public final class ManualTransferCoordinator {
         connectionTestResult = result.description
         recordConnectionEvent(result.description)
     }
-    public func selectScope(_ scope: ManualTransferScope) { guard !busy, preview == nil, mediaPreview == nil else { return }; self.scope = scope; result = nil }
     public func select(_ direction: ManualTransferDirection) { guard !busy, preview == nil, mediaPreview == nil else { return }; self.direction = direction; result = nil }
     public func applyEndpoint() async {
         if stage == .transferringMedia { await cancelAndDrain() }
@@ -512,7 +511,10 @@ public final class ManualTransferCoordinator {
             case .diskFull: message = "There isn’t enough free space to safely prepare this transfer."
             case .invalidDownload: message = "The server collection could not be validated. It was not activated."
             case .busy: message = "A transfer or file operation needs attention. Inspect local history below."
-            case .server: message = "The server request failed. Check the endpoint and login, then inspect the recorded stages."
+            case .server:
+                message = failure.serverKind == "endpoint_refused"
+                    ? "This build permits local test servers. Remote use requires a personal preview build."
+                    : "The server request failed. Check the endpoint and login, then inspect the recorded stages."
             default: message = "The transfer could not finish. Inspect the recorded stages and retained copies below."
             }
         } else if error is ManualTransferInterrupted { message = "The operation was interrupted by the system. Inspect local history before continuing." }
@@ -561,7 +563,7 @@ extension ManualTransferCoordinator {
             // The fixture service never forwards it to a production adapter.
             let identity = ManualTransferCredentials(username: "Fixture study account", hostKey: "render-only-inert")
             model.credentials = identity; model.authenticated = true; model.username = identity.username
-            model.scope = .collectionAndMedia; model.direction = .export
+            model.direction = .export
             model.records = [ManualTransferMediaRenderFixture.history(mediaState)]
             model.result = model.records.first?.record
             model.message = "Rendering fixture: simulated collection/media state. No server work or acceptance."
@@ -611,6 +613,7 @@ private actor UnavailableManualTransferService: ManualTransferService {
         return [ManualTransferMediaRenderFixture.history(mediaState)]
     }
     func prepare(endpoint: String, credentials: ManualTransferCredentials, direction: ManualTransferDirection, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) throws -> PreparedManualTransfer { throw BridgeError.unavailable(reason: "Rendering fixture") }
+    func prepare(endpoint: String, credentials: ManualTransferCredentials, direction: ManualTransferDirection, scope: ManualTransferScope, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) throws -> PreparedManualTransfer { throw BridgeError.unavailable(reason: "Rendering fixture") }
     func confirm(endpoint: String, credentials: ManualTransferCredentials, preview: PreparedManualTransfer, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) throws -> ManualTransferRecord { throw BridgeError.unavailable(reason: "Rendering fixture") }
     func recover(_ entry: ManualTransferHistory, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) throws -> PreparedManualTransfer { throw BridgeError.unavailable(reason: "Rendering fixture") }
     func cancelPreparation(_ entry: ManualTransferHistory, operation: ManualTransferOperation) throws { throw BridgeError.unavailable(reason: "Rendering fixture") }
