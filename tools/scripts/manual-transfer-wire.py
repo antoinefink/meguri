@@ -30,7 +30,9 @@ MEDIA = frozenset('/msync/' + name for name in (
 TRANSFERS = frozenset(('/sync/upload', '/sync/download'))
 FILES = frozenset(('/msync/downloadFiles', '/msync/uploadChanges'))
 CHECKPOINTS = ('startup', 'before-consent', 'cancelled', 'passive-history',
-               'resume-decision', 'resumed', 'export-before-consent', 'exported')
+               'resume-decision', 'resumed', 'a-export-before-consent', 'a-exported',
+               'export-before-consent', 'export-cancelled', 'export-passive-history',
+               'export-resume-decision', 'exported')
 HOP = frozenset(('host', 'connection', 'proxy-connection', 'keep-alive',
                  'transfer-encoding', 'content-length', 'te', 'trailer', 'upgrade',
                  'proxy-authorization', 'proxy-authenticate', 'x-rf4-control'))
@@ -87,6 +89,7 @@ class RigServer(http.server.ThreadingHTTPServer):
         self.reader_process = None
         self.reader_mobile = mobile
         self.reader_bound = None
+        self.reader_operations = {}
         self.bootstrap_attempted = False
         self.bootstrap_running = False
         self.bootstrap_complete = False
@@ -253,6 +256,18 @@ class RigServer(http.server.ThreadingHTTPServer):
                 else:
                     value = reducer.validate_native_state(document, self.reader_context)
                     success = (200, value)
+                # Freeze the first observed operation at each fixed stage. A
+                # later Import or substituted Export cannot replace run proof.
+                for label, record in value["operations"].items() if action == 'read' else ():
+                    prior = self.reader_operations.get(label)
+                    if record is None:
+                        if prior is not None:
+                            raise reducer.EvidenceFailure('binding')
+                        continue
+                    identity = tuple(record[k] for k in ('id', 'authority', 'account', 'configured_endpoint'))
+                    if prior is not None and prior != identity:
+                        raise reducer.EvidenceFailure('binding')
+                    self.reader_operations[label] = identity
         except reducer.EvidenceFailure as error:
             result = error.receipt
         except subprocess.TimeoutExpired:
@@ -481,6 +496,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 state.condition.notify_all()
             elif action == 'release' and state.gate == 'aborted' and state.counts['active'] == 0:
                 state.gate = 'released'
+            elif (action == 'arm-export' and state.gate == 'released'
+                  and state.counts['active'] == 0 and state.counts['held'] == 1
+                  and 'a-exported' in state.checkpoints and 'export-before-consent' not in state.checkpoints):
+                state.gate = 'armed'
             elif action.startswith('mark/') and action[5:] in CHECKPOINTS:
                 name = action[5:]
                 if name in state.checkpoints:

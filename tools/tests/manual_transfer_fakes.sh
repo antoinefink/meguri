@@ -138,7 +138,7 @@ mg_mt_stage_reader() {
   MG_MT_MEDIA_STAGED=1
 }
 mg_app_xcodebuild_test() {
-  local selection='-only-testing:MeguriUITests/ManualTransferJourneyTests/testDistinctAccountRoundTripPreservesImportCooldownAfterRestart'
+  local selection='-only-testing:MeguriUITests/ManualTransferJourneyTests/testSameLoginReviewCycleThenCrossAccountMediaRecovery'
   [ "$#" -eq 5 ] && [ "$5" = "$selection" ] || return 2
   printf 'selector %s\n' "$5" >>"$FX_EVENTS"
   printf 'test %s\n' "$2" >>"$FX_EVENTS"
@@ -146,13 +146,14 @@ mg_app_xcodebuild_test() {
   mkdir -p "$1.xcresult"
 }
 xcrun() {
+  if [ "${FX_EMPTY_XCRESULT:-0}" = 1 ]; then printf '{}\n'; return 0; fi
   case "$*" in
     *summary*)
       jq -nc --argjson omitted "${FX_SKIP:-0}" --argjson passed "${FX_PASSED:-1}" \
         '{result:"Passed",passedTests:$passed,failedTests:0,skippedTests:$omitted}'
       ;;
     *tests*)
-      jq -nc --arg method "${FX_TEST_ID:-ManualTransferJourneyTests/testDistinctAccountRoundTripPreservesImportCooldownAfterRestart()}" \
+      jq -nc --arg method "${FX_TEST_ID:-ManualTransferJourneyTests/testSameLoginReviewCycleThenCrossAccountMediaRecovery()}" \
         '{testNodes:[{nodeType:"Test Case",result:"Passed",nodeIdentifier:$method}]}'
       ;;
     *) return 97 ;;
@@ -161,10 +162,22 @@ xcrun() {
 mg_mt_copy_export() { printf 'capture\n' >>"$FX_EVENTS"; }
 mg_mt_child() {
   printf 'peer\n' >>"$FX_EVENTS"
-  jq -nc --argjson cells "${FX_PEER_MATCH:-true}" --argjson media "${FX_MEDIA_MATCH:-true}" '{complete:true,notes:1,cards:1,reviews:1,
-    easy_reviews:1,identity_content:true,scheduling:true,all_logical_cells:$cells,
-    declared_download_transforms:true,media:{complete:$media,native_bytes:$media,server_bytes:$media,
-      typed_stages:[{},{}],peers:[{},{},{},{}]}}' >"$MG_RUN_DIR/peer-proof.json"
+  jq -nc --argjson cells "${FX_PEER_MATCH:-true}" --argjson media "${FX_MEDIA_MATCH:-true}" \
+    --argjson a "${FX_A_MATCH:-true}" --argjson bytes "${FX_B_BYTES:-8192}" \
+    --argjson cycle "${FX_A_CYCLE:-true}" '
+    def stage($direction;$files;$download;$upload;$unknown):
+      {direction:$direction,complete:true,downloaded_files:$files,uploaded_files:$files,
+       bytes_downloaded:$download,bytes_uploaded:$upload,excluded_empty:["rf4-zero.bin"],
+       awaiting:0,immediately_eligible:true,prior_effects_unknown:$unknown};
+    {complete:true,notes:1,cards:1,reviews:1,easy_reviews:1,identity_content:true,scheduling:true,
+     all_logical_cells:$cells,declared_download_transforms:true,
+     independent_a:(if $a then {downloaded:true,saved_review:true,easy_reviews:1,
+       scheduling:true,identity_content:true,replay_equal:true} else null end),
+     media:{complete:$media,native_bytes:$media,server_bytes:$media,
+       cycle:{same_account:$cycle,same_endpoint:true,distinct_operations:true,ordered:true,
+         completed_within_hour:true,immediately_eligible:true},
+       typed_stages:[stage("Import";1;4096;6144;true),stage("AExport";0;0;0;false),
+         stage("Export";1;$bytes;6144;true)],peers:[{},{},{},{}]}}' >"$MG_RUN_DIR/peer-proof.json"
 }
 mg_queued_settle() { :; }
 

@@ -78,9 +78,9 @@ both VM observations: the only listening address is `127.0.0.1:18765`, and an
 HTTP request through it receives a response. Otherwise leave route proof
 pending. Keep diagnostics local until redaction review.
 
-Let the controller pipe the six manifest fields directly into the leased VM:
-`endpoint`, `username`, `password`, `deckID`, `exportUsername`, `exportPassword`.
-The endpoint is `http://127.0.0.1:18765/`. Use only the generated example
+Let the controller pipe its manifest directly into the leased VM, including
+`endpoint`, A/B credentials, `deckID`, expected media hashes and the frozen
+observer/native-context capabilities. The endpoint is `http://127.0.0.1:18765/`. Use only the generated example
 accounts. The ignored file is
 `app/Fixtures/ManualTransfer/controlled-rig.json`, written with mode 0600.
 Keep credentials out of host files, process arguments, environment values
@@ -89,11 +89,40 @@ and logs. Do not stage or retain a manifest for another run.
 ## Native evidence
 
 Select exactly
-`ManualTransferJourneyTests/testDistinctAccountRoundTripPreservesImportCooldownAfterRestart`.
-The test imports A through Settings, saves Easy, restarts on the system clock,
-restores A's login and requires cooldown with a returned deadline and no
-replacement preview. It then logs out, logs into distinct B and exports at
-the same endpoint. It does not establish a later successful transfer by A.
+`ManualTransferJourneyTests/testSameLoginReviewCycleThenCrossAccountMediaRecovery`.
+The fixed sequence is A Import, A same-login Export, then independent B Export.
+Initial sign-in enters the exact URL and credentials and presses Log In directly,
+without Save Endpoint. Login performs no collection or media transfer.
+
+A Import retains the actual held first media request, Cancel/drain/durable
+partial, passive restart/history with zero calls, explicit fresh-consent Resume
+on the same operation and zero collection resend. Require server4096 download,
+device6144 upload and zero-file exclusion. Save an actual Easy answer, restart,
+and prove its persistence and passive restoration of A's stored login.
+
+Without logout/relogin or endpoint, clock or policy edits, explicitly prepare
+A Export at that same URL, with a fresh safety backup, preview and confirmation.
+Require the same opaque account/endpoint, a distinct operation and completion
+before one real hour after Import. Select media and obtain fresh consent with
+zero media requests before it. This unchanged same-owner stage has exactly zero
+downloads and uploads; server4096/device6144 stay exact. It has no payload to hold
+or cancel. Fixed `a-export-before-consent` and `a-exported` checkpoints retain it
+between the fresh Import and final B Export.
+
+Only afterward log out and sign into distinct B. Preserve server8192 download,
+device6144 upload, held request, cancellation/drain, restart, fresh-consent Resume,
+exact counters/bytes/exclusions and zero collection resend. B has its own
+`export-cancelled`, `export-passive-history` and `export-resume-decision` checkpoints.
+The observer arms B's hold only after A Export completes and drains.
+
+New custom-server own receipts use `next_eligible_at == completed_at`; explicit
+operations need no wait. Old future receipts/maps remain valid history. Capture
+the historical per-account `successCooldown` baseline at each preparation: a
+partial has no operation receipt and leaves that value unchanged. Whole success
+uses its own truthful receipt. Never clear history to make a nil assertion pass.
+The strict reducer retains all three phases and rejects missing/wrong-account,
+intervening or unfinished A Export, stale contexts and malformed history. Proofs
+contain booleans/counts and safe operation facts, never identity values.
 
 Require one passed case, zero skips and zero failures in both the xcresult
 summary and case tree. Require the exact method identity. Empty receipts,
@@ -108,7 +137,14 @@ helper. Reject unknown layouts without searching other apps or host data.
 
 ## Peer evidence
 
-The Docker child independently logs into B and downloads through Meguri's
+The Docker child independently logs into A and downloads completed A through
+the existing guarded rig transport into a separate owned `peer-a` directory.
+Require its actual note/card/review rows to equal the independent Easy replay,
+including the saved answer and scheduling. This proof is separate from native
+state and from B. `peer-proof.json.independent_a` must attest the download,
+saved review, one Easy, scheduling, identity/content and replay equality.
+
+The child also independently logs into B and downloads through Meguri's
 guarded rig transport. Require a current verified server copy without upgrade
 transforms, the generated note/card identities and fields, one uploaded Easy
 review, zero pending reviews and the persisted scheduling state. Check the
@@ -130,7 +166,11 @@ Compare every cell in all twelve logical tables: `col`, `config`,
 `deck_config`, `decks`, `notetypes`, `fields`, `templates`, `tags`, `graves`,
 `notes`, `cards`, `revlog`. Permit no masked columns, other transforms or
 tolerances. A difference fails. Retain child receipts and `peer-proof.json`.
-Report only safe counts and booleans. Keep generated SQLite files in the
+Report only safe counts and booleans. `media.typed_stages` has exact separate
+Import/AExport/Export expectations; `media.cycle` proves same account/endpoint,
+distinct operations, real-clock ordering, completion within an hour and immediate
+eligibility. The backend field is `immediately_eligible`. B retains positive
+media counts and all existing peer/media comparisons. Keep generated SQLite files in the
 ignored run directory. Keep actual result bundles for independent review;
 screenshots cannot replace peer comparison. Review secure-field XCTest
 activities and log redaction before sharing logs or xcresults. Exclude

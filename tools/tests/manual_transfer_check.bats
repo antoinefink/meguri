@@ -48,7 +48,7 @@ guest_manifest() { printf '%s/app/Fixtures/ManualTransfer/controlled-rig.json' "
   [ ! -e "$(guest_manifest)" ]
   [ ! -e "$FX_ROOT/app/Fixtures/ManualTransfer/controlled-rig.json" ]
   [ ! -e "$FX_ROOT/build/manual-transfer-check.lock" ]
-  grep -qx 'selector -only-testing:MeguriUITests/ManualTransferJourneyTests/testDistinctAccountRoundTripPreservesImportCooldownAfterRestart' "$FX_EVENTS"
+  grep -qx 'selector -only-testing:MeguriUITests/ManualTransferJourneyTests/testSameLoginReviewCycleThenCrossAccountMediaRecovery' "$FX_EVENTS"
   python3 - "$FX_EVENTS" <<'PY'
 from pathlib import Path
 import sys
@@ -70,7 +70,7 @@ PY
   [ "$(recorded_status)" = pass ]
   [ "$(grep -cx lease "$FX_EVENTS")" -eq 1 ]
   for event in 'build ios-sim Debug' 'sim-lease ipad release' 'test ipad' \
-      'selector -only-testing:MeguriUITests/ManualTransferJourneyTests/testDistinctAccountRoundTripPreservesImportCooldownAfterRestart'; do
+      'selector -only-testing:MeguriUITests/ManualTransferJourneyTests/testSameLoginReviewCycleThenCrossAccountMediaRecovery'; do
     grep -qx "$event" "$FX_EVENTS"
   done
 }
@@ -161,7 +161,7 @@ PY
 }
 
 @test "manual transfer: the exact qualified XCTest identifier is accepted" {
-  export FX_TEST_ID='MeguriUITests/ManualTransferJourneyTests/testDistinctAccountRoundTripPreservesImportCooldownAfterRestart()'
+  export FX_TEST_ID='MeguriUITests/ManualTransferJourneyTests/testSameLoginReviewCycleThenCrossAccountMediaRecovery()'
   run invoke_fake check --platform mac
   [ "$status" -eq 0 ]
   [ "$(recorded_status)" = pass ]
@@ -238,39 +238,59 @@ PY
   [[ "$output" != *never-print-this* ]]
 }
 
-@test "manual transfer: native reducer emits only media aggregates and fixed logical IDs" {
-  python3 - "$FX_ROOT/native" <<'PY'
-import json, sys
+@test "manual transfer: native reducer emits three fixed stages and safe same-login facts" {
+  python3 - "$FX_ROOT/native" "$FX_REPO/tools/tests" <<'PYFIXTURE'
+import sys
 from pathlib import Path
-root = Path(sys.argv[1])
-(root / "ManualTransfers").mkdir(parents=True)
-(root / "Collection/collection.media").mkdir(parents=True)
-for name in ("rf4-server.bin", "rf4-device.bin", "rf4-zero.bin"):
-    (root / "Collection/collection.media" / name).write_bytes(b"" if name.endswith("zero.bin") else b"synthetic")
-counters = dict(uploaded_files=1, uploaded_deletions=0, downloaded_files=1,
-                downloaded_deletions=0, checked=3, bytes_downloaded=9,
-                bytes_uploaded=9, awaiting=0, resynced=False,
-                empty=["rf4-zero.bin"], oversized=[])
-operations = {}
-for direction in ("Import", "Export"):
-    operations[direction] = dict(direction=direction, prepared_at=10, revision=5,
-        account="opaque-account-do-not-export", configured_endpoint="http://reserved.invalid/",
-        actual_generation=2, phase="Complete", scope="CollectionAndMedia",
-        collection_complete=True, receipt=dict(completed_at=20, next_eligible_at=3600020),
-        media=dict(stage="Complete", exclusions_verified=True, remote_outcome_unknown=False,
-            counters=counters, consent=dict(generation=2, categories=1,
-                account="opaque-account-do-not-export", configured_endpoint="http://reserved.invalid/")))
-(root / "ManualTransfers/manual-transfers.json").write_text(json.dumps(dict(manualTransfers=dict(operations=operations))))
-PY
-  run python3 "$FX_REPO/tools/scripts/manual-transfer-config.py" native-proof "$FX_ROOT/native"
+sys.path.insert(0, sys.argv[2])
+from manual_transfer_wire_test import synthetic_cycle
+synthetic_cycle(Path(sys.argv[1]).resolve())
+PYFIXTURE
+  local support="$FX_ROOT/native/Library/Containers/com.antoinefink.meguri.dev/Data/Library/Application Support"
+  run python3 "$FX_REPO/tools/scripts/manual-transfer-config.py" native-proof "$support"
   [ "$status" -eq 0 ]
-  [[ "$output" != *opaque-account-do-not-export* ]]
   [[ "$output" != *reserved.invalid* ]]
-  python3 -c 'import json,sys; p=json.load(sys.stdin); assert set(p)=={"stages","files"}; assert all(s["consent_bound"] for s in p["stages"].values()); assert p["files"]["rf4-zero.bin"]["bytes"]==0' <<<"$output"
-  rm "$FX_ROOT/native/Collection/collection.media/rf4-device.bin"
-  run python3 "$FX_REPO/tools/scripts/manual-transfer-config.py" native-proof "$FX_ROOT/native"
+  python3 -c 'import json,sys; p=json.load(sys.stdin); assert set(p)=={"stages","files","cycle"}; assert set(p["stages"])=={"Import","AExport","Export"}; assert all(p["cycle"].values()); assert all(s["consent_bound"] for s in p["stages"].values()); assert p["stages"]["AExport"]["counters"]["bytes_uploaded"]==0; assert p["files"]["rf4-zero.bin"]["bytes"]==0' <<<"$output"
+  rm "$support/Collection/collection.media/rf4-device.bin"
+  run python3 "$FX_REPO/tools/scripts/manual-transfer-config.py" native-proof "$support"
   [ "$status" -ne 0 ]
-  [[ "$output" != *opaque-account-do-not-export* ]]
+  [[ "$output" != *reserved.invalid* ]]
+}
+
+@test "manual transfer: missing independent A saved-review comparison fails acceptance" {
+  export FX_A_MATCH=false
+  run invoke_fake check --platform mac
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = fail ]
+  grep -qx 'failure manual-transfer/peer-proof' "$FX_EVENTS"
+  ! grep -qx 'native_transfer_complete true' "$FX_EVENTS"
+}
+
+@test "manual transfer: missing same-login A cycle fails acceptance" {
+  export FX_A_CYCLE=false
+  run invoke_fake check --platform mac
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = fail ]
+  grep -qx 'failure manual-transfer/peer-proof' "$FX_EVENTS"
+  ! grep -qx 'native_transfer_complete true' "$FX_EVENTS"
+}
+
+@test "manual transfer: B positive byte counts cannot use A zero-change expectations" {
+  export FX_B_BYTES=0
+  run invoke_fake check --platform mac
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = fail ]
+  grep -qx 'failure manual-transfer/peer-proof' "$FX_EVENTS"
+  ! grep -qx 'native_transfer_complete true' "$FX_EVENTS"
+}
+
+@test "manual transfer: empty xcresult cannot supply the exact native case" {
+  export FX_EMPTY_XCRESULT=1
+  run invoke_fake check --platform mac
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = fail ]
+  ! grep -qx peer "$FX_EVENTS"
+  ! grep -qx 'native_transfer_complete true' "$FX_EVENTS"
 }
 
 @test "manual transfer: cancellation cleans VM inputs before returning its lease" {

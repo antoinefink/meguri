@@ -303,7 +303,7 @@ mg_mt_read_results() {
   if ! jq -e '[.. | objects | select(.nodeType? == "Test Case")] as $cases |
       ($cases | length) == 1 and $cases[0].result == "Passed" and
       ($cases[0].nodeIdentifier |
-        test("^(MeguriUITests/)?ManualTransferJourneyTests/testDistinctAccountRoundTripPreservesImportCooldownAfterRestart(\\(\\))?$"))' \
+        test("^(MeguriUITests/)?ManualTransferJourneyTests/testSameLoginReviewCycleThenCrossAccountMediaRecovery(\\(\\))?$"))' \
       <<<"$tree" >/dev/null; then
     return 1
   fi
@@ -346,20 +346,34 @@ mg_mt_copy_export() {
 mg_mt_compare_peer() {
   local evidence="$MG_RUN_DIR/peer-proof.json"
   if ! mg_mt_child manual-transfer-data verify "${MG_RUN_DIR#"$MG_ROOT"/}"; then
-    mg_mt_error peer "independent B download and comparison failed" fail
+    mg_mt_error peer "independent A/B downloads and comparison failed" fail
     return 1
   fi
   if ! jq -e '.complete == true and [.notes, .cards, .reviews, .easy_reviews] == [1,1,1,1]
       and .identity_content == true and .scheduling == true
       and .all_logical_cells == true and .declared_download_transforms == true
       and .media.complete == true and .media.native_bytes == true and .media.server_bytes == true
-      and (.media.typed_stages | length) == 2 and (.media.peers | length) == 4' \
+      and .independent_a == {downloaded:true,saved_review:true,easy_reviews:1,
+        scheduling:true,identity_content:true,replay_equal:true}
+      and .media.cycle == {same_account:true,same_endpoint:true,distinct_operations:true,
+        ordered:true,completed_within_hour:true,immediately_eligible:true}
+      and .media.typed_stages == [
+        {direction:"Import",complete:true,downloaded_files:1,uploaded_files:1,
+         bytes_downloaded:4096,bytes_uploaded:6144,excluded_empty:["rf4-zero.bin"],
+         awaiting:0,immediately_eligible:true,prior_effects_unknown:true},
+        {direction:"AExport",complete:true,downloaded_files:0,uploaded_files:0,
+         bytes_downloaded:0,bytes_uploaded:0,excluded_empty:["rf4-zero.bin"],
+         awaiting:0,immediately_eligible:true,prior_effects_unknown:false},
+        {direction:"Export",complete:true,downloaded_files:1,uploaded_files:1,
+         bytes_downloaded:8192,bytes_uploaded:6144,excluded_empty:["rf4-zero.bin"],
+         awaiting:0,immediately_eligible:true,prior_effects_unknown:true}]
+      and (.media.peers | length) == 4' \
       "$evidence" >/dev/null; then
     mg_mt_error peer-proof "required peer comparison facts were not established" fail
     return 1
   fi
   mg_detail peer_proof "$(cat "$evidence")"
-  mg_artifact peer-proof "$evidence" "B data checked against review replay and activated Export"
+  mg_artifact peer-proof "$evidence" "A saved review/scheduling checked against replay; B retains all-cell/media comparison"
 }
 
 mg_manual_transfer_check() {
@@ -442,7 +456,7 @@ mg_manual_transfer_check() {
   # Callbacks run in reverse order. Remove inputs before releasing leases.
   mg_on_exit mg_mt_cleanup
   mg_app_xcodebuild_test "$MG_RUN_DIR/$selected_platform" "$selected_platform" "$test_destination" Debug \
-    -only-testing:MeguriUITests/ManualTransferJourneyTests/testDistinctAccountRoundTripPreservesImportCooldownAfterRestart
+    -only-testing:MeguriUITests/ManualTransferJourneyTests/testSameLoginReviewCycleThenCrossAccountMediaRecovery
   test_status=$?
   mg_artifact xcresult "$MG_RUN_DIR/$selected_platform.xcresult" "VM native receipt; check credential redaction before sharing"
   if [ "$selected_platform" = mac ] && [ "$test_status" -le 1 ] && \

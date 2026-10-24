@@ -62,6 +62,36 @@ def synthetic_native(root):
     return support, path, history
 
 
+def synthetic_cycle(root):
+    support, path, history = synthetic_native(root)
+    template = next(iter(history['operations'].values()))
+    history['operations'] = {}
+    for serial, label, files, downloaded, uploaded in (
+            (1, 'Import', 1, 4096, 6144), (2, 'AExport', 0, 0, 0), (3, 'Export', 1, 8192, 6144)):
+        record = copy.deepcopy(template)
+        identity = '%016x-0000000000000002' % serial
+        record.update(id=identity, direction='Import' if serial == 1 else 'Export',
+                      prepared_at=serial * 20 - 10, phase='Complete',
+                      account=('b' if serial == 3 else 'a') * 64,
+                      receipt=dict(completed_at=serial * 20, next_eligible_at=serial * 20),
+                      safety_backups=[] if serial == 1 else [{}])
+        record['media'].update(stage='Complete', exclusions_verified=True,
+                               remote_outcome_unknown=label != 'AExport',
+                               consent=dict(revision=5, generation=1, categories=1,
+                                            account=record['account'], configured_endpoint=record['configured_endpoint']))
+        record['media']['counters'].update(downloaded_files=files, uploaded_files=files,
+                                           bytes_downloaded=downloaded, bytes_uploaded=uploaded,
+                                           empty=['rf4-zero.bin'])
+        history['operations'][identity] = record
+    history.update(serial=3, active=None)
+    # Historical future map intentionally differs from all new own receipts.
+    history['cooldowns']['a' * 64] = dict(completed_at=1, next_eligible_at=3600001)
+    path.write_text(json.dumps(dict(manualTransfers=history)))
+    (support / 'Collection/collection.media/rf4-server.bin').write_bytes(b's' * 8192)
+    (support / 'Collection/collection.media/rf4-device.bin').write_bytes(b'd' * 6144)
+    return support, path, history
+
+
 class MobileBindingTests(unittest.TestCase):
     udid = '11111111-2222-3333-4444-555555555555'
     appid = 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE'
@@ -554,6 +584,101 @@ class NativeStateTests(unittest.TestCase):
         for bad in variants:
             with self.assertRaises(ValueError):
                 config.validate_native_state(bad, config.fingerprint(self.context))
+
+
+class SameLoginCycleTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.support, self.path, self.history = synthetic_cycle(Path(self.temp.name).resolve())
+
+    def save(self):
+        self.path.write_text(json.dumps(dict(manualTransfers=self.history)))
+
+    def test_equal_time_own_receipts_and_old_future_map_are_preserved(self):
+        proof = config.native_proof(self.support)
+        self.assertEqual(set(proof['stages']), {'Import', 'AExport', 'Export'})
+        self.assertTrue(all(proof['cycle'].values()))
+        state = config.native_state(config.native_context(self.support))
+        a = state['operations']['AExport']
+        self.assertNotEqual(a['id'], state['operations']['Export']['id'])
+        self.assertEqual(a['account'], state['operations']['Import']['account'])
+        self.assertEqual(a['receipt'], dict(completed_at=40, next_eligible_at=40))
+        self.assertEqual(a['success_cooldown'], dict(completed_at=1, next_eligible_at=3600001))
+        self.assertNotIn('reserved.invalid', json.dumps(proof))
+        self.assertNotIn('a' * 64, json.dumps(proof))
+
+    def test_partial_stage_keeps_nonnull_legacy_map_without_own_receipt(self):
+        # B has not started. A's partial Export retains pre-operation history.
+        records = self.history['operations']
+        del records['0000000000000003-0000000000000002']
+        a = records['0000000000000002-0000000000000002']
+        a.update(phase='MediaIncomplete', receipt=None)
+        a['media'].update(stage='Cancelled', consent=None, remote_outcome_unknown=True)
+        self.save()
+        before = copy.deepcopy(self.history['cooldowns'])
+        state = config.native_state(config.native_context(self.support))
+        self.assertIsNone(state['operations']['AExport']['receipt'])
+        self.assertEqual(state['operations']['AExport']['success_cooldown'], before['a' * 64])
+        self.assertEqual(json.loads(self.path.read_text())['manualTransfers']['cooldowns'], before)
+        with self.assertRaises(ValueError):
+            config.native_proof(self.support)
+
+    def test_missing_wrong_account_intervening_unfinished_or_unordered_a_rejected(self):
+        original = copy.deepcopy(self.history)
+        for mutation in ('missing', 'account', 'endpoint', 'intervening', 'unfinished', 'order', 'hour', 'future', 'backup'):
+            with self.subTest(mutation=mutation):
+                self.history = copy.deepcopy(original)
+                records = self.history['operations']
+                a = records['0000000000000002-0000000000000002']
+                if mutation == 'missing':
+                    del records[a['id']]
+                elif mutation == 'account':
+                    a['account'] = 'c' * 64
+                elif mutation == 'endpoint':
+                    a['configured_endpoint'] = 'http://other.invalid/'
+                elif mutation == 'intervening':
+                    extra = copy.deepcopy(a)
+                    extra['id'] = '0000000000000004-0000000000000002'
+                    records[extra['id']] = extra
+                    self.history['serial'] = 4
+                elif mutation == 'unfinished':
+                    a.update(phase='MediaIncomplete', receipt=None)
+                elif mutation == 'order':
+                    a['prepared_at'] = 19
+                elif mutation == 'hour':
+                    a['receipt'] = dict(completed_at=3600020, next_eligible_at=3600020)
+                    b = records['0000000000000003-0000000000000002']
+                    b['prepared_at'] = 3600030
+                    b['receipt'] = dict(completed_at=3600040, next_eligible_at=3600040)
+                elif mutation == 'future':
+                    a['receipt']['next_eligible_at'] += 3600000
+                else:
+                    a['safety_backups'] = []
+                self.save()
+                with self.assertRaises(ValueError):
+                    config.native_proof(self.support)
+
+    def test_exact_a_zero_and_b_positive_counts_bytes_and_history_rejected_on_change(self):
+        original = copy.deepcopy(self.history)
+        for serial in (1, 2, 3):
+            for field in ('downloaded_files', 'uploaded_files', 'bytes_downloaded', 'bytes_uploaded',
+                          'downloaded_deletions', 'uploaded_deletions', 'awaiting'):
+                with self.subTest(serial=serial, field=field):
+                    self.history = copy.deepcopy(original)
+                    self.history['operations']['%016x-0000000000000002' % serial]['media']['counters'][field] += 1
+                    self.save()
+                    with self.assertRaises(ValueError):
+                        config.native_proof(self.support)
+        self.history = copy.deepcopy(original)
+        self.history['cooldowns']['a' * 64] = dict(completed_at=10, next_eligible_at=9)
+        self.save()
+        with self.assertRaises(ValueError):
+            config.native_proof(self.support)
+        self.history = original; self.save()
+        (self.support / 'Collection/collection.media/rf4-device.bin').write_bytes(b'wrong-size')
+        with self.assertRaises(ValueError):
+            config.native_proof(self.support)
 
 
 class MediaStagingTests(unittest.TestCase):
@@ -1080,16 +1205,36 @@ class WireTests(unittest.TestCase):
         self.control('mark/resumed')
         self.protocol('/sync/download')
         self.protocol('/sync/upload')
+        self.control('mark/a-export-before-consent')
+        self.protocol('/msync/begin')  # A checks unchanged media, no file payload.
+        self.control('mark/a-exported')
+        self.control('arm-export')
+        self.protocol('/sync/download')
+        self.protocol('/sync/upload')
         self.control('mark/export-before-consent')
+        future = self.held_request()
+        self.control('abort')
+        self.await_aborted(future)
+        for name in ('export-cancelled', 'export-passive-history', 'export-resume-decision'):
+            self.control('mark/' + name)
+        self.control('release')
+        self.protocol('/msync/downloadFiles')
         self.protocol('/msync/uploadChanges')
         self.control('mark/exported')
         proof = self.control('proof')
         config.verify_wire(proof)
         # An otherwise complete proof must fail each required M8 wire condition.
         for checkpoint, key in (('before-consent', 'media'), ('passive-history', 'media'),
-                                ('resume-decision', 'media'), ('resumed', 'collection_transfers')):
+                                ('resume-decision', 'media'), ('resumed', 'collection_transfers'),
+                                ('a-export-before-consent', 'media'), ('a-exported', 'collection_transfers'),
+                                ('export-passive-history', 'media'), ('export-resume-decision', 'collection'),
+                                ('exported', 'held')):
             broken = json.loads(json.dumps(proof))
             broken['checkpoints'][checkpoint][key] += 1
+            with self.assertRaises(ValueError):
+                config.verify_wire(broken)
+        for name in ('a-export-before-consent', 'a-exported'):
+            broken = copy.deepcopy(proof); del broken['checkpoints'][name]
             with self.assertRaises(ValueError):
                 config.verify_wire(broken)
         self.assertNotIn(self.server.token, json.dumps(proof))
@@ -1199,6 +1344,29 @@ class WireTests(unittest.TestCase):
         status, data = request(self.server.server_port, '/__rf4/native-state', self.server.token)
         self.assertEqual(status, 503)
         config.validate_failure(json.loads(data))
+
+    def test_observer_freezes_import_and_both_export_identities(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            support, _, _ = synthetic_cycle(Path(temporary).resolve())
+            value = config.native_state(config.native_context(support))
+        self.reader('print(' + repr(json.dumps(value)) + ')')
+        self.server.reader_context = value['context']
+        self.assertEqual(self.control('native-state'), value)
+        for label in ('Import', 'AExport', 'Export'):
+            for mutation in ('id', 'account', 'missing'):
+                with self.subTest(label=label, mutation=mutation):
+                    changed = copy.deepcopy(value)
+                    if mutation == 'missing':
+                        changed['operations'][label] = None
+                    elif mutation == 'id':
+                        changed['operations'][label]['id'] = '0000000000000004-0000000000000002'
+                    else:
+                        changed['operations'][label]['account'] = 'f' * 64
+                    self.reader('print(' + repr(json.dumps(changed)) + ')')
+                    self.server.reader_context = value['context']
+                    response = request(self.server.server_port, '/__rf4/native-state', self.server.token)
+                    # Missing Import fails schema before the frozen-identity check.
+                    self.assert_failure_response(response, 'schema' if label == 'Import' and mutation == 'missing' else 'binding')
 
     def assert_failure_response(self, response, stage, status=503):
         actual_status, data = response

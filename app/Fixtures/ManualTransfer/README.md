@@ -1,68 +1,62 @@
 # Controlled native transfer rig
 
-The integrator stages an ignored `controlled-rig.json` in this directory in the
-test VM. `ManualTransferJourneyTests` requires these exact fields:
+The integrator stages an ignored, mode-0600 `controlled-rig.json` in the test
+VM through `tools/mg manual-transfer-check --platform mac|iphone|ipad`.
+Use only the pinned, checkout-owned loopback sync rig and reserved synthetic
+accounts A/C and B/D. Never use real credentials or a collection fixture launch.
+Keep the manifest out of logs and attachments; cleanup removes it before the
+forward and leases are released.
 
-- `endpoint`: the controlled server URL, accessible on VM loopback.
-- `username`: the synthetic Import account A username.
-- `password`: account A's password.
-- `deckID`: the ID of a generated, reviewable deck in A's server collection.
-- `exportUsername`: the username of a separate synthetic Export account B.
-- `exportPassword`: account B's password.
+The manifest supplies `endpoint`, A's `username`/`password`, B's distinct
+`exportUsername`/`exportPassword`, generated `deckID`, the three expected media
+SHA256 values, `wireToken` and `nativeContext`. The controller also supplies its
+fixed support-path seam. The helper generates these fields; do not hand-edit
+account identities, receipts, policies, media files or clocks. Credentials enter
+normal Settings controls and the login key stays in device-only Keychain.
 
-Provision A and B on the same controlled server. Their usernames must be
-nonempty and unequal after trimming whitespace; the test compares the resulting
-strings exactly. B must be a separate account, rather than an alias, a new key
-for A or a different endpoint identity. Neither account may use real credentials.
-There is no fallback from B to A. Keep this manifest within the isolated run;
-it is not a report attachment. Never include its passwords in logs or evidence.
-The test enters credentials in the app's normal login controls. The test login
-key stays in the device-only Keychain, and the app does not retain the password.
+Select exactly
+`ManualTransferJourneyTests/testSameLoginReviewCycleThenCrossAccountMediaRecovery`.
+Require one pass and zero failures/skips in both xcresult summary and case tree.
+Missing hooks, manifest, VM route or independent peer proof cannot pass.
 
-Use the pinned server from `tools/mg sync-rig`. A controlled `tools/mg` fixture
-and forwarding job must expose only that server's workstation loopback port on
-VM loopback. Mac apps and simulators in the VM both use the forwarded address;
-the workstation's `127.0.0.1` does not reach the VM. Keep listeners off the LAN.
-Retain endpoint validation and certificate checks, and never use a public server.
-The native test accepts only loopback hosts and rejects URL credentials, queries
-and fragments. Provisioning and forwarding are outside this patch. The
-integrator must supply tooling and receipts for generated content in A and for
-comparison of B's exported content, saved answer included, on the server and peer.
+The fixed three-stage proof uses system time throughout:
 
-## Execution and evidence
+1. A enters the exact URL and credentials and presses **Log In** directly.
+   It never presses Save Endpoint. Login sends no collection or media transfer.
+   A prepares/confirms Import with selected media. The observer holds the first
+   real media payload; Cancel drains to a durable partial with no operation
+   receipt and unchanged historical account state. Restart/history send zero
+   requests. Explicit Resume requires fresh consent on the same operation and
+   sends no collection again. Actual media is server4096 down/device6144 up;
+   the zero-byte file is excluded.
+2. Save an actual Easy answer, restart, and prove its persistence and A's stored
+   login without passive requests. With no logout, relogin, endpoint edit, clock
+   or policy edit, prepare a fresh backup/confirmation and Export back to A at
+   that same URL. Its distinct operation completes before one real hour after
+   Import. Fresh media consent is mandatory; unchanged same-owner media has
+   exactly zero downloads/uploads. Server4096/device6144 bytes remain exact.
+   This stage has no held payload or cancellation.
+3. Log out and sign into B at the unchanged URL. Its separate Export preserves
+   positive media coverage: server8192 down/device6144 up, an actual held request,
+   Cancel/drain/durable partial, passive restart, fresh-consent same-operation
+   Resume, and no collection resend. Preserve unknown prior effects and the
+   zero-file exclusion.
 
-Run the suite on each of Mac, iPhone and iPad using
-`tools/mg ui-test --platform … --suite ManualTransferJourneyTests`. Prepare an
-isolated development installation with a generated server collection, an
-admitted deck that can be reviewed, and both synthetic accounts. Resolve earlier
-unfinished transfers first and retain the required safety copies. Every launch
-uses system time so the app and server enforce the real deadline. UTC and
-disabled animations affect presentation only. Leave clocks, receipts, cooldown
-durations, deadlines and protocol validation intact.
+New custom-server success receipts have `next_eligible_at == completed_at`:
+there is no wait between explicit operations. Historical future receipts and
+per-account maps remain readable and unchanged. A partial has no own receipt;
+its historical map value is compared with the captured baseline, including a
+nonnull legacy value. A whole success is proved by its own receipt.
 
-First the test signs in as A in Settings, imports the server collection after
-confirming the replacement preview, and saves a real review answer. It restarts
-with the persisted collection and no collection fixture. Once A's stored login
-has loaded, preparing another Import must produce the existing cooldown and its
-recorded deadline, without a confirmation preview. This state is captured before
-the test logs out. It then signs in as B through the same login controls, chooses
-Export, prepares the safety-copy preview, confirms replacement, and waits for
-completion. Login itself must perform no preparation or transfer. Switching
-credentials must retain A's history and deadline; core checks, retained copies
-and candidate generation still apply throughout.
+The source reader retains strict schemas, frozen context/inode binding and
+reserved-media bootstrap guards. The reducer retains Import, A Export and B
+Export independently, rejecting missing, intervening, unfinished or wrong-account
+A exports. No account/endpoint values leave the VM in proof summaries.
 
-Report an Import from A and Export to B, with A's cooldown still active.
-This test does not show A transferring after its deadline.
-Rust and Swift deadline tests remain required.
-Skip the suite if its manifest is absent.
-Record a missing manifest, VM route, or peer proof as queued work.
-Skipped and queued runs do not pass acceptance.
-
-Retain screenshots of A's completed Import, saved review, durable review after
-restart and cooldown rejection, plus B's Export preview and completion. The UI
-receipt must also include a read-only rig comparison of B's logical content on
-the server and peer against the reviewed collection, including the saved answer.
-Images cannot prove that content comparison. Required evidence still includes
-compilation, execution in the VM, independent visual inspection, fault cases,
-renders and full gates. Cover interruption, recovery, saving copies, decision
-facts and keyboard focus. Static Settings images document appearance only.
+The data helper independently downloads completed A into `peer-a` and compares
+its saved review and scheduling rows with the independent Easy replay. B retains
+its separate peer download, all twelve logical-table comparisons against the
+activated Export, replay comparison and exact app/server media bytes. UI text,
+screenshots or B's success cannot substitute for A's peer proof. Root owns
+compilation, focused checks, VM execution, independent review, full gates and
+final human evidence; this source change claims none of them.

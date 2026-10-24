@@ -290,7 +290,7 @@ def repair_absent_databases(parent):
 
 def repair_policy(support):
     # Reuse the strict read-only schema reducer without changing M8 selectors.
-    state = native_state(native_context(support))
+    state = native_state(native_context(support), cycle=False)
     with directory(support / "ManualTransfers") as parent:
         policy, identity = bounded_read(parent, "manual-transfers.json", SIDECAR_LIMIT)
     history = strict_json(policy)["manualTransfers"]
@@ -321,7 +321,8 @@ def repair_policy(support):
     deadlines = list(history["cooldowns"].values()) + old_receipts
     now = time.time_ns() // 1_000_000
     for value in deadlines:
-        if receipt(value) is None or value["next_eligible_at"] > now:
+        if (receipt(value) is None or value["next_eligible_at"] <= value["completed_at"]
+                or value["next_eligible_at"] > now):
             raise ValueError("repair cooldown not expired")
     return policy, identity, dict(operations=len(history["operations"]),
                                   cooldowns=len(history["cooldowns"]), receipts=len(old_receipts),
@@ -446,7 +447,9 @@ def wire_config(config=None):
 def verify_wire(proof):
     checkpoints = proof["checkpoints"]
     names = ("startup", "before-consent", "cancelled", "passive-history",
-             "resume-decision", "resumed", "export-before-consent", "exported")
+             "resume-decision", "resumed", "a-export-before-consent", "a-exported",
+             "export-before-consent", "export-cancelled", "export-passive-history",
+             "export-resume-decision", "exported")
     if set(checkpoints) != set(names):
         raise ValueError("missing native wire checkpoints")
     for point in [proof] + [checkpoints[name] for name in names]:
@@ -460,9 +463,9 @@ def verify_wire(proof):
             raise ValueError("undrained or failed observed request")
         if point["gate"] not in ("armed", "holding", "aborted", "released"):
             raise ValueError("invalid observed gate state")
-    start, before, cancelled, passive, decision, resumed, export_before, exported = (
+    start, before, cancelled, passive, decision, resumed, a_before, a_done, export_before, b_cancelled, b_passive, b_decision, exported = (
         checkpoints[name] for name in names)
-    if start["media"] != 0 or before["media"] != 0 or before["collection_transfers"] < 1:
+    if start["media"] != 0 or start["collection_transfers"] != 0 or before["media"] != 0 or before["collection_transfers"] < 1:
         raise ValueError("media before consent or no real collection import")
     if not (cancelled["media"] > 0 and cancelled["held"] == cancelled["aborted"] == 1):
         raise ValueError("missing held file request and cancellation")
@@ -470,14 +473,28 @@ def verify_wire(proof):
         raise ValueError("passive startup or offline decision sent media")
     if len({point["collection_transfers"] for point in (before, cancelled, passive, decision, resumed)}) != 1:
         raise ValueError("collection resent during media resume")
-    if decision["collection"] != resumed["collection"] or passive["collection"] != decision["collection"]:
+    if len({p["collection"] for p in (before, cancelled, passive, decision, resumed)}) != 1:
         raise ValueError("media decision/resume sent collection protocol")
-    if resumed["media"] != export_before["media"] or exported["media"] <= export_before["media"]:
-        raise ValueError("export consent wire boundary missing")
-    if exported["collection_transfers"] <= resumed["collection_transfers"]:
-        raise ValueError("missing distinct account export")
-    if proof["gate"] != "released" or proof["held"] != 1 or proof["aborted"] != 1:
-        raise ValueError("gate not drained/released")
+    if resumed["media"] != a_before["media"] or a_done["media"] <= a_before["media"]:
+        raise ValueError("A export fresh consent boundary missing")
+    if not resumed["collection_transfers"] < a_before["collection_transfers"] == a_done["collection_transfers"]:
+        raise ValueError("missing distinct A export or collection resent")
+    if a_before["collection"] != a_done["collection"] or a_done["held"] != a_done["aborted"] or a_done["held"] != 1:
+        raise ValueError("A zero-change media must complete without a held payload")
+    if a_done["media"] != export_before["media"] or not a_done["collection_transfers"] < export_before["collection_transfers"]:
+        raise ValueError("missing independent B export")
+    if not (b_cancelled["media"] > export_before["media"] and b_cancelled["held"] == b_cancelled["aborted"] == 2):
+        raise ValueError("missing B held file cancellation")
+    if not b_cancelled["media"] == b_passive["media"] == b_decision["media"] < exported["media"]:
+        raise ValueError("B passive restart or resume consent boundary")
+    if len({p["collection_transfers"] for p in (export_before, b_cancelled, b_passive, b_decision, exported)}) != 1:
+        raise ValueError("B resume resent collection")
+    if len({p["collection"] for p in (export_before, b_cancelled, b_passive, b_decision, exported)}) != 1:
+        raise ValueError("B media recovery sent collection protocol")
+    if proof != dict(exported, checkpoints=checkpoints):
+        raise ValueError("requests after final completion")
+    if proof["gate"] != "released" or proof["held"] != 2 or proof["aborted"] != 2:
+        raise ValueError("gates not drained/released")
     return proof
 
 
@@ -883,7 +900,7 @@ def receipt(value):
         keys(value, ("completed_at", "next_eligible_at"))
         for instant in value.values():
             number(instant, (1 << 63) - 1)
-        if value["next_eligible_at"] <= value["completed_at"]:
+        if value["next_eligible_at"] < value["completed_at"]:
             raise ValueError("evidence deadline")
     return value
 
@@ -904,23 +921,24 @@ def validate_native_state(value, context):
     keys(value, ("context", "operations", "files"))
     if digest(value["context"]) != digest(context):
         raise ValueError("stale evidence context")
-    keys(value["operations"], ("Import", "Export"))
+    keys(value["operations"], ("Import", "AExport", "Export"))
     for direction, record in value["operations"].items():
         if record is None:
-            if direction != "Export":
+            if direction == "Import":
                 raise ValueError("missing import evidence")
             continue
         keys(record, ("id", "direction", "phase", "scope", "authority", "account",
                       "configured_endpoint", "resulting_publication", "collection_complete",
-                      "receipt", "success_cooldown", "media"))
+                      "receipt", "success_cooldown", "safety_backup_count", "media"))
         operation_id(record["id"])
-        if record["direction"] != direction or record["phase"] not in PHASES or record["scope"] != "CollectionAndMedia":
+        if record["direction"] != ("Export" if direction == "AExport" else direction) or record["phase"] not in PHASES or record["scope"] != "CollectionAndMedia":
             raise ValueError("evidence operation state")
         for key in ("authority", "account", "configured_endpoint"):
             digest(record[key])
         if record["resulting_publication"] is not None:
             digest(record["resulting_publication"])
         flag(record["collection_complete"])
+        number(record["safety_backup_count"], 256)
         receipt(record["receipt"])
         receipt(record["success_cooldown"])
         media = record["media"]
@@ -1004,7 +1022,7 @@ def native_context(support):
         return dict(root=str(root), device=info.st_dev, inode=info.st_ino)
 
 
-def native_state(context):
+def native_state(context, *, cycle=True):
     keys(context, ("root", "device", "inode"))
     number(context["device"]); number(context["inode"])
     support = Path(context["root"]) / "Library/Application Support"
@@ -1038,7 +1056,7 @@ def native_state(context):
             serials.add(serial)
             allowed = ("id account configured_endpoint target_endpoint direction scope phase acceptance boundary guard recovery_guard recovery_local local remote candidate activation_identity original safety_backups server_copy prepared_at actual_generation collection_complete resulting_publication media receipt revision").split()
             keys(record, allowed)
-            if record["id"] != identity or record["direction"] not in selected:
+            if record["id"] != identity or record["direction"] not in ("Import", "Export"):
                 raise ValueError("evidence operation identity")
             if record["phase"] not in PHASES or record["scope"] not in ("CollectionOnly", "CollectionAndMedia") or record["acceptance"] not in ("NotSent", "PossiblyAccepted", "ExactOk", "Refused"):
                 raise ValueError("evidence authority state")
@@ -1055,11 +1073,16 @@ def native_state(context):
             prior = selected[record["direction"]]
             if prior is None or identity > prior["id"]:
                 selected[record["direction"]] = record
+        # The one-off historical archive keeps its original latest-direction
+        # selector. Live acceptance alone requires the fixed three-stage suffix.
+        selected = fixed_stages(list(operations.values())) if cycle else dict(selected, AExport=None)
         reduced = {}
         for direction, record in selected.items():
             if record is None:
                 reduced[direction] = None
                 continue
+            if type(record["safety_backups"]) is not list or len(record["safety_backups"]) > 256:
+                raise ValueError("evidence backup count")
             publication = record["resulting_publication"]
             if publication is not None:
                 if type(publication) is not list or len(publication) != 2:
@@ -1082,12 +1105,13 @@ def native_state(context):
                          consent["configured_endpoint"] == record["configured_endpoint"] and
                          consent["categories"] == 1 and consent["revision"] <= record["revision"])
             reduced[direction] = dict(
-                id=record["id"], direction=direction, phase=record["phase"], scope=record["scope"],
+                id=record["id"], direction=record["direction"], phase=record["phase"], scope=record["scope"],
                 authority=fingerprint([record[k] for k in ("id", "account", "configured_endpoint", "direction", "scope")]),
                 account=fingerprint(record["account"]), configured_endpoint=fingerprint(record["configured_endpoint"]),
                 resulting_publication=None if publication is None else fingerprint(publication),
                 collection_complete=record["collection_complete"], receipt=record["receipt"],
-                success_cooldown=cooldowns.get(record["account"]), media=dict(
+                success_cooldown=cooldowns.get(record["account"]),
+                safety_backup_count=len(record["safety_backups"]), media=dict(
                     stage=media["stage"], consent=None if consent is None else dict(categories=consent["categories"]),
                     consent_bound=bound, counters=media["counters"],
                     remote_outcome_unknown=media["remote_outcome_unknown"], exclusions_verified=media["exclusions_verified"]))
@@ -1109,59 +1133,90 @@ def native_state(context):
         return validate_native_state(result, fingerprint(context))
 
 
+def fixed_stages(records):
+    """Newest Import, then exactly A Export and B Export; never lose A to latest."""
+    imports = [r for r in records if r["direction"] == "Import"]
+    if not imports:
+        raise ValueError("missing cycle import")
+    first = max(imports, key=lambda r: operation_id(r["id"]))
+    later = sorted((r for r in records if r["id"] > first["id"]), key=lambda r: r["id"])
+    if len(later) > 2 or any(r["direction"] != "Export" for r in later):
+        raise ValueError("intervening cycle operation")
+    selected = dict(Import=first, AExport=None, Export=None)
+    for label, record in zip(("AExport", "Export"), later):
+        operation_id(record["id"])
+        if (record["account"] == first["account"]) != (label == "AExport"):
+            raise ValueError("cycle account mismatch")
+        if record["configured_endpoint"] != first["configured_endpoint"]:
+            raise ValueError("cycle endpoint mismatch")
+        selected[label] = record
+    for record in selected.values():
+        if record is not None and record["receipt"] is not None:
+            receipt(record["receipt"])
+            if record["receipt"]["completed_at"] < record["prepared_at"]:
+                raise ValueError("cycle completion order")
+    # Starting a later stage requires the previous stage's truthful completion.
+    for previous, following in zip(selected.values(), list(selected.values())[1:]):
+        if following is not None:
+            if previous["phase"] != "Complete" or previous["receipt"] is None:
+                raise ValueError("unfinished earlier cycle stage")
+            receipt(previous["receipt"])
+            if following["prepared_at"] < previous["receipt"]["completed_at"]:
+                raise ValueError("cycle preparation order")
+    return selected
+
+
 def native_proof(support):
-    """Reduce app-owned evidence in the VM; never export rows or account records."""
+    """Safe three-stage summary; identities and collection rows remain in the VM."""
     support = Path(support)
-    with (support / "ManualTransfers/manual-transfers.json").open(encoding="utf-8") as stream:
-        records = json.load(stream)["manualTransfers"]["operations"].values()
+    # Use the bound, strict source reader, including all historical receipt/map
+    # validation and inode checks; no separate permissive JSON summary path.
+    state = native_state(native_context(support))
     stages = {}
-    for direction in ("Import", "Export"):
-        record = max((record for record in records if record["direction"] == direction),
-                     key=lambda record: (record["prepared_at"], record["revision"]))
+    for label, record in state["operations"].items():
+        if record is None:
+            raise ValueError("missing cycle stage")
         media = record["media"]
-        consent = media.get("consent") or {}
-        counters = media["counters"]
-        # Fail closed before emitting any unrecognized filenames/server content.
-        for category in ("empty", "oversized"):
-            if any(name not in MEDIA_NAMES for name in counters[category]):
-                raise ValueError("unreserved media exclusion")
-        numeric = ("uploaded_files", "uploaded_deletions", "downloaded_files",
-                   "downloaded_deletions", "checked", "bytes_downloaded",
-                   "bytes_uploaded", "awaiting")
-        if any(type(counters[key]) is not int or counters[key] < 0 for key in numeric):
-            raise ValueError("invalid media counters")
-        safe_counters = {key: counters[key] for key in numeric}
-        safe_counters.update(resynced=counters["resynced"], empty=counters["empty"],
-                             oversized=counters["oversized"])
-        if record["phase"] not in ("Complete", "MediaIncomplete", "CollectionComplete"):
-            raise ValueError("unfinished collection")
-        if record["scope"] != "CollectionAndMedia" or media["stage"] != "Complete":
-            raise ValueError("unfinished selected media")
-        receipt = record["receipt"]
-        if any(type(value) is not bool for value in (
-                counters["resynced"], record["collection_complete"],
-                media["exclusions_verified"], media["remote_outcome_unknown"])):
-            raise ValueError("invalid completion flags")
-        if any(type(receipt[key]) is not int for key in ("completed_at", "next_eligible_at")):
-            raise ValueError("invalid completion instants")
-        stages[direction] = dict(
-            phase=record["phase"], scope=record["scope"], media_stage=media["stage"],
-            collection_complete=record["collection_complete"], counters=safe_counters,
-            consent_bound=bool(consent and consent["generation"] == record["actual_generation"]
-                               and consent["account"] == record["account"]
-                               and consent["configured_endpoint"] == record["configured_endpoint"]
-                               and consent["categories"] == 1),
+        if (record["phase"] != "Complete" or not record["collection_complete"]
+                or media["stage"] != "Complete" or not media["consent_bound"]
+                or not media["exclusions_verified"] or record["receipt"] is None):
+            raise ValueError("unfinished selected operation")
+        if label != "Import" and record["safety_backup_count"] == 0:
+            raise ValueError("missing fresh Export backup")
+        expected_files, downloaded_bytes, uploaded_bytes = {
+            "Import": (1, 4096, 6144), "AExport": (0, 0, 0), "Export": (1, 8192, 6144)}[label]
+        counts = media["counters"]
+        expected = dict(downloaded_files=expected_files, uploaded_files=expected_files,
+                        bytes_downloaded=downloaded_bytes, bytes_uploaded=uploaded_bytes,
+                        downloaded_deletions=0, uploaded_deletions=0, awaiting=0,
+                        empty=["rf4-zero.bin"], oversized=[])
+        if any(counts[k] != v for k, v in expected.items()) or media["remote_outcome_unknown"] != (label != "AExport"):
+            raise ValueError("fixed stage media counts differ")
+        own = record["receipt"]
+        if own["next_eligible_at"] != own["completed_at"]:
+            raise ValueError("custom server receipt is not immediately eligible")
+        stages[label] = dict(phase=record["phase"], scope=record["scope"],
+            media_stage=media["stage"], collection_complete=record["collection_complete"],
+            safety_backup_count=record["safety_backup_count"],
+            counters=media["counters"], consent_bound=media["consent_bound"],
             exclusions_verified=media["exclusions_verified"],
-            remote_outcome_unknown=media["remote_outcome_unknown"],
-            completed_at=receipt["completed_at"], next_eligible_at=receipt["next_eligible_at"])
+            remote_outcome_unknown=media["remote_outcome_unknown"], **own)
+    imported, exported = (state["operations"][label] for label in ("Import", "AExport"))
+    elapsed = exported["receipt"]["completed_at"] - imported["receipt"]["completed_at"]
+    if not 0 <= elapsed < 3600000:
+        raise ValueError("cycle must complete before one real hour")
+    cycle = dict(same_account=imported["account"] == exported["account"],
+                 same_endpoint=imported["configured_endpoint"] == exported["configured_endpoint"],
+                 distinct_operations=imported["id"] != exported["id"],
+                 ordered=True, completed_within_hour=True, immediately_eligible=True)
+    if not all(cycle.values()):
+        raise ValueError("cycle identity differs")
     files = {}
-    for name in MEDIA_NAMES:
-        path = support / "Collection/collection.media" / name
-        if path.is_symlink() or not path.is_file() or path.stat().st_size > 65536:
-            raise ValueError("invalid synthetic native media")
-        data = path.read_bytes()
-        files[name] = dict(bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
-    return dict(stages=stages, files=files)
+    for name, fact in state["files"].items():
+        if not fact["exists"] or fact["bytes"] != {"rf4-server.bin": 8192, "rf4-device.bin": 6144, "rf4-zero.bin": 0}[name]:
+            raise ValueError("missing or wrong final native media")
+        files[name] = dict(bytes=fact["bytes"], sha256=fact["sha256"])
+    return dict(stages=stages, cycle=cycle, files=files)
 
 
 def accounts(path):

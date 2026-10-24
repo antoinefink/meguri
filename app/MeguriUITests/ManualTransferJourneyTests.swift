@@ -52,7 +52,7 @@ import AppKit
         attachGeometry(app, "rf4-preflight-endpoint-revealed", bundle)
     }
     #endif
-    func testDistinctAccountRoundTripPreservesImportCooldownAfterRestart() async throws {
+    func testSameLoginReviewCycleThenCrossAccountMediaRecovery() async throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
         guard build.hasHooks else {
@@ -70,7 +70,7 @@ import AppKit
             XCTAssertFalse(username.isEmpty)
             XCTAssertFalse(password.isEmpty)
         }
-        XCTAssertNotEqual(importUsername, exportUsername, "Import and Export must use separate accounts after trimming usernames.")
+        XCTAssertTrue(importUsername != exportUsername, "A and B must use distinct accounts after trimming usernames.")
 
         let app = XCUIApplication()
         let bundle = try build.bundleIdentifier
@@ -90,6 +90,10 @@ import AppKit
             try openSettings(app, bundle)
             let savedLogin = element(app, "settings.anki.logout")
             if savedLogin.waitForExistence(timeout: 2) { try click(savedLogin, app, bundle) }
+            let passiveLaunch = try await wire(rig, "snapshot")
+            XCTAssertEqual(passiveLaunch.collection, 0)
+            XCTAssertEqual(passiveLaunch.media, 0)
+            XCTAssertEqual(passiveLaunch.collectionTransfers, 0)
             let address = element(app, "settings.anki.endpoint")
             try click(address, app, bundle)
             replaceText(address, app: app, with: rig.endpoint)
@@ -100,19 +104,25 @@ import AppKit
             let endpointState = XCTAttachment(string: "endpointExactMatch=\(endpointExactMatch)")
             endpointState.name = "rf4-endpoint-entry-state"; endpointState.lifetime = .keepAlways; add(endpointState)
             XCTAssertTrue(endpointExactMatch, "Endpoint entry must match the intended draft.")
-            try click(element(app, "settings.anki.saveEndpoint"), app, bundle)
             try login(app, bundle, username: importUsername, password: rig.password)
             let startup = try await wire(rig, "mark/startup")
             XCTAssertEqual(startup.media, 0, "Passive launch and login must send zero media requests.")
+            XCTAssertEqual(startup.collectionTransfers, 0, "Direct URL Login must not transfer a collection.")
+            XCTAssertTrue((address.value as? String) == rig.endpoint, "Login must preserve the exact entered URL.")
             try selectMediaScope(app, bundle)
-            for id in ["settings.anki.prepareImport", "settings.anki.confirm"] {
-                try click(element(app, id), app, bundle)
-            }
+            try click(element(app, "settings.anki.prepareImport"), app, bundle)
+            try reveal(element(app, "settings.anki.confirm"), app, bundle)
+            waitUntilReady(element(app, "settings.anki.confirm"), app)
+            let baseline = try durableOperation(try await nativeState(rig), direction: "Import").successCooldown
+            try click(element(app, "settings.anki.confirm"), app, bundle)
             try confirmNative(app, bundle)
             try completeOptionalFsrsAdmission(app, bundle)
             try openSettings(app, bundle)
-            try await allowAndFinishMedia(app, bundle, rig: rig, importing: true, name: "rf4-account-a-import")
+            _ = try await allowAndFinishMedia(app, bundle, rig: rig, stage: "Import", baseline: baseline, name: "rf4-account-a-import")
         }
+
+        let imported = try durableOperation(try await nativeState(rig), direction: "Import")
+        let afterImport = try await wire(rig, "snapshot")
 
         // Save an answer in the imported deck before restarting the app.
         try openHome(app, bundle)
@@ -129,52 +139,73 @@ import AppKit
         try waitForText(element(app, "home.session.recorded"), "1 answers recorded", app, bundle)
         attachSuccess(app, "rf4-account-a-review-durable-after-restart")
 
-        // A's stored login must load without starting work. The next explicit
-        // preparation uses system time and must meet A's existing cooldown.
+        // Restore the persisted answer and A's stored login with no passive work.
         try openSettings(app, bundle)
         try waitForText(element(app, "settings.anki.loginIdentity"), importUsername, app, bundle)
         waitUntilReady(element(app, "settings.anki.logout"), app)
-        XCTAssertFalse(element(app, "settings.anki.username").exists, "Restore A's saved login.")
-        XCTAssertFalse(element(app, "settings.anki.confirm").exists, "Loading a login must leave preparation untouched.")
-        try click(element(app, "settings.anki.prepareImport"), app, bundle)
-        let result = element(app, "settings.anki.result")
-        try waitForText(result, "cooling down", app, bundle)
-        XCTAssertTrue(element(app, "settings.anki.nextEligible").waitForExistence(timeout: 5), "Record the deadline returned with the cooldown.")
-        waitUntilReady(element(app, "settings.anki.prepareImport"), app)
-        for (id, explanation) in [
-            ("settings.anki.progress", "Wait for preparation to finish before checking its outcome."),
-            ("settings.anki.confirm", "A's cooldown must leave no replacement preview.")
-        ] {
-            XCTAssertFalse(element(app, id).exists, explanation)
-        }
-        try reveal(result, app, bundle)
-        attachSuccess(app, "rf4-account-a-restored-login-cooldown-enforced")
+        XCTAssertFalse(element(app, "settings.anki.username").exists)
+        XCTAssertFalse(element(app, "settings.anki.confirm").exists)
+        XCTAssertTrue((element(app, "settings.anki.endpoint").value as? String) == rig.endpoint)
+        let restored = try await wire(rig, "snapshot")
+        XCTAssertEqual(restored.media, afterImport.media)
+        XCTAssertEqual(restored.collection, afterImport.collection)
+        XCTAssertEqual(restored.collectionTransfers, afterImport.collectionTransfers)
+        try selectExport(app, bundle)
+        try selectMediaScope(app, bundle)
+        try click(element(app, "settings.anki.prepareExport"), app, bundle)
+        try reveal(element(app, "settings.anki.confirm"), app, bundle)
+        waitUntilReady(element(app, "settings.anki.confirm"), app)
+        let aPrepared = try durableOperation(try await nativeState(rig), direction: "AExport")
+        XCTAssertTrue(aPrepared.receipt == nil && aPrepared.safetyBackupCount > 0)
+        XCTAssertTrue(aPrepared.id != imported.id && aPrepared.account == imported.account &&
+                      aPrepared.configuredEndpoint == imported.configuredEndpoint,
+                      "The fresh Export must use A's restored login at the same endpoint.")
+        try click(element(app, "settings.anki.confirm"), app, bundle)
+        attachSuccess(app, "rf4-account-a-export-fresh-backup-preview")
+        try confirmNative(app, bundle)
+        try completeOptionalFsrsAdmission(app, bundle)
+        try openSettings(app, bundle)
+        let aExported = try await allowAndFinishMedia(app, bundle, rig: rig, stage: "AExport",
+            baseline: aPrepared.successCooldown, name: "rf4-account-a-export")
+        let importReceipt = try XCTUnwrap(imported.receipt)
+        let exportReceipt = try XCTUnwrap(aExported.receipt)
+        let elapsed = exportReceipt.completedAt - importReceipt.completedAt
+        XCTAssertTrue(elapsed >= 0 && elapsed < 3_600_000,
+                      "A's real review cycle must finish before one hour without changing clocks or policy.")
 
-        // Use B for Export at the unchanged endpoint; A's saved history and
-        // deadline remain in place while credentials change.
+        // Independent B coverage follows A's completed cycle. Arm only B's real payload.
+        _ = try await wire(rig, "arm-export")
         try click(element(app, "settings.anki.logout"), app, bundle)
         try login(app, bundle, username: exportUsername, password: rig.exportPassword)
+        try selectExport(app, bundle)
+        try selectMediaScope(app, bundle)
+        try click(element(app, "settings.anki.prepareExport"), app, bundle)
+        try reveal(element(app, "settings.anki.confirm"), app, bundle)
+        waitUntilReady(element(app, "settings.anki.confirm"), app)
+        let bPrepared = try durableOperation(try await nativeState(rig), direction: "Export")
+        XCTAssertTrue(bPrepared.receipt == nil && bPrepared.safetyBackupCount > 0 && bPrepared.account != imported.account &&
+                      bPrepared.configuredEndpoint == imported.configuredEndpoint)
+        try click(element(app, "settings.anki.confirm"), app, bundle)
+        attachSuccess(app, "rf4-account-b-export-backup-preview")
+        try confirmNative(app, bundle)
+        try completeOptionalFsrsAdmission(app, bundle)
+        try openSettings(app, bundle)
+        _ = try await allowAndFinishMedia(app, bundle, rig: rig, stage: "Export", baseline: bPrepared.successCooldown, name: "rf4-account-b-export")
+        let retained = try await nativeState(rig)
+        assertSameOperation(imported, try durableOperation(retained, direction: "Import"))
+        assertSameOperation(aExported, try durableOperation(retained, direction: "AExport"))
+        attachSuccess(app, "rf4-account-b-export-complete-local-activation")
+
+        // The rig independently downloads A and B and compares the saved review
+        // and scheduling with replay. Native state alone cannot establish that.
+    }
+    private func selectExport(_ app: XCUIApplication, _ bundle: String) throws {
         try click(element(app, "settings.anki.direction"), app, bundle)
         #if os(macOS)
         try click(app.menuItems["Export to Anki"].firstMatch, app, bundle)
         #else
         try click(app.buttons["Export to Anki"].firstMatch, app, bundle)
         #endif
-        try selectMediaScope(app, bundle)
-        for id in ["settings.anki.prepareExport", "settings.anki.confirm"] {
-            try click(element(app, id), app, bundle)
-        }
-        attachSuccess(app, "rf4-account-b-export-backup-preview")
-        try confirmNative(app, bundle)
-        try completeOptionalFsrsAdmission(app, bundle)
-        try openSettings(app, bundle)
-        try await allowAndFinishMedia(app, bundle, rig: rig, importing: false, name: "rf4-account-b-export")
-        attachSuccess(app, "rf4-account-b-export-complete-local-activation")
-
-        // Evidence covers two accounts: A is still blocked and B completes.
-        // A later successful transfer by A is outside this run. Acceptance also
-        // needs the rig's comparison of B's server and peer content with the
-        // reviewed collection, including the answer saved above.
     }
     private func selectMediaScope(_ app: XCUIApplication, _ bundle: String) throws {
         try click(element(app, "settings.anki.scope"), app, bundle)
@@ -184,7 +215,13 @@ import AppKit
         try click(app.buttons["Collection and media"].firstMatch, app, bundle)
         #endif
     }
-    private func allowAndFinishMedia(_ app: XCUIApplication, _ bundle: String, rig: Rig, importing: Bool, name: String) async throws {
+    private func allowAndFinishMedia(_ app: XCUIApplication, _ bundle: String, rig: Rig, stage: String,
+                                     baseline: DurableOperation.Receipt?, name: String) async throws -> DurableOperation {
+        let importing = stage == "Import"
+        let cancelledStage = stage != "AExport"
+        let prefix = importing ? "" : "export-"
+        let direction = stage == "AExport" ? "AExport" : (importing ? "Import" : "Export")
+        let expectedHeld = importing ? 1 : 2
         // Collection activation/adoption must drain before this separate, real
         // both-side decision becomes enabled. No launch hook grants consent.
         let allow = element(app, "settings.anki.startMedia")
@@ -201,24 +238,25 @@ import AppKit
         }
         try assertMediaHash(initial, name: "rf4-device.bin", expected: rig.deviceSHA256, bytes: 6144)
         attachSuccess(app, name + "-collection-complete-media-awaiting-consent")
-        let before = try await wire(rig, importing ? "mark/before-consent" : "mark/export-before-consent")
+        let before = try await wire(rig, importing ? "mark/before-consent" : (stage == "AExport" ? "mark/a-export-before-consent" : "mark/export-before-consent"))
         XCTAssertEqual(before.active, 0)
         if importing { XCTAssertEqual(before.media, 0, "Preparing the media decision must be offline.") }
-        let original = try durableOperation(initial, direction: importing ? "Import" : "Export")
+        let original = try durableOperation(initial, direction: direction)
         XCTAssertTrue(original.collectionComplete && original.receipt == nil && original.media.stage == "AwaitingConsent")
+        XCTAssertTrue(original.media.consent == nil, "Each stage requires fresh explicit consent.")
+        assertHistoricalCooldown(original, baseline: baseline)
         try click(allow, app, bundle)
-        if importing {
+        if cancelledStage {
             // The observer holds the first real media file request before it
             // reaches the owned rig. Cancellation cannot race loopback completion.
-            let held = try await waitForWire(rig) { $0.gate == "holding" && $0.held == 1 }
+            let held = try await waitForWire(rig) { $0.gate == "holding" && $0.held == expectedHeld }
             XCTAssertGreaterThan(held.media, before.media)
             try click(element(app, "settings.anki.cancel"), app, bundle)
             try waitForText(element(app, "settings.anki.result"), "operation is partial", app, bundle)
             XCTAssertFalse(element(app, "settings.anki.progress").exists)
-            XCTAssertFalse(element(app, "settings.anki.nextEligible").exists)
 
             let cancelled = try await nativeState(rig)
-            let partial = try durableOperation(cancelled, direction: "Import")
+            let partial = try durableOperation(cancelled, direction: direction)
             XCTAssertEqual(partial.media.stage, "Cancelled")
             assertSameOperation(original, partial)
             XCTAssertEqual(partial.phase, "MediaIncomplete")
@@ -227,45 +265,50 @@ import AppKit
             XCTAssertTrue(partial.media.remoteOutcomeUnknown)
             XCTAssertEqual(partial.media.counters.downloadedFiles, 0)
             XCTAssertEqual(partial.media.counters.uploadedFiles, 0)
-            assertNoSuccessCooldown(partial)
-            XCTAssertFalse(try XCTUnwrap(cancelled.files["rf4-server.bin"]).exists)
+            XCTAssertEqual(partial.media.counters.bytesDownloaded, 0)
+            XCTAssertEqual(partial.media.counters.bytesUploaded, 0)
+            assertHistoricalCooldown(partial, baseline: baseline)
+            if importing { XCTAssertFalse(try XCTUnwrap(cancelled.files["rf4-server.bin"]).exists) }
+            else { try assertMediaHash(cancelled, name: "rf4-server.bin", expected: rig.serverImportSHA256, bytes: 4096) }
             try assertMediaHash(cancelled, name: "rf4-device.bin", expected: rig.deviceSHA256, bytes: 6144)
             _ = try await wire(rig, "abort")
-            _ = try await waitForWire(rig) { $0.active == 0 && $0.aborted == 1 }
-            let stopped = try await wire(rig, "mark/cancelled")
+            _ = try await waitForWire(rig) { $0.active == 0 && $0.aborted == expectedHeld }
+            let stopped = try await wire(rig, "mark/\(prefix)cancelled")
             XCTAssertEqual(stopped.collectionTransfers, before.collectionTransfers)
             try reveal(element(app, "settings.anki.history"), app, bundle)
             waitUntilReady(element(app, "settings.anki.history"), app)
-            attachSuccess(app, name + "-native-cancel-drained-durable-partial-no-cooldown")
+            attachSuccess(app, name + "-native-cancel-drained-durable-partial-history-preserved")
 
             app.terminate()
             app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false).arguments
             app.launch()
             try completeOptionalFsrsAdmission(app, bundle)
             try openSettings(app, bundle)
-            try waitForText(element(app, "settings.anki.loginIdentity"), rig.username, app, bundle)
+            try waitForText(element(app, "settings.anki.loginIdentity"), importing ? rig.username : rig.exportUsername, app, bundle)
             try click(element(app, "settings.anki.history"), app, bundle)
             waitUntilReady(element(app, "settings.anki.history"), app)
             XCTAssertFalse(element(app, "settings.anki.startMedia").exists)
             XCTAssertFalse(element(app, "settings.anki.progress").exists)
-            let recovered = try durableOperation(try await nativeState(rig), direction: "Import")
+            let recovered = try durableOperation(try await nativeState(rig), direction: direction)
             assertSameOperation(partial, recovered)
             XCTAssertTrue(recovered.collectionComplete && recovered.receipt == nil)
             XCTAssertEqual(recovered.media.stage, "Cancelled")
-            assertNoSuccessCooldown(recovered)
-            let passive = try await wire(rig, "mark/passive-history")
+            assertHistoricalCooldown(recovered, baseline: baseline)
+            let passive = try await wire(rig, "mark/\(prefix)passive-history")
             XCTAssertEqual(passive.media, stopped.media, "Restart and offline history must issue zero additional media requests.")
             XCTAssertEqual(passive.collectionTransfers, stopped.collectionTransfers)
+            XCTAssertEqual(passive.collection, stopped.collection)
             attachSuccess(app, name + "-passive-restart-no-media-requests")
 
             try click(element(app, "settings.anki.resumeMedia.\(original.id)"), app, bundle)
             try reveal(allow, app, bundle)
             waitUntilReady(allow, app)
-            let decision = try durableOperation(try await nativeState(rig), direction: "Import")
+            let decision = try durableOperation(try await nativeState(rig), direction: direction)
             assertSameOperation(original, decision)
             XCTAssertEqual(decision.media.stage, "AwaitingConsent")
             XCTAssertTrue(decision.media.consent == nil && decision.receipt == nil)
-            let prepared = try await wire(rig, "mark/resume-decision")
+            assertHistoricalCooldown(decision, baseline: baseline)
+            let prepared = try await wire(rig, "mark/\(prefix)resume-decision")
             XCTAssertEqual(prepared.media, passive.media, "Reviewing the saved media decision must remain offline.")
             XCTAssertEqual(prepared.collection, passive.collection)
             _ = try await wire(rig, "release")
@@ -275,27 +318,36 @@ import AppKit
         try reveal(element(app, "settings.anki.history"), app, bundle)
         waitUntilReady(element(app, "settings.anki.history"), app)
         XCTAssertFalse(element(app, "settings.anki.startMedia").exists)
-        XCTAssertTrue(element(app, "settings.anki.nextEligible").exists)
         let final = try await nativeState(rig)
-        try assertMediaHash(final, name: "rf4-server.bin", expected: importing ? rig.serverImportSHA256 : rig.serverExportSHA256, bytes: importing ? 4096 : 8192)
+        try assertMediaHash(final, name: "rf4-server.bin", expected: stage == "Export" ? rig.serverExportSHA256 : rig.serverImportSHA256, bytes: stage == "Export" ? 8192 : 4096)
         try assertMediaHash(final, name: "rf4-device.bin", expected: rig.deviceSHA256, bytes: 6144)
         try assertMediaHash(final, name: "rf4-zero.bin", expected: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", bytes: 0)
-        let finished = try durableOperation(final, direction: importing ? "Import" : "Export")
+        let finished = try durableOperation(final, direction: direction)
         assertSameOperation(original, finished)
         XCTAssertTrue(finished.phase == "Complete" && finished.media.stage == "Complete" && finished.receipt != nil)
         XCTAssertTrue(finished.media.consentBound && finished.media.exclusionsVerified)
-        XCTAssertTrue(finished.successCooldown != nil)
-        XCTAssertTrue(finished.receipt?.completedAt == finished.successCooldown?.completedAt &&
-                      finished.receipt?.nextEligibleAt == finished.successCooldown?.nextEligibleAt)
-        XCTAssertEqual(finished.media.remoteOutcomeUnknown, importing,
-                       "A completed resume cannot erase unknown prior effects; fresh Export has none.")
+        let ownReceipt = try XCTUnwrap(finished.receipt)
+        XCTAssertEqual(ownReceipt.nextEligibleAt, ownReceipt.completedAt,
+                       "A custom-server completion is immediately eligible.")
+        XCTAssertEqual(finished.media.remoteOutcomeUnknown, cancelledStage,
+                       "Completion must retain unknown effects of the cancelled attempt.")
+        let counts = finished.media.counters
+        XCTAssertEqual(counts.downloadedFiles, stage == "AExport" ? 0 : 1)
+        XCTAssertEqual(counts.uploadedFiles, stage == "AExport" ? 0 : 1)
+        XCTAssertEqual(counts.bytesDownloaded, stage == "AExport" ? 0 : (importing ? 4096 : 8192))
+        XCTAssertEqual(counts.bytesUploaded, stage == "AExport" ? 0 : 6144)
+        XCTAssertEqual(counts.downloadedDeletions, 0)
+        XCTAssertEqual(counts.uploadedDeletions, 0)
+        XCTAssertEqual(counts.awaiting, 0)
+        XCTAssertTrue(counts.empty == ["rf4-zero.bin"] && counts.oversized.isEmpty)
         _ = try await waitForWire(rig) { $0.active == 0 }
-        let completed = try await wire(rig, importing ? "mark/resumed" : "mark/exported")
+        let completed = try await wire(rig, importing ? "mark/resumed" : (stage == "AExport" ? "mark/a-exported" : "mark/exported"))
         XCTAssertEqual(completed.collectionTransfers, before.collectionTransfers, "Media Resume must send zero collection uploads/downloads.")
         XCTAssertEqual(completed.collection, before.collection, "Media must never replace or resend the collection.")
         // Durable typed counters and actual app/server SHA256 values are also
         // checked by manual-transfer-data; this text alone cannot pass RF4.
         attachSuccess(app, name + "-supported-media-complete")
+        return finished
     }
 
     private struct WireCounts: Decodable {
@@ -398,9 +450,13 @@ import AppKit
         throw EvidenceError.unavailable
     }
     private struct DurableOperation: Decodable {
-        struct Receipt: Decodable { let completedAt, nextEligibleAt: Int64 }
+        struct Receipt: Decodable, Equatable { let completedAt, nextEligibleAt: Int64 }
         struct Media: Decodable {
-            struct Counters: Decodable { let downloadedFiles, uploadedFiles: UInt64 }
+            struct Counters: Decodable {
+                let downloadedFiles, uploadedFiles, downloadedDeletions, uploadedDeletions: UInt64
+                let bytesDownloaded, bytesUploaded, awaiting: UInt64
+                let empty, oversized: [String]
+            }
             struct Consent: Decodable { let categories: UInt32 }
             let stage: String
             let remoteOutcomeUnknown, consentBound, exclusionsVerified: Bool
@@ -409,6 +465,7 @@ import AppKit
         }
         let id, direction, phase, authority, account, configuredEndpoint: String
         let collectionComplete: Bool
+        let safetyBackupCount: UInt64
         let resultingPublication: String?
         let receipt, successCooldown: Receipt?
         let media: Media
@@ -456,7 +513,7 @@ import AppKit
     }
     private func nativeState(_ rig: Rig) async throws -> NativeState {
         let data = try await evidenceRPC(rig, "native-state", limit: 65536, timeout: 12)
-        // The observer retains strict full-schema validation. Swift separately
+        // The observer retains strict full-schema and frozen operation validation. Swift separately
         // binds both the run selector and the actual postinstall fingerprint.
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
         #if os(macOS)
@@ -482,7 +539,7 @@ import AppKit
     }
     private func durableOperation(_ state: NativeState, direction: String) throws -> DurableOperation {
         guard let candidate = state.operations[direction], let record = candidate,
-              record.direction == direction,
+              record.direction == (direction == "AExport" ? "Export" : direction),
               record.id.range(of: "^[0-9a-f]{16}-[0-9a-f]{16}$", options: .regularExpression) != nil else {
             throw EvidenceError.unavailable
         }
@@ -494,9 +551,10 @@ import AppKit
         XCTAssertTrue(first.resultingPublication != nil && first.resultingPublication == second.resultingPublication,
                       "Media cancellation/recovery/resume must retain this collection activation.")
     }
-    private func assertNoSuccessCooldown(_ operation: DurableOperation) {
-        XCTAssertTrue(operation.successCooldown == nil,
-                      "No whole-operation receipt or success cooldown exists for partial media.")
+    private func assertHistoricalCooldown(_ operation: DurableOperation, baseline: DurableOperation.Receipt?) {
+        XCTAssertTrue(operation.receipt == nil, "A partial operation must have no own receipt.")
+        XCTAssertTrue(operation.successCooldown == baseline,
+                      "Partial media must preserve historical per-account success state.")
     }
     private func assertMediaHash(_ state: NativeState, name: String, expected: String, bytes: UInt64) throws {
         let fact = try XCTUnwrap(state.files[name])

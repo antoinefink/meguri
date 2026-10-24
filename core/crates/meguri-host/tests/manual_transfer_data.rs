@@ -145,7 +145,11 @@ fn verify_media(root: &Path, options: &JobOptions) -> Value {
     let native = json_file(&root.join("native-media.json"));
     let device = media_bytes(root, "device", 6144);
     let mut stages = Vec::new();
-    for (direction, size) in [("Import", 4096), ("Export", 8192)] {
+    for (direction, size, files, uploaded) in [
+        ("Import", 4096, 1, 6144),
+        ("AExport", 0, 0, 0),
+        ("Export", 8192, 1, 6144),
+    ] {
         let fact = &native["stages"][direction];
         let phase: Phase = checked(serde_json::from_value(fact["phase"].clone()));
         let scope: Scope = checked(serde_json::from_value(fact["scope"].clone()));
@@ -159,7 +163,7 @@ fn verify_media(root: &Path, options: &JobOptions) -> Value {
             fact["collection_complete"] == true
                 && fact["consent_bound"] == true
                 && fact["exclusions_verified"] == true
-                && fact["remote_outcome_unknown"] == (direction == "Import"),
+                && fact["remote_outcome_unknown"] == (direction != "AExport"),
             "native stage authority/completion facts differ"
         );
         let completed = fact["completed_at"].as_i64().expect("whole completion instant missing");
@@ -176,10 +180,10 @@ fn verify_media(root: &Path, options: &JobOptions) -> Value {
             "native media receipt predates this run"
         );
         assert!(
-            counters.downloaded_files == 1
-                && counters.uploaded_files == 1
+            counters.downloaded_files == files
+                && counters.uploaded_files == files
                 && counters.bytes_downloaded == size
-                && counters.bytes_uploaded == device.len() as u64
+                && counters.bytes_uploaded == uploaded
                 && counters.downloaded_deletions == 0
                 && counters.uploaded_deletions == 0
                 && counters.awaiting == 0
@@ -187,11 +191,33 @@ fn verify_media(root: &Path, options: &JobOptions) -> Value {
                 && counters.empty == [ZERO_MEDIA],
             "native media counters/exclusions differ"
         );
-        stages.push(json!({"direction": direction, "complete": true, "downloaded_files": 1,
-            "uploaded_files": 1, "bytes_downloaded": size, "bytes_uploaded": device.len(),
+        stages.push(
+            json!({"direction": direction, "complete": true, "downloaded_files": files,
+            "uploaded_files": files, "bytes_downloaded": size, "bytes_uploaded": uploaded,
             "excluded_empty": [ZERO_MEDIA], "awaiting": 0, "immediately_eligible": true,
-            "prior_effects_unknown": direction == "Import"}));
+            "prior_effects_unknown": direction != "AExport"}),
+        );
     }
+    for field in [
+        "same_account",
+        "same_endpoint",
+        "distinct_operations",
+        "ordered",
+        "completed_within_hour",
+        "immediately_eligible",
+    ] {
+        assert!(native["cycle"][field] == true, "missing same-login native cycle proof");
+    }
+    let imported = native["stages"]["Import"]["completed_at"]
+        .as_i64()
+        .expect("Import completion");
+    let a_exported = native["stages"]["AExport"]["completed_at"]
+        .as_i64()
+        .expect("A Export completion");
+    assert!(
+        (0..3_600_000).contains(&(a_exported - imported)),
+        "A cycle exceeded one real hour"
+    );
     let mut peers = Vec::new();
     for (index, label, size) in [(3, "server-c", 4096), (4, "server-d", 8192)] {
         let credential = key(options, index);
@@ -232,7 +258,7 @@ fn verify_media(root: &Path, options: &JobOptions) -> Value {
         );
     }
     json!({"complete": true, "native_bytes": true, "server_bytes": true,
-        "typed_stages": stages, "peers": peers, "native_files": native["files"]})
+        "typed_stages": stages, "peers": peers, "native_files": native["files"], "cycle": native["cycle"]})
 }
 fn account(index: usize) -> (String, String) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
@@ -428,6 +454,25 @@ fn verify(root: &Path, options: &JobOptions) {
     let seed = json_file(&root.join("seed.json"));
     let note_id = NoteId(seed["noteID"].as_i64().expect("generated note identity missing"));
     let card_id = CardId(seed["cardID"].as_i64().expect("generated card identity missing"));
+    // Independent A collection download through the existing controlled rig.
+    // Its owned peer directory is separate from B and from native app evidence.
+    let a_directory = root.join("peer-a");
+    checked(fs::create_dir(&a_directory));
+    let account_a = key(options, 3);
+    let a_before = meta(options, &account_a);
+    downloaded(&a_directory, options, &account_a);
+    let a_after = meta(options, &account_a);
+    assert!(a_after.usn.0 == a_before.usn.0 + 1, "A download sequence differs");
+    assert!(
+        a_after.schema_modified == a_before.schema_modified,
+        "A download changed schema time"
+    );
+    assert!(
+        (a_before.server_time.0 * 1000..(a_after.server_time.0 + 1) * 1000).contains(&a_after.modified.0),
+        "A download modification time is outside observed bounds"
+    );
+    meguri_sync::transport::runtime::shut_down();
+
     let account_b = key(options, 4);
     let before = meta(options, &account_b);
     downloaded(root, options, &account_b);
@@ -532,6 +577,13 @@ fn verify(root: &Path, options: &JobOptions) {
     for table in ["notes", "cards", "revlog"] {
         same_rows(&replay, &peer, table, "id");
     }
+    let a_peer = checked(PlainDatabase::open(&a_directory.join("peer.anki2")));
+    for table in ["notes", "cards", "revlog"] {
+        same_rows(&replay, &a_peer, table, "id");
+    }
+    // Complete row equality includes the actual Easy answer, review duration,
+    // scheduling memory, interval, queue, reps and uploaded USNs. No peer edits.
+    checked(a_peer.close());
     checked(replay.close());
 
     // Check the activated Export before applying O7.4 to a comparison copy.
@@ -583,6 +635,8 @@ fn verify(root: &Path, options: &JobOptions) {
             "complete": true, "notes": 1, "cards": 1, "reviews": 1,
             "easy_reviews": 1, "identity_content": true, "scheduling": true,
             "all_logical_cells": true, "declared_download_transforms": true,
+            "independent_a": {"downloaded": true, "saved_review": true,
+                "easy_reviews": 1, "scheduling": true, "identity_content": true, "replay_equal": true},
             "media": media_proof,
             "download_transforms": [
                 "O7.4: observed download time becomes col.mod",

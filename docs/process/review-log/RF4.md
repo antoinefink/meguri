@@ -1287,3 +1287,32 @@ appropriate isolation. The runtime failure proves the unsaved-URL case;
 the corrected suite includes retained login after restart, rejected URLs,
 captured inputs and cancellation/credential-removal failures. Native proof,
 the remaining UI feedback and the final integration gate are still pending.
+
+Same-login native proof; start `abea0c9c`.
+
+Filtered `065544Z-56917` adds A Export after the saved review and passive
+login restoration, then retains B Export's positive media recovery checks.
+A separate peer download checks A's actual saved review and scheduling rows.
+R1 found no P0-P2. The controller now checks three stages, immediate
+receipts and unchanged older history. Exact native selection is
+`testSameLoginReviewCycleThenCrossAccountMediaRecovery`.
+
+| Check | Receipt | Result |
+| --- | --- | --- |
+| Tooling and wire/reducer checks | `selftest/071251Z-68768` | 38 passed |
+| Peer mismatch regression | `core-test/071252Z-68981` | One passed; real rig helper awaits native run |
+| Ten-file privacy | `071252Z-69059` | Passed |
+| Static checks | `071559Z-70464` | Three passed |
+| Initial lint | `071600Z-70658` | Peer-helper formatting failed |
+| Formatter and final lint | `071652Z-71204`, `071657Z-71491` | Passed |
+
+Native execution remains pending. The old distinct-account M8 receipts
+remain evidence for their original scope.
+
+Preview `build/previews/mac-server-reviews-abea0c9c/Meguri.app` contains
+the checked login and no-wait changes. Normal Mac build `065205Z-54476`
+passed with verified signatures, entitlements and matching copied app/widget
+hashes. Instructions and build metadata passed privacy before sharing.
+This is an intermediate build; the file exporter still excludes media.
+Catch-up `063505Z-41619` passed. Doctor `065916Z-58738` reports reachable
+VM and 163 GiB free; the locked host does not prevent VM checks.
