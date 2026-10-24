@@ -754,7 +754,7 @@ extension ManualTransferSettingsTests {
         let probe = SettingsReachabilityProbe()
         let model = ManualTransferCoordinator(owner: nil, service: service, defaults: nil,
             reachability: { await probe.check($0) })
-        model.endpointDraft = "https://ankiweb.net/"
+        model.endpointDraft = "https://example.test/"
         await model.testConnection()
         #expect(await service.calls == ["normalize"])
         #expect(await probe.endpoints.isEmpty)
