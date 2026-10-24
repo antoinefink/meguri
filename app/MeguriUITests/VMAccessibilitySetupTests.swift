@@ -740,6 +740,76 @@ final class VMAccessibilitySetupTests: XCTestCase {
     }
 
     @MainActor
+    func testDismissRecordedMeguriCrashAlert() throws {
+        guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-dismiss-recorded-meguri-crash") else {
+            throw XCTSkip("Recorded Meguri crash dismissal opt-in absent")
+        }
+        continueAfterFailure = false
+        guard CardSwapTimingGate.hypervisorPresent() == true, NSUserName() == "meguri" else {
+            XCTFail("Recorded crash dismissal requires the dedicated VM's meguri account")
+            return
+        }
+
+        let helper = XCUIApplication(bundleIdentifier: "com.apple.UserNotificationCenter")
+        guard helper.state != .notRunning, helper.dialogs.count == 1,
+              helper.secureTextFields.count == 0 else {
+            XCTFail("Expected one already-existing UserNotificationCenter dialog without secure fields; no input performed")
+            return
+        }
+        let dialogs = helper.dialogs.allElementsBoundByAccessibilityElement
+        guard dialogs.count == 1, let dialog = dialogs.first, dialog.exists,
+              dialog.secureTextFields.count == 0 else {
+            XCTFail("Existing dialog is absent, ambiguous or secure; no input performed")
+            return
+        }
+
+        let heading = NSPredicate(format: "value == %@", "Meguri quit unexpectedly.")
+        let explanation = NSPredicate(format: "value == %@",
+                                      "Click Reopen to open the application again. Click Report to see more detailed information and send a report to Apple.")
+        let help = NSPredicate(format: "identifier == %@ AND label == %@ AND title == %@", "_NS:30", "Help", "")
+        let reopen = NSPredicate(format: "identifier == %@ AND label == %@ AND title == %@", "action-button-1", "", "Reopen")
+        let ignoreMatch = NSPredicate(format: "identifier == %@ AND label == %@ AND title == %@", "action-button-2", "", "Ignore")
+        let report = NSPredicate(format: "identifier == %@ AND label == %@ AND title == %@", "action-button-3", "", "Report…")
+
+        func recordedDialogMatches() -> Bool {
+            helper.state != .notRunning && helper.dialogs.count == 1 && dialog.exists
+                && helper.secureTextFields.count == 0 && dialog.secureTextFields.count == 0
+                && dialog.staticTexts.count == 2 && dialog.buttons.count == 4
+                && dialog.staticTexts.matching(heading).count == 1
+                && dialog.staticTexts.matching(explanation).count == 1
+                && dialog.buttons.matching(help).count == 1
+                && dialog.buttons.matching(reopen).count == 1
+                && dialog.buttons.matching(ignoreMatch).count == 1
+                && dialog.buttons.matching(report).count == 1
+        }
+        guard recordedDialogMatches() else {
+            XCTFail("Recorded crash dialog facts did not match exactly and uniquely; no input performed")
+            return
+        }
+        let ignoreButtons = dialog.buttons.matching(ignoreMatch).allElementsBoundByAccessibilityElement
+        guard ignoreButtons.count == 1, let ignore = ignoreButtons.first else {
+            XCTFail("Recorded Ignore button is absent or ambiguous; no input performed")
+            return
+        }
+        // Recheck the same bound dialog and every recorded fact immediately before the only input.
+        guard ignore.exists, ignore.isEnabled, ignore.isHittable, recordedDialogMatches(),
+              helper.secureTextFields.count == 0, dialog.secureTextFields.count == 0,
+              helper.dialogs.count == 1, dialog.exists else {
+            XCTFail("Recorded crash dialog changed or Ignore is unavailable; no input performed")
+            return
+        }
+        ignore.click()
+
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !dialog.exists
+        }, object: nil)
+        guard XCTWaiter().wait(for: [dismissed], timeout: 5) == .completed else {
+            XCTFail("The same recorded crash dialog remained after five seconds; no further input performed")
+            return
+        }
+    }
+
+    @MainActor
     func testEnableRunnerAccessibility() throws {
         guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-ax-enable") else {
             throw XCTSkip("VM setup opt-in absent")
