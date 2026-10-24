@@ -1405,3 +1405,31 @@ UI patch `083459Z-25942`: Home and copy-ID changes only.
 wrapped sidebar text and Import Collection below its message. Settings passed
 the three requested widths. R2: no P0-P2. Source privacy: passed.
 Media copy and its test remain unapplied. Full visual and audit checks are pending.
+
+Pause checkpoint requested by Antoine on 2026-10-24.
+
+Media backend `085201Z-39092` closed the staging case and the compile errors.
+R3: no P0/P1; the known P2 is closed. Focused `core-test/090641Z-48461`
+passed 89 tests, zero failures or skips. Privacy `091009Z-49835` still flags
+`meguri-package/src/reader.rs:393` and `src/reader/tests.rs:293,300,302,322`.
+No further rewrite was started after the pause request.
+
+The exact checked source is retained in
+`build/prepared/rf4-20261024-pause/media-backend.patch`, metadata beside it.
+SHA-256: `667129fecbd41cdaafc1b2cd16ecef33653c25f0f183d781cbad5c7d03437474`.
+Its base is `cc3b79d2`; the source was removed from the working tree after
+saving, so master retains the checked app. The export `085201Z-39092` is a
+second copy. This work has no Unit trailer and is not accepted.
+
+Resume with that prepared patch, close the two privacy regions, then run
+format/lint, regenerate bindings and check Swift/native behavior. Four held
+UI files remain in `083459Z-25942`: Settings, ExportSheet, their catalog and
+CollectionExportAccessibilityTests. Home and ManualTransferSections from
+that patch already landed in `cc3b79d2`.
+
+The current self-hosted Mac cycle passes. The corrected iPhone case still
+needs a fresh run; iPad is pending. Media-file native saves, interop execution,
+memory/permission evidence, snapshots, audits, critic and the full gate remain
+pending. Full-gate base remains `81c207573c20c337c8834e4ae8b4ee8f29603dbf`.
+The last interop fixer may finish its current run; no follow-up work is authorized
+before resume. No new feature or full gate was started for this pause.
