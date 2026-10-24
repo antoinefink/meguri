@@ -295,19 +295,88 @@ import AppKit
         let media, collection, collectionTransfers, active, held, aborted, errors: Int
         let gate: String
     }
-    private enum EvidenceError: Error { case unavailable }
-    private func wire(_ rig: Rig, _ action: String) async throws -> WireCounts {
-        var request = URLRequest(url: try XCTUnwrap(URL(string: rig.endpoint + "__rf4/" + action)))
+    private enum EvidenceStage: String, Decodable {
+        case resolver, context, binding, marker, media, read, schema, subprocess
+        case transport, decoder, timeout, cancelled, stopped, busy, output, cleanup
+    }
+    private enum EvidenceError: Error, CustomStringConvertible {
+        case unavailable
+        case rpc(EvidenceStage, status: Int? = nil, childRC: Int? = nil,
+                 timeoutMS: Int? = nil, scriptLine: Int? = nil)
+        var description: String {
+            switch self {
+            case .unavailable: return "Controlled evidence unavailable"
+            case let .rpc(stage, status, childRC, timeoutMS, scriptLine):
+                return "Controlled evidence stage=\(stage.rawValue) status=\(status ?? 0) childRC=\(childRC ?? 0) timeoutMS=\(timeoutMS ?? 0) scriptLine=\(scriptLine ?? 0)"
+            }
+        }
+    }
+    private struct EvidenceFailure: Decodable {
+        struct Detail: Decodable {
+            let stage: EvidenceStage
+            let child_rc, http_status, timeout_ms, script_line: Int?
+        }
+        let failure: Detail
+    }
+    private func safeFailure(_ data: Data, status: Int) -> EvidenceError {
+        // Reject unknown keys/codes and out-of-range numbers; response text and
+        // Foundation error descriptions never reach test output.
+        guard data.count <= 2048,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(root.keys) == Set(["failure"]),
+              let detail = root["failure"] as? [String: Any],
+              Set(detail.keys) == Set(["stage", "child_rc", "http_status", "timeout_ms", "script_line"]),
+              let decoded = try? JSONDecoder().decode(EvidenceFailure.self, from: data) else {
+            return .rpc(.schema, status: status)
+        }
+        for key in ["child_rc", "http_status", "timeout_ms", "script_line"] {
+            if let raw = detail[key], !(raw is NSNull) {
+                guard let number = raw as? NSNumber,
+                      ["s", "i", "l", "q", "S", "I", "L", "Q"].contains(String(cString: number.objCType)) else {
+                    return .rpc(.schema, status: status)
+                }
+            }
+        }
+        let value = decoded.failure
+        func bounded(_ number: Int?, _ range: ClosedRange<Int>) -> Bool {
+            number.map { range.contains($0) } ?? true
+        }
+        guard bounded(value.child_rc, -255...255), bounded(value.http_status, 100...599),
+              bounded(value.timeout_ms, 0...120000), bounded(value.script_line, 1...100000),
+              value.http_status == status else { return .rpc(.schema, status: status) }
+        return .rpc(value.stage, status: status, childRC: value.child_rc,
+                    timeoutMS: value.timeout_ms, scriptLine: value.script_line)
+    }
+    private func evidenceRPC(_ rig: Rig, _ action: String, limit: Int, timeout: TimeInterval) async throws -> Data {
+        guard let url = URL(string: rig.endpoint + "__rf4/" + action) else {
+            throw EvidenceError.rpc(.transport)
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = Data()
-        request.timeoutInterval = 5
+        request.timeoutInterval = timeout
         request.setValue(rig.wireToken, forHTTPHeaderField: "X-RF4-Control")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 16384 else {
-            throw EvidenceError.unavailable
-        }
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let status = (response as? HTTPURLResponse)?.statusCode, (100...599).contains(status) else {
+                throw EvidenceError.rpc(.transport)
+            }
+            guard status == 200 else { throw safeFailure(data, status: status) }
+            guard data.count <= limit else { throw EvidenceError.rpc(.output, status: status) }
+            return data
+        } catch let error as EvidenceError { throw error }
+        catch is CancellationError { throw EvidenceError.rpc(.cancelled) }
+        catch let error as URLError {
+            throw EvidenceError.rpc(error.code == .timedOut ? .timeout :
+                                    error.code == .cancelled ? .cancelled : .transport)
+        } catch { throw EvidenceError.rpc(.transport) }
+    }
+    private func wire(_ rig: Rig, _ action: String) async throws -> WireCounts {
+        let data = try await evidenceRPC(rig, action, limit: 16384, timeout: 5)
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let counts = try decoder.decode(WireCounts.self, from: data)
+        guard let counts = try? decoder.decode(WireCounts.self, from: data) else {
+            throw EvidenceError.rpc(.decoder, status: 200)
+        }
         XCTAssertEqual(counts.errors, 0, "Fixture forwarding must remain error-free.")
         return counts
     }
@@ -347,24 +416,39 @@ import AppKit
         let operations: [String: DurableOperation?]
         let files: [String: FileFact]
     }
+    private struct MobileNativeState: Decodable {
+        let selector: String
+        let state: NativeState
+    }
+    private var nativeBoundContext: (selector: String, context: String)?
     private func nativeState(_ rig: Rig) async throws -> NativeState {
-        do {
-            var request = URLRequest(url: try XCTUnwrap(URL(string: rig.endpoint + "__rf4/native-state")))
-            request.httpMethod = "POST"
-            request.httpBody = Data()
-            request.timeoutInterval = 12
-            request.setValue(rig.wireToken, forHTTPHeaderField: "X-RF4-Control")
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 65536 else {
-                throw EvidenceError.unavailable
+        let data = try await evidenceRPC(rig, "native-state", limit: 65536, timeout: 12)
+        // The observer retains strict full-schema validation. Swift separately
+        // binds both the run selector and the actual postinstall fingerprint.
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        #if os(macOS)
+        guard let state = try? decoder.decode(NativeState.self, from: data) else {
+            throw EvidenceError.rpc(.decoder, status: 200)
+        }
+        guard state.context == rig.nativeContext else { throw EvidenceError.rpc(.context, status: 200) }
+        #else
+        guard let response = try? decoder.decode(MobileNativeState.self, from: data) else {
+            throw EvidenceError.rpc(.decoder, status: 200)
+        }
+        let state = response.state
+        guard response.selector == rig.nativeContext,
+              state.context.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else {
+            throw EvidenceError.rpc(.binding, status: 200)
+        }
+        if let bound = nativeBoundContext {
+            guard bound.selector == rig.nativeContext, state.context == bound.context else {
+                throw EvidenceError.rpc(.context, status: 200)
             }
-            // The controlled observer validates the entire strict schema before
-            // returning it. Decoder failures never attach response bodies.
-            let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
-            let state = try decoder.decode(NativeState.self, from: data)
-            guard state.context == rig.nativeContext else { throw EvidenceError.unavailable }
-            return state
-        } catch { throw EvidenceError.unavailable }
+        } else {
+            nativeBoundContext = (selector: rig.nativeContext, context: state.context)
+        }
+        #endif
+        return state
     }
     private func durableOperation(_ state: NativeState, direction: String) throws -> DurableOperation {
         guard let candidate = state.operations[direction], let record = candidate,

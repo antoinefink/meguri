@@ -12,6 +12,8 @@ import ctypes
 import pwd
 import subprocess
 import time
+import select
+import secrets
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -480,6 +482,271 @@ PHASES = ("Preparing", "Preview", "ConfirmedIntent", "Transferring", "RemoteAcce
 MEDIA_STAGES = ("AwaitingConsent", "Declined", "Running", "Cancelled", "Interrupted", "Failed", "Complete")
 
 
+# Only these codes and bounded numbers may cross the evidence boundary.
+FAILURE_STAGES = ("resolver", "context", "binding", "marker", "media", "read", "schema",
+                  "subprocess", "transport", "decoder", "timeout", "cancelled", "stopped",
+                  "busy", "output", "cleanup")
+
+
+class EvidenceFailure(ValueError):
+    def __init__(self, stage, child_rc=None, timeout_ms=None):
+        self.receipt = failure(stage, child_rc=child_rc, timeout_ms=timeout_ms)
+        super().__init__("controlled evidence refused")
+
+
+def failure(stage, child_rc=None, http_status=None, timeout_ms=None, script_line=None):
+    value = dict(stage=stage, child_rc=child_rc, http_status=http_status,
+                 timeout_ms=timeout_ms, script_line=script_line)
+    return validate_failure(dict(failure=value))
+
+
+def validate_failure(value):
+    keys(value, ("failure",))
+    item = value["failure"]
+    keys(item, ("stage", "child_rc", "http_status", "timeout_ms", "script_line"))
+    if type(item["stage"]) is not str or item["stage"] not in FAILURE_STAGES:
+        raise ValueError("evidence failure stage")
+    for name, lower, upper in (("child_rc", -255, 255), ("http_status", 100, 599),
+                               ("timeout_ms", 0, 120000), ("script_line", 1, 100000)):
+        value = item[name]
+        if value is not None and (type(value) is not int or not lower <= value <= upper):
+            raise ValueError("evidence failure number")
+    return dict(failure=dict(item))
+
+
+def controlled(stage, function, *args):
+    try:
+        return function(*args)
+    except EvidenceFailure as error:
+        if error.receipt["failure"]["stage"] == "read" and stage in ("binding", "context", "marker", "media"):
+            raise EvidenceFailure(stage) from None
+        raise
+    except OSError:
+        raise EvidenceFailure("read" if stage == "schema" else stage) from None
+    except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
+        raise EvidenceFailure(stage) from None
+
+
+def vm_child(arguments, stage):
+    """Fixed VM argv only; bounded output, deadline, kill, drain and reap."""
+    child = None
+    try:
+        child = subprocess.Popen(arguments, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+        end = time.monotonic() + 2
+        output = bytearray()
+        while True:
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                raise EvidenceFailure("timeout", timeout_ms=2000)
+            if not select.select([child.stdout], [], [], min(remaining, .05))[0]:
+                continue
+            piece = os.read(child.stdout.fileno(), min(8192, 65537 - len(output)))
+            if not piece:
+                break
+            output.extend(piece)
+            if len(output) > 65536:
+                raise EvidenceFailure("output")
+        rc = child.wait(timeout=max(.001, end - time.monotonic()))
+        if rc != 0:
+            raise EvidenceFailure(stage, child_rc=rc if -255 <= rc <= 255 else None)
+        return bytes(output)
+    except subprocess.TimeoutExpired:
+        raise EvidenceFailure("timeout", timeout_ms=2000) from None
+    except OSError:
+        raise EvidenceFailure(stage) from None
+    finally:
+        if child is not None:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            # Descendants sharing stdout die with the group. communicate drains
+            # only the remaining pipe capacity after the bounded reads above.
+            try:
+                child.communicate(timeout=1)
+            finally:
+                child.stdout.close()
+
+
+def reader_home():
+    user = pwd.getpwuid(os.getuid())
+    if sys.platform != "darwin" or user.pw_name != "meguri" or user.pw_dir != "/Users/meguri":
+        raise EvidenceFailure("context")
+    return Path(user.pw_dir)
+
+
+def owned_identity(path):
+    with directory(path) as parent:
+        info = os.fstat(parent)
+        if info.st_uid != os.getuid() or info.st_mode & 0o022:
+            raise EvidenceFailure("context")
+        return dict(device=info.st_dev, inode=info.st_ino)
+
+
+def mobile_device(config):
+    home = reader_home()
+    keys(config, ("mode", "udid", "run", "nonce", "device"))
+    if config["mode"] != "mobile" or type(config["udid"]) is not str or re.fullmatch(
+            r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}", config["udid"]) is None:
+        raise EvidenceFailure("context")
+    recipe_run(config["run"]); digest(config["nonce"])
+    keys(config["device"], ("device", "inode"))
+    for item in config["device"].values():
+        number(item)
+    device = home / "Library/Developer/CoreSimulator/Devices" / config["udid"]
+    if owned_identity(device) != config["device"]:
+        raise EvidenceFailure("context")
+    document = controlled("context", strict_json, vm_child(
+        ["/usr/bin/xcrun", "simctl", "list", "devices", config["udid"], "--json"], "context"))
+    if type(document) is not dict:
+        raise EvidenceFailure("context")
+    devices = document.get("devices")
+    if type(devices) is not dict or len(devices) > 64:
+        raise EvidenceFailure("context")
+    matches = [item for items in devices.values() if type(items) is list for item in items
+               if type(item) is dict and item.get("udid") == config["udid"]]
+    if len(matches) != 1 or matches[0].get("state") != "Booted" or matches[0].get("isAvailable") is not True:
+        raise EvidenceFailure("context")
+    return home, device
+
+
+def mobile_reader_config(udid, run):
+    # Setup knows only the leased device. No container resolver before XCTest.
+    home = reader_home()
+    if type(udid) is not str or re.fullmatch(r"[0-9A-Fa-f-]{36}", udid) is None:
+        raise EvidenceFailure("context")
+    device = home / "Library/Developer/CoreSimulator/Devices" / udid
+    result = dict(mode="mobile", udid=udid, run=recipe_run(run), nonce=secrets.token_hex(32),
+                  device=owned_identity(device))
+    mobile_device(result)
+    return result
+
+
+def selected_mobile_context(config, home, device):
+    data = vm_child(["/usr/bin/xcrun", "simctl", "get_app_container", config["udid"],
+                     "com.antoinefink.meguri.dev", "data"], "resolver")
+    try:
+        root = data.decode("utf-8").removesuffix("\n")
+    except UnicodeError:
+        raise EvidenceFailure("resolver") from None
+    prefix = str(device / "data/Containers/Data/Application") + "/"
+    if not root.startswith(prefix) or re.fullmatch(
+            r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}", root[len(prefix):]) is None:
+        raise EvidenceFailure("context")
+    owned_identity(home); owned_identity(Path(root))
+    return native_context(Path(root) / "Library/Application Support")
+
+
+def staged_marker(home, context, run):
+    owners = home / "MeguriTestArchives/ManualTransferFixtureMedia" / fingerprint(context) / "ownership"
+    with directory(owners) as parent:
+        owned_identity(owners)
+        data, identity = bounded_read(parent, run + ".json", 1024)
+        if strict_json(data) != fixture_marker(context, run):
+            raise EvidenceFailure("marker")
+        info = os.stat(run + ".json", dir_fd=parent, follow_symlinks=False)
+        if info.st_uid != os.getuid() or info.st_mode & 0o022:
+            raise EvidenceFailure("marker")
+        return dict(sha256=hashlib.sha256(data).hexdigest(), identity=list(identity))
+
+
+def verify_staged_media(context, run, initial=True):
+    # The first call precedes StartMedia. Expected bytes come only from recipe.
+    with directory(Path(context["root"]) / "Library/Application Support/Collection/collection.media") as media:
+        expected = {MEDIA_NAMES[0]: None, MEDIA_NAMES[1]: recipe_bytes(run, "device", 6144), MEDIA_NAMES[2]: b""}
+        for name, data in expected.items():
+            observed = bounded_read(media, name, 8192, missing=True)
+            actual = None if observed is None else observed[0]
+            if name == MEDIA_NAMES[0] and not initial:
+                if actual is not None and actual not in recipe_files(run)[name]:
+                    raise EvidenceFailure("media")
+            elif actual != data:
+                raise EvidenceFailure("media")
+
+
+def mobile_applications(device):
+    with directory(device / "data/Containers/Data/Application") as applications:
+        identity = signature(os.fstat(applications))
+        members = []
+        for name in sorted(os.listdir(applications)):
+            info = os.stat(name, dir_fd=applications, follow_symlinks=False)
+            members.append([name, info.st_dev, info.st_ino, info.st_mode])
+        if signature(os.fstat(applications)) != identity:
+            raise EvidenceFailure("context")
+        return dict(identity=list(identity), members=fingerprint(members))
+
+
+def mobile_native_state(input_path, request):
+    # The observer alone supplies the previous digest, never an HTTP payload.
+    keys(request, ("selector", "bound"))
+    digest(request["selector"])
+    if request["bound"] is not None:
+        digest(request["bound"])
+    input_path = Path(input_path)
+    with directory(input_path.parent) as parent:
+        owned_identity(input_path.parent)
+        data, _ = bounded_read(parent, input_path.name, 4096)
+        info = os.stat(input_path.name, dir_fd=parent, follow_symlinks=False)
+        if info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise EvidenceFailure("binding")
+        config = controlled("binding", strict_json, data)
+        selector = fingerprint(config)
+        if selector != request["selector"]:
+            raise EvidenceFailure("binding")
+        home, device = controlled("context", mobile_device, config)
+        bound_name = "native-reader-bound.json"
+        if request["bound"] is None:
+            # Exclusive attempt latch survives failure; no reset, restage or rebind.
+            try:
+                os.mkdir("native-reader-attempt", 0o700, dir_fd=parent)
+            except FileExistsError:
+                raise EvidenceFailure("binding") from None
+            applications = controlled("context", mobile_applications, device)
+            context = controlled("context", selected_mobile_context, config, home, device)
+            marker = controlled("marker", staged_marker, home, context, config["run"])
+            controlled("media", verify_staged_media, context, config["run"])
+            record = dict(selector=selector, context=context, marker=marker, applications=applications)
+            fixture_write_new(parent, bound_name, json.dumps(record, sort_keys=True).encode())
+        else:
+            # Missing attempt/record is fatal even if a new app container exists.
+            with fixture_child(parent, "native-reader-attempt"):
+                pass
+            data, _ = controlled("binding", bounded_read, parent, bound_name, 4096)
+            info = os.stat(bound_name, dir_fd=parent, follow_symlinks=False)
+            if info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise EvidenceFailure("binding")
+            record = controlled("binding", strict_json, data)
+            keys(record, ("selector", "context", "marker", "applications"))
+            context = record["context"]
+            if record["selector"] != selector or fingerprint(context) != request["bound"]:
+                raise EvidenceFailure("binding")
+        # Recheck exact device, root/inode and this run's marker on every read.
+        prefix = str(device / "data/Containers/Data/Application") + "/"
+        if type(context.get("root")) is not str or not context["root"].startswith(prefix):
+            raise EvidenceFailure("context")
+        # Conservatively refuse any application-container directory membership
+        # change, even while the frozen old root still exists. No rediscovery.
+        if controlled("context", mobile_applications, device) != record["applications"]:
+            raise EvidenceFailure("context")
+        owned_identity(Path(context["root"]))
+        if native_context(Path(context["root"]) / "Library/Application Support") != context:
+            raise EvidenceFailure("context")
+        if controlled("marker", staged_marker, home, context, config["run"]) != record["marker"]:
+            raise EvidenceFailure("marker")
+        controlled("media", verify_staged_media, context, config["run"], False)
+        state = controlled("schema", native_state, context)
+        controlled("context", mobile_device, config)
+        owned_identity(Path(context["root"]))
+        if native_context(Path(context["root"]) / "Library/Application Support") != context:
+            raise EvidenceFailure("context")
+        if controlled("marker", staged_marker, home, context, config["run"]) != record["marker"]:
+            raise EvidenceFailure("marker")
+        if controlled("context", mobile_applications, device) != record["applications"]:
+            raise EvidenceFailure("context")
+        return dict(selector=selector, state=state)
+
+
 def keys(value, expected):
     if type(value) is not dict or set(value) != set(expected):
         raise ValueError("evidence schema")
@@ -622,7 +889,7 @@ def bounded_read(parent, name, limit, missing=False):
     except FileNotFoundError:
         if missing:
             return None
-        raise ValueError("missing evidence input")
+        raise EvidenceFailure("read")
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > limit:
@@ -852,24 +1119,35 @@ def main():
             raise ValueError("repair arguments")
         json.dump(repair_source(sys.argv[2], sys.argv[3]), sys.stdout)
         return
-    if sys.argv[1] in ("native-state", "native-context"):
+    if sys.argv[1] in ("native-state", "native-context", "native-mobile", "mobile-reader-config"):
         # VM-only bounded reader. No records or exceptions escape on failure.
-        signal.signal(signal.SIGALRM, lambda *_args: (_ for _ in ()).throw(ValueError("reader deadline")))
+        signal.signal(signal.SIGALRM, lambda *_args: (_ for _ in ()).throw(EvidenceFailure("timeout", timeout_ms=6000)))
+        signal.signal(signal.SIGTERM, lambda *_args: (_ for _ in ()).throw(EvidenceFailure("stopped")))
+        signal.signal(signal.SIGHUP, lambda *_args: (_ for _ in ()).throw(EvidenceFailure("stopped")))
         signal.alarm(6)
-        if sys.argv[1] == "native-context":
+        if sys.argv[1] == "mobile-reader-config":
+            value = mobile_reader_config(sys.argv[2], sys.argv[3])
+        elif sys.argv[1] == "native-mobile":
+            request = controlled("binding", strict_json, sys.stdin.buffer.read(1025))
+            value = controlled("binding", mobile_native_state, sys.argv[2], request)
+        elif sys.argv[1] == "native-context":
             value = native_context(sys.argv[2])
         else:
             input_path = Path(sys.argv[2])
             with directory(input_path.parent) as parent:
                 data, _ = bounded_read(parent, input_path.name, 4096)
-            value = native_state(strict_json(data))
+            value = controlled("schema", native_state, strict_json(data))
         json.dump(value, sys.stdout)
         return
     if sys.argv[1] == "reader-config":
         context = strict_json(sys.stdin.read(4097))
-        keys(context, ("root", "device", "inode"))
-        number(context["device"]); number(context["inode"])
-        json.dump(dict(context=fingerprint(context), command=[sys.argv[2],
+        mobile = context.get("mode") == "mobile"
+        if mobile:
+            keys(context, ("mode", "udid", "run", "nonce", "device"))
+        else:
+            keys(context, ("root", "device", "inode"))
+            number(context["device"]); number(context["inode"])
+        json.dump(dict(context=fingerprint(context), mobile=mobile, command=[sys.argv[2],
                        "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", sys.argv[3]]), sys.stdout)
         return
     if sys.argv[1] == "wire-port":
@@ -926,7 +1204,16 @@ if __name__ == "__main__":
     try:
         main()
     except (ValueError, KeyError, IndexError, OSError, TypeError, AttributeError, RecursionError,
-            subprocess.SubprocessError, http.client.HTTPException):
+            subprocess.SubprocessError, http.client.HTTPException) as error:
+        if len(sys.argv) > 1 and sys.argv[1] in ("native-state", "native-mobile"):
+            value = error.receipt if isinstance(error, EvidenceFailure) else failure(
+                "read" if isinstance(error, OSError) else "schema")
+            trace = error.__traceback__
+            while trace is not None:
+                if trace.tb_frame.f_code.co_filename == __file__ and 1 <= trace.tb_lineno <= 100000:
+                    value["failure"]["script_line"] = trace.tb_lineno
+                trace = trace.tb_next
+            json.dump(validate_failure(value), sys.stdout)
         # Never include input text, exception reprs or an inspect inventory.
         sys.stderr.write("manual-transfer-data: synthetic configuration refused\n")
         sys.exit(1)

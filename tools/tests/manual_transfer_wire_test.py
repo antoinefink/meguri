@@ -62,6 +62,263 @@ def synthetic_native(root):
     return support, path, history
 
 
+class MobileBindingTests(unittest.TestCase):
+    udid = '11111111-2222-3333-4444-555555555555'
+    appid = 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE'
+    run_id = '20261024T010101Z-17'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name).resolve()
+        support, _, _ = synthetic_native(self.home)
+        self.device = self.home / 'Library/Developer/CoreSimulator/Devices' / self.udid
+        self.root = self.device / 'data/Containers/Data/Application' / self.appid
+        self.root.parent.mkdir(parents=True)
+        support.parent.parent.rename(self.root)
+        self.support = self.root / 'Library/Application Support'
+        self.media = self.support / 'Collection/collection.media'
+        for name in ('rf4-device.bin', 'rf4-zero.bin'):
+            (self.media / name).unlink()
+        with mock.patch.object(config, 'dedicated_fixture_vm', return_value=self.home):
+            config.stage_media(self.support, self.run_id)
+        self.inputs = self.home / 'mg-owned'
+        self.inputs.mkdir(mode=0o700)
+        self.path = self.inputs / 'native-reader-input.json'
+        self.home_guard = mock.patch.object(config, 'reader_home', return_value=self.home)
+        self.home_guard.start(); self.addCleanup(self.home_guard.stop)
+        self.calls = []
+        self.booted = True
+        self.installed = False
+        def command(argv, stage):
+            self.calls.append(argv)
+            if argv[2] == 'list':
+                return json.dumps(dict(devices={'runtime': [dict(udid=self.udid,
+                    state='Booted' if self.booted else 'Shutdown', isAvailable=True)]})).encode()
+            self.assertTrue(self.installed, 'container resolution must follow test installation/launch')
+            self.assertEqual(argv, ['/usr/bin/xcrun', 'simctl', 'get_app_container', self.udid,
+                                    'com.antoinefink.meguri.dev', 'data'])
+            return (str(self.root) + '\n').encode()
+        guard = mock.patch.object(config, 'vm_child', side_effect=command)
+        guard.start(); self.addCleanup(guard.stop)
+        self.selection = config.mobile_reader_config(self.udid, self.run_id)
+        self.path.write_text(json.dumps(self.selection)); self.path.chmod(0o600)
+        self.selector = config.fingerprint(self.selection)
+        self.bound = None
+
+    def read(self):
+        value = config.mobile_native_state(self.path, dict(selector=self.selector, bound=self.bound))
+        self.bound = value['state']['context']
+        return value
+
+    def resolvers(self):
+        return [argv for argv in self.calls if argv[2] == 'get_app_container']
+
+    def test_setup_defers_then_exact_device_bundle_freezes_without_rediscovery(self):
+        self.assertEqual(self.resolvers(), [])
+        self.installed = True
+        first = self.read()
+        self.assertEqual(first['selector'], self.selector)
+        self.assertEqual(first['state']['context'], config.fingerprint(config.native_context(self.support)))
+        self.assertEqual(self.read(), first)
+        self.assertEqual(len(self.resolvers()), 1)
+        self.root.rename(self.root.with_name('retained'))
+        self.root.mkdir()
+        with self.assertRaises(config.EvidenceFailure):
+            self.read()
+        self.assertEqual(len(self.resolvers()), 1)
+
+    def test_lost_bound_record_or_attempt_never_resolves_again(self):
+        for name in ('native-reader-bound.json', 'native-reader-attempt'):
+            with self.subTest(name=name):
+                # One independently prepared run per case, no reset in production.
+                if self.bound is None:
+                    self.installed = True; self.read()
+                path = self.inputs / name
+                saved = path.with_name(name + '-saved')
+                path.rename(saved)
+                with self.assertRaises((ValueError, OSError)):
+                    self.read()
+                saved.rename(path)
+                self.assertEqual(len(self.resolvers()), 1)
+
+    def test_initial_lost_marker_or_media_never_restages_or_retries_bind(self):
+        self.installed = True
+        context = config.native_context(self.support)
+        marker = self.home / 'MeguriTestArchives/ManualTransferFixtureMedia' / config.fingerprint(context) / 'ownership' / (self.run_id + '.json')
+        for index, target in enumerate((marker, self.media / 'rf4-device.bin', self.media / 'rf4-zero.bin')):
+            with self.subTest(target=target.name):
+                # Separate synthetic controller directories, never a production reset.
+                case = self.inputs / str(index); case.mkdir(mode=0o700)
+                path = case / self.path.name
+                path.write_bytes(self.path.read_bytes()); path.chmod(0o600)
+                before = target.read_bytes(); target.unlink()
+                request_value = dict(selector=self.selector, bound=None)
+                with mock.patch.object(config, 'stage_media', side_effect=AssertionError('must not restage')):
+                    with self.assertRaises(config.EvidenceFailure) as error:
+                        config.mobile_native_state(path, request_value)
+                self.assertEqual(error.exception.receipt['failure']['stage'], 'marker' if index == 0 else 'media')
+                self.assertFalse(target.exists())
+                target.write_bytes(before); target.chmod(0o400)
+                with self.assertRaises(config.EvidenceFailure):
+                    config.mobile_native_state(path, request_value)
+                self.assertEqual(len(self.resolvers()), index + 1)
+
+    def test_initial_changed_marker_provenance_refuses_without_adoption(self):
+        self.installed = True
+        context = config.native_context(self.support)
+        marker = self.home / 'MeguriTestArchives/ManualTransferFixtureMedia' / config.fingerprint(context) / 'ownership' / (self.run_id + '.json')
+        marker.chmod(0o600)
+        marker.write_text(json.dumps(config.fixture_marker(context, '20261024T020202Z-18')))
+        marker.chmod(0o400)
+        with mock.patch.object(config, 'stage_media', side_effect=AssertionError('must not restage')):
+            with self.assertRaises(config.EvidenceFailure) as error: self.read()
+        self.assertEqual(error.exception.receipt['failure']['stage'], 'marker')
+        self.assertEqual(len(self.resolvers()), 1)
+
+    def test_initial_changed_media_refuses_recipe_adoption(self):
+        self.installed = True
+        media = self.media / 'rf4-device.bin'
+        media.chmod(0o600); media.write_bytes(b'private-unexpected-media')
+        with self.assertRaises(config.EvidenceFailure) as error: self.read()
+        self.assertEqual(error.exception.receipt['failure']['stage'], 'media')
+        self.assertEqual(media.read_bytes(), b'private-unexpected-media')
+        with self.assertRaises(config.EvidenceFailure): self.read()
+        self.assertEqual(len(self.resolvers()), 1)
+
+    def test_bound_marker_change_refuses(self):
+        self.installed = True; self.read()
+        context = config.native_context(self.support)
+        marker = self.home / 'MeguriTestArchives/ManualTransferFixtureMedia' / config.fingerprint(context) / 'ownership' / (self.run_id + '.json')
+        marker.chmod(0o600); marker.write_bytes(b'private-changed-marker')
+        with self.assertRaises(config.EvidenceFailure) as error: self.read()
+        self.assertEqual(error.exception.receipt['failure']['stage'], 'marker')
+        self.assertEqual(len(self.resolvers()), 1)
+
+    def test_bound_media_loss_or_change_refuses_without_restaging(self):
+        self.installed = True; self.read()
+        media = self.media / 'rf4-device.bin'
+        before = media.read_bytes(); media.unlink()
+        with mock.patch.object(config, 'stage_media', side_effect=AssertionError('must not restage')):
+            with self.assertRaises(config.EvidenceFailure) as error: self.read()
+            self.assertEqual(error.exception.receipt['failure']['stage'], 'media')
+            self.assertFalse(media.exists())
+            media.write_bytes(b'private-changed-media')
+            with self.assertRaises(config.EvidenceFailure): self.read()
+        self.assertEqual(len(self.resolvers()), 1)
+        self.assertNotEqual(media.read_bytes(), before)
+
+    def test_config_device_selector_and_bound_fingerprint_changes_refuse(self):
+        self.installed = True; self.read()
+        self.booted = False
+        with self.assertRaises(config.EvidenceFailure): self.read()
+        self.booted = True
+        original_bound = self.bound; self.bound = 'f' * 64
+        with self.assertRaises(config.EvidenceFailure): self.read()
+        self.bound = original_bound
+        with self.assertRaises(config.EvidenceFailure):
+            config.mobile_native_state(self.path, dict(selector='f' * 64, bound=self.bound))
+        before = self.path.read_bytes(); self.path.unlink()
+        with self.assertRaises((ValueError, OSError)): self.read()
+        self.path.write_bytes(before); self.path.chmod(0o600)
+        self.path.write_bytes(b'private-changed-config')
+        with self.assertRaises(config.EvidenceFailure): self.read()
+        self.assertEqual(len(self.resolvers()), 1)
+
+    def test_application_membership_or_device_inode_change_refuses_no_resolver(self):
+        self.installed = True; self.read()
+        sibling = self.root.with_name('retained-sibling'); sibling.mkdir()
+        with self.assertRaises(config.EvidenceFailure): self.read()
+        self.device.rename(self.device.with_name('retained-device'))
+        self.device.mkdir()
+        with self.assertRaises(config.EvidenceFailure): self.read()
+        self.assertEqual(len(self.resolvers()), 1)
+
+    def test_membership_change_during_first_resolution_refuses_readable_old_root(self):
+        self.installed = True
+        command = config.vm_child.side_effect
+        context = config.native_context(self.support)
+        original_state = config.native_state(context)
+        def changing(argv, stage):
+            result = command(argv, stage)
+            if argv[2] == 'get_app_container':
+                self.root.with_name('new-container').mkdir()
+            return result
+        with mock.patch.object(config, 'vm_child', side_effect=changing):
+            with self.assertRaises(config.EvidenceFailure) as error: self.read()
+        self.assertEqual(error.exception.receipt['failure']['stage'], 'context')
+        self.assertEqual(config.native_state(context), original_state)
+        self.assertEqual(len(self.resolvers()), 1)
+        with self.assertRaises(config.EvidenceFailure): self.read()
+        self.assertEqual(len(self.resolvers()), 1)
+
+    def assert_read_mutation_refused(self, bound):
+        self.installed = True
+        if bound:
+            self.read()
+        context = config.native_context(self.support)
+        read = config.native_state
+        original_state = read(context)
+        def changing(actual):
+            value = read(actual)
+            self.assertEqual(value, original_state)
+            self.root.with_name('new-container').mkdir()
+            return value
+        with mock.patch.object(config, 'native_state', side_effect=changing) as reader:
+            with self.assertRaises(config.EvidenceFailure) as error: self.read()
+            reader.assert_called_once_with(context)
+        self.assertEqual(error.exception.receipt['failure']['stage'], 'context')
+        self.assertEqual(read(context), original_state)
+        self.assertEqual(len(self.resolvers()), 1)
+        with self.assertRaises(config.EvidenceFailure): self.read()
+        self.assertEqual(len(self.resolvers()), 1)
+
+    def test_membership_change_during_initial_read_refuses_readable_old_root(self):
+        self.assert_read_mutation_refused(False)
+
+    def test_membership_change_during_bound_read_refuses_readable_old_root(self):
+        self.assert_read_mutation_refused(True)
+
+    def test_invalid_selector_payload_and_failed_resolver_are_one_attempt(self):
+        self.installed = True
+        with self.assertRaises(ValueError):
+            config.mobile_native_state(self.path, dict(selector=self.selector, bound=None, path='/private'))
+        self.assertEqual(self.resolvers(), [])
+        with mock.patch.object(config, 'selected_mobile_context', side_effect=config.EvidenceFailure('resolver', child_rc=70)) as resolve:
+            with self.assertRaises(config.EvidenceFailure) as error: self.read()
+            self.assertEqual(error.exception.receipt, config.failure('resolver', child_rc=70))
+            with self.assertRaises(config.EvidenceFailure): self.read()
+            self.assertEqual(resolve.call_count, 1)
+
+
+class SafeDiagnosticTests(unittest.TestCase):
+    def test_fixed_codes_exact_shape_and_numeric_bounds_match_swift_parser(self):
+        for stage in config.FAILURE_STAGES:
+            value = config.failure(stage, child_rc=-9, http_status=503, timeout_ms=8000, script_line=100)
+            self.assertEqual(config.validate_failure(value), value)
+        for change in (dict(stage='private-path-or-nonce'), dict(child_rc=True), dict(child_rc=256),
+                       dict(http_status=600), dict(timeout_ms=120001), dict(script_line=-1),
+                       dict(stderr='private-error'), dict(nonce='never-output')):
+            value = config.failure('read'); value['failure'].update(change)
+            with self.assertRaises(ValueError): config.validate_failure(value)
+        for raw in ({}, dict(failure={}), dict(failure='private'), dict(failure={}, extra=True)):
+            with self.assertRaises(ValueError): config.validate_failure(raw)
+
+    def test_os_read_schema_and_timeout_reduction_never_includes_raw_error(self):
+        for stage, exception, expected in (('schema', OSError('private-path'), 'read'),
+                                           ('schema', ValueError('private-record'), 'schema'),
+                                           ('marker', ValueError('private-nonce'), 'marker')):
+            with self.assertRaises(config.EvidenceFailure) as error:
+                config.controlled(stage, mock.Mock(side_effect=exception))
+            self.assertEqual(error.exception.receipt, config.failure(expected))
+        with self.assertRaises(config.EvidenceFailure) as error:
+            config.vm_child([sys.executable, '-c', 'import time; time.sleep(60)'], 'resolver')
+        self.assertEqual(error.exception.receipt, config.failure('timeout', timeout_ms=2000))
+        with self.assertRaises(config.EvidenceFailure) as error:
+            config.vm_child([sys.executable, '-c', 'raise SystemExit(70)'], 'resolver')
+        self.assertEqual(error.exception.receipt, config.failure('resolver', child_rc=70))
+
+
 class NativeStateTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -173,7 +430,9 @@ class NativeStateTests(unittest.TestCase):
         child = subprocess.run([sys.executable, str(SCRIPTS / 'manual-transfer-config.py'),
                                 'native-state', str(context_path)], capture_output=True, timeout=3)
         self.assertNotEqual(child.returncode, 0)
-        self.assertEqual(child.stdout, b'')
+        diagnostic = config.validate_failure(json.loads(child.stdout))
+        self.assertEqual(diagnostic['failure']['stage'], 'schema')
+        self.assertNotIn(b'never-export-private-input', child.stdout)
         self.assertEqual(child.stderr, b'manual-transfer-data: synthetic configuration refused\n')
 
     def test_reduced_schema_rejects_extra_fields_aliases_hashes_names_and_absence(self):
@@ -814,13 +1073,58 @@ class WireTests(unittest.TestCase):
                 self.assertEqual((status, data), (expected, b'{}'))
             launch.assert_not_called()
         self.assertEqual(logs.getvalue(), '')
-        self.assertEqual(request(self.server.server_port, '/__rf4/native-state', self.server.token), (503, b'{}'))
+        status, data = request(self.server.server_port, '/__rf4/native-state', self.server.token)
+        self.assertEqual(status, 503)
+        config.validate_failure(json.loads(data))
         for output in ('{}', 'not-json', '{"private":"never-export"}', 'x' * (wire.READER_LIMIT + 1)):
             self.reader('print(' + repr(output) + ')')
-            self.assertEqual(request(self.server.server_port, '/__rf4/native-state', self.server.token), (503, b'{}'))
+            status, data = request(self.server.server_port, '/__rf4/native-state', self.server.token)
+            self.assertEqual(status, 503)
+            config.validate_failure(json.loads(data))
         # Even a valid reduced response is refused when selected context changed.
         self.reader('print(' + repr(json.dumps(value)) + ')')
-        self.assertEqual(request(self.server.server_port, '/__rf4/native-state', self.server.token), (503, b'{}'))
+        status, data = request(self.server.server_port, '/__rf4/native-state', self.server.token)
+        self.assertEqual(status, 503)
+        config.validate_failure(json.loads(data))
+
+    def assert_failure_response(self, response, stage, status=503):
+        actual_status, data = response
+        self.assertEqual(actual_status, status)
+        value = config.validate_failure(json.loads(data))
+        self.assertEqual(value['failure']['stage'], stage)
+        self.assertEqual(value['failure']['http_status'], status)
+        self.assertNotIn(b'private', data)
+        return value
+
+    def test_nonzero_child_safe_receipt_persisted_before_teardown(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            self.server.failure_directory = Path(temporary)
+            diagnostic = config.failure('resolver', child_rc=70, script_line=10)
+            self.reader('import sys; print(' + repr(json.dumps(diagnostic)) + '); sys.exit(1)')
+            value = self.assert_failure_response(request(self.server.server_port, '/__rf4/native-state', self.server.token), 'resolver')
+            saved = json.loads((Path(temporary) / 'native-reader-failure.json').read_bytes())
+            self.assertEqual(saved, dict(version=1, failures=1, first=value, last=value))
+            self.assertEqual(value['failure']['child_rc'], 70)
+            bad = config.failure('read'); bad['failure']['stage'] = 'private-nonce'
+            self.reader('import sys; print(' + repr(json.dumps(bad)) + '); sys.exit(1)')
+            self.assert_failure_response(request(self.server.server_port, '/__rf4/native-state', self.server.token), 'schema')
+
+    def test_mobile_observer_retains_selector_actual_digest_and_poisoned_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            support, _, _ = synthetic_native(Path(temporary).resolve())
+            state = config.native_state(config.native_context(support))
+        selector = 'a' * 64
+        self.reader('import json,sys; request=json.loads(sys.stdin.readline()); print(' + repr(json.dumps(dict(selector=selector, state=state))) + ')')
+        self.server.reader_mobile = True
+        self.assertEqual(self.control('native-state'), dict(selector=selector, state=state))
+        self.assertEqual(self.server.reader_bound, state['context'])
+        self.assertEqual(self.control('native-state'), dict(selector=selector, state=state))
+        changed = dict(state, context='b' * 64)
+        self.reader('print(' + repr(json.dumps(dict(selector=selector, state=changed))) + ')')
+        self.assert_failure_response(request(self.server.server_port, '/__rf4/native-state', self.server.token), 'schema')
+        with mock.patch.object(wire.subprocess, 'Popen') as launch:
+            self.assert_failure_response(request(self.server.server_port, '/__rf4/native-state', self.server.token), 'binding')
+            launch.assert_not_called()
 
     def await_reader(self):
         end = time.monotonic() + 2
@@ -839,7 +1143,7 @@ class WireTests(unittest.TestCase):
             self.reader('import subprocess,sys,time; subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"]); time.sleep(60)')
             future = self.pool.submit(request, self.server.server_port, '/__rf4/native-state', self.server.token)
             child = self.await_reader()
-            self.assertEqual(future.result(timeout=3), (503, b'{}'))
+            self.assert_failure_response(future.result(timeout=3), 'timeout')
             self.assertIsNotNone(child.returncode)
             self.assertTrue(child.stdout.closed)
             self.assertTrue(child.stdin.closed)
@@ -851,11 +1155,11 @@ class WireTests(unittest.TestCase):
         self.reader('import time; time.sleep(60)')
         future = self.pool.submit(request, self.server.server_port, '/__rf4/native-state', self.server.token)
         child = self.await_reader()
-        self.assertEqual(request(self.server.server_port, '/__rf4/native-state', self.server.token), (409, b'{}'))
+        self.assert_failure_response(request(self.server.server_port, '/__rf4/native-state', self.server.token), 'busy', 409)
         # Protocol snapshots remain responsive: subprocess work holds no condition.
         self.control('snapshot')
         self.server.stop_reader()
-        self.assertEqual(future.result(timeout=2), (503, b'{}'))
+        self.assert_failure_response(future.result(timeout=2), 'stopped')
         self.assertIsNotNone(child.returncode)
         self.assertTrue(child.stdout.closed)
         self.assertIsNone(self.server.reader_process)
@@ -900,7 +1204,7 @@ class WireTests(unittest.TestCase):
                     _, stderr = child.communicate(timeout=3)
                     self.assertEqual((child.returncode, stderr), (0, b''))
                     try:
-                        self.assertEqual(future.result(timeout=2), (503, b'{}'))
+                        self.assert_failure_response(future.result(timeout=2), 'stopped')
                     except (http.client.RemoteDisconnected, ConnectionResetError):
                         pass  # shutdown may close before the static refusal
                     with self.assertRaises(ProcessLookupError):

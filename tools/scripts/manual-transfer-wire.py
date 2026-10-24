@@ -19,6 +19,7 @@ import secrets
 import signal
 import socket
 import threading
+import stat
 import time
 
 COLLECTION = frozenset('/sync/' + name for name in (
@@ -66,7 +67,7 @@ class RigServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
     block_on_close = False
 
-    def __init__(self, upstream_port, reader_command=None, reader_context=None):
+    def __init__(self, upstream_port, reader_command=None, reader_context=None, mobile=False, failure_directory=None):
         if type(upstream_port) is not int or not 1024 <= upstream_port <= 65535:
             raise ValueError('invalid owned rig port')
         super().__init__(('127.0.0.1', 0), Handler)
@@ -84,6 +85,48 @@ class RigServer(http.server.ThreadingHTTPServer):
         self.reader_slot = threading.Lock()
         self.reader_guard = threading.Lock()
         self.reader_process = None
+        self.reader_mobile = mobile
+        self.reader_bound = None
+        self.reader_failed = False
+        self.reader_failures = 0
+        self.last_reader_failure = None
+        self.first_reader_failure = None
+        self.failure_directory = failure_directory
+
+    def evidence_failure(self, value, status=503):
+        # Validate even nonzero-child diagnostics. Never copy arbitrary messages,
+        # stderr, paths, nonce or response bodies into receipts or HTTP errors.
+        value = reducer.validate_failure(value)
+        value['failure']['http_status'] = status
+        with self.condition:
+            self.reader_failures = min(1000000, self.reader_failures + 1)
+            self.last_reader_failure = value
+            if self.first_reader_failure is None:
+                self.first_reader_failure = value
+            aggregate = dict(version=1, failures=self.reader_failures, first=self.first_reader_failure, last=value)
+            if self.failure_directory is not None:
+                try:
+                    with reducer.directory(self.failure_directory) as parent:
+                        owner = os.fstat(parent)
+                        if owner.st_uid != os.getuid() or owner.st_mode & 0o022:
+                            raise ValueError('receipt ownership')
+                        fd = os.open('native-reader-failure.json', os.O_WRONLY | os.O_CREAT |
+                                     os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=parent)
+                        try:
+                            info = os.fstat(fd)
+                            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1 or info.st_mode & 0o077:
+                                raise ValueError('receipt ownership')
+                            data = json.dumps(aggregate, separators=(',', ':')).encode()
+                            os.ftruncate(fd, 0)
+                            os.write(fd, data)
+                            os.fsync(fd)
+                        finally:
+                            os.close(fd)
+                except (OSError, ValueError):
+                    # Persistence cannot replace or hide the original refusal;
+                    # its validated receipt is still forwarded in the RPC.
+                    pass
+        return status, value
 
     def process_request(self, request, address):
         if not self.slots.acquire(blocking=False):
@@ -121,47 +164,97 @@ class RigServer(http.server.ThreadingHTTPServer):
 
     def native_state(self, connection):
         if not self.reader_command or not self.reader_slot.acquire(blocking=False):
-            return 409, {}
-        child = None
+            return self.evidence_failure(reducer.failure('busy'), 409)
+        child, result = None, None
+        stage = 'subprocess'
+        rc = None
         try:
             with self.reader_guard:
                 if self.stopping:
-                    return 409, {}
+                    raise reducer.EvidenceFailure('stopped')
+                if self.reader_mobile and self.reader_failed:
+                    raise reducer.EvidenceFailure('binding')
                 child = subprocess.Popen(self.reader_command, stdin=subprocess.PIPE,
                                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                          start_new_session=True, close_fds=True)
                 self.reader_process = child
+                if self.reader_mobile:
+                    child.stdin.write((json.dumps(dict(selector=self.reader_context,
+                                                       bound=self.reader_bound)) + '\n').encode())
+                    child.stdin.flush()
             deadline = time.monotonic() + READER_SECONDS
             output = bytearray()
             while True:
-                if self.stopping or time.monotonic() >= deadline:
-                    raise ValueError('reader stopped')
+                if self.stopping:
+                    raise reducer.EvidenceFailure('stopped')
+                if time.monotonic() >= deadline:
+                    raise reducer.EvidenceFailure('timeout', timeout_ms=int(READER_SECONDS * 1000))
                 readable, _, _ = select.select([child.stdout, connection], [], [], 0.05)
                 if connection in readable:
-                    # A control body is forbidden; EOF is cancellation.
-                    raise ValueError('reader client cancelled')
+                    raise reducer.EvidenceFailure('cancelled')
                 if child.stdout in readable:
                     piece = os.read(child.stdout.fileno(), min(8192, READER_LIMIT + 1 - len(output)))
                     if not piece:
                         break
                     output.extend(piece)
                     if len(output) > READER_LIMIT:
-                        raise ValueError('reader output bound')
+                        raise reducer.EvidenceFailure('output')
             remaining = deadline - time.monotonic()
-            if remaining <= 0 or child.wait(timeout=remaining) != 0 or self.stopping:
-                raise ValueError('reader failed')
-            value = reducer.validate_native_state(reducer.strict_json(output), self.reader_context)
-            return 200, value
+            if remaining <= 0:
+                raise reducer.EvidenceFailure('timeout', timeout_ms=int(READER_SECONDS * 1000))
+            rc = child.wait(timeout=remaining)
+            if self.stopping:
+                raise reducer.EvidenceFailure('stopped')
+            stage = 'decoder' if rc == 0 else 'subprocess'
+            document = reducer.strict_json(output)
+            if type(document) is dict and 'failure' in document:
+                stage = 'schema'
+                result = reducer.validate_failure(document)
+                if result['failure']['child_rc'] is None and -255 <= rc <= 255:
+                    result['failure']['child_rc'] = rc
+            elif rc != 0:
+                raise reducer.EvidenceFailure('subprocess', child_rc=rc if -255 <= rc <= 255 else None)
+            else:
+                stage = 'schema'
+                if self.reader_mobile:
+                    reducer.keys(document, ('selector', 'state'))
+                    if reducer.digest(document['selector']) != self.reader_context:
+                        raise reducer.EvidenceFailure('binding')
+                    actual = reducer.digest(document['state']['context'])
+                    expected = self.reader_bound if self.reader_bound is not None else actual
+                    value = reducer.validate_native_state(document['state'], expected)
+                    self.reader_bound = actual
+                    success = (200, dict(selector=self.reader_context, state=value))
+                else:
+                    value = reducer.validate_native_state(document, self.reader_context)
+                    success = (200, value)
+        except reducer.EvidenceFailure as error:
+            result = error.receipt
+        except subprocess.TimeoutExpired:
+            result = reducer.failure('timeout', timeout_ms=int(READER_SECONDS * 1000))
         except (OSError, ValueError, TypeError, KeyError, RecursionError, subprocess.SubprocessError):
-            return 503, {}
+            result = reducer.failure(stage, child_rc=rc if rc is not None and -255 <= rc <= 255 else None)
         finally:
+            # Record and deliver the reader's failure while its pipes remain open.
+            # Once mobile evidence fails, keep that attempt closed to further reads.
+            if result is not None:
+                if self.reader_mobile:
+                    self.reader_failed = True
+                result = self.evidence_failure(result)
             try:
                 if child is not None:
                     drain_reader(child)
+            except (OSError, ValueError, subprocess.SubprocessError):
+                if result is None:
+                    result = self.evidence_failure(reducer.failure('cleanup'))
+                    if self.reader_mobile:
+                        self.reader_failed = True
+                # Preserve an existing original failure; cleanup cannot replace it.
             finally:
                 with self.reader_guard:
                     self.reader_process = None
                 self.reader_slot.release()
+        return result if result is not None else success
 
     def stop(self):
         self.stop_reader()
@@ -368,20 +461,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def main():
     import sys
-    command, context = None, None
+    command, context, mobile, failure_directory = None, None, False, None
     if len(sys.argv) == 3:
         with open(sys.argv[2], 'rb') as stream:
             data = stream.read(16385)
         if len(data) > 16384:
             raise ValueError('reader configuration bound')
         config = reducer.strict_json(data)
-        reducer.keys(config, ('command', 'context'))
+        if 'mobile' in config:
+            reducer.keys(config, ('command', 'context', 'mobile'))
+            mobile = reducer.flag(config['mobile'])
+        else:
+            reducer.keys(config, ('command', 'context'))
+        failure_directory = Path(sys.argv[2]).parent
         command, context = config['command'], reducer.digest(config['context'])
         if type(command) is not list or not 2 <= len(command) <= 16 or any(type(arg) is not str or not arg or len(arg) > 8192 or '\x00' in arg for arg in command):
             raise ValueError('reader configuration')
     elif len(sys.argv) != 2:
         raise ValueError('observer arguments')
-    server = RigServer(int(sys.argv[1]), command, context)
+    server = RigServer(int(sys.argv[1]), command, context, mobile, failure_directory)
     def stop(*_args):
         threading.Thread(target=server.stop, daemon=True).start()
     signal.signal(signal.SIGTERM, stop)

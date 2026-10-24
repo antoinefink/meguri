@@ -133,7 +133,7 @@ mg_mt_cleanup_media() {
   rm -rf "$MG_RUN_DIR/device-fixture" "$MG_RUN_DIR/media-proof-config.py"
   rm -f "$MG_RUN_DIR/native-reader-command.json"
   if [ -n "${MG_MT_MEDIA_STAGED:-}" ]; then
-    if ! mg_mac_vm_ssh "rm -rf $(mvl_q "$MG_RUN_DIR/device-fixture" "$MG_RUN_DIR/media-proof-config.py" "$MG_RUN_DIR/native-reader-input.json")" >/dev/null 2>&1; then
+    if ! mg_mac_vm_ssh "rm -rf $(mvl_q "$MG_RUN_DIR/device-fixture" "$MG_RUN_DIR/media-proof-config.py" "$MG_RUN_DIR/native-reader-input.json" "$MG_RUN_DIR/native-reader-bound.json" "$MG_RUN_DIR/native-reader-attempt")" >/dev/null 2>&1; then
       mg_mt_error cleanup "media fixture teardown is unconfirmed"
       return 1
     fi
@@ -245,10 +245,17 @@ mg_mt_archive_stale_fixture_state() {
 }
 
 mg_mt_stage_reader() {
-  local context command wrapper
+  local context command wrapper mode=native-state
   mvl_lease_held "$MG_LEASE_DIR" || return 1
   # The selected app-ID seam above alone chooses the root. HTTP supplies nothing.
-  context="$(mg_mac_vm_ssh "/usr/bin/python3 $(mvl_q "$MG_RUN_DIR/media-proof-config.py") native-context $(mvl_q "$MG_MT_SUPPORT")" 2>/dev/null)" || return 1
+  if [ -n "${MG_MT_READER_DEVICE:-}" ]; then
+    # Freeze only the out-of-band leased selector here. XCTest installs/launches
+    # before the first RPC; that RPC alone may select the actual app container.
+    mode=native-mobile
+    context="$(mg_mac_vm_ssh "/usr/bin/python3 $(mvl_q "$MG_RUN_DIR/media-proof-config.py") mobile-reader-config $(mvl_q "$MG_MT_READER_DEVICE" "${MG_RUN_DIR##*/}")" 2>/dev/null)" || return 1
+  else
+    context="$(mg_mac_vm_ssh "/usr/bin/python3 $(mvl_q "$MG_RUN_DIR/media-proof-config.py") native-context $(mvl_q "$MG_MT_SUPPORT")" 2>/dev/null)" || return 1
+  fi
   printf '%s' "$context" | mg_mac_vm_ssh_in "umask 077; cat >$(mvl_q "$MG_RUN_DIR/native-reader-input.json")" >/dev/null 2>&1 || return 1
   wrapper="$(jq -r .ssh <<<"$MG_MAC_VM")"
   # SSH stdin stays open for the read. EOF/SSH loss terminates and reaps the
@@ -256,19 +263,32 @@ mg_mt_stage_reader() {
   command="$(mvl_q /bin/bash -c 'exec 3<&0
 worker=""; guard=""
 cleanup() {
-  [ -z "$worker" ] || kill -KILL "$worker" 2>/dev/null || true
+  if [ -n "$worker" ]; then
+    kill -TERM "$worker" 2>/dev/null || true
+    ticks=0
+    while kill -0 "$worker" 2>/dev/null && [ "$ticks" -lt 10 ]; do
+      /bin/sleep 0.05
+      ticks=$((ticks + 1))
+    done
+    kill -KILL "$worker" 2>/dev/null || true
+  fi
   [ -z "$guard" ] || kill -TERM "$guard" 2>/dev/null || true
   [ -z "$worker" ] || wait "$worker" 2>/dev/null || true
   [ -z "$guard" ] || wait "$guard" 2>/dev/null || true
 }
 trap cleanup EXIT
 trap '\''exit 143'\'' TERM HUP
-/usr/bin/python3 "$1" native-state "$2" < /dev/null &
+if [ "$3" = native-mobile ]; then
+  IFS= read -r binding <&3 || exit 1
+  printf '\''%s\n'\'' "$binding" | /usr/bin/python3 "$1" native-mobile "$2" &
+else
+  /usr/bin/python3 "$1" native-state "$2" < /dev/null &
+fi
 worker=$!
-(IFS= read -r ignored <&3; kill -KILL "$worker" 2>/dev/null || true) &
+(IFS= read -r ignored <&3; kill -TERM "$worker" 2>/dev/null || true; /bin/sleep 1; kill -KILL "$worker" 2>/dev/null || true) &
 guard=$!
 wait "$worker"; result=$?
-exit "$result"' manual-transfer-reader "$MG_RUN_DIR/media-proof-config.py" "$MG_RUN_DIR/native-reader-input.json")"
+exit "$result"' manual-transfer-reader "$MG_RUN_DIR/media-proof-config.py" "$MG_RUN_DIR/native-reader-input.json" "$mode")"
   printf '%s' "$context" | python3 "$MG_TOOLS/scripts/manual-transfer-config.py" reader-config "$wrapper" "$command" \
     >"$MG_RUN_DIR/native-reader-command.json"
 }
@@ -402,6 +422,7 @@ mg_manual_transfer_check() {
     test_destination="id=$leased_device"
   fi
   mg_on_exit mg_mt_cleanup
+  MG_MT_READER_DEVICE="$leased_device"
   if ! mg_mt_set_native_support "$selected_platform" "$leased_device"; then
     mg_mt_error native-container "the VM development app container could not be established"
     return 0
