@@ -22,7 +22,7 @@ public struct HomeView: View {
                         .accessibilityIdentifier("home.collection.error")
                 }
                 content
-                if collection.state == .ready || collection.state == .noFile {
+                if collection.state == .ready {
                     HomeCollectionImportButton(canPresent: collection.entry.canPresent) { collection.entry.present() }
                 }
             }
@@ -43,7 +43,8 @@ public struct HomeView: View {
         switch collection.state {
         case .unopened, .loading: LoadingStateView(Text("Opening collection…", bundle: .module))
         case .noFile:
-            HomeCollectionEmptyContent()
+            HomeCollectionEmptyContent(canPresent: collection.entry.canPresent,
+                importAction: { collection.entry.present() })
         case .unavailable:
             LoadingStateView(Text("Collection is busy…", bundle: .module))
         case .failed(let message):
@@ -82,9 +83,16 @@ public struct HomeView: View {
 }
 
 struct HomeCollectionEmptyContent: View {
+    var canPresent: Bool = true
+    var importAction: (() -> Void)? = nil
+
     var body: some View {
         EmptyStateView(Text("No Collection", bundle: .module), systemImage: "rectangle.stack",
-            description: Text("Import a collection-only .colpkg to study your own cards on this device.", bundle: .module))
+            description: Text("Import a collection-only .colpkg to study your own cards on this device.", bundle: .module)) {
+            if let importAction {
+                HomeCollectionImportButton(canPresent: canPresent, action: importAction)
+            }
+        }
     }
 }
 
@@ -159,6 +167,7 @@ public struct HomeSidebarDecks: View {
             emptyGuidance
                 .font(.subheadline)
                 .foregroundStyle(.token(.textSecondary))
+                .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier("home.sidebar.guidance")

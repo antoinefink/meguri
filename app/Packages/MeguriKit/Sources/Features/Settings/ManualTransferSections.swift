@@ -185,7 +185,7 @@ public struct ManualTransferSections: View {
                                 }
                                 .buttonStyle(.plain)
                                 .disabled(model.busy)
-                                .accessibilityIdentifier("settings.anki.copy.\(entry.id).\(index)")
+                                .accessibilityIdentifier("settings.anki.copy.\(entry.id)-\(index)")
                             }
                         }
                     }

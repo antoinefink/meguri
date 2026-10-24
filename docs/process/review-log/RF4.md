@@ -1399,3 +1399,9 @@ the existing `media.staging` namespace was absent from alias protection.
 Privacy `084656Z-35060` flagged five tracked files; full input check
 `084902Z-37034`, including both new files, retained those same five findings.
 Keep the formatted patch for the next filtered fixer. This is incomplete work.
+
+UI patch `083459Z-25942`: Home and copy-ID changes only.
+`drive/085327Z-40094` passed 12 steps with zero issues. The screenshots show
+wrapped sidebar text and Import Collection below its message. Settings passed
+the three requested widths. R2: no P0-P2. Source privacy: passed.
+Media copy and its test remain unapplied. Full visual and audit checks are pending.
