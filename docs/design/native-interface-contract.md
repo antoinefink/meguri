@@ -10,7 +10,7 @@ The HTML specifies hierarchy and behavior. It does not specify native control me
 - Use system styles, control sizes and fonts by default. Change styling only to meet a task or accessibility need.
 - Keep Settings category navigation visible without a sidebar-toggle toolbar button. Align row labels and controls vertically; avoid excess row space caused by nested control frames.
 - Keep the existing collection, review, import, export and server-transfer behavior functional.
-- Keep iOS and iPadOS source paths compatible. This preview targets macOS.
+- Apply shared control lessons to iOS and iPadOS while keeping their native touch targets and navigation patterns. Inspect their native renders too. The agreed workspace composition in this contract targets macOS.
 - Antoine's newer direction overrides R6, R109 and R110 only for the separate native macOS Settings scene.
 - Quiet corners overrides R21's option to reveal the sidebar during review. Restore the deck workspace after review.
 - Preserve the underlying navigation and saved-answer semantics of R5, R12, R13 and R22.

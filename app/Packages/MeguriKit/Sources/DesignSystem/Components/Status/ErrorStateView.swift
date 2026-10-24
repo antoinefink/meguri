@@ -48,6 +48,10 @@ public struct ErrorStateView: View {
                 }
                 .accessibilityIdentifier(retry.identifier)
                 .stateViewActions()
+                #if os(macOS)
+                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                .contentShape(Rectangle())
+                #endif
             }
         }
         // The Mac sizes the view to its content: centred in its container

@@ -79,3 +79,27 @@ visual checks remain in progress. Antoine chose system SwiftUI styles
 and asked to use them across all Apple platforms. Shared state actions,
 review button sizing and transfer action styles are the remaining bounded
 source findings for that visual pass.
+
+Shared-control run `cleanroom/20261024T122650Z-93034` keeps regular Mac
+review/state buttons, native Form action styling and touch targets. Native
+iPhone inspection found the same URL row issue; the shared fix also sets
+the URL keyboard and removes repeated placeholder copy. The standalone
+build `build-app/20261024T122840Z-95007` and privacy check passed. Review
+found three Mac state actions needing outer target frames; the two-file
+fix `cleanroom/20261024T123010Z-99856` closes that finding. Independent source
+review is clear for the bounded patch.
+
+Actual synthetic empty-collection drives ran on iPhone and iPad:
+`drive/20261024T122416Z-88382` and `drive/20261024T122543Z-91440`. Their
+Home and Settings images were inspected. The drive checks remain red for
+missing cell identifiers and title/content overlap reports. No claim of an
+accessibility pass is made. They released their simulator leases.
+
+`snapshots/20261024T122911Z-96378` built both targets and returned native
+Settings screenshots were returned for iOS and iPadOS. The inspected
+iPhone URL row is aligned. Its filter selected more matrix variants than
+intended. The receipt records 12 pass, 28 new and 60 deferred; Mac test-host
+startup also failed before connection. Preserve this failed receipt and
+all returned output. No baseline was changed and no full gate was run.
+`similarity/20261024T123055Z-1894` scanned 28 files with zero flags.
+`static-checks/20261024T123058Z-2222` passed the commit trailer check.

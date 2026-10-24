@@ -48,11 +48,19 @@ public struct ReviewView: View {
             EmptyStateView(Text("Waiting for Learning", bundle: .module), systemImage: "clock",
                 description: Text("Your next learning card is not ready yet.", bundle: .module)) {
                     Button { model.retry() } label: { Text("Check Now", bundle: .module) }.accessibilityIdentifier("review.session.refresh")
+                        #if os(macOS)
+                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                        .contentShape(Rectangle())
+                        #endif
                 }
         case .finished:
             EmptyStateView(Text("Finished for Now", bundle: .module), systemImage: "checkmark.circle",
                 description: Text("Your answers have been recorded. You can go back to your last answer or close the session.", bundle: .module)) {
                     Button(action: close) { Text("Done", bundle: .module) }.accessibilityIdentifier("review.session.done")
+                        #if os(macOS)
+                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                        .contentShape(Rectangle())
+                        #endif
                 }
         case .error:
             ErrorStateView(Text("Review Paused", bundle: .module), message: Text(verbatim: model.notice ?? ""),
