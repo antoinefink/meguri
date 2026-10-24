@@ -118,6 +118,9 @@ struct Intent {
 struct State {
     active: Publication,
     intent: Option<Intent>,
+    /// R6 activation chain survives policy write failure and further replacements.
+    #[serde(default)]
+    replacements: Vec<ReplacementEvidence>,
     #[serde(flatten)]
     extra: BTreeMap<String, Value>,
 }
@@ -173,6 +176,22 @@ pub struct ReplacementEvidence {
     pub old_file: Option<FileIdentity>,
 }
 
+/// Constructible only by checking the durable R6 chain against its active record.
+/// Consumers must hold the collection's lifecycle slot until their CAS completes.
+#[derive(Clone, Debug)]
+pub struct LocalReplacementSuccessor {
+    before: PublicationId,
+    after: PublicationId,
+}
+impl LocalReplacementSuccessor {
+    pub fn before(&self) -> PublicationId {
+        self.before
+    }
+    pub fn after(&self) -> PublicationId {
+        self.after
+    }
+}
+
 /// Read access to the device record. Collection ownership must cover these
 /// calls, including queued-work token validation immediately before sending.
 #[derive(Clone, Debug)]
@@ -193,6 +212,53 @@ impl DeviceState {
                 .and_then(|s| s.extra.get("lastReplacement").cloned())
                 .map(|v| serde_json::from_value(v).map_err(|_| failure("unreadable activation evidence")))
                 .transpose()
+        })
+    }
+    /// Offline proof, never inferred from process generation or collection absence.
+    /// Legacy lastReplacement is the first retained link on the next activation.
+    pub fn local_replacement_successor(
+        &self,
+        before: PublicationId,
+    ) -> Result<Option<LocalReplacementSuccessor>, StorageError> {
+        if !std::fs::symlink_metadata(&self.live)?.file_type().is_file() {
+            return Ok(None);
+        }
+        sidecar::read_document(&self.path, |doc| {
+            let Some(state) = decode(doc)? else { return Ok(None) };
+            bound(&state, &state.active.binding)?;
+            if state.intent.is_some() || state.active.identity == before {
+                return Ok(None);
+            }
+            let chain = retained_replacements(&state)?;
+            let Some(start) = chain.iter().position(|e| e.prior.identity == before) else {
+                return Ok(None);
+            };
+            if !matches!(
+                chain[start].reason,
+                crate::replace::ReplaceReason::ColpkgImport | crate::replace::ReplaceReason::Restore
+            ) {
+                return Ok(None);
+            }
+            let mut successor = &chain[start].prior;
+            for evidence in &chain[start..] {
+                if evidence.prior.identity != successor.identity
+                    || evidence.prior.binding != successor.binding
+                    || evidence.prior.identity == evidence.candidate.identity
+                    || evidence.prior.binding != evidence.candidate.binding
+                {
+                    return Ok(None);
+                }
+                successor = &evidence.candidate;
+            }
+            // Decisions may be resolved independently; persistent identity and
+            // binding still have to name the active verified successor.
+            if successor.identity != state.active.identity || successor.binding != state.active.binding {
+                return Ok(None);
+            }
+            Ok(Some(LocalReplacementSuccessor {
+                before,
+                after: successor.identity,
+            }))
         })
     }
     pub fn publication(&self) -> Result<Option<Publication>, StorageError> {
@@ -278,6 +344,7 @@ pub(crate) fn ensure(live: &Path, binding: &AccountBinding, random: &dyn RandomS
                     decision: PublicationDecision::Clear,
                 },
                 intent: None,
+                replacements: Vec::new(),
                 extra: BTreeMap::new(),
             },
         )
@@ -395,10 +462,28 @@ pub(crate) fn begin(
         put(doc, &state)
     })
 }
+fn retained_replacements(state: &State) -> Result<Vec<ReplacementEvidence>, StorageError> {
+    if !state.replacements.is_empty() {
+        return Ok(state.replacements.clone());
+    }
+    state
+        .extra
+        .get("lastReplacement")
+        .cloned()
+        .map(|value| {
+            serde_json::from_value(value)
+                .map(|e| vec![e])
+                .map_err(|_| failure("unreadable activation evidence"))
+        })
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
 pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
     sidecar::update_document(&sidecar_path(live), |doc| {
         let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing activation journal"))?;
         bound(&state, binding)?;
+        let mut retained = retained_replacements(&state)?;
         let intent = state.intent.as_mut().ok_or_else(|| failure("missing intent"))?;
         state.active = intent.candidate.clone();
         intent.phase = Phase::Activated;
@@ -409,6 +494,10 @@ pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), Stor
             candidate_file: intent.candidate_file.clone(),
             old_file: intent.old_file.clone(),
         };
+        if retained.last() != Some(&evidence) {
+            retained.push(evidence.clone());
+        }
+        state.replacements = retained;
         state.extra.insert(
             "lastReplacement".into(),
             serde_json::to_value(evidence).map_err(failure)?,

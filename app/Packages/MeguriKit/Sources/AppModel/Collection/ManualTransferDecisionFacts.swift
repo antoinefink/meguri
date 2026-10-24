@@ -66,14 +66,18 @@ public extension ManualTransferRecord {
         if let media {
             let totals = media.counters
             let status: String
-            switch media.stage {
-            case .complete: status = "Supported media complete."
-            case .awaitingConsent: status = "Waiting for your decision. The operation is partial."
-            case .declined: status = "Selected media remains for later. The operation is partial; saved effects remain."
-            case .running: status = "Unfinished media work. Inspect before resuming; saved effects remain."
-            case .cancelled: status = "Cancelled. The operation is partial; saved effects remain."
-            case .interrupted: status = "Interrupted by the system. The operation is partial; saved effects remain."
-            case .failed: status = "Failed. The operation is partial; saved effects remain."
+            if phase == .superseded {
+                status = "Partial operation superseded by a verified local collection replacement. Media cannot resume for the replaced collection. Saved effects and any unknown effects remain recorded."
+            } else {
+                switch media.stage {
+                case .complete: status = "Supported media complete."
+                case .awaitingConsent: status = "Waiting for your decision. The operation is partial."
+                case .declined: status = "Selected media remains for later. The operation is partial; saved effects remain."
+                case .running: status = "Unfinished media work. Inspect before resuming; saved effects remain."
+                case .cancelled: status = "Cancelled. The operation is partial; saved effects remain."
+                case .interrupted: status = "Interrupted by the system. The operation is partial; saved effects remain."
+                case .failed: status = "Failed. The operation is partial; saved effects remain."
+                }
             }
             add("media.stage", "Media", status)
             add("media.downloaded", "Media received", "\(totals.downloadedFiles) files, \(totals.downloadedDeletions) deletions, \(totals.bytesDownloaded) file bytes recorded.")

@@ -178,6 +178,7 @@ pub enum TransferPhase {
     Activating,
     CollectionComplete,
     MediaIncomplete,
+    Superseded,
     Complete,
     Cancelled,
     Failed,
@@ -194,6 +195,7 @@ impl From<policy::Phase> for TransferPhase {
             policy::Phase::Activating => Self::Activating,
             policy::Phase::CollectionComplete => Self::CollectionComplete,
             policy::Phase::MediaIncomplete => Self::MediaIncomplete,
+            policy::Phase::Superseded => Self::Superseded,
             policy::Phase::Complete => Self::Complete,
             policy::Phase::Cancelled => Self::Cancelled,
             policy::Phase::Failed => Self::Failed,
@@ -781,7 +783,25 @@ impl ManualTransferSession {
     pub fn start_history(&self) -> Result<ManualTransferJob, CoreError> {
         callback::enter("ManualTransferSession::start_history");
         let root = self.config.manual_transfer_directory.clone();
+        // Read history without requiring an open collection. Reconcile a verified
+        // successor only after replacement and media work have stopped.
+        let host = match runtime::host() {
+            Ok(host) => Some(host),
+            Err(CoreError::Unavailable { .. }) => None,
+            Err(error) => return Err(error),
+        };
         worker("read manual transfer history", move |_| {
+            if let Some(host) = host
+                && host.engine().slot_holder().is_none()
+                && !host
+                    .engine()
+                    .jobs()
+                    .running()
+                    .iter()
+                    .any(|job| job.name == meguri_engine::JobKind::MediaSync.name())
+            {
+                host.reconcile_manual_transfer_replacement()?;
+            }
             let entries = policy::TransferPolicy::new(&root)
                 .history()?
                 .into_iter()

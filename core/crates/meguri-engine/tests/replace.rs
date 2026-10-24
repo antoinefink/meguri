@@ -1249,3 +1249,33 @@ fn initial_import_rechecks_absence_under_ownership_before_any_mutation() {
         assert_eq!(candidate_after, candidate_bytes);
     }
 }
+
+#[test]
+fn legacy_r6_last_replacement_migrates_to_chain_before_second_activation() {
+    let h = Harness::open();
+    let before = publication(&h.path).identity;
+    for legacy in [true, false] {
+        let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
+        slot.replace_verified(stage(h.dir.path(), "schema-18.anki2"), ReplaceReason::Restore, |_| {
+            Ok(())
+        })
+        .unwrap();
+        drop(slot);
+        if legacy {
+            // Keep the first activation in the legacy single-record form.
+            // The next activation must carry that link into the proof chain.
+            meguri_storage::sidecar::update_document(&h.dir.path().join("meguri-sidecar.json"), |doc| {
+                let device_fields = doc["deviceState"].as_object_mut().unwrap();
+                device_fields.remove("replacements");
+                Ok(())
+            })
+            .unwrap();
+        }
+    }
+    let device = DeviceState::for_collection(&h.path);
+    let proof = device.local_replacement_successor(before).unwrap().unwrap();
+    assert!(proof.before() == before);
+    assert!(proof.after() == publication(&h.path).identity);
+    assert!(proof.after() != before);
+    h.engine.close().unwrap();
+}

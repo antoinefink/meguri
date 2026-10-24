@@ -111,3 +111,22 @@ extension ManualTransferMappingTests {
         }
     }
 }
+
+
+extension ManualTransferMappingTests {
+    @Test func supersededPartialMapsWithoutResumeOrWholeSuccess() {
+        let record = ManualTransferRecord(.init(id: "superseded-partial", configuredEndpoint: "https://example.test/",
+            targetEndpoint: "https://example.test/", direction: .export, phase: .superseded, acceptance: .exactOk,
+            boundary: .interrupted, local: nil, remoteHasNoCards: nil, remote: nil, servedCounts: nil,
+            preparedMs: 1, generation: 2, collectionComplete: true, mediaSelected: true, revision: 7,
+            media: .init(stage: .interrupted,
+                counters: .init(uploadedFiles: 2, uploadedDeletions: 1, downloadedFiles: 3, downloadedDeletions: 1,
+                    checked: 9, bytesDownloaded: 100, bytesUploaded: 50, resynced: false, oversized: [], empty: [], awaiting: 4),
+                remoteOutcomeUnknown: true, exclusionsVerified: false, failureKind: "interrupted"),
+            copies: [], nextEligibleMs: nil))
+        #expect(record.phase == .superseded && record.collectionComplete && record.mediaSelected)
+        #expect(!record.canResumeMedia && !record.canInspectRecovery)
+        #expect(record.media?.stage == .interrupted && record.media?.remoteOutcomeUnknown == true)
+        #expect(record.media?.counters.uploadedFiles == 2 && record.nextEligibleMilliseconds == nil)
+    }
+}

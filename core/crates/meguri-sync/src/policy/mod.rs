@@ -61,6 +61,8 @@ pub enum Phase {
     Activating,
     CollectionComplete,
     MediaIncomplete,
+    /// Terminal partial outcome: a proven local replacement superseded media.
+    Superseded,
     Complete,
     Cancelled,
     Failed,
@@ -393,7 +395,9 @@ impl TransferPolicy {
                 return Err(PolicyError::Stale);
             }
             let prior = state.operations.get(operation.id.as_str()).ok_or(PolicyError::Stale)?;
-            if prior.scope != operation.scope
+            if prior.phase == Phase::Superseded
+                || operation.phase == Phase::Superseded
+                || prior.scope != operation.scope
                 || prior.account != operation.account
                 || prior.configured_endpoint != operation.configured_endpoint
                 || prior.direction != operation.direction
@@ -419,6 +423,39 @@ impl TransferPolicy {
         })?;
         operation.revision = next;
         Ok(())
+    }
+    /// Retire a partial transfer while the caller owns the replacement slot.
+    /// R6 must start at the publication saved by this operation.
+    pub(crate) fn retire_replaced_media(
+        &self,
+        expected: &Operation,
+        proof: &meguri_engine::device_state::LocalReplacementSuccessor,
+    ) -> Result<Operation, PolicyError> {
+        let origin = proof.before();
+        let destination = proof.after();
+        if origin == destination || !can_supersede_partial_media(expected) {
+            return Err(PolicyError::Invalid);
+        }
+        match expected.resulting_publication {
+            Some(publication) if publication == origin => self.compare_and_supersede_partial_media(expected),
+            _ => Err(PolicyError::Invalid),
+        }
+    }
+    fn compare_and_supersede_partial_media(&self, expected: &Operation) -> Result<Operation, PolicyError> {
+        self.update(|state| {
+            let current = state.operations.get(expected.id.as_str()).ok_or(PolicyError::Stale)?;
+            if current != expected || state.active.as_ref() != Some(&current.id) {
+                return Err(PolicyError::Stale);
+            }
+            // Clone the complete stored record: counters, effects and unknown
+            // outcomes survive; this transaction has no success-policy writes.
+            let mut retired = current.clone();
+            retired.phase = Phase::Superseded;
+            retired.revision = retired.revision.checked_add(1).ok_or(PolicyError::Invalid)?;
+            state.operations.insert(retired.id.0.clone(), retired.clone());
+            state.active = None;
+            Ok(retired)
+        })
     }
     /// The caller retains the last successfully saved snapshot under its flight
     /// guard. Per-file UI progress with identical durable facts needs no sidecar
@@ -486,6 +523,33 @@ impl TransferPolicy {
         })
     }
 }
+pub(crate) fn can_supersede_partial_media(op: &Operation) -> bool {
+    match op.phase {
+        Phase::Complete | Phase::Superseded => false,
+        _ => partial_media_facts_permit_supersession(op),
+    }
+}
+fn partial_media_facts_permit_supersession(op: &Operation) -> bool {
+    if op.scope != Scope::CollectionAndMedia || !op.collection_complete {
+        return false;
+    }
+    if op.resulting_publication.is_none() || op.receipt.is_some() {
+        return false;
+    }
+    let collection_outcome_permits_supersession = match op.direction {
+        Direction::Import => op.acceptance != Acceptance::PossiblyAccepted,
+        Direction::Export => op.acceptance == Acceptance::ExactOk,
+    };
+    let unfinished_media = match op.media.stage {
+        MediaStage::Running | MediaStage::Complete => false,
+        MediaStage::AwaitingConsent
+        | MediaStage::Declined
+        | MediaStage::Cancelled
+        | MediaStage::Interrupted
+        | MediaStage::Failed => true,
+    };
+    collection_outcome_permits_supersession && unfinished_media
+}
 fn selected_complete(op: &Operation) -> bool {
     op.collection_complete
         && (op.scope == Scope::CollectionOnly
@@ -518,10 +582,18 @@ fn decode(doc: Option<&serde_json::Map<String, serde_json::Value>>) -> Result<St
         return Err(invalid());
     }
     for (id, op) in &state.operations {
-        let unresolved = !matches!(op.phase, Phase::Complete | Phase::Failed | Phase::Cancelled)
-            || (op.acceptance == Acceptance::PossiblyAccepted)
-            || (op.acceptance == Acceptance::ExactOk && op.phase != Phase::Complete)
-            || (op.activation_identity.is_some() && op.phase != Phase::Complete);
+        if op.phase == Phase::Superseded {
+            // Superseded records retain partial-media facts and cannot hold admission.
+            // Validate those facts with the conditions required before supersession.
+            if state.active.as_ref() == Some(&op.id) || !partial_media_facts_permit_supersession(op) {
+                return Err(invalid());
+            }
+        }
+        let unresolved = op.phase != Phase::Superseded
+            && (!matches!(op.phase, Phase::Complete | Phase::Failed | Phase::Cancelled)
+                || (op.acceptance == Acceptance::PossiblyAccepted)
+                || (op.acceptance == Acceptance::ExactOk && op.phase != Phase::Complete)
+                || (op.activation_identity.is_some() && op.phase != Phase::Complete));
         if id != op.id.as_str()
             || id.len() != 33
             || id.as_bytes()[16] != b'-'
@@ -781,6 +853,51 @@ mod tests {
         saved.remove("resulting_publication");
         std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
         assert_eq!(policy.get(&op.id).unwrap(), op);
+    }
+    #[test]
+    fn partial_media_snapshot_mismatch_preserves_storage_and_admission() {
+        // Policy snapshot conflicts are independent of activation proof.
+        // Host tests cover producing that proof through verified replacements.
+        let root = tempfile::tempdir().unwrap();
+        let policy = TransferPolicy::new(root.path());
+        let account = AccountRef::derive(&Endpoint::parse("http://127.0.0.1/").unwrap(), "synthetic").unwrap();
+        let op = policy.begin(operation(account, Direction::Import), 1, 0).unwrap();
+        let path = root.path().join("manual-transfers.json");
+        let bytes = std::fs::read(&path).unwrap();
+        let conflicts = [
+            Operation {
+                id: OperationId("0000000000000002-0000000000000001".into()),
+                ..op.clone()
+            },
+            Operation {
+                revision: op.revision + 1,
+                ..op.clone()
+            },
+            Operation {
+                resulting_publication: Some(serde_json::from_str("[3,5]").unwrap()),
+                ..op.clone()
+            },
+            Operation {
+                collection_complete: true,
+                ..op.clone()
+            },
+        ];
+        for snapshot in conflicts {
+            let error = policy.compare_and_supersede_partial_media(&snapshot).unwrap_err();
+            assert_eq!(error, PolicyError::Stale);
+            assert_eq!(bytes, std::fs::read(&path).unwrap());
+            assert_eq!(policy.active().unwrap(), Some(op.clone()));
+        }
+        // A new operation must not be released by any snapshot of its predecessor.
+        let mut closed = op.clone();
+        closed.phase = Phase::Cancelled;
+        policy.end_before_activation(&mut closed).unwrap();
+        let newer = policy
+            .begin(operation(op.account.clone(), Direction::Import), 2, 0)
+            .unwrap();
+        let predecessor_error = policy.compare_and_supersede_partial_media(&op).unwrap_err();
+        assert_eq!(predecessor_error, PolicyError::Stale);
+        assert_eq!(policy.active().unwrap(), Some(newer));
     }
     #[test]
     fn unreadable_history_is_retained_and_refused() {

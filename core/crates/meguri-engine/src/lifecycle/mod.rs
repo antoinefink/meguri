@@ -593,9 +593,9 @@ impl Engine {
         if kind == JobKind::Open {
             self.jobs().pause(false);
         }
-        if kind == JobKind::MediaSync && self.slot_holder() == Some(LongOp::OneWaySync) {
+        if kind == JobKind::MediaSync && self.slot_holder().is_some_and(LongOp::replaces_collection) {
             return Err(EngineError::Busy {
-                running_op: LongOp::OneWaySync.name().into(),
+                running_op: self.slot_holder().map_or("collection replacement", LongOp::name).into(),
             });
         }
         let slot = match kind.long_op() {
@@ -699,6 +699,28 @@ impl<'s> Exclusive<'s> {
             if let Err(error) = participant.flush() {
                 core.exec.review_accepting.store(true, Ordering::Release);
                 return Err(error);
+            }
+        }
+        // The held replacement slot excludes new MediaSync admission. Drain
+        // the entire worker (including its final policy callback) before any
+        // swap; no reader or lifecycle lock is held while cancellation settles.
+        let events = engine.stream().subscribe();
+        loop {
+            let media: Vec<_> = engine
+                .jobs()
+                .running()
+                .into_iter()
+                .filter(|job| job.name == JobKind::MediaSync.name())
+                .collect();
+            if media.is_empty() {
+                break;
+            }
+            for job in media {
+                job.cancel.interrupt();
+            }
+            if events.recv().is_none() {
+                core.exec.review_accepting.store(true, Ordering::Release);
+                return Err(EngineError::unavailable("media drain stream closed"));
             }
         }
         let privilege = Privilege(engine.new_token());

@@ -78,7 +78,7 @@ public final class PreparedManualMedia: Sendable {
     init(record: ManualTransferRecord) { self.raw = nil; self.record = record }
 }
 public enum ManualTransferPhase: String, Sendable, Equatable {
-    case preparing, preview, confirmedIntent, transferring, remoteAccepted, activating, collectionComplete, mediaIncomplete, complete, cancelled, failed, needsDecision
+    case preparing, preview, confirmedIntent, transferring, remoteAccepted, activating, collectionComplete, mediaIncomplete, superseded, complete, cancelled, failed, needsDecision
     init(_ raw: MeguriCoreBindings.TransferPhase) {
         switch raw {
         case .preparing: self = .preparing
@@ -89,6 +89,7 @@ public enum ManualTransferPhase: String, Sendable, Equatable {
         case .activating: self = .activating
         case .collectionComplete: self = .collectionComplete
         case .mediaIncomplete: self = .mediaIncomplete
+        case .superseded: self = .superseded
         case .complete: self = .complete
         case .cancelled: self = .cancelled
         case .failed: self = .failed
@@ -205,7 +206,7 @@ public struct ManualTransferRecord: Sendable, Identifiable {
     }
 }
 public extension ManualTransferRecord {
-    var canResumeMedia: Bool { collectionComplete && mediaSelected && phase != .complete }
+    var canResumeMedia: Bool { collectionComplete && mediaSelected && phase != .complete && phase != .superseded }
     var canInspectRecovery: Bool {
         !collectionComplete && acceptance != .possiblyAccepted && [.preview, .needsDecision, .remoteAccepted, .activating].contains(phase)
     }

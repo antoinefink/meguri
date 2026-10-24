@@ -283,6 +283,41 @@ impl ManualTransfers {
     pub fn policy(&self) -> &TransferPolicy {
         &self.policy
     }
+    /// Offline local retry, serialized with every verified replacement and new
+    /// admission by the existing lifecycle slot. Never opens or contacts a server.
+    pub fn reconcile_local_replacement(&self, slot: &SlotGuard) -> Result<Option<Operation>> {
+        let _flight = Flight::acquire()?;
+        self.reconcile_replacement_under_slot(slot)
+    }
+    fn reconcile_replacement_under_slot(&self, slot: &SlotGuard) -> Result<Option<Operation>> {
+        if !slot.belongs_to(&self.inputs.engine) || !slot.op().replaces_collection() {
+            return Err(TransferError::Unavailable);
+        }
+        // A process counter or an absent collection cannot supply R6 authority.
+        let collection = match self.inputs.engine.collection() {
+            Ok(collection) => collection,
+            Err(_) => return Ok(None),
+        };
+        let _reader = collection.reader(meguri_storage::ReaderRole::Query)?;
+        if collection.path() != self.live() {
+            return Err(TransferError::Unavailable);
+        }
+        let operation = match self.policy.active()? {
+            Some(operation) if can_supersede_partial_media(&operation) => operation,
+            _ => return Ok(None),
+        };
+        let Some(selected_publication) = operation.resulting_publication else {
+            return Ok(None);
+        };
+        let device = DeviceState::for_collection(collection.path());
+        let Some(successor) = device.local_replacement_successor(selected_publication)? else {
+            return Ok(None);
+        };
+        self.policy
+            .retire_replaced_media(&operation, &successor)
+            .map(Some)
+            .map_err(Into::into)
+    }
     fn live(&self) -> PathBuf {
         self.inputs.collection_directory.join("collection.anki2")
     }
@@ -429,6 +464,7 @@ impl ManualTransfers {
         self.check_layout()?;
         self.preflight(direction, None)?;
         files::directory(&self.inputs.state_directory)?;
+        self.reconcile_replacement_under_slot(slot)?;
         let now = self.inputs.clock.now_ms();
         let operation = Operation {
             id: OperationId(String::new()),

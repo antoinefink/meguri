@@ -225,6 +225,7 @@ public struct ManualTransferSections: View {
         return formatter.string(from: Date(timeIntervalSince1970: Double(recordedInstant) / 1_000))
     }
     private func status(_ record: ManualTransferRecord) -> String {
+        if record.phase == .superseded { return "Partial operation superseded by a verified local collection replacement. Media Resume is unavailable; saved effects and retained copies remain." }
         if record.phase == .complete { return record.mediaSelected ? "Collection and supported media complete. Excluded files were not transferred." : "Collection complete. Media was excluded." }
         if record.collectionComplete { return "Collection complete. The whole selected operation is incomplete." }
         switch record.phase {

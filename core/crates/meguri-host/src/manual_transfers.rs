@@ -55,6 +55,15 @@ impl CoreHost {
     pub fn manual_transfer_history(&self) -> &TransferPolicy {
         self.manual_transfers.policy()
     }
+    /// Explicit local-only reconciliation for history and recovery presentation.
+    /// Policy write errors remain visible; Files does not depend on this retry.
+    pub fn reconcile_manual_transfer_replacement(&self) -> Result<Option<Operation>, TransferError> {
+        if self.manual_transfer_history().active()?.is_none() {
+            return Ok(None);
+        }
+        let slot = self.engine().acquire_slot(meguri_engine::LongOp::OneWaySync)?;
+        self.manual_transfers.reconcile_local_replacement(&slot)
+    }
     pub fn prepare_manual_transfer(
         &self,
         access: TransferAccess,

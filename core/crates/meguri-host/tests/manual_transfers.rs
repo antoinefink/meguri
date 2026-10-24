@@ -1625,7 +1625,10 @@ fn rf4_media_resume_rejects_unrelated_local_replacement() {
     ]);
     let fresh = prepare(&host, &script, Direction::Import, Scope::CollectionOnly);
     assert!(
-        !matches!(&fresh, Err(TransferError::Policy(meguri_sync::policy::PolicyError::Overlap(_)))),
+        !matches!(
+            &fresh,
+            Err(TransferError::Policy(meguri_sync::policy::PolicyError::Overlap(_)))
+        ),
         "verified replacement must release the old media operation's overlap guard"
     );
     let fresh = fresh.unwrap_or_else(|_| panic!("fresh explicit transfer must reach preview"));
@@ -1635,32 +1638,42 @@ fn rf4_media_resume_rejects_unrelated_local_replacement() {
     assert_eq!(script.count(Method::Upload), 0);
 
     let history = host.manual_transfer_history();
-    let old = history.get(&before.id).unwrap_or_else(|_| panic!("old partial history must remain"));
+    let old = history
+        .get(&before.id)
+        .unwrap_or_else(|_| panic!("old partial history must remain"));
     assert!(
-        old.id == before.id && old.account == before.account
+        old.id == before.id
+            && old.account == before.account
             && old.configured_endpoint == before.configured_endpoint
             && old.target_endpoint == before.target_endpoint
-            && old.direction == before.direction && old.scope == before.scope,
+            && old.direction == before.direction
+            && old.scope == before.scope,
         "replacement must preserve historical transfer identity and scope"
     );
     assert!(old.collection_complete && old.phase != Phase::Complete && old.receipt.is_none());
     assert!(old.media.stage != meguri_sync::policy::MediaStage::Complete);
     assert!(
-        old.media.consent == before.media.consent && old.media.counters == before.media.counters
+        old.media.consent == before.media.consent
+            && old.media.counters == before.media.counters
             && old.media.remote_outcome_unknown == before.media.remote_outcome_unknown
             && old.media.exclusions_verified == before.media.exclusions_verified
             && old.media.failure_kind == before.media.failure_kind,
         "replacement must preserve media consent and effect facts"
     );
     assert!(
-        old.candidate == before.candidate && old.original == before.original
-            && old.server_copy == before.server_copy && old.safety_backups == before.safety_backups
-            && old.acceptance == before.acceptance && old.activation_identity == before.activation_identity
+        old.candidate == before.candidate
+            && old.original == before.original
+            && old.server_copy == before.server_copy
+            && old.safety_backups == before.safety_backups
+            && old.acceptance == before.acceptance
+            && old.activation_identity == before.activation_identity
             && old.resulting_publication == before.resulting_publication,
         "replacement must preserve collection and retained artifact facts"
     );
     assert!(
-        history.next_eligible_at(&before.account).unwrap_or_else(|_| panic!("cooldown history must remain"))
+        history
+            .next_eligible_at(&before.account)
+            .unwrap_or_else(|_| panic!("cooldown history must remain"))
             == cooldown,
         "replacement and fresh preview must grant no success cooldown"
     );
@@ -1869,4 +1882,513 @@ fn rf4_media_drain_uses_first_cause_of_actual_admitted_job_token() {
         host.engine().resume().unwrap();
         host.close().unwrap();
     }
+}
+
+// M5.1 uses the real transfer producer and R6 lifecycle for every matrix cell.
+fn m51_selected(root: &Path, direction: Direction) -> (CoreHost, HostConfig, Operation) {
+    if direction == Direction::Export {
+        return selected_collection(root);
+    }
+    let (host, config) = seeded(&root.join("local"));
+    let (_, bytes) = server(&root.join("server"));
+    let script = Script::new(vec![
+        (Method::Meta, Reply::Bytes(meta(NOW - 2000, 7))),
+        (Method::Download, Reply::Bytes(bytes)),
+        (Method::Meta, Reply::Bytes(meta(NOW - 1000, 8))),
+        (Method::Meta, Reply::Bytes(meta(NOW - 1000, 8))),
+    ]);
+    let preview = prepare(&host, &script, direction, Scope::CollectionAndMedia).unwrap();
+    let op = confirm(&host, &script, preview).unwrap();
+    script.assert_done();
+    (host, config, op)
+}
+fn m51_replace(host: &CoreHost, config: &HostConfig, op: &Operation, files: bool) {
+    let package_directory = tempfile::tempdir().unwrap();
+    let source = match op.direction {
+        Direction::Export => config
+            .backups_directory
+            .join(&op.server_copy.as_ref().unwrap().artifact.name),
+        Direction::Import => {
+            // Import retains a standalone candidate, not an Export server copy.
+            // Package that closed artifact for the ordinary Files/Restore APIs.
+            let candidate = config
+                .manual_transfer_directory
+                .join(op.id.as_str())
+                .join(&op.candidate.as_ref().unwrap().name);
+            let package = package_directory.path().join("replacement.colpkg");
+            meguri_package::write_collection_package_from_standalone(
+                &candidate,
+                &package,
+                &meguri_package::CollectionPackageWriteContext {
+                    collection_directory: &config.collection_directory,
+                    purpose: meguri_storage::atomic_file::Purpose::Export,
+                    finalisation: meguri_package::Finalisation::ExclusiveCreate,
+                    clock: config.clock.as_ref(),
+                    random: config.random.as_ref(),
+                    space: config.disk_space_provider.as_ref(),
+                    is_cancelled: &|| false,
+                },
+            )
+            .unwrap();
+            package
+        }
+    };
+    if files {
+        let inspection = meguri_package::entry::inspect_entry(
+            host.engine(),
+            &source,
+            &config.entry_inputs(),
+            meguri_engine::CancelToken::new(),
+            &meguri_engine::ProgressSink::new(),
+        )
+        .unwrap();
+        let slot = host.engine().acquire_slot(meguri_engine::LongOp::ColpkgImport).unwrap();
+        inspection
+            .activate_ready(
+                &slot,
+                host.backup().as_ref(),
+                &meguri_engine::CancelToken::new(),
+                &meguri_engine::ProgressSink::new(),
+            )
+            .unwrap();
+    } else {
+        let package = inspect(config, &source);
+        let slot = host.engine().acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+        slot.replace_verified(
+            ReplacementStage::from_staging(package.into_staged().into_directory()).unwrap(),
+            ReplaceReason::Restore,
+            |_| Ok(()),
+        )
+        .unwrap();
+    }
+}
+fn m51_media_state(host: &CoreHost, op: &Operation, stage: meguri_sync::policy::MediaStage) -> Operation {
+    use meguri_sync::policy::MediaStage;
+    if stage == MediaStage::AwaitingConsent {
+        return media_preview(host, op).operation;
+    }
+    let preview = media_preview(host, op);
+    if stage == MediaStage::Declined {
+        let events = host.engine().stream().subscribe();
+        return complete(events, host.cancel_prepared_manual_media(preview.confirmation).unwrap()).unwrap();
+    }
+    // Upload one file before stopping at sanity, so history includes a known
+    // remote effect as well as the unfinished media result.
+    host.media().unwrap().add("m51.bin", b"synthetic media effect").unwrap();
+    if stage == MediaStage::Interrupted {
+        let entered = Arc::new(std::sync::Barrier::new(2));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let script = Script::new(vec![
+            (Method::MediaBegin, media_begin(0)),
+            (Method::UploadChanges, media_answer(serde_json::json!([1, 1]))),
+            (Method::MediaSanity, Reply::Held(entered.clone(), release.clone())),
+        ]);
+        let events = host.engine().stream().subscribe();
+        let task = host
+            .run_manual_media(access(&script, "Synthetic User", "rotated"), preview.confirmation)
+            .unwrap();
+        entered.wait();
+        task.stop_media(true);
+        release.wait();
+        let op = complete(events, task).unwrap();
+        script.assert_done();
+        return op;
+    }
+    let script = Script::new(vec![
+        (Method::MediaBegin, media_begin(0)),
+        (Method::UploadChanges, media_answer(serde_json::json!([1, 1]))),
+        (
+            Method::MediaSanity,
+            if stage == MediaStage::Cancelled {
+                Reply::Cancelled
+            } else {
+                Reply::Lost
+            },
+        ),
+    ]);
+    media_run(host, &script, preview)
+}
+#[test]
+fn rf4_m51_both_directions_five_partial_states_files_and_restore_preserve_exact_history() {
+    use meguri_sync::policy::MediaStage;
+    let _lane = LANE.lock().unwrap();
+    for direction in [Direction::Import, Direction::Export] {
+        for stage in [
+            MediaStage::AwaitingConsent,
+            MediaStage::Declined,
+            MediaStage::Cancelled,
+            MediaStage::Interrupted,
+            MediaStage::Failed,
+        ] {
+            for files in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let (host, config, op) = m51_selected(root.path(), direction);
+                let before = m51_media_state(&host, &op, stage);
+                assert!(before.media.stage == stage);
+                let cooldown = host.manual_transfer_history().next_eligible_at(&op.account).unwrap();
+                let retained = config.manual_transfer_directory.join(op.id.as_str());
+                let candidate = retained.join(&op.candidate.as_ref().unwrap().name);
+                let bytes = digest(&candidate);
+                m51_replace(&host, &config, &op, files);
+                let retired = host.reconcile_manual_transfer_replacement().unwrap().unwrap();
+                let mut expected = before;
+                expected.phase = Phase::Superseded;
+                expected.revision += 1;
+                assert_eq!(
+                    retired, expected,
+                    "partial transfer facts must survive local replacement"
+                );
+                assert!(host.manual_transfer_history().active().unwrap().is_none());
+                assert!(host.manual_transfer_history().next_eligible_at(&op.account).unwrap() == cooldown);
+                assert!(digest(&candidate) == bytes);
+                assert!(host.reconcile_manual_transfer_replacement().unwrap().is_none());
+                host.close().unwrap();
+                let restarted = CoreHost::open(config).unwrap();
+                assert!(restarted.manual_transfer_history().get(&op.id).unwrap() == retired);
+                assert!(restarted.manual_transfer_history().active().unwrap().is_none());
+                restarted.close().unwrap();
+            }
+        }
+    }
+}
+#[test]
+fn rf4_m51_policy_write_failure_second_replacement_restart_retains_r6_chain() {
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config, op) = selected_collection(root.path());
+    let before = media_preview(&host, &op).operation;
+    m51_replace(&host, &config, &op, false);
+    meguri_model::faultpoint::arm(
+        "storage.sidecar.before_save",
+        meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other),
+    );
+    let result = host.reconcile_manual_transfer_replacement();
+    meguri_model::faultpoint::disarm_all();
+    assert!(matches!(
+        result,
+        Err(TransferError::Policy(meguri_sync::policy::PolicyError::Storage))
+    ));
+    assert!(host.manual_transfer_history().active().unwrap().as_ref() == Some(&before));
+    // Retry admission stays fenced by the failed policy write. A Files swap
+    // still proceeds and must leave a recoverable path across both activations.
+    m51_replace(&host, &config, &op, true);
+    host.close().unwrap();
+    let restarted = CoreHost::open(config).unwrap();
+    assert!(restarted.manual_transfer_history().active().unwrap().as_ref() == Some(&before));
+    let retired = restarted.reconcile_manual_transfer_replacement().unwrap().unwrap();
+    assert!(retired.phase == Phase::Superseded && retired.receipt.is_none());
+    assert!(retired.media == before.media);
+    assert!(restarted.manual_transfer_history().active().unwrap().is_none());
+    assert!(
+        restarted
+            .manual_transfer_history()
+            .next_eligible_at(&op.account)
+            .unwrap()
+            .is_none()
+    );
+    restarted.close().unwrap();
+}
+#[test]
+fn rf4_m51_failed_replacement_or_unchanged_publication_keeps_overlap() {
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config, op) = selected_collection(root.path());
+    assert!(host.reconcile_manual_transfer_replacement().unwrap().is_none());
+    let package = inspect(
+        &config,
+        &config
+            .backups_directory
+            .join(&op.server_copy.as_ref().unwrap().artifact.name),
+    );
+    let slot = host.engine().acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+    let failed = slot.replace_verified(
+        ReplacementStage::from_staging(package.into_staged().into_directory()).unwrap(),
+        ReplaceReason::Restore,
+        |_| {
+            Err(meguri_storage::StorageError::Io {
+                detail: "synthetic refusal".into(),
+            })
+        },
+    );
+    assert!(failed.is_err());
+    drop(slot);
+    assert!(host.reconcile_manual_transfer_replacement().unwrap().is_none());
+    let offline = Script::new(vec![]);
+    assert!(matches!(
+        prepare(&host, &offline, Direction::Import, Scope::CollectionOnly),
+        Err(TransferError::Policy(meguri_sync::policy::PolicyError::Overlap(_)))
+    ));
+    assert!(offline.calls.lock().unwrap().is_empty());
+    assert!(host.manual_transfer_history().active().unwrap().as_ref() == Some(&op));
+    host.close().unwrap();
+}
+#[test]
+fn rf4_m51_old_consent_and_late_decision_cannot_write_over_new_operation() {
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config, op) = selected_collection(root.path());
+    let first = media_preview(&host, &op);
+    let stale_revision = first.confirmation;
+    let latest = media_preview(&host, &op);
+    let before = latest.operation;
+    let offline = Script::new(vec![]);
+    let events = host.engine().stream().subscribe();
+    assert!(complete(events, host.cancel_prepared_manual_media(stale_revision).unwrap()).is_err());
+    assert!(host.manual_transfer_history().get(&op.id).unwrap() == before);
+    m51_replace(&host, &config, &op, false);
+    let bytes = fs::read(root.path().join("server/collection.anki2")).unwrap();
+    let script = Script::new(vec![
+        (Method::Meta, Reply::Bytes(meta(NOW - 2000, 7))),
+        (Method::Download, Reply::Bytes(bytes)),
+        (Method::Meta, Reply::Bytes(meta(NOW - 1000, 8))),
+    ]);
+    let fresh = prepare(&host, &script, Direction::Import, Scope::CollectionOnly).unwrap();
+    script.assert_done();
+    let history = host.manual_transfer_history().history().unwrap();
+    let source = source_bytes(&config);
+    let events = host.engine().stream().subscribe();
+    assert!(
+        complete(
+            events,
+            host.run_manual_media(
+                access(&offline, "Synthetic User", "rotated"),
+                latest.confirmation.clone()
+            )
+            .unwrap()
+        )
+        .is_err()
+    );
+    let events = host.engine().stream().subscribe();
+    assert!(complete(events, host.cancel_prepared_manual_media(latest.confirmation).unwrap()).is_err());
+    assert!(host.manual_transfer_history().history().unwrap() == history);
+    assert!(host.manual_transfer_history().active().unwrap().as_ref() == Some(&fresh.operation));
+    assert!(source_bytes(&config) == source);
+    assert!(offline.calls.lock().unwrap().is_empty());
+    host.close().unwrap();
+}
+#[test]
+fn rf4_m51_replacement_cancels_and_drains_worker_before_publication() {
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config, op) = selected_collection(root.path());
+    let preview = media_preview(&host, &op);
+    let entered = Arc::new(std::sync::Barrier::new(2));
+    let release = Arc::new(std::sync::Barrier::new(2));
+    let script = Script::new(vec![(
+        Method::MediaBegin,
+        Reply::Held(entered.clone(), release.clone()),
+    )]);
+    let events = host.engine().stream().subscribe();
+    let task = host
+        .run_manual_media(access(&script, "Synthetic User", "rotated"), preview.confirmation)
+        .unwrap();
+    entered.wait();
+    let prior = DeviceState::for_collection(host.collection().unwrap().path())
+        .publication()
+        .unwrap();
+    let token = task.job.cancel.clone();
+    std::thread::scope(|scope| {
+        let replacement = scope.spawn(|| m51_replace(&host, &config, &op, false));
+        // Await the actual replacement's cancellation without releasing its
+        // transport. No wall-clock assertion or manual cancel substitutes for it.
+        while token.stop_cause().is_none() {
+            std::thread::yield_now();
+        }
+        assert!(token.stop_cause() == Some(meguri_engine::StopCause::System));
+        assert!(
+            DeviceState::for_collection(&config.collection_directory.join("collection.anki2"))
+                .publication()
+                .unwrap()
+                == prior
+        );
+        assert!(task.take_result().is_none());
+        release.wait();
+        let stopped = complete(events, task).unwrap();
+        assert!(stopped.media.stage == meguri_sync::policy::MediaStage::Interrupted);
+        replacement.join().unwrap();
+    });
+    script.assert_done();
+    let retired = host.reconcile_manual_transfer_replacement().unwrap().unwrap();
+    assert!(retired.phase == Phase::Superseded);
+    host.close().unwrap();
+}
+
+#[test]
+fn rf4_m51_crash_before_policy_publication_then_second_swap_recovers_locally() {
+    if let Ok(root) = std::env::var("MEGURI_RF4_M51_CHILD_ROOT") {
+        let root = PathBuf::from(root);
+        let (host, config, op) = selected_collection(&root);
+        m51_replace(&host, &config, &op, false);
+        meguri_model::faultpoint::arm("storage.sidecar.before_save", meguri_model::faultpoint::Fault::Abort);
+        let _ = host.reconcile_manual_transfer_replacement();
+        panic!("expected termination before policy publication");
+    }
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "rf4_m51_crash_before_policy_publication_then_second_swap_recovers_locally",
+            "--nocapture",
+        ])
+        .env("MEGURI_RF4_M51_CHILD_ROOT", root.path())
+        .status()
+        .unwrap();
+    use std::os::unix::process::ExitStatusExt;
+    assert!(status.signal() == Some(6));
+    let config = config(&root.path().join("local"), fixed());
+    let host = CoreHost::open(config.clone()).unwrap();
+    settle(&host);
+    let op = host.manual_transfer_history().active().unwrap().unwrap();
+    assert!(op.collection_complete && op.receipt.is_none());
+    m51_replace(&host, &config, &op, true);
+    host.close().unwrap();
+    let restarted = CoreHost::open(config).unwrap();
+    let retired = restarted.reconcile_manual_transfer_replacement().unwrap().unwrap();
+    assert!(retired.phase == Phase::Superseded && retired.media == op.media);
+    assert!(restarted.manual_transfer_history().active().unwrap().is_none());
+    restarted.close().unwrap();
+}
+#[test]
+fn rf4_m51_unknown_collection_upload_remains_fenced_after_verified_local_replacement() {
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config) = seeded(&root.path().join("local"));
+    let (_, bytes) = server(&root.path().join("server"));
+    let script = export_steps(bytes, Reply::Lost);
+    let preview = prepare(&host, &script, Direction::Export, Scope::CollectionAndMedia).unwrap();
+    assert!(confirm(&host, &script, preview).is_err());
+    script.assert_done();
+    let op = host.manual_transfer_history().active().unwrap().unwrap();
+    assert!(op.acceptance == Acceptance::PossiblyAccepted);
+    m51_replace(&host, &config, &op, true);
+    assert!(host.reconcile_manual_transfer_replacement().unwrap().is_none());
+    let offline = Script::new(vec![]);
+    assert!(matches!(
+        prepare(&host, &offline, Direction::Import, Scope::CollectionOnly),
+        Err(TransferError::Policy(meguri_sync::policy::PolicyError::Overlap(_)))
+    ));
+    assert!(host.manual_transfer_history().active().unwrap().as_ref() == Some(&op));
+    assert!(offline.calls.lock().unwrap().is_empty());
+    host.close().unwrap();
+}
+#[test]
+fn rf4_m51_reused_process_generation_missing_saved_publication_or_r6_proof_cannot_retire() {
+    let _lane = LANE.lock().unwrap();
+    for missing_publication in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let (host, config, op) = selected_collection(root.path());
+        host.close().unwrap();
+        let restarted = CoreHost::open(config.clone()).unwrap();
+        // This actual replacement reuses the original operation's process
+        // generation. Its persistent R6 identity is still different.
+        m51_replace(&restarted, &config, &op, false);
+        assert!(Some(restarted.collection().unwrap().generation().0) == op.actual_generation);
+        restarted.close().unwrap();
+        if missing_publication {
+            let path = config.manual_transfer_directory.join("manual-transfers.json");
+            let mut doc: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            doc["manualTransfers"]["operations"][op.id.as_str()]
+                .as_object_mut()
+                .unwrap()
+                .remove("resulting_publication");
+            fs::write(path, serde_json::to_vec(&doc).unwrap()).unwrap();
+        } else {
+            // Exercise missing proof by deleting both persisted R6 forms from
+            // this test's sidecar after the verified activation has finished.
+            let path = config.collection_directory.join("meguri-sidecar.json");
+            let mut doc: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            for field in ["lastReplacement", "replacements"] {
+                doc["deviceState"].as_object_mut().unwrap().remove(field);
+            }
+            fs::write(path, serde_json::to_vec(&doc).unwrap()).unwrap();
+        }
+        let host = CoreHost::open(config).unwrap();
+        let before = host.manual_transfer_history().active().unwrap().unwrap();
+        assert!(host.reconcile_manual_transfer_replacement().unwrap().is_none());
+        let offline = Script::new(vec![]);
+        assert!(matches!(
+            prepare(&host, &offline, Direction::Import, Scope::CollectionOnly),
+            Err(TransferError::Policy(meguri_sync::policy::PolicyError::Overlap(_)))
+        ));
+        assert!(host.manual_transfer_history().active().unwrap().as_ref() == Some(&before));
+        assert!(offline.calls.lock().unwrap().is_empty());
+        host.close().unwrap();
+    }
+}
+
+#[test]
+fn rf4_m51_absent_live_collection_does_not_use_retained_r6_proof_as_admission_release() {
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config, op) = selected_collection(root.path());
+    m51_replace(&host, &config, &op, false);
+    host.close().unwrap();
+    fs::rename(
+        config.collection_directory.join("collection.anki2"),
+        root.path().join("retained-active.anki2"),
+    )
+    .unwrap();
+    let process = ProcessCore::new(config.engine.clone()).unwrap();
+    let prepared = process.open_for_manual_import(config).unwrap();
+    assert!(prepared.collection().is_err());
+    assert!(prepared.reconcile_manual_transfer_replacement().unwrap().is_none());
+    assert!(prepared.manual_transfer_history().active().unwrap().as_ref() == Some(&op));
+    prepared.close().unwrap();
+}
+#[test]
+fn rf4_m51_replaced_partial_media_preserves_other_account_receipt_and_deadline() {
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config) = seeded(&root.path().join("local"));
+    let (_, bytes) = server(&root.path().join("server"));
+    let first = export_steps(bytes.clone(), Reply::Bytes(b"OK".to_vec()));
+    let events = host.engine().stream().subscribe();
+    let preview = complete(
+        events,
+        host.prepare_manual_transfer(
+            access(&first, "Other Synthetic Account", "synthetic-key"),
+            Direction::Export,
+            Scope::CollectionOnly,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let events = host.engine().stream().subscribe();
+    let success = complete(
+        events,
+        host.confirm_manual_transfer(
+            access(&first, "Other Synthetic Account", "synthetic-key"),
+            preview.confirmation,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    first.assert_done();
+    assert!(success.receipt.is_some());
+    let deadline = host
+        .manual_transfer_history()
+        .next_eligible_at(&success.account)
+        .unwrap();
+    let second = export_steps(bytes, Reply::Bytes(b"OK".to_vec()));
+    let preview = prepare(&host, &second, Direction::Export, Scope::CollectionAndMedia).unwrap();
+    let partial = confirm(&host, &second, preview).unwrap();
+    second.assert_done();
+    m51_replace(&host, &config, &partial, false);
+    let retired = host.reconcile_manual_transfer_replacement().unwrap().unwrap();
+    assert!(retired.receipt.is_none() && retired.phase == Phase::Superseded);
+    assert!(host.manual_transfer_history().get(&success.id).unwrap() == success);
+    assert!(
+        host.manual_transfer_history()
+            .next_eligible_at(&success.account)
+            .unwrap()
+            == deadline
+    );
+    assert!(
+        host.manual_transfer_history()
+            .next_eligible_at(&partial.account)
+            .unwrap()
+            .is_none()
+    );
+    host.close().unwrap();
 }

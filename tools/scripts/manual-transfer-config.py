@@ -476,7 +476,7 @@ NUMERIC_COUNTERS = ("uploaded_files", "uploaded_deletions", "downloaded_files",
                     "bytes_uploaded", "awaiting")
 PHASES = ("Preparing", "Preview", "ConfirmedIntent", "Transferring", "RemoteAccepted",
           "Activating", "CollectionComplete", "MediaIncomplete", "Complete",
-          "Cancelled", "Failed", "NeedsDecision")
+          "Cancelled", "Failed", "NeedsDecision", "Superseded")
 MEDIA_STAGES = ("AwaitingConsent", "Declined", "Running", "Cancelled", "Interrupted", "Failed", "Complete")
 
 
