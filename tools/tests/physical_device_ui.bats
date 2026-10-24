@@ -73,6 +73,7 @@ esac'
 cat "$6"'
   stub xcodebuild 'echo "xcodebuild $*" >>"$STUB_LOG"
 action="$1"; shift
+[ "$action" != -showBuildSettings ] || { cat "$FX_PERSONAL_SETTINGS"; exit 0; }
 dest=""; config=""; scheme=""; plan=""; result=""; dd=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -94,6 +95,13 @@ if [ "$action" = build ]; then
   echo "synthetic widget" >"$w/Contents/MacOS/MeguriWidget"
   echo "{\"CFBundleIdentifier\":\"com.antoinefink.meguri.dev\",\"CFBundleExecutable\":\"Meguri\",\"MeguriCardInspectionBuild\":\"debug\",\"LSUIElement\":true}" >"$p/Contents/Info.plist"
   echo "{\"CFBundleIdentifier\":\"com.antoinefink.meguri.dev.widget\",\"CFBundleExecutable\":\"MeguriWidget\"}" >"$w/Contents/Info.plist"
+  if [ "$config" = Release ]; then
+    jq ".MeguriCardInspectionBuild = \"personalRelease\" | .LSUIElement = false" "$p/Contents/Info.plist" >"$p/Contents/personal.json"
+    mv "$p/Contents/personal.json" "$p/Contents/Info.plist"
+    cp "$FX_APP_PROFILE" "$p/Contents/embedded.provisionprofile"
+    cp "$FX_WIDGET_PROFILE" "$w/Contents/embedded.provisionprofile"
+  fi
+  [ "${FX_SOURCE_CHANGE:-0}" = 0 ] || echo "synthetic mutation" >>app/TestPlans/Performance.xctestplan
   exit "${FX_BUILD_RC:-0}"
 fi
 if [ "$action" = build-for-testing ]; then
@@ -212,6 +220,166 @@ esac'
 [ "$1 $2 $3 $4" = "-convert json -o -" ] || exit 97
 case "$5" in -) cat ;; *) cat "$5" ;; esac'
   stub lipo 'echo "lipo $*" >>"$STUB_LOG"; echo "${FX_ARCH:-arm64}"'
+}
+
+personal_facts() {
+  standalone_facts
+  export MEGURI_APP_SIGNING=team
+  export FX_PERSONAL_SETTINGS="$BATS_TEST_TMPDIR/personal-settings.json"
+  export FX_APP_PROFILE="$BATS_TEST_TMPDIR/app-profile.plist" FX_WIDGET_PROFILE="$BATS_TEST_TMPDIR/widget-profile.plist"
+  jq 'del(.["com.apple.security.get-task-allow"], .["com.apple.security.temporary-exception.files.absolute-path.read-only"], .["com.apple.private.security.storage.AppDataContainers"])
+    | .["com.apple.developer.team-identifier"] = "TESTTEAM01"
+    | .["com.apple.application-identifier"] = "TESTTEAM01.com.antoinefink.meguri.dev"
+    | .["com.apple.security.application-groups"] = ["TESTTEAM01.com.antoinefink.meguri.dev"]
+    | .["keychain-access-groups"] = ["TESTTEAM01.com.antoinefink.meguri.dev"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/personal-app.json"
+  mv "$BATS_TEST_TMPDIR/personal-app.json" "$FX_APP_ENT"
+  jq 'del(.["com.apple.security.get-task-allow"])
+    | .["com.apple.developer.team-identifier"] = "TESTTEAM01"
+    | .["com.apple.application-identifier"] = "TESTTEAM01.com.antoinefink.meguri.dev.widget"
+    | .["com.apple.security.application-groups"] = ["TESTTEAM01.com.antoinefink.meguri.dev"]' "$FX_WIDGET_ENT" >"$BATS_TEST_TMPDIR/personal-widget.json"
+  mv "$BATS_TEST_TMPDIR/personal-widget.json" "$FX_WIDGET_ENT"
+  python3 - "$FX_APP_ENT" "$FX_APP_PROFILE" "$FX_WIDGET_ENT" "$FX_WIDGET_PROFILE" <<'PY'
+import datetime, json, plistlib, sys
+for source, target in zip(sys.argv[1::2], sys.argv[2::2]):
+    with open(source) as stream:
+        grants = json.load(stream)
+    grants["get-task-allow"] = True
+    with open(target, "wb") as stream:
+        plistlib.dump({"Entitlements": grants, "TeamIdentifier": ["TESTTEAM01"],
+                      "ExpirationDate": datetime.datetime(2099, 1, 1),
+                      "ProvisionedDevices": ["00000000-0000-4000-8000-000000000009"]}, stream)
+PY
+  jq -n '["Meguri", "MeguriWidget"] | map(. as $target | {target: $target, buildSettings: {
+    CONFIGURATION:"Release", MEGURI_BUNDLE_ID_SUFFIX:".dev",
+    PRODUCT_BUNDLE_IDENTIFIER:("com.antoinefink.meguri.dev" + (if $target == "Meguri" then "" else ".widget" end)),
+    MEGURI_CORE_FEATURES:"ankiweb", MEGURI_SWIFT_CONDITIONS:"ANKIWEB_ENABLED", SWIFT_ACTIVE_COMPILATION_CONDITIONS:"ANKIWEB_ENABLED",
+    MEGURI_CARD_INSPECTION_BUILD:"personalRelease", MEGURI_MAC_UI_ELEMENT:"NO",
+    MEGURI_ENTITLEMENTS_HOOKS_SUFFIX:"", MEGURI_ENTITLEMENTS_SIGNING_SUFFIX:"",
+    CODE_SIGN_ENTITLEMENTS:(if $target == "Meguri" then "Meguri/Meguri-macOS.entitlements" else "MeguriWidget/MeguriWidget-macOS.entitlements" end),
+    ENABLE_TESTABILITY:"NO", ENABLE_DEBUG_DYLIB:"NO", ENABLE_HARDENED_RUNTIME:"YES"}})' >"$FX_PERSONAL_SETTINGS"
+  printf 'hash=%s\nconfiguration=Release\nprofile=release\nfeatures=ankiweb\nslices=mac,sim\n' \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"$SB/app/Packages/MeguriCore/Binaries/.stamp"
+  stub security 'echo "security $*" >>"$STUB_LOG"; [ "$1 $2 $3" = "cms -D -i" ] || exit 97; cat "$4"'
+  stub system_profiler 'echo "system_profiler $*" >>"$STUB_LOG"; echo "{\"SPHardwareDataType\":[{\"provisioning_UDID\":\"00000000-0000-4000-8000-000000000009\",\"platform_UUID\":\"00000000-0000-4000-8000-000000000010\"}]}"'
+}
+
+@test "personal preview rejects incompatible flags configuration platform and signing before work" {
+  local platform config
+  for platform in mac ios-sim; do
+    for config in Debug Profile Release AppStore; do
+      [ "$platform/$config" != mac/Release ] || continue
+      mg build-app --platform "$platform" --config "$config" --personal-preview
+      [ "$status" -eq 2 ]
+      [ ! -s "$STUB_LOG" ]
+    done
+  done
+  mg build-app --platform mac --personal-preview --standalone
+  [ "$status" -eq 2 ]
+  [ ! -s "$STUB_LOG" ]
+  mg build-app --platform mac --personal-preview
+  [ "$status" -eq 2 ]
+  [ ! -s "$STUB_LOG" ]
+  [ ! -d "$SB/build/app" ]
+}
+
+@test "personal preview uses Release core normal build dev identities native launch and hashes without changing test defaults" {
+  personal_facts
+  local args candidate="$SB/build/app/PersonalPreviewDerivedData/Build/Products/Release/Meguri.app"
+  for args in implicit explicit; do
+    : >"$STUB_LOG"
+    if [ "$args" = explicit ]; then
+      mg build-app --personal-preview --platform mac --config Release
+    else
+      mg build-app --personal-preview --platform mac
+    fi
+    [ "$status" -eq 0 ] || cat "$STUB_LOG"
+    [ "$status" -eq 0 ]
+    [ "$(field .status)" = pass ]
+    called '^xcodebuild -showBuildSettings .* -configuration Release .* MEGURI_BUNDLE_ID_SUFFIX=.dev$'
+    called '^xcframework .* --configuration Release$'
+    [ "$(grep -n '^xcframework ' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n '^xcodebuild -showBuildSettings ' "$STUB_LOG" | cut -d: -f1)" ]
+    called '^xcodebuild build .* -configuration Release .* -derivedDataPath build/app/PersonalPreviewDerivedData .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration MEGURI_BUNDLE_ID_SUFFIX=.dev$'
+    not_called 'build-for-testing|-testPlan|test-without-building|^(sim-|vm-test|host-lease|open|lsregister)|xcrun (simctl|devicectl)'
+    [ "$(field .details.build.personal_preview)" = true ]
+    [ "$(field .details.build.standalone)" = false ]
+    [ "$(field .details.personal_preview_product.provisioning_verified)" = true ]
+    [ "$(field .details.personal_preview_product.test_hooks)" = false ]
+    [ "$(field .details.personal_preview_product.card_inspection_build)" = personalRelease ]
+    [ "$(field .details.personal_preview_product.executable_sha256)" = "$(shasum -a 256 "$candidate/Contents/MacOS/Meguri" | cut -c1-64)" ]
+    [ "$(field .details.personal_preview_product.provisioning_sha256.app)" = "$(shasum -a 256 "$FX_APP_PROFILE" | cut -c1-64)" ]
+    [[ "$(field .details.input)" =~ ^[0-9a-f]{64}$ ]]
+    not_called '^codesign .*--(sign|remove-signature)'
+  done
+  : >"$STUB_LOG"
+  MEGURI_PERSONAL_PREVIEW=1 MEGURI_BUNDLE_ID_SUFFIX=.dev mg build-app --platform mac --config Release
+  [ "$status" -eq 2 ]
+  [ ! -s "$STUB_LOG" ]
+  mg build-app --platform mac --config AppStore
+  [ "$status" -eq 2 ]
+  [ ! -s "$STUB_LOG" ]
+  mg build-app --platform ios-sim
+  [ "$status" -eq 0 ]
+  called '^xcodebuild build-for-testing .* -testPlan UI -configuration Debug .* -derivedDataPath build/app/DerivedData '
+  not_called 'MEGURI_BUNDLE_ID_SUFFIX=|^codesign |^security |^system_profiler '
+}
+
+@test "personal preview checks resolved target identities and no hooks after core and before app builds" {
+  personal_facts
+  cp "$FX_PERSONAL_SETTINGS" "$BATS_TEST_TMPDIR/normal-settings.json"
+  local mutation
+  for mutation in \
+    '.[1].buildSettings.PRODUCT_BUNDLE_IDENTIFIER = "com.antoinefink.meguri.widget"' \
+    '.[0].buildSettings.MEGURI_CORE_FEATURES = "ankiweb,test-hooks"' \
+    '.[0].buildSettings.SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG ANKIWEB_ENABLED"' \
+    '.[0].buildSettings.MEGURI_CARD_INSPECTION_BUILD = "debug"'; do
+    jq "$mutation" "$BATS_TEST_TMPDIR/normal-settings.json" >"$FX_PERSONAL_SETTINGS"
+    : >"$STUB_LOG"
+    mg build-app --platform mac --personal-preview
+    [ "$status" -eq 1 ]
+    [ "$(field '.failures[0].id')" = personal-preview-settings ]
+    called '^xcframework .* --configuration Release$'
+    not_called '^xcodebuild build '
+  done
+}
+
+@test "personal preview rejects fixture scope debug grants stale core invalid provisioning and source changes" {
+  local fault
+  for fault in fixture debug keychain group stamp profile expired device grant source signature arch; do
+    personal_facts
+    case "$fault" in
+      fixture) jq '.["com.apple.security.temporary-exception.files.absolute-path.read-only"] = ["/"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
+      debug) jq '.["com.apple.security.get-task-allow"] = true' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
+      keychain) jq '.["keychain-access-groups"] = ["TESTTEAM01.com.antoinefink.meguri"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
+      group) jq '.["com.apple.security.application-groups"] = ["TESTTEAM01.com.antoinefink.meguri"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
+      stamp) sed 's/features=ankiweb/features=ankiweb,test-hooks/' "$SB/app/Packages/MeguriCore/Binaries/.stamp" >"$BATS_TEST_TMPDIR/stamp"; mv "$BATS_TEST_TMPDIR/stamp" "$SB/app/Packages/MeguriCore/Binaries/.stamp" ;;
+      profile) echo invalid >"$FX_APP_PROFILE" ;;
+      expired|device|grant)
+        python3 - "$FX_APP_PROFILE" "$fault" <<'PY'
+import datetime, plistlib, sys
+with open(sys.argv[1], "rb") as stream:
+    profile = plistlib.load(stream)
+if sys.argv[2] == "expired":
+    profile["ExpirationDate"] = datetime.datetime(2000, 1, 1)
+elif sys.argv[2] == "device":
+    profile["ProvisionedDevices"] = ["00000000-0000-4000-8000-000000000010"]
+else:
+    profile["Entitlements"]["keychain-access-groups"] = []
+with open(sys.argv[1], "wb") as stream:
+    plistlib.dump(profile, stream)
+PY
+        ;;
+    esac
+    [ ! -f "$BATS_TEST_TMPDIR/fault.json" ] || mv "$BATS_TEST_TMPDIR/fault.json" "$FX_APP_ENT"
+    case "$fault" in
+      source) FX_SOURCE_CHANGE=1 mg build-app --platform mac --personal-preview ;;
+      signature) FX_SIGNATURE_RC=1 mg build-app --platform mac --personal-preview ;;
+      arch) FX_ARCH='arm64 x86_64' mg build-app --platform mac --personal-preview ;;
+      *) mg build-app --platform mac --personal-preview ;;
+    esac
+    [ "$status" -eq 1 ]
+    [ "$(field '.failures[0].id')" = personal-preview-product ]
+    [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
+  done
 }
 
 @test "standalone app admits only mac Debug and refuses all other pairs before work" {
