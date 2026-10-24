@@ -37,7 +37,7 @@ struct SettingsCollectionFilesSection: View {
     }
     var body: some View {
         Section {
-            LabeledContent {
+            CollectionActionRow {
                 Button { if let present { present(.collectionEntry) } else { collection?.entry.present() } } label: {
                     Text("Import Collection", bundle: .module)
                 }
@@ -50,7 +50,7 @@ struct SettingsCollectionFilesSection: View {
             } label: {
                 Label { Text("From a file", bundle: .module) } icon: { Image(systemName: "square.and.arrow.down") }
             }
-            LabeledContent {
+            CollectionActionRow {
                 Button { if let present { present(.collectionExport) } else { collection?.collectionExport.present() } } label: {
                     Text("Export Collection", bundle: .module)
                 }
@@ -69,6 +69,26 @@ struct SettingsCollectionFilesSection: View {
         }
     }
 
+}
+
+/// Compact native Mac rows; other platforms retain their labeled Form layout.
+private struct CollectionActionRow<Content: View, RowLabel: View>: View {
+    private let content: Content
+    private let label: RowLabel
+    init(@ViewBuilder content: () -> Content, @ViewBuilder label: () -> RowLabel) {
+        self.content = content(); self.label = label()
+    }
+    var body: some View {
+        #if os(macOS)
+        HStack(alignment: .center) {
+            label
+            Spacer()
+            content
+        }
+        #else
+        LabeledContent { content } label: { label }
+        #endif
+    }
 }
 
 #if os(macOS)
@@ -91,6 +111,7 @@ public struct MacSettingsView: View {
                     .accessibilityIdentifier("settings.root.collection")
             }
             .sidebarColumnChrome()
+            .toolbar(removing: .sidebarToggle)
         } detail: {
             Form {
                 if selectedSection == "collection" {
@@ -113,13 +134,16 @@ public struct MacSettingsView: View {
             .frame(maxWidth: .infinity)
             .detailColumnChrome()
         }
-        .toolbar(removing: .sidebarToggle)
         .manualTransferPresentation(model: collection.manualTransfers, isActive: collection.navigation.sheet != .manualTransfer)
         .accessibilityIdentifier("settings.root.content")
     }
     private var hasActiveTransfer: Bool {
         let model = collection.manualTransfers
         return model.busy || model.preview != nil || model.mediaPreview != nil
+    }
+    private var hasTransferDetails: Bool {
+        let model = collection.manualTransfers
+        return hasActiveTransfer || model.message != nil || model.result != nil
     }
     private var canOpenTransfer: Bool {
         collection.navigation.sheet == nil && !collection.entry.busy && !collection.collectionExport.busy
@@ -128,12 +152,19 @@ public struct MacSettingsView: View {
         Section {
             serverAction(.import)
             serverAction(.export)
-            if hasActiveTransfer { continueButton }
+            if let message = collection.manualTransfers.message {
+                Text(verbatim: message)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("settings.anki.result")
+            }
+            if hasTransferDetails {
+                transferButton("Details…", id: "settings.anki.transferDetails")
+            }
         } header: { Text("Server Transfers", bundle: .module) }
         footer: { Text("A transfer replaces the destination collection. Review preparation and media decisions before continuing.", bundle: .module) }
     }
     private func serverAction(_ direction: ManualTransferDirection) -> some View {
-        LabeledContent {
+        CollectionActionRow {
             Button {
                 guard canOpenTransfer, !hasActiveTransfer else { return }
                 collection.manualTransfers.select(direction)
@@ -154,17 +185,17 @@ public struct MacSettingsView: View {
         }
     }
     private var continueTransfer: some View {
-        Section { continueButton }
+        Section { transferButton("Continue…", id: "settings.anki.continueTransfer") }
     }
-    private var continueButton: some View {
-        LabeledContent {
-            Button { present(.manualTransfer) } label: { Text("Continue…", bundle: .module) }
+    private func transferButton(_ title: LocalizedStringKey, id: String) -> some View {
+        CollectionActionRow {
+            Button { present(.manualTransfer) } label: { Text(title, bundle: .module) }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
                 .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
                 .contentShape(Rectangle())
                 .disabled(!canOpenTransfer)
-                .accessibilityIdentifier("settings.anki.continueTransfer")
+                .accessibilityIdentifier(id)
         } label: { Text("Current transfer", bundle: .module) }
     }
 }

@@ -6,6 +6,8 @@ Use this with `brief.md`, the screen's contract and `rubric.md` before changing 
 
 Write down the screen's main task, its primary action, what must stay visible and what can wait until requested. Use the existing contract or change notes; a second large plan is not needed.
 
+Use native SwiftUI controls with system styles and sizes. A custom style needs a task or accessibility reason.
+
 Choose a system pattern for the task. Read the Apple HIG and compare system apps. Use native lists, forms, menus, navigation and Settings, with clear groups, aligned controls and plain text.
 
 Resolve meaningful layout choices with a small visual example. Compare different task flows or control locations, not just colours. Make each option usable enough to judge. Record what the user chose and why; do not reopen that choice through later cleanup.
@@ -31,6 +33,8 @@ Resolve meaningful layout choices with a small visual example. Compare different
 | iOS | Use navigation stacks and system tabs where the sections need them. Put frequent actions within reach and respect safe areas. Show settings sections as rows and detail screens when a sidebar does not fit. A focused review still needs an obvious exit and bottom answer controls. |
 
 The task, saved data and action meanings stay the same as space changes. The visible arrangement can change. Base layout on available space and size classes, not a device-name test. Check long text, the largest supported text size, short windows and compact height; side-by-side controls may need to stack.
+
+Inspect controls in the native app. Check field alignment and labels in Forms. Size the interaction area on the Button rather than its Text. Check each action identifier after placing it in a group.
 
 Native SwiftUI is the implementation medium. HTML can help choose hierarchy and behavior, but its CSS is not the source for native dimensions, materials or control styling. Keep card-template content separate from app chrome.
 
@@ -59,3 +63,4 @@ Record user choices in the active contract and change log. Use the existing proc
 Use one self-contained, navigable HTML page when a browser example is useful. Keep example controls outside the product view and clearly identify sample data. If inline previews are unavailable on the user's device, provide the browser page directly rather than repeating the unavailable preview. Keep generated examples out of `references/` and approved screenshots.
 
 Reference patterns: [references/index.md](references/index.md). User decisions: Antoine, 2026-10-24. Check the Apple HIG for the current layout, Settings and toolbar patterns.
+

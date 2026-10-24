@@ -48,5 +48,34 @@ preview path; app and widget hashes matched its receipt. PID 59001 opened that
 exact product. Direct inspection of its Settings found a duplicated URL label,
 an unchanged-address Save action and too much initial transfer setup content.
 Antoine requested ongoing direct visual inspection and Apple-quality results.
-URL row, a Save action with no draft change, and a long transfer form.
-was made during inspection. Full acceptance is still pending.
+No server request was made during inspection. Full acceptance is still pending.
+
+
+The next filtered visual pass was `cleanroom/20261024T120433Z-66625`.
+`build-app/20261024T121202Z-73382` passed lint and the signed standalone build
+with zero warnings. The copied preview opened by its exact product path.
+Live inspection confirmed one URL label, a hidden unchanged-address Save
+action, regular buttons and compact Collection action rows. Independent source
+review found no P0/P1. Three P2 corrections remain in the next filtered pass:
+URL text alignment, account action identity and visible terminal transfer
+outcomes with a Details path after the workflow closes.
+
+`snapshots/20261024T120514Z-67427` stopped at an app/widget signing mismatch.
+The explicit team-signing run `snapshots/20261024T121239Z-74789` built and ran
+in the dedicated VM. It rendered six question/answer/overflow cells, including
+light and dark appearances. The images show bottom answer controls and no
+sidebar. These fixtures use sample Text content, not a live collection or the
+WebKit card renderer. All six differ from the old baselines; none was recorded
+or approved. The suite also found an obsolete R110 assertion that forbids the
+new native Settings scene. That assertion needs to follow N1/N5 while retaining
+the rule against opening a second main window. Full acceptance is pending.
+
+Filtered runs `cleanroom/20261024T121438Z-79319` and its seeded follow-up
+`cleanroom/20261024T121741Z-81556` address those three findings and Antoine's
+row-spacing, sidebar-toggle and oversized-import feedback. Independent source
+review found no remaining P0–P2 correctness issue in that patch. The normal
+standalone Mac build and lint passed. Native inspection and cross-platform
+visual checks remain in progress. Antoine chose system SwiftUI styles
+and asked to use them across all Apple platforms. Shared state actions,
+review button sizing and transfer action styles are the remaining bounded
+source findings for that visual pass.

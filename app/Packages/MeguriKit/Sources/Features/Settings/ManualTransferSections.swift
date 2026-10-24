@@ -19,38 +19,23 @@ public struct ManualTransferSections: View {
         Group {
             if area == .all || area == .connectionAndTransfers || area == .connection {
                 Section {
+                    #if os(macOS)
+                    HStack(alignment: .center) {
+                        Text("Server URL", bundle: .module)
+                        endpointField
+                        testConnectionButton
+                    }
+                    #else
                     LabeledContent {
                         HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
-                            TextField("Server URL", text: $model.endpointDraft, axis: .vertical)
-                                .labelsHidden()
-                                .frame(maxWidth: .infinity)
-                                .font(.body)
-                                .textContentType(.URL)
-                                #if os(macOS)
-                                .textFieldStyle(.roundedBorder)
-                                #endif
-                                #if os(iOS)
-                                .focused($focusedField, equals: .endpoint)
-                                #endif
-                                .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
-                                .accessibilityIdentifier("settings.anki.endpoint")
-                                .accessibilityLabel(Text("Server URL", bundle: .module))
-                                .accessibilityHint("Self-hosted server URL, including an optional path prefix.")
-                            Button { Task { await model.testConnection() } } label: {
-                                Text("Test", bundle: .module)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.regular)
-                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                            .contentShape(Rectangle())
-                            .disabled(!model.canTestConnection)
-                            .accessibilityLabel(Text("Test Connection", bundle: .module))
-                            .accessibilityIdentifier("settings.anki.testConnection")
+                            endpointField
+                            testConnectionButton
                         }
                         .frame(maxWidth: .infinity)
                     } label: {
                         Text("Server URL", bundle: .module)
                     }
+                    #endif
                     if let result = model.connectionTestResult {
                         Text(verbatim: result)
                             .fixedSize(horizontal: false, vertical: true)
@@ -77,23 +62,22 @@ public struct ManualTransferSections: View {
                 }
                 Section {
                     if model.authenticated {
+                        #if os(macOS)
+                        HStack(alignment: .center) {
+                            Text("Login", bundle: .module)
+                            Spacer()
+                            accountIdentity
+                            signOutButton
+                        }
+                        #else
                         LabeledContent {
                             HStack(spacing: Spacing.small) {
-                                Text(verbatim: model.username)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                accountIdentity
                                 Spacer()
-                                Button { Task { await model.logout() } } label: {
-                                    Text("Sign Out", bundle: .module)
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.regular)
-                                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                                .contentShape(Rectangle())
-                                .disabled(model.busy || model.preview != nil)
-                                .accessibilityIdentifier("settings.anki.logout")
+                                signOutButton
                             }
                         } label: { Text("Login", bundle: .module) }
-                        .accessibilityIdentifier("settings.anki.loginIdentity")
+                        #endif
                     } else {
                         TextField("Username", text: $model.username)
                             .textContentType(.username)
@@ -262,6 +246,57 @@ public struct ManualTransferSections: View {
             }
         }
         #endif
+    }
+    private var endpointField: some View {
+        Group {
+            #if os(macOS)
+            TextField("Server URL", text: $model.endpointDraft)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.regular)
+                .multilineTextAlignment(.leading)
+            #else
+            TextField("Server URL", text: $model.endpointDraft, axis: .vertical)
+            #endif
+        }
+        .labelsHidden()
+        .frame(maxWidth: .infinity)
+        .font(.body)
+        .textContentType(.URL)
+        #if os(iOS)
+        .focused($focusedField, equals: .endpoint)
+        #endif
+        .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
+        .accessibilityIdentifier("settings.anki.endpoint")
+        .accessibilityLabel(Text("Server URL", bundle: .module))
+        .accessibilityHint("Self-hosted server URL, including an optional path prefix.")
+    }
+    private var testConnectionButton: some View {
+        Button { Task { await model.testConnection() } } label: {
+            Text("Test", bundle: .module)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+        .contentShape(Rectangle())
+        .disabled(!model.canTestConnection)
+        .accessibilityLabel(Text("Test Connection", bundle: .module))
+        .accessibilityIdentifier("settings.anki.testConnection")
+    }
+    private var accountIdentity: some View {
+        Text(verbatim: model.username)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("settings.anki.loginIdentity")
+    }
+    private var signOutButton: some View {
+        Button { Task { await model.logout() } } label: {
+            Text("Sign Out", bundle: .module)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+        .contentShape(Rectangle())
+        .disabled(model.busy || model.preview != nil)
+        .accessibilityIdentifier("settings.anki.logout")
     }
     @ViewBuilder private var operationProgress: some View {
         if model.busy {

@@ -12,8 +12,8 @@ import AppKit
 
 /// The app shell (U150) in the app's own process: which states its
 /// snapshots cover, and on the Mac the window's lifetime policy (R11) and the
-/// menu bar, where nothing opens a second window (R6, R110). The snapshots
-/// themselves render in `ScreenSnapshots` (`MatrixRegistry` lists
+/// menu bar, which prevents a second main window and provides native Settings
+/// (N1, N5). The snapshots themselves render in `ScreenSnapshots` (`MatrixRegistry` lists
 /// `shell.root`).
 @MainActor
 @Suite struct ShellSnapshotTests {
@@ -68,14 +68,15 @@ import AppKit
         (menu?.items ?? []).flatMap { [$0] + menuItems($0.submenu) }
     }
 
-    @Test func noMenuOpensASecondWindow() throws {
+    @Test func noMenuOpensASecondMainWindow() throws {
         let items = menuItems(NSApp.mainMenu)
         #expect(!items.isEmpty, "the host app has no menu bar")
         let titles = items.map(\.title)
         #expect(!titles.contains("New Window"), "\(titles)")
         #expect(!titles.contains { $0.hasPrefix("New Meguri Window") }, "\(titles)")
         #expect(!items.contains { $0.keyEquivalent == "n" && $0.keyEquivalentModifierMask == .command }, "⌘N opens something")
-        #expect(!titles.contains { $0.hasPrefix("Settings") }, "a Settings item opens a Settings window (R110)")
+        let settings = try #require(items.first { $0.title.hasPrefix("Settings") }, "no native Settings command (N1, N5)")
+        #expect(settings.keyEquivalent == "," && settings.keyEquivalentModifierMask == .command, "Settings must use ⌘,")
     }
 
     @Test func theWindowMenuShowsTheMainWindow() throws {

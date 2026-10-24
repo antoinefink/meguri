@@ -7,6 +7,8 @@ The HTML specifies hierarchy and behavior. It does not specify native control me
 ## N1. Scope and authority
 
 - Use native SwiftUI controls, semantic styles, SF Symbols and macOS menus.
+- Use system styles, control sizes and fonts by default. Change styling only to meet a task or accessibility need.
+- Keep Settings category navigation visible without a sidebar-toggle toolbar button. Align row labels and controls vertically; avoid excess row space caused by nested control frames.
 - Keep the existing collection, review, import, export and server-transfer behavior functional.
 - Keep iOS and iPadOS source paths compatible. This preview targets macOS.
 - Antoine's newer direction overrides R6, R109 and R110 only for the separate native macOS Settings scene.

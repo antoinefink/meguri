@@ -109,16 +109,16 @@ public struct HomeView: View {
                             Text("Study", bundle: .module)
                                 .fixedSize(horizontal: false, vertical: true)
                         } icon: { Image(systemName: "play.fill") }
+                            #if !os(macOS)
                             .font(.headline)
-                            #if os(macOS)
-                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                            #else
                             .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget)
                             #endif
                     }
                     .buttonStyle(.borderedProminent)
                     #if os(macOS)
                     .controlSize(.regular)
+                    .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                    .contentShape(Rectangle())
                     #else
                     .controlSize(.large)
                     .frame(maxWidth: ContentWidth.primaryAction)
@@ -162,11 +162,21 @@ struct HomeCollectionImportButton: View {
     var body: some View {
         Button(action: action) {
             Text("Import Collection")
+                #if !os(macOS)
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
+                #endif
         }
         .buttonStyle(.bordered)
+        #if os(macOS)
+        .controlSize(.regular)
+        // EmptyStateView supplies a text-primary tint for its touch controls.
+        .tint(nil)
+        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+        .contentShape(Rectangle())
+        #else
         .tint(ColorToken.textPrimary.color)
+        #endif
         .disabled(!canPresent)
         .accessibilityIdentifier("home.collection.import")
     }

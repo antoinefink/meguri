@@ -651,6 +651,16 @@
         }
       }
     },
+    "Details…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Details…"
+          }
+        }
+      }
+    },
     "Current transfer": {
       "localizations": {
         "en": {
