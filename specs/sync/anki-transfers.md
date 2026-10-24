@@ -139,6 +139,36 @@ Run one media job at most. Replacement cancels and drains it through lifecycle, 
 Continue study using awaiting placeholders and MediaArrived as files arrive. Launch, timers, review completion
 and background events never initiate or resume this server media work.
 
+### M5.1. Local replacement with unfinished media
+
+Restore and whole-collection file import follow normal lifecycle checks. Cancel and drain media before the swap; fence remaining callbacks.
+Only operations with durable `collection_complete=true`, `CollectionAndMedia` scope and `receipt=None` may be superseded.
+Collection-upload acceptance must be resolved under M4. Eligible stages are
+`MediaStage::{AwaitingConsent, Declined, Cancelled, Interrupted, Failed}`; durable `Running` is ineligible.
+
+R6 acceptance predicates; `proof` has type `LocalReplacementSuccessor`:
+
+| Predicate | Requirement |
+|---|---|
+| Acquisition | `op.resulting_publication = Some(before)`; `DeviceState::local_replacement_successor(before) = Ok(Some(proof))`. `None` or error keeps `policy.active`. |
+| Endpoints | `proof.before() = before`; `proof.after() = active.identity`; `before != proof.after()`. |
+| Durable chain | First `ReplacementEvidence.prior.identity = before`; consecutive `candidate` and `prior` have equal identity and binding; final `candidate` matches active identity and binding. Every link preserves account/configuration/environment binding. |
+| Proof origin | Use only the `proof` produced by Acquisition's `Ok(Some(proof))`. A proof assembled by the consumer is invalid; generation numbers and absent collection/activation records cannot replace R6 verification. |
+| Retention | Keep the R6 chain until `Phase::Superseded` is durable, including write failures, process death and a second replacement. Unmet predicates keep admission occupied. |
+
+Under the lifecycle slot, `retire_replaced_media` compares the full stored operation—including id, revision, publication and completed
+stage—and matching `policy.active`. One durable CAS sets `Phase::Superseded`, advances revision and clears only that admission owner.
+Failure preserves the guard. M4's uncertain collection-upload protection remains.
+
+Callback mutation requires the active stored operation to match its captured `{id, revision, resulting_publication}`; that publication must still identify the active collection.
+Any terminal phase rejects callback writes. Consent remains bound to its original publication and cannot cover a successor.
+Historical superseded entries retain scope, effects, unresolved outcomes, counters and recovery artifacts without further modification.
+
+Explicit history/readmission calls may invoke `reconcile_local_replacement` locally; its startup/recovery path sends no Anki requests.
+Supersession adds neither success nor receipt and changes no cooldown. Show partial status and unavailable media Resume because of replacement.
+Fresh transfers require M2's new preview/confirmation and M6 eligibility. Local reviews remain independent; R1548's cloud-publication choice
+is unchanged. These are Meguri rules, not protocol extensions.
+
 ## M6. Shared success-only cooldown and identity limits
 
 Persist last success/deadline per normalized configured endpoint plus exact trimmed login username, preserving case.
@@ -191,3 +221,14 @@ cancel/recovery/resume and truthful final per-stage results. Local server routin
 Server/oracle evidence proves this protocol boundary, not Apple delivery/account/quota/convergence.
 Collection-only may ship as a separately logged partial delivery; it cannot claim the full selected-media requirement.
 Keep remaining plan units, formats/options, compatibility suites and all milestone/final gates explicit.
+
+M5.1: both directions × five eligible `MediaStage` variants.
+
+| Given | Assert |
+|---|---|
+| Verified `ColpkgImport`/`Restore` | Fresh explicit admission allowed. |
+| Active media; late completion | Drain before swap; successor/new operation untouched. |
+| Missing proof, generation reuse, `PossiblyAccepted` or durable `Running` | Admission retained. |
+| CAS id/revision/publication mismatch | Current owner unchanged. |
+| `rf4_m51_policy_write_failure_second_replacement_restart_retains_r6_chain`; process-exit variant | Retained R6 chain after two replacements and relaunch; local policy retry; zero automatic Anki requests. |
+| `Superseded` | Facts preserved; no media Resume, success, receipt or new cooldown; prior deadlines retained. |
