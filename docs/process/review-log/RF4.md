@@ -1386,3 +1386,16 @@ VM drive `082948Z-21901` passed all 12 steps but failed hierarchy checking:
 showed clipped sidebar guidance and an unaligned empty-state import action.
 Filtered UI fix `083459Z-25942` is held with the media-export copy until
 backend verification; its tests and rendered review are still pending.
+
+Watchdog fixture `084354Z-32623` adds the missing VM setup and requires
+forward/manifest setup before the signal check. R3 found no P0/P1.
+`selftest/084540Z-33999` passed all 39 checks, with zero failures or skips.
+The runbook rewrite passed privacy. Native iPhone execution remains pending.
+
+Media backend fixer `082851Z-20970` was integrated for focused checks.
+`core-format/084513Z-33591` passed. `core-test/084704Z-35415` failed to
+compile at two digest-trait imports; no test ran. R2 found one remaining P2:
+the existing `media.staging` namespace was absent from alias protection.
+Privacy `084656Z-35060` flagged five tracked files; full input check
+`084902Z-37034`, including both new files, retained those same five findings.
+Keep the formatted patch for the next filtered fixer. This is incomplete work.

@@ -178,12 +178,12 @@ credentials, host keys and collection content from summaries.
 
 ## Cleanup and result
 
-EXIT, TERM and HUP cleanup stops native work, removes VM inputs and closes
-the forward before simulator reset or VM lease release. The remote process
-removes its manifest on input EOF or a signal; its watchdog expires after
-thirty minutes. After route verification, confirm that both manifest and
-listener are gone. Unconfirmed teardown is an error. The next ordinary VM
-fixture copy replaces `app/Fixtures`.
+Cleanup handles EXIT, TERM and HUP by stopping native work, removing VM
+inputs and closing the forward before simulator reset or VM lease release.
+The observer and remote watchdogs are each bounded to 3600 seconds. Normal
+input EOF and signals clean up immediately. Confirm removal of the manifest
+and listener before returning the VM lease; unknown cleanup state is an
+error. The ordinary VM fixture copy replaces `app/Fixtures`.
 
 Missing attestation, VM, route, manifest, native receipt or peer proof leaves
 evidence incomplete or queued. Only the exact native pass, strict peer match

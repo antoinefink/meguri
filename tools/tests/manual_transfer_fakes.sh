@@ -188,6 +188,7 @@ case "${1:-}" in
     ;;
   forward|forward-eof|terminate)
     operation="$1"
+    mg_mac_ui_begin || exit 1
     mg_mac_vm_take
     MG_MT_VM_PORT=18765
     MG_MT_HOST_PORT=19090
@@ -222,7 +223,7 @@ case "${1:-}" in
       [ -s "$FX_WATCHDOG.cancelled" ] || exit 1
       [ ! -e "${MG_MT_MANIFEST/"$MG_ROOT"/"$FX_VM"}" ] || exit 1
     else
-      mg_mt_open_forward && mg_mt_write_manifest
+      mg_mt_open_forward && mg_mt_write_manifest || exit 1
       kill -TERM $$
     fi
     ;;
