@@ -369,9 +369,9 @@ import UIKit
             var step: CGFloat = 0.8
             let targetExists = target.exists
             if targetExists {
-                step = 0.5
                 let frame = target.frame
                 if valid(frame) {
+                    if visible.intersects(frame) { step = 0.5 }
                     let fits: Bool
                     switch mode {
                     case .textStart, .textEnd:
@@ -441,8 +441,10 @@ import UIKit
         let windowFrame = windowExists ? window.frame : nil
         if let surfaceFrame { context.append(geometry("surfaceFrame", surfaceFrame)) }
         if let windowFrame { context.append(geometry("windowFrame", windowFrame)) }
-        if let surfaceFrame, let windowFrame {
-            context.append(geometry("clippedViewport", surfaceFrame.intersection(windowFrame).insetBy(dx: 4, dy: 8)))
+        let clippedViewport = try? viewport(surface, app: app)
+        context.append("viewportAvailable=\(clippedViewport != nil ? 1 : 0)")
+        if let clippedViewport {
+            context.append(geometry("clippedViewport", clippedViewport))
         }
         XCTContext.runActivity(named: "rf4-fixture-reveal-boundary") { activity in
             let diagnostic = XCTAttachment(string: context.joined(separator: "\n"))
