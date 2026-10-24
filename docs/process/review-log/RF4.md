@@ -1057,3 +1057,17 @@ covered by their independent reviews and privacy checks; the combined full
 gate is still required against base
 `81c207573c20c337c8834e4ae8b4ee8f29603dbf`. iPad M8, supplemental mobile
 rendering, explicit audits and critic remain open. No Unit is accepted.
+
+iPad native M8; source `21b61196`.
+
+| Check | Receipt | Result |
+| --- | --- | --- |
+| iPad native and peer checks | `manual-transfer-check/20261024T034252Z-99322` | PASS; one UI pass, zero skips |
+| Completion and cleanup | same | true |
+| Logical cells, saved review and scheduling | same | match |
+| Media | same | exact native and server bytes; typed counters and empty-file exclusion |
+| Import and Export cooldowns | same | real hour |
+| Prior effects | same | Import unknown retained; fresh Export false |
+
+M8 now passes on Mac, iPhone and iPad. The required supplemental rendering,
+explicit audits, critic and combined full gate remain open; no Unit is accepted.
