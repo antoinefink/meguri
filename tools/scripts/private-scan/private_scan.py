@@ -90,6 +90,10 @@ PUBLIC_IDENTIFIERS = ("ResizeObserver.prototype.disconnect", "MutationObserver.p
 PUBLIC_COMPILER_URL = "https://github.com/sass/dart-sass/releases/download/1.102.0/dart-sass-1.102.0-linux-arm64.tar.gz"
 # Fixed Xcode 27 public interface call. The receiver remains outside its span.
 PUBLIC_GESTURE_CALL = ".pinch(withScale: 2, velocity: 1)"
+# Docker's security option, approved in E-20261024T181932Z-5d69. Quotes are
+# required; bare words and matches crossing the literal remain private.
+# https://docs.docker.com/reference/cli/docker/container/run/#optional-security-options---security-opt
+PUBLIC_DOCKER_OPTION = "no-new-privileges"
 # Fixed public Rust API spans, longest first; only complete paths qualify.
 # Media I/O additions: approved in E-20261024T045314Z-f655.
 PUBLIC_RUST_PATHS = (
@@ -145,6 +149,7 @@ PUBLIC_LITERAL = re.compile(
     r"|(?<![^\s\"'`<>()\[\]{},;=|])" + re.escape(PUBLIC_COMPILER_URL) +
     r"(?=$|[\s\"'`<>()\[\]{},;|])"
     r"|(?<=\.)" + re.escape(PUBLIC_GESTURE_CALL[1:]) + r"(?=$|[\s;\"'])"
+    r'''|(?P<docker_quote>["'])''' + re.escape(PUBLIC_DOCKER_OPTION) + r"(?P=docker_quote)"
     r"|(?<![^\s\"'`<>()\[\]{},;=|&])(?:" + "|".join(map(re.escape, PUBLIC_RUST_PATHS)) +
     r")(?=$|[\s\"'`<>()\[\]{},;=|&])"
 )

@@ -752,6 +752,7 @@ runs:
     user_step: device-run
 
 utilities:
+  - {job: local-sync, why: "user-owned persistent loopback service; explicitly managed outside automated test lifecycle"}
   - {job: css-reference, why: "spec-side public compiler check: neutral JSON facts only; runtime tests verify the resulting contract"}
   - {job: corpus-generate, why: "spec side: generates the comparison corpus as run artifacts; conformance checks published scenarios"}
   - {job: cleanroom, why: "restricted Codex implementation runner; boundary probes run before every invocation"}

@@ -1006,6 +1006,60 @@ class FixedPublicFactsTests(unittest.TestCase):
                     self.assertTrue(private_scan.scan_staged(matcher, repo)[0])
 
 
+class PublicDockerOptionTests(unittest.TestCase):
+    """Only the approved, complete quoted Docker spelling is public."""
+
+    check_all = PublicInterfaceTests.check_all
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = self.temp.name
+        git(self.repo, "init", "-q")
+        self.option = private_scan.PUBLIC_DOCKER_OPTION
+        self.option_words = private_scan.words(self.option)
+        self.matcher = private_scan.Matcher({(word,) for word in self.option_words})
+
+    def check_decoded_and_files(self, text, expected, matcher=None):
+        matcher = matcher or self.matcher
+        encoders = (lambda value: value,
+                    lambda value: "".join("&#%d;" % ord(c) for c in value),
+                    lambda value: "".join("\\u%04x" % ord(c) for c in value),
+                    lambda value: "".join("%%%02X" % ord(c) for c in value))
+        for encode in encoders:
+            encoded = encode(text)
+            self.assertEqual(bool(private_scan.line_hits(matcher, encoded)), expected, text)
+            self.check_all(encoded, expected, matcher)
+
+    def test_exact_single_and_double_quoted_option_is_public(self):
+        self.assertEqual(self.option, "no-new-privileges")
+        for quote in ('"', "'"):
+            literal = quote + self.option + quote
+            self.check_decoded_and_files(literal, False)
+            self.check_decoded_and_files('docker("--security-opt", ' + literal + ')', False)
+            self.check_decoded_and_files(literal, False,
+                                         private_scan.Matcher({tuple(self.option_words)}))
+
+    def test_bare_modified_and_incomplete_literals_are_scanned(self):
+        for text in (self.option, '`' + self.option + '`',
+                     '"' + self.option + "'", '"' + self.option,
+                     '"' + self.option.upper() + '"',
+                     '"prefix-' + self.option + '"', '"' + self.option + '-suffix"',
+                     '"' + self.option + '=true"', '" ' + self.option + '"',
+                     '"' + self.option + '\u034f"'):
+            self.check_decoded_and_files(text, True)
+
+    def test_surrounding_and_crossing_tokens_remain_scanned(self):
+        literal = '"' + self.option + '"'
+        cases = (("sentinelprivate " + literal, ("sentinelprivate",)),
+                 (literal + " sentinelprivate", ("sentinelprivate",)),
+                 ("sentinelprivate " + literal, ("sentinelprivate", self.option_words[0])),
+                 (literal + " sentinelprivate", (self.option_words[-1], "sentinelprivate")),
+                 (literal + ", " + literal, (self.option_words[-1], self.option_words[0])))
+        for text, token in cases:
+            self.check_decoded_and_files(text, True, private_scan.Matcher({token}))
+
+
 class PublicLibraryTests(unittest.TestCase):
     def test_public_asset_mutations(self):
         root = Path(SCRIPT).resolve().parents[3]
