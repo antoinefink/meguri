@@ -25,3 +25,12 @@ The bounded diagnostic records only fixed categories, counts and geometry.
 
 This is WIP, without a completed Unit trailer. RF4 and the shared integration
 gate from `81c207573c20c337c8834e4ae8b4ee8f29603dbf` remain unaccepted.
+
+The next source-only capture helper is `cleanroom/20261024T205155Z-27393`.
+Independent review found no P0–P2 findings. It publishes only a bounded crop
+of the collapsed header, after identity, state, geometry and field checks.
+`ui-test/20261024T205451Z-28859` compiled and retained the preflight failure.
+The single named crop was exported and inspected. It contains the native
+chevron and fixed header text only. A center click lands on the label; the
+chevron lies within the leading portion of the reported control frame.
+The original pointer action and assertions are still unchanged here.

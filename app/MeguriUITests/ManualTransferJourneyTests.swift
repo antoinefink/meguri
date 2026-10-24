@@ -1036,6 +1036,89 @@ import AppKit
         lines.append("historyExactIDCount=\(descendants.matching(NSPredicate(format: "identifier == %@", "settings.anki.history")).count)")
         let report = XCTAttachment(string: lines.joined(separator: "\n"))
         report.name = name; report.lifetime = .keepAlways; add(report)
+        if name == "rf4-reveal-failure-geometry" {
+            attachCollapsedSettingsDetailsHeader(app)
+        }
+    }
+    private func attachCollapsedSettingsDetailsHeader(_ app: XCUIApplication) {
+        // Failure-only crop of the fixed collapsed header, including its leading chevron.
+        let detailsID = NSPredicate(format: "identifier == %@", "settings.anki.details")
+        let rootID = NSPredicate(format: "identifier == %@", "settings.root.content")
+        let detailsMatches = app.descendants(matching: .any).matching(detailsID)
+        let windowMatches = app.windows.containing(detailsID)
+        guard detailsMatches.count == 1, windowMatches.count == 1 else { return }
+        let boundDetails = detailsMatches.allElementsBoundByAccessibilityElement
+        let boundWindows = windowMatches.allElementsBoundByAccessibilityElement
+        guard boundDetails.count == 1, boundWindows.count == 1,
+              let details = boundDetails.first, let window = boundWindows.first,
+              details.exists, window.exists else { return }
+        let detailsFrame = details.frame
+        let windowFrame = window.frame
+
+        func validFrame(_ frame: CGRect) -> Bool {
+            !frame.isNull && !frame.isInfinite && !frame.isEmpty &&
+                frame.origin.x.isFinite && frame.origin.y.isFinite &&
+                frame.width.isFinite && frame.height.isFinite &&
+                frame.minX.isFinite && frame.maxX.isFinite &&
+                frame.minY.isFinite && frame.maxY.isFinite &&
+                frame.width > 0 && frame.height > 0
+        }
+        guard validFrame(detailsFrame), validFrame(windowFrame) else { return }
+        let cropFrame = CGRect(x: detailsFrame.minX - 32, y: detailsFrame.minY - 8,
+                               width: detailsFrame.width + 40, height: detailsFrame.height + 16)
+
+        func safeHeader() -> Bool {
+            guard app.state == .runningForeground, app.exists,
+                  app.alerts.count == 0, app.sheets.count == 0,
+                  app.descendants(matching: .secureTextField).count == 0,
+                  detailsMatches.count == 1, windowMatches.count == 1,
+                  app.windows.containing(rootID).count == 1,
+                  details.exists, window.exists, window.elementType == .window,
+                  details.identifier == "settings.anki.details",
+                  window.descendants(matching: .any).matching(detailsID).count == 1,
+                  window.descendants(matching: .any).matching(rootID).count == 1,
+                  details.frame == detailsFrame, window.frame == windowFrame,
+                  validFrame(details.frame), validFrame(window.frame),
+                  validFrame(cropFrame), cropFrame.width <= 260, cropFrame.height <= 48,
+                  windowFrame.contains(cropFrame) else { return false }
+            switch details.value {
+            case let number as NSNumber:
+                guard number == 0 else { return false }
+            case let text as String:
+                guard text == "0" || text == "false" else { return false }
+            default: return false
+            }
+            let fields = window.descendants(matching: .textField).allElementsBoundByAccessibilityElement +
+                window.descendants(matching: .secureTextField).allElementsBoundByAccessibilityElement
+            for field in fields {
+                guard field.exists else { return false }
+                let fieldFrame = field.frame
+                guard validFrame(fieldFrame), !fieldFrame.intersects(cropFrame) else { return false }
+            }
+            return true
+        }
+        guard safeHeader() else { return }
+        let windowImage = window.screenshot().image
+        var proposedRect = CGRect(origin: .zero, size: windowImage.size)
+        guard let source = windowImage.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil),
+              source.width > 0, source.height > 0 else { return }
+        let scaleX = CGFloat(source.width) / windowFrame.width
+        let scaleY = CGFloat(source.height) / windowFrame.height
+        guard scaleX.isFinite, scaleY.isFinite, scaleX > 0, scaleY > 0 else { return }
+        let relativeFrame = cropFrame.offsetBy(dx: -windowFrame.minX, dy: -windowFrame.minY)
+        let minX = ceil(relativeFrame.minX * scaleX)
+        let minY = ceil(relativeFrame.minY * scaleY)
+        let maxX = floor(relativeFrame.maxX * scaleX)
+        let maxY = floor(relativeFrame.maxY * scaleY)
+        let pixelFrame = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        let imageBounds = CGRect(x: 0, y: 0, width: CGFloat(source.width), height: CGFloat(source.height))
+        guard validFrame(relativeFrame), validFrame(pixelFrame), imageBounds.contains(pixelFrame),
+              let cropped = source.cropping(to: pixelFrame) else { return }
+        guard safeHeader() else { return }
+        let attachment = XCTAttachment(image: NSImage(cgImage: cropped, size: cropFrame.size))
+        attachment.name = "settings-details-collapsed-header"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
     #endif
     private func attach(_ app: XCUIApplication, _ name: String, target: XCUIElement? = nil, scroll: XCUIElement? = nil) {
