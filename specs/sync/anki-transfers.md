@@ -8,7 +8,7 @@ Scenarios: none (focused core, local-server and native acceptance in M8)
 This contract governs explicitly selected self-hosted server transfers. Routine sync uses CloudKit.
 Collection Import and Export are directional; separately authorized media reconciliation changes both sides.
 Collection-only is a valid selected scope, but does not complete the full include-media delivery requirement.
-File import/export follows its package/native contracts and is never subject to this server cooldown.
+File import/export follows its package/native contracts and remains independent of server eligibility.
 
 ## F1. Retained protocol facts and proof limits
 
@@ -31,7 +31,7 @@ M5 support is still required. U107 normal/hold-back contracts remain a deferred 
 
 Settings offers self-hosted endpoint configuration, Login, Import from Anki and Export to Anki in every build.
 Validate the endpoint with L1/L2. Changing it clears active credentials and redirects before another request.
-Keep historical operation/cooldown records. Store username and host key in device-only nonsynchronizable Keychain.
+Keep historical operations and legacy deadline records. Store username and host key in device-only nonsynchronizable Keychain.
 Never persist the password, log credentials, or put credentials in operation records, URLs or diagnostics.
 Login returns to the selected direction's preview; it never transfers or schedules a future request.
 Only explicit preview/preparation, Start and Resume actions may issue their disclosed server requests.
@@ -93,7 +93,7 @@ Represent preview/preparation, confirmed transfer intent, transferring, remote a
 collection complete, media awaiting consent/incomplete/complete, complete, cancelled, failed and needs decision.
 These phase names describe semantics; they do not prescribe a new shared wire or sidecar serialization.
 Write intent before upload may reach the server and before local activation. Persist known OK before activation.
-Write final success and its cooldown deadline in one durable state transition; failure cannot record success.
+Write final selected-scope success, its receipt and admission release in one durable state transition; failure cannot record success.
 Keep required artifacts and recovery evidence outside U32's unconditional temporary sweep namespaces.
 At relaunch display state and explicit Resume/Recovery actions; issue no request automatically.
 Resume only the same operation with matching identity and verified retained artifacts; reauthenticate if needed.
@@ -128,7 +128,7 @@ Changed categories/scope require another decision. No new dry-run engine is requ
 
 Keep the completed collection stage even if media is awaiting permission, declined, cancelled, interrupted or failed.
 Present each stage's result and mark the operation partial until the media work selected for it finishes.
-Cancelling media does not allow changing the recorded scope afterward to obtain success or start the cooldown.
+Cancelling media does not allow changing the recorded scope afterward to obtain success.
 List excluded files alongside any supported-media completion; do not describe excluded files as transferred.
 For collection-only, leave media alone and issue no media requests. Resume is explicit and continues media for
 the same operation without uploading or replacing the collection again. Use U110's journal/change stamps and
@@ -165,31 +165,43 @@ Any terminal phase rejects callback writes. Consent remains bound to its origina
 Historical superseded entries retain scope, effects, unresolved outcomes, counters and recovery artifacts without further modification.
 
 Explicit history/readmission calls may invoke `reconcile_local_replacement` locally; its startup/recovery path sends no Anki requests.
-Supersession adds neither success nor receipt and changes no cooldown. Show partial status and unavailable media Resume because of replacement.
+Supersession adds neither success nor receipt and changes no retained deadline history. Show partial status and unavailable media Resume because of replacement.
 Fresh transfers require M2's new preview/confirmation and M6 eligibility. Local reviews remain independent; R1548's cloud-publication choice
 is unchanged. These are Meguri rules, not protocol extensions.
 
-## M6. Shared success-only cooldown and identity limits
+## M6. Identity, receipts and custom-server eligibility
 
-Persist last success/deadline per normalized configured endpoint plus exact trimmed login username, preserving case.
-This is the logical identity, not permission to duplicate the username in ordinary durable records. Operation and
-cooldown records use a stable opaque or derived identity reference; username and display login remain Keychain-backed.
-Never place the raw username, host key or password in those records. The reference must preserve the logical
-identity across logout and credential rotation without changing its case-sensitive equality or alias limitations.
-Share the 60-minute cooldown between Import and Export. The host key, direction, redirect target, generation,
-login session and credential rotation do not form a new identity or erase historical deadlines.
-Logout, switching endpoint away/back and restart preserve records. Use configured identity through redirects.
-This prevents reset for that configured login; no canonical id proves that different aliases/case spellings or
-different configured URL aliases are the same server account. Do not claim stronger alias enforcement.
-Do not infer account equivalence from host keys, lowercase usernames or merge unrelated accounts speculatively.
-The unresolved-operation overlap guard is independent of these cooldown keys and cannot be bypassed by switching them.
+Antoine's 2026-10-24 decision exempts servers selected by entering a custom URL from the 60-minute wait.
+This contract's explicit self-hosted transfers use that exception in both directions and selected scopes.
+After whole selected-scope completion, a fresh Import or Export may start immediately for the same endpoint/login,
+including Import → saved review → Export. Each transfer still requires M2's preparation, backups, confirmation
+and current admission checks. End the review session before collection transfer.
 
-Record 60 minutes from whole selected-scope completion, only when the receipt and deadline are durable.
-Selected collection-only can finish without media; selected media must finish before whole-operation success.
-Failed, cancelled, partial or ambiguous operations consume no success cooldown. Resume of the same incomplete
-operation is not a new transfer; the unresolved-operation guard remains applicable independently.
-Show the next eligible instant. A backward clock change cannot shorten the retained deadline.
-File operations and CloudKit remain exempt. Enforcement is installation-local, not an account-wide service.
+An older retained deadline cannot block custom-server admission, including after restart, logout, credential
+rotation, endpoint selection or a backward clock change. Keep historical operations, receipts and the legacy
+deadline map unchanged; never delete, rewrite or backdate them to obtain eligibility. A custom server has no
+effective next-eligible deadline, so its UI and bridge projections expose no enforced wait or next-eligible time.
+
+Keep the version-1 receipt shape: a new custom-server receipt's `next_eligible_at` equals its `completed_at`.
+This compatibility field denotes immediate eligibility, not a future restriction. Do not add or overwrite an
+entry in the legacy `cooldowns` map for new custom-server success. Older future-dated values remain readable
+as history. Continue to validate the complete stored schema and identities; the exception does not turn a
+corrupt or unreadable history into empty state or successful admission.
+
+Commit the completion receipt and clear that operation's active admission together in one durable M4 update.
+Collection-only completion requires no media work. If media was selected, its durable completion is required too.
+A failure, cancellation or unfinished stage records no successful receipt. An unresolved upload keeps M4's
+admission occupied, including across restart, identity changes and either transfer direction. Resume continues
+the original operation rather than admitting another. Only the time restriction is removed for custom servers.
+
+Use normalized configured endpoint plus exact trimmed login username, preserving case, as the logical identity.
+Operation and historical deadline records use a stable opaque or derived reference; username and display login
+remain Keychain-backed. Never place raw username, host key or password in those records. Preserve the reference
+across logout and credential rotation. Use configured identity through redirects; no canonical id proves that
+different aliases, username case spellings or configured URLs are one account. Do not infer stronger equivalence.
+
+The exception starts no request and authorizes no AnkiWeb contact. Any noncustom server path retains the product
+rule specified for it; this self-hosted contract adds no such provider. File operations and CloudKit stay independent.
 
 ## M7. Fresh cloud-publication decision after manual Import
 
@@ -212,8 +224,12 @@ both direction confirmations, no hidden incremental merge, real local backup bef
 Include zero-card nondefault decks/config/history, fresh-account pre-copy, failed-copy refusal and post-copy stamp preview.
 Compare accepted-upload logical content after declared schema/stamp transforms; do not mask arbitrary differences.
 Cover lost OK/kill, post-OK local failure, partial media, explicit media-only resume, change-stamp races, exclusions,
-server-wins/trash/deletion/name repair, stale identities, overlap across credential changes, durable shared cooldown,
-logout/key rotation/restart, deadline clock changes and Import's fresh generation/account-bound cloud fence.
+server-wins/trash/deletion/name repair, stale identities, overlap across credential changes, immediate custom-server
+readmission, retained legacy deadlines, logout/key rotation/restart, backward clock changes and Import's fresh
+generation/account-bound cloud fence. Prove the same-login Import → actual saved review → restart with passive
+stored-login restoration → explicit Export cycle before an hour elapses, without changing clocks or stored deadlines.
+Keep the independent selected-media, cancellation, resume, byte comparison and peer checks; account substitution
+does not prove the same-login cycle. Incomplete or uncertain operations must still refuse overlap.
 With no explicitly authorized operation running, assert launch, foreground, timers, review end and integrations
 make zero Anki requests, including status/media requests.
 Native Mac/iPhone/iPad evidence must show Settings configuration/login/preview, direction/media decisions, progress,
@@ -231,4 +247,4 @@ M5.1: both directions × five eligible `MediaStage` variants.
 | Missing proof, generation reuse, `PossiblyAccepted` or durable `Running` | Admission retained. |
 | CAS id/revision/publication mismatch | Current owner unchanged. |
 | `rf4_m51_policy_write_failure_second_replacement_restart_retains_r6_chain`; process-exit variant | Retained R6 chain after two replacements and relaunch; local policy retry; zero automatic Anki requests. |
-| `Superseded` | Facts preserved; no media Resume, success, receipt or new cooldown; prior deadlines retained. |
+| `Superseded` | Facts preserved; no media Resume, success or receipt; prior deadline history retained. |

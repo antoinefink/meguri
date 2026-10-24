@@ -171,7 +171,7 @@ A change made from outside while an upload is in flight reaches the journal only
 
 Reset makes the next media sync compare every file with the server from the start, without transferring files the server already holds with the same content.
 
-- It runs after cancelling/draining media on logout or server change, and on the authorized job's sanity mismatch (R1581, U111). A mismatch permits only Y11's bounded re-run within that operation. Reset itself starts no request. Keep manual-operation receipts, stage results, cooldown and unknown-upload guards outside this reset; new endpoint/account authority requires explicit admission. If reset invalidates a media baseline, an explicit resume must re-list against the new baseline rather than trust old clean marks.
+- It runs after cancelling/draining media on logout or server change, and on the authorized job's sanity mismatch (R1581, U111). A mismatch permits only Y11's bounded re-run within that operation. Reset itself starts no request. Keep manual-operation receipts, stage results, retained deadline history and unknown-upload guards outside this reset; new endpoint/account authority requires explicit admission. If reset invalidates a media baseline, an explicit resume must re-list against the new baseline rather than trust old clean marks.
 - Reset takes the media lock, so it waits while a media sync or Check Media holds it; a caller that must not wait cancels the media sync first. Holding the lock, in one journal transaction, reset:
   1. removes every entry without file facts (deletion records and `awaiting` entries);
   2. puts every other entry in `none`, not pending, with a new change stamp, keeping its file facts;
@@ -180,7 +180,7 @@ Reset makes the next media sync compare every file with the server from the star
 - Before reconciling an unknown or changed baseline owner, require the separate M5 consent for the selected
   endpoint/account and both-side effects. Cancel and drain prior media work. Under the media lock, perform the
   T11 reset and persist the new opaque owner in the same journal transaction; a crash cannot expose a new owner
-  with an old cursor. Keep file facts, media files, manual history, receipts, cooldown and unresolved-operation
+  with an old cursor. Keep file facts, media files, manual history, receipts, retained deadline history and unresolved-operation
   guards. Reset alone starts no requests. Logout invalidates the active binding; an unbound baseline must be
   initialized this way before later use. A same-owner sanity reset may retain its binding within the authorized job.
 - The next check is therefore a full comparison. By T4.3 it makes every syncable file a pending `live` entry, hashing only files whose size or time changed since they were last registered, and removes the entries of files that are gone, without recording a deletion for them.

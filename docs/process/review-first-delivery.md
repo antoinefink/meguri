@@ -28,8 +28,11 @@ those transfers immediately after safe local entry and reviews, before the
 remaining editing, statistics and advanced review features. Reuse prepared work.
 
 The existing sync design remains: routine Meguri sync uses CloudKit; Anki server
-access is an explicit Settings transfer with preview, confirmation, safety backup
-and the specified cooldown. Antoine chose a self-hosted Anki-compatible server
+access is an explicit Settings transfer with preview, confirmation and safety backup.
+Antoine exempted custom servers entered by URL from the 60-minute wait on 2026-10-24,
+including retained earlier deadlines. After completion, an explicit transfer may
+follow immediately; active/uncertain-operation guards and confirmations remain.
+Antoine chose a self-hosted Anki-compatible server
 for the first usable version on 2026-10-22. Provide endpoint configuration and
 explicit import/export in every build; test with the local official server rig.
 No automated AnkiWeb contact is permitted. The routine-sync design is unchanged.

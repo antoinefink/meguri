@@ -195,7 +195,7 @@ The push repeats Y10.1 to Y10.4 until no entry is pending, each batch committed 
 - If the re-run's sanity check disagrees too, the job resets the state again, so that the next media sync starts from USN 0 as well, and fails with `media_resync_failed` (`sync/errors#E3`). The error is shown as a status, never as a blocking dialog (R1562, U151).
 - Anki instead resets after the first mismatch and asks the user to sync again (Y17).
 - A server whose media USN fell below the local one (its media was replaced) lists nothing; the sanity check then disagrees, and the re-run brings both sides together.
-- This re-run remains inside the same authorized manual operation and disclosed media scope. It cannot schedule a later transfer or bypass cancel/identity guards. A failure leaves selected media incomplete; `sync/anki-transfers` M4–M6 retains the collection result and governs explicit recovery and cooldown.
+- This re-run remains inside the same authorized manual operation and disclosed media scope. It cannot schedule a later transfer or bypass cancel/identity guards. A failure leaves selected media incomplete; `sync/anki-transfers` M4–M6 retains the collection result and governs explicit recovery and custom-server eligibility.
 
 ## Y12. Files still arriving (R1584 core part, R1592)
 
@@ -237,8 +237,8 @@ A finished job returns:
 
 These counters describe the media stage only. Retain the completed collection result if media is waiting,
 cancelled, interrupted or failed; show the whole selected operation as partial. Completion and exclusions
-follow `sync/anki-transfers#M5`; no media-only result can clear a CloudKit fence or start a success cooldown
-until all selected work and its receipt are complete under M6.
+follow `sync/anki-transfers#M5`. Media-only success never clears a CloudKit fence. Whole-operation success
+requires durable completion of all selected work and its receipt under M6. Custom servers impose no subsequent wait.
 
 `downloaded_deletions` counts the server deletions that removed a local file or a local deletion record (Y7); a server deletion met by a pending local change, or by no entry, is not counted.
 
@@ -251,7 +251,7 @@ until all selected work and its receipt are complete under M6.
 Resume requires an explicit action for the same durable operation, endpoint/account, media scope and expected
 local generation (`sync/anki-transfers#M5`). Resume only this media stage after collection completion; never
 resend or replace the collection. Preserve completed pages/batches and recorded partial effects. Credentials
-or identity changes do not erase operation results, cooldown or an unknown-upload guard. Relaunch, foreground,
+or identity changes do not erase operation results, retained deadline history or an unknown-upload guard. Relaunch, foreground,
 review end, timers and background events start no Anki media work. An authorized job may continue within its
 lifecycle limits, and Y11 may perform its internal bounded re-run.
 
