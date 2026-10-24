@@ -5,7 +5,7 @@ Requirements: R1597, R1598, R1599, R1619 (the latest-format, collection-only par
 Anki: 26.09.3
 Scenarios: conformance/scenarios/package/collection-package/
 
-The zip container that collection packages (`.colpkg`) and deck packages (`.apkg`) share, in its latest format, for packages that hold a collection and no media file. It covers how Meguri reads such a package (bounded, into a staging directory), how it writes one (backups U126, server copies U109, and later U124's export without media), and how it inspects one before a restore (U127). The legacy formats are U120's, media entries U122's, the legacy writer U123's: each extends the sections that name it. Swapping an inspected package into place is `engine/collection-replace`. The scenario vocabulary is `specs/conformance/package-ops.md`.
+The zip container that collection packages (`.colpkg`) and deck packages (`.apkg`) share, in its latest format, for packages that hold a collection and no media file. It covers how Meguri reads such a package (bounded, into a staging directory), how it writes one (backups U126, server copies U109, and later U124's export without media), and how it inspects one before a restore (U127). The legacy formats are U120's, media entries U122's, the legacy writer U123's: each extends the sections that name it. P15 defines the narrow RF4 latest-format media writer/verifier used by user collection-file export, without accepting U122/U124 or changing the collection-only writers. Swapping an inspected package into place is `engine/collection-replace`. The scenario vocabulary is `specs/conformance/package-ops.md`.
 
 ## P1. Formats
 
@@ -255,3 +255,48 @@ Checks a collection package before a restore (U127), and later before a `.colpkg
 | Disk full during the write (failpoint): no destination file, temporary file removed, `DiskFull`; injected low space: `InsufficientSpace` before any write | same file |
 | `collection.anki21b` of the writer: header bytes 18 and 19 are 2, frame declares the size and has a checksum; placeholder: header bytes 1 and 1, P7's objects | same file |
 | Reader on arbitrary bytes: no panic, no write outside staging, limits hold | `core/fuzz/fuzz_targets/package_reader.rs` (30 minutes) |
+
+
+## P15. Latest-format media output for user collection-file export
+
+This extension implements `package/file-export#E7`. P11 remains the explicit
+collection-only writer for backups and retained server copies. Its layout and
+verification do not change. No legacy or deck-subset behavior is added here.
+
+The media-capable writer takes the closed collection snapshot and the immutable
+captured media inventory of E7. Reuse P11's `meta`, collection and placeholder
+entries and their frame settings. Add one stored zip entry per media file,
+named by its zero-based map position in decimal with no leading zeros. Its
+payload is one streaming zstd level-3 frame, including decoded content size and
+content checksum. A zero-byte file still has a complete zstd frame and its own
+map record. Write `media` as a zstd frame containing the P5 protobuf records;
+write each record's exact UTF-8 name, uint32 decoded length and 20-byte SHA-1.
+Never emit field 255. Zip64 remains available; no media payload is buffered
+whole. Entry ordering is `meta`, `collection.anki21b`, `collection.anki2`, numeric
+media entries in map order, then `media`.
+
+Check available capacity on each filesystem before capture creates files.
+Extend P10 to budget for the database snapshot and immutable media copies on
+the collection filesystem, and the completed archive, map and zip-record
+costs on the output filesystem. Allow for media that grows under compression.
+Sum concurrent temporary and output requirements when they use one filesystem;
+otherwise query each filesystem's capacity provider separately. All arithmetic
+must detect overflow, and the P8 and uint32 bounds must pass before any write.
+Do not start capture until every capacity check succeeds. The later native
+save still follows `package/file-export#E4`, checking the selected destination
+against the finished artifact's size. Exhausting capacity after preflight
+returns `DiskFull`.
+
+Before publication, reread the closed package under P2/P4/P5/P6/P8. Match the
+snapshot's exact decoded collection length and SHA-256 and every captured map
+record and numbered entry. Stream each media payload to verify its exact decoded
+length and SHA-1, frame validity/checksum and aggregate bounds. Reject missing,
+duplicate or extra numeric entries and mismatched records. A name never becomes
+an arbitrary staging path. The existing atomic-file verifier/publication,
+cleanup and cancellation rules apply to the complete media-inclusive package.
+
+This verifier may validate nonempty media maps without enabling media install
+in collection import or restore. Those callers retain explicit intake policy;
+an unsupported nonempty map cannot be accepted and then discarded. R1627's
+media merge and legacy package reading remain unfinished unless independently
+implemented and verified. No unit completion follows from this extension.

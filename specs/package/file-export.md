@@ -1,18 +1,21 @@
-# Collection-only file export
+# Collection file export
 
 Spec: package/file-export
-Requirements: R1619, R1624, R1635, R1852, R2004, R2015, R2046, R2059
-Anki: none (Meguri app flow over package/container P10/P11)
+Requirements: R1619, R1624, R1625, R1635, R1852, R2004, R2015, R2046, R2059
+Anki: none (Meguri app flow over package/container P5/P10/P11/P15)
 Scenarios: none (focused Rust/Swift tests and native VM journeys in E6)
 
-This contract covers RF3's latest-format collection-only export, a partial U124/U162 delivery.
-Package format and verification remain `package/container#P10` and `#P11`.
+This contract covers RF3's owned file-export flow and RF4's media-inclusive extension,
+a partial U124/U162 delivery. Collection-only internal writers remain
+`package/container#P10` and `#P11`; user file export adds `#P15` and E7.
 
 ## E1. Scope and entry
 
-Offer “Export Collection — Without Media” from Settings on every platform.
-Make the omission visible before export; produce latest-format whole-collection .colpkg only.
-No deck/selection scope, legacy format, scheduling switch or media option is implied.
+Offer “Export Collection” from Settings on every platform.
+Produce a latest-format whole-collection .colpkg including media by default (E7).
+Show that media is included before creation; no separate option is needed in this delivery.
+No deck/selection scope, legacy format or scheduling switch is implied.
+R1625’s complete option set remains part of U124/U162; this extension does not accept those units.
 Local file export needs no Apple account, server, network, sync permission or cooldown.
 FSRS admission and unsupported presets cannot block a faithful collection snapshot.
 Require an open Ready collection; explain NoCollection, failed and exclusive-busy states.
@@ -21,7 +24,8 @@ It never updates backup reference/retention metadata or starts an Anki request.
 
 ## E2. Snapshot and job
 
-Use the existing live writer and `package/container#P10` disk preflight on the bounded background job pool.
+Use the existing live snapshot path and the E7 media capture on the bounded background job pool.
+Apply `package/container#P10` plus `#P15` disk preflight before writing.
 Capture source generation and admission sequence from the admitted collection handle.
 Keep the engine and Maintenance reader leases through the existing live-writer call, including compression and verification.
 Use VACUUM INTO; never copy live database bytes or hold the writer lock for compression.
@@ -116,7 +120,118 @@ flush failure prevents a false Ready; concurrent writes do not falsify receipt i
 large/sparse fixture copy has bounded RSS and zero whole-package Swift allocations; destination aliases refused;
 existing destination preserved under copy/disk-full/pre-rename cancellation; uncertain post-rename failure is truthful;
 job-tracking failure drains before cleanup; delayed provider read outlives sheet dismissal; retry/discard/restart cleanup.
-VM journeys: Mac Save/replace/cancel; iPhone Files; iPad native presentation; real RF2 re-import
-and durable review of the exported file. Offline/missing-account/quota status never hides local export.
-Full U124/U162 scope remains open: sharing, media, legacy, deck/selection export, complete options, remembered settings,
+VM journeys: Mac Save/replace/cancel; iPhone Files; iPad native presentation.
+Retain RF2 re-import and durable review for empty-media, collection-only exports only.
+Media-bearing exports require E7.4’s independent archive and compatible-client import proof.
+Offline/missing-account/quota status never hides local export.
+Full U124/U162 scope remains open: sharing, media installation during file import, legacy, deck/selection export, complete options, remembered settings,
 all file intake routes/menus and broader package interoperability/performance matrices.
+
+
+## E7. Media-inclusive user export
+
+This section applies only to the explicit user file-export flow. Backups,
+retained server copies and damaged-collection copies keep their existing
+collection-only contracts. Never change their defaults to include media.
+
+### E7.1 Inventory and names
+
+List the files directly from the admitted generation's `collection.media`
+folder. Include every regular media file: externally added, unreferenced,
+`_`-prefixed, zero-byte and larger than 100 MiB. The journal and the references
+in notes, templates or CSS must not restrict this list. Read no other media
+root, trash, staging area, child folder or symbolic-link destination.
+
+Apply `media/media-files#M8` only to exclude operating-system metadata. Flat
+subdirectories are not media (`#M1`); never recurse into them. A symbolic link,
+other nonregular nondirectory entry, unreadable media file or name that cannot
+be represented safely must refuse the whole export with an actionable error.
+Do not silently skip that file or follow the link. Refuse a media directory
+that is itself a link or is replaced during capture.
+
+Use UTF-8 media names that satisfy `package/container#P6`. On Apple platforms,
+represent the filesystem name in NFC as `media/media-files#M7.1` permits;
+retain the original directory-entry spelling for source access. This conversion
+must not rename or rewrite the source. On other platforms a non-NFC name is
+refused. Refuse invalid UTF-8, unsafe names and duplicate archive names after
+NFC conversion. Distinct safe case variants remain distinct map entries with
+their own numbered payloads. Never lowercase, deduplicate by hash, rename files
+or rewrite collection references during this whole-collection export.
+
+Order entries by the archive name's UTF-8 bytes for a deterministic manifest.
+An absent media directory means zero media files. A present path that cannot be
+safely inventoried is an error, not an empty directory. Validate name, count,
+individual length and aggregate limits before producing a Ready artifact.
+
+### E7.2 Capture and concurrent changes
+
+Capture media as immutable operation-owned data with bounded streaming I/O;
+reuse U32 staging and E3 ownership. Never build whole media payloads in memory
+or pass them to Swift. Open each exact directory entry relative to the
+validated media root without following links, require a regular file and keep
+its descriptor while copying. Reject any alias of the collection, its SQLite
+sidecars, operation output or internal staging.
+
+Record file identity, length and high-resolution modification/change metadata.
+Check them around each capture and again before Ready. Rescan the root's exact
+inventory before Ready to detect additions, removals, renames and replacements.
+The directory timestamp alone cannot detect an in-place rewrite. A changed,
+vanished or replaced source invalidates this attempt; discard unpublished work
+and ask for an explicit fresh export. No automatic restart loop or partial
+success is permitted. Tests must exercise an in-place content rewrite while
+copying, including a same-length rewrite, and a directory-entry replacement.
+
+The package contains each captured file's exact bytes and the consistent
+collection snapshot from E2. These have separate capture boundaries; there is
+no cross-filesystem transaction and no claim of a single atomic database/media
+instant. Completed capture data is immutable even if the live file later changes.
+Do not acquire the collection writer for enumeration, copying or compression,
+and do not block review commits on a long media-store or engine lock. Drain or
+cancel through the existing export/replacement leases; generation checks apply
+to the entire package. Export must not register media, update journal/pending
+state, change names or mutate source content.
+
+### E7.3 Container and limits
+
+Use `package/container#P15`: every captured media file has one numbered zip
+entry and one P5 map record with its exact decoded length and SHA-1. Zero bytes
+is valid and has SHA-1 of the empty byte sequence. The protobuf uint32 length
+admits at most 4,294,967,295 bytes per media file. Refuse a larger file before
+writing; never wrap, truncate, omit it or substitute the server's sync limit.
+Keep the existing P8 limits, including 400,000 zip entries, 64 MiB decoded map
+and 16 GiB total decoded package data. Report a resource/format-limit refusal
+as such, not as media successfully excluded. This is the existing package
+safety envelope, not a CloudKit or server quota.
+
+Reread the finished archive without relying on the original media paths.
+Check the complete set of numbered entries and map records, each name and
+length, zstd frame completion, frame checksums and streamed SHA-1 digests.
+Check the captured collection's length and SHA-256 as before. Reject duplicate,
+absent or unexpected numbered payloads. Enforce the same decoded-data bounds
+in this check and ordinary reads. Release every verification handle before
+publishing durably. Continue to apply E3–E5 to destination handling, artifact
+ownership, cancellation and any uncertain publication outcome.
+
+### E7.4 Focused acceptance and explicit intake boundary
+
+Use generated media only. Verify a package with referenced, unused, underscore,
+empty, Unicode, case-variant and greater-than-100-MiB files; decode its map and
+payloads with an independent validator and compare every filename, byte length
+and digest. A black-box compatible-client import must recover the collection's
+actual saved reviews and every included media file. Preserve source database,
+media bytes/names and journal/pending state throughout.
+
+Extend every applicable E6 focused check to the complete E7 and P15 contract,
+including each refusal and failure outcome and all safety invariants.
+
+Native VM checks on Mac, iPhone and iPad must save a media-inclusive artifact
+through the actual destination flow and validate the resulting bytes. Replace
+all user-file-export “Without Media” copy only with this implementation; keep
+collection-only safety-copy descriptions accurate.
+
+Media installation in local file import is a separate unfinished U124 leg.
+Until it exists, that flow must explicitly refuse nonempty media maps before
+replacement, with a clear unsupported-format message. Do not silently import
+only the collection or advertise a Meguri export/re-import roundtrip with
+media. Container validation and user intake policy are separate decisions;
+adding the export verifier must not accidentally enable an incomplete import.

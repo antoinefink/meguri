@@ -1343,3 +1343,21 @@ VM runner refresh `ui-test/072714Z-78914` and fresh trust check
 `ui-test/072841Z-80728` each passed one test with zero failures or skips.
 These verify the runner prerequisite, not the new UI or transfer cycle.
 Actual native execution, rendered review, audits and full gate remain pending.
+
+Same-login Mac execution, source `883090c3`: `manual-transfer-check/073720Z-87088`
+passed its exact native case, both independent peer checks and teardown.
+A imported media, saved a review, restarted and exported to the same login
+immediately. The peer confirmed the saved answer and scheduling. B retained
+the positive media cancellation/restart/resume checks. No clock or history
+reset was used. iPhone and iPad execution and the full gate remain pending.
+
+File-media contract; start `883090c3`. Spec session
+`s-20261024T075447Z-e085dbac` wrote E7/P15 from existing Meguri contracts.
+Spec R1 found two P2: the old E6 re-import requirement conflicted with the
+explicit media-intake boundary, and preflight omitted the capture volume.
+Both were fixed; R2 and the final wording review found no P0-P2.
+Privacy `075536Z-2107`, `075653Z-2840` and `075741Z-3666` failed on new prose.
+Whole paragraphs were rewritten, then duplicate test prose became an E6
+cross-reference. All normative requirements remain. `075851Z-4606` passed
+both specs. Implementation, focused checks and native media-file saves remain
+pending; internal copies keep their collection-only contract.
