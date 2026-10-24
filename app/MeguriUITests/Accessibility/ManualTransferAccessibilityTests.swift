@@ -35,7 +35,9 @@ import XCTest
         let consent = state == "overflow" || state == "media-consent"
         let complete = state == "media-complete"
         let unknown = "Current exclusions are unknown until a fresh media check completes. Recorded transfer counts retain saved effects from earlier attempts."
-        var messages = ["Fixture only: simulated media effects. No server work or acceptance."]
+        // The initial all-types audit covers the diagnostic fixture marker.
+        // Supplemental visibility coverage starts with actual product content.
+        var messages: [String] = []
         var controls: [(String, String)] = []
         if consent {
             messages += [
@@ -68,7 +70,7 @@ import XCTest
         let surface = try ManualTransferFixtureUI.scrollSurface(app)
         let targets = messages.map { ManualTransferFixtureUI.text($0, in: app) }
             + controls.map { app.buttons["settings.anki." + $0.0].firstMatch }
-        try ManualTransferFixtureUI.reveal(targets[0], in: app, bundle: bundle)
+        try ManualTransferFixtureUI.reveal(targets[0], in: app, bundle: bundle, mode: .textStart)
         var checked: Set<Int> = []
         var textEnds: [Int: CGFloat] = [:]
         var findings: [AuditFinding] = []

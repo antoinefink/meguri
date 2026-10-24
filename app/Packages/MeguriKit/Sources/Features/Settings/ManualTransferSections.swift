@@ -14,10 +14,11 @@ public struct ManualTransferSections: View {
     public init(model: ManualTransferCoordinator) { self.model = model }
     public var body: some View {
         Group {
-            Section("Anki Server Import / Export") {
+            Section {
                 Text("Routine sync uses CloudKit. These separate, explicit server transfers replace a collection. Collection Files and local reviews do not require a server login.")
                     .foregroundStyle(.token(.textSecondary))
-                TextField("Self-hosted endpoint, including optional prefix", text: $model.endpointDraft)
+                TextField("Self-hosted endpoint, including optional prefix", text: $model.endpointDraft, axis: .vertical)
+                    .font(.body)
                     .textContentType(.URL)
                     #if os(iOS)
                     .focused($focusedField, equals: .endpoint)
@@ -25,7 +26,14 @@ public struct ManualTransferSections: View {
                     .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
                     .accessibilityIdentifier("settings.anki.endpoint")
                 action("Save Endpoint", id: "saveEndpoint", disabled: model.busy || model.preview != nil) { await model.applyEndpoint() }
-                if !model.endpoint.isEmpty { LabeledContent("Configured endpoint", value: model.endpoint) }
+                if !model.endpoint.isEmpty {
+                    LabeledContent {
+                        Text(model.endpoint)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } label: {
+                        Text("Configured endpoint")
+                    }
+                }
                 if model.authenticated {
                     LabeledContent("Login", value: model.username)
                         .accessibilityIdentifier("settings.anki.loginIdentity")
@@ -53,12 +61,14 @@ public struct ManualTransferSections: View {
                     Text("Import from Anki").tag(ManualTransferDirection.import)
                     Text("Export to Anki").tag(ManualTransferDirection.export)
                 }
+                .font(.body)
                 .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
                 .accessibilityIdentifier("settings.anki.direction")
                 Picker("Transfer scope", selection: Binding(get: { model.scope }, set: { model.selectScope($0) })) {
                     Text("Collection only").tag(ManualTransferScope.collectionOnly)
                     Text("Collection and media").tag(ManualTransferScope.collectionAndMedia)
                 }
+                .font(.body)
                 .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
                 .accessibilityIdentifier("settings.anki.scope")
                 Text(model.scope == .collectionOnly
@@ -71,6 +81,11 @@ public struct ManualTransferSections: View {
                     Text("Preparation makes a local safety copy, downloads and retains the server’s current collection, and prepares an upload. Downloading changes the server’s bookkeeping. Nothing is uploaded until final confirmation. Export replaces the server collection and activates the prepared version locally.")
                     action("Make Copies and Prepare Export Preview", id: "prepareExport", disabled: !model.canPrepare) { await model.prepare() }
                 }
+            } header: {
+                Text("Anki Server Import / Export")
+                    .font(.headline)
+                    .foregroundStyle(.token(.textPrimary))
+                    .accessibilityIdentifier("settings.anki.sectionTitle")
             }
             if let preview = model.preview {
                 Section(model.isRecoveryPreview ? "Local Recovery Decision" : "Final Replacement Preview") {
@@ -210,7 +225,16 @@ public struct ManualTransferSections: View {
         }
     }
     private func action(_ title: String, id: String, disabled: Bool, run: @escaping @MainActor () async -> Void) -> some View {
-        Button { Task { await run() } } label: { Text(title).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle()) }
+        Button { Task { await run() } } label: {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(.token(.textPrimary))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .tint(ColorToken.textPrimary.color)
             .disabled(disabled).accessibilityIdentifier("settings.anki.\(id)")
     }
     @ViewBuilder private func recordFacts(_ record: ManualTransferRecord) -> some View {
