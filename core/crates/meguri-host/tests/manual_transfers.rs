@@ -1573,6 +1573,9 @@ fn rf4_media_resume_rejects_unrelated_local_replacement() {
     let root = tempfile::tempdir().unwrap();
     let (host, config, op) = selected_collection(root.path());
     let preview = media_preview(&host, &op);
+    let before = preview.operation.clone();
+    let cooldown = host.manual_transfer_history().next_eligible_at(&op.account).unwrap();
+    assert!(cooldown.is_none());
     let copy = op.server_copy.as_ref().unwrap();
     let path = config.backups_directory.join(&copy.artifact.name);
     let package = inspect(&config, &path);
@@ -1605,12 +1608,62 @@ fn rf4_media_resume_rejects_unrelated_local_replacement() {
     assert!(matches!(
         complete(
             events,
-            host.prepare_manual_media(op.id, access(&offline, "Synthetic User", "rotated"))
+            host.prepare_manual_media(op.id.clone(), access(&offline, "Synthetic User", "rotated"))
                 .unwrap()
         ),
         Err(TransferError::Stale(Boundary::LocalChanged))
     ));
     assert!(offline.calls.lock().unwrap().is_empty());
+
+    // Restore proves the same publication transition as a Files import. A new
+    // explicit transfer must be admitted without completing the old media work.
+    let bytes = fs::read(root.path().join("server/collection.anki2")).unwrap();
+    let script = Script::new(vec![
+        (Method::Meta, Reply::Bytes(meta(NOW - 2000, 7))),
+        (Method::Download, Reply::Bytes(bytes)),
+        (Method::Meta, Reply::Bytes(meta(NOW - 1000, 8))),
+    ]);
+    let fresh = prepare(&host, &script, Direction::Import, Scope::CollectionOnly);
+    assert!(
+        !matches!(&fresh, Err(TransferError::Policy(meguri_sync::policy::PolicyError::Overlap(_)))),
+        "verified replacement must release the old media operation's overlap guard"
+    );
+    let fresh = fresh.unwrap_or_else(|_| panic!("fresh explicit transfer must reach preview"));
+    script.assert_done();
+    assert!(fresh.operation.id != before.id);
+    assert_eq!(fresh.operation.phase, Phase::Preview);
+    assert_eq!(script.count(Method::Upload), 0);
+
+    let history = host.manual_transfer_history();
+    let old = history.get(&before.id).unwrap_or_else(|_| panic!("old partial history must remain"));
+    assert!(
+        old.id == before.id && old.account == before.account
+            && old.configured_endpoint == before.configured_endpoint
+            && old.target_endpoint == before.target_endpoint
+            && old.direction == before.direction && old.scope == before.scope,
+        "replacement must preserve historical transfer identity and scope"
+    );
+    assert!(old.collection_complete && old.phase != Phase::Complete && old.receipt.is_none());
+    assert!(old.media.stage != meguri_sync::policy::MediaStage::Complete);
+    assert!(
+        old.media.consent == before.media.consent && old.media.counters == before.media.counters
+            && old.media.remote_outcome_unknown == before.media.remote_outcome_unknown
+            && old.media.exclusions_verified == before.media.exclusions_verified
+            && old.media.failure_kind == before.media.failure_kind,
+        "replacement must preserve media consent and effect facts"
+    );
+    assert!(
+        old.candidate == before.candidate && old.original == before.original
+            && old.server_copy == before.server_copy && old.safety_backups == before.safety_backups
+            && old.acceptance == before.acceptance && old.activation_identity == before.activation_identity
+            && old.resulting_publication == before.resulting_publication,
+        "replacement must preserve collection and retained artifact facts"
+    );
+    assert!(
+        history.next_eligible_at(&before.account).unwrap_or_else(|_| panic!("cooldown history must remain"))
+            == cooldown,
+        "replacement and fresh preview must grant no success cooldown"
+    );
     host.close().unwrap();
 }
 #[test]
