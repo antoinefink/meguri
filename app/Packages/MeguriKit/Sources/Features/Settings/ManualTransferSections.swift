@@ -15,12 +15,12 @@ public struct ManualTransferSections: View {
     public var body: some View {
         Group {
             Section {
-                Text("Routine sync uses CloudKit. These separate, explicit server transfers replace a collection. Collection Files and local reviews do not require a server login.")
-                    .foregroundStyle(.token(.textSecondary))
-                    .accessibilityIdentifier("settings.anki.intro")
                 TextField("Server URL", text: $model.endpointDraft, axis: .vertical)
                     .font(.body)
                     .textContentType(.URL)
+                    #if os(macOS)
+                    .textFieldStyle(.roundedBorder)
+                    #endif
                     #if os(iOS)
                     .focused($focusedField, equals: .endpoint)
                     #endif
@@ -49,6 +49,9 @@ public struct ManualTransferSections: View {
                 } else {
                     TextField("Username", text: $model.username)
                         .textContentType(.username)
+                        #if os(macOS)
+                        .textFieldStyle(.roundedBorder)
+                        #endif
                         #if os(iOS)
                         .focused($focusedField, equals: .username)
                         #endif
@@ -56,15 +59,15 @@ public struct ManualTransferSections: View {
                         .accessibilityIdentifier("settings.anki.username")
                     SecureField("Password", text: $model.password)
                         .textContentType(.password)
+                        #if os(macOS)
+                        .textFieldStyle(.roundedBorder)
+                        #endif
                         #if os(iOS)
                         .focused($focusedField, equals: .password)
                         #endif
                         .disabled(model.busy)
                         .accessibilityIdentifier("settings.anki.password")
                     action("Log In", id: "login", disabled: model.busy || model.endpoint.isEmpty || model.password.isEmpty) { await model.login() }
-                    Text("Login only saves a device-only login key. It does not prepare or transfer a collection. The password is not saved.")
-                        .foregroundStyle(.token(.textSecondary))
-                        .accessibilityIdentifier("settings.anki.loginNotice")
                 }
                 Picker("Direction", selection: Binding(get: { model.direction }, set: { model.select($0) })) {
                     Text("Import from Anki").tag(ManualTransferDirection.import)
@@ -91,10 +94,21 @@ public struct ManualTransferSections: View {
                     action("Make Copies and Prepare Export Preview", id: "prepareExport", disabled: !model.canPrepare) { await model.prepare() }
                 }
             } header: {
-                Text("Anki Server Import / Export")
+                Text("Anki Server")
                     .font(.headline)
                     .foregroundStyle(.token(.textPrimary))
                     .accessibilityIdentifier("settings.anki.sectionTitle")
+            } footer: {
+                VStack(alignment: .leading, spacing: Spacing.small) {
+                    Text("Routine sync uses CloudKit. These separate, explicit server transfers replace a collection. Collection Files and local reviews do not require a server login.")
+                        .accessibilityIdentifier("settings.anki.intro")
+                    if !model.authenticated {
+                        Text("Login only saves a device-only login key. It does not prepare or transfer a collection. The password is not saved.")
+                            .accessibilityIdentifier("settings.anki.loginNotice")
+                    }
+                }
+                .font(.body)
+                .foregroundStyle(.token(.textSecondary))
             }
             if let preview = model.preview {
                 Section(model.isRecoveryPreview ? "Local Recovery Decision" : "Final Replacement Preview") {
@@ -103,8 +117,13 @@ public struct ManualTransferSections: View {
                     Text("Other clients can change the server after its retained copy was made. Export can discard those later edits; the server does not reserve this preview.")
                     Button(role: .destructive) { model.confirmationPresented = true } label: {
                         Text(model.isRecoveryPreview ? "Confirm Local Recovery…" : (preview.record.direction == .import ? "Replace This Device’s Collection…" : "Replace Server Collection…"))
-                            .frame(minWidth: 44, minHeight: 44)
+                            .font(.body)
+                            .foregroundStyle(.token(model.canConfirm ? .destructive : .textSecondary))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(minWidth: minimumActionSize, minHeight: minimumActionSize, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .disabled(!model.canConfirm)
                     .accessibilityIdentifier("settings.anki.confirm")
                     action("Close Preview", id: "closePreview", disabled: model.busy) { await model.discardPreview() }
@@ -154,8 +173,14 @@ public struct ManualTransferSections: View {
                         ForEach(Array(entry.record.copies.enumerated()), id: \.offset) { index, copy in
                             Text("Save a separate copy of \(copy.name)")
                             Button { model.chooseCopy(entry, index: index) } label: {
-                                Text("Save Copy to Folder…").frame(minWidth: 44, minHeight: 44)
+                                Text("Save Copy to Folder…")
+                                    .font(.body)
+                                    .foregroundStyle(.token(model.busy ? .textSecondary : .statusAccent))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(minWidth: minimumActionSize, minHeight: minimumActionSize, alignment: .leading)
+                                    .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
                             .disabled(model.busy)
                             .accessibilityIdentifier("settings.anki.copy.\(entry.id).\(index)")
                         }
@@ -169,7 +194,15 @@ public struct ManualTransferSections: View {
             ToolbarItemGroup(placement: .keyboard) {
                 if focusedField != nil {
                     Spacer()
-                    Button { focusedField = nil } label: { Text("Done", bundle: .module) }
+                    Button { focusedField = nil } label: {
+                        Text("Done", bundle: .module)
+                            .font(.body)
+                            .foregroundStyle(.token(.statusAccent))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(minWidth: minimumActionSize, minHeight: minimumActionSize)
+                            .contentShape(Rectangle())
+                    }
+                        .buttonStyle(.plain)
                         .accessibilityIdentifier("settings.anki.keyboardDone")
                 }
             }
@@ -238,11 +271,20 @@ public struct ManualTransferSections: View {
         Button { Task { await run() } } label: {
             Text(title)
                 .font(.body)
+                .foregroundStyle(.token(disabled ? .textSecondary : .statusAccent))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(minWidth: minimumActionSize, minHeight: minimumActionSize, alignment: .leading)
+                .contentShape(Rectangle())
         }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .tint(ColorToken.textPrimary.color)
+            .buttonStyle(.plain)
             .disabled(disabled).accessibilityIdentifier("settings.anki.\(id)")
+    }
+    private var minimumActionSize: CGFloat {
+        #if os(macOS)
+        28
+        #else
+        44
+        #endif
     }
     @ViewBuilder private func recordFacts(_ record: ManualTransferRecord) -> some View {
         ForEach(record.decisionFacts) { fact in

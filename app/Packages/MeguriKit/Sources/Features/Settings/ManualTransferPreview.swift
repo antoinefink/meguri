@@ -29,7 +29,7 @@ public enum ManualTransferSettingsPreview: PreviewStates {
                 .background(.token(.backgroundPrimary))
                 .accessibilityIdentifier("settings.anki.content")
                 .manualTransferPresentation(model: model)
-                .navigationTitle("Anki Server Import / Export")
+                .navigationTitle(Text("Settings", bundle: .module))
                 .task { if state == .mediaProgress { await model.startMedia() } }
         }
     }
