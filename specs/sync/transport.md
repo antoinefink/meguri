@@ -39,7 +39,7 @@ Facts marked "verified" were observed against the official sync server of Anki 2
   | `c` | the client identity (T3) |
   | `s` | the job's session key (T4) |
 
-  Example: `{"v":11,"k":"0123456789abcdef0123456789abcdef01234567","c":"meguri,1.0.0 (3f2a9c1d),macos","s":"q7Rb2KxA"}`.
+  Example: `{"v":11,"k":"0123456789abcdef0123456789abcdef01234567","c":"meguri,1.0.0 (3f2a9c1d),macos","s":"4gfFC3"}`.
 - The value is printable ASCII only. Strings are written as JSON requires (`"` and `\` escaped), and every character outside U+0020 to U+007E is written as a `\uXXXX` escape, with a surrogate pair for characters above U+FFFF. The official server answers 400 to a header that holds raw non-ASCII bytes and accepts the same characters escaped (verified). Meguri's own `c` and `s` are ASCII anyway; the rule matters for a host key a server might issue.
 - How the official server treats the header (verified, for the stub and for U106): no header, or a value that is not JSON, gives 400; a `v` it does not support gives 400 (it supports 8 to 11; 12 was tried); extra members are ignored; a `k` it does not know gives 403; an empty `s` on `start`, `applyGraves`, `applyChanges`, `chunk`, `applyChunk`, `sanityCheck2` or `finish` gives 400 (tried on `start`).
 
@@ -65,8 +65,8 @@ Facts marked "verified" were observed against the official sync server of Anki 2
 ## T4. Session key
 
 - A job creates one session key when it starts and sends it as `s` in every request of the job: the `meta` retry after a redirect (T7) and the media requests the job makes included. Every job, a login included, has a new key.
-- Form: 8 characters from `0-9 A-Z a-z`, taken from fresh draws of the core's random source (`meguri_model::rng`) when the job starts. The source is seeded once per process and never per job, so two jobs get different keys even when a test seeds it, and a seeded run repeats its keys.
-- Why it matters: the server binds the state of an incremental sync to the key that called `start`. A later request of that sync with a different key gets 409 (verified), and a new `start` with another key ends the old sync on the server. Anki's client uses a random 32-bit number written in base 62 (at most 6 characters); the server only compares keys for equality, so any non-empty ASCII key works.
+- Form: the base-62 representation of a fresh unsigned 32-bit value drawn from the core's process-wide random source (`meguri_model::rng`) when the job starts. Digits are `0-9 A-Z a-z` in that order, most significant first, with no leading zeroes; zero is `0`. The result has one to six characters and decodes to at most `4294967295`. Seed the source once per process, never per job. Each job takes a fresh draw; a seeded run repeats its keys.
+- Why it matters: the server binds the state of an incremental sync to the key that called `start`. A later request of that sync with a different key gets 409 (verified), and a new `start` with another key ends the old sync on the server. Anki's client uses a random 32-bit number written in base 62 (at most 6 characters). The official server also accepts other non-empty ASCII keys; that acceptance does not relax the bounded form Meguri sends.
 
 ## T5. Request bodies (R1507)
 
