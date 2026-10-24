@@ -294,10 +294,17 @@ fn record(directory: &Path, receipt: &BackupReceipt) -> Result<(), StorageError>
             .get_mut("deviceState")
             .and_then(serde_json::Value::as_object_mut)
             .ok_or_else(invalid)?;
-        // Validate known identity without serializing it back: nested unknown
-        // members (including recovery evidence) must remain byte-value intact.
-        serde_json::from_value::<Publication>(state.get("active").cloned().ok_or_else(invalid)?)
-            .map_err(|_| invalid())?;
+        // Validate only the required active fields with the strict typed decoder.
+        // Keep the full original object, including unknown members, untouched.
+        let active = state
+            .get("active")
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(invalid)?;
+        let mut known = serde_json::Map::new();
+        for field in ["identity", "binding", "decision"] {
+            known.insert(field.into(), active.get(field).cloned().ok_or_else(invalid)?);
+        }
+        serde_json::from_value::<Publication>(serde_json::Value::Object(known)).map_err(|_| invalid())?;
         if !state.get("intent").is_some_and(|v| v.is_null() || v.is_object()) {
             return Err(invalid());
         }

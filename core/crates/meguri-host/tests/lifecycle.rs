@@ -1178,6 +1178,78 @@ fn missing_or_unreadable_backup_metadata_retains_the_durable_file_and_refuses_im
 }
 
 #[test]
+fn invalid_required_backup_identity_metadata_retains_the_durable_file_without_rewriting_sidecar() {
+    for (field, value) in [
+        ("identity", None),
+        ("binding", None),
+        ("decision", None),
+        ("identity", Some(serde_json::json!([1, -1]))),
+        (
+            "binding",
+            Some(serde_json::json!({"Connected": {"account": "test", "configuration": "test"}})),
+        ),
+        (
+            "binding",
+            Some(serde_json::json!({"Connected": {
+                "account": "test", "configuration": "test", "environment": "test", "unexpected": true
+            }})),
+        ),
+        ("decision", Some(serde_json::json!("Unsupported"))),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let host = CoreHost::open(config(dir.path())).unwrap();
+        let c = host.collection().unwrap();
+        let sidecar = c.path().with_file_name("meguri-sidecar.json");
+        let original = std::fs::read(&sidecar).unwrap();
+        meguri_storage::sidecar::update_document(&sidecar, |doc| {
+            let active = doc["deviceState"]["active"].as_object_mut().unwrap();
+            active.insert("futureIdentityMember".into(), serde_json::json!(["opaque"]));
+            match value {
+                Some(value) => {
+                    active.insert(field.into(), value);
+                }
+                None => {
+                    active.remove(field);
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+        let invalid = std::fs::read(&sidecar).unwrap();
+        let error = host
+            .backup()
+            .before_colpkg_import(&c, &meguri_engine::CancelToken::default())
+            .unwrap_err();
+        let meguri_engine::EngineError::SafetyBackupFailed(failure) = error else {
+            panic!("typed metadata failure for {field}")
+        };
+        assert!(matches!(
+            failure.cause,
+            meguri_engine::ports::BackupFailureCause::Engine(ref error)
+                if matches!(error.as_ref(),
+                    meguri_engine::EngineError::Storage(meguri_storage::StorageError::Io { detail })
+                        if detail == "backup metadata requires existing device identity and journal")
+        ));
+        let meguri_engine::ports::BackupPublication::Durable(receipt) = failure.publication else {
+            panic!("published file must be reported for {field}")
+        };
+        assert_eq!(std::fs::read(&sidecar).unwrap(), invalid);
+        assert_eq!(std::fs::read_dir(dir.path().join("backups")).unwrap().count(), 1);
+        assert_eq!(
+            std::fs::metadata(dir.path().join("backups").join(&receipt.name))
+                .unwrap()
+                .len(),
+            receipt.size_bytes
+        );
+        let captured = inspect_backup(&host, &receipt.name);
+        assert!(captured.collection_path().is_file(), "retained backup is recoverable");
+        // Repair synthetic corruption solely to release the test host cleanly.
+        std::fs::write(&sidecar, original).unwrap();
+        host.close().unwrap();
+    }
+}
+
+#[test]
 fn all_61_occupied_backup_names_refuse_before_snapshot_or_capacity_checks() {
     let dir = tempfile::tempdir().unwrap();
     let space = Arc::new(BackupCapacity::default());
