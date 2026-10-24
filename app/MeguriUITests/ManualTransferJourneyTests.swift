@@ -807,7 +807,37 @@ import AppKit
             let main = try keyboardWindow(app.windows.matching(identifier: "main").firstMatch)
             main.typeKey(",", modifierFlags: .command)
         }
-        XCTAssertTrue(element(app, "settings.root.content").waitForExistence(timeout: 30),
+        let settingsOpened = element(app, "settings.root.content").waitForExistence(timeout: 30)
+        if !settingsOpened {
+            let notificationCenter = XCUIApplication(bundleIdentifier: "com.apple.UserNotificationCenter")
+            let notificationCenterState = notificationCenter.state
+            let notificationCenterRunning = notificationCenterState == .runningForeground
+                || notificationCenterState == .runningBackground
+            var facts: [String: Any] = [
+                "appStateRawValue": app.state.rawValue,
+                "appWindowCount": app.windows.count,
+                "mainWindowCount": app.windows.matching(NSPredicate(format: "identifier == %@", "main")).count,
+                "settingsRootContentCount": app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "identifier == %@", "settings.root.content")).count,
+                "settingsRootConnectionCount": app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "identifier == %@", "settings.root.connection")).count,
+                "settingsRootCollectionCount": app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "identifier == %@", "settings.root.collection")).count,
+                "settingsAnkiEndpointCount": app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "identifier == %@", "settings.anki.endpoint")).count,
+                "notificationCenterRunning": notificationCenterRunning
+            ]
+            if notificationCenterRunning {
+                facts["notificationCenterDialogCount"] = notificationCenter.dialogs.count
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: facts, options: [.sortedKeys]) {
+                let report = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+                report.name = "settings-open-failure-facts"
+                report.lifetime = .keepAlways
+                add(report)
+            }
+        }
+        XCTAssertTrue(settingsOpened,
                       "Command-comma must open the native Settings scene.")
         try click(element(app, "settings.root.connection"), app, bundle)
         #else
@@ -937,7 +967,7 @@ import AppKit
     }
     #if os(macOS)
     private func attachGeometry(_ app: XCUIApplication, _ name: String, _ bundle: String) {
-        // Numeric/boolean geometry only; never inspect account controls or AX text.
+        // Geometry and closed disclosure facts only; never emit AX text or inspect account controls.
         let appState = app.state
         let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
         let appExists = app.exists
@@ -976,6 +1006,34 @@ import AppKit
                 frame(intersection, "viewportIntersection")
             }
         }
+        let descendants = app.descendants(matching: .any)
+        let details = element(app, "settings.anki.details")
+        let detailsExists = details.exists
+        lines.append("detailsExactIDCount=\(descendants.matching(NSPredicate(format: "identifier == %@", "settings.anki.details")).count)")
+        lines.append("detailsExists=\(detailsExists)")
+        var detailsValueCategory = "absent"
+        if detailsExists {
+            lines.append("detailsEnabled=\(details.isEnabled)")
+            lines.append("detailsHittable=\(details.isHittable)")
+            frame(details.frame, "detailsFrame")
+            // Compare allowed values in memory; never stringify the AX value.
+            switch details.value {
+            case nil: break
+            case let number as NSNumber:
+                detailsValueCategory = number == 1 ? "expanded" : number == 0 ? "collapsed" : "other"
+            case let text as String:
+                switch text {
+                case "1", "true": detailsValueCategory = "expanded"
+                case "0", "false": detailsValueCategory = "collapsed"
+                default: detailsValueCategory = "other"
+                }
+            default: detailsValueCategory = "other"
+            }
+        }
+        lines.append("detailsValueCategory=\(detailsValueCategory)")
+        lines.append("syncLogsLabelOrTitleCount=\(descendants.matching(NSPredicate(format: "label == %@ OR title == %@", "Sync Logs", "Sync Logs")).count)")
+        lines.append("refreshLocalHistoryLabelOrTitleCount=\(descendants.matching(NSPredicate(format: "label == %@ OR title == %@", "Refresh Local History", "Refresh Local History")).count)")
+        lines.append("historyExactIDCount=\(descendants.matching(NSPredicate(format: "identifier == %@", "settings.anki.history")).count)")
         let report = XCTAttachment(string: lines.joined(separator: "\n"))
         report.name = name; report.lifetime = .keepAlways; add(report)
     }

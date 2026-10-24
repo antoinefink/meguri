@@ -138,6 +138,7 @@ public struct MacSettingsView: View {
             .detailColumnChrome()
         }
         .manualTransferPresentation(model: collection.manualTransfers, isActive: collection.navigation.sheet != .manualTransfer)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings.root.content")
     }
     private var hasActiveTransfer: Bool {
