@@ -5,6 +5,7 @@
 - `cleanroom-image` builds the pinned Codex Linux runtime. `cleanroom --check` proves its boundaries without credentials; implementation/fixer runs require clean master plus a recorded session and export a patch, never write the real checkout. See `cleanroom/README.md`. Keep the command sandbox mandatory and forbidden sources/history/caches absent from its mounts.
 
 - Run host Apple jobs one at a time, including Swift package tests. Their core XCFramework and bindings are shared across configurations; another build can replace them after Xcode's pre-action releases its lock. Rust and image jobs may run alongside Apple work. Run `selftest-xcframework` alone on a quiet machine: its unchanged-input check has a strict timing budget.
+- Switching Mac signing modes can leave an older signature inside the app even after Xcode signs the extension product. Keep the forced copy step.
 
 - Run `core-test` separately from builds and `core-lint` when it includes WAL, suspension or latency bounds. Nextest reservations isolate tests within one run; these checks require an idle machine.
 

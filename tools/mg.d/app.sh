@@ -29,6 +29,31 @@ mg_app_products() {
   esac
 }
 
+# Xcode can retain an embedded widget signed by an earlier signing mode.
+# Remove only its generated copy so the build embeds the current product.
+mg_app_remove_embedded_widget() {
+  local widget path
+  case "$MG_APP_DD" in
+    build/app/DerivedData|build/app/StandaloneDerivedData|build/app/PersonalPreviewDerivedData) ;;
+    *) mg_failure embedded-widget "widget cleanup requires a known app build directory"; mg_status error; return 1 ;;
+  esac
+  widget="$(mg_app_products mac "$1")/Meguri.app/Contents/PlugIns/MeguriWidget.appex"
+  path="$widget"
+  while [ "$path" != "$MG_ROOT" ]; do
+    if [ -L "$path" ]; then
+      mg_failure embedded-widget "refusing widget cleanup through a symbolic link in the build product path"
+      mg_status error
+      return 1
+    fi
+    path="${path%/*}"
+  done
+  if ! rm -rf "$widget"; then
+    mg_failure embedded-widget "could not remove the generated embedded widget before the Mac build"
+    mg_status error
+    return 1
+  fi
+}
+
 # mg_app_build <mac|ios-sim|ios-device> <config> [plan] [scheme] [build settings...]: UI
 # lint first (AE90), core XCFramework and build-for-testing of the plan (UI
 # by default; snapshots build Snapshot; perf-ui builds Performance with the
@@ -123,6 +148,9 @@ mg_app_build_action() {
     ios-device) dest="platform=iOS,id=$MG_UI_PHYSICAL_DEVICE" ;;
     *) dest="generic/platform=iOS Simulator" ;;
   esac
+  if [ "$platform" = mac ]; then
+    mg_app_remove_embedded_widget "$config" || return 1
+  fi
   result="$MG_RUN_DIR/build-$platform-$config-$plan.xcresult"
   log="$MG_RUN_DIR/build-$platform-$config-$plan.log"
   rm -rf "$result"

@@ -86,6 +86,14 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+if [ "${FX_WIDGET_REFRESH_CHECK:-0}" = 1 ] && [ "$dest" = platform=macOS,arch=arm64 ]; then
+  products="$dd/Build/Products/$config"
+  widget="$products/Meguri.app/Contents/PlugIns/MeguriWidget.appex"
+  [ ! -e "$widget" ] && [ ! -L "$widget" ] || exit 96
+  [ "$(cat "$products/MeguriWidget.appex/keep")" = source-product ] || exit 96
+  [ "$(cat "$products/Meguri.app/Contents/PlugIns/Other.appex/keep")" = other-plugin ] || exit 96
+  echo "widget-copy-refreshed $dd $config" >>"$STUB_LOG"
+fi
 mkdir -p "$result"
 if [ "$action" = build ]; then
   p="$dd/Build/Products/$config/Meguri.app"
@@ -154,6 +162,76 @@ test_tree() {
       called '^xcodebuild build-for-testing .* -testPlan UI -configuration Debug '
       not_called 'MEGURI_SIGNING=|allowProvisioning'
     done
+  done
+}
+
+@test "Mac embedded widget refresh selects only the current build directory and configuration" {
+  local mode dd config platform build_dir build_config products widget selected args=()
+  for mode in normal profile standalone personal ios; do
+    unset MEGURI_APP_SIGNING
+    dd=DerivedData; config=Debug; platform=mac; args=()
+    case "$mode" in
+      profile) config=Profile ;;
+      standalone) dd=StandaloneDerivedData; standalone_facts; args=(--standalone) ;;
+      personal) dd=PersonalPreviewDerivedData; config=Release; personal_facts; args=(--personal-preview) ;;
+      ios) platform=ios-sim ;;
+    esac
+    for build_dir in DerivedData StandaloneDerivedData PersonalPreviewDerivedData; do
+      for build_config in Debug Profile Release; do
+        products="$SB/build/app/$build_dir/Build/Products/$build_config"
+        widget="$products/Meguri.app/Contents/PlugIns/MeguriWidget.appex"
+        mkdir -p "$widget" "$products/MeguriWidget.appex" "$products/Meguri.app/Contents/PlugIns/Other.appex"
+        echo stale-copy >"$widget/stale"
+        echo source-product >"$products/MeguriWidget.appex/keep"
+        echo other-plugin >"$products/Meguri.app/Contents/PlugIns/Other.appex/keep"
+      done
+    done
+    : >"$STUB_LOG"
+    FX_WIDGET_REFRESH_CHECK=1 mg build-app --platform "$platform" --config "$config" "${args[@]}"
+    [ "$status" -eq 0 ]
+    [ "$(field .status)" = pass ]
+    selected="$SB/build/app/$dd/Build/Products/$config"
+    if [ "$platform" = mac ]; then
+      called "^widget-copy-refreshed build/app/$dd $config$"
+      [ ! -e "$selected/Meguri.app/Contents/PlugIns/MeguriWidget.appex/stale" ]
+    else
+      not_called '^widget-copy-refreshed '
+    fi
+    for build_dir in DerivedData StandaloneDerivedData PersonalPreviewDerivedData; do
+      for build_config in Debug Profile Release; do
+        products="$SB/build/app/$build_dir/Build/Products/$build_config"
+        [ "$(cat "$products/MeguriWidget.appex/keep")" = source-product ]
+        [ "$(cat "$products/Meguri.app/Contents/PlugIns/Other.appex/keep")" = other-plugin ]
+        if [ "$platform" != mac ] || [ "$products" != "$selected" ]; then
+          [ "$(cat "$products/Meguri.app/Contents/PlugIns/MeguriWidget.appex/stale")" = stale-copy ]
+        fi
+      done
+    done
+  done
+}
+
+@test "Mac embedded widget refresh refuses symlinked generated paths before Xcode" {
+  local component products="$SB/build/app/DerivedData/Build/Products/Debug" link target
+  for component in derived app plugins widget; do
+    rm -rf "$SB/build/app"
+    target="$BATS_TEST_TMPDIR/outside-$component"
+    mkdir -p "$target"
+    echo preserve >"$target/keep"
+    case "$component" in
+      derived) link="$SB/build/app/DerivedData" ;;
+      app) link="$products/Meguri.app" ;;
+      plugins) link="$products/Meguri.app/Contents/PlugIns" ;;
+      widget) link="$products/Meguri.app/Contents/PlugIns/MeguriWidget.appex" ;;
+    esac
+    mkdir -p "$(dirname "$link")"
+    ln -s "$target" "$link"
+    : >"$STUB_LOG"
+    mg build-app --platform mac
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = embedded-widget ]
+    [ -L "$link" ]
+    [ "$(cat "$target/keep")" = preserve ]
+    not_called '^xcodebuild '
   done
 }
 
