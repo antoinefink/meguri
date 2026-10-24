@@ -57,12 +57,13 @@ public struct ErrorStateView: View {
 }
 
 extension View {
-    /// The actions of an empty or error state: bordered, at the large control
-    /// size, so each is a full touch target (R1980: 44×44 pt on iPhone and
-    /// iPad, 28×28 pt on the Mac; the system's default actions are only as
-    /// tall as their text), with the primary text colour, whose contrast on
-    /// the bordered fill passes the audit where the accent colour does not.
+    /// Native state actions: regular on Mac, large with audited text contrast
+    /// on touch platforms.
     func stateViewActions() -> some View {
+        #if os(macOS)
+        buttonStyle(.bordered).controlSize(.regular)
+        #else
         buttonStyle(.bordered).controlSize(.large).tint(ColorToken.textPrimary.color)
+        #endif
     }
 }

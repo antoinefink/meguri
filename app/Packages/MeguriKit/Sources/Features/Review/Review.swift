@@ -271,14 +271,26 @@ public struct ReviewAnswerBar: View {
             if phase == .question {
                 Button(action: reveal) {
                     Text("Show Answer", bundle: .module)
+                        #if !os(macOS)
                         .font(.headline)
+                        #endif
                         .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(.center)
+                        #if os(macOS)
+                        .frame(maxWidth: .infinity)
+                        #else
                         .frame(maxWidth: .infinity, minHeight: 44)
+                        #endif
                 }
                     .buttonStyle(.bordered)
+                    #if os(macOS)
+                    .controlSize(.regular)
+                    .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                    .contentShape(Rectangle())
+                    #else
                     .tint(ColorToken.textPrimary.color)
                     .controlSize(.large)
+                    #endif
                     .disabled(!enabled)
                     .accessibilityIdentifier("review.session.reveal")
             }
@@ -328,10 +340,19 @@ public struct ReviewAnswerBar: View {
                 }
             }
             .foregroundStyle(.token(color))
+            #if os(macOS)
+            .frame(maxWidth: .infinity)
+            #else
             .frame(maxWidth: .infinity, minHeight: 44)
+            #endif
             .fixedSize(horizontal: false, vertical: true)
         }
         .buttonStyle(.bordered)
+        #if os(macOS)
+        .controlSize(.regular)
+        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+        .contentShape(Rectangle())
+        #endif
         .disabled(!enabled || phase != .answer)
         .accessibilityLabel("\(title), \(label.map(Self.interval) ?? "")")
         .accessibilityIdentifier("review.session.rate.\(ReviewCoordinator.name(rating))")

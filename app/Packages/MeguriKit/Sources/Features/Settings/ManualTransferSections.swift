@@ -19,23 +19,11 @@ public struct ManualTransferSections: View {
         Group {
             if area == .all || area == .connectionAndTransfers || area == .connection {
                 Section {
-                    #if os(macOS)
                     HStack(alignment: .center) {
                         Text("Server URL", bundle: .module)
                         endpointField
                         testConnectionButton
                     }
-                    #else
-                    LabeledContent {
-                        HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
-                            endpointField
-                            testConnectionButton
-                        }
-                        .frame(maxWidth: .infinity)
-                    } label: {
-                        Text("Server URL", bundle: .module)
-                    }
-                    #endif
                     if let result = model.connectionTestResult {
                         Text(verbatim: result)
                             .fixedSize(horizontal: false, vertical: true)
@@ -250,19 +238,24 @@ public struct ManualTransferSections: View {
     private var endpointField: some View {
         Group {
             #if os(macOS)
-            TextField("Server URL", text: $model.endpointDraft)
+            TextField("Server URL", text: $model.endpointDraft, prompt: Text(verbatim: "https://…"))
                 .textFieldStyle(.roundedBorder)
                 .controlSize(.regular)
-                .multilineTextAlignment(.leading)
             #else
-            TextField("Server URL", text: $model.endpointDraft, axis: .vertical)
+            TextField("Server URL", text: $model.endpointDraft, prompt: Text(verbatim: "https://…"), axis: .vertical)
             #endif
         }
         .labelsHidden()
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .multilineTextAlignment(.leading)
         .font(.body)
         .textContentType(.URL)
         #if os(iOS)
+        .keyboardType(.URL)
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        .frame(minHeight: ControlMetrics.minimumTarget)
+        .contentShape(Rectangle())
         .focused($focusedField, equals: .endpoint)
         #endif
         .disabled(model.busy || model.preview != nil || model.mediaPreview != nil)
@@ -285,6 +278,9 @@ public struct ManualTransferSections: View {
     private var accountIdentity: some View {
         Text(verbatim: model.username)
             .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(verbatim: model.username))
+            .accessibilityAddTraits(.isStaticText)
             .accessibilityIdentifier("settings.anki.loginIdentity")
     }
     private var signOutButton: some View {
@@ -360,13 +356,12 @@ public struct ManualTransferSections: View {
     private func action(_ title: String, id: String, disabled: Bool, run: @escaping @MainActor () async -> Void) -> some View {
         Button { Task { await run() } } label: {
             Text(title)
-                .font(.body)
-                .foregroundStyle(.token(disabled ? .textSecondary : .statusAccent))
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
-                .contentShape(Rectangle())
         }
-            .buttonStyle(.plain)
+            .buttonStyle(.automatic)
+            .controlSize(.regular)
+            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
+            .contentShape(Rectangle())
             .disabled(disabled).accessibilityIdentifier("settings.anki.\(id)")
     }
 
