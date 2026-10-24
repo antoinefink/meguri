@@ -206,7 +206,9 @@ import AppKit
         try openSettings(app, bundle)
         try click(element(app, "settings.root.collection"), app, bundle)
         try click(element(app, "settings.anki.openImport"), app, bundle)
-        XCTAssertTrue(element(app, "settings.anki.transferWorkflow").waitForExistence(timeout: 30))
+        let workflowExists = element(app, "settings.anki.transferWorkflow").waitForExistence(timeout: 30)
+        if !workflowExists { attachTransferWorkflowFailureFacts(app) }
+        XCTAssertTrue(workflowExists)
         #endif
     }
     private func selectExport(_ app: XCUIApplication, _ bundle: String) throws {
@@ -214,12 +216,60 @@ import AppKit
         try openSettings(app, bundle)
         try click(element(app, "settings.root.collection"), app, bundle)
         try click(element(app, "settings.anki.openExport"), app, bundle)
-        XCTAssertTrue(element(app, "settings.anki.transferWorkflow").waitForExistence(timeout: 30))
+        let workflowExists = element(app, "settings.anki.transferWorkflow").waitForExistence(timeout: 30)
+        if !workflowExists { attachTransferWorkflowFailureFacts(app) }
+        XCTAssertTrue(workflowExists)
         #else
         try click(element(app, "settings.anki.direction"), app, bundle)
         try click(app.buttons["Export to Anki"].firstMatch, app, bundle)
         #endif
     }
+    #if os(macOS)
+    private func attachTransferWorkflowFailureFacts(_ app: XCUIApplication) {
+        let knownIDs = ["settings.anki.transferWorkflow", "settings.anki.closeTransfer",
+                        "settings.anki.prepareImport", "settings.anki.prepareExport"]
+        func counts(in owner: XCUIElement) -> [String: Int] {
+            let descendants = owner.descendants(matching: .any)
+            return Dictionary(uniqueKeysWithValues: knownIDs.map { id in
+                (id, descendants.matching(NSPredicate(format: "identifier == %@", id)).count)
+            })
+        }
+        func component(_ value: CGFloat) -> [String: Any] {
+            ["value": value.isFinite ? Double(value) : 0, "isFinite": value.isFinite]
+        }
+        let sheets = app.sheets
+        let sheetCount = sheets.count
+        var sheetFacts: [[String: Any]] = []
+        // Bound only this app's sheets, and do not enumerate when over the cap.
+        if sheetCount <= 4 {
+            for (index, sheet) in sheets.allElementsBoundByAccessibilityElement.prefix(4).enumerated() {
+                let exists = sheet.exists
+                let frame = exists ? sheet.frame : .zero
+                sheetFacts.append([
+                    "index": index,
+                    "exists": exists,
+                    "frame": ["x": component(frame.origin.x), "y": component(frame.origin.y),
+                              "width": component(frame.width), "height": component(frame.height)],
+                    "exactIDCounts": exists ? counts(in: sheet)
+                        : Dictionary(uniqueKeysWithValues: knownIDs.map { ($0, 0) })
+                ])
+            }
+        }
+        let facts: [String: Any] = [
+            "appWindowCount": app.windows.count,
+            "appSheetCount": sheetCount,
+            "exactIDCounts": counts(in: app),
+            "sheetsTruncated": sheetCount > 4,
+            "sheets": sheetFacts
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: facts, options: [.sortedKeys]) {
+            let report = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+            report.name = "transfer-workflow-failure-facts"
+            report.lifetime = .keepAlways
+            add(report)
+        }
+    }
+    #endif
     private func selectMediaScope(_ app: XCUIApplication, _ bundle: String) throws {
         let included = element(app, "settings.anki.mediaIncluded")
         try waitForText(included, "Imports and exports include collection and media.", app, bundle)

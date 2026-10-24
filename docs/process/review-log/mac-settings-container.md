@@ -34,3 +34,27 @@ The single named crop was exported and inspected. It contains the native
 chevron and fixed header text only. A center click lands on the label; the
 chevron lies within the leading portion of the reported control frame.
 The original pointer action and assertions are still unchanged here.
+
+## Workflow identity diagnosis
+
+Start: `122cceb8`. Filtered diagnostic export:
+`cleanroom/20261024T222521Z-85874`. Independent round 1 found no P0–P2.
+Privacy, similarity, lint and native compilation passed. Run
+`manual-transfer-check/20261024T222653Z-87057` failed at the unchanged
+workflow-root assertion. Import and review had not started.
+
+The failure-only attachment proves that Import opened one real app-owned
+sheet: Done and Prepare Import each occur once inside it, while the workflow
+root identifier occurs zero times. Export is absent, as expected. Bounded
+export `workflow-facts-export/20261024T222925Z-90876` contains only fixed
+identifier counts and finite geometry. The root identifier, rather than the
+Import action, needs repair. Keep the original actions and assertions.
+
+Dedicated-VM Xcode alignment and signature verification passed in
+`vm-xcode-align/20261024T211341Z-40341` and
+`vm-xcode-align-verify/20261024T211929Z-42687`. Runner registration was repaired
+in the VM. Fresh-process trust passed before and after normal product copying
+(`vm-ax-trust-frozen/20261024T213657Z-51493`,
+`vm-ax-trust-frozen/20261024T214200Z-54688`). A native alert Cancel click passed
+in `ui-test/20261024T214306Z-55451`. Do not repeat setup without new evidence.
+The original collapsed Connection details failure remains separately open.
