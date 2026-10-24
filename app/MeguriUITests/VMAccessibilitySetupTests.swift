@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 @preconcurrency import ApplicationServices
+import CryptoKit
 import Darwin
 import XCTest
 
@@ -837,17 +838,239 @@ final class VMAccessibilitySetupTests: XCTestCase {
     }
 
     @MainActor
+    func testRefreshRunnerAccessibilityRegistration() throws {
+        continueAfterFailure = false
+        guard try runnerRefreshBoundary(), let trusted = recordRunnerIdentityAndTrust() else { return }
+        if trusted { return }
+
+        let settings = XCUIApplication(bundleIdentifier: "com.apple.systempreferences")
+        defer {
+            if settings.state != .notRunning {
+                attachSetupEvidence(settings, stage: "final")
+                settings.terminate()
+            }
+            if vmConsentValue != nil { NSPasteboard.general.clearContents() }
+            vmConsentValue = nil
+        }
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+        guard NSWorkspace.shared.open(url), settings.wait(for: .runningForeground, timeout: 10) else {
+            reportSetupFailure(settings, "Could not open Settings Accessibility privacy pane for runner refresh")
+            return
+        }
+        _ = settings.staticTexts.matching(identifier: "MeguriUITests-Runner_Title").firstMatch.waitForExistence(timeout: 10)
+        guard requireRunnerRefreshPane(settings), let current = refreshRunnerRow(settings) else { return }
+        attachSetupEvidence(settings, stage: "before refresh")
+        // The row itself can be disabled; select only its unique native title, without coordinates.
+        guard click(current.title, in: settings, description: "exact runner title") else { return }
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let rows = current.outline.outlineRows.matching(NSPredicate(format: "selected == true"))
+            return rows.count == 1 && current.row.isSelected
+                && rows.element(boundBy: 0).staticTexts.matching(identifier: "MeguriUITests-Runner_Title").count == 1
+        }, object: nil)
+        guard XCTWaiter().wait(for: [selected], timeout: 5) == .completed,
+              requireRunnerRefreshPane(settings), let selection = refreshRunnerRow(settings) else {
+            reportSetupFailure(settings, "Exact runner row was not uniquely selected; no removal performed")
+            return
+        }
+        let selectedRows = selection.outline.outlineRows.matching(NSPredicate(format: "selected == true"))
+        let remove = settings.buttons.matching(NSPredicate(format: "label == %@", "Remove"))
+        guard selection.row.isSelected, selectedRows.count == 1,
+              selectedRows.element(boundBy: 0).staticTexts.matching(identifier: "MeguriUITests-Runner_Title").count == 1,
+              remove.count == 1, remove.element(boundBy: 0).isEnabled, remove.element(boundBy: 0).isHittable else {
+            reportSetupFailure(settings, "Runner selection or enabled Remove action is ambiguous; no removal performed")
+            return
+        }
+        guard click(remove.element(boundBy: 0), in: settings, description: "selected runner Remove") else { return }
+        let removalStarted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.refreshRunnerRows(settings).isEmpty || self.runnerRefreshHasSurface(settings)
+        }, object: nil)
+        guard XCTWaiter().wait(for: [removalStarted], timeout: 10) == .completed,
+              requireRunnerRefreshPane(settings) else {
+            reportSetupFailure(settings, "Runner removal did not complete normally; no further input performed")
+            return
+        }
+        let removed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.refreshRunnerRows(settings).isEmpty || self.runnerRefreshHasSurface(settings)
+        }, object: nil)
+        guard XCTWaiter().wait(for: [removed], timeout: 10) == .completed,
+              !runnerRefreshHasSurface(settings), refreshRunnerRows(settings).isEmpty,
+              settings.staticTexts.matching(identifier: "MeguriUITests-Runner_Title").count == 0 else {
+            reportSetupFailure(settings, "Runner row remains or an unexpected surface appeared after removal; no Add performed")
+            return
+        }
+
+        guard addCurrentRunner(settings) else { return }
+        let readded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            if self.hasAuthorizationPrompt(settings) { return true }
+            if self.runnerRefreshHasSurface(settings) {
+                guard let picker = self.pickerContainer(settings) else { return true }
+                return !self.isAppPicker(picker)
+            }
+            return !self.refreshRunnerRows(settings).isEmpty
+        }, object: nil)
+        guard XCTWaiter().wait(for: [readded], timeout: 10) == .completed,
+              requireRunnerRefreshPane(settings), let added = refreshRunnerRow(settings) else {
+            reportSetupFailure(settings, "Expected exactly one readded runner row without unexpected surfaces")
+            return
+        }
+        if remoteLoginBoolean(added.control) == false {
+            guard click(added.control, in: settings, description: "readded runner switch") else { return }
+            let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                self.remoteLoginBoolean(added.control) == true || self.runnerRefreshHasSurface(settings)
+            }, object: nil)
+            guard XCTWaiter().wait(for: [changed], timeout: 10) == .completed,
+                  requireRunnerRefreshPane(settings) else {
+                reportSetupFailure(settings, "Readded runner switch did not enable normally")
+                return
+            }
+        }
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.remoteLoginBoolean(added.control) == true || self.runnerRefreshHasSurface(settings)
+        }, object: nil)
+        guard XCTWaiter().wait(for: [enabled], timeout: 10) == .completed,
+              !runnerRefreshHasSurface(settings), let configured = refreshRunnerRow(settings),
+              remoteLoginBoolean(configured.control) == true else {
+            reportSetupFailure(settings, "Readded runner registration is not uniquely enabled")
+            return
+        }
+        let evidence = XCTAttachment(string: "Runner registration configured; awaiting fresh-process prompt-free trust verification with the same frozen runner identity.")
+        evidence.name = "VM runner registration refresh completion"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+    }
+
+    /// Run alone in a new test runner/job; two methods in one process do not prove relaunch.
+    @MainActor
+    func testCheckRunnerAccessibilityTrust() throws {
+        continueAfterFailure = false
+        guard try runnerRefreshBoundary(), let trusted = recordRunnerIdentityAndTrust() else { return }
+        XCTAssertTrue(trusted, "Fresh runner AX trust is false; compare the frozen runner identity with refresh evidence")
+    }
+
+    @MainActor
+    private func runnerRefreshBoundary() throws -> Bool {
+        guard FileManager.default.fileExists(atPath: "/tmp/mg-vm-ax-refresh-runner"),
+              FileManager.default.fileExists(atPath: "/tmp/mg-vm-ax-enable") else {
+            throw XCTSkip("VM runner refresh requires both Accessibility opt-ins")
+        }
+        guard CardSwapTimingGate.hypervisorPresent() == true, NSUserName() == "meguri" else {
+            XCTFail("Runner refresh/check requires the dedicated VM's meguri account")
+            return false
+        }
+        return true
+    }
+
+    @MainActor
+    private func recordRunnerIdentityAndTrust() -> Bool? {
+        guard let runnerURL = currentRunnerBundleURL(),
+              runnerURL.lastPathComponent == "MeguriUITests-Runner.app" else {
+            XCTFail("Current bundle is not the exact expected runner app")
+            return nil
+        }
+
+        let runnerExecutableDirectory = runnerURL.appendingPathComponent("Contents/MacOS").resolvingSymlinksInPath()
+        guard let executable = Bundle.main.executableURL?.resolvingSymlinksInPath(),
+              executable.lastPathComponent == "MeguriUITests-Runner",
+              executable.deletingLastPathComponent() == runnerExecutableDirectory else {
+            XCTFail("Current executable does not have the expected name and resolved runner directory")
+            return nil
+        }
+
+        guard let runnerBundle = Bundle(url: runnerURL),
+              let bundleExecutable = runnerBundle.executableURL?.resolvingSymlinksInPath(),
+              bundleExecutable == executable else {
+            XCTFail("The exact runner bundle does not independently identify the current executable")
+            return nil
+        }
+        let bytes: Data
+        do {
+            bytes = try Data(contentsOf: executable)
+        } catch {
+            XCTFail("Could not read the current runner executable for SHA256 identity")
+            return nil
+        }
+        guard !bytes.isEmpty else {
+            XCTFail("Current runner executable is empty; no identity emitted")
+            return nil
+        }
+        let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        let trusted = AXIsProcessTrusted()
+        let evidence = XCTAttachment(string: "bundleIdentifier=com.antoinefink.meguri.dev.uitests.xctrunner\nexecutableSHA256=\(digest)\naxTrusted=\(trusted)")
+        evidence.name = "VM runner code identity and prompt-free trust"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+        return trusted
+    }
+
+    @MainActor
+    private func runnerRefreshHasSurface(_ settings: XCUIApplication) -> Bool {
+        settings.descendants(matching: .sheet).count > 0 || settings.descendants(matching: .dialog).count > 0
+            || settings.alerts.count > 0 || settings.secureTextFields.count > 0
+    }
+
+    @MainActor
+    private func requireRunnerRefreshPane(_ settings: XCUIApplication) -> Bool {
+        // Only the existing exact Settings authorization matcher may consume credentials or approve.
+        guard settings.alerts.count == 0, authorizeSettingsIfNeeded(settings), !runnerRefreshHasSurface(settings) else {
+            reportSetupFailure(settings, "Unexpected Settings surface during runner refresh; no generic confirmation performed")
+            return false
+        }
+        return true
+    }
+
+    @MainActor
+    private func refreshRunnerRows(_ settings: XCUIApplication) -> [XCUIElement] {
+        let names = ["MeguriUITests-Runner", "MeguriUITests Runner"]
+        return runnerRows(settings, predicate: NSPredicate(format: "label IN %@ OR value IN %@", names, names))
+    }
+
+    @MainActor
+    private func refreshRunnerRow(_ settings: XCUIApplication) -> (row: XCUIElement, title: XCUIElement, outline: XCUIElement, control: XCUIElement)? {
+        let titleID = "MeguriUITests-Runner_Title"
+        let titles = settings.staticTexts.matching(identifier: titleID)
+        let outlines = settings.outlines.containing(.staticText, identifier: titleID)
+        guard refreshRunnerRows(settings).count == 1, titles.count == 1, outlines.count == 1 else {
+            reportSetupFailure(settings, "Expected one exact runner row/title and containing outline")
+            return nil
+        }
+        let outline = outlines.element(boundBy: 0)
+        let rows = outline.outlineRows.containing(.staticText, identifier: titleID)
+        guard rows.count == 1 else {
+            reportSetupFailure(settings, "Runner title is not contained in exactly one row of its outline")
+            return nil
+        }
+        let row = rows.element(boundBy: 0)
+        let names = ["MeguriUITests-Runner", "MeguriUITests Runner"]
+        let exactName = NSPredicate(format: "label IN %@ OR value IN %@", names, names)
+        let controls = row.switches.matching(identifier: "MeguriUITests-Runner_Toggle")
+        guard row.staticTexts.matching(exactName).matching(identifier: titleID).count == 1,
+              row.switches.count == 1, row.checkBoxes.count == 0, controls.count == 1,
+              remoteLoginBoolean(controls.element(boundBy: 0)) != nil else {
+            reportSetupFailure(settings, "Exact runner title or its single boolean switch is missing or unknown")
+            return nil
+        }
+        return (row, titles.element(boundBy: 0), outline, controls.element(boundBy: 0))
+    }
+
+    @MainActor
     private func runnerRows(_ settings: XCUIApplication, predicate: NSPredicate) -> [XCUIElement] {
         settings.outlineRows.containing(predicate).allElementsBoundByIndex
             + settings.tableRows.containing(predicate).allElementsBoundByIndex
     }
 
-    @MainActor
-    private func addCurrentRunner(_ settings: XCUIApplication) -> Bool {
+    private func currentRunnerBundleURL() -> URL? {
         let runnerURL = Bundle.main.bundleURL
         guard runnerURL.isFileURL, runnerURL.pathExtension == "app",
               Bundle.main.bundleIdentifier == "com.antoinefink.meguri.dev.uitests.xctrunner",
               Bundle(url: runnerURL)?.bundleIdentifier == "com.antoinefink.meguri.dev.uitests.xctrunner" else {
+            return nil
+        }
+        return runnerURL
+    }
+
+    @MainActor
+    private func addCurrentRunner(_ settings: XCUIApplication) -> Bool {
+        guard let runnerURL = currentRunnerBundleURL() else {
             reportSetupFailure(settings, "Refusing Add: Bundle.main is not the expected runner .app")
             return false
         }
