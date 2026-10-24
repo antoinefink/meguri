@@ -9,6 +9,21 @@ import UIKit
 
 @MainActor final class ManualTransferFixtureKeyboardTests: XCTestCase {
     func testSyntheticMediaRenderEvidence() throws {
+        try syntheticMediaRenderEvidence(
+            states: ["media-consent", "media-progress", "media-partial", "media-complete", "media-unknown"],
+            variants: AccessibilityAudit.Variant.all)
+    }
+
+    func testMediaCompleteAtLargestText() throws {
+        #if os(macOS)
+        throw XCTSkip("Mobile-only largest-text synthetic evidence")
+        #else
+        try syntheticMediaRenderEvidence(states: ["media-complete"],
+            variants: [AccessibilityAudit.Variant(largestText: true, dark: false)])
+        #endif
+    }
+
+    private func syntheticMediaRenderEvidence(states: [String], variants: [AccessibilityAudit.Variant]) throws {
         continueAfterFailure = false
         #if os(macOS)
         guard CardSwapTimingGate.hypervisorPresent() == true else { throw XCTSkip("VM-only synthetic evidence") }
@@ -19,10 +34,9 @@ import UIKit
         let build = try BuildUnderTest.current()
         guard build.hasHooks, try build.bundleIdentifier.hasSuffix(".dev") else { throw XCTSkip("Requires development rendering hooks") }
         let bundle = try build.bundleIdentifier
-        let states = ["media-consent", "media-progress", "media-partial", "media-complete", "media-unknown"]
         let disclosure = "Import and export both reconcile media in both directions. Server files are downloaded and pending local files are uploaded, even when the collection does not reference them. Counts become available after the media check."
         let unknown = "Current exclusions are unknown until a fresh media check completes. Recorded transfer counts retain saved effects from earlier attempts."
-        for variant in AccessibilityAudit.Variant.all {
+        for variant in variants {
             variant.apply()
             let variantName = (variant.dark ? "dark" : "light") + (variant.largestText ? "-ax5" : "-default")
             for state in states {
@@ -348,6 +362,50 @@ import UIKit
                 if unchanged { discoveryDown.toggle() }
             }
         }
+        attachRevealBoundary(target, surface: surface, app: app, mode: mode, budget: 24)
         throw AuditError(description: "Synthetic target did not become visible within 24 scoped gestures")
+    }
+
+    private static func attachRevealBoundary(_ target: XCUIElement, surface: XCUIElement,
+                                             app: XCUIApplication, mode: RevealMode, budget: Int) {
+        let targetExists = target.exists
+        let surfaceExists = surface.exists
+        let window = app.windows.firstMatch
+        let windowExists = window.exists
+        let modeName: String
+        switch mode {
+        case .actionable: modeName = "actionable"
+        case .visibleDisabled: modeName = "visibleDisabled"
+        case .textStart: modeName = "textStart"
+        case .textEnd: modeName = "textEnd"
+        }
+        func geometry(_ name: String, _ frame: CGRect) -> String {
+            "\(name).x=\(frame.origin.x) \(name).y=\(frame.origin.y) " +
+            "\(name).width=\(frame.width) \(name).height=\(frame.height)"
+        }
+        var context = ["targetExists=\(targetExists)", "surfaceExists=\(surfaceExists)",
+                       "windowExists=\(windowExists)", "mode=\(modeName)", "budget=\(budget)"]
+        if targetExists { context.append(geometry("targetFrame", target.frame)) }
+        let surfaceFrame = surfaceExists ? surface.frame : nil
+        let windowFrame = windowExists ? window.frame : nil
+        if let surfaceFrame { context.append(geometry("surfaceFrame", surfaceFrame)) }
+        if let windowFrame { context.append(geometry("windowFrame", windowFrame)) }
+        if let surfaceFrame, let windowFrame {
+            context.append(geometry("clippedViewport", surfaceFrame.intersection(windowFrame).insetBy(dx: 4, dy: 8)))
+        }
+        XCTContext.runActivity(named: "rf4-fixture-reveal-boundary") { activity in
+            let diagnostic = XCTAttachment(string: context.joined(separator: "\n"))
+            diagnostic.name = "rf4-fixture-reveal-geometry"
+            diagnostic.lifetime = .keepAlways
+            activity.add(diagnostic)
+            do {
+                try guardFixture(app)
+                _ = try scrollSurface(app)
+            } catch { return }
+            let shot = XCTAttachment(screenshot: window.screenshot())
+            shot.name = "rf4-fixture-reveal-boundary"
+            shot.lifetime = .keepAlways
+            activity.add(shot)
+        }
     }
 }
