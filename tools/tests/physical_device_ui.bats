@@ -99,7 +99,7 @@ if [ "$action" = build ]; then
     jq ".MeguriCardInspectionBuild = \"personalRelease\" | .LSUIElement = false" "$p/Contents/Info.plist" >"$p/Contents/personal.json"
     mv "$p/Contents/personal.json" "$p/Contents/Info.plist"
     cp "$FX_APP_PROFILE" "$p/Contents/embedded.provisionprofile"
-    cp "$FX_WIDGET_PROFILE" "$w/Contents/embedded.provisionprofile"
+    [ "${FX_WIDGET_NO_PROFILE:-0}" = 1 ] || cp "$FX_WIDGET_PROFILE" "$w/Contents/embedded.provisionprofile"
   fi
   [ "${FX_SOURCE_CHANGE:-0}" = 0 ] || echo "synthetic mutation" >>app/TestPlans/Performance.xctestplan
   exit "${FX_BUILD_RC:-0}"
@@ -212,6 +212,16 @@ standalone_facts() {
 case "$1" in
   --verify) exit "${FX_SIGNATURE_RC:-0}" ;;
   -d)
+    case "$2" in
+      --extract-certificates=*)
+        cert="${FX_LEAF_CERT:-synthetic certificate}"
+        case "$*" in *.appex) cert="${FX_WIDGET_LEAF_CERT:-$cert}" ;; esac
+        printf "%s" "$cert" >"${2#*=}0"; exit 0 ;;
+      --verbose=4)
+        identity=com.antoinefink.meguri.dev
+        case "$*" in *.appex) identity="${FX_WIDGET_SIGNED_ID:-$identity.widget}" ;; esac
+        printf "Identifier=%s\nTeamIdentifier=TESTTEAM01\n" "$identity" >&2; exit 0 ;;
+    esac
     [ "${FX_ENTITLEMENTS_RC:-0}" -eq 0 ] || exit 1
     case "$*" in *.appex) cat "$FX_WIDGET_ENT" ;; *) cat "$FX_APP_ENT" ;; esac ;;
   *) exit 97 ;;
@@ -243,9 +253,9 @@ import datetime, json, plistlib, sys
 for source, target in zip(sys.argv[1::2], sys.argv[2::2]):
     with open(source) as stream:
         grants = json.load(stream)
-    grants["get-task-allow"] = True
     with open(target, "wb") as stream:
         plistlib.dump({"Entitlements": grants, "TeamIdentifier": ["TESTTEAM01"],
+                      "Platform": ["OSX"], "DeveloperCertificates": [b"synthetic certificate"],
                       "ExpirationDate": datetime.datetime(2099, 1, 1),
                       "ProvisionedDevices": ["00000000-0000-4000-8000-000000000009"]}, stream)
 PY
@@ -345,7 +355,7 @@ PY
 
 @test "personal preview rejects fixture scope debug grants stale core invalid provisioning and source changes" {
   local fault
-  for fault in fixture debug keychain group stamp profile expired device grant source signature arch; do
+  for fault in fixture debug keychain group stamp profile expired device grant platform certificates profile-debug signer source signature arch; do
     personal_facts
     case "$fault" in
       fixture) jq '.["com.apple.security.temporary-exception.files.absolute-path.read-only"] = ["/"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
@@ -354,7 +364,7 @@ PY
       group) jq '.["com.apple.security.application-groups"] = ["TESTTEAM01.com.antoinefink.meguri"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
       stamp) sed 's/features=ankiweb/features=ankiweb,test-hooks/' "$SB/app/Packages/MeguriCore/Binaries/.stamp" >"$BATS_TEST_TMPDIR/stamp"; mv "$BATS_TEST_TMPDIR/stamp" "$SB/app/Packages/MeguriCore/Binaries/.stamp" ;;
       profile) echo invalid >"$FX_APP_PROFILE" ;;
-      expired|device|grant)
+      expired|device|grant|platform|certificates|profile-debug)
         python3 - "$FX_APP_PROFILE" "$fault" <<'PY'
 import datetime, plistlib, sys
 with open(sys.argv[1], "rb") as stream:
@@ -363,8 +373,14 @@ if sys.argv[2] == "expired":
     profile["ExpirationDate"] = datetime.datetime(2000, 1, 1)
 elif sys.argv[2] == "device":
     profile["ProvisionedDevices"] = ["00000000-0000-4000-8000-000000000010"]
-else:
+elif sys.argv[2] == "grant":
     profile["Entitlements"]["keychain-access-groups"] = []
+elif sys.argv[2] == "platform":
+    profile["Platform"] = ["iOS"]
+elif sys.argv[2] == "certificates":
+    profile["DeveloperCertificates"] = []
+else:
+    profile["Entitlements"]["get-task-allow"] = False
 with open(sys.argv[1], "wb") as stream:
     plistlib.dump(profile, stream)
 PY
@@ -374,6 +390,7 @@ PY
     case "$fault" in
       source) FX_SOURCE_CHANGE=1 mg build-app --platform mac --personal-preview ;;
       signature) FX_SIGNATURE_RC=1 mg build-app --platform mac --personal-preview ;;
+      signer) FX_LEAF_CERT='different synthetic certificate' mg build-app --platform mac --personal-preview ;;
       arch) FX_ARCH='arm64 x86_64' mg build-app --platform mac --personal-preview ;;
       *) mg build-app --platform mac --personal-preview ;;
     esac
@@ -381,6 +398,21 @@ PY
     [ "$(field '.failures[0].id')" = personal-preview-product ]
     [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
   done
+}
+
+@test "personal preview accepts native Mac widget without profile only with exact dev signed identity and authorized app signer" {
+  personal_facts
+  echo '{"com.apple.security.app-sandbox":true,"com.apple.security.application-groups":["TESTTEAM01.com.antoinefink.meguri.dev"]}' >"$FX_WIDGET_ENT"
+  FX_WIDGET_NO_PROFILE=1 mg build-app --platform mac --personal-preview
+  [ "$status" -eq 0 ]
+  [ "$(field .details.personal_preview_product.provisioning.app)" = verified ]
+  [ "$(field .details.personal_preview_product.provisioning.widget)" = not_embedded ]
+  [ "$(field .details.personal_preview_product.provisioning_sha256.widget)" = null ]
+  [ "$(field .details.personal_preview_product.widget_signer_matches_app)" = true ]
+  FX_WIDGET_NO_PROFILE=1 FX_WIDGET_LEAF_CERT='other signer' mg build-app --platform mac --personal-preview
+  [ "$status" -eq 1 ]
+  FX_WIDGET_NO_PROFILE=1 FX_WIDGET_SIGNED_ID=com.antoinefink.meguri.widget mg build-app --platform mac --personal-preview
+  [ "$status" -eq 1 ]
 }
 
 @test "standalone app admits only mac Debug and refuses all other pairs before work" {

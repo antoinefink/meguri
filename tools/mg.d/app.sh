@@ -211,8 +211,13 @@ mg_app_personal_settings() {
 # Profiles are checked in memory and never published. Validate the signed
 # identity/grants against an unexpired development profile, including this Mac.
 mg_app_personal_profile() {
-  local bundle="$1" ent="$2" hardware="$3"
+  local bundle="$1" ent="$2" hardware="$3" cert_dir rc
   [ -f "$bundle/Contents/embedded.provisionprofile" ] || return 1
+  cert_dir="$(mktemp -d "$MG_RUN_DIR/personal-signer.XXXXXX")" || return 1
+  if ! codesign -d --extract-certificates="$cert_dir/cert" "$bundle" >/dev/null; then
+    rm -rf "$cert_dir"
+    return 1
+  fi
   security cms -D -i "$bundle/Contents/embedded.provisionprofile" | python3 -I -c '
 import datetime, fnmatch, json, plistlib, sys
 try:
@@ -225,7 +230,13 @@ try:
     assert team in profile["TeamIdentifier"], "team membership"
     assert grants["com.apple.developer.team-identifier"] == team, "team grant"
     assert isinstance(identity, str) and fnmatch.fnmatchcase(identity, allowed), "identity grant"
-    assert grants.get("get-task-allow", grants.get("com.apple.security.get-task-allow")) is True, "development profile"
+    # Mac device-bound development profiles omit debugger grants. Release
+    # products must not carry that entitlement even when a profile permits it.
+    assert "OSX" in profile["Platform"], "Mac profile"
+    assert profile["DeveloperCertificates"] and all(isinstance(cert, bytes) and cert for cert in profile["DeveloperCertificates"]), "developer certificates"
+    with open(sys.argv[3], "rb") as certificate:
+        assert certificate.read() in profile["DeveloperCertificates"], "authorized signer"
+    assert all(grants[key] is True for key in ("get-task-allow", "com.apple.security.get-task-allow") if key in grants), "development profile"
     assert profile["ExpirationDate"] > datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None), "expiry"
     assert sys.argv[2] in profile["ProvisionedDevices"], "device coverage"
     for key in ("keychain-access-groups", "com.apple.security.application-groups"):
@@ -234,15 +245,18 @@ try:
 except AssertionError as error:
     print("personal preview provisioning check: " + str(error), file=sys.stderr)
     sys.exit(1)
-except (KeyError, TypeError, ValueError, plistlib.InvalidFileException) as error:
+except (KeyError, TypeError, ValueError, OSError, plistlib.InvalidFileException) as error:
     print("personal preview provisioning parse: " + type(error).__name__, file=sys.stderr)
     sys.exit(1)
-' "$ent" "$hardware"
+' "$ent" "$hardware" "$cert_dir/cert0"
+  rc=$?
+  rm -rf "$cert_dir"
+  return "$rc"
 }
 
 mg_app_personal_check() {
   local app="$1" widget="$1/Contents/PlugIns/MeguriWidget.appex" bundle xml ent info team="" identity
-  local hardware stamp hash slices app_hash widget_hash app_profile_hash widget_profile_hash digest
+  local hardware stamp hash slices app_hash widget_hash app_profile_hash widget_profile_hash="" digest signed_info cert_dir widget_provision=not_embedded
   codesign --verify --deep --strict "$app" && codesign --verify --strict "$widget" || return 1
   hardware="$(system_profiler SPHardwareDataType -json | jq -er '.SPHardwareDataType[0] |
     (.provisioning_UDID // .platform_UUID) | select(type == "string" and length > 0)')" || return 1
@@ -253,25 +267,38 @@ mg_app_personal_check() {
     [ -n "$team" ] || team="$(jq -er '.["com.apple.developer.team-identifier"] | select(type == "string" and test("^[A-Z0-9]{10}$"))' <<<"$ent")" || return 1
     identity=com.antoinefink.meguri.dev
     [ "$bundle" = "$app" ] || identity="$identity.widget"
+    signed_info="$(codesign -d --verbose=4 "$bundle" 2>&1)" || return 1
+    [ "$(sed -n 's/^Identifier=//p' <<<"$signed_info")" = "$identity" ] &&
+      [ "$(sed -n 's/^TeamIdentifier=//p' <<<"$signed_info")" = "$team" ] || return 1
     jq -e --arg team "$team" --arg identity "$identity" '
       type == "object" and .["com.apple.security.app-sandbox"] == true and
       ((.["com.apple.security.get-task-allow"] // false) == false) and ((.["get-task-allow"] // false) == false) and
-      .["com.apple.developer.team-identifier"] == $team and
-      (.["com.apple.application-identifier"] // .["application-identifier"]) == ($team + "." + $identity) and
       .["com.apple.security.application-groups"] == [$team + ".com.antoinefink.meguri.dev"] and
       ([keys[] | select(startswith("com.apple.security.temporary-exception."))] == []) and
       ([keys[] | select(startswith("com.apple.security.cs."))] == [])
     ' <<<"$ent" >/dev/null || return 1
     if [ "$bundle" = "$app" ]; then
-      jq -e --arg team "$team" '
+      jq -e --arg team "$team" --arg identity "$identity" '
+        .["com.apple.developer.team-identifier"] == $team and
+        (.["com.apple.application-identifier"] // .["application-identifier"]) == ($team + "." + $identity) and
         .["keychain-access-groups"] == [$team + ".com.antoinefink.meguri.dev"] and
         .["com.apple.security.network.client"] == true and .["com.apple.security.network.server"] == true and
         .["com.apple.security.files.user-selected.read-write"] == true and .["com.apple.security.files.bookmarks.app-scope"] == true
       ' <<<"$ent" >/dev/null || return 1
+      mg_app_personal_profile "$bundle" "$ent" "$hardware" || return 1
     else
-      jq -e '(.["keychain-access-groups"] // []) == []' <<<"$ent" >/dev/null || return 1
+      # Native Mac widgets need no profile/identity entitlement for their App
+      # Group. Their signed metadata and certificate still bind them to the app.
+      jq -e --arg team "$team" --arg identity "$identity" '
+        (.["keychain-access-groups"] // []) == [] and
+        (.["com.apple.developer.team-identifier"] // $team) == $team and
+        (.["com.apple.application-identifier"] // .["application-identifier"] // ($team + "." + $identity)) == ($team + "." + $identity)
+      ' <<<"$ent" >/dev/null || return 1
+      if [ -f "$bundle/Contents/embedded.provisionprofile" ]; then
+        mg_app_personal_profile "$bundle" "$ent" "$hardware" || return 1
+        widget_provision=verified
+      fi
     fi
-    mg_app_personal_profile "$bundle" "$ent" "$hardware" || return 1
     info="$(plutil -convert json -o - "$bundle/Contents/Info.plist")" || return 1
     jq -e --arg identity "$identity" '.CFBundleIdentifier == $identity' <<<"$info" >/dev/null || return 1
     if [ "$bundle" = "$app" ]; then
@@ -280,6 +307,14 @@ mg_app_personal_check() {
       jq -e '.CFBundleExecutable == "MeguriWidget"' <<<"$info" >/dev/null || return 1
     fi
   done
+  cert_dir="$(mktemp -d "$MG_RUN_DIR/personal-widget-signer.XXXXXX")" || return 1
+  if ! codesign -d --extract-certificates="$cert_dir/app" "$app" >/dev/null ||
+      ! codesign -d --extract-certificates="$cert_dir/widget" "$widget" >/dev/null ||
+      ! cmp -s "$cert_dir/app0" "$cert_dir/widget0"; then
+    rm -rf "$cert_dir"
+    return 1
+  fi
+  rm -rf "$cert_dir"
   [ "$(lipo -archs "$app/Contents/MacOS/Meguri")" = arm64 ] &&
     [ "$(lipo -archs "$widget/Contents/MacOS/MeguriWidget")" = arm64 ] || return 1
   stamp="$(cat "$MG_ROOT/app/Packages/MeguriCore/Binaries/.stamp")" || return 1
@@ -292,16 +327,17 @@ mg_app_personal_check() {
   app_hash="$(shasum -a 256 "$app/Contents/MacOS/Meguri" | cut -c1-64)"
   widget_hash="$(shasum -a 256 "$widget/Contents/MacOS/MeguriWidget" | cut -c1-64)"
   app_profile_hash="$(shasum -a 256 "$app/Contents/embedded.provisionprofile" | cut -c1-64)"
-  widget_profile_hash="$(shasum -a 256 "$widget/Contents/embedded.provisionprofile" | cut -c1-64)"
-  for digest in "$app_hash" "$widget_hash" "$app_profile_hash" "$widget_profile_hash"; do
+  [ "$widget_provision" != verified ] || widget_profile_hash="$(shasum -a 256 "$widget/Contents/embedded.provisionprofile" | cut -c1-64)"
+  for digest in "$app_hash" "$widget_hash" "$app_profile_hash" ${widget_profile_hash:+"$widget_profile_hash"}; do
     printf '%s\n' "$digest" | grep -Eq '^[0-9a-f]{64}$' || return 1
   done
   mg_detail personal_preview_product "$(jq -nc --arg hash "$app_hash" --arg widget_hash "$widget_hash" \
-    --arg app_profile "$app_profile_hash" --arg widget_profile "$widget_profile_hash" \
+    --arg app_profile "$app_profile_hash" --arg widget_profile "$widget_profile_hash" --arg widget_provision "$widget_provision" \
     --arg core_hash "$hash" --arg slices "$slices" '
     {signature_verified: true, provisioning_verified: true, architecture: {app: "arm64", widget: "arm64"},
      executable_sha256: $hash, widget_executable_sha256: $widget_hash,
-     provisioning_sha256: {app: $app_profile, widget: $widget_profile},
+     provisioning: {app: "verified", widget: $widget_provision}, widget_signer_matches_app: true,
+     provisioning_sha256: {app: $app_profile, widget: (if $widget_profile == "" then null else $widget_profile end)},
      bundle_id: "com.antoinefink.meguri.dev", widget_bundle_id: "com.antoinefink.meguri.dev.widget",
      card_inspection_build: "personalRelease", native_visible_application: true, fixture_read_scope: false, test_hooks: false,
      core: {hash: $core_hash, configuration: "Release", profile: "release", features: "ankiweb", slices: $slices}}')"
