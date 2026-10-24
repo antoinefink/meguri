@@ -1170,3 +1170,77 @@ production bytes were verified unchanged by `051327Z-62628`. The rejected
 approval-resolution prose remains in `escalation/20261024T051641Z-66369`;
 the replacement records only author, counts, commit and result IDs. The
 approval is resolved in `cb6c5cb2`. No Unit is accepted by these changes.
+
+UI correction round 3; start `1feb8fac`.
+
+Filtered `053226Z-75008` changed two Settings files. Preview uses the
+production Settings title. The footer retains the setup explanation. Actions
+use existing tokens, wrapping text and 44-point iOS or 28-point Mac minimums.
+Mac fields use the native rounded border. Bindings, actions, consent,
+disabled conditions and identifiers remain unchanged.
+
+Independent review found one P2: the active replacement action used the
+normal action token. Filtered `054045Z-79429` changed it to `destructive`;
+every other source byte matched the prior export. Review then found no
+P0-P2. Commit `f578cf60` is on master and origin. Privacy
+`20261024T054219Z-80447` passed.
+
+Probe `ui-test/20261024T053913Z-77983` was cancelled during VM preflight,
+before any build or test. Its error receipt remains. The authorized VM
+restart completed. Probe `ui-test/20261024T054305Z-81561` queued after
+240 seconds without SSH. Antoine disabled the VPN; doctor
+`20261024T055003Z-5825` then confirmed VM access. No measured UI pass is
+claimed for this correction.
+
+Gate `20261024T054737Z-83344` used clean `f578cf60` and original base
+`81c207573c20c337c8834e4ae8b4ee8f29603dbf`. Completed runs passed:
+
+| Check | Receipt | Result |
+| --- | --- | --- |
+| Static | `054738Z-83734`, `054755Z-93410` | Passed |
+| Canaries | `054811Z-3394`, `054816Z-3696` | Passed |
+| Core lint and dependency check | `054903Z-4692`, `054909Z-5023` | Passed |
+| Core tests | `054913Z-5310` | Main suite: 2919 passed; C8: 225.100 seconds |
+| Native durability | `055544Z-8711` | Passed |
+| Conformance | `055648Z-9522` | Passed; pending/reference coverage remains explicit |
+| Goldens | `060245Z-13908` | Passed |
+| Harvest | `060259Z-14504` | Passed |
+
+Antoine changed R2062 while the gate ran. The gate was cancelled at
+selftest, before Apple checks, to combine the new policy with the final
+integration run. The error/cancelled receipt remains; this is not a full
+gate pass. The final gate still uses the original base above.
+
+Custom-server decision and preview feedback (2026-10-24).
+
+Antoine requires no 60-minute wait for custom servers entered by URL.
+Spec-writer session `s-20261024T060421Z-a856f241` started from `399db61b`;
+five-document contract commit `d1d1e172` passed independent review with no
+P0-P2 and privacy `061403Z-25367`. The initial privacy finding
+`061244Z-24073` was resolved by rewriting its complete public paragraph.
+Backend work starts at `d1d1e172`. M6 retains old history, receipts and
+active/uncertain-operation guards. M8 now requires the same-login
+import, saved review, restart and immediate export cycle. Earlier M8 used
+different import/export accounts and does not prove this new cycle.
+
+The host preview found a 69-byte destination dated 2026-10-13. It matched
+the public `app/Fixtures/TestHooks/single-file.fixture` byte for byte;
+SHA-256 `cf43867b9ceda021478e02d2f55c46ceb7331417afc6fea3c84e39b7d62ccf6a`.
+The guarded repair archived only that exact file under the development
+container's `MeguriTestArchives/RF4-20261024-known-test-fixture/`.
+Hash, size and inode were preserved; the collection file path is absent.
+No other collection files or credentials changed. The user was asked to
+retry or reopen. Unknown invalid user files must never be reset automatically.
+
+Antoine requested these further changes:
+
+- Log In saves and validates the entered server URL as part of that action.
+- Collection file export includes media; remove its Without Media wording.
+- Settings uses native groups and a readable form width.
+- The empty deck sidebar explains how to start.
+- A failed collection open shows useful copy and recovery actions.
+
+Finish the same-account server review cycle first. Then implement media
+package export and the UI changes. File export currently omits media;
+its writer and reader require implementation before changing its label.
+No Unit is accepted by this checkpoint.
