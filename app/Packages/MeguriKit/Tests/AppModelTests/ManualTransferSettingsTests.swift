@@ -441,6 +441,8 @@ private actor SettingsTransferService: ManualTransferService {
     private let historyUnavailable: Bool
     private let suspendPreparation: Bool
     private let preparationRecord: ManualTransferRecord?
+    private let mediaResult: ManualTransferRecord?
+    private var historyRecords: [ManualTransferRecord] = []
     private var loginFailure: ManualTransferFailure?
     private var preparationFailure: ManualTransferFailure?
     private let entered: AsyncStream<Void>
@@ -449,13 +451,14 @@ private actor SettingsTransferService: ManualTransferService {
          normalizedEndpoint: String? = nil, rejectNormalization: Bool = false,
          recoveryRecord: ManualTransferRecord? = nil, suspension: SettingsLoginSuspension? = nil,
          preparationRecord: ManualTransferRecord? = nil, loginFailure: ManualTransferFailure? = nil,
-         preparationFailure: ManualTransferFailure? = nil) {
+         preparationFailure: ManualTransferFailure? = nil, mediaResult: ManualTransferRecord? = nil) {
         self.normalizedEndpoint = normalizedEndpoint; self.rejectNormalization = rejectNormalization
         self.recoveryRecord = recoveryRecord; self.suspension = suspension
         self.historyUnavailable = historyUnavailable
         self.suspendPreparation = suspendPreparation
         self.preparationRecord = preparationRecord; self.loginFailure = loginFailure
         self.preparationFailure = preparationFailure
+        self.mediaResult = mediaResult
         (entered, enteredContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }
     func waitUntilPreparing() async {
@@ -481,7 +484,18 @@ private actor SettingsTransferService: ManualTransferService {
     func history(operation: ManualTransferOperation) throws -> [ManualTransferHistory] {
         calls.append("history")
         if historyUnavailable { throw BridgeError.unavailable(reason: "Scripted offline history failure") }
-        return []
+        return historyRecords.map { .init(record: $0) }
+    }
+    func prepareMedia(_ entry: ManualTransferHistory, endpoint: String, credentials: ManualTransferCredentials, operation: ManualTransferOperation) -> PreparedManualMedia {
+        calls.append("mediaPreview")
+        return .init(record: entry.record)
+    }
+    func runMedia(_ preview: PreparedManualMedia, endpoint: String, credentials: ManualTransferCredentials, operation: ManualTransferOperation, progress: @escaping @Sendable (ManualMediaSnapshot) -> Void) throws -> ManualTransferRecord {
+        calls.append("media")
+        guard let mediaResult else { throw BridgeError.unavailable(reason: "No scripted media result") }
+        historyRecords.removeAll { $0.id == mediaResult.id }
+        historyRecords.insert(mediaResult, at: 0)
+        return mediaResult
     }
     func prepare(endpoint: String, credentials: ManualTransferCredentials, direction: ManualTransferDirection, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> PreparedManualTransfer {
         throw BridgeError.internal("Scope required")
@@ -781,6 +795,127 @@ nonisolated private func mediaDecisionRecord(generation: UInt64, completeCollect
             remoteOutcomeUnknown: stopped, exclusionsVerified: false, failureKind: stopped ? "cancelled" : nil),
         copies: [], nextEligibleMs: nil))
 }
+
+nonisolated private func failedMediaRecord(_ kind: String?, id: String = "synthetic-selected-media") -> ManualTransferRecord {
+    ManualTransferRecord(.init(id: id, configuredEndpoint: "http://127.0.0.1:28711/prefix/",
+        targetEndpoint: "http://127.0.0.1:28711/approved/", direction: .export,
+        phase: .mediaIncomplete, acceptance: .exactOk, boundary: .server,
+        local: nil, remoteHasNoCards: nil, remote: nil, servedCounts: nil,
+        preparedMs: 1_894_701_600_000, generation: 4, collectionComplete: true,
+        mediaSelected: true, revision: 5,
+        media: .init(stage: .failed,
+            counters: .init(uploadedFiles: 2, uploadedDeletions: 1, downloadedFiles: 3, downloadedDeletions: 1,
+                checked: 9, bytesDownloaded: 42, bytesUploaded: 12, resynced: false,
+                oversized: ["large.bin"], empty: ["empty.bin"], awaiting: 4),
+            remoteOutcomeUnknown: true, exclusionsVerified: false, failureKind: kind),
+        copies: [.init(name: "local.colpkg", length: 10, sha256: Data(repeating: 0x11, count: 32),
+            verifiedPackage: true, instantMs: nil, server: false)], nextEligibleMs: nil))
+}
+
+extension ManualTransferSettingsTests {
+    @Test(arguments: ["auth_failed", "network", "proxy_auth", "server_message", "cancelled", "interrupted", "AUTH_FAILED", "auth_failed ", nil] as [String?])
+    func returnedMediaFailurePreservesPartialEffectsAndOnlyExactAuthFailureClearsLogin(kind: String?) async throws {
+        let returned = failedMediaRecord(kind)
+        let service = SettingsTransferService(mediaResult: returned)
+        let keys = SettingsTransferKeys()
+        let model = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: nil)
+        model.endpointDraft = returned.configuredEndpoint
+        model.username = "Synthetic User"; model.password = "transient"
+        await model.login()
+        try #require(model.authenticated)
+        let clearsBefore = await keys.clears
+        await model.prepareMedia(.init(record: mediaDecisionRecord(generation: 4)))
+        try #require(model.canRunMedia)
+        model.password = "pending-password"
+        await model.startMedia()
+
+        let authFailed = kind == "auth_failed"
+        #expect(model.authenticated == !authFailed)
+        #expect(await keys.clears == clearsBefore + (authFailed ? 1 : 0))
+        #expect((await keys.saved == nil) == authFailed)
+        #expect((await keys.savedEndpoint == nil) == authFailed)
+        #expect(model.password == (authFailed ? "" : "pending-password"))
+        #expect(model.failureCategory == (authFailed ? .authFailed : nil))
+        #expect((model.message?.contains("log in again") == true) == authFailed)
+        #expect(model.message?.contains("partial") == true)
+        #expect(model.endpoint == returned.configuredEndpoint && model.endpointDraft == returned.configuredEndpoint)
+        let result = try #require(model.result)
+        #expect(result.id == returned.id && result.phase == .mediaIncomplete && result.collectionComplete)
+        #expect(result.acceptance == .exactOk && result.targetEndpoint == returned.targetEndpoint)
+        #expect(result.media == returned.media && result.copies == returned.copies)
+        #expect(model.nextEligibleMilliseconds == returned.nextEligibleMilliseconds)
+        let history = try #require(model.records.first?.record)
+        #expect(history.id == returned.id && history.media == returned.media && history.copies == returned.copies)
+        #expect(model.mediaPreview == nil && model.stage == .ready && !model.busy)
+        #expect(await service.calls == ["normalize", "login", "mediaPreview", "media", "history"])
+        if authFailed {
+            // Authentication state and the private in-memory credentials must
+            // both be invalidated: another preview cannot reach the service.
+            await model.prepareMedia(.init(record: result))
+            #expect(await service.calls.last == "history")
+        } else {
+            #expect(await keys.saved?.hostKey == "synthetic-host-key")
+        }
+    }
+
+    @Test func handledMediaAuthFailureDoesNotReloadRejectedLoginAndOldHistoryPreservesFreshLogin() async throws {
+        let suite = "meguri.media-auth.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let returned = failedMediaRecord("auth_failed")
+        let service = SettingsTransferService(mediaResult: returned)
+        let keys = SettingsTransferKeys()
+        let model = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: defaults)
+        model.endpointDraft = returned.configuredEndpoint
+        model.username = "Synthetic User"; model.password = "transient"
+        await model.login()
+        let saved = await keys.saved
+        try #require(model.authenticated && saved != nil)
+        let clearsBefore = await keys.clears
+        await model.prepareMedia(.init(record: mediaDecisionRecord(generation: 4)))
+        try #require(model.canRunMedia)
+        model.password = "pending-password"
+        await model.startMedia()
+        #expect(!model.authenticated && model.password.isEmpty)
+        #expect(await keys.saved == nil)
+        #expect(await keys.savedEndpoint == nil)
+        #expect(await keys.clears == clearsBefore + 1)
+        #expect(model.message?.contains("log in again") == true)
+        #expect(model.failureCategory == .authFailed)
+        #expect(model.result?.id == returned.id && model.result?.media == returned.media)
+        #expect(model.result?.copies == returned.copies && model.result?.acceptance == .exactOk)
+        await model.prepareMedia(.init(record: returned))
+        #expect(await service.calls.last == "history")
+
+        let restarted = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: defaults)
+        await restarted.loadOffline()
+        #expect(!restarted.authenticated && restarted.username.isEmpty && restarted.password.isEmpty)
+        #expect(restarted.endpoint == returned.configuredEndpoint && restarted.result == nil)
+        let history = try #require(restarted.records.first?.record)
+        #expect(restarted.records.count == 1 && history.id == returned.id)
+        #expect(history.phase == .mediaIncomplete && history.collectionComplete && history.acceptance == .exactOk)
+        #expect(history.media == returned.media && history.copies == returned.copies)
+        #expect(history.media?.counters.checked == 9 && history.media?.counters.awaiting == 4)
+        #expect(await keys.clears == clearsBefore + 1)
+
+        restarted.username = "Fresh Synthetic User"; restarted.password = "fresh-login"
+        await restarted.login()
+        try #require(restarted.authenticated)
+        let clearsAfterLogin = await keys.clears
+        #expect(await keys.saved?.username == "Fresh Synthetic User")
+        #expect(await keys.saved?.hostKey == "synthetic-host-key")
+        #expect(await keys.savedEndpoint == returned.configuredEndpoint)
+        let fresh = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: defaults)
+        await fresh.loadOffline()
+        #expect(fresh.authenticated && fresh.username == "Fresh Synthetic User" && fresh.result == nil)
+        #expect(fresh.records.count == 1 && fresh.records.first?.id == returned.id)
+        #expect(fresh.records.first?.record.media == returned.media && fresh.records.first?.record.copies == returned.copies)
+        #expect(await keys.clears == clearsAfterLogin)
+        #expect(await service.calls.filter { $0 == "login" }.count == 2)
+        #expect(await service.calls.filter { $0 == "media" }.count == 1)
+    }
+}
+
 private actor SelectedMediaSettingsService: ManualTransferService {
     private(set) var calls: [String] = []
     private(set) var consentAfterAdoption = false

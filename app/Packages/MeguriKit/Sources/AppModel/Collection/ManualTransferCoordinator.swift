@@ -432,7 +432,8 @@ public final class ManualTransferCoordinator {
                 }
             }
             result = value; nextEligibleMilliseconds = value.nextEligibleMilliseconds
-            if value.phase == .complete { message = "Collection and supported media complete. Excluded files are listed in history." }
+            if value.media?.failureKind == "auth_failed" { await reportMediaAuthenticationFailure() }
+            else if value.phase == .complete { message = "Collection and supported media complete. Excluded files are listed in history." }
             else { message = "Collection complete. Media stopped before completion; the operation is partial. Saved changes remain. Resume media explicitly from history." }
         } catch { await report(error, operation: operation) }
         if let cause = operation.cancellation { recordCancellation(cause, id: prepared.record.id) }
@@ -539,6 +540,16 @@ public final class ManualTransferCoordinator {
         failureCategory = nil
         failureRequestMethod = nil
     }
+    private func invalidateCredentials() async {
+        credentials = nil; authenticated = false; password = ""
+        try? await keychain.clear()
+    }
+    private func reportMediaAuthenticationFailure() async {
+        clearFailureDiagnostics()
+        failureCategory = .authFailed
+        await invalidateCredentials()
+        message = "The server rejected the login. Check your username and password, then log in again. Collection complete. Media is partial; saved changes and retained copies remain available."
+    }
     private func report(_ error: any Error, operation: ManualTransferOperation?) async {
         clearFailureDiagnostics()
         if let failure = error as? ManualTransferFailure {
@@ -546,8 +557,7 @@ public final class ManualTransferCoordinator {
             failureRequestMethod = failure.requestMethod
             nextEligibleMilliseconds = failure.nextEligibleMilliseconds
             if failure.serverKind == "auth_failed" {
-                credentials = nil; authenticated = false; password = ""
-                try? await keychain.clear()
+                await invalidateCredentials()
             }
             switch failure.issue {
             case .cooldown: message = "This login is cooling down after a completed transfer. Reviews and Collection Files remain available."
