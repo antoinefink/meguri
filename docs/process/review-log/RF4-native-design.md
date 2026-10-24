@@ -184,3 +184,9 @@ Privacy passes. Static checks `20261024T135106Z-91743`: three pass.
 The earlier static failure was a pre-existing real hostname in a reject-all fake;
 `ba9dab71` replaces it with reserved test data and preserves its assertions.
 No backend, redirect or credential policy changes are part of this patch.
+
+Final preview build `build-app/20261024T135715Z-99569`: PASS, no compiler warnings.
+Input: `1616736dcfab36ebd05ed20c377bc1b1e29d5b179c42dffa9d1aba8f92507674`.
+The copied app and widget match the receipt hashes. The exact Mac product opens.
+Static checks `20261024T135735Z-1030` and similarity `20261024T135736Z-1254` pass.
+The larger goal stays paused; no Unit or milestone acceptance is claimed.
