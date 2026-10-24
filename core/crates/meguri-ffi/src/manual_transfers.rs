@@ -302,10 +302,6 @@ impl From<TransferError> for TransferFailure {
             server_kind: None,
         };
         f.issue = match e {
-            TransferError::Policy(policy::PolicyError::Cooldown { next_eligible_at }) => {
-                f.next_eligible_ms = Some(next_eligible_at);
-                TransferIssue::Cooldown
-            }
             TransferError::Policy(policy::PolicyError::Overlap(_)) | TransferError::Busy => TransferIssue::Busy,
             TransferError::Policy(policy::PolicyError::Stale) => TransferIssue::Stale,
             TransferError::Policy(_) | TransferError::Storage => TransferIssue::Storage,
@@ -463,7 +459,9 @@ impl From<&Operation> for TransferRecord {
                 failure_kind: v.media.failure_kind.clone(),
             }),
             copies,
-            next_eligible_ms: v.receipt.as_ref().map(|r| r.next_eligible_at),
+            // Custom-server receipts retain their raw compatibility field only
+            // in history; this DTO projects effective eligibility.
+            next_eligible_ms: None,
         }
     }
 }
@@ -1204,14 +1202,59 @@ mod tests {
         assert_eq!(observed.media_revision, 4);
     }
     #[test]
-    fn manual_cooldown_is_not_reported_as_success_or_lost_in_bridge_error() {
+    fn manual_legacy_cooldown_error_is_failure_without_an_effective_wait() {
         let failure: TransferFailure = TransferError::Policy(policy::PolicyError::Cooldown {
             next_eligible_at: 12345,
         })
         .into();
-        assert_eq!(failure.issue, TransferIssue::Cooldown);
-        assert_eq!(failure.next_eligible_ms, Some(12345));
+        assert_eq!(failure.issue, TransferIssue::Storage);
+        assert_eq!(failure.next_eligible_ms, None);
         assert!(!failure.candidate_active);
+    }
+    #[test]
+    fn manual_custom_history_projects_no_wait_and_preserves_old_and_immediate_receipts() {
+        for direction in ["Import", "Export"] {
+            for next_eligible_at in [100, 3_600_100] {
+                // Direct v1-shaped history input, including an old future
+                // deadline. Projection must never rewrite that raw receipt.
+                let operation: Operation = serde_json::from_value(serde_json::json!({
+                    "id": "0000000000000001-000000000000000c",
+                    "account": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                    "configured_endpoint": "http://127.0.0.1/",
+                    "target_endpoint": "http://127.0.0.1/",
+                    "direction": direction,
+                    "scope": "CollectionOnly",
+                    "phase": "Complete",
+                    "acceptance": "ExactOk",
+                    "boundary": null,
+                    "guard": null,
+                    "recovery_guard": null,
+                    "recovery_local": null,
+                    "local": null,
+                    "remote": null,
+                    "candidate": null,
+                    "activation_identity": null,
+                    "original": null,
+                    "safety_backups": [],
+                    "server_copy": null,
+                    "prepared_at": 99,
+                    "actual_generation": 7,
+                    "collection_complete": true,
+                    "receipt": {"completed_at": 100, "next_eligible_at": next_eligible_at},
+                    "revision": 4
+                }))
+                .unwrap();
+                let raw = serde_json::to_value(&operation).unwrap();
+                let record = TransferRecord::from(&operation);
+                assert_eq!(record.next_eligible_ms, None);
+                assert_eq!(record.phase, TransferPhase::Complete);
+                assert!(record.collection_complete);
+                assert_eq!(record.generation, Some(7));
+                assert_eq!(serde_json::to_value(&operation).unwrap(), raw);
+                assert_eq!(operation.receipt.as_ref().unwrap().completed_at, 100);
+                assert_eq!(operation.receipt.as_ref().unwrap().next_eligible_at, next_eligible_at);
+            }
+        }
     }
 }
 

@@ -486,7 +486,7 @@ fn rf4_unverified_server_copy_keeps_exact_raw_bytes_and_never_reports_known_coun
     host.close().unwrap();
 }
 #[test]
-fn rf4_complete_refusal_and_nonexact_ok_never_mutate_local_or_consume_cooldown() {
+fn rf4_complete_refusal_and_nonexact_ok_never_mutate_local_or_gain_receipts() {
     let _lane = LANE.lock().unwrap();
     for answer in [
         Reply::Bytes(b"OK\n".to_vec()),
@@ -605,7 +605,7 @@ fn rf4_known_ok_recovery_after_restart_activates_retained_digest_without_uploadi
     restarted.close().unwrap();
 }
 #[test]
-fn rf4_selected_media_stays_partial_and_never_starts_media_or_success_cooldown() {
+fn rf4_selected_media_stays_partial_and_never_starts_media_or_gains_receipts() {
     let _lane = LANE.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     let (host, _) = seeded(&root.path().join("local"));
@@ -1106,39 +1106,98 @@ fn rf4_post_rename_recovery_reports_actual_generation_and_does_not_replace_twice
     restarted.close().unwrap();
 }
 #[test]
-fn rf4_cancelled_upload_retains_guard_and_success_cooldown_is_shared_between_directions() {
+fn rf4_cancelled_upload_retains_guard_across_directions_accounts_and_restart() {
     let _lane = LANE.lock().unwrap();
-    for cancelled in [true, false] {
-        let root = tempfile::tempdir().unwrap();
-        let (host, _) = seeded(&root.path().join("local"));
-        let (_, bytes) = server(&root.path().join("server"));
-        let script = export_steps(
-            bytes,
-            if cancelled {
-                Reply::Cancelled
-            } else {
-                Reply::Bytes(b"OK".to_vec())
-            },
-        );
-        let p = prepare(&host, &script, Direction::Export, Scope::CollectionOnly).unwrap();
-        if cancelled {
-            assert!(matches!(confirm(&host, &script, p), Err(TransferError::Cancelled)));
-            assert_eq!(
-                host.manual_transfer_history().active().unwrap().unwrap().acceptance,
-                Acceptance::PossiblyAccepted
-            );
-        } else {
-            let done = confirm(&host, &script, p).unwrap();
-            let no_requests = Script::new(vec![]);
+    let root = tempfile::tempdir().unwrap();
+    let (host, config) = seeded(&root.path().join("local"));
+    let (_, bytes) = server(&root.path().join("server"));
+    let script = export_steps(bytes, Reply::Cancelled);
+    let p = prepare(&host, &script, Direction::Export, Scope::CollectionOnly).unwrap();
+    assert!(matches!(confirm(&host, &script, p), Err(TransferError::Cancelled)));
+    script.assert_done();
+    let retained = host.manual_transfer_history().active().unwrap().unwrap();
+    assert_eq!(retained.acceptance, Acceptance::PossiblyAccepted);
+    assert!(retained.receipt.is_none());
+    host.close().unwrap();
+    let restarted = CoreHost::open(config).unwrap();
+    settle(&restarted);
+    let no_requests = Script::new(vec![]);
+    for user in ["Synthetic User", "Other Account"] {
+        for direction in [Direction::Import, Direction::Export] {
+            let events = restarted.engine().stream().subscribe();
+            let task = restarted
+                .prepare_manual_transfer(access(&no_requests, user, "new-key"), direction, Scope::CollectionOnly)
+                .unwrap();
             assert!(matches!(
-                prepare(&host, &no_requests, Direction::Import, Scope::CollectionOnly),
-                Err(TransferError::Policy(meguri_sync::policy::PolicyError::Cooldown { .. }))
+                complete(events, task),
+                Err(TransferError::Policy(meguri_sync::policy::PolicyError::Overlap(id))) if id == retained.id
             ));
-            assert_eq!(done.receipt.unwrap().next_eligible_at, NOW + 3_600_000);
-            assert!(no_requests.calls.lock().unwrap().is_empty());
         }
-        host.close().unwrap();
     }
+    assert!(restarted.cancel_prepared_manual_transfer(&retained.id, false).is_err());
+    assert_eq!(restarted.manual_transfer_history().active().unwrap(), Some(retained));
+    assert!(no_requests.calls.lock().unwrap().is_empty());
+    restarted.close().unwrap();
+}
+#[test]
+fn rf4_same_login_immediate_import_export_and_repeated_success_survive_reopen_without_clock_change() {
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (mut host, config) = seeded(&root.path().join("local"));
+    let (_, bytes) = server(&root.path().join("server"));
+    let mut completed: Vec<Operation> = Vec::new();
+    for (index, direction) in [
+        Direction::Import,
+        Direction::Export,
+        Direction::Export,
+        Direction::Import,
+        Direction::Import,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(config.clock.now_ms(), NOW);
+        let script = if direction == Direction::Import {
+            Script::new(vec![
+                (Method::Meta, Reply::Bytes(meta(NOW - 2000, 7))),
+                (Method::Download, Reply::Bytes(bytes.clone())),
+                (Method::Meta, Reply::Bytes(meta(NOW - 1000, 8))),
+                (Method::Meta, Reply::Bytes(meta(NOW - 1000, 8))),
+            ])
+        } else {
+            export_steps(bytes.clone(), Reply::Bytes(b"OK".to_vec()))
+        };
+        let preview = prepare(&host, &script, direction, Scope::CollectionOnly).unwrap();
+        assert_eq!(script.count(Method::Upload), 0);
+        let done = confirm(&host, &script, preview).unwrap();
+        script.assert_done();
+        assert_eq!(done.phase, Phase::Complete);
+        assert!(done.collection_complete);
+        let receipt = done.receipt.as_ref().unwrap();
+        assert_eq!(receipt.completed_at, NOW);
+        assert_eq!(receipt.next_eligible_at, receipt.completed_at);
+        let history = host.manual_transfer_history();
+        assert_eq!(history.next_eligible_at(&done.account).unwrap(), None);
+        assert!(history.active().unwrap().is_none());
+        for prior in &completed {
+            assert_eq!(history.get(&prior.id).unwrap(), *prior);
+            assert_eq!(done.account, prior.account);
+        }
+        assert_transfer_modes(&config, &done);
+        completed.push(done);
+        let document: serde_json::Value =
+            serde_json::from_slice(&fs::read(config.manual_transfer_directory.join("manual-transfers.json")).unwrap())
+                .unwrap();
+        assert!(document["manualTransfers"]["cooldowns"].as_object().unwrap().is_empty());
+        if matches!(index, 1 | 3) {
+            host.close().unwrap();
+            host = CoreHost::open(config.clone()).unwrap();
+            settle(&host);
+            assert_eq!(host.manual_transfer_history().history().unwrap(), completed);
+        }
+    }
+    assert_eq!(config.clock.now_ms(), NOW);
+    host.close().unwrap();
 }
 #[test]
 fn rf4_process_kill_after_upload_intent_preserves_evidence_and_overlap() {
@@ -1368,7 +1427,7 @@ fn rf4_same_operation_media_requires_consent_then_resumes_only_media_after_failu
     assert_eq!(finished.id, done.id);
     assert_eq!(finished.media.stage, MediaStage::Complete);
     assert_eq!(finished.phase, Phase::Complete);
-    assert_eq!(finished.receipt.as_ref().unwrap().next_eligible_at, NOW + 3_600_000);
+    assert_eq!(finished.receipt.as_ref().unwrap().next_eligible_at, NOW);
     assert_eq!(host.manual_transfer_history().get(&finished.id).unwrap(), finished);
     assert!(host.manual_transfer_history().active().unwrap().is_none());
     for script in [&broken, &media] {
@@ -1729,7 +1788,7 @@ fn rf4_lost_accepted_media_upload_resumes_matching_server_hash_without_resend_or
         done.media.counters.bytes_uploaded,
         partial.media.counters.bytes_uploaded
     );
-    assert_eq!(done.receipt.as_ref().unwrap().next_eligible_at, NOW + 3_600_000);
+    assert_eq!(done.receipt.as_ref().unwrap().next_eligible_at, NOW);
     assert!(restarted.manual_transfer_history().active().unwrap().is_none());
     assert_eq!(restarted.manual_transfer_history().get(&done.id).unwrap(), done);
     restarted.close().unwrap();

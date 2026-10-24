@@ -165,8 +165,8 @@ fn verify_media(root: &Path, options: &JobOptions) -> Value {
         let completed = fact["completed_at"].as_i64().expect("whole completion instant missing");
         let deadline = fact["next_eligible_at"].as_i64().expect("success deadline missing");
         assert!(
-            deadline - completed == 3_600_000,
-            "success cooldown is not one real hour"
+            deadline == completed,
+            "custom-server success must be immediately eligible"
         );
         assert!(
             completed
@@ -189,7 +189,7 @@ fn verify_media(root: &Path, options: &JobOptions) -> Value {
         );
         stages.push(json!({"direction": direction, "complete": true, "downloaded_files": 1,
             "uploaded_files": 1, "bytes_downloaded": size, "bytes_uploaded": device.len(),
-            "excluded_empty": [ZERO_MEDIA], "awaiting": 0, "real_hour_cooldown": true,
+            "excluded_empty": [ZERO_MEDIA], "awaiting": 0, "immediately_eligible": true,
             "prior_effects_unknown": direction == "Import"}));
     }
     let mut peers = Vec::new();

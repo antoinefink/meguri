@@ -12,6 +12,7 @@ use std::{
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum AccountBinding {
     LocalOnly,
     Connected {
@@ -62,6 +63,7 @@ pub enum PublicationDecision {
     Pending,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Publication {
     pub identity: PublicationId,
     pub binding: AccountBinding,

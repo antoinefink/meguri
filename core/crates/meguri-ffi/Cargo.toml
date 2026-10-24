@@ -40,4 +40,5 @@ meguri-host = { workspace = true, features = ["test-hooks"] }
 meguri-model = { workspace = true, features = ["test-hooks"] }
 meguri-storage = { workspace = true, features = ["test-hooks"] }
 meguri-testkit.workspace = true
+serde_json.workspace = true
 tempfile.workspace = true

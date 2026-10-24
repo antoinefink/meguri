@@ -1244,3 +1244,24 @@ Finish the same-account server review cycle first. Then implement media
 package export and the UI changes. File export currently omits media;
 its writer and reader require implementation before changing its label.
 No Unit is accepted by this checkpoint.
+
+M6 backend; start `d1d1e172`.
+
+Implementer `061532Z-26802` removed the custom-server wait and preserved
+legacy history. R1 found one P2: unknown stored fields could be lost during
+an update. Focused check `062217Z-31994` also found a missing FFI test
+dependency. Fixer `062519Z-34265`, from `9f0ab1e2`, closed both. Strict
+decoding covers policy objects and nested account/publication metadata;
+valid legacy defaults remain. R2 found no P0-P2. The new dependency is
+test-only; tooling added one `serde_json` lock entry.
+
+| Check | Receipt | Result |
+| --- | --- | --- |
+| Focused core tests | `062801Z-36296` | 57 passed; zero failed or skipped |
+| Initial lint | `062908Z-37120` | Formatting failed |
+| Formatter | `063048Z-38166` | Passed |
+| Final lint | `063105Z-38745` | Four checks passed |
+| Privacy | `063104Z-38515` | Eight files passed |
+
+Native checks and the full gate are pending. The native proof helpers still
+need the new receipt format and the same-login review/export check.

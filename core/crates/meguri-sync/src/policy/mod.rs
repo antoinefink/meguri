@@ -92,16 +92,19 @@ pub enum Boundary {
     InvalidDownload,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FileIdentity {
     pub length: u64,
     pub sha256: [u8; 32],
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Artifact {
     pub name: String,
     pub identity: FileIdentity,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocalGuard {
     /// Process incarnation; process generation/seq equality after restart is insufficient.
     pub process: [u64; 2],
@@ -113,6 +116,7 @@ pub struct LocalGuard {
     pub closed_wal: Option<FileIdentity>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteFacts {
     pub modified: i64,
     pub schema_modified: i64,
@@ -132,6 +136,7 @@ impl From<&crate::wire::meta::ServerMeta> for RemoteFacts {
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocalFacts {
     pub modified: i64,
     pub schema_modified: i64,
@@ -177,6 +182,7 @@ pub enum CopyKind {
     UnverifiedRaw,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ServerCopy {
     pub artifact: Artifact,
     pub kind: CopyKind,
@@ -185,6 +191,7 @@ pub struct ServerCopy {
     pub served_facts: Option<LocalFacts>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SuccessReceipt {
     pub completed_at: i64,
     pub next_eligible_at: i64,
@@ -203,6 +210,7 @@ pub enum MediaStage {
     Complete,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MediaConsent {
     pub revision: u64,
     pub generation: u64,
@@ -211,6 +219,7 @@ pub struct MediaConsent {
     pub configured_endpoint: String,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MediaCounters {
     pub uploaded_files: u64,
     pub uploaded_deletions: u64,
@@ -225,6 +234,7 @@ pub struct MediaCounters {
     pub awaiting: u64,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MediaOutcome {
     pub stage: MediaStage,
     pub consent: Option<MediaConsent>,
@@ -238,6 +248,7 @@ pub struct MediaOutcome {
     pub failure_kind: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Operation {
     pub id: OperationId,
     pub account: AccountRef,
@@ -272,6 +283,7 @@ pub struct Operation {
     pub revision: u64,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct State {
     version: u32,
     serial: u64,
@@ -364,20 +376,16 @@ impl TransferPolicy {
             .cloned()
             .ok_or(PolicyError::Stale)
     }
-    pub fn next_eligible_at(&self, account: &AccountRef) -> Result<Option<i64>, PolicyError> {
-        Ok(self.read()?.cooldowns.get(&account.0).map(|r| r.next_eligible_at))
+    pub fn next_eligible_at(&self, _account: &AccountRef) -> Result<Option<i64>, PolicyError> {
+        // This manual pipeline is custom-server only. Retained deadlines are
+        // history, but the complete document must still pass validation.
+        self.read()?;
+        Ok(None)
     }
-    pub(crate) fn begin(&self, mut operation: Operation, nonce: u64, now: i64) -> Result<Operation, PolicyError> {
+    pub(crate) fn begin(&self, mut operation: Operation, nonce: u64, _now: i64) -> Result<Operation, PolicyError> {
         self.update(|state| {
             if let Some(id) = &state.active {
                 return Err(PolicyError::Overlap(id.clone()));
-            }
-            if let Some(r) = state.cooldowns.get(&operation.account.0)
-                && now < r.next_eligible_at
-            {
-                return Err(PolicyError::Cooldown {
-                    next_eligible_at: r.next_eligible_at,
-                });
             }
             state.serial = state.serial.checked_add(1).ok_or(PolicyError::Invalid)?;
             operation.id = OperationId(format!("{:016x}-{:016x}", state.serial, nonce));
@@ -467,8 +475,8 @@ impl TransferPolicy {
         }
         Ok(())
     }
-    /// Only a complete selected scope gets a receipt. Receipt, retained deadline
-    /// and guard release are a SINGLE durable transition. Rollback never lowers it.
+    /// Only a complete selected scope gets a receipt. Receipt and exact owner
+    /// release are a SINGLE durable transition; legacy deadlines stay unchanged.
     pub(crate) fn finish(&self, operation: &mut Operation, now: i64) -> Result<(), PolicyError> {
         if !selected_complete(operation) {
             return Err(PolicyError::Invalid);
@@ -478,24 +486,14 @@ impl TransferPolicy {
             if state.active.as_ref() != Some(&saved.id) || state.operations.get(saved.id.as_str()) != Some(&saved) {
                 return Err(PolicyError::Stale);
             }
-            let previous = state
-                .cooldowns
-                .get(&saved.account.0)
-                .map(|r| r.next_eligible_at)
-                .unwrap_or(i64::MIN);
-            let deadline = now
-                .checked_add(60 * 60 * 1000)
-                .ok_or(PolicyError::Invalid)?
-                .max(previous);
             let receipt = SuccessReceipt {
                 completed_at: now,
-                next_eligible_at: deadline,
+                next_eligible_at: now,
             };
             saved.phase = Phase::Complete;
             saved.boundary = None;
-            saved.receipt = Some(receipt.clone());
+            saved.receipt = Some(receipt);
             saved.revision = saved.revision.checked_add(1).ok_or(PolicyError::Invalid)?;
-            state.cooldowns.insert(saved.account.0.clone(), receipt);
             state.operations.insert(saved.id.0.clone(), saved.clone());
             state.active = None;
             Ok(())
@@ -574,6 +572,12 @@ fn decode(doc: Option<&serde_json::Map<String, serde_json::Value>>) -> Result<St
         None => return Err(invalid()),
     };
     if state.version != 1
+        || state.cooldowns.keys().any(|account| {
+            account.len() != 64
+                || !account
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
         || state
             .active
             .as_ref()
@@ -650,8 +654,43 @@ mod tests {
             revision: 0,
         }
     }
+    // A version-1 input with the old one-hour receipt, never produced by finish.
+    fn legacy_history(root: &Path, account: &AccountRef) -> Operation {
+        let mut old = operation(account.clone(), Direction::Import);
+        old.id = OperationId("0000000000000001-000000000000000c".into());
+        old.phase = Phase::Complete;
+        old.collection_complete = true;
+        old.receipt = Some(SuccessReceipt {
+            completed_at: 100,
+            next_eligible_at: 3_600_100,
+        });
+        let other = AccountRef::derive(&Endpoint::parse("http://127.0.0.2/").unwrap(), "other history").unwrap();
+        let state = State {
+            version: 1,
+            serial: 1,
+            active: None,
+            operations: BTreeMap::from([(old.id.0.clone(), old.clone())]),
+            cooldowns: BTreeMap::from([
+                (account.0.clone(), old.receipt.clone().unwrap()),
+                (
+                    other.0,
+                    SuccessReceipt {
+                        completed_at: 200,
+                        next_eligible_at: 3_600_200,
+                    },
+                ),
+            ]),
+        };
+        let document = serde_json::json!({"manualTransfers": state});
+        std::fs::write(
+            root.join("manual-transfers.json"),
+            serde_json::to_vec_pretty(&document).unwrap(),
+        )
+        .unwrap();
+        old
+    }
     #[test]
-    fn shared_success_cooldown_survives_restart_rotation_and_clock_rollback() {
+    fn immediate_success_survives_restart_rotation_and_clock_rollback_with_legacy_history() {
         let root = tempfile::tempdir().unwrap();
         let base = Endpoint::parse(" HTTP://127.0.0.1:80/anki ").unwrap();
         let account = AccountRef::derive(&base, "  CaseSensitiveLogin  ").unwrap();
@@ -664,38 +703,71 @@ mod tests {
             .unwrap()
         );
         assert_ne!(account, AccountRef::derive(&base, "casesensitivelogin").unwrap());
-        let policy = TransferPolicy::new(root.path());
-        let mut op = policy
-            .begin(operation(account.clone(), Direction::Import), 12, 100)
-            .unwrap();
-        op.collection_complete = true;
-        op.phase = Phase::CollectionComplete;
-        policy.save(&mut op).unwrap();
-        policy.finish(&mut op, 100).unwrap();
-        assert_eq!(op.receipt.as_ref().unwrap().next_eligible_at, 3_600_100);
-        let restarted = TransferPolicy::new(root.path());
-        for now in [99, -1_000_000, 3_600_099] {
-            assert!(matches!(
-                restarted.begin(operation(account.clone(), Direction::Export), 13, now),
-                Err(PolicyError::Cooldown {
-                    next_eligible_at: 3_600_100
+        let old = legacy_history(root.path(), &account);
+        let path = root.path().join("manual-transfers.json");
+        let bytes = std::fs::read(&path).unwrap();
+        let original: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let mut retained = vec![old];
+        let fresh = AccountRef::derive(&base, "no legacy map entry").unwrap();
+        for (direction, now, identity) in [
+            (Direction::Export, 100, account.clone()),
+            (Direction::Export, 100, account.clone()),
+            (Direction::Import, 99, account.clone()),
+            (Direction::Import, -1_000_000, account.clone()),
+            (Direction::Export, -1_000_000, fresh),
+        ] {
+            let restarted = TransferPolicy::new(root.path());
+            let before_read = std::fs::read(&path).unwrap();
+            assert_eq!(restarted.next_eligible_at(&identity).unwrap(), None);
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                before_read,
+                "reads must preserve historical bytes"
+            );
+            let mut op = restarted.begin(operation(identity, direction), 13, now).unwrap();
+            let mut stale = retained.last().unwrap().clone();
+            let before_stale_finish = std::fs::read(&path).unwrap();
+            assert_eq!(restarted.finish(&mut stale, now), Err(PolicyError::Stale));
+            assert_eq!(std::fs::read(&path).unwrap(), before_stale_finish);
+            assert_eq!(restarted.active().unwrap(), Some(op.clone()));
+            op.collection_complete = true;
+            op.phase = Phase::CollectionComplete;
+            restarted.save(&mut op).unwrap();
+            restarted.finish(&mut op, now).unwrap();
+            assert_eq!(
+                op.receipt,
+                Some(SuccessReceipt {
+                    completed_at: now,
+                    next_eligible_at: now,
                 })
-            ));
+            );
+            assert!(restarted.active().unwrap().is_none());
+            let document: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(document["manualTransfers"]["version"], 1);
+            assert_eq!(
+                document["manualTransfers"]["cooldowns"],
+                original["manualTransfers"]["cooldowns"]
+            );
+            for prior in &retained {
+                assert_eq!(restarted.get(&prior.id).unwrap(), *prior);
+                assert_eq!(
+                    document["manualTransfers"]["operations"][prior.id.as_str()],
+                    serde_json::to_value(prior).unwrap()
+                );
+            }
+            retained.push(op);
         }
-        assert!(
-            restarted
-                .begin(operation(account, Direction::Export), 14, 3_600_100)
-                .is_ok()
-        );
-        let text = std::fs::read_to_string(root.path().join("manual-transfers.json")).unwrap();
+        let text = std::fs::read_to_string(path).unwrap();
         assert!(!text.contains("CaseSensitiveLogin"));
     }
     #[test]
-    fn failed_partial_and_unknown_never_consume_cooldown_or_release_unknown_guard() {
+    fn failed_partial_and_unknown_never_gain_receipts_or_release_unknown_guard() {
         let root = tempfile::tempdir().unwrap();
         let p = TransferPolicy::new(root.path());
         let base = Endpoint::parse("http://127.0.0.1/").unwrap();
         let account = AccountRef::derive(&base, "synthetic").unwrap();
+        let old = legacy_history(root.path(), &account);
+        let old_deadlines = p.read().unwrap().cooldowns;
         let mut failed = p.begin(operation(account.clone(), Direction::Export), 1, 0).unwrap();
         failed.phase = Phase::Failed;
         p.end_before_activation(&mut failed).unwrap();
@@ -709,16 +781,31 @@ mod tests {
         assert_eq!(p.end_before_activation(&mut op), Err(PolicyError::Invalid));
         let rotated = AccountRef::derive(&Endpoint::parse("http://127.0.0.2/").unwrap(), "different").unwrap();
         let restart = TransferPolicy::new(root.path());
-        assert!(matches!(
-            restart.begin(operation(rotated, Direction::Import), 3, 9_999_999),
-            Err(PolicyError::Overlap(_))
-        ));
+        for phase in [Phase::ConfirmedIntent, Phase::Cancelled, Phase::NeedsDecision] {
+            op.phase = phase;
+            p.save(&mut op).unwrap();
+            let bytes = std::fs::read(&p.path).unwrap();
+            for identity in [account.clone(), rotated.clone()] {
+                for direction in [Direction::Import, Direction::Export] {
+                    assert_eq!(
+                        restart.begin(operation(identity.clone(), direction), 3, -1_000_000),
+                        Err(PolicyError::Overlap(op.id.clone()))
+                    );
+                }
+            }
+            assert_eq!(p.end_before_activation(&mut op), Err(PolicyError::Invalid));
+            assert_eq!(p.finish(&mut op, 100), Err(PolicyError::Invalid));
+            assert_eq!(std::fs::read(&p.path).unwrap(), bytes);
+            assert_eq!(restart.active().unwrap(), Some(op.clone()));
+        }
         assert_eq!(restart.next_eligible_at(&account).unwrap(), None);
         op.acceptance = Acceptance::ExactOk;
         op.collection_complete = true;
         p.save(&mut op).unwrap();
         assert_eq!(p.finish(&mut op, 1_000), Err(PolicyError::Invalid));
         assert_eq!(p.next_eligible_at(&account).unwrap(), None);
+        assert_eq!(p.get(&old.id).unwrap(), old);
+        assert_eq!(p.read().unwrap().cooldowns, old_deadlines);
     }
     #[test]
     fn media_receipt_requires_durable_completion_and_scope_is_immutable() {
@@ -753,6 +840,17 @@ mod tests {
             policy.save(&mut op).unwrap();
             assert_eq!(policy.finish(&mut op, 1), Err(PolicyError::Invalid));
             assert_eq!(policy.next_eligible_at(&account).unwrap(), None);
+            let other = AccountRef::derive(&Endpoint::parse("http://127.0.0.2/").unwrap(), "different").unwrap();
+            for identity in [account.clone(), other] {
+                for direction in [Direction::Import, Direction::Export] {
+                    assert_eq!(
+                        policy.begin(operation(identity.clone(), direction), 21, 1),
+                        Err(PolicyError::Overlap(op.id.clone()))
+                    );
+                }
+            }
+            assert_eq!(policy.active().unwrap(), Some(op.clone()));
+            assert!(op.receipt.is_none());
         }
         op.media.consent = Some(MediaConsent {
             revision: op.revision,
@@ -772,7 +870,16 @@ mod tests {
         policy.save(&mut op).unwrap();
         policy.finish(&mut op, 1).unwrap();
         assert_eq!(TransferPolicy::new(root.path()).get(&op.id).unwrap(), op);
-        assert_eq!(policy.next_eligible_at(&account).unwrap(), Some(3_600_001));
+        assert_eq!(
+            op.receipt,
+            Some(SuccessReceipt {
+                completed_at: 1,
+                next_eligible_at: 1,
+            })
+        );
+        assert!(policy.active().unwrap().is_none());
+        assert!(policy.read().unwrap().cooldowns.is_empty());
+        assert_eq!(policy.next_eligible_at(&account).unwrap(), None);
     }
     #[test]
     fn repeated_media_snapshot_does_not_publish_but_batch_error_and_terminal_do() {
@@ -822,7 +929,7 @@ mod tests {
         }
         assert_eq!(op.revision, revision + 3);
         policy.finish(&mut op, 1).unwrap();
-        assert_eq!(policy.get(&op.id).unwrap().receipt.unwrap().next_eligible_at, 3_600_001);
+        assert_eq!(policy.get(&op.id).unwrap().receipt.unwrap().next_eligible_at, 1);
     }
     #[test]
     fn legacy_history_without_media_fields_stays_readable() {
@@ -905,7 +1012,232 @@ mod tests {
         let path = root.path().join("manual-transfers.json");
         std::fs::write(&path, b"{corrupt-history").unwrap();
         let p = TransferPolicy::new(root.path());
+        let account = AccountRef::derive(&Endpoint::parse("http://127.0.0.1/").unwrap(), "synthetic").unwrap();
         assert_eq!(p.history().unwrap_err(), PolicyError::Storage);
-        assert_eq!(std::fs::read(path).unwrap(), b"{corrupt-history");
+        assert_eq!(p.next_eligible_at(&account), Err(PolicyError::Storage));
+        assert_eq!(
+            p.begin(operation(account, Direction::Import), 1, 0),
+            Err(PolicyError::Storage)
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"{corrupt-history");
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let account = AccountRef::derive(&Endpoint::parse("http://127.0.0.1/").unwrap(), "synthetic").unwrap();
+        assert_eq!(p.next_eligible_at(&account), Err(PolicyError::Storage));
+        assert_eq!(
+            p.begin(operation(account, Direction::Export), 1, 0),
+            Err(PolicyError::Storage)
+        );
+        assert!(path.is_dir());
+    }
+    #[test]
+    fn unexpected_policy_fields_refuse_all_queries_and_admission_without_rewriting() {
+        let root = tempfile::tempdir().unwrap();
+        let account = AccountRef::derive(&Endpoint::parse("http://127.0.0.1/").unwrap(), "synthetic").unwrap();
+        let mut old = legacy_history(root.path(), &account);
+        let policy = TransferPolicy::new(root.path());
+        let identity = FileIdentity {
+            length: 42,
+            sha256: [7; 32],
+        };
+        let artifact = Artifact {
+            name: "synthetic.collection".into(),
+            identity: identity.clone(),
+        };
+        let guard = LocalGuard {
+            process: [1, 2],
+            generation: 3,
+            admitted: 4,
+            committed: 4,
+            publication: Some(
+                serde_json::from_value(serde_json::json!({
+                    "identity": [5, 6],
+                    "binding": {"Connected": {
+                        "account": "synthetic-account",
+                        "configuration": "synthetic-configuration",
+                        "environment": "synthetic-environment"
+                    }},
+                    "decision": "Clear"
+                }))
+                .unwrap(),
+            ),
+            closed_main: Some(identity.clone()),
+            closed_wal: Some(identity.clone()),
+        };
+        let local = LocalFacts {
+            modified: 10,
+            schema_modified: 11,
+            last_sync: 12,
+            usn: 13,
+            cards: 14,
+            notes: 15,
+            reviews: 16,
+            pending_reviews: 0,
+            pending_rows: [0; 8],
+            last_review: Some(17),
+        };
+        old.guard = Some(guard.clone());
+        old.recovery_guard = Some(guard);
+        old.local = Some(local.clone());
+        old.recovery_local = Some(local.clone());
+        old.remote = Some(RemoteFacts {
+            modified: 10,
+            schema_modified: 11,
+            usn: 13,
+            empty: false,
+            media_usn: 18,
+        });
+        old.candidate = Some(artifact.clone());
+        old.activation_identity = Some(identity);
+        old.original = Some(artifact.clone());
+        old.safety_backups = vec![artifact.clone()];
+        old.server_copy = Some(ServerCopy {
+            artifact,
+            kind: CopyKind::VerifiedPackage,
+            published_at: 99,
+            served_facts: Some(local),
+        });
+        old.media.consent = Some(MediaConsent {
+            revision: 0,
+            generation: 3,
+            categories: MEDIA_CATEGORIES,
+            account: account.clone(),
+            configured_endpoint: old.configured_endpoint.clone(),
+        });
+        let mut original: serde_json::Value = serde_json::from_slice(&std::fs::read(&policy.path).unwrap()).unwrap();
+        original["manualTransfers"]["operations"][old.id.as_str()] = serde_json::to_value(&old).unwrap();
+        // Other sidecar namespaces remain opaque and survive a valid admission.
+        original["otherNamespace"] = serde_json::json!({"opaque": {"future": 1}});
+        let bytes = serde_json::to_vec(&original).unwrap();
+        std::fs::write(&policy.path, &bytes).unwrap();
+        assert_eq!(policy.get(&old.id).unwrap(), old);
+        assert_eq!(policy.next_eligible_at(&account).unwrap(), None);
+        assert_eq!(std::fs::read(&policy.path).unwrap(), bytes);
+        policy
+            .begin(operation(account.clone(), Direction::Import), 13, -1_000_000)
+            .unwrap();
+        let admitted: serde_json::Value = serde_json::from_slice(&std::fs::read(&policy.path).unwrap()).unwrap();
+        assert_eq!(admitted["otherNamespace"], original["otherNamespace"]);
+        assert_eq!(
+            admitted["manualTransfers"]["cooldowns"],
+            original["manualTransfers"]["cooldowns"]
+        );
+        assert_eq!(
+            admitted["manualTransfers"]["operations"][old.id.as_str()],
+            original["manualTransfers"]["operations"][old.id.as_str()]
+        );
+
+        let mut paths = vec![
+            "/manualTransfers".to_owned(),
+            format!("/manualTransfers/cooldowns/{}", account.0),
+        ];
+        // Cover every persisted object shape and each nested route, including
+        // the publication's structured account binding. Scalars/arrays have no
+        // object members to discard; no wire decoder or user payload is involved.
+        for suffix in [
+            "",
+            "/receipt",
+            "/guard",
+            "/guard/publication",
+            "/guard/publication/binding/Connected",
+            "/guard/closed_main",
+            "/guard/closed_wal",
+            "/recovery_guard",
+            "/recovery_guard/publication",
+            "/recovery_guard/publication/binding/Connected",
+            "/recovery_guard/closed_main",
+            "/recovery_guard/closed_wal",
+            "/local",
+            "/recovery_local",
+            "/remote",
+            "/candidate",
+            "/candidate/identity",
+            "/activation_identity",
+            "/original",
+            "/original/identity",
+            "/safety_backups/0",
+            "/safety_backups/0/identity",
+            "/server_copy",
+            "/server_copy/artifact",
+            "/server_copy/artifact/identity",
+            "/server_copy/served_facts",
+            "/media",
+            "/media/consent",
+            "/media/counters",
+        ] {
+            paths.push(format!("/manualTransfers/operations/{}{suffix}", old.id.as_str()));
+        }
+        for path in paths {
+            let mut document = original.clone();
+            document
+                .pointer_mut(&path)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("unexpected_policy_field".into(), serde_json::json!({"synthetic": 1}));
+            let bytes = serde_json::to_vec(&document).unwrap();
+            std::fs::write(&policy.path, &bytes).unwrap();
+            let unchanged = || assert_eq!(std::fs::read(&policy.path).unwrap(), bytes, "{path}");
+            assert_eq!(policy.next_eligible_at(&account), Err(PolicyError::Storage), "{path}");
+            unchanged();
+            assert_eq!(policy.history(), Err(PolicyError::Storage), "{path}");
+            unchanged();
+            assert_eq!(policy.active(), Err(PolicyError::Storage), "{path}");
+            unchanged();
+            assert_eq!(policy.get(&old.id), Err(PolicyError::Storage), "{path}");
+            unchanged();
+            for direction in [Direction::Import, Direction::Export] {
+                assert_eq!(
+                    policy.begin(operation(account.clone(), direction), 13, -1_000_000),
+                    Err(PolicyError::Storage),
+                    "{path}"
+                );
+                unchanged();
+            }
+        }
+    }
+    #[test]
+    fn no_wait_still_validates_complete_legacy_schema_and_identities_without_rewriting() {
+        let root = tempfile::tempdir().unwrap();
+        let account = AccountRef::derive(&Endpoint::parse("http://127.0.0.1/").unwrap(), "synthetic").unwrap();
+        let old = legacy_history(root.path(), &account);
+        let policy = TransferPolicy::new(root.path());
+        let original: serde_json::Value = serde_json::from_slice(&std::fs::read(&policy.path).unwrap()).unwrap();
+        for defect in 0..8 {
+            let mut document = original.clone();
+            let state = &mut document["manualTransfers"];
+            match defect {
+                0 => state["version"] = serde_json::json!(2),
+                1 => state["cooldowns"][&account.0]["next_eligible_at"] = serde_json::json!("invalid"),
+                2 => {
+                    state["cooldowns"][&account.0]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("completed_at");
+                }
+                3 => {
+                    let receipt = state["cooldowns"].as_object_mut().unwrap().remove(&account.0).unwrap();
+                    state["cooldowns"]["invalid-account-reference"] = receipt;
+                }
+                4 => state["operations"][old.id.as_str()]["account"] = serde_json::json!("invalid"),
+                5 => {
+                    state["operations"][old.id.as_str()]["id"] = serde_json::json!("0000000000000002-000000000000000c");
+                }
+                6 => state["active"] = serde_json::json!("0000000000000002-000000000000000c"),
+                7 => state["operations"][old.id.as_str()]["receipt"]["next_eligible_at"] = serde_json::Value::Null,
+                _ => unreachable!(),
+            }
+            let bytes = serde_json::to_vec(&document).unwrap();
+            std::fs::write(&policy.path, &bytes).unwrap();
+            assert_eq!(policy.next_eligible_at(&account), Err(PolicyError::Storage));
+            assert_eq!(policy.history(), Err(PolicyError::Storage));
+            for direction in [Direction::Import, Direction::Export] {
+                assert_eq!(
+                    policy.begin(operation(account.clone(), direction), 13, -1_000_000),
+                    Err(PolicyError::Storage)
+                );
+            }
+            assert_eq!(std::fs::read(&policy.path).unwrap(), bytes);
+        }
     }
 }
