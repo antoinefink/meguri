@@ -58,3 +58,9 @@ in the VM. Fresh-process trust passed before and after normal product copying
 `vm-ax-trust-frozen/20261024T214200Z-54688`). A native alert Cancel click passed
 in `ui-test/20261024T214306Z-55451`. Do not repeat setup without new evidence.
 The original collapsed Connection details failure remains separately open.
+
+Workflow repair start: `23d903ea`; filtered export
+`cleanroom/20261024T223058Z-92507`. The workflow now declares an explicit
+accessibility container before its identifier, retaining native children.
+Independent review: no P0–P2. Privacy: pass. Similarity: pass.
+Native verification: pending. Shared full gate: pending. Unit acceptance: pending.

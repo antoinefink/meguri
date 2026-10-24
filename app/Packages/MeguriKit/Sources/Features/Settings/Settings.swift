@@ -243,6 +243,7 @@ public struct ManualTransferWorkflowView: View {
             }
         }
         .interactiveDismissDisabled(model.confirmationPresented || model.copyDestinationPresented)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings.anki.transferWorkflow")
     }
 }
