@@ -612,89 +612,73 @@ final class VMAccessibilitySetupTests: XCTestCase {
             XCTFail("UserNotificationCenter is not already running")
             return
         }
-        let appeared = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            helper.windows.firstMatch.exists || helper.dialogs.firstMatch.exists
-        }, object: nil)
-        let result = XCTWaiter().wait(for: [appeared], timeout: 5)
-        guard !helper.secureTextFields.firstMatch.exists else {
-            XCTFail("Secure text fields present; sharing consent evidence withheld")
+        guard helper.dialogs.count == 1, helper.secureTextFields.count == 0 else {
+            XCTFail("Expected one existing UserNotificationCenter dialog without secure fields; sharing consent evidence withheld")
             return
         }
-        let windowCount = helper.windows.count
-        let dialogCount = helper.dialogs.count
-        guard windowCount <= 4, dialogCount <= 4 else {
-            XCTFail("Too many UserNotificationCenter surfaces; sharing consent evidence withheld")
+        // Bind to the existing accessibility element, rather than an index that could resolve to a replacement.
+        let dialogs = helper.dialogs.allElementsBoundByAccessibilityElement
+        guard dialogs.count == 1, let dialog = dialogs.first, dialog.exists,
+              dialog.secureTextFields.count == 0 else {
+            XCTFail("UserNotificationCenter dialog is absent, ambiguous or secure; sharing consent evidence withheld")
             return
         }
-
-        let helperStaticTextCount = helper.staticTexts.count
-        let helperButtonCount = helper.buttons.count
-        let dialogs = (0..<dialogCount).map { helper.dialogs.element(boundBy: $0) }
-        let dialogCounts = dialogs.map { (staticTexts: $0.staticTexts.count, buttons: $0.buttons.count) }
-        guard dialogCounts.allSatisfy({ $0.staticTexts <= 8 && $0.buttons <= 8 }) else {
+        let staticTextCount = dialog.staticTexts.count
+        let buttonCount = dialog.buttons.count
+        guard staticTextCount <= 8, buttonCount <= 8 else {
             XCTFail("Too many UserNotificationCenter dialog texts or buttons; sharing consent evidence withheld")
             return
         }
-        var dialogFacts: [[String: Any]] = []
-        for (index, dialog) in dialogs.enumerated() {
-            guard !helper.secureTextFields.firstMatch.exists, dialog.exists else {
-                XCTFail("Secure fields present or UserNotificationCenter dialog changed; sharing consent evidence withheld")
-                return
-            }
-            let counts = dialogCounts[index]
-            let staticTexts = (0..<counts.staticTexts).map { textIndex in
-                let text = dialog.staticTexts.element(boundBy: textIndex)
-                return ["label": text.label, "value": text.value as? String ?? "<non-string>"]
-            }
-            let buttons: [[String: Any]] = (0..<counts.buttons).map { buttonIndex in
-                let button = dialog.buttons.element(boundBy: buttonIndex)
-                return ["identifier": button.identifier, "label": button.label, "title": button.title,
-                        "isEnabled": button.isEnabled, "isHittable": button.isHittable]
-            }
-            dialogFacts.append(["index": index, "staticTextCount": counts.staticTexts,
-                                "buttonCount": counts.buttons, "staticTexts": staticTexts, "buttons": buttons])
+
+        func inspectionIsStable() -> Bool {
+            helper.state != .notRunning && helper.dialogs.count == 1
+                && helper.secureTextFields.count == 0 && dialog.exists
+                && dialog.secureTextFields.count == 0
+                && dialog.staticTexts.count == staticTextCount && dialog.buttons.count == buttonCount
         }
-        let facts: [String: Any] = ["helperStaticTextCount": helperStaticTextCount,
-                                   "helperButtonCount": helperButtonCount, "dialogCount": dialogCount,
-                                   "dialogs": dialogFacts]
+        guard inspectionIsStable() else {
+            XCTFail("UserNotificationCenter dialog changed or secure fields appeared; sharing consent evidence withheld")
+            return
+        }
+        let staticTexts = (0..<staticTextCount).map { index in
+            let text = dialog.staticTexts.element(boundBy: index)
+            return ["label": String(text.label.prefix(4_096)),
+                    "value": String((text.value as? String ?? "<non-string>").prefix(4_096))]
+        }
+        let buttons: [[String: Any]] = (0..<buttonCount).map { index in
+            let button = dialog.buttons.element(boundBy: index)
+            return ["identifier": String(button.identifier.prefix(4_096)),
+                    "label": String(button.label.prefix(4_096)),
+                    "title": String(button.title.prefix(4_096)), "isEnabled": button.isEnabled]
+        }
+        let facts: [String: Any] = ["staticTextCount": staticTextCount, "buttonCount": buttonCount,
+                                   "staticTexts": staticTexts, "buttons": buttons]
         let factsData = try JSONSerialization.data(withJSONObject: facts, options: [.prettyPrinted, .sortedKeys])
         let matchingFacts = XCTAttachment(string: String(decoding: factsData, as: UTF8.self))
-        matchingFacts.name = "VM sharing consent matching facts"
+        matchingFacts.name = "VM sharing consent dialog facts (strings up to 4096 characters)"
         matchingFacts.lifetime = .keepAlways
-        let outline = XCTAttachment(string: helper.debugDescription)
-        outline.name = "VM sharing consent helper tree"
-        outline.lifetime = .keepAlways
-        var evidence = [outline, matchingFacts]
-        let surfaces = windowCount > 0 ? helper.windows : helper.dialogs
-        let surfaceCount = windowCount > 0 ? windowCount : dialogCount
-        for index in 0..<surfaceCount {
-            let surface = surfaces.element(boundBy: index)
-            guard !helper.secureTextFields.firstMatch.exists else {
-                XCTFail("Secure text fields present; sharing consent evidence withheld")
-                return
-            }
-            guard surface.exists else {
-                XCTFail("UserNotificationCenter surface changed; sharing consent evidence withheld")
-                return
-            }
-            let pixels = XCTAttachment(screenshot: surface.screenshot())
-            pixels.name = "VM sharing consent system window"
-            pixels.lifetime = .keepAlways
-            evidence.append(pixels)
+
+        guard inspectionIsStable() else {
+            XCTFail("UserNotificationCenter dialog changed or secure fields appeared; sharing consent evidence withheld")
+            return
         }
-        // Hold all evidence until the final secure-field check has passed.
-        guard !helper.secureTextFields.firstMatch.exists else {
-            XCTFail("Secure text fields present; sharing consent evidence withheld")
+        let outline = XCTAttachment(string: String(dialog.debugDescription.prefix(64_000)))
+        outline.name = "VM sharing consent dialog tree (up to 64000 characters)"
+        outline.lifetime = .keepAlways
+        guard inspectionIsStable() else {
+            XCTFail("UserNotificationCenter dialog changed or secure fields appeared; sharing consent evidence withheld")
+            return
+        }
+        let pixels = XCTAttachment(screenshot: dialog.screenshot())
+        pixels.name = "VM sharing consent dialog"
+        pixels.lifetime = .keepAlways
+        let evidence = [matchingFacts, outline, pixels]
+        // Publish nothing until the same dialog passes all privacy and stability checks again.
+        guard inspectionIsStable() else {
+            XCTFail("UserNotificationCenter dialog changed or secure fields appeared; sharing consent evidence withheld")
             return
         }
         for attachment in evidence { add(attachment) }
-        guard result == .completed, surfaceCount > 0 else {
-            XCTFail("No existing UserNotificationCenter window or dialog appeared within five seconds")
-            return
-        }
-        if surfaceCount > 1 {
-            XCTFail("Multiple UserNotificationCenter surfaces require manual inspection")
-        }
     }
 
     @MainActor
