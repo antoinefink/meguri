@@ -168,3 +168,19 @@ That adapter method has no offline test seam; review checked its one-line call.
 Privacy checks and focused similarity checks pass.
 Native visual checks and broader regression gates remain pending.
 Collection-file media support remains separate, open work under N9.
+
+### Curated transfer errors
+
+Start: `ba9dab71`; fixer session `s-20261024T135051Z-59428f7a`.
+Exports: `cleanroom/20261024T135101Z-91474` and `20261024T135420Z-96101`.
+Known failure ids select fixed messages. Unknown ids use the existing fallback.
+No raw server text or address enters the result or its diagnostic events.
+Review round 1 found P2: the timeout text assigned an unproven server cause.
+Round 2 confirmed the corrected text and no remaining P0–P2 findings.
+Privacy check: the flagged test line was replaced with other synthetic values.
+The guard and no-exposure assertions remain enabled.
+Focused Swift check `20261024T135613Z-97648`: 32 pass, zero failures or skips.
+Privacy passes. Static checks `20261024T135106Z-91743`: three pass.
+The earlier static failure was a pre-existing real hostname in a reject-all fake;
+`ba9dab71` replaces it with reserved test data and preserves its assertions.
+No backend, redirect or credential policy changes are part of this patch.

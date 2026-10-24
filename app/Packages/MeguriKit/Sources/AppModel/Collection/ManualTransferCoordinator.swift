@@ -512,9 +512,26 @@ public final class ManualTransferCoordinator {
             case .invalidDownload: message = "The server collection could not be validated. It was not activated."
             case .busy: message = "A transfer or file operation needs attention. Inspect local history below."
             case .server:
-                message = failure.serverKind == "endpoint_refused"
-                    ? "This build permits local test servers. Remote use requires a personal preview build."
-                    : "The server request failed. Check the endpoint and login, then inspect the recorded stages."
+                switch failure.serverKind {
+                case "auth_failed": message = "The server rejected the login. Check your username and password, then log in again."
+                case "offline": message = "The server could not be reached. Check your network connection and server address."
+                case "network": message = "A network problem interrupted the request. Check your connection and server availability."
+                case "tls": message = "A secure connection could not be made. Check that the server supports TLS 1.2 or later with a certificate this device trusts."
+                case "timeout": message = "The request timed out. Check your connection and server availability."
+                case "redirect_refused": message = "The server redirected the request in an unsupported way. Check the server address."
+                case "proxy_auth": message = "The proxy requires authentication. Check your proxy login."
+                case "proxy_unusable": message = "The system proxy could not be used. Check your proxy settings."
+                case "invalid_endpoint": message = "The server address is invalid. Check the address and its path prefix."
+                case "conflict": message = "Another device is syncing. Wait for it to finish before preparing a new decision."
+                case "server_error": message = "The server reported a problem. Check server availability before preparing a new decision."
+                case "unexpected_status": message = "The server returned an unexpected error status. Check the server address and configuration."
+                case "bad_response": message = "The server response could not be read. Check the server address and compatibility."
+                case "server_message": message = "The server declined the request. Check the server configuration before preparing a new decision."
+                case "client_too_old": message = "The server requires a newer client. Update Meguri before preparing a new decision."
+                case "clock_incorrect": message = "The device and server clocks differ. Check the date, time and time zone on both."
+                case "endpoint_refused": message = "This build permits local test servers. Remote use requires a personal preview build."
+                default: message = "The server request failed. Check the endpoint and login, then inspect the recorded stages."
+                }
             default: message = "The transfer could not finish. Inspect the recorded stages and retained copies below."
             }
         } else if error is ManualTransferInterrupted { message = "The operation was interrupted by the system. Inspect local history before continuing." }

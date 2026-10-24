@@ -54,22 +54,53 @@ import Testing
     }
 }
 extension ManualTransferSettingsTests {
-    @Test(arguments: ["endpoint_refused", "synthetic_other_failure"])
-    func serverFailureUsesCuratedBuildGuidance(serverKind: String) async {
-        let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
-            generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: serverKind))
-        let service = SettingsTransferService(loginFailure: failure)
-        let model = ManualTransferCoordinator(owner: nil, service: service, keychain: SettingsTransferKeys(), defaults: nil)
-        model.endpointDraft = "https://example.test/"
-        model.username = "Synthetic User"; model.password = "synthetic-transient"
-        await model.login()
-        let expected = serverKind == "endpoint_refused"
-            ? "This build permits local test servers. Remote use requires a personal preview build."
-            : "The server request failed. Check the endpoint and login, then inspect the recorded stages."
-        #expect(model.message == expected)
-        #expect(model.connectionEvents.filter { $0.detail == expected }.count == 1)
-        #expect(!model.authenticated && model.password.isEmpty && model.preview == nil)
-        #expect(await service.calls == ["normalize", "login"])
+    @Test func serverFailureUsesCuratedBuildGuidance() async {
+        let fallback = "The server request failed. Check the endpoint and login, then inspect the recorded stages."
+        let sensitive = ["Synthetic User", "synthetic-transient", "synthetic-host-key", "synthetic-token",
+            "ephemeral-only", "never-persist-me", "clear-on-background",
+            "https://synthetic-user:synthetic-password@example.test/private?token=synthetic-token#secret"]
+        let cases: [(String?, String)] = [
+            ("auth_failed", "The server rejected the login. Check your username and password, then log in again."),
+            ("offline", "The server could not be reached. Check your network connection and server address."),
+            ("network", "A network problem interrupted the request. Check your connection and server availability."),
+            ("tls", "A secure connection could not be made. Check that the server supports TLS 1.2 or later with a certificate this device trusts."),
+            ("timeout", "The request timed out. Check your connection and server availability."),
+            ("redirect_refused", "The server redirected the request in an unsupported way. Check the server address."),
+            ("proxy_auth", "The proxy requires authentication. Check your proxy login."),
+            ("proxy_unusable", "The system proxy could not be used. Check your proxy settings."),
+            ("invalid_endpoint", "The server address is invalid. Check the address and its path prefix."),
+            ("conflict", "Another device is syncing. Wait for it to finish before preparing a new decision."),
+            ("server_error", "The server reported a problem. Check server availability before preparing a new decision."),
+            ("unexpected_status", "The server returned an unexpected error status. Check the server address and configuration."),
+            ("bad_response", "The server response could not be read. Check the server address and compatibility."),
+            ("server_message", "The server declined the request. Check the server configuration before preparing a new decision."),
+            ("client_too_old", "The server requires a newer client. Update Meguri before preparing a new decision."),
+            ("clock_incorrect", "The device and server clocks differ. Check the date, time and time zone on both."),
+            ("endpoint_refused", "This build permits local test servers. Remote use requires a personal preview build."),
+            (nil, fallback), ("", fallback), ("synthetic_other_failure", fallback),
+            ("AUTH_FAILED", fallback), (" auth_failed", fallback), ("auth_failed\n", fallback),
+            ("endpoint_refused_extra", fallback),
+            ("server_message: " + sensitive.joined(separator: "\n"), fallback)
+        ]
+        for (serverKind, expected) in cases {
+            let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
+                generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: serverKind))
+            let service = SettingsTransferService(loginFailure: failure)
+            let keys = SettingsTransferKeys()
+            let model = ManualTransferCoordinator(owner: nil, service: service, keychain: keys, defaults: nil)
+            model.endpointDraft = "https://example.test/"
+            model.username = sensitive[0]; model.password = sensitive[1]
+            await model.login()
+            #expect(model.message == expected)
+            #expect(model.connectionEvents.filter { $0.detail == expected }.count == 1)
+            let diagnostics = ([model.message ?? ""] + model.connectionEvents.map(\.detail)).joined(separator: "\n")
+            #expect(!diagnostics.contains("example.test"))
+            for value in sensitive { #expect(!diagnostics.contains(value)) }
+            #expect(!model.authenticated && model.password.isEmpty && model.preview == nil && !model.busy)
+            #expect(await keys.saved == nil)
+            #expect(await keys.clears == (serverKind == "auth_failed" ? 2 : 1))
+            #expect(await service.calls == ["normalize", "login"])
+        }
     }
 
     @Test func loginEligibilityUsesEnteredFields() {
