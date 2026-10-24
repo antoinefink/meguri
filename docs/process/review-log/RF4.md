@@ -858,3 +858,77 @@ keyboard skip remains a final device-evidence gap.
 
 This is WIP. The next fixture run records numeric Form lookup facts.
 Rendered evidence, audits and final native review remain required.
+
+Replacement admission; start `d627a9f6`.
+
+| Check | Receipt | Outcome |
+| --- | --- | --- |
+| Initial regression | `core-test/20261024T004336Z-19694` | FAIL; overlap retained |
+| First matrix | `core-test/20261024T010521Z-34325` | 10 passed; Import fixture failed |
+| Corrected matrix | `core-test/20261024T011351Z-82387` | 11 passed; all 20 cells |
+| Host manual transfers | `core-test/20261024T011845Z-88774` | 37 passed |
+| Affected packages and R6 migration | `core-test/20261024T012559Z-94377` | 366 passed |
+| Bridge | `swift-test/20261024T011239Z-75400` | 98 passed before internal renaming |
+| App model | `swift-test/20261024T012722Z-95399` | 90 passed |
+| Strict Rust lint | `core-lint/20261024T013106Z-1560` | Four checks passed |
+| Complete source privacy | `private/20261024T011902Z-89111` | PASS; 14 files |
+
+Filtered source: `005255Z-24811`, `010752Z-36373`, `011524Z-85071`.
+Independent reviews: round 1 found the Import fixture defect; round 2 had
+no P0–P2; round 3 had no P0–P1. Source commit: `86dd295a`.
+The retained replacement chain has no pruning; review records it as follow-up.
+No success receipt or cooldown is created for a superseded partial operation.
+The full engine run `core-test/20261024T012007Z-90480` was cancelled while
+its unrelated 10,000-session test ran. Its cancellation receipt is retained;
+the required full integration suite is still pending.
+
+VM fixture preservation; start `d627a9f6`.
+
+| Check | Receipt | Outcome |
+| --- | --- | --- |
+| Staging/archive focused | `selftest/20261024T004513Z-20477` | 31 passed |
+| Initial archive | `manual-transfer-check/20261024T005319Z-25298` | ERROR; preconditions blocked |
+| Corrected guard focused | `selftest/20261024T010430Z-33521` | 33 passed |
+| Actual archive | `manual-transfer-check/20261024T010643Z-35402` | ERROR; controller Bash 3.2 parsing |
+| Host contract checks | `selftest-host/20261024T011001Z-41613` | 29 passed |
+
+The actual archive returned SSH exit 0 and a successful preservation receipt.
+Read-only verification found the source absent and archive present, with matching
+policy hash, directory device and inode. The controller error remains recorded;
+the archive was not repeated. The bytes remain in the dedicated VM. This is
+environment repair, not M8 transfer evidence. Guard review round 5 and portability
+review round 6 found no P0–P1. Commits: `3c458085`, `a4701955`.
+
+Supplemental rendering remains open. Mac run `ui-test/20261024T000613Z-98350`
+passed; independent review covered 34 synthetic captures. iPhone largest-text
+runs `005947Z-27969`, `010816Z-37609`, `011420Z-82867` failed in the helper.
+Captured geometry led to window-bar clipping and offscreen travel corrections;
+visibility assertions and the 24-gesture limit remain enabled. Helper commits:
+`d627a9f6`, `245ddd9a`, `81e7fa88`. The corrected focused run
+`ui-test/20261024T013040Z-99521` passed. Independent visual review covered all
+six largest-text captures and found no P0–P1 issues.
+Explicit audits, all three real media journeys,
+parent native review round 6 and the combined gate remain open.
+Gate base: `81c207573c20c337c8834e4ae8b4ee8f29603dbf`. No Unit is accepted.
+
+VM runner registration; start `81e7fa88`.
+
+| Check | Receipt | Outcome |
+| --- | --- | --- |
+| Refresh | `ui-test/20261024T013537Z-4157` | One passed |
+| Fresh process trust | `ui-test/20261024T013718Z-6392` | One passed |
+| Mac keyboard actions | `ui-test/20261024T013912Z-8511` | One passed |
+| Helper privacy | `private/20261024T013320Z-2898` | PASS; two files |
+
+Independent review rounds 1 and 2 found no P0–P2. The two jobs recorded the
+same executable SHA-256; trust changed from false to true. Read-only checks
+confirmed all temporary authorization and credential files absent. Source
+commit: `5e7cb073`. Start, Cancel, Resume and Keep Media for Later were
+activated with Space and produced their asserted fixture states.
+
+The local privacy cache was refreshed on clean `81e7fa88` only, after the
+implementation passed its scan and was committed: `private/20261024T012706Z-95025`.
+The 87,721 candidates and 82,948 tokens were unchanged. No private values were
+read and no exemption was added. The final neutral contract passed its privacy
+check and independent review round 3 found no P0–P1. Earlier contract candidates
+and their failed receipts remain retained; no scanner exception was introduced.
