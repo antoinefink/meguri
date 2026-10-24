@@ -214,6 +214,7 @@ import AppKit
             XCTAssertGreaterThan(held.media, before.media)
             try click(element(app, "settings.anki.cancel"), app, bundle)
             try waitForText(element(app, "settings.anki.result"), "operation is partial", app, bundle)
+            try reveal(element(app, "settings.anki.history"), app, bundle)
             waitUntilReady(element(app, "settings.anki.history"), app)
             XCTAssertFalse(element(app, "settings.anki.progress").exists)
             XCTAssertFalse(element(app, "settings.anki.nextEligible").exists)
@@ -271,6 +272,7 @@ import AppKit
             try click(allow, app, bundle) // fresh explicit both-side consent
         }
         try waitForText(element(app, "settings.anki.result"), "Collection and supported media complete", app, bundle)
+        try reveal(element(app, "settings.anki.history"), app, bundle)
         waitUntilReady(element(app, "settings.anki.history"), app)
         XCTAssertFalse(element(app, "settings.anki.startMedia").exists)
         XCTAssertTrue(element(app, "settings.anki.nextEligible").exists)
