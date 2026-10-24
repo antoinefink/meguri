@@ -149,3 +149,22 @@ milestone gates and human acceptance remain pending. The exported Mac AX
 view still gives history descendants their disclosure's identifier; preserve
 this and the account-text identifier limitation for the later native checks.
 This preview carries no Unit trailer and accepts no milestone or RF4 unit.
+
+### Media scope defaults
+
+Start: `702decb7`. Contract: `2ab924ae`. Implementation session:
+`s-20261024T133024Z-54c532eb`; export `cleanroom/20261024T133044Z-61890`.
+The scope picker is removed on every platform. Both directions request media.
+Historical scopes, separate media consent, cancellation and partial outcomes remain.
+
+Review round 1: P2 in `CoreManualTransferService.prepare` without a scope argument.
+Its default excluded media. Fixer session `s-20261024T134036Z-6513bae7`, export
+`cleanroom/20261024T134059Z-74317`, changes that default. Round 2 closed the
+finding and found no remaining P0–P2 issues in this scope.
+
+Focused Swift check `20261024T133915Z-69392` passes all 32 selected tests.
+It covers both preparation directions, historical scope and media consent/recovery.
+That adapter method has no offline test seam; review checked its one-line call.
+Privacy checks and focused similarity checks pass.
+Native visual checks and broader regression gates remain pending.
+Collection-file media support remains separate, open work under N9.
