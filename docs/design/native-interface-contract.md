@@ -72,6 +72,7 @@ Supporting requirements: R131, R134, R135, R1975, R1976, R1980–R1982.
 - Show one visible Server URL label. Show Save Endpoint only after an address change.
 - Collection contains the existing file import and export actions and their real presentations.
 - Keep Collection's first view to simple action rows. A chosen server action opens its full preparation/decision flow before any request starts; keep all effect warnings before their corresponding preparation or confirmation action.
+- Remove the Transfer scope choice. New server imports and exports always include collection and media, without a UI downgrade.
 - Keep normal actions, progress and actionable errors visible. Secondary diagnostics belong in N7.
 - Keep other Apple platforms' existing Settings navigation functional.
 - Preserve storage boundaries and write-on-change behavior (R112, R114).
@@ -125,6 +126,9 @@ These support truthful details; they do not supply a persisted timestamp for eve
 - Keep the destination and pending local work visible before confirmation.
 - Warn that later server edits can be discarded. An export preview does not reserve the server.
 - Preserve uncertain-upload blocking, local recovery rules, cooldowns and cancellation semantics.
+- Every new server preparation uses collection-and-media scope in both directions. No preparation path may silently choose collection-only scope.
+- Keep historical collection-only records and prepared decisions interpretable under their recorded scope.
+- Never upgrade, resend or restart a historical operation merely because the default changed. A new all-media operation requires an explicit action.
 - Preserve the separate media decision and its bidirectional effects, even when collection direction is one-way.
 - Keep partial, cancelled, interrupted, excluded-media and unknown-remote outcomes distinct from success.
 - Opening Settings or loading offline history must not start or resume a server request.
@@ -135,10 +139,12 @@ Supporting requirements: R1496–R1504, R2046, R2048–R2050, R2054–R2063, lim
 
 ## N9. Pending backend work
 
-The agreed destination is collection file export with media. Its prepared backend patch is paused and unverified.
-Use plain Export Collection labels. Explain before export that the active file export excludes media.
-The UI must describe the implemented export. Backend media work and its checks remain separate.
-This limitation does not remove the existing explicit server media-transfer workflow.
+Collection file export must include media. A prepared backend patch exists, but media inclusion remains unverified.
+Use plain Export Collection labels. Keep the current pre-export explanation truthful until backend support passes its checks.
+Current file export without media remains an open requirement, not a completed all-media export.
+New server imports and exports include media through the existing separate media-effect decision.
+That decision retains consent, cancellation and recovery. Declined or unfinished media leaves the operation partial.
+This bounded change does not resume the larger application goal.
 
 ## N10. Native preview evidence
 
