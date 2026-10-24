@@ -254,7 +254,6 @@ PY
     PRODUCT_BUNDLE_IDENTIFIER:("com.antoinefink.meguri.dev" + (if $target == "Meguri" then "" else ".widget" end)),
     MEGURI_CORE_FEATURES:"ankiweb", MEGURI_SWIFT_CONDITIONS:"ANKIWEB_ENABLED", SWIFT_ACTIVE_COMPILATION_CONDITIONS:"ANKIWEB_ENABLED",
     MEGURI_CARD_INSPECTION_BUILD:"personalRelease", MEGURI_MAC_UI_ELEMENT:"NO",
-    MEGURI_ENTITLEMENTS_HOOKS_SUFFIX:"", MEGURI_ENTITLEMENTS_SIGNING_SUFFIX:"",
     CODE_SIGN_ENTITLEMENTS:(if $target == "Meguri" then "Meguri/Meguri-macOS.entitlements" else "MeguriWidget/MeguriWidget-macOS.entitlements" end),
     ENABLE_TESTABILITY:"NO", ENABLE_DEBUG_DYLIB:"NO", ENABLE_HARDENED_RUNTIME:"YES"}})' >"$FX_PERSONAL_SETTINGS"
   printf 'hash=%s\nconfiguration=Release\nprofile=release\nfeatures=ankiweb\nslices=mac,sim\n' \
@@ -331,6 +330,8 @@ PY
     '.[1].buildSettings.PRODUCT_BUNDLE_IDENTIFIER = "com.antoinefink.meguri.widget"' \
     '.[0].buildSettings.MEGURI_CORE_FEATURES = "ankiweb,test-hooks"' \
     '.[0].buildSettings.SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG ANKIWEB_ENABLED"' \
+    '.[0].buildSettings.MEGURI_ENTITLEMENTS_HOOKS_SUFFIX = "-Dev"' \
+    '.[1].buildSettings.MEGURI_ENTITLEMENTS_SIGNING_SUFFIX = "-AdHoc"' \
     '.[0].buildSettings.MEGURI_CARD_INSPECTION_BUILD = "debug"'; do
     jq "$mutation" "$BATS_TEST_TMPDIR/normal-settings.json" >"$FX_PERSONAL_SETTINGS"
     : >"$STUB_LOG"

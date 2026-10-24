@@ -200,7 +200,9 @@ mg_app_personal_settings() {
       .MEGURI_CORE_FEATURES == "ankiweb" and .MEGURI_SWIFT_CONDITIONS == "ANKIWEB_ENABLED" and
       ((.SWIFT_ACTIVE_COMPILATION_CONDITIONS // "" | test("(^|[ ,])DEBUG|MEGURI_TEST_HOOKS")) | not) and
       .MEGURI_CARD_INSPECTION_BUILD == "personalRelease" and .MEGURI_MAC_UI_ELEMENT == "NO" and
-      .MEGURI_ENTITLEMENTS_HOOKS_SUFFIX == "" and .MEGURI_ENTITLEMENTS_SIGNING_SUFFIX == "" and
+      # Xcode omits empty settings from its JSON; the exact entitlement path
+      # below independently confirms that no hooks or ad-hoc suffix resolved.
+      (.MEGURI_ENTITLEMENTS_HOOKS_SUFFIX // "") == "" and (.MEGURI_ENTITLEMENTS_SIGNING_SUFFIX // "") == "" and
       .CODE_SIGN_ENTITLEMENTS == (if $target == "Meguri" then "Meguri/Meguri-macOS.entitlements" else "MeguriWidget/MeguriWidget-macOS.entitlements" end) and
       .ENABLE_TESTABILITY == "NO" and .ENABLE_DEBUG_DYLIB == "NO" and .ENABLE_HARDENED_RUNTIME == "YES")
   ' "$settings" >/dev/null
