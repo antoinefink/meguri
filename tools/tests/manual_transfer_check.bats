@@ -75,6 +75,16 @@ PY
   done
 }
 
+@test "manual transfer: mobile prepares helper but never prestages reserved media" {
+  run invoke_fake check --platform iphone
+  [ "$status" -eq 0 ]
+  [ "$(recorded_status)" = pass ]
+  grep -qx stage-media "$FX_EVENTS"
+  grep -qx stage-reader "$FX_EVENTS"
+  grep -qx 'test iphone' "$FX_EVENTS"
+  ! grep -qx install-reserved-media "$FX_EVENTS"
+}
+
 @test "manual transfer: no attestation means no synthetic account or VM work" {
   unset MEGURI_MANUAL_TRANSFER_SSH_OPTION_PASSTHROUGH
   run invoke_fake check --platform mac

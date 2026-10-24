@@ -79,6 +79,11 @@ import AppKit
         app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false).arguments
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
+        #if os(iOS)
+        // Exactly once, after the initial real launch and before login/Import.
+        // Relaunch/recovery paths only read the frozen bootstrap identity.
+        try await bootstrapMedia(rig)
+        #endif
 
         // Import A through the same Settings controls used outside tests.
         do {
@@ -416,11 +421,37 @@ import AppKit
         let operations: [String: DurableOperation?]
         let files: [String: FileFact]
     }
+    private struct BootstrapProof: Decodable, Equatable {
+        let authority, context, marker, namespace, binding: String
+    }
+    private struct MobileBootstrap: Decodable {
+        let selector: String
+        let bootstrap: BootstrapProof
+    }
     private struct MobileNativeState: Decodable {
         let selector: String
+        let bootstrap: BootstrapProof
         let state: NativeState
     }
-    private var nativeBoundContext: (selector: String, context: String)?
+    private var nativeBoundContext: (selector: String, proof: BootstrapProof)?
+    private var bootstrapAttempted = false
+    private func bootstrapMedia(_ rig: Rig) async throws {
+        guard !bootstrapAttempted, nativeBoundContext == nil else { throw EvidenceError.rpc(.binding) }
+        bootstrapAttempted = true
+        let data = try await evidenceRPC(rig, "bootstrap", limit: 2048, timeout: 12)
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(root.keys) == Set(["selector", "bootstrap"]),
+              let raw = root["bootstrap"] as? [String: Any],
+              Set(raw.keys) == Set(["authority", "context", "marker", "namespace", "binding"]),
+              let response = try? JSONDecoder().decode(MobileBootstrap.self, from: data),
+              response.selector == rig.nativeContext,
+              response.bootstrap.authority == "rf4-mobile-pretransfer-media-v1",
+              [response.selector, response.bootstrap.context, response.bootstrap.marker,
+               response.bootstrap.namespace, response.bootstrap.binding].allSatisfy({
+                  $0.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
+              }) else { throw EvidenceError.rpc(.binding, status: 200) }
+        nativeBoundContext = (selector: response.selector, proof: response.bootstrap)
+    }
     private func nativeState(_ rig: Rig) async throws -> NativeState {
         let data = try await evidenceRPC(rig, "native-state", limit: 65536, timeout: 12)
         // The observer retains strict full-schema validation. Swift separately
@@ -440,12 +471,9 @@ import AppKit
               state.context.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else {
             throw EvidenceError.rpc(.binding, status: 200)
         }
-        if let bound = nativeBoundContext {
-            guard bound.selector == rig.nativeContext, state.context == bound.context else {
-                throw EvidenceError.rpc(.context, status: 200)
-            }
-        } else {
-            nativeBoundContext = (selector: rig.nativeContext, context: state.context)
+        guard let bound = nativeBoundContext, bound.selector == rig.nativeContext,
+              response.bootstrap == bound.proof, state.context == bound.proof.context else {
+            throw EvidenceError.rpc(.context, status: 200)
         }
         #endif
         return state

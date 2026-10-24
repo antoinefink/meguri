@@ -87,6 +87,10 @@ class RigServer(http.server.ThreadingHTTPServer):
         self.reader_process = None
         self.reader_mobile = mobile
         self.reader_bound = None
+        self.bootstrap_attempted = False
+        self.bootstrap_running = False
+        self.bootstrap_complete = False
+        self.protocol_seen = False
         self.reader_failed = False
         self.reader_failures = 0
         self.last_reader_failure = None
@@ -162,8 +166,10 @@ class RigServer(http.server.ThreadingHTTPServer):
         with self.reader_slot:
             pass
 
-    def native_state(self, connection):
+    def native_state(self, connection, action="read"):
         if not self.reader_command or not self.reader_slot.acquire(blocking=False):
+            if self.reader_mobile:
+                self.reader_failed = True
             return self.evidence_failure(reducer.failure('busy'), 409)
         child, result = None, None
         stage = 'subprocess'
@@ -172,14 +178,26 @@ class RigServer(http.server.ThreadingHTTPServer):
             with self.reader_guard:
                 if self.stopping:
                     raise reducer.EvidenceFailure('stopped')
-                if self.reader_mobile and self.reader_failed:
-                    raise reducer.EvidenceFailure('binding')
+                with self.condition:
+                    if action not in ('bootstrap', 'read') or (action == 'bootstrap' and not self.reader_mobile):
+                        raise reducer.EvidenceFailure('binding')
+                    if self.reader_mobile:
+                        if self.reader_failed:
+                            raise reducer.EvidenceFailure('binding')
+                        if action == 'bootstrap':
+                            if (self.bootstrap_attempted or self.protocol_seen or self.reader_bound is not None
+                                    or self.counts['active'] or self.counts['held'] or self.gate != 'armed'):
+                                raise reducer.EvidenceFailure('binding')
+                            self.bootstrap_attempted = True
+                            self.bootstrap_running = True
+                        elif not self.bootstrap_complete:
+                            raise reducer.EvidenceFailure('binding')
                 child = subprocess.Popen(self.reader_command, stdin=subprocess.PIPE,
                                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                          start_new_session=True, close_fds=True)
                 self.reader_process = child
                 if self.reader_mobile:
-                    child.stdin.write((json.dumps(dict(selector=self.reader_context,
+                    child.stdin.write((json.dumps(dict(action=action, selector=self.reader_context,
                                                        bound=self.reader_bound)) + '\n').encode())
                     child.stdin.flush()
             deadline = time.monotonic() + READER_SECONDS
@@ -187,6 +205,8 @@ class RigServer(http.server.ThreadingHTTPServer):
             while True:
                 if self.stopping:
                     raise reducer.EvidenceFailure('stopped')
+                if self.reader_mobile and self.reader_failed:
+                    raise reducer.EvidenceFailure('binding')
                 if time.monotonic() >= deadline:
                     raise reducer.EvidenceFailure('timeout', timeout_ms=int(READER_SECONDS * 1000))
                 readable, _, _ = select.select([child.stdout, connection], [], [], 0.05)
@@ -217,14 +237,19 @@ class RigServer(http.server.ThreadingHTTPServer):
             else:
                 stage = 'schema'
                 if self.reader_mobile:
-                    reducer.keys(document, ('selector', 'state'))
+                    reducer.keys(document, ('selector', 'bootstrap') if action == 'bootstrap'
+                                 else ('selector', 'bootstrap', 'state'))
                     if reducer.digest(document['selector']) != self.reader_context:
                         raise reducer.EvidenceFailure('binding')
-                    actual = reducer.digest(document['state']['context'])
-                    expected = self.reader_bound if self.reader_bound is not None else actual
-                    value = reducer.validate_native_state(document['state'], expected)
-                    self.reader_bound = actual
-                    success = (200, dict(selector=self.reader_context, state=value))
+                    proof = reducer.validate_bootstrap(document['bootstrap'])
+                    if action == 'bootstrap':
+                        self.reader_bound = proof
+                        success = (200, dict(selector=self.reader_context, bootstrap=proof))
+                    else:
+                        if proof != self.reader_bound:
+                            raise reducer.EvidenceFailure('binding')
+                        value = reducer.validate_native_state(document['state'], proof['context'])
+                        success = (200, dict(selector=self.reader_context, bootstrap=proof, state=value))
                 else:
                     value = reducer.validate_native_state(document, self.reader_context)
                     success = (200, value)
@@ -253,6 +278,12 @@ class RigServer(http.server.ThreadingHTTPServer):
             finally:
                 with self.reader_guard:
                     self.reader_process = None
+                with self.condition:
+                    if self.reader_mobile and action == 'bootstrap':
+                        self.bootstrap_running = False
+                        self.bootstrap_complete = result is None and not self.reader_failed
+                    if self.reader_mobile and self.reader_failed and result is None:
+                        result = self.evidence_failure(reducer.failure('binding'))
                 self.reader_slot.release()
         return result if result is not None else success
 
@@ -315,6 +346,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         state = self.server
         with state.condition:
+            state.protocol_seen = True
+            if state.reader_mobile and (not state.bootstrap_complete or state.bootstrap_running or state.reader_failed):
+                state.reader_failed = True
+                self.reply(*state.evidence_failure(reducer.failure('binding'), 409))
+                return
             state.counts['media' if self.path in MEDIA else 'collection'] += 1
             state.counts['collection_transfers'] += int(self.path in TRANSFERS)
             state.counts['active'] += 1
@@ -433,8 +469,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.headers.get_all('Content-Length') != ['0'] or self.headers.get_all('Transfer-Encoding'):
             self.reply(400, {})
             return
-        if self.path == '/__rf4/native-state':
-            status, value = state.native_state(self.connection)
+        if self.path in ('/__rf4/native-state', '/__rf4/bootstrap'):
+            action = 'bootstrap' if self.path == '/__rf4/bootstrap' else 'read'
+            status, value = state.native_state(self.connection, action)
             self.reply(status, value)
             return
         action = self.path[len('/__rf4/'):]

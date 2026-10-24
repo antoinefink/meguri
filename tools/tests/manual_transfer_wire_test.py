@@ -80,13 +80,14 @@ class MobileBindingTests(unittest.TestCase):
         self.media = self.support / 'Collection/collection.media'
         for name in ('rf4-device.bin', 'rf4-zero.bin'):
             (self.media / name).unlink()
-        with mock.patch.object(config, 'dedicated_fixture_vm', return_value=self.home):
-            config.stage_media(self.support, self.run_id)
         self.inputs = self.home / 'mg-owned'
         self.inputs.mkdir(mode=0o700)
         self.path = self.inputs / 'native-reader-input.json'
-        self.home_guard = mock.patch.object(config, 'reader_home', return_value=self.home)
-        self.home_guard.start(); self.addCleanup(self.home_guard.stop)
+        for name in ('reader_home', 'dedicated_fixture_identity'):
+            guard = mock.patch.object(config, name, return_value=self.home)
+            guard.start(); self.addCleanup(guard.stop)
+        guard = mock.patch.object(config, 'dedicated_fixture_vm', side_effect=ValueError('app running'))
+        guard.start(); self.addCleanup(guard.stop)
         self.calls = []
         self.booted = True
         self.installed = False
@@ -95,7 +96,7 @@ class MobileBindingTests(unittest.TestCase):
             if argv[2] == 'list':
                 return json.dumps(dict(devices={'runtime': [dict(udid=self.udid,
                     state='Booted' if self.booted else 'Shutdown', isAvailable=True)]})).encode()
-            self.assertTrue(self.installed, 'container resolution must follow test installation/launch')
+            self.assertTrue(self.installed, 'container resolution must follow initial app launch')
             self.assertEqual(argv, ['/usr/bin/xcrun', 'simctl', 'get_app_container', self.udid,
                                     'com.antoinefink.meguri.dev', 'data'])
             return (str(self.root) + '\n').encode()
@@ -106,70 +107,111 @@ class MobileBindingTests(unittest.TestCase):
         self.selector = config.fingerprint(self.selection)
         self.bound = None
 
-    def read(self):
-        value = config.mobile_native_state(self.path, dict(selector=self.selector, bound=self.bound))
-        self.bound = value['state']['context']
+    def bootstrap(self):
+        self.installed = True
+        value = config.mobile_native_state(self.path, dict(action='bootstrap', selector=self.selector, bound=None))
+        self.bound = value['bootstrap']
         return value
+
+    def read(self):
+        return config.mobile_native_state(self.path, dict(action='read', selector=self.selector, bound=self.bound))
 
     def resolvers(self):
         return [argv for argv in self.calls if argv[2] == 'get_app_container']
 
+    def marker(self):
+        context = config.native_context(self.support)
+        return self.home / 'MeguriTestArchives/ManualTransferFixtureMedia' / config.fingerprint(context) / 'ownership' / (self.run_id + '.json')
+
     def test_setup_defers_then_exact_device_bundle_freezes_without_rediscovery(self):
         self.assertEqual(self.resolvers(), [])
-        self.installed = True
-        first = self.read()
+        self.assertEqual(list(self.media.iterdir()), [])
+        self.assertFalse((self.home / 'MeguriTestArchives').exists())
+        first = self.bootstrap()
+        self.assertEqual(set(first), {'selector', 'bootstrap'})
         self.assertEqual(first['selector'], self.selector)
-        self.assertEqual(first['state']['context'], config.fingerprint(config.native_context(self.support)))
-        self.assertEqual(self.read(), first)
+        self.assertEqual(first['bootstrap']['context'], config.fingerprint(config.native_context(self.support)))
+        self.assertEqual(first['bootstrap']['authority'], config.BOOTSTRAP_AUTHORITY)
+        self.assertEqual(self.read()['bootstrap'], first['bootstrap'])
+        with mock.patch.object(config, 'stage_media', side_effect=AssertionError('READ must not stage')), mock.patch.object(config, 'selected_mobile_context', side_effect=AssertionError('READ must not resolve')):
+            self.assertEqual(self.read()['bootstrap'], first['bootstrap'])
         self.assertEqual(len(self.resolvers()), 1)
         self.root.rename(self.root.with_name('retained'))
         self.root.mkdir()
-        with self.assertRaises(config.EvidenceFailure):
-            self.read()
+        with self.assertRaises(config.EvidenceFailure): self.read()
+        self.assertEqual(len(self.resolvers()), 1)
+
+    def test_bootstrap_only_media_and_marker_preserves_database_sidecar_policy(self):
+        retained = {}
+        for relative in ('Collection/collection.anki2', 'Collection/collection.anki2-wal',
+                         'Collection/collection.anki2-shm', 'manual-transfer-policy.json',
+                         'clock.json', 'ManualTransfers/manual-transfers.json'):
+            path = self.support / relative
+            if not path.exists(): path.write_bytes(b'preexisting-' + relative.encode())
+            retained[path] = (path.read_bytes(), config.signature(path.stat()))
+        before = {p.relative_to(self.root) for p in self.root.rglob('*')}
+        self.bootstrap()
+        after = {p.relative_to(self.root) for p in self.root.rglob('*')}
+        self.assertEqual(after - before, {Path('Library/Application Support/Collection/collection.media') / name
+            for name in ('rf4-device.bin', 'rf4-zero.bin')})
+        self.assertEqual({p.name for p in self.media.iterdir()}, {'rf4-device.bin', 'rf4-zero.bin'})
+        self.assertEqual((self.media / 'rf4-device.bin').read_bytes(), config.recipe_bytes(self.run_id, 'device', 6144))
+        self.assertEqual((self.media / 'rf4-zero.bin').read_bytes(), b'')
+        self.assertEqual(self.marker().stat().st_mode & 0o777, 0o400)
+        for path, original in retained.items(): self.assertEqual((path.read_bytes(), config.signature(path.stat())), original)
+
+    def test_initial_history_absence_is_not_synthesized_or_required(self):
+        sidecar = self.support / 'ManualTransfers/manual-transfers.json'
+        sidecar.unlink(); sidecar.parent.rmdir()
+        with mock.patch.object(config, 'native_state', side_effect=AssertionError('no history before Import')):
+            self.bootstrap()
+        self.assertFalse(sidecar.exists())
+        self.assertFalse(sidecar.parent.exists())
+        with self.assertRaises((ValueError, OSError)): self.read()
+        self.assertFalse(sidecar.exists())
+
+    def test_bootstrap_replay_and_failed_attempt_never_resolve_or_stage_again(self):
+        self.bootstrap()
+        with mock.patch.object(config, 'stage_media', side_effect=AssertionError('no restage')):
+            with self.assertRaises(config.EvidenceFailure): self.bootstrap()
         self.assertEqual(len(self.resolvers()), 1)
 
     def test_lost_bound_record_or_attempt_never_resolves_again(self):
+        self.bootstrap()
         for name in ('native-reader-bound.json', 'native-reader-attempt'):
-            with self.subTest(name=name):
-                # One independently prepared run per case, no reset in production.
-                if self.bound is None:
-                    self.installed = True; self.read()
-                path = self.inputs / name
-                saved = path.with_name(name + '-saved')
-                path.rename(saved)
-                with self.assertRaises((ValueError, OSError)):
-                    self.read()
-                saved.rename(path)
-                self.assertEqual(len(self.resolvers()), 1)
+            path = self.inputs / name
+            saved = path.with_name(name + '-saved')
+            path.rename(saved)
+            with mock.patch.object(config, 'stage_media', side_effect=AssertionError('no restage')):
+                with self.assertRaises((ValueError, OSError)): self.read()
+            saved.rename(path)
+            self.assertEqual(len(self.resolvers()), 1)
+
+    def test_replaced_binding_with_identical_bytes_refuses(self):
+        self.bootstrap()
+        path = self.inputs / 'native-reader-bound.json'
+        saved = path.with_name('saved-binding')
+        path.rename(saved); path.write_bytes(saved.read_bytes()); path.chmod(0o400)
+        with self.assertRaises(config.EvidenceFailure): self.read()
+        self.assertEqual(len(self.resolvers()), 1)
 
     def test_initial_lost_marker_or_media_never_restages_or_retries_bind(self):
-        self.installed = True
-        context = config.native_context(self.support)
-        marker = self.home / 'MeguriTestArchives/ManualTransferFixtureMedia' / config.fingerprint(context) / 'ownership' / (self.run_id + '.json')
-        for index, target in enumerate((marker, self.media / 'rf4-device.bin', self.media / 'rf4-zero.bin')):
-            with self.subTest(target=target.name):
-                # Separate synthetic controller directories, never a production reset.
-                case = self.inputs / str(index); case.mkdir(mode=0o700)
-                path = case / self.path.name
-                path.write_bytes(self.path.read_bytes()); path.chmod(0o600)
-                before = target.read_bytes(); target.unlink()
-                request_value = dict(selector=self.selector, bound=None)
-                with mock.patch.object(config, 'stage_media', side_effect=AssertionError('must not restage')):
-                    with self.assertRaises(config.EvidenceFailure) as error:
-                        config.mobile_native_state(path, request_value)
-                self.assertEqual(error.exception.receipt['failure']['stage'], 'marker' if index == 0 else 'media')
-                self.assertFalse(target.exists())
-                target.write_bytes(before); target.chmod(0o400)
-                with self.assertRaises(config.EvidenceFailure):
-                    config.mobile_native_state(path, request_value)
-                self.assertEqual(len(self.resolvers()), index + 1)
+        self.bootstrap()
+        for index, target in enumerate((self.media / 'rf4-device.bin', self.media / 'rf4-zero.bin', self.marker())):
+            saved = target.with_name(target.name + '-retained')
+            target.rename(saved)
+            with mock.patch.object(config, 'stage_media', side_effect=AssertionError('must not restage')):
+                with self.assertRaises(config.EvidenceFailure) as error: self.read()
+            self.assertEqual(error.exception.receipt['failure']['stage'], 'marker' if index == 2 else 'media')
+            self.assertFalse(target.exists())
+            saved.rename(target)
+        self.assertEqual(len(self.resolvers()), 1)
 
     def test_initial_changed_marker_provenance_refuses_without_adoption(self):
-        self.installed = True
-        context = config.native_context(self.support)
-        marker = self.home / 'MeguriTestArchives/ManualTransferFixtureMedia' / config.fingerprint(context) / 'ownership' / (self.run_id + '.json')
+        self.bootstrap()
+        marker = self.marker()
         marker.chmod(0o600)
-        marker.write_text(json.dumps(config.fixture_marker(context, '20261024T020202Z-18')))
+        marker.write_text(json.dumps(config.fixture_marker(config.native_context(self.support), '20261024T020202Z-18')))
         marker.chmod(0o400)
         with mock.patch.object(config, 'stage_media', side_effect=AssertionError('must not restage')):
             with self.assertRaises(config.EvidenceFailure) as error: self.read()
@@ -177,26 +219,60 @@ class MobileBindingTests(unittest.TestCase):
         self.assertEqual(len(self.resolvers()), 1)
 
     def test_initial_changed_media_refuses_recipe_adoption(self):
-        self.installed = True
         media = self.media / 'rf4-device.bin'
-        media.chmod(0o600); media.write_bytes(b'private-unexpected-media')
-        with self.assertRaises(config.EvidenceFailure) as error: self.read()
+        media.write_bytes(b'private-unexpected-media')
+        with self.assertRaises(config.EvidenceFailure) as error: self.bootstrap()
         self.assertEqual(error.exception.receipt['failure']['stage'], 'media')
         self.assertEqual(media.read_bytes(), b'private-unexpected-media')
-        with self.assertRaises(config.EvidenceFailure): self.read()
+        self.assertFalse(self.marker().exists())
+        with self.assertRaises(config.EvidenceFailure): self.bootstrap()
         self.assertEqual(len(self.resolvers()), 1)
 
+    def test_old_context_marker_and_matching_recipe_bytes_cannot_be_adopted(self):
+        old = config.native_context(self.support)
+        owners = self.home / 'MeguriTestArchives/ManualTransferFixtureMedia' / config.fingerprint(old) / 'ownership'
+        owners.mkdir(parents=True)
+        (owners / (self.run_id + '.json')).write_text(json.dumps(config.fixture_marker(old, self.run_id)))
+        replacement = self.root.with_name('BBBBBBBB-BBBB-CCCC-DDDD-EEEEEEEEEEEE')
+        self.root.rename(replacement); self.root.mkdir()
+        # Keep old root readable; the resolver still selects the new empty root.
+        (self.root / 'Library/Application Support/Collection/collection.media').mkdir(parents=True)
+        self.support = self.root / 'Library/Application Support'
+        self.media = self.support / 'Collection/collection.media'
+        (self.media / 'rf4-device.bin').write_bytes(config.recipe_bytes(self.run_id, 'device', 6144))
+        with self.assertRaises(config.EvidenceFailure): self.bootstrap()
+        self.assertEqual(json.loads((owners / (self.run_id + '.json')).read_bytes()), config.fixture_marker(old, self.run_id))
+        self.assertTrue(replacement.exists())
+
     def test_bound_marker_change_refuses(self):
-        self.installed = True; self.read()
-        context = config.native_context(self.support)
-        marker = self.home / 'MeguriTestArchives/ManualTransferFixtureMedia' / config.fingerprint(context) / 'ownership' / (self.run_id + '.json')
-        marker.chmod(0o600); marker.write_bytes(b'private-changed-marker')
+        self.bootstrap()
+        marker = self.marker(); marker.chmod(0o600); marker.write_bytes(b'private-changed-marker')
         with self.assertRaises(config.EvidenceFailure) as error: self.read()
         self.assertEqual(error.exception.receipt['failure']['stage'], 'marker')
         self.assertEqual(len(self.resolvers()), 1)
 
+    def test_marker_replacement_with_identical_recipe_provenance_refuses(self):
+        self.bootstrap()
+        marker = self.marker()
+        saved = marker.with_name('retained-marker')
+        marker.rename(saved); marker.write_bytes(saved.read_bytes()); marker.chmod(0o400)
+        with mock.patch.object(config, 'stage_media', side_effect=AssertionError('no restage')):
+            with self.assertRaises(config.EvidenceFailure) as error: self.read()
+        self.assertEqual(error.exception.receipt['failure']['stage'], 'marker')
+        self.assertEqual(len(self.resolvers()), 1)
+
+    def test_generic_live_staging_cannot_use_read_capability(self):
+        self.bootstrap()
+        context = config.native_context(self.support)
+        authority = config.MobileBootstrap(self.selection, self.home, self.device, context,
+                                           config.mobile_applications(self.device))
+        with self.assertRaises(config.EvidenceFailure):
+            config.stage_media(self.support, self.run_id, _bootstrap=authority)
+        with mock.patch.object(config, 'dedicated_fixture_vm', return_value=self.home):
+            with self.assertRaises(ValueError): config.stage_media(self.support, self.run_id)
+
     def test_bound_media_loss_or_change_refuses_without_restaging(self):
-        self.installed = True; self.read()
+        self.bootstrap()
         media = self.media / 'rf4-device.bin'
         before = media.read_bytes(); media.unlink()
         with mock.patch.object(config, 'stage_media', side_effect=AssertionError('must not restage')):
@@ -209,15 +285,15 @@ class MobileBindingTests(unittest.TestCase):
         self.assertNotEqual(media.read_bytes(), before)
 
     def test_config_device_selector_and_bound_fingerprint_changes_refuse(self):
-        self.installed = True; self.read()
+        self.bootstrap()
         self.booted = False
         with self.assertRaises(config.EvidenceFailure): self.read()
         self.booted = True
-        original_bound = self.bound; self.bound = 'f' * 64
+        original_bound = self.bound; self.bound = dict(self.bound, context='f' * 64)
         with self.assertRaises(config.EvidenceFailure): self.read()
         self.bound = original_bound
         with self.assertRaises(config.EvidenceFailure):
-            config.mobile_native_state(self.path, dict(selector='f' * 64, bound=self.bound))
+            config.mobile_native_state(self.path, dict(action='read', selector='f' * 64, bound=self.bound))
         before = self.path.read_bytes(); self.path.unlink()
         with self.assertRaises((ValueError, OSError)): self.read()
         self.path.write_bytes(before); self.path.chmod(0o600)
@@ -226,11 +302,10 @@ class MobileBindingTests(unittest.TestCase):
         self.assertEqual(len(self.resolvers()), 1)
 
     def test_application_membership_or_device_inode_change_refuses_no_resolver(self):
-        self.installed = True; self.read()
-        sibling = self.root.with_name('retained-sibling'); sibling.mkdir()
+        self.bootstrap()
+        self.root.with_name('retained-sibling').mkdir()
         with self.assertRaises(config.EvidenceFailure): self.read()
-        self.device.rename(self.device.with_name('retained-device'))
-        self.device.mkdir()
+        self.device.rename(self.device.with_name('retained-device')); self.device.mkdir()
         with self.assertRaises(config.EvidenceFailure): self.read()
         self.assertEqual(len(self.resolvers()), 1)
 
@@ -241,21 +316,34 @@ class MobileBindingTests(unittest.TestCase):
         original_state = config.native_state(context)
         def changing(argv, stage):
             result = command(argv, stage)
-            if argv[2] == 'get_app_container':
-                self.root.with_name('new-container').mkdir()
+            if argv[2] == 'get_app_container': self.root.with_name('new-container').mkdir()
             return result
-        with mock.patch.object(config, 'vm_child', side_effect=changing):
-            with self.assertRaises(config.EvidenceFailure) as error: self.read()
+        with mock.patch.object(config, 'vm_child', side_effect=changing), mock.patch.object(config, 'stage_media', side_effect=AssertionError('race before any write')):
+            with self.assertRaises(config.EvidenceFailure) as error: self.bootstrap()
         self.assertEqual(error.exception.receipt['failure']['stage'], 'context')
         self.assertEqual(config.native_state(context), original_state)
-        self.assertEqual(len(self.resolvers()), 1)
-        with self.assertRaises(config.EvidenceFailure): self.read()
+        self.assertFalse(self.marker().exists())
+        with self.assertRaises(config.EvidenceFailure): self.bootstrap()
         self.assertEqual(len(self.resolvers()), 1)
 
-    def assert_read_mutation_refused(self, bound):
-        self.installed = True
-        if bound:
-            self.read()
+    def test_namespace_change_during_bootstrap_refuses_old_readable_root(self):
+        original = config.stage_media
+        context = config.native_context(self.support)
+        before = config.native_state(context)
+        def changing(*args, **kwargs):
+            value = original(*args, **kwargs)
+            self.root.with_name('new-container').mkdir()
+            return value
+        with mock.patch.object(config, 'stage_media', side_effect=changing):
+            with self.assertRaises(config.EvidenceFailure) as error: self.bootstrap()
+        self.assertEqual(error.exception.receipt['failure']['stage'], 'context')
+        self.assertFalse((self.inputs / 'native-reader-bound.json').exists())
+        self.assertEqual(config.native_state(context)['operations'], before['operations'])
+        with self.assertRaises(config.EvidenceFailure): self.bootstrap()
+        self.assertEqual(len(self.resolvers()), 1)
+
+    def assert_read_mutation_refused(self):
+        self.bootstrap()
         context = config.native_context(self.support)
         read = config.native_state
         original_state = read(context)
@@ -274,21 +362,37 @@ class MobileBindingTests(unittest.TestCase):
         self.assertEqual(len(self.resolvers()), 1)
 
     def test_membership_change_during_initial_read_refuses_readable_old_root(self):
-        self.assert_read_mutation_refused(False)
+        self.assert_read_mutation_refused()
 
     def test_membership_change_during_bound_read_refuses_readable_old_root(self):
-        self.assert_read_mutation_refused(True)
+        self.bootstrap(); self.read()
+        context = config.native_context(self.support)
+        original = config.native_state
+        def changing(actual):
+            value = original(actual)
+            self.root.with_name('new-container').mkdir()
+            return value
+        with mock.patch.object(config, 'native_state', side_effect=changing):
+            with self.assertRaises(config.EvidenceFailure): self.read()
+        self.assertEqual(len(self.resolvers()), 1)
+        self.assertTrue(Path(context['root']).is_dir())
 
     def test_invalid_selector_payload_and_failed_resolver_are_one_attempt(self):
         self.installed = True
         with self.assertRaises(ValueError):
-            config.mobile_native_state(self.path, dict(selector=self.selector, bound=None, path='/private'))
+            config.mobile_native_state(self.path, dict(action='bootstrap', selector=self.selector, bound=None, path='/private'))
         self.assertEqual(self.resolvers(), [])
         with mock.patch.object(config, 'selected_mobile_context', side_effect=config.EvidenceFailure('resolver', child_rc=70)) as resolve:
-            with self.assertRaises(config.EvidenceFailure) as error: self.read()
+            with self.assertRaises(config.EvidenceFailure) as error: self.bootstrap()
             self.assertEqual(error.exception.receipt, config.failure('resolver', child_rc=70))
-            with self.assertRaises(config.EvidenceFailure): self.read()
+            with self.assertRaises(config.EvidenceFailure): self.bootstrap()
             self.assertEqual(resolve.call_count, 1)
+
+    def test_read_without_bootstrap_cannot_resolve_or_stage(self):
+        with mock.patch.object(config, 'stage_media', side_effect=AssertionError('READ cannot stage')), mock.patch.object(config, 'selected_mobile_context', side_effect=AssertionError('READ cannot resolve')):
+            with self.assertRaises(config.EvidenceFailure): self.read()
+        self.assertEqual(self.resolvers(), [])
+        self.assertFalse((self.inputs / 'native-reader-attempt').exists())
 
 
 class SafeDiagnosticTests(unittest.TestCase):
@@ -848,6 +952,15 @@ class DedicatedFixtureVMTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     config.dedicated_fixture_vm()
 
+    def test_shared_vm_identity_keeps_hardware_guard_without_stopped_app_bypass(self):
+        user = mock.Mock(pw_name='meguri', pw_dir='/Users/meguri')
+        with mock.patch.object(config.sys, 'platform', 'darwin'), mock.patch.object(config.pwd, 'getpwuid', return_value=user), mock.patch.object(config.subprocess, 'run', return_value=mock.Mock(stdout=b'VirtualMac2,1')) as child:
+            self.assertEqual(config.dedicated_fixture_identity(), Path('/Users/meguri'))
+            child.assert_called_once_with(['/usr/sbin/sysctl', '-n', 'hw.model'], check=True,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5)
+        with mock.patch.object(config, 'dedicated_fixture_vm', side_effect=ValueError('running app')):
+            with self.assertRaises(ValueError): config.stage_media('/unselected', '20261024T010101Z-17')
+
 
 class Upstream(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_args):
@@ -1109,21 +1222,105 @@ class WireTests(unittest.TestCase):
             self.reader('import sys; print(' + repr(json.dumps(bad)) + '); sys.exit(1)')
             self.assert_failure_response(request(self.server.server_port, '/__rf4/native-state', self.server.token), 'schema')
 
+    def mobile_child(self, state=None, proof=None):
+        proof = proof or dict(authority=config.BOOTSTRAP_AUTHORITY, context='b' * 64,
+                              marker='c' * 64, namespace='d' * 64, binding='e' * 64)
+        selector = 'a' * 64
+        code = ("import json,sys; request=json.loads(sys.stdin.readline()); "
+                "assert set(request)=={'action','selector','bound'}; "
+                "assert request['selector']==" + repr(selector) + "; "
+                "proof=" + repr(proof) + "; "
+                "value={'selector':request['selector'],'bootstrap':proof}; "
+                "value.update({'state':json.loads(" + repr(json.dumps(state)) + ")}) if request['action']=='read' else None; "
+                "print(json.dumps(value))")
+        self.reader(code)
+        self.server.reader_mobile = True
+        return proof
+
     def test_mobile_observer_retains_selector_actual_digest_and_poisoned_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             support, _, _ = synthetic_native(Path(temporary).resolve())
             state = config.native_state(config.native_context(support))
-        selector = 'a' * 64
-        self.reader('import json,sys; request=json.loads(sys.stdin.readline()); print(' + repr(json.dumps(dict(selector=selector, state=state))) + ')')
-        self.server.reader_mobile = True
-        self.assertEqual(self.control('native-state'), dict(selector=selector, state=state))
-        self.assertEqual(self.server.reader_bound, state['context'])
-        self.assertEqual(self.control('native-state'), dict(selector=selector, state=state))
+        proof = self.mobile_child(state, dict(authority=config.BOOTSTRAP_AUTHORITY,
+            context=state['context'], marker='c' * 64, namespace='d' * 64, binding='e' * 64))
+        self.assertEqual(self.control('bootstrap'), dict(selector='a' * 64, bootstrap=proof))
+        self.assertEqual(self.server.reader_bound, proof)
+        self.assertTrue(self.server.bootstrap_complete)
+        expected = dict(selector='a' * 64, bootstrap=proof, state=state)
+        self.assertEqual(self.control('native-state'), expected)
+        self.assertEqual(self.control('native-state'), expected)
         changed = dict(state, context='b' * 64)
-        self.reader('print(' + repr(json.dumps(dict(selector=selector, state=changed))) + ')')
+        self.reader('print(' + repr(json.dumps(dict(selector='a' * 64, bootstrap=proof, state=changed))) + ')')
         self.assert_failure_response(request(self.server.server_port, '/__rf4/native-state', self.server.token), 'schema')
         with mock.patch.object(wire.subprocess, 'Popen') as launch:
             self.assert_failure_response(request(self.server.server_port, '/__rf4/native-state', self.server.token), 'binding')
+            self.assert_failure_response(request(self.server.server_port, '/__rf4/bootstrap', self.server.token), 'binding')
+            launch.assert_not_called()
+
+    def test_mobile_bootstrap_auth_body_unknown_action_and_replay(self):
+        proof = self.mobile_child()
+        with mock.patch.object(wire.subprocess, 'Popen') as launch:
+            self.assertEqual(request(self.server.server_port, '/__rf4/bootstrap', 'invalid')[0], 403)
+            self.assertEqual(request(self.server.server_port, '/__rf4/bootstrap', self.server.token, body=b'{}')[0], 400)
+            self.assertEqual(request(self.server.server_port, '/__rf4/bootstrap/path', self.server.token)[0], 409)
+            launch.assert_not_called()
+        self.assertFalse(self.server.bootstrap_attempted)
+        self.assertEqual(self.control('bootstrap')['bootstrap'], proof)
+        with mock.patch.object(wire.subprocess, 'Popen') as launch:
+            self.assert_failure_response(request(self.server.server_port, '/__rf4/bootstrap', self.server.token), 'binding')
+            launch.assert_not_called()
+
+    def test_mobile_protocol_before_bootstrap_poisoned_and_never_forwarded(self):
+        self.mobile_child()
+        self.assert_failure_response(request(self.server.server_port, '/sync/hostKey'), 'binding', 409)
+        self.assertEqual(self.upstream.observed, 0)
+        with mock.patch.object(wire.subprocess, 'Popen') as launch:
+            self.assert_failure_response(request(self.server.server_port, '/__rf4/bootstrap', self.server.token), 'binding')
+            launch.assert_not_called()
+
+    def test_mobile_read_before_bootstrap_poisoned_and_cannot_fallback(self):
+        self.mobile_child()
+        with mock.patch.object(wire.subprocess, 'Popen') as launch:
+            self.assert_failure_response(request(self.server.server_port, '/__rf4/native-state', self.server.token), 'binding')
+            self.assert_failure_response(request(self.server.server_port, '/__rf4/bootstrap', self.server.token), 'binding')
+            launch.assert_not_called()
+
+    def test_mobile_held_or_active_gate_forbids_bootstrap(self):
+        self.mobile_child()
+        self.server.gate = 'holding'; self.server.counts['held'] = 1; self.server.counts['active'] = 1
+        with mock.patch.object(wire.subprocess, 'Popen') as launch:
+            self.assert_failure_response(request(self.server.server_port, '/__rf4/bootstrap', self.server.token), 'binding')
+            launch.assert_not_called()
+
+    def test_mobile_failed_bootstrap_is_once_and_keeps_typed_metadata(self):
+        self.mobile_child()
+        diagnostic = config.failure('media', child_rc=1, script_line=525)
+        self.reader('import sys; print(' + repr(json.dumps(diagnostic)) + '); sys.exit(1)')
+        value = self.assert_failure_response(request(self.server.server_port, '/__rf4/bootstrap', self.server.token), 'media')
+        self.assertEqual(value['failure']['child_rc'], 1)
+        self.assertEqual(value['failure']['script_line'], 525)
+        self.assertFalse(self.server.bootstrap_complete)
+        with mock.patch.object(wire.subprocess, 'Popen') as launch:
+            self.assert_failure_response(request(self.server.server_port, '/__rf4/bootstrap', self.server.token), 'binding')
+            self.assert_failure_response(request(self.server.server_port, '/__rf4/native-state', self.server.token), 'binding')
+            launch.assert_not_called()
+
+    def test_mobile_concurrent_bootstrap_refuses_and_drains_only_child(self):
+        self.mobile_child()
+        self.reader('import time; time.sleep(60)')
+        future = self.pool.submit(request, self.server.server_port, '/__rf4/bootstrap', self.server.token)
+        child = self.await_reader()
+        self.assert_failure_response(request(self.server.server_port, '/__rf4/bootstrap', self.server.token), 'busy', 409)
+        self.assert_failure_response(future.result(timeout=2), 'binding')
+        self.assertIsNotNone(child.returncode)
+        self.assertTrue(child.stdout.closed)
+        self.assertTrue(child.stdin.closed)
+        self.assertFalse(self.server.bootstrap_complete)
+
+    def test_mac_bootstrap_cannot_launch_staging_child(self):
+        self.reader('raise SystemExit("must not launch")')
+        with mock.patch.object(wire.subprocess, 'Popen') as launch:
+            self.assert_failure_response(request(self.server.server_port, '/__rf4/bootstrap', self.server.token), 'binding')
             launch.assert_not_called()
 
     def await_reader(self):

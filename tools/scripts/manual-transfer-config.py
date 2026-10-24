@@ -41,7 +41,7 @@ def recipe_files(run):
             MEDIA_NAMES[1]: (recipe_bytes(run, "device", 6144),), MEDIA_NAMES[2]: (b"",)}
 
 
-def dedicated_fixture_vm():
+def dedicated_fixture_identity():
     # No environment-provided home, clock, process arguments or account inventory.
     user = pwd.getpwuid(os.getuid())
     if sys.platform != "darwin" or user.pw_name != "meguri" or user.pw_dir != "/Users/meguri":
@@ -50,13 +50,18 @@ def dedicated_fixture_vm():
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5).stdout
     if model.strip() != b"VirtualMac2,1":
         raise ValueError("fixture dedicated VM hardware")
+    return Path(user.pw_dir)
+
+
+def dedicated_fixture_vm():
+    home = dedicated_fixture_identity()
     # Check each process path for the app executable; leave all processes running.
     processes = subprocess.run(["/bin/ps", "-axo", "comm="], check=True,
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5).stdout
     if len(processes) > 1024 * 1024 or any(line.rsplit(b"/", 1)[-1] == b"Meguri"
                                          for line in processes.splitlines()):
         raise ValueError("fixture app must be stopped")
-    return Path(user.pw_dir)
+    return home
 
 
 def rename_new(source_fd, source, destination_fd, destination):
@@ -130,9 +135,20 @@ def fixture_prior_runs(home, context):
         return []
 
 
-def stage_media(support, run):
+def stage_media(support, run, *, _bootstrap=None):
     """Test controller only. Never install Collection or interpret transfer policy."""
-    home = dedicated_fixture_vm()
+    if _bootstrap is None:
+        home = dedicated_fixture_vm()
+    else:
+        # Internal capability created only by the fixed, pretransfer mobile action.
+        if (type(_bootstrap) is not MobileBootstrap or not _bootstrap.pretransfer
+                or _bootstrap.stage_attempted):
+            raise EvidenceFailure("binding")
+        _bootstrap.stage_attempted = True
+        home = dedicated_fixture_identity()
+        if home != _bootstrap.home or Path(support) != _bootstrap.support or run != _bootstrap.config["run"]:
+            raise EvidenceFailure("binding")
+        _bootstrap.check()
     run = recipe_run(run)
     support = Path(support)
     context = native_context(support)
@@ -140,9 +156,15 @@ def stage_media(support, run):
     sim = re.fullmatch(re.escape(str(home)) + r"/Library/Developer/CoreSimulator/Devices/[0-9A-Fa-f-]{36}/data/Containers/Data/Application/[0-9A-Fa-f-]{36}/Library/Application Support", str(support))
     if support != mac and sim is None:
         raise ValueError("fixture selected container scope")
+    if sim is not None and _bootstrap is None:
+        raise ValueError("fixture mobile requires postlaunch bootstrap")
+    if _bootstrap is not None and context != _bootstrap.context:
+        raise EvidenceFailure("context")
     prior = fixture_prior_runs(home, context)
     # These two directories may be absent on the first launch. mkdir is scoped
     # to these exact children and never replaces an existing directory or data.
+    if _bootstrap is not None:
+        _bootstrap.check()
     with directory(support.parent) as library, fixture_child(library, "Application Support", True) as support_fd:
         with fixture_child(support_fd, "Collection", create=True) as collection:
             with fixture_child(collection, "collection.media", create=True) as media:
@@ -160,11 +182,15 @@ def stage_media(support, run):
                                 if run not in prior:
                                     if len(prior) >= 256:
                                         raise ValueError("fixture ownership bound")
+                                    if _bootstrap is not None:
+                                        _bootstrap.check()
                                     fixture_write_new(owners, run + ".json", marker)
                             with fixture_child(storage, "originals", True) as originals:
                                 with fixture_child(originals, run, True) as saved, fixture_child(storage, "pending", True) as pending:
                                     desired = {MEDIA_NAMES[0]: None, MEDIA_NAMES[1]: recipe_bytes(run, "device", 6144), MEDIA_NAMES[2]: b""}
                                     for name in MEDIA_NAMES:
+                                        if _bootstrap is not None:
+                                            _bootstrap.check()
                                         fact, data = current[name], desired[name]
                                         # A current-run server file is also archived: a
                                         # fresh real Import must prove its own download.
@@ -192,6 +218,8 @@ def stage_media(support, run):
                                     os.fsync(media)
     if native_context(support) != context:
         raise ValueError("fixture container changed")
+    if _bootstrap is not None:
+        _bootstrap.check()
     return dict(purpose=FIXTURE_PURPOSE, context=fingerprint(context), staged=2)
 
 
@@ -646,7 +674,7 @@ def staged_marker(home, context, run):
         if strict_json(data) != fixture_marker(context, run):
             raise EvidenceFailure("marker")
         info = os.stat(run + ".json", dir_fd=parent, follow_symlinks=False)
-        if info.st_uid != os.getuid() or info.st_mode & 0o022:
+        if info.st_uid != os.getuid() or info.st_mode & 0o222:
             raise EvidenceFailure("marker")
         return dict(sha256=hashlib.sha256(data).hexdigest(), identity=list(identity))
 
@@ -677,12 +705,55 @@ def mobile_applications(device):
         return dict(identity=list(identity), members=fingerprint(members))
 
 
+BOOTSTRAP_AUTHORITY = "rf4-mobile-pretransfer-media-v1"
+
+
+def validate_bootstrap(value):
+    keys(value, ("authority", "context", "marker", "namespace", "binding"))
+    if value["authority"] != BOOTSTRAP_AUTHORITY:
+        raise EvidenceFailure("binding")
+    for name in ("context", "marker", "namespace", "binding"):
+        digest(value[name])
+    return dict(value)
+
+
+def bootstrap_proof(record, identity):
+    return validate_bootstrap(dict(authority=BOOTSTRAP_AUTHORITY,
+        context=fingerprint(record["context"]), marker=fingerprint(record["marker"]),
+        namespace=fingerprint(record["applications"]), binding=fingerprint([record, list(identity)])))
+
+
+class MobileBootstrap:
+    """Internal fixed-context staging capability, never constructed from HTTP data."""
+    def __init__(self, config, home, device, context, applications, *, pretransfer=False):
+        self.pretransfer, self.stage_attempted = pretransfer, False
+        self.config, self.home, self.device = config, home, device
+        self.context, self.applications = context, applications
+        self.support = Path(context["root"]) / "Library/Application Support"
+
+    def check(self):
+        # No resolver here. Preserve the namespace captured BEFORE resolution,
+        # even if an old root remains readable during a container switch.
+        if owned_identity(self.device) != self.config["device"]:
+            raise EvidenceFailure("context")
+        if mobile_applications(self.device) != self.applications:
+            raise EvidenceFailure("context")
+        owned_identity(Path(self.context["root"]))
+        if native_context(self.support) != self.context:
+            raise EvidenceFailure("context")
+
+
 def mobile_native_state(input_path, request):
-    # The observer alone supplies the previous digest, never an HTTP payload.
-    keys(request, ("selector", "bound"))
+    keys(request, ("action", "selector", "bound"))
+    if request["action"] not in ("bootstrap", "read"):
+        raise EvidenceFailure("binding")
+    bootstrap = request["action"] == "bootstrap"
     digest(request["selector"])
-    if request["bound"] is not None:
-        digest(request["bound"])
+    if bootstrap:
+        if request["bound"] is not None:
+            raise EvidenceFailure("binding")
+    else:
+        controlled("binding", validate_bootstrap, request["bound"])
     input_path = Path(input_path)
     with directory(input_path.parent) as parent:
         owned_identity(input_path.parent)
@@ -694,57 +765,71 @@ def mobile_native_state(input_path, request):
         selector = fingerprint(config)
         if selector != request["selector"]:
             raise EvidenceFailure("binding")
-        home, device = controlled("context", mobile_device, config)
         bound_name = "native-reader-bound.json"
-        if request["bound"] is None:
-            # Exclusive attempt latch survives failure; no reset, restage or rebind.
+        if bootstrap:
+            # This MG-owned latch survives ALL failures. No retry or rebind.
             try:
                 os.mkdir("native-reader-attempt", 0o700, dir_fd=parent)
             except FileExistsError:
                 raise EvidenceFailure("binding") from None
+            if bounded_read(parent, bound_name, 4096, missing=True) is not None:
+                raise EvidenceFailure("binding")
+        home, device = controlled("context", mobile_device, config)
+        if bootstrap:
             applications = controlled("context", mobile_applications, device)
             context = controlled("context", selected_mobile_context, config, home, device)
+            authority = MobileBootstrap(config, home, device, context, applications, pretransfer=True)
+            controlled("context", authority.check)  # resolver race: before ANY write
+            controlled("media", stage_media_bootstrap, authority)
             marker = controlled("marker", staged_marker, home, context, config["run"])
             controlled("media", verify_staged_media, context, config["run"])
-            record = dict(selector=selector, context=context, marker=marker, applications=applications)
+            record = dict(selector=selector, context=context, marker=marker, applications=applications,
+                          attempt=owned_identity(input_path.parent / "native-reader-attempt"))
+            controlled("context", authority.check)
             fixture_write_new(parent, bound_name, json.dumps(record, sort_keys=True).encode())
+            _, binding_identity = bounded_read(parent, bound_name, 4096)
         else:
-            # Missing attempt/record is fatal even if a new app container exists.
+            # Missing attempt/record/marker is fatal. READ never bootstraps.
             with fixture_child(parent, "native-reader-attempt"):
                 pass
-            data, _ = controlled("binding", bounded_read, parent, bound_name, 4096)
+            data, binding_identity = controlled("binding", bounded_read, parent, bound_name, 4096)
             info = os.stat(bound_name, dir_fd=parent, follow_symlinks=False)
-            if info.st_uid != os.getuid() or info.st_mode & 0o077:
+            if info.st_uid != os.getuid() or info.st_mode & 0o222 or info.st_mode & 0o077:
                 raise EvidenceFailure("binding")
             record = controlled("binding", strict_json, data)
-            keys(record, ("selector", "context", "marker", "applications"))
+            keys(record, ("selector", "context", "marker", "applications", "attempt"))
             context = record["context"]
-            if record["selector"] != selector or fingerprint(context) != request["bound"]:
+            if record["selector"] != selector or bootstrap_proof(record, binding_identity) != request["bound"]:
                 raise EvidenceFailure("binding")
-        # Recheck exact device, root/inode and this run's marker on every read.
+            authority = MobileBootstrap(config, home, device, context, record["applications"])
         prefix = str(device / "data/Containers/Data/Application") + "/"
         if type(context.get("root")) is not str or not context["root"].startswith(prefix):
             raise EvidenceFailure("context")
-        # Conservatively refuse any application-container directory membership
-        # change, even while the frozen old root still exists. No rediscovery.
-        if controlled("context", mobile_applications, device) != record["applications"]:
-            raise EvidenceFailure("context")
-        owned_identity(Path(context["root"]))
-        if native_context(Path(context["root"]) / "Library/Application Support") != context:
-            raise EvidenceFailure("context")
+        if owned_identity(input_path.parent / "native-reader-attempt") != record["attempt"]:
+            raise EvidenceFailure("binding")
+        controlled("context", authority.check)
         if controlled("marker", staged_marker, home, context, config["run"]) != record["marker"]:
             raise EvidenceFailure("marker")
-        controlled("media", verify_staged_media, context, config["run"], False)
-        state = controlled("schema", native_state, context)
+        controlled("media", verify_staged_media, context, config["run"], bootstrap)
+        # Bootstrap deliberately has no operation reducer: first Import has not
+        # happened yet. Only READ uses the real native_state, without fallback.
+        state = None if bootstrap else controlled("schema", native_state, context)
         controlled("context", mobile_device, config)
-        owned_identity(Path(context["root"]))
-        if native_context(Path(context["root"]) / "Library/Application Support") != context:
-            raise EvidenceFailure("context")
+        controlled("context", authority.check)
         if controlled("marker", staged_marker, home, context, config["run"]) != record["marker"]:
             raise EvidenceFailure("marker")
-        if controlled("context", mobile_applications, device) != record["applications"]:
-            raise EvidenceFailure("context")
-        return dict(selector=selector, state=state)
+        if controlled("binding", bounded_read, parent, bound_name, 4096) != (json.dumps(record, sort_keys=True).encode(), binding_identity):
+            raise EvidenceFailure("binding")
+        if owned_identity(input_path.parent / "native-reader-attempt") != record["attempt"]:
+            raise EvidenceFailure("binding")
+        controlled("context", authority.check)  # final namespace barrier after marker/binding reads
+        proof = bootstrap_proof(record, binding_identity)
+        return dict(selector=selector, bootstrap=proof) if bootstrap else dict(selector=selector, bootstrap=proof, state=state)
+
+
+def stage_media_bootstrap(authority):
+    # Exactly the existing reserved-name preflight/archive/publication logic.
+    return stage_media(authority.support, authority.config["run"], _bootstrap=authority)
 
 
 def keys(value, expected):

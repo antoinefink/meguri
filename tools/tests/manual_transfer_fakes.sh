@@ -127,7 +127,7 @@ mg_sim_check_runtime() { :; }
 mg_sim_prepare() { :; }
 mg_mt_set_native_support() {
   printf 'native-container\n' >>"$FX_EVENTS"
-  MG_MT_SUPPORT="$FX_VM/native-support"
+  if [ "$1" = mac ]; then MG_MT_SUPPORT="$FX_VM/native-support"; else MG_MT_SUPPORT=""; fi
 }
 mg_mt_stage_reader() {
   printf 'stage-reader\n' >>"$FX_EVENTS"

@@ -118,12 +118,9 @@ mg_mt_set_native_support() {
       MG_MT_SUPPORT="$(mg_mac_vm_ssh 'printf "%s/Library/Containers/com.antoinefink.meguri.dev/Data/Library/Application Support" "$HOME"')" || return 1
       ;;
     *)
-      # Select the actual container through the existing owned VM app-ID seam.
-      # This never launches or imports a collection.
-      mg_simctl install "$2" "$(mg_app_products ios-sim Debug)/Meguri.app" >&2 || return 1
-      app_home="$(mg_simctl get_app_container "$2" com.antoinefink.meguri.dev data)" || return 1
-      case "$app_home" in /*/Containers/Data/Application/*) ;; *) return 1 ;; esac
-      MG_MT_SUPPORT="$app_home/Library/Application Support"
+      # XCTest alone installs/launches. The authenticated initial bootstrap
+      # selects the actual container; no preinstall media writes or resolver.
+      MG_MT_SUPPORT=""
       ;;
   esac
 }
@@ -142,14 +139,15 @@ mg_mt_cleanup_media() {
 }
 
 mg_mt_stage_media() {
-  # The fixture launch hook replaces Collection. Stage ONLY reserved media,
-  # through the selected container seam and under the retained pool leases.
+  # Copy the fixed helper under the lease. Mac keeps stopped-app prestaging;
+  # mobile writes only through the postlaunch bootstrap control.
   mvl_lease_held "$MG_LEASE_DIR" || return 1
   [ "$(jq -r .name <<<"$MG_MAC_VM")" = meguri-mac ] || return 1
   cp "$MG_TOOLS/scripts/manual-transfer-config.py" "$MG_RUN_DIR/media-proof-config.py" || return 1
   MG_MT_MEDIA_STAGED=1
   mg_on_exit mg_mt_cleanup
   mg_mac_vm_copy_in "$MG_RUN_DIR/media-proof-config.py" || return $?
+  [ -z "${MG_MT_READER_DEVICE:-}" ] || return 0
   mg_mac_vm_ssh "/usr/bin/python3 $(mvl_q "$MG_RUN_DIR/media-proof-config.py") stage-media $(mvl_q "$MG_MT_SUPPORT" "${MG_RUN_DIR##*/}")" >/dev/null 2>&1
 }
 
@@ -250,7 +248,7 @@ mg_mt_stage_reader() {
   # The selected app-ID seam above alone chooses the root. HTTP supplies nothing.
   if [ -n "${MG_MT_READER_DEVICE:-}" ]; then
     # Freeze only the out-of-band leased selector here. XCTest installs/launches
-    # before the first RPC; that RPC alone may select the actual app container.
+    # before bootstrap; only that explicit action may resolve and stage media.
     mode=native-mobile
     context="$(mg_mac_vm_ssh "/usr/bin/python3 $(mvl_q "$MG_RUN_DIR/media-proof-config.py") mobile-reader-config $(mvl_q "$MG_MT_READER_DEVICE" "${MG_RUN_DIR##*/}")" 2>/dev/null)" || return 1
   else
