@@ -802,7 +802,11 @@ import AppKit
         #if os(macOS)
         try closeTransfer(app, bundle)
         try app.bringToFront(bundleIdentifier: bundle)
-        app.typeKey(",", modifierFlags: .command)
+        let settings = app.windows.containing(.any, identifier: "settings.root.content").firstMatch
+        if !settings.exists {
+            let main = try keyboardWindow(app.windows.matching(identifier: "main").firstMatch)
+            main.typeKey(",", modifierFlags: .command)
+        }
         XCTAssertTrue(element(app, "settings.root.content").waitForExistence(timeout: 30),
                       "Command-comma must open the native Settings scene.")
         try click(element(app, "settings.root.connection"), app, bundle)
@@ -848,6 +852,15 @@ import AppKit
         try click(element(app, "settings.anki.logout"), app, bundle)
     }
     #if os(macOS)
+    private func keyboardWindow(_ window: XCUIElement) throws -> XCUIElement {
+        let target = try XCTUnwrap(window.exists ? window : nil, "Native keyboard target must be an existing window.")
+        // The application AX frame can be null; synthesize keys against a real window.
+        let frame = target.frame
+        return try XCTUnwrap(!frame.isNull && !frame.isEmpty
+            && frame.origin.x.isFinite && frame.origin.y.isFinite
+            && frame.width.isFinite && frame.height.isFinite ? target : nil,
+            "Native keyboard target must have a finite, nonempty window frame.")
+    }
     private func closeTransfer(_ app: XCUIApplication, _ bundle: String) throws {
         let workflow = element(app, "settings.anki.transferWorkflow")
         guard workflow.exists else { return }
@@ -860,8 +873,9 @@ import AppKit
         try closeTransfer(app, bundle)
         let settings = app.windows.containing(.any, identifier: "settings.root.content").firstMatch
         guard settings.exists else { return }
-        // Target this window's native close control, never the review window.
-        try click(settings.buttons["_XCUI:CloseWindow"].firstMatch, app, bundle)
+        try app.bringToFront(bundleIdentifier: bundle)
+        let target = try keyboardWindow(settings)
+        target.typeKey("w", modifierFlags: .command)
         let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !settings.exists }, object: nil)
         XCTAssertEqual(XCTWaiter().wait(for: [dismissed], timeout: 30), .completed,
                        "Settings must close before admission or real local reviews.")
