@@ -1441,3 +1441,19 @@ Copies are saved in `build/prepared/rf4-20261024-pause/`:
 `package-interop.patch`, `ui-copy-and-render.patch` and `remaining-work.json`.
 The latter records hashes and which UI files already landed. The source
 exports remain as additional copies. No worker or test remains active.
+
+### Diagnostic test isolation — 2026-10-24
+
+Start: `37eaabcca326da8b87f3144058dc9c3247926746`.
+Fixer session: `s-20261024T162609Z-fb00ac40`.
+Filtered export: `cleanroom/20261024T162648Z-19130`.
+The preparation-category test now belongs to the existing serialized
+`ReviewCollectionStartupTests` suite. Its ten cases and all assertions are
+unchanged. A real collection owner in a parallel suite could compete for the
+process-wide event stream and leave review presentation durability stale.
+
+Independent review: no P0–P2 findings. Focused verification:
+`swift-test/20261024T162945Z-21597` passed all 38 tests, including the previously
+failing reopen/durability case. The prior failure remains recorded at
+`swift-test/20261024T155625Z-94217`; its assertion was preserved.
+This repair does not accept RF4 or replace its pending integration gate.

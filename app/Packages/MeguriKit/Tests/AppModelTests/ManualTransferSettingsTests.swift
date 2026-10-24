@@ -114,54 +114,6 @@ extension ManualTransferSettingsTests {
         }
     }
 
-    @Test(arguments: ["db_check_required", "download_invalid", "local_storage", "internal", "offline",
-                      "internal\nAuthorization: synthetic-secret", "download_invalid_extra", " internal", "", nil] as [String?])
-    func preparationFailureExposesOnlyAnExactSafeCategory(kind: String?) async throws {
-        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        var configuration = LaunchConfiguration()
-        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
-        await owner.start()
-        try #require(owner.state == .noFile)
-        let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
-            generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: kind, requestMethod: "download", redirect: nil))
-        let service = SettingsTransferService(suspendPreparation: true, preparationFailure: failure)
-        let keys = SettingsTransferKeys()
-        let model = ManualTransferCoordinator(owner: owner, service: service, keychain: keys, defaults: nil)
-        model.endpointDraft = "https://example.test/"
-        model.username = "Synthetic User"; model.password = "synthetic-transient"
-        await model.login()
-        try #require(model.canPrepare)
-        await model.prepare()
-        let known = ["db_check_required", "download_invalid", "local_storage", "internal", "offline"].contains(kind ?? "")
-        #expect(model.failureCategory?.rawValue == (known ? kind : nil))
-        #expect(model.failureRequestMethod == .download)
-        #expect(model.message == (kind == "offline"
-            ? "The server could not be reached. Check your network connection and server address."
-            : "The server request failed. Check the endpoint and login, then inspect the recorded stages."))
-        let exposed = ([model.message ?? "", model.failureCategory?.rawValue ?? ""] + model.connectionEvents.map(\.detail)).joined(separator: "\n")
-        #expect(!exposed.contains("synthetic-secret") && !exposed.contains("Authorization"))
-        if !known, let kind, !kind.isEmpty { #expect(!exposed.contains(kind)) }
-        #expect(model.authenticated && model.preview == nil && model.result == nil && !model.busy)
-        #expect(await keys.saved?.hostKey == "synthetic-host-key")
-        #expect(await keys.clears == 1)
-        #expect(await service.calls == ["normalize", "login", "prepare", "history"])
-
-        // Clear before the next attempt completes, even when it is cancelled.
-        await service.clearPreparationFailure()
-        let nextAttempt = Task { await model.prepare() }
-        await service.waitUntilPreparing()
-        #expect(model.busy && model.message == nil && model.failureCategory == nil && model.redirectDiagnostic == nil)
-        #expect(model.failureRequestMethod == nil)
-        await model.cancel()
-        await nextAttempt.value
-        #expect(model.failureCategory == nil && model.authenticated && !model.busy)
-        #expect(model.failureRequestMethod == nil)
-        #expect(await service.calls == ["normalize", "login", "prepare", "history", "prepare", "history"])
-        #expect(await owner.close())
-    }
-
     @Test func loginEligibilityUsesEnteredFields() {
         let model = ManualTransferCoordinator(owner: nil, service: SettingsTransferService(), defaults: nil)
         model.endpointDraft = "https://example.test/prefix"
@@ -635,6 +587,54 @@ extension ManualTransferSettingsTests {
 }
 
 extension ReviewCollectionStartupTests {
+    @Test(arguments: ["db_check_required", "download_invalid", "local_storage", "internal", "offline",
+                      "internal\nAuthorization: synthetic-secret", "download_invalid_extra", " internal", "", nil] as [String?])
+    func preparationFailureExposesOnlyAnExactSafeCategory(kind: String?) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        await owner.start()
+        try #require(owner.state == .noFile)
+        let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
+            generation: nil, candidateActive: false, nextEligibleMs: nil, serverKind: kind, requestMethod: "download", redirect: nil))
+        let service = SettingsTransferService(suspendPreparation: true, preparationFailure: failure)
+        let keys = SettingsTransferKeys()
+        let model = ManualTransferCoordinator(owner: owner, service: service, keychain: keys, defaults: nil)
+        model.endpointDraft = "https://example.test/"
+        model.username = "Synthetic User"; model.password = "synthetic-transient"
+        await model.login()
+        try #require(model.canPrepare)
+        await model.prepare()
+        let known = ["db_check_required", "download_invalid", "local_storage", "internal", "offline"].contains(kind ?? "")
+        #expect(model.failureCategory?.rawValue == (known ? kind : nil))
+        #expect(model.failureRequestMethod == .download)
+        #expect(model.message == (kind == "offline"
+            ? "The server could not be reached. Check your network connection and server address."
+            : "The server request failed. Check the endpoint and login, then inspect the recorded stages."))
+        let exposed = ([model.message ?? "", model.failureCategory?.rawValue ?? ""] + model.connectionEvents.map(\.detail)).joined(separator: "\n")
+        #expect(!exposed.contains("synthetic-secret") && !exposed.contains("Authorization"))
+        if !known, let kind, !kind.isEmpty { #expect(!exposed.contains(kind)) }
+        #expect(model.authenticated && model.preview == nil && model.result == nil && !model.busy)
+        #expect(await keys.saved?.hostKey == "synthetic-host-key")
+        #expect(await keys.clears == 1)
+        #expect(await service.calls == ["normalize", "login", "prepare", "history"])
+
+        // Clear before the next attempt completes, even when it is cancelled.
+        await service.clearPreparationFailure()
+        let nextAttempt = Task { await model.prepare() }
+        await service.waitUntilPreparing()
+        #expect(model.busy && model.message == nil && model.failureCategory == nil && model.redirectDiagnostic == nil)
+        #expect(model.failureRequestMethod == nil)
+        await model.cancel()
+        await nextAttempt.value
+        #expect(model.failureCategory == nil && model.authenticated && !model.busy)
+        #expect(model.failureRequestMethod == nil)
+        #expect(await service.calls == ["normalize", "login", "prepare", "history", "prepare", "history"])
+        #expect(await owner.close())
+    }
+
     @Test(arguments: [ManualTransferDirection.import, .export])
     func newPreparationIncludesMediaWithoutOptIn(direction: ManualTransferDirection) async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
