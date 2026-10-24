@@ -119,7 +119,7 @@ public actor CoreManualTransferService: ManualTransferService {
         return .init(raw: raw, record: record)
     }
     public func prepare(endpoint: String, credentials: ManualTransferCredentials, direction: ManualTransferDirection, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> PreparedManualTransfer {
-        try await prepare(endpoint: endpoint, credentials: credentials, direction: direction, scope: .collectionOnly, operation: operation, progress: progress)
+        try await prepare(endpoint: endpoint, credentials: credentials, direction: direction, scope: .collectionAndMedia, operation: operation, progress: progress)
     }
     public func prepare(endpoint: String, credentials: ManualTransferCredentials, direction: ManualTransferDirection, scope: ManualTransferScope, operation: ManualTransferOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> PreparedManualTransfer {
         try await setup(operation)
