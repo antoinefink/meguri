@@ -543,9 +543,9 @@ pub struct JobError {
     /// English text for logs and diagnostics only, never the message shown to
     /// the user. Never a host key, a password, a body (but the server's own
     /// message) or a URL with credentials.
-    pub detail: String,
+    pub detail: Box<str>,
     /// Sanitized redirect facts, separate from unrestricted log text.
-    pub redirect: Option<RedirectDiagnostic>,
+    pub redirect: Option<Box<RedirectDiagnostic>>,
 }
 
 impl JobError {
@@ -553,7 +553,7 @@ impl JobError {
         JobError {
             kind,
             method,
-            detail: detail.into(),
+            detail: detail.into().into_boxed_str(),
             redirect: None,
         }
     }
@@ -574,7 +574,7 @@ impl JobError {
     /// E4 and E5: a transport failure of a job on a server of kind `server`.
     pub fn from_transport(error: SyncError, method: Option<Method>, server: ServerKind) -> JobError {
         let redirect = match &error {
-            SyncError::Redirect(error) => Some(error.diagnostic()),
+            SyncError::Redirect(error) => Some(Box::new(error.diagnostic())),
             _ => None,
         };
         // A status's reason is the start of the answer's body, and a
