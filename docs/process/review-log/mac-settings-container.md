@@ -79,3 +79,36 @@ Bounded facts identify a native disclosure triangle (type 13), no child nodes,
 enabled/hittable state and a collapsed value. No history control was exposed.
 Pointer delivery and disclosure behavior still require diagnosis. The full
 gate remains pending; no unit is accepted.
+
+## Expanded details boundary repair
+
+Start: `66a266da8a021edf6b77e695493a4bebc6f09905`.
+Fixer session: `s-20261024T174115Z-511e3ad6`.
+Final cumulative export: `cleanroom/20261025T001728Z-56616`.
+
+The excluded pointer probe `vm-settings-frozen/20261024T235445Z-48683`
+expanded the real native disclosure, then failed history reachability. Its
+bounded numeric attachment showed 185 occurrences of the details identifier
+and zero history identifiers, although the history action existed by label.
+A single SwiftUI modifier scopes the parent ID. Native layout, state and
+child controls stay intact.
+
+The original preflight now also requires one details identifier, one history
+identifier and an enabled, hittable native history button. Its single pointer
+action resolves the native disclosure header within the unique container and
+targets the measured chevron. VM, app identity, owning window, finite stable
+geometry and collapsed state must hold before input. There is no input retry.
+Existing scroll and workflow assertions remain.
+
+Independent R1 found a missing collapsed guard and unsupported process API.
+R2 reviewed the final cumulative patch and found both closed, with no P0–P2.
+`build-app/20261025T002154Z-59761` passed UI lint and native compilation.
+Focused privacy `private/20261025T002329Z-62077` passed.
+Fresh runner authorization `vm-ax-refresh-private/20261025T002211Z-60766`
+and fresh-process trust `vm-ax-trust-frozen/20261025T002326Z-61677` passed,
+each with one test and no failures or skips. The temporary input was removed.
+`vm-settings-frozen/20261025T002339Z-62765` passed the original preflight,
+Its ID counts, button roles and scroll checks all passed: one test,
+zero failures or skips. Similarity
+`20261025T002334Z-62439` also passed. The broader gate and unit acceptance
+remain pending.

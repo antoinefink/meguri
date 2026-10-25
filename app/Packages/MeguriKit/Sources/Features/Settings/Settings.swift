@@ -128,6 +128,7 @@ public struct MacSettingsView: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         } label: { Text("Connection details", bundle: .module) }
+                        .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("settings.anki.details")
                     }
                 }

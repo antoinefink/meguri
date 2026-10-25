@@ -70,7 +70,12 @@ import AppKit
         try showHistory(app, bundle)
         let history = element(app, "settings.anki.history")
         try reveal(history, app, bundle)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings.anki.details").count, 1)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings.anki.history").count, 1)
         XCTAssertTrue(history.exists, "Settings must expose the Local History refresh control.")
+        XCTAssertEqual(history.elementType, .button, "Local History refresh must remain a native button.")
+        XCTAssertTrue(history.exists && history.isEnabled && history.isHittable,
+                      "Local History refresh must be enabled and hittable after reveal.")
         XCTAssertTrue(history.exists && history.isHittable, "Local History refresh must be reachable by scrolling down.")
         attachGeometry(app, "rf4-preflight-history-revealed", bundle)
         try reveal(endpoint, app, bundle)
@@ -946,7 +951,7 @@ import AppKit
         if !element(app, "settings.anki.transferWorkflow").exists {
             try click(element(app, "settings.root.connection"), app, bundle)
             let history = element(app, "settings.anki.history")
-            if !history.exists { try click(element(app, "settings.anki.details"), app, bundle) }
+            if !history.exists { try clickSettingsDetailsHeader(app, bundle) }
         }
         #endif
         try reveal(element(app, "settings.anki.history"), app, bundle)
@@ -958,6 +963,66 @@ import AppKit
         try click(element(app, "settings.anki.logout"), app, bundle)
     }
     #if os(macOS)
+    private func settingsDetailsHeader(_ app: XCUIApplication) -> (container: XCUIElement, header: XCUIElement)? {
+        let containers = app.descendants(matching: .any).matching(identifier: "settings.anki.details")
+        guard containers.count == 1, let container = containers.allElementsBoundByAccessibilityElement.first else { return nil }
+        if container.elementType == .disclosureTriangle { return (container, container) }
+        let headers = container.descendants(matching: .disclosureTriangle)
+        guard headers.count == 1, let header = headers.allElementsBoundByAccessibilityElement.first else { return nil }
+        return (container, header)
+    }
+    private func clickSettingsDetailsHeader(_ app: XCUIApplication, _ bundle: String) throws {
+        guard CardSwapTimingGate.hypervisorPresent() == true else { throw EvidenceError.unavailable }
+        try app.bringToFront(bundleIdentifier: bundle)
+        let (container, header) = try XCTUnwrap(settingsDetailsHeader(app), "Expected one scoped native disclosure header.")
+        try reveal(header, app, bundle)
+        waitUntilReady(header, app)
+        let build = try BuildUnderTest.current()
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
+        let roots = app.descendants(matching: .any).matching(identifier: "settings.root.content")
+        let windows = app.windows.containing(.any, identifier: "settings.anki.details")
+        guard running.count == 1, let live = running.first, roots.count == 1, windows.count == 1,
+              let root = roots.allElementsBoundByAccessibilityElement.first,
+              let window = windows.allElementsBoundByAccessibilityElement.first else { throw EvidenceError.unavailable }
+        let boundPID = live.processIdentifier
+        let headerFrame = header.frame, rootFrame = root.frame, windowFrame = window.frame
+        let containerFrame = container.frame, headerID = header.identifier
+        func finite(_ frame: CGRect) -> Bool {
+            !frame.isNull && !frame.isInfinite && !frame.isEmpty &&
+                [frame.minX, frame.maxX, frame.minY, frame.maxY, frame.width, frame.height].allSatisfy { $0.isFinite }
+        }
+        func collapsed(_ value: Any?) -> Bool {
+            if let number = value as? NSNumber { return number == 0 }
+            if let text = value as? String { return text == "0" || text == "false" }
+            return false
+        }
+        let viewport = rootFrame.intersection(windowFrame)
+        guard [headerFrame, containerFrame, rootFrame, windowFrame, viewport].allSatisfy(finite) else { throw EvidenceError.unavailable }
+        let x: CGFloat
+        if abs(headerFrame.width - 147.5) <= 0.5 && abs(headerFrame.height - 16) <= 0.5 { x = 26 }
+        else if (8...24).contains(headerFrame.width) && (8...24).contains(headerFrame.height) { x = headerFrame.width / 2 }
+        else { attachGeometry(app, "rf4-header-unsupported-geometry", bundle); throw EvidenceError.unavailable }
+        let point = CGPoint(x: headerFrame.minX + x, y: headerFrame.midY)
+        let coordinate = header.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: headerFrame.height / 2))
+        let actual = coordinate.screenPoint
+        let currentRunning = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
+        guard actual.x.isFinite, actual.y.isFinite, abs(actual.x - point.x) <= 0.5, abs(actual.y - point.y) <= 0.5,
+              viewport.contains(headerFrame), viewport.contains(point),
+              app.state == .runningForeground, live.processIdentifier > 0, live.processIdentifier == boundPID,
+              !live.isTerminated, live.isActive, NSWorkspace.shared.frontmostApplication?.processIdentifier == boundPID,
+              live.bundleURL?.resolvingSymlinksInPath() == build.appBundle.resolvingSymlinksInPath(),
+              currentRunning.count == 1, currentRunning.first?.processIdentifier == boundPID,
+              app.sheets.count == 0, app.alerts.count == 0, roots.count == 1, windows.count == 1,
+              container.exists, container.identifier == "settings.anki.details", container.frame == containerFrame,
+              settingsDetailsHeader(app) != nil, header.exists, header.elementType == .disclosureTriangle,
+              header.identifier == headerID, header.frame == headerFrame, header.isEnabled, header.isHittable,
+              root.exists, root.frame == rootFrame, window.exists, window.frame == windowFrame,
+              root.descendants(matching: .any).matching(identifier: "settings.anki.details").count == 1,
+              window.descendants(matching: .any).matching(identifier: "settings.root.content").count == 1,
+              collapsed(header.value)
+        else { attachGeometry(app, "rf4-header-final-guard-failure", bundle); throw EvidenceError.unavailable }
+        coordinate.click()
+    }
     private func keyboardWindow(_ window: XCUIElement) throws -> XCUIElement {
         let target = try XCTUnwrap(window.exists ? window : nil, "Native keyboard target must be an existing window.")
         // The application AX frame can be null; synthesize keys against a real window.
@@ -1083,12 +1148,17 @@ import AppKit
             }
         }
         let descendants = app.descendants(matching: .any)
-        let details = element(app, "settings.anki.details")
-        let detailsExists = details.exists
+        let container = element(app, "settings.anki.details")
+        let resolved = settingsDetailsHeader(app)
+        let details = resolved?.header
+        let detailsExists = details?.exists == true
         lines.append("detailsExactIDCount=\(descendants.matching(NSPredicate(format: "identifier == %@", "settings.anki.details")).count)")
+        lines.append("detailsContainerExists=\(container.exists)")
+        if container.exists { lines.append("detailsContainerElementType=\(container.elementType.rawValue)") }
+        lines.append("detailsNativeHeaderResolved=\(resolved != nil)")
         lines.append("detailsExists=\(detailsExists)")
         var detailsValueCategory = "absent"
-        if detailsExists {
+        if let details, detailsExists {
             lines.append("detailsEnabled=\(details.isEnabled)")
             lines.append("detailsHittable=\(details.isHittable)")
             lines.append("detailsElementType=\(details.elementType.rawValue)")
