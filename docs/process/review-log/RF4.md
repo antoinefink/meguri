@@ -1528,3 +1528,32 @@ actions stay intact. Source round two has no required findings. Mac audit
 `230700Z-54534` passes one case with the same 36 existing exclusions.
 Independent light/dark visual review closes the P2. Touch audits and actual
 media-inclusive native destination/independent archive checks remain open.
+
+Export accessibility audits now pass on iPhone (`231004Z-57005`) and iPad
+(`231829Z-63596`), one case each with no failures or skips. These are focused
+screen checks, not native destination or complete integration acceptance.
+Sandbox-only Docker/VM access failures were retained; the authorized runs above
+used the dedicated VM and did not substitute host UI execution.
+
+Offline package verifier intake starts at `f3a8474e`, recorded before work in
+`build/unit-starts/RF4-package-interop-resume-20261025.json`. The prepared seven
+paths were reused through `cleanroom/230239Z-52486`. Independent review closes
+the earlier missing archive map/payload proof and misleading hash label, and
+finds two P2 test-fixture assumptions. Selftest `231955Z-66407`: fail.
+Private `232011Z-66870`: fail. Both receipts remain available.
+
+Fixer `232148Z-67615` changes only the compose option spelling and two Python
+files. It preserves the ten negative mutations, uses the actual composite row
+identities, and tests the decomposable name as a non-Apple refusal. Source round
+two has no P0–P2 findings. Selftest `232502Z-69510` passes all 17 selected BATS
+cases: eight package-verifier and nine native-capture cases. Private
+`232549Z-71558` passes all seven verifier paths; similarity `232547Z-71185`
+passes the bounded verifier/native-capture inputs.
+
+This commits the offline utility, not an interoperability result. No actual
+compatible-client import has run. Its full proof deliberately requires UTC and
+zero creation offset; the existing generated native fixture has another clock.
+Do not alter its source bytes or count partial archive checks as client/timing
+proof. The native save implementation, its remaining test-description privacy
+finding, actual destination runs and integration gate remain open. No Unit or
+milestone is accepted. The pending full-gate base remains `1416a520`.

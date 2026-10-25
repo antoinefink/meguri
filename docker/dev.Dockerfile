@@ -47,6 +47,12 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends parallel \
  && rm -rf /var/lib/apt/lists/*
 
+# Independent generated-package proof: streaming public libzstd API only.
+# Late layer preserves the Rust tool caches; no host package installation.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libzstd1 \
+ && rm -rf /var/lib/apt/lists/*
+
 ENV MG_CONTAINER=dev
 
 FROM dev AS fuzz

@@ -29,6 +29,23 @@ services:
       CARGO_TARGET_DIR: /cargo-target
       TMPDIR: /tmp
 
+  # Generated RF4 proof only. Host job adds its owned fixture directory,
+  # decoder script (read-only), and fresh output directory; no checkout mount.
+  package-interop-decoder:
+    build:
+      context: ..
+      dockerfile: docker/dev.Dockerfile
+      target: dev
+    pull_policy: build
+    init: true
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges"]
+    mem_limit: 768m
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+
   # cargo-fuzz (tools/mg core-fuzz): the dev image plus the pinned nightly and
   # cargo-fuzz of stage `fuzz`, with the dev service's mounts. Fuzz corpora
   # stay on the tmpfs; findings go to the run directory under build/mg/.
