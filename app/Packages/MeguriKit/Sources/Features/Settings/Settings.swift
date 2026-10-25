@@ -225,15 +225,23 @@ public struct ManualTransferWorkflowView: View {
     }
     public var body: some View {
         NavigationStack {
-            Form {
-                ManualTransferSections(model: model)
-                Section {} footer: {
-                    Text("Closing this sheet keeps active work and pending decisions. Continue from Collection settings.", bundle: .module)
+            ScrollViewReader { proxy in
+                Form {
+                    ManualTransferSections(model: model)
+                    Section {} footer: {
+                        Text("Closing this sheet keeps active work and pending decisions. Continue from Collection settings.", bundle: .module)
+                    }
+                }
+                #if os(macOS)
+                .formStyle(.grouped)
+                #endif
+                .task(id: model.mediaPreview != nil) {
+                    guard model.mediaPreview != nil else { return }
+                    await Task.yield()
+                    guard !Task.isCancelled, model.mediaPreview != nil else { return }
+                    proxy.scrollTo(ManualTransferSections.mediaDecisionID, anchor: .top)
                 }
             }
-            #if os(macOS)
-            .formStyle(.grouped)
-            #endif
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("settings.anki.transferWorkflow")
             .manualTransferPresentation(model: model)
@@ -241,11 +249,12 @@ public struct ManualTransferWorkflowView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: close) { Text("Done", bundle: .module) }
+                        .disabled(model.mediaPreview != nil)
                         .accessibilityIdentifier("settings.anki.closeTransfer")
                 }
             }
         }
-        .interactiveDismissDisabled(model.confirmationPresented || model.copyDestinationPresented)
+        .interactiveDismissDisabled(model.confirmationPresented || model.copyDestinationPresented || model.mediaPreview != nil)
     }
 }
 

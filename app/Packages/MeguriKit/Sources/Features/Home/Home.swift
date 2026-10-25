@@ -245,6 +245,19 @@ public struct HomeDeckTree: View {
         GeometryReader { viewport in
             ScrollViewReader { proxy in
                 List {
+                    Section {
+                        ForEach(nodes, id: \.id) { node in
+                            HomeDeckBranch(node: node, select: select, frameChanged: recordFrame)
+                        }
+                    } header: { Text("Decks", bundle: .module) }
+                    if let error {
+                        Section {
+                            Text(verbatim: error)
+                                .foregroundStyle(.token(.statusError))
+                                .accessibilityIdentifier("home.collection.error")
+                                .id(InfoAnchor.error)
+                        }
+                    }
                     if let previousAnswerCount, previousAnswerCount > 0 {
                         Section {
                             Text("\(previousAnswerCount) answers recorded", bundle: .module)
@@ -252,15 +265,6 @@ public struct HomeDeckTree: View {
                                 .accessibilityIdentifier("home.session.recorded")
                         } header: { Text("Previous Session", bundle: .module) }
                         .id(InfoAnchor.previousSession)
-                    }
-                    if let error {
-                        Text(verbatim: error)
-                            .foregroundStyle(.token(.statusError))
-                            .accessibilityIdentifier("home.collection.error")
-                            .id(InfoAnchor.error)
-                    }
-                    ForEach(nodes, id: \.id) { node in
-                        HomeDeckBranch(node: node, select: select, frameChanged: recordFrame)
                     }
                 }
                 .coordinateSpace(name: "home.deck.list")
@@ -312,12 +316,12 @@ public struct HomeDeckTree: View {
         nodes.contains { $0.id == id || contains(id, in: $0.children) }
     }
     private func scrollToTop(_ proxy: ScrollViewProxy) {
-        if let previousAnswerCount, previousAnswerCount > 0 {
-            proxy.scrollTo(InfoAnchor.previousSession, anchor: .top)
+        if let first = nodes.first {
+            proxy.scrollTo(first.id, anchor: .top)
         } else if error != nil {
             proxy.scrollTo(InfoAnchor.error, anchor: .top)
-        } else if let first = nodes.first {
-            proxy.scrollTo(first.id, anchor: .top)
+        } else if let previousAnswerCount, previousAnswerCount > 0 {
+            proxy.scrollTo(InfoAnchor.previousSession, anchor: .top)
         }
     }
 }

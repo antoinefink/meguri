@@ -68,6 +68,7 @@ struct ManualTransferRedirectDetails: View {
 
 /// System Form content shared by the production Settings shell and render hooks.
 public struct ManualTransferSections: View {
+    static let mediaDecisionID = "settings.anki.mediaDecision"
     @Bindable private var model: ManualTransferCoordinator
     #if os(iOS)
     private enum Field: Hashable { case endpoint, username, password }
@@ -228,6 +229,7 @@ public struct ManualTransferSections: View {
                 }
                 if let media = model.mediaPreview {
                     Section("Reconcile Media on This Device and Server") {
+                        LabeledContent("Current observed stage", value: model.stage.description)
                         recordFacts(media.record)
                         Text("Import and export both reconcile media in both directions. Server files are downloaded and pending local files are uploaded, even when the collection does not reference them. Counts become available after the media check.")
                         Text("A server file can overwrite a pending local edit, moving the previous local file to trash. A server deletion can move an unchanged local file to trash. Files marked for local deletion may return through download; local deletions may also be sent to the server.")
@@ -235,6 +237,7 @@ public struct ManualTransferSections: View {
                         Text("Allowing media applies these effects across every supported file and batch, including changes that occur during the run. Stopping keeps saved changes and does not restore either side. Reviews remain available during media transfer.")
                         mediaDecisionActions
                     }
+                    .id(Self.mediaDecisionID)
                 }
                 operationProgress
                 if let message = model.message {
