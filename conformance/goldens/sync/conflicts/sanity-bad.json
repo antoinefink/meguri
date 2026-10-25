@@ -1,0 +1,449 @@
+{
+  "clock": {
+    "mode": "step",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {},
+      {},
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{\"pos\":1,\"lrt\":1894701780}",
+              "did": 1894701600000,
+              "due": 1894702519,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1,
+              "mod": 1894701780,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 1,
+              "reps": 1,
+              "type": 1,
+              "usn": -1
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701780000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701780000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701780,
+              "nid": 1894701780000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 1894701720000,
+              "mod": 1894701780000,
+              "models": "",
+              "scm": 1894701660000,
+              "tags": "",
+              "usn": 2,
+              "ver": 18
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 586834209,
+              "data": "",
+              "flags": 0,
+              "flds": "sun\u001fsol",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "sun",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600001": {
+              "csum": 1188877533,
+              "data": "",
+              "flags": 0,
+              "flds": "moon\u001fluna",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "moon",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701780000": {
+              "csum": 1312686521,
+              "data": "",
+              "flags": 0,
+              "flds": "star\u001festrella",
+              "guid": "#random",
+              "id": 1894701780000,
+              "mid": 1894701600006,
+              "mod": 1894701780,
+              "sfld": "star",
+              "tags": "",
+              "usn": 0
+            }
+          },
+          "revlog": {
+            "1894701780000": {
+              "cid": 1894701600000,
+              "ease": 3,
+              "factor": 0,
+              "id": 1894701780000,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 3000,
+              "type": 0,
+              "usn": -1
+            }
+          }
+        }
+      },
+      {},
+      {
+        "sync": {
+          "error": "sanity_check_failed"
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{\"pos\":1,\"lrt\":1894701780}",
+              "did": 1894701600000,
+              "due": 1894702519,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1,
+              "mod": 1894701780,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 1,
+              "reps": 1,
+              "type": 1,
+              "usn": -1
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701780000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701780000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701780,
+              "nid": 1894701780000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 1894701720000,
+              "mod": 1894701780000,
+              "models": "",
+              "scm": 1894701840000,
+              "tags": "",
+              "usn": 2,
+              "ver": 18
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 586834209,
+              "data": "",
+              "flags": 0,
+              "flds": "sun\u001fsol",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "sun",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600001": {
+              "csum": 1188877533,
+              "data": "",
+              "flags": 0,
+              "flds": "moon\u001fluna",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "moon",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701780000": {
+              "csum": 1312686521,
+              "data": "",
+              "flags": 0,
+              "flds": "star\u001festrella",
+              "guid": "#random",
+              "id": 1894701780000,
+              "mid": 1894701600006,
+              "mod": 1894701780,
+              "sfld": "star",
+              "tags": "",
+              "usn": 0
+            }
+          },
+          "revlog": {
+            "1894701780000": {
+              "cid": 1894701600000,
+              "ease": 3,
+              "factor": 0,
+              "id": 1894701780000,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 3000,
+              "type": 0,
+              "usn": -1
+            }
+          }
+        }
+      },
+      {},
+      {
+        "sync": {
+          "result": "full_sync"
+        }
+      },
+      {
+        "sync": {
+          "result": "full_sync"
+        }
+      },
+      {},
+      {},
+      {
+        "sync": {
+          "result": "no_changes"
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 1894701960000,
+              "mod": 1894701960000,
+              "models": "",
+              "scm": 1894701660000,
+              "tags": "",
+              "usn": 3,
+              "ver": 18
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 586834209,
+              "data": "",
+              "flags": 0,
+              "flds": "sun\u001fsol",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "sun",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600001": {
+              "csum": 1188877533,
+              "data": "",
+              "flags": 0,
+              "flds": "moon\u001fluna",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "moon",
+              "tags": "",
+              "usn": 0
+            }
+          },
+          "revlog": {}
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "5d3030f2518fad6a7b7cb947d4feb88429080e1b6592c8c47f2d800be2b79849",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sync/conflicts/sanity-bad",
+  "scenario_sha256": "403a92e3e9a674f5b0e23646f7f8852f77b85428d11f9a9952d636e153598dfc",
+  "tz": "UTC"
+}

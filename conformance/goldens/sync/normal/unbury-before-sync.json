@@ -1,0 +1,133 @@
+{
+  "clock": {
+    "mode": "step",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {},
+      {},
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [-3, 1894701600, 0],
+            [-2, 1894701600, 0]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {
+        "sync": {
+          "result": "no_changes"
+        }
+      },
+      {},
+      {},
+      {
+        "sync": {
+          "result": "no_changes"
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Words",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 0
+          },
+          "#c2": {
+            "data": {},
+            "did": "Words",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 0
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, 1894701600, 0],
+            [0, 1894701600, 0],
+            [0, 1894788180, 2]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "ecb0c593606d7e5686ebcbdb0ffd447e96f9ce434c8499049597f34b283404fa",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sync/normal/unbury-before-sync",
+  "scenario_sha256": "cbf9d4132fbe39936a0650ccd10b36df265b0205ae5ac9d3c25554d64d8bfaca",
+  "tz": "UTC"
+}

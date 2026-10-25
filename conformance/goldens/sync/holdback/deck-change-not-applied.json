@@ -1,0 +1,124 @@
+{
+  "clock": {
+    "mode": "step",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {},
+      {},
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "sync": {
+          "result": "no_changes"
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "sync": {
+          "result": "no_changes"
+        }
+      },
+      {
+        "undo_status": {
+          "redo": null,
+          "undo": null
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Default"],
+            ["Words"]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Default"],
+            ["Words"]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "sync": {
+          "result": "no_changes"
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "sync": {
+          "result": "no_changes"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Default"],
+            ["Words"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "5d3030f2518fad6a7b7cb947d4feb88429080e1b6592c8c47f2d800be2b79849",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sync/holdback/deck-change-not-applied",
+  "scenario_sha256": "3466043b57cea93a32857c145fb34eb3f68ec13845efcc3751c156108f4d92dc",
+  "tz": "UTC"
+}

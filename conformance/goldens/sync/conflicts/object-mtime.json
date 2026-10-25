@@ -1,0 +1,329 @@
+{
+  "clock": {
+    "mode": "step",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {},
+      {},
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "sync": {
+          "result": "no_changes"
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "sync": {
+          "result": "no_changes"
+        }
+      },
+      {
+        "db_dump": {
+          "deck_config": {
+            "1": {
+              "config": {
+                "sha256": "b2d3a13378af8601b372cc76113debc42f7b2c4c669788ee98c3705a7af51d94"
+              },
+              "id": 1,
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1894701600000": {
+              "config": {
+                "sha256": "d929e65b31c71e505bd31b39f74ef872b95f721d71f43a0f57f44f8b273a79af"
+              },
+              "id": 1894701600000,
+              "mtime_secs": 1894701840,
+              "name": "Slow",
+              "usn": 2
+            }
+          },
+          "decks": {
+            "1": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1894701600000": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600000,
+              "kind": {
+                "sha256": "0acb1b8a68e1331e300dcaccc8f879524d942a13a04ca014c960e87ce05aded3"
+              },
+              "mtime_secs": 1894701780,
+              "name": "Words",
+              "usn": 2
+            },
+            "1894701600001": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600001,
+              "kind": {
+                "sha256": "8b4b25933c23a808aa3568801f2acee8cf92532de6160f9e94d2bddceb47211a"
+              },
+              "mtime_secs": 1894701900,
+              "name": "Verbs",
+              "usn": 3
+            }
+          },
+          "notetypes": {
+            "1894701600000": {
+              "config": {
+                "sha256": "d6937884c2f7974835d5ac8f4366508963bfd27190c4c562184d220fbd6080a5"
+              },
+              "id": 1894701600000,
+              "mtime_secs": 0,
+              "name": "Basic",
+              "usn": 0
+            },
+            "1894701600001": {
+              "config": {
+                "sha256": "2f14492aeacd3232c43a85a88ec85dbf0c475febdffb6fbf70050a276f04699b"
+              },
+              "id": 1894701600001,
+              "mtime_secs": 0,
+              "name": "Basic (and reversed card)",
+              "usn": 0
+            },
+            "1894701600002": {
+              "config": {
+                "sha256": "a2b470f52ed0afc047453940f3ad968936d494f8b83225a8fd9a8c5121a000c4"
+              },
+              "id": 1894701600002,
+              "mtime_secs": 0,
+              "name": "Basic (optional reversed card)",
+              "usn": 0
+            },
+            "1894701600003": {
+              "config": {
+                "sha256": "0186114a942b020c8490b596762edfc74ba9c5c4d57faa48c7accec9212cb824"
+              },
+              "id": 1894701600003,
+              "mtime_secs": 0,
+              "name": "Basic (type in the answer)",
+              "usn": 0
+            },
+            "1894701600004": {
+              "config": {
+                "sha256": "5a0fb80f63d1429b1e63cc665c57fd6377d7612c2033954a5775f507d52322ff"
+              },
+              "id": 1894701600004,
+              "mtime_secs": 0,
+              "name": "Cloze",
+              "usn": 0
+            },
+            "1894701600005": {
+              "config": {
+                "sha256": "11ca3d461773ef6d927f4a7a19639227674382ee14b1438536dc08824f7b2574"
+              },
+              "id": 1894701600005,
+              "mtime_secs": 0,
+              "name": "Image Occlusion",
+              "usn": 0
+            },
+            "1894701600006": {
+              "config": {
+                "sha256": "ee213107b2a94124c3c2a26d3d7b33b876401882cd005bd931f2f93e2cf2786c"
+              },
+              "id": 1894701600006,
+              "mtime_secs": 1894708800,
+              "name": "Pair",
+              "usn": 0
+            }
+          }
+        }
+      },
+      {},
+      {},
+      {
+        "sync": {
+          "result": "no_changes"
+        }
+      },
+      {
+        "db_dump": {
+          "deck_config": {
+            "1": {
+              "config": {
+                "sha256": "b2d3a13378af8601b372cc76113debc42f7b2c4c669788ee98c3705a7af51d94"
+              },
+              "id": 1,
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1894701600000": {
+              "config": {
+                "sha256": "d929e65b31c71e505bd31b39f74ef872b95f721d71f43a0f57f44f8b273a79af"
+              },
+              "id": 1894701600000,
+              "mtime_secs": 1894701840,
+              "name": "Slow",
+              "usn": 2
+            }
+          },
+          "decks": {
+            "1": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1894701600000": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600000,
+              "kind": {
+                "sha256": "e65b611bb70b7e5fee5e1ac974ab5d12364b69b21b8b05b48e37773e27085849"
+              },
+              "mtime_secs": 1894701780,
+              "name": "Words",
+              "usn": 3
+            },
+            "1894701600001": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600001,
+              "kind": {
+                "sha256": "8b4b25933c23a808aa3568801f2acee8cf92532de6160f9e94d2bddceb47211a"
+              },
+              "mtime_secs": 1894701900,
+              "name": "Verbs",
+              "usn": 3
+            }
+          },
+          "notetypes": {
+            "1894701600000": {
+              "config": {
+                "sha256": "d6937884c2f7974835d5ac8f4366508963bfd27190c4c562184d220fbd6080a5"
+              },
+              "id": 1894701600000,
+              "mtime_secs": 0,
+              "name": "Basic",
+              "usn": 0
+            },
+            "1894701600001": {
+              "config": {
+                "sha256": "2f14492aeacd3232c43a85a88ec85dbf0c475febdffb6fbf70050a276f04699b"
+              },
+              "id": 1894701600001,
+              "mtime_secs": 0,
+              "name": "Basic (and reversed card)",
+              "usn": 0
+            },
+            "1894701600002": {
+              "config": {
+                "sha256": "a2b470f52ed0afc047453940f3ad968936d494f8b83225a8fd9a8c5121a000c4"
+              },
+              "id": 1894701600002,
+              "mtime_secs": 0,
+              "name": "Basic (optional reversed card)",
+              "usn": 0
+            },
+            "1894701600003": {
+              "config": {
+                "sha256": "0186114a942b020c8490b596762edfc74ba9c5c4d57faa48c7accec9212cb824"
+              },
+              "id": 1894701600003,
+              "mtime_secs": 0,
+              "name": "Basic (type in the answer)",
+              "usn": 0
+            },
+            "1894701600004": {
+              "config": {
+                "sha256": "5a0fb80f63d1429b1e63cc665c57fd6377d7612c2033954a5775f507d52322ff"
+              },
+              "id": 1894701600004,
+              "mtime_secs": 0,
+              "name": "Cloze",
+              "usn": 0
+            },
+            "1894701600005": {
+              "config": {
+                "sha256": "11ca3d461773ef6d927f4a7a19639227674382ee14b1438536dc08824f7b2574"
+              },
+              "id": 1894701600005,
+              "mtime_secs": 0,
+              "name": "Image Occlusion",
+              "usn": 0
+            },
+            "1894701600006": {
+              "config": {
+                "sha256": "c2e922951abe8a9955ac3d3d42755bfd4f38bc924265a246a3709c3b28317ffd"
+              },
+              "id": 1894701600006,
+              "mtime_secs": 1894701780,
+              "name": "Pair",
+              "usn": 2
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "ecb0c593606d7e5686ebcbdb0ffd447e96f9ce434c8499049597f34b283404fa",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sync/conflicts/object-mtime",
+  "scenario_sha256": "8ec00ddf3fe3a6081a124d074307b15d1a8d95fdaa2719c31977491c6509a164",
+  "tz": "UTC"
+}
