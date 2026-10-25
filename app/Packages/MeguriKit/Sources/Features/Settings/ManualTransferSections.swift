@@ -84,11 +84,29 @@ public struct ManualTransferSections: View {
         Group {
             if area == .all || area == .connectionAndTransfers || area == .connection {
                 Section {
+                    #if os(macOS)
                     HStack(alignment: .center) {
                         Text("Server URL", bundle: .module)
                         endpointField
                         testConnectionButton
                     }
+                    #else
+                    VStack(alignment: .leading, spacing: Spacing.small) {
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                Text("Server URL", bundle: .module)
+                                Spacer()
+                                testConnectionButton
+                            }
+                            VStack(alignment: .leading, spacing: Spacing.small) {
+                                Text("Server URL", bundle: .module)
+                                testConnectionButton
+                            }
+                        }
+                        endpointField
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    #endif
                     if let result = model.connectionTestResult {
                         Text(verbatim: result)
                             .fixedSize(horizontal: false, vertical: true)

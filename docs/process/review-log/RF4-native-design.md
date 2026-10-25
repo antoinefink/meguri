@@ -190,3 +190,21 @@ Input: `1616736dcfab36ebd05ed20c377bc1b1e29d5b179c42dffa9d1aba8f92507674`.
 The copied app and widget match the receipt hashes. The exact Mac product opens.
 Static checks `20261024T135735Z-1030` and similarity `20261024T135736Z-1254` pass.
 The larger goal stays paused; no Unit or milestone acceptance is claimed.
+
+## Touch address layout, 2026-10-25
+
+The full app goal has resumed. Layout repair starts at
+`3419ceba3f6111ed6682d979d31b9f9fb839c367`.
+Implementer session: `s-20261025T024158Z-4e350e81`.
+Filtered export: `cleanroom/20261025T024238Z-39959`.
+
+The public Settings fixture in `snapshots/20261025T022726Z-26703` showed a
+supported URL split across five short lines at XXXLarge on iPhone. Independent
+review found a P2 in the three-control horizontal row. Touch platforms now put
+the URL editor below an adaptive label/Test header, using its full row width.
+The Mac row, controls, guards and input behavior are unchanged.
+
+Independent source review found no P0–P2. UI lint
+`20261025T024405Z-41252`, privacy `20261025T024406Z-41468` and similarity
+`20261025T024406Z-41481` passed. Native renders, replacement baselines and the
+shared integration gate remain pending. No unit is accepted by this repair.
