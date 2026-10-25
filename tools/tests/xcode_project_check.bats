@@ -110,6 +110,14 @@ case "$name $*" in
     mkdir -p "$dd/Build/Products"
     sdk=iphonesimulator root="$config-iphonesimulator"
     case "$dest" in platform=macOS*) sdk=macosx root="$config" ;; esac
+    if [ "$sdk" = macosx ] && [ "$plan" = Snapshot ]; then
+      if [ "${STUB_EXPECT_TEAM_WIDGET_RECOPY:-0}" = 1 ]; then
+        widget="$dd/Build/Products/Debug/Meguri.app/Contents/PlugIns/MeguriWidget.appex"
+        [ ! -e "$widget" ] && [ ! -L "$widget" ] || { echo "xcode_project_check: stale embedded widget reached build"; exit 65; }
+        echo 'snapshot-widget-absent-before-build' >>"$STUB_LOG"
+      fi
+      [ "${STUB_MAC_SNAPSHOT_BUILD_FAIL:-0}" != 1 ] || exit 65
+    fi
     if [ "$sdk" = macosx ] && [ "$plan" = Unit ]; then
       excluded="$dd/Build/Products/$root/Meguri.app/Contents/PlugIns/MeguriSnapshotTests.xctest"
       if [ -e "$excluded" ] || [ "${STUB_MAC_UNIT_BUILD_FAIL:-0}" = 1 ]; then
@@ -202,7 +210,8 @@ EOF
     ln -s _stub "$STUBS/$c"
   done
   export PATH="$STUBS:$PATH"
-  unset MEGURI_ALLOW_MAC_UI STUB_APP_TYPE
+  unset MEGURI_ALLOW_MAC_UI STUB_APP_TYPE MEGURI_APP_SIGNING XCODE_CHECK_WORK
+  unset STUB_EXPECT_TEAM_WIDGET_RECOPY STUB_MAC_SNAPSHOT_BUILD_FAIL
 }
 
 teardown() {
@@ -325,7 +334,7 @@ check_project() {
     set -- --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac "$@"
   fi
   FAKE_VM_APP_INFO="${STUB_APP_INFO:-}" FAKE_VM_APP_TYPE="${STUB_APP_TYPE:-UIElement}" FAKE_VM_APP_FRONT="${STUB_APP_FRONT:-}" \
-    run --separate-stderr /bin/bash "$SB/tools/tests/xcode_project_check.sh" "$BATS_TEST_TMPDIR/work" "$@"
+    run --separate-stderr /bin/bash "$SB/tools/tests/xcode_project_check.sh" "${XCODE_CHECK_WORK:-$BATS_TEST_TMPDIR/work}" "$@"
 }
 
 called() { grep -qE "$1" "$STUB_LOG" || { echo "no call matches: $1" && cat "$STUB_LOG" && return 1; }; }
@@ -887,6 +896,170 @@ assert_project_presence_missing() {
   FAKE_VM_TEST_RC=65 check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
   [ "$status" -ne 0 ]
   tap_line 'not ok [0-9]+ iphone-Debug-TestHooksTests: Passed .*'
+}
+
+# Only these new cases need the production checkout/build path constraint;
+# existing cases keep their original work directory.
+team_snapshot_work() {
+  export XCODE_CHECK_WORK="$(cd "$SB" && pwd -P)/build/snapshot-signing"
+  mkdir -p "$XCODE_CHECK_WORK"
+}
+
+seed_snapshot_widget_products() {
+  local products="$XCODE_CHECK_WORK/DerivedData-tests/Build/Products"
+  local path
+  for path in Debug/Meguri.app/Contents/PlugIns/MeguriWidget.appex \
+    Debug/MeguriWidget.appex Debug/Meguri.app/Contents/PlugIns/Other.appex \
+    Debug/Other.app Debug/Unrelated.framework; do
+    mkdir -p "$products/$path"
+    printf '%s\n' "$path" >"$products/$path/keep"
+  done
+  mkdir -p "$XCODE_CHECK_WORK/DerivedData-tests/Build/Intermediates.noindex"
+  echo intermediate >"$XCODE_CHECK_WORK/DerivedData-tests/Build/Intermediates.noindex/keep"
+}
+
+assert_snapshot_sentinels() {
+  local products="$XCODE_CHECK_WORK/DerivedData-tests/Build/Products" path
+  for path in Debug/MeguriWidget.appex Debug/Meguri.app/Contents/PlugIns/Other.appex \
+    Debug/Other.app Debug/Unrelated.framework; do
+    [ "$(cat "$products/$path/keep")" = "$path" ]
+  done
+  [ "$(cat "$XCODE_CHECK_WORK/DerivedData-tests/Build/Intermediates.noindex/keep")" = intermediate ]
+}
+
+assert_adhoc_snapshot_widget() {
+  team_snapshot_work
+  seed_snapshot_widget_products
+  check_project --phase devices
+  no_vm_failure
+  called '^xcodebuild build-for-testing .* -testPlan Snapshot .* -destination platform=macOS,arch=arm64 .*DerivedData-tests$'
+  not_called '^xcodebuild .* (MEGURI_SIGNING=|CODE_SIGN|DEVELOPMENT_TEAM=|-allowProvisioning)'
+  not_called '^snapshot-widget-absent-before-build$'
+  [ "$(cat "$XCODE_CHECK_WORK/DerivedData-tests/Build/Products/Debug/Meguri.app/Contents/PlugIns/MeguriWidget.appex/keep")" = Debug/Meguri.app/Contents/PlugIns/MeguriWidget.appex ]
+  assert_snapshot_sentinels
+}
+
+@test "default Mac Snapshot signing keeps existing arguments and embedded widget" {
+  assert_adhoc_snapshot_widget
+}
+
+@test "explicit adhoc Mac Snapshot signing keeps existing arguments and embedded widget" {
+  MEGURI_APP_SIGNING=adhoc assert_adhoc_snapshot_widget
+}
+
+@test "explicit team adds exactly the existing provisioning arguments only to Mac Snapshot and recopies only its embedded widget" {
+  team_snapshot_work
+  seed_snapshot_widget_products
+  MEGURI_APP_SIGNING=team MEGURI_ALLOW_MAC_UI=1 STUB_EXPECT_TEAM_WIDGET_RECOPY=1 check_project
+  no_vm_failure
+  tap_line 'ok [0-9]+ mac-app-hosted: Passed .*'
+  called '^snapshot-widget-absent-before-build$'
+  called '^vm-xcodebuild .*Meguri_Unit_macosx'
+  called '^vm-xcodebuild .*Meguri_UI_macosx'
+  called '^vm-xcodebuild .*Meguri_Snapshot_iphonesimulator'
+  [ ! -e "$XCODE_CHECK_WORK/DerivedData-tests/Build/Products/Debug/Meguri.app/Contents/PlugIns/MeguriWidget.appex" ]
+  assert_snapshot_sentinels
+  python3 - "$STUB_LOG" "$(cd "$SB" && pwd -P)" "$XCODE_CHECK_WORK" "$REPO_ROOT/app/Config/MeguriUITests.xcconfig" <<'PY'
+from pathlib import Path
+import sys
+
+log, repo, work, runner = sys.argv[1:]
+builds = [line for line in Path(log).read_text().splitlines() if line.startswith("xcodebuild ")]
+snapshot = [line for line in builds if " -testPlan Snapshot " in line and " -destination platform=macOS" in line]
+expected = (f"xcodebuild build-for-testing -project {repo}/app/Meguri.xcodeproj"
+            " -scheme Meguri -testPlan Snapshot -configuration Debug -destination platform=macOS,arch=arm64"
+            f" -derivedDataPath {work}/DerivedData-tests"
+            " MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration")
+assert snapshot == [expected], snapshot
+for line in builds:
+    assert not any(key in line for key in ("CODE_SIGN", "DEVELOPMENT_TEAM", "PROVISIONING_PROFILE")), line
+    if line != expected:
+        assert not any(arg in line for arg in ("MEGURI_SIGNING=", "-allowProvisioning")), line
+config = Path(runner).read_text()
+for setting in ("CODE_SIGN_STYLE[sdk=macosx*] = Manual", "CODE_SIGN_IDENTITY[sdk=macosx*] = -",
+                "DEVELOPMENT_TEAM[sdk=macosx*] =\n"):
+    assert setting in config, setting
+PY
+}
+
+@test "invalid and explicitly empty app signing modes stop VM test builds and Products copies with a fixed diagnostic" {
+  local mode
+  for mode in invalid-signing-marker ''; do
+    : >"$STUB_LOG"
+    MEGURI_APP_SIGNING="$mode" check_project --phase devices
+    [ "$status" -ne 0 ]
+    tap_line '# xcode_project_check: MEGURI_APP_SIGNING takes adhoc or team'
+    ! grep -q 'invalid-signing-marker' <<<"$output"
+    not_called '^xcodebuild build-for-testing '
+    not_called '^vm-ssh .*DerivedData-tests/Build/Products'
+    not_called '^vm-xcodebuild '
+  done
+}
+
+@test "failed Team Mac Snapshot build starts no Snapshot VM test or fallback build" {
+  team_snapshot_work
+  seed_snapshot_widget_products
+  MEGURI_APP_SIGNING=team STUB_EXPECT_TEAM_WIDGET_RECOPY=1 STUB_MAC_SNAPSHOT_BUILD_FAIL=1 check_project --phase devices
+  [ "$status" -ne 0 ]
+  tap_line 'not ok [0-9]+ mac-app-hosted: .*'
+  tap_line '# xcode_project_check: the build for testing failed'
+  [ "$(grep -c '^xcodebuild build-for-testing .* -testPlan Snapshot .* -destination platform=macOS' "$STUB_LOG")" -eq 1 ]
+  called '^xcodebuild build-for-testing .* -testPlan Snapshot .* -destination platform=macOS.* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration$'
+  not_called '^vm-xcodebuild .*Meguri_Snapshot_macosx'
+  not_called '^xcodebuild test '
+  assert_snapshot_sentinels
+}
+
+@test "Team Mac Snapshot refuses widget and plugin ancestor symlinks without changing outside data" {
+  team_snapshot_work
+  local plugins="$XCODE_CHECK_WORK/DerivedData-tests/Build/Products/Debug/Meguri.app/Contents/PlugIns"
+  local outside="$BATS_TEST_TMPDIR/outside-widget" kind
+  mkdir -p "$plugins" "$outside"
+  echo outside >"$outside/keep"
+  for kind in widget ancestor; do
+    : >"$STUB_LOG"
+    if [ "$kind" = widget ]; then
+      ln -s "$outside" "$plugins/MeguriWidget.appex"
+    else
+      rm "$plugins/MeguriWidget.appex"
+      rmdir "$plugins"
+      ln -s "$outside" "$plugins"
+    fi
+    MEGURI_APP_SIGNING=team check_project --phase devices
+    [ "$status" -ne 0 ]
+    tap_line '# xcode_project_check: unsafe Team Snapshot embedded widget path'
+    not_called '^xcodebuild build-for-testing .* -testPlan Snapshot .* -destination platform=macOS'
+    not_called '^vm-xcodebuild .*Meguri_Snapshot_macosx'
+    [ "$(cat "$outside/keep")" = outside ]
+    [ "$(ls -A "$outside")" = keep ]
+    if [ "$kind" = widget ]; then [ -L "$plugins/MeguriWidget.appex" ]; else [ -L "$plugins" ]; fi
+  done
+}
+
+@test "Team Mac Snapshot refuses work outside the canonical checkout build directory" {
+  local widget="$BATS_TEST_TMPDIR/work/DerivedData-tests/Build/Products/Debug/Meguri.app/Contents/PlugIns/MeguriWidget.appex"
+  mkdir -p "$widget"
+  echo keep >"$widget/keep"
+  MEGURI_APP_SIGNING=team check_project --phase devices
+  [ "$status" -ne 0 ]
+  tap_line '# xcode_project_check: unsafe Team Snapshot embedded widget path'
+  not_called '^xcodebuild build-for-testing .* -testPlan Snapshot .* -destination platform=macOS'
+  not_called '^vm-xcodebuild .*Meguri_Snapshot_macosx'
+  [ "$(cat "$widget/keep")" = keep ]
+}
+
+@test "retained Profile proof guard stops Team Snapshot before widget removal or build or Products copy" {
+  team_snapshot_work
+  seed_snapshot_widget_products
+  mkdir -p "$XCODE_CHECK_WORK/DerivedData-tests/Build/Products/Profile-iphonesimulator/Partial.app"
+  MEGURI_APP_SIGNING=team check_project --phase devices
+  [ "$status" -ne 0 ]
+  tap_line '# xcode_project_check: Profile/Performance cache blocked: .*'
+  not_called '^xcodebuild build-for-testing '
+  not_called '^vm-ssh .*DerivedData-tests/Build/Products'
+  not_called '^vm-xcodebuild '
+  [ -f "$XCODE_CHECK_WORK/DerivedData-tests/Build/Products/Debug/Meguri.app/Contents/PlugIns/MeguriWidget.appex/keep" ]
+  assert_snapshot_sentinels
 }
 
 @test "xcode-check removes only the excluded Snapshot bundle before its first Mac Unit build" {

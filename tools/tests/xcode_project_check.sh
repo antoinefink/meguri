@@ -485,6 +485,46 @@ fi
 
 # --- VM execution (the devices phase) ---------------------------------------
 VM_MARK="mg-xcode-check: remote exit"
+
+# Force Xcode to recopy only the generated Debug widget when Snapshot opts
+# into team signing. Refuse symlinks anywhere from the checkout to that copy.
+remove_team_snapshot_embedded_widget() {
+  local widget="$DD_TESTS/Build/Products/Debug/Meguri.app/Contents/PlugIns/MeguriWidget.appex"
+  if ! python3 - "$REPO" "$WORK" "$DD_TESTS" "$widget" <<'PY'
+from pathlib import Path
+import sys
+
+def require(condition):
+    if not condition:
+        raise ValueError()
+
+try:
+    repo, work, dd, widget = map(Path, sys.argv[1:])
+    require(repo.is_absolute() and repo == repo.resolve(strict=True))
+    relative = work.relative_to(repo)
+    require(len(relative.parts) >= 2 and relative.parts[0] == "build")
+    require(work == work.resolve(strict=True))
+    require(sys.argv[3] == str(work / "DerivedData-tests"))
+    require(widget == dd / "Build/Products/Debug/Meguri.app/Contents/PlugIns/MeguriWidget.appex")
+    current = repo
+    for part in widget.relative_to(repo).parts:
+        require(part not in (".", ".."))
+        current = current / part
+        require(not current.is_symlink())
+        require(not current.exists() or current.is_dir())
+except (OSError, RuntimeError, ValueError):
+    sys.exit(1)
+PY
+  then
+    echo "xcode_project_check: unsafe Team Snapshot embedded widget path"
+    return 1
+  fi
+  if ! rm -rf "$widget" 2>/dev/null; then
+    echo "xcode_project_check: cannot remove the Team Snapshot embedded widget"
+    return 1
+  fi
+}
+
 # What the tests read in the repository, at their source paths, besides the
 # products: the snapshot baselines (HostedSnapshot.swift), the hook fixtures
 # (BuildUnderTest.hookFixture) and the example drive scripts
@@ -696,6 +736,7 @@ vm_session_result() {
 # reached (VM_QUEUE_REASON; U19c).
 test_in_vm() {
   local name="$1" scheme="$2" plan="$3" config="$4" dest="$5" result="$WORK/$1.xcresult" log="$LOGS/$1.log" xctestrun code p inputs=() rc policy_report sdk=iphonesimulator build_dest="generic/platform=iOS Simulator"
+  local signing="${MEGURI_APP_SIGNING-adhoc}" signing_args=()
   shift 5
   VM_QUEUE_REASON=""
   if [ -n "$VM_PRODUCTS_BLOCKED" ]; then
@@ -713,8 +754,17 @@ test_in_vm() {
   # Check retained evidence before any build (including earlier Mac/Debug
   # plans) can replace it, as well as immediately before whole-Products copy.
   : >"$log"
+  case "$signing" in
+    adhoc | team) ;;
+    *) echo "xcode_project_check: MEGURI_APP_SIGNING takes adhoc or team" >>"$log"; return 70 ;;
+  esac
   profile_cache_check "$log" || return 70
   case "$dest" in platform=macOS*) sdk=macosx build_dest="$dest" ;; esac
+  if [ "$sdk" = macosx ] && [ "$plan" = Snapshot ] && [ "$signing" = team ]; then
+    [ "$config" = Debug ] || { echo "xcode_project_check: Team Snapshot requires Debug" >>"$log"; return 70; }
+    remove_team_snapshot_embedded_widget >>"$log" 2>&1 || return 70
+    signing_args=(MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration)
+  fi
   # Unit excludes the app-hosted Snapshot target. An old incomplete copy
   # inside its host app can make signing fail before any Unit test builds.
   # Remove only that excluded generated bundle, before the first build.
@@ -729,7 +779,7 @@ test_in_vm() {
     profile_cache begin >>"$log" 2>&1 || return 70
   fi
   if ! xcodebuild build-for-testing -project "$PROJECT" -scheme "$scheme" -testPlan "$plan" -configuration "$config" \
-    -destination "$build_dest" -derivedDataPath "$DD_TESTS" >>"$log" 2>&1; then
+    -destination "$build_dest" -derivedDataPath "$DD_TESTS" ${signing_args[0]+"${signing_args[@]}"} >>"$log" 2>&1; then
     echo "xcode_project_check: the build for testing failed" >>"$log"
     return 70
   fi

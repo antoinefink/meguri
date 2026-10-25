@@ -36,3 +36,20 @@ Privacy `20261025T024340Z-40904` and similarity
 test-title or comment lines; those lines were rewritten without changing the
 guard. The full integration gate remains pending against batch base
 `81c207573c20c337c8834e4ae8b4ee8f29603dbf`. This repair adds no unit acceptance.
+
+## Mac Snapshot signing
+
+Start: `f1a6e81f`. Filtered repair: `cleanroom/20261025T025430Z-50155`.
+The real credential test failed with status -34018 because this test-build path
+ignored the explicit team-signing mode. The signed native workflow had passed.
+
+The runner now honors that existing opt-in only for the Mac Debug Snapshot
+host. Configuration checks, hidden launches, Mac Unit tests, simulators and the
+Mac UI runner retain their existing signing. A bounded widget recopy prevents
+an old embedded signature from surviving the mode change. The direct credential
+assertions are unchanged. There is no fallback after a failed build.
+
+Independent review found no P0–P2. All eight focused regressions passed without
+skips in `selftest/20261025T030022Z-60289`. Privacy
+`20261025T030023Z-60563` and similarity `20261025T030023Z-60504` passed.
+Native credential verification and the full gate remain pending.
