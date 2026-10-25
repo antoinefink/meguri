@@ -304,3 +304,23 @@ passes 11 checks. The transport run is active; its result remains pending.
 
 Core lint `200411Z-39826` fails: apply takes nine arguments and three labels
 use conversions. Fix these before the batch gate.
+
+## App delivery priority and open checks
+
+Antoine asked to stop extended Anki sync investigation and return to app
+delivery. The sync batch is parked, not accepted. The original integration
+base remains `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
+
+The private merge-input refactor has a clear independent review. Lint run
+`201709Z-48187` clears those four sync diagnostics but fails on three testkit
+checks: the actors expect after is_some, items after the storage test module,
+and a guard held across await in the sync adapter. These remain open.
+
+Real transport run `200526Z-40823` ends with error and zero transport passes.
+The before-token cancellation cleanup cannot prove proxy ownership. Source
+triage does not establish the cause. The failed receipt and owner registry
+remain in that run directory; reservations remain held. Inspect through MG
+and prove exact-owned cleanup before reusing them. No force cleanup or fault
+service restart was performed. Actual live cases and the batch gate remain
+pending. Return to the shared app and review workflow; resume these checks
+before sync or release acceptance.

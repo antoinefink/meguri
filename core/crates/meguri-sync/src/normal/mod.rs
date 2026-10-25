@@ -192,7 +192,7 @@ async fn run_inner(
     progress: ProgressSink,
 ) -> Result<Outcome> {
     checkpoint(engine, collection, job)?;
-    progress.set_phase(ProgressPhase::Named("connecting".into()));
+    progress.set_phase(ProgressPhase::Named("connecting"));
     collection.check_rollover().map_err(engine_error)?;
     let mut reader = collection.reader(ReaderRole::Sync).map_err(engine_error)?;
     let local = status::LocalRecord::read(&*reader)?;
@@ -259,7 +259,7 @@ async fn run_inner(
     let mut started = false;
     let result: Result<MergeOutcome> = async {
         checkpoint(engine, collection, job)?;
-        progress.set_phase(ProgressPhase::Named("syncing".into()));
+        progress.set_phase(ProgressPhase::Named("syncing"));
         started = true;
         let graves =
             decode_graves(&request(job, Method::Start, Payload::Json(encode_start(check.local_usn, newer))).await?)?;
@@ -303,7 +303,7 @@ async fn run_inner(
                 break;
             }
         }
-        progress.set_phase(ProgressPhase::Named("finalising".into()));
+        progress.set_phase(ProgressPhase::Named("finalising"));
         let counts = sanity::counts(&disk)?;
         if let SanityAnswer::Bad { client, server } = decode_sanity_answer(
             &request(job, Method::SanityCheck2, Payload::Json(encode_sanity_check(&counts))).await?,
@@ -332,11 +332,13 @@ async fn run_inner(
         commit::apply(
             collection,
             &disk,
-            hold,
-            schema,
-            usn,
-            time,
-            meta,
+            commit::MergeInput {
+                hold,
+                schema,
+                usn,
+                time,
+                meta,
+            },
             job.cancellation(),
             progress.clone(),
         )

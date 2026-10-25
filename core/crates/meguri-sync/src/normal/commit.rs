@@ -31,17 +31,27 @@ pub struct MergeOutcome {
     pub write_budget: Duration,
     pub seq: Option<meguri_engine::Seq>,
 }
+pub(super) struct MergeInput {
+    pub(super) hold: SyncHold,
+    pub(super) schema: EpochMillis,
+    pub(super) usn: Usn,
+    pub(super) time: EpochMillis,
+    pub(super) meta: Meta,
+}
 pub(super) fn apply(
     collection: &Collection,
     stage: &NormalStage,
-    hold: SyncHold,
-    schema: EpochMillis,
-    usn: Usn,
-    time: EpochMillis,
-    meta: Meta,
+    input: MergeInput,
     cancel: Arc<CancelToken>,
     progress: ProgressSink,
 ) -> Result<MergeOutcome> {
+    let MergeInput {
+        hold,
+        schema,
+        usn,
+        time,
+        meta,
+    } = input;
     let path = stage.path().to_path_buf();
     if cancel.is_cancelled() {
         return Err(engine_error(EngineError::Cancelled));

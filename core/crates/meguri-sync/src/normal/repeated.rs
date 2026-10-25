@@ -36,11 +36,13 @@ fn merge(f: &Fixture, disk: &NormalStage, hold: SyncHold, schema: EpochMillis) -
     commit::apply(
         &f.collection,
         disk,
-        hold,
-        schema,
-        Usn(5),
-        EpochMillis(NOW),
-        stage::Meta::default(),
+        commit::MergeInput {
+            hold,
+            schema,
+            usn: Usn(5),
+            time: EpochMillis(NOW),
+            meta: stage::Meta::default(),
+        },
         CancelToken::new(),
         ProgressSink::new(),
     )
@@ -737,11 +739,13 @@ fn repeated_note_replay_declares_long_write_and_hands_off_durable_answer() {
             commit::apply(
                 &collection,
                 &disk,
-                hold,
-                schema,
-                Usn(5),
-                EpochMillis(NOW),
-                stage::Meta::default(),
+                commit::MergeInput {
+                    hold,
+                    schema,
+                    usn: Usn(5),
+                    time: EpochMillis(NOW),
+                    meta: stage::Meta::default(),
+                },
                 CancelToken::new(),
                 ProgressSink::new(),
             )
