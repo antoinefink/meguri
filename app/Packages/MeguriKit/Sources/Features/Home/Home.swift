@@ -142,11 +142,12 @@ public struct HomeView: View {
                         .accessibilityIdentifier("home.deck.counts.due")
                 }
                 GridRow {
-                    Text("New", bundle: .module).accessibilityHidden(true)
-                    Text("Learning", bundle: .module).accessibilityHidden(true)
-                    Text("Due", bundle: .module).accessibilityHidden(true)
+                    Text("New", bundle: .module).padding(.horizontal).accessibilityHidden(true)
+                    Text("Learning", bundle: .module).padding(.horizontal).accessibilityHidden(true)
+                    Text("Due", bundle: .module).padding(.horizontal).accessibilityHidden(true)
                 }
             }
+            .padding(.vertical)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home.deck.counts")
             Button { Task { await collection.startStudy(deckID: deck.id) } } label: {
@@ -282,18 +283,13 @@ public struct HomeSidebarDecks: View {
                     let dueValue: Text = Text("\(Text(dueCount, format: .number)) due", bundle: .module)
                     // Native compact navigation may truncate visually; help keeps
                     // the full path, and accessibility keeps the path and due count.
-                    HStack {
-                        Text(verbatim: deck.path)
-                        Spacer(minLength: 0)
-                        if let node = collection.deck(deck.id) {
-                            Text("\(Text(node.counts.review, format: .number)) due", bundle: .module)
-                        }
-                    }
-                    .lineLimit(1)
-                    .help(Text(verbatim: deck.path))
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel(Text(verbatim: deck.path))
-                    .accessibilityValue(dueValue)
+                    Text(verbatim: deck.path)
+                        .badge(Text(dueCount, format: .number))
+                        .lineLimit(1)
+                        .help(Text(verbatim: deck.path))
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(Text(verbatim: deck.path))
+                        .accessibilityValue(dueValue)
                     #else
                     VStack(alignment: .leading, spacing: Spacing.xxSmall) {
                         Text(verbatim: deck.path)

@@ -39,6 +39,7 @@ Passing checks alone do not establish native appearance.
 - Center the selected deck and empty state in the available detail pane. Overflow content remains scrollable; fixed top padding is not the centering mechanism.
 - On Mac, use a content-sized Study button and simple deck-name/due-count sidebar rows. The selected deck shows the three labeled counts without filling the sidebar with that full sentence.
 - Mac deck rows use the system sidebar surface and selection. Keep navigation rows to one line; retain the full deck path in accessibility and hover help. This bounded truncation keeps long names from taking over the sidebar. Touch rows retain wrapping.
+- Use a native numeric badge for the Mac sidebar count, without a visible “due” suffix. Retain its meaning in the accessibility value. Give the deck summary space with system padding around its count grid and labels (Antoine, 2026-10-25).
 - Keep a previous-session summary secondary and aligned with the selected deck. Show it there only when the saved session belongs to that deck; keep collection-wide history available on the Decks root.
 - The sidebar shows deck names and counts. With no deck rows, show “No decks”.
 - Keep import in File, Collection settings and empty-state onboarding.

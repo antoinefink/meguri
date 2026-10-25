@@ -55,3 +55,22 @@ The review receipt is complete and retained in `build/`.
 The original full gate base remains unchanged. This focused
 repair does not establish release or human visual acceptance.
 Human visual and baseline approval remain pending.
+
+## User preview feedback
+
+Antoine inspected the updated desktop preview and requested numeric sidebar
+counts without the visible suffix, plus more space around the deck summary.
+The full gate `081719Z-4017` was stopped through documented cancellation
+before its Apple UI suites while this preview layout is changing. It remains
+incomplete, not passing. Its completed checks include the repaired native
+durability run, core/conformance suites, tooling tests, docs/lint and SwiftCore.
+
+Filtered fix `cleanroom/20261025T084723Z-90419`, from `4f2ad264`, uses the
+native Text badge and system padding on the Grid and labels. Spoken count
+meaning, navigation identity, review guards and touch layout are unchanged.
+Native drive `084937Z-91931` passed all 21 steps with no hierarchy issue,
+compiler error or warning. Independent source and six-image review found no
+P0–P2 findings. Privacy `085006Z-93715` and the scoped similarity check passed.
+The exact verified app was copied to a stable preview path and opened after
+the older copy quit normally. Only one desktop instance was observed.
+The full gate retains the original integration base and remains required.
