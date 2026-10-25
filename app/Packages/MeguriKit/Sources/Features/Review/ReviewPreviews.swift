@@ -32,18 +32,20 @@ private struct ReviewFinishedFixture: View {
             notice: nil, undoDescription: "Undo Answer Card", canUndo: true, canRedo: false,
             phase: waiting ? .waiting : .finished, states: nil, enabled: true,
             close: {}, undo: {}, redo: {}, reveal: {}, rate: { _ in }) {
-                if waiting {
-                    EmptyStateView(Text("Waiting for Learning", bundle: .module), systemImage: "clock",
-                        description: Text("Your next learning card is not ready yet.", bundle: .module)) {
-                            Button {} label: { Text("Check Now", bundle: .module) }
-                                .accessibilityIdentifier("review.session.refresh")
-                        }
-                } else {
-                    EmptyStateView(Text("Finished for Now", bundle: .module), systemImage: "checkmark.circle",
-                        description: Text("Your answers have been recorded. You can go back to your last answer or close the session.", bundle: .module)) {
-                            Button {} label: { Text("Done", bundle: .module) }
-                                .accessibilityIdentifier("review.session.done")
-                        }
+                ReviewStatusLayout {
+                    if waiting {
+                        EmptyStateView(Text("Waiting for Learning", bundle: .module), systemImage: "clock",
+                            description: Text("Your next learning card is not ready yet.", bundle: .module)) {
+                                Button {} label: { Text("Check Now", bundle: .module) }
+                                    .accessibilityIdentifier("review.session.refresh")
+                            }
+                    } else {
+                        EmptyStateView(Text("Finished for Now", bundle: .module), systemImage: "checkmark.circle",
+                            description: Text("Your answers have been recorded. You can go back to your last answer or close the session.", bundle: .module)) {
+                                Button {} label: { Text("Done", bundle: .module) }
+                                    .accessibilityIdentifier("review.session.done")
+                            }
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -59,7 +61,9 @@ private struct ReviewFixture: View {
             undoDescription: "Undo Answer Card", canUndo: true, canRedo: false,
             phase: state == .loading ? .loading : (answer ? .answer : .question), states: states,
             enabled: true, close: {}, undo: {}, redo: {}, reveal: {}, rate: { _ in }) {
-                if state == .loading { LoadingStateView(Text(verbatim: "Preparing review…")) }
+                if state == .loading {
+                    ReviewStatusLayout { LoadingStateView(Text(verbatim: "Preparing review…")) }
+                }
                 else {
                     ScrollView {
                         Text(verbatim: state == .overflow ? String(repeating: "A longer question with an answer that wraps across the card. ", count: 12) : (answer ? "Answer" : "Question"))

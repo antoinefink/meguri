@@ -250,3 +250,24 @@ Independent source review found no P0–P2. Focused audit
 case, with no failures or skips. UI lint `20261025T045908Z-57866`, privacy
 `20261025T050034Z-60566` and similarity `20261025T045908Z-57978` passed.
 Updated render evidence and the required full gate remain pending.
+
+## Review status layout, in progress
+
+Start: `d6075d6c`. The failed gate's public Review images exposed clipped
+completion text and missing actions on iPhone at AX5. Terminal states still
+reserved space for hidden rating buttons. Filtered work
+`cleanroom/20261025T044019Z-38273`, session `s-20261025T024158Z-4e350e81`,
+removes that reservation outside active review and gives status content a
+scrolling viewport. Active question, answer and transition controls retain
+their layout and card-host identity. The public fixtures use the same layout.
+The test requires each action to fit inside its scroll view before one tap.
+It also checks saved answers after restarting. Independent source review
+round 2 found no P0–P2. Lint, privacy and similarity passed in the focused
+receipts recorded above. One new documentation comment was removed after
+the privacy guard named its line; the guard was not changed.
+
+The first native AX5 run `ui-test/20261025T050355Z-66903` failed after the
+visible Check Now action changed waiting to finished. This outcome remains
+under investigation; the assertion has not been weakened. Native completion
+and iPad coverage, image review and the original full gate remain pending.
+This work is not accepted.

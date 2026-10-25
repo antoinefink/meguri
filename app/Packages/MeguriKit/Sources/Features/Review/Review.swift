@@ -43,29 +43,37 @@ public struct ReviewView: View {
     }
     @ViewBuilder private var stateContent: some View {
         switch model.phase {
-        case .loading: LoadingStateView(Text("Preparing review…", bundle: .module))
+        case .loading:
+            ReviewStatusLayout { LoadingStateView(Text("Preparing review…", bundle: .module)) }
         case .waiting:
-            EmptyStateView(Text("Waiting for Learning", bundle: .module), systemImage: "clock",
-                description: Text("Your next learning card is not ready yet.", bundle: .module)) {
-                    Button { model.retry() } label: { Text("Check Now", bundle: .module) }.accessibilityIdentifier("review.session.refresh")
-                        #if os(macOS)
-                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                        .contentShape(Rectangle())
-                        #endif
-                }
+            ReviewStatusLayout {
+                EmptyStateView(Text("Waiting for Learning", bundle: .module), systemImage: "clock",
+                    description: Text("Your next learning card is not ready yet.", bundle: .module)) {
+                        Button { model.retry() } label: { Text("Check Now", bundle: .module) }.accessibilityIdentifier("review.session.refresh")
+                            #if os(macOS)
+                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                            .contentShape(Rectangle())
+                            #endif
+                    }
+            }
         case .finished:
-            EmptyStateView(Text("Finished for Now", bundle: .module), systemImage: "checkmark.circle",
-                description: Text("Your answers have been recorded. You can go back to your last answer or close the session.", bundle: .module)) {
-                    Button(action: close) { Text("Done", bundle: .module) }.accessibilityIdentifier("review.session.done")
-                        #if os(macOS)
-                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                        .contentShape(Rectangle())
-                        #endif
-                }
+            ReviewStatusLayout {
+                EmptyStateView(Text("Finished for Now", bundle: .module), systemImage: "checkmark.circle",
+                    description: Text("Your answers have been recorded. You can go back to your last answer or close the session.", bundle: .module)) {
+                        Button(action: close) { Text("Done", bundle: .module) }.accessibilityIdentifier("review.session.done")
+                            #if os(macOS)
+                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                            .contentShape(Rectangle())
+                            #endif
+                    }
+            }
         case .error:
-            ErrorStateView(Text("Review Paused", bundle: .module), message: Text(verbatim: model.notice ?? ""),
-                retryIdentifier: "review.session.retry", retry: model.retry)
-        case .ended: Text("Session Ended", bundle: .module)
+            ReviewStatusLayout {
+                ErrorStateView(Text("Review Paused", bundle: .module), message: Text(verbatim: model.notice ?? ""),
+                    retryIdentifier: "review.session.retry", retry: model.retry)
+            }
+        case .ended:
+            ReviewStatusLayout { Text("Session Ended", bundle: .module) }
         case .transition:
             if model.item == nil { ProgressView() }
         case .question, .answer: EmptyView()
@@ -85,6 +93,23 @@ public struct ReviewView: View {
         }
     }
     private func appearance() async { try? await model.pair?.setAppearance(colorScheme == .dark ? .dark : .light) }
+}
+
+struct ReviewStatusLayout<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        GeometryReader { viewport in
+            ScrollView(.vertical) {
+                content()
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: max(0, viewport.size.height))
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("review.session.status")
+        }
+    }
 }
 
 
@@ -254,7 +279,7 @@ struct ReviewLayout<Card: View>: View {
 
 }
 
-/// One reserved bottom region on both sides; controls never resize the card.
+/// One reserved bottom region for question, answer and transition; terminal states need none.
 public struct ReviewAnswerBar: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     public let phase: ReviewCoordinator.Phase
@@ -267,47 +292,49 @@ public struct ReviewAnswerBar: View {
         self.phase = phase; self.states = states; self.enabled = enabled; self.reveal = reveal; self.rate = rate
     }
     public var body: some View {
-        ZStack {
-            // Kept in layout on both sides, including at large text sizes.
-            if phase == .answer {
-                ratings.allowsHitTesting(enabled)
-            } else {
-                ratings.hidden()
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-            if phase == .question {
-                Button(action: reveal) {
-                    Text("Show Answer", bundle: .module)
-                        #if !os(macOS)
-                        .font(.headline)
-                        #endif
-                        .fixedSize(horizontal: false, vertical: true)
-                        .multilineTextAlignment(.center)
-                        #if os(macOS)
-                        .frame(maxWidth: .infinity)
-                        #else
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        #endif
+        if phase == .question || phase == .answer || phase == .transition {
+            ZStack {
+                // Kept in layout on both sides, including at large text sizes.
+                if phase == .answer {
+                    ratings.allowsHitTesting(enabled)
+                } else {
+                    ratings.hidden()
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
-                    .buttonStyle(.bordered)
-                    #if os(macOS)
-                    .controlSize(.regular)
-                    .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                    .contentShape(Rectangle())
-                    #else
-                    .tint(ColorToken.textPrimary.color)
-                    .controlSize(.large)
-                    #endif
-                    .disabled(!enabled)
-                    .accessibilityIdentifier("review.session.reveal")
+                if phase == .question {
+                    Button(action: reveal) {
+                        Text("Show Answer", bundle: .module)
+                            #if !os(macOS)
+                            .font(.headline)
+                            #endif
+                            .fixedSize(horizontal: false, vertical: true)
+                            .multilineTextAlignment(.center)
+                            #if os(macOS)
+                            .frame(maxWidth: .infinity)
+                            #else
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            #endif
+                    }
+                        .buttonStyle(.bordered)
+                        #if os(macOS)
+                        .controlSize(.regular)
+                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                        .contentShape(Rectangle())
+                        #else
+                        .tint(ColorToken.textPrimary.color)
+                        .controlSize(.large)
+                        #endif
+                        .disabled(!enabled)
+                        .accessibilityIdentifier("review.session.reveal")
+                }
             }
+            .padding(Spacing.small)
+            .frame(maxWidth: ContentWidth.readable)
+            .frame(maxWidth: .infinity)
+            .fixedSize(horizontal: false, vertical: true)
+            .layoutPriority(1)
         }
-        .padding(Spacing.small)
-        .frame(maxWidth: ContentWidth.readable)
-        .frame(maxWidth: .infinity)
-        .fixedSize(horizontal: false, vertical: true)
-        .layoutPriority(1)
     }
     @ViewBuilder private var ratings: some View {
         if dynamicTypeSize.isAccessibilitySize {

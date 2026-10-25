@@ -273,6 +273,111 @@ final class LocalReviewJourneyTests: XCTestCase {
 
     func testStudyRevealFourRatingsUndoWaitAndRestart() throws {
         let (app, bundleIdentifier) = try startFreshReview()
+        guard let answers = try reachWaiting(app, bundleIdentifier: bundleIdentifier) else { return }
+        // Close the waiting session through its real control, without advancing time.
+        try click(element(app, "review.session.close"), in: app, bundleIdentifier: bundleIdentifier)
+        try assertSavedAndRestart(app, bundleIdentifier: bundleIdentifier, answers: answers, evidence: "waiting")
+    }
+
+    func testAllEasyExhaustionAndRestart() throws {
+        let (app, bundleIdentifier) = try startFreshReview()
+        guard let answers = try reachExhaustion(app, bundleIdentifier: bundleIdentifier) else { return }
+        try click(element(app, "review.session.done"), in: app, bundleIdentifier: bundleIdentifier)
+        try assertSavedAndRestart(app, bundleIdentifier: bundleIdentifier, answers: answers, evidence: "exhausted")
+    }
+
+    #if os(iOS)
+    func testTerminalActionsAtLargestAccessibilitySize() throws {
+        let appearance = XCUIDevice.shared.appearance
+        defer { XCUIDevice.shared.appearance = appearance }
+        let variant = AccessibilityAudit.Variant(largestText: true, dark: false)
+        variant.apply()
+        let extra = variant.launchArguments
+
+        let (waitingApp, waitingBundle) = try startFreshReview(extra: extra)
+        guard let waitingAnswers = try reachWaiting(waitingApp, bundleIdentifier: waitingBundle) else { return }
+        let checkNow = try readyTerminalButton("review.session.refresh", in: waitingApp)
+        checkNow.clickOrTap()
+        // The pinned clock can yield waiting again. This checks availability,
+        // not independent evidence that the retry callback executed.
+        XCTAssertEqual(reviewState(waitingApp), "review.session.refresh")
+        XCTAssertTrue(waitingTitle(waitingApp).waitForExistence(timeout: 10))
+        XCTAssertTrue(element(waitingApp, "review.session.refresh").isEnabled)
+        XCTAssertFalse(element(waitingApp, "review.session.done").exists)
+        // Close the waiting session through its real control, without advancing time.
+        try click(element(waitingApp, "review.session.close"), in: waitingApp, bundleIdentifier: waitingBundle)
+        try assertSavedAndRestart(waitingApp, bundleIdentifier: waitingBundle, answers: waitingAnswers,
+            evidence: "ax5-waiting", extra: extra)
+        waitingApp.terminate()
+
+        let (finishedApp, finishedBundle) = try startFreshReview(extra: extra)
+        guard let finishedAnswers = try reachExhaustion(finishedApp, bundleIdentifier: finishedBundle) else { return }
+        let done = try readyTerminalButton("review.session.done", in: finishedApp)
+        done.clickOrTap()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
+            object: element(finishedApp, "review.session.screen"))
+        XCTAssertEqual(XCTWaiter().wait(for: [dismissed], timeout: 10), .completed,
+            "Done must dismiss the actual review presentation")
+        XCTAssertFalse(element(finishedApp, "review.session.done").exists)
+        try assertSavedAndRestart(finishedApp, bundleIdentifier: finishedBundle, answers: finishedAnswers,
+            evidence: "ax5-exhausted", extra: extra)
+    }
+
+    private func readyTerminalButton(_ identifier: String, in app: XCUIApplication) throws -> XCUIElement {
+        let owners = app.scrollViews.matching(identifier: "review.session.status")
+        let scroll = owners.firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
+        XCTAssertEqual(owners.count, 1, "Terminal content must have one owning status scroll viewport")
+        let buttons = scroll.descendants(matching: .button).matching(identifier: identifier)
+        let button = buttons.firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 10))
+        XCTAssertEqual(buttons.count, 1, "The action must be a unique native button inside the status scroll")
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: button)
+        XCTAssertEqual(XCTWaiter().wait(for: [enabled], timeout: 10), .completed)
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+
+        func validFrame(_ frame: CGRect) -> Bool {
+            !frame.isNull && !frame.isInfinite && frame.width > 0 && frame.height > 0 &&
+                [frame.minX, frame.minY, frame.maxX, frame.maxY, frame.width, frame.height].allSatisfy(\.isFinite)
+        }
+        var diagnostics = ""
+        // Only this owning scroll may move, at most three times. Choose the
+        // direction from the actual button frame, including on short screens.
+        for gestures in 0...3 {
+            XCTAssertEqual(owners.count, 1)
+            XCTAssertEqual(buttons.count, 1)
+            let windowFrame = try XCTUnwrap(validFrame(window.frame) ? window.frame : nil, "Invalid app window frame")
+            let scrollFrame = try XCTUnwrap(validFrame(scroll.frame) ? scroll.frame : nil, "Invalid status scroll frame")
+            let intersection = scrollFrame.intersection(windowFrame)
+            let viewport = try XCTUnwrap(validFrame(intersection) ? intersection : nil, "Status viewport must intersect the app window")
+            let frame = try XCTUnwrap(validFrame(button.frame) ? button.frame : nil, "Invalid terminal button frame")
+            diagnostics = "action=\(identifier); gestures=\(gestures); button=\(frame); viewport=\(viewport); window=\(windowFrame)"
+            if viewport.contains(frame) {
+                let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    button.exists && button.isEnabled && button.isHittable &&
+                        validFrame(window.frame) && validFrame(scroll.frame) && validFrame(button.frame) &&
+                        validFrame(scroll.frame.intersection(window.frame)) &&
+                        scroll.frame.intersection(window.frame).contains(button.frame)
+                }, object: button)
+                let result = XCTWaiter().wait(for: [ready], timeout: 10)
+                return try XCTUnwrap(result == .completed ? button : nil, "Terminal action is not fully visible and hittable; \(diagnostics)")
+            }
+            guard gestures < 3 else { break }
+            if frame.maxY > viewport.maxY {
+                scroll.swipeUp()
+            } else if frame.minY < viewport.minY {
+                scroll.swipeDown()
+            } else {
+                break
+            }
+        }
+        XCTFail("Terminal action is not fully inside its owning viewport; \(diagnostics)")
+        throw NSError(domain: "LocalReviewJourneyTests.TerminalReadiness", code: 1)
+    }
+    #endif
+
+    private func reachWaiting(_ app: XCUIApplication, bundleIdentifier: String) throws -> Int? {
         for rating in ["again", "hard", "good", "easy"] {
             try reveal(app, bundleIdentifier: bundleIdentifier)
             for name in ["again", "hard", "good", "easy"] {
@@ -295,7 +400,7 @@ final class LocalReviewJourneyTests: XCTestCase {
             guard state == "review.session.reveal" else {
                 attach(app, "waiting-unexpected-state")
                 XCTFail("Expected a question or waiting for learning, got \(state)")
-                return
+                return nil
             }
             try reveal(app, bundleIdentifier: bundleIdentifier)
             try click(element(app, "review.session.rate.easy"), in: app, bundleIdentifier: bundleIdentifier)
@@ -306,13 +411,10 @@ final class LocalReviewJourneyTests: XCTestCase {
         XCTAssertTrue(waiting, "Again at the pinned clock must leave learning waiting, not exhausted")
         XCTAssertTrue(waitingTitle(app).exists)
         XCTAssertFalse(element(app, "review.session.done").exists)
-        // Close the waiting session through its real control, without advancing time.
-        try click(element(app, "review.session.close"), in: app, bundleIdentifier: bundleIdentifier)
-        try assertSavedAndRestart(app, bundleIdentifier: bundleIdentifier, answers: answers, evidence: "waiting")
+        return answers
     }
 
-    func testAllEasyExhaustionAndRestart() throws {
-        let (app, bundleIdentifier) = try startFreshReview()
+    private func reachExhaustion(_ app: XCUIApplication, bundleIdentifier: String) throws -> Int? {
         var answers = 0
         for _ in 0..<20 {
             let state = reviewState(app)
@@ -320,7 +422,7 @@ final class LocalReviewJourneyTests: XCTestCase {
             guard state == "review.session.reveal" else {
                 attach(app, "exhaustion-unexpected-state")
                 XCTFail("All-Easy must reach exhaustion, got \(state)")
-                return
+                return nil
             }
             try reveal(app, bundleIdentifier: bundleIdentifier)
             try click(element(app, "review.session.rate.easy"), in: app, bundleIdentifier: bundleIdentifier)
@@ -332,18 +434,17 @@ final class LocalReviewJourneyTests: XCTestCase {
         XCTAssertFalse(element(app, "review.session.refresh").exists)
         XCTAssertFalse(waitingTitle(app).exists)
         XCTAssertEqual(answers, 4, "each of the four due text cards must be answered exactly once")
-        try click(element(app, "review.session.done"), in: app, bundleIdentifier: bundleIdentifier)
-        try assertSavedAndRestart(app, bundleIdentifier: bundleIdentifier, answers: answers, evidence: "exhausted")
+        return answers
     }
 
-    private func startFreshReview() throws -> (XCUIApplication, String) {
+    private func startFreshReview(extra: [String] = []) throws -> (XCUIApplication, String) {
         let build = try BuildUnderTest.current()
         guard build.hasHooks else { throw XCTSkip("generated fixtures require a hook build") }
         let bundleIdentifier = try build.bundleIdentifier
         guard bundleIdentifier.hasSuffix(".dev") else { throw XCTSkip("development container required") }
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = launchArguments(fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"))
+        app.launchArguments = launchArguments(fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"), extra: extra)
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
         let enable = element(app, "home.policy.enable")
@@ -358,11 +459,11 @@ final class LocalReviewJourneyTests: XCTestCase {
         return (app, bundleIdentifier)
     }
 
-    private func assertSavedAndRestart(_ app: XCUIApplication, bundleIdentifier: String, answers: Int, evidence: String) throws {
+    private func assertSavedAndRestart(_ app: XCUIApplication, bundleIdentifier: String, answers: Int, evidence: String, extra: [String] = []) throws {
         assertSavedOutcome(app, answers: answers, evidence: "\(evidence)-closed")
         app.terminate()
         // No fixture and no study input: reuse the database without replaying answers.
-        app.launchArguments = launchArguments()
+        app.launchArguments = launchArguments(extra: extra)
         app.launch()
         XCTAssertTrue(element(app, "home.session.recorded").waitForExistence(timeout: 20))
         try openDeck(app, bundleIdentifier: bundleIdentifier)
@@ -381,9 +482,9 @@ final class LocalReviewJourneyTests: XCTestCase {
         XCTAssertFalse(element(app, "home.collection.error").exists)
     }
 
-    private func launchArguments(fixture: URL? = nil) -> [String] {
+    private func launchArguments(fixture: URL? = nil, extra: [String] = []) -> [String] {
         MeguriLaunch(fixture: fixture, now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris",
-            locale: "en_US", animations: false).arguments
+            locale: "en_US", animations: false, extra: extra).arguments
     }
 
     private func openDeck(_ app: XCUIApplication, bundleIdentifier: String) throws {
