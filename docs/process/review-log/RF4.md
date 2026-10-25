@@ -1557,3 +1557,22 @@ Do not alter its source bytes or count partial archive checks as client/timing
 proof. The native save implementation, its remaining test-description privacy
 finding, actual destination runs and integration gate remain open. No Unit or
 milestone is accepted. The pending full-gate base remains `1416a520`.
+
+Native-clock intake starts at `660c2e476c93a1a84cc539b6c7d9128a619f311d`,
+recorded in `build/unit-starts/RF4-export-native-clock-20261026.json`.
+Filtered implementation `233002Z-73966` follows D1/D3 for the generated
+input. The prior UTC checks remain. Source review has no P0–P2 findings. Selftest `233955Z-79917` passes nine
+cases. Private `233957Z-80181` and similarity `234042Z-80727` pass. Fixture
+bytes and all full-proof assertions remain unchanged. Actual client proof is
+still pending; this is not an interoperability result.
+
+Native-save source rounds one and two close the output-name and file-race
+findings. Selftest `232502Z-69510` passes all selected cases. Mac native run
+`232536Z-70214` fails at the test runner's copy outside its sandbox, after the
+picker actions. Fixer `232833Z-73116` keeps the output in runner tmp.
+Selftest `233500Z-75951` passes 11 cases; dispatcher `233531Z-77923` passes
+four. Private `233505Z-76763` passes. Mac `233502Z-76196` reports one passed
+native case, but the job errors during file collection and registers no export
+proof. Preserve both outcomes. Source round three has no P0–P1 findings and
+records an unused iOS value as P2. Native capture and mobile builds remain
+unfinished. No Unit or gate is accepted.

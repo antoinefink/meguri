@@ -10,6 +10,10 @@ bats_require_minimum_version 1.5.0
   python3 "$BATS_TEST_DIRNAME/package_interop_check_test.py" Evidence
 }
 
+@test "package interop: fixed native Paris clock, D3 dates, complete proof and unchanged source" {
+  python3 "$BATS_TEST_DIRNAME/package_interop_check_test.py" NativeClock
+}
+
 @test "package interop: generated owned paths, streaming, mutation and fresh media isolation" {
   python3 "$BATS_TEST_DIRNAME/package_interop_check_test.py" Boundaries
 }

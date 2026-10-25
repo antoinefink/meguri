@@ -4,8 +4,11 @@
 Inputs must be frozen, generated, owned build/ artifacts. This tool cannot establish
 that their content is synthetic: the caller owns that responsibility. Never point
 it at real collections. Only package + DB enter the readonly oracle fixture mount;
-expected media stays local. UTC scope: 2000..2037, creationOffset=0, valid rollover,
-schedVer=2, creation before now. Both explicit timing queries must match D3 exactly, with no
+expected media stays local. Conservative fixed clock scope: UTC in 2000..2037
+with creationOffset=0, or Europe/Paris only at 2030-01-15T10:00:00+01:00
+with current offset +3600 seconds and creationOffset=-60 minutes west. This is
+not general timezone or DST support. Both require valid rollover, schedVer=2,
+creation before now. Both explicit timing queries must match D3 exactly, with no
 clock movement or permitted timing difference. Raw dumps precede timing. Before
 any client opens, an isolated libzstd decoder proves the package DB's exact raw
 rows against the frozen expected DB (including stamps), and independently checks
@@ -84,6 +87,9 @@ JSON_LIMIT = 16 * 1024 * 1024
 JSON_TOKENS = 200000
 JSON_DEPTH = 24
 CLOCK_LIMIT = 64
+NATIVE_TZ = 'Europe/Paris'
+NATIVE_START = '2030-01-15T10:00:00+01:00'
+NATIVE_NOW = 1894698000
 KEYS = {'graves': ('oid', 'type'), 'fields': ('ntid', 'ord'),
         'templates': ('ntid', 'ord'), 'tags': ('tag',), 'config': ('KEY',)}
 # Unicode 10 Cn ranges from Meguri's own generated unicode10_unassigned.rs;
@@ -377,6 +383,9 @@ def scan_tree(fd, prefix='', digest=False, budget=None, depth=0):
 
 
 def clock(now, tz):
+    if tz == NATIVE_TZ:
+        require(now == NATIVE_START, 'clock-scope')
+        return now, NATIVE_NOW
     require(tz == 'UTC', 'clock-scope')
     require(re.fullmatch(r'20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d(?:Z|\+00:00)?', now)
             is not None, 'clock-scope')
@@ -386,8 +395,16 @@ def clock(now, tz):
     return start, int(instant.timestamp())
 
 
-def scenario(start):
-    return {'id': ID, 'clock': {'tz': 'UTC', 'start': start, 'mode': 'frozen'},
+def clock_offset(now, tz):
+    # Reviewed fixture instant only; never infer an offset from ambient TZ or
+    # assume this fixed January offset applies to another Paris instant.
+    require(tz == 'UTC' or (tz == NATIVE_TZ and exact(now, NATIVE_NOW)), 'clock-scope')
+    return 0 if tz == 'UTC' else 3600
+
+
+def scenario(start, tz='UTC'):
+    clock(start, tz)
+    return {'id': ID, 'clock': {'tz': tz, 'start': start, 'mode': 'frozen'},
             'steps': [{'open': {'fixture': 'collection.anki2'}},
                       {'observe': [{'db_dump': {'raw': True}}, 'timing']},
                       {'import': {'format': 'colpkg', 'fixture': 'package.colpkg'}},
@@ -895,7 +912,8 @@ def decode_zstd(source, destination, encoded_size, *, native=False, decoded_limi
 
 def decode(args):
     """Only invoked in the isolated no-network generated-input service."""
-    start, now = clock(args.now, 'UTC')
+    start, now = clock(args.now, args.tz)
+    offset = clock_offset(now, args.tz)
     package, expected, output = map(absolute, (args.package, args.expected, args.output))
     inventory_path = absolute(args.media_inventory)
     parent, dest, exp = open_dir(package.parent), open_dir(output), open_dir(expected.parent)
@@ -965,8 +983,9 @@ def decode(args):
         decoded = output / 'collection.anki2'
         _, decoded_hash, decoded_sig = read_file(dest, 'collection.anki2', limit=DB_LIMIT)
         compare_databases(expected, decoded)
-        timing = timing_for(expected, now)
-        require(exact(timing_for(decoded, now), timing), 'collection-clock-scope')
+        clock_values = {}
+        timing = timing_for(expected, now, args.tz, clock_values=clock_values)
+        require(exact(timing_for(decoded, now, args.tz), timing), 'collection-clock-scope')
         write_expected(dest, expected)
         _, raw_hash, _ = read_file(dest, 'expected.json', limit=JSON_LIMIT)
         _, final_hash, final_sig = read_file(exp, expected.name, limit=DB_LIMIT)
@@ -978,7 +997,9 @@ def decode(args):
                 inventory_hash, 'staged-input-changed')
         write_json(dest, 'proof.json', {'package_sha256': package_hash,
                     'expected_sha256': expected_hash, 'decoded_sha256': decoded_hash,
-                    'raw_sha256': raw_hash, 'start': start, 'now': now, 'timing': timing,
+                    'raw_sha256': raw_hash, 'start': start, 'now': now,
+                    'tz': args.tz, 'utc_offset_secs': offset, 'timing': timing,
+                    'clock_values': clock_values,
                     'pre_client_database_equal': True,
                     'pre_client_media_equal': True,
                     'expected_media_inventory_sha256': inventory_hash,
@@ -1015,27 +1036,49 @@ def validate_direct(run, manifest):
                     'expected_sha256': manifest['hashes']['collection.anki2'],
                     'decoded_sha256': digest, 'raw_sha256': raw_hash,
                     'start': manifest['start'], 'now': manifest['now'], 'timing': proof['timing'],
+                    'tz': manifest['tz'], 'utc_offset_secs': manifest['utc_offset_secs'],
+                    'clock_values': proof['clock_values'],
                     'pre_client_database_equal': True,
                     'pre_client_media_equal': True,
                     'expected_media_inventory_sha256': media_hash,
                     'decoded_media_map_sha256': map_hash,
                     'pre_client_stamp_edits': 0}), 'decoder-proof-changed')
-        start, now = clock(manifest['start'], 'UTC')
+        start, now = clock(manifest['start'], manifest['tz'])
+        offset = clock_offset(now, manifest['tz'])
         timing = proof['timing']
         require(exact(start, manifest['start']) and exact(now, manifest['now']) and
+                exact(offset, manifest['utc_offset_secs']) and
                 type(timing) is dict and set(timing) ==
                 {'days_elapsed', 'now', 'utc_offset_secs', 'next_day_at'} and
                 all(type(v) is int for v in timing.values()) and timing['now'] == now and
-                timing['utc_offset_secs'] == 0 and 0 <= timing['days_elapsed'] <= now // 86400 and
+                timing['utc_offset_secs'] == offset and
+                0 <= timing['days_elapsed'] <= (now + offset) // 86400 and
                 now < timing['next_day_at'] <= now + 86400, 'collection-clock-scope')
+        # Bind the tiny original JSON BLOBs to the raw dump before doing D3 on
+        # the host. Keep their exact bytes: whitespace/encoding are not repairs.
+        values = proof['clock_values']
+        require(type(values) is dict and set(values) ==
+                {'creationOffset', 'rollover', 'schedVer'}, 'collection-clock-scope')
+        decoded = {}
+        for key, value in values.items():
+            require(type(value) is str and len(value) <= CLOCK_LIMIT * 2 and
+                    re.fullmatch(r'(?:[0-9a-f]{2})*', value) is not None,
+                    'collection-clock-scope')
+            raw = bytes.fromhex(value)
+            require(exact(expected['config'][key]['val'],
+                          {'sha256': hashlib.sha256(raw).hexdigest()}), 'decoder-proof-changed')
+            decoded[key] = json_bytes(raw)
+        require(exact(timing, day_timing(expected['col']['1']['crt'], decoded, now,
+                                        manifest['tz'])), 'collection-clock-scope')
         return expected, timing, proof
     finally:
         os.close(output)
 
 
-def timing_for(db_path, now):
+def timing_for(db_path, now, tz='UTC', *, clock_values=None):
     # Query the operation-owned DB copy with immutable read-only access.
     # The caller's source DB receives no SQLite connection or write.
+    clock_offset(now, tz)
     conn = sqlite_reader(db_path)
     try:
         rows = conn.execute('SELECT id, crt, ver FROM col LIMIT 2').fetchall()
@@ -1052,17 +1095,29 @@ def timing_for(db_path, now):
                     0 <= rows[0][1] <= CLOCK_LIMIT, 'collection-clock-scope')
             value = conn.execute('SELECT val FROM config WHERE "KEY"=?', (key,)).fetchone()[0]
             decoded[key] = json_bytes(value)
-        require(type(decoded['creationOffset']) is int and decoded['creationOffset'] == 0
-                and type(decoded['rollover']) is int and 0 <= decoded['rollover'] <= 23
-                and type(decoded['schedVer']) is int and decoded['schedVer'] == 2,
-                'collection-clock-scope')
-        rollover = decoded['rollover']
-        boundary = (now // 86400) * 86400 + rollover * 3600
-        day = max(0, now // 86400 - crt // 86400 - (now < boundary))
-        return {'days_elapsed': day, 'now': now, 'utc_offset_secs': 0,
-                'next_day_at': boundary + (86400 if boundary <= now else 0)}
+            if clock_values is not None:
+                clock_values[key] = value.hex()
+        return day_timing(crt, decoded, now, tz)
     finally:
         conn.close()
+
+
+def day_timing(crt, decoded, now, tz):
+    offset = clock_offset(now, tz)
+    require(type(crt) is int and 0 <= crt <= now, 'clock-scope')
+    require(type(decoded['creationOffset']) is int and
+            decoded['creationOffset'] == -(offset // 60)
+            and type(decoded['rollover']) is int and 0 <= decoded['rollover'] <= 23
+            and type(decoded['schedVer']) is int and decoded['schedVer'] == 2,
+            'collection-clock-scope')
+    rollover = decoded['rollover']
+    # D1/D3: config offsets are minutes WEST, current offset seconds EAST.
+    creation_offset = -decoded['creationOffset'] * 60
+    local_day = (now + offset) // 86400
+    boundary = local_day * 86400 + rollover * 3600 - offset
+    day = max(0, local_day - (crt + creation_offset) // 86400 - (now < boundary))
+    return {'days_elapsed': day, 'now': now, 'utc_offset_secs': offset,
+            'next_day_at': boundary + (86400 if boundary <= now else 0)}
 
 
 def validate_run(root, value):
@@ -1081,6 +1136,7 @@ def mkdir(fd, name):
 def stage(args):
     root = absolute(args.root)
     start, now = clock(args.now, args.tz)
+    offset = clock_offset(now, args.tz)
     run = validate_run(root, args.run)
     parent, exp, package, expected, initial = sources(root, args.package, args.expected)
     try:
@@ -1125,7 +1181,7 @@ def stage(args):
             try:
                 area = mkdir(scenarios, 'rf4')
                 try:
-                    write_json(area, 'package-interop.json', scenario(start), 0o400)
+                    write_json(area, 'package-interop.json', scenario(start, args.tz), 0o400)
                 finally:
                     os.close(area)
             finally:
@@ -1137,7 +1193,8 @@ def stage(args):
             manifest = {'expected_media_inventory_sha256': inventory_hash,
                         'package': str(package), 'expected': str(expected),
                         'package_signature': package_sig, 'tree': initial,
-                        'media': media, 'hashes': hashes, 'start': start, 'now': now}
+                        'media': media, 'hashes': hashes, 'start': start, 'now': now,
+                        'tz': args.tz, 'utc_offset_secs': offset}
             write_json(work, 'manifest.json', manifest)
         finally:
             os.close(work)
@@ -1227,7 +1284,7 @@ def verify(args):
         scenarios = open_dir(run / 'interop/scenarios/rf4', root)
         try:
             sc = load_json(scenarios, 'package-interop.json')
-            require(exact(sc, scenario(manifest['start'])), 'scenario-changed')
+            require(exact(sc, scenario(manifest['start'], manifest['tz'])), 'scenario-changed')
         finally:
             os.close(scenarios)
         expected_dump, timing, archive_proof = validate_direct(run, manifest)
@@ -1265,7 +1322,7 @@ def verify(args):
                     'oracle', 'clock', 'tz', 'observations'}, 'golden-shape')
             oracle_meta(golden['oracle'], pin)
             require(exact(report['oracle'], golden['oracle']), 'oracle-metadata')
-            require(golden['scenario_id'] == ID and golden['tz'] == 'UTC' and
+            require(golden['scenario_id'] == ID and golden['tz'] == manifest['tz'] and
                     exact(golden['clock'], {'start': manifest['start'], 'mode': 'frozen'}) and
                     golden['scenario_sha256'] == hashlib.sha256(canonical(sc).encode()).hexdigest(),
                     'golden-identity')
@@ -1298,6 +1355,8 @@ def verify(args):
                         'pre_client_stamp_edits': 0,
                         'oracle_open_edits': 0,
                         'import_col_mod_scm_ms': manifest['now'] * 1000,
+                        'start': manifest['start'], 'now': manifest['now'],
+                        'tz': manifest['tz'], 'utc_offset_secs': manifest['utc_offset_secs'],
                         'pre_client_media_equal': True,
                         'decoded_media_map_sha256': archive_proof['decoded_media_map_sha256'],
                         'imported_media_inventory_sha256':
@@ -1329,6 +1388,7 @@ def main():
     p.add_argument('--output', required=True)
     p.add_argument('--media-inventory', required=True)
     p.add_argument('--now', required=True)
+    p.add_argument('--tz', required=True)
     args = parser.parse_args()
     try:
         if args.command == 'decode':

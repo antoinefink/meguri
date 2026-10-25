@@ -1,8 +1,9 @@
 # Generated-only RF4 package proof. Inputs must be frozen owned build/ artifacts;
 # callers are responsible for synthetic content. See the Python helper docstring
-# for the deliberately bounded UTC collection-clock scope. Never repairs a DB.
+# for the conservative UTC / single native Paris instant scope, not general
+# timezone support. Never repairs a DB.
 mg_job package-interop-check host mg_package_interop_check \
-  "Generated native RF4 package proof: --package <build/*.colpkg> --expected <build/frozen-dir> --now <UTC instant, 2000..2037> --tz UTC"
+  "Generated native RF4 package proof: --package <build/*.colpkg> --expected <build/frozen-dir> --now <UTC 2000..2037 | 2030-01-15T10:00:00+01:00> --tz <UTC | Europe/Paris at that instant only>"
 
 mg_package_interop_check() {
   local package="" expected="" now="" tz="" flag value helper="$MG_ROOT/tools/scripts/package-interop-check.py"
@@ -16,7 +17,7 @@ mg_package_interop_check() {
   while [ "$#" -gt 0 ]; do
     flag="$1"
     case "$flag" in --package|--expected|--now|--tz) ;; *)
-      mg_failure usage "package-interop-check requires --package, --expected, --now and --tz UTC"
+      mg_failure usage "package-interop-check requires --package, --expected, --now and explicit supported --tz"
       mg_status error; return 0 ;;
     esac
     if [ "$#" -lt 2 ]; then
@@ -60,7 +61,7 @@ mg_package_interop_check() {
       -v "$stage/decoded:/out" package-interop-decoder \
       python3 /decoder.py decode --package /in/package.colpkg \
       --expected /in/collection.anki2 --output /out \
-      --media-inventory /expected-media.json --now "$now" </dev/null; then
+      --media-inventory /expected-media.json --now "$now" --tz "$tz" </dev/null; then
     mg_failure pre-client-database "independent bounded package DB and media archive proof failed"
     mg_status fail; return 0
   fi
@@ -77,7 +78,7 @@ mg_package_interop_check() {
   (
   set -o noclobber
   mg_oracle__run "$MG_ORACLE_TAG" "$MG_ORACLE_DIR" -u "$(id -u):$(id -g)" \
-    -e TZ=UTC -e ORACLE_FIXTURES=/in/fixtures \
+    -e "TZ=$tz" -e ORACLE_FIXTURES=/in/fixtures \
     -v "$stage/scenarios:/in/scenarios:ro" \
     -v "$stage/fixtures:/in/fixtures:ro" \
     -v "$stage/goldens:/in/goldens" -v "$stage/out:/out" \

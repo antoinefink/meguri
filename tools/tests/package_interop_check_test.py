@@ -29,6 +29,8 @@ interop = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(interop)
 PIN = {'anki_version': '26.9.3', 'lock_sha256': 'a' * 64}
 NOW = '2030-01-15T10:00:00Z'
+NATIVE_NOW = '2030-01-15T10:00:00+01:00'
+NATIVE_TZ = 'Europe/Paris'
 
 
 def dump_db(path):
@@ -57,10 +59,14 @@ def outputs(run):
     manifest = json.loads((work / 'manifest.json').read_text())
     sc = json.loads((work / 'scenarios/rf4/package-interop.json').read_text())
     before = dump_db(work / 'fixtures/collection.anki2')
-    # Synthetic fixture's independently known UTC clock. Fake client evidence
+    # Synthetic fixtures' independently known clocks. Fake client evidence
     # must also exist when decode refuses: never borrow its expected dump/proof.
-    timing = {'days_elapsed': 0, 'now': 1894701600, 'utc_offset_secs': 0,
-              'next_day_at': 1894766400}
+    if manifest['tz'] == NATIVE_TZ:
+        timing = {'days_elapsed': 0, 'now': 1894698000, 'utc_offset_secs': 3600,
+                  'next_day_at': 1894762800}
+    else:
+        timing = {'days_elapsed': 0, 'now': 1894701600, 'utc_offset_secs': 0,
+                  'next_day_at': 1894766400}
     after = copy.deepcopy(before)
     for stamp in ('mod', 'scm'):
         after['col']['1'][stamp] = manifest['now'] * 1000
@@ -68,7 +74,7 @@ def outputs(run):
     golden = {'scenario_id': interop.ID,
               'scenario_sha256': hashlib.sha256(interop.canonical(sc).encode()).hexdigest(),
               'oracle': meta, 'clock': {'start': manifest['start'], 'mode': 'frozen'},
-              'tz': 'UTC', 'observations': {'steps': [{}, {'db_dump': before, 'timing': timing},
+              'tz': manifest['tz'], 'observations': {'steps': [{}, {'db_dump': before, 'timing': timing},
                   {}, {'db_dump': after, 'timing': copy.deepcopy(timing)},
                   {'media_dir': manifest['media']}]}}
     report = {'command': 'record', 'oracle': meta, 'scenario_count': 1,
@@ -264,7 +270,18 @@ class Fixture(unittest.TestCase):
         work = self.run / 'interop'
         interop.decode(argparse.Namespace(package=str(work / 'fixtures/package.colpkg'),
             expected=str(work / 'fixtures/collection.anki2'), output=str(work / 'decoded'),
-            media_inventory=str(work / 'media-inventory.json'), now=self.args.now))
+            media_inventory=str(work / 'media-inventory.json'), now=self.args.now, tz=self.args.tz))
+
+    def native_clock(self):
+        # Configure only this test's temporary synthetic inputs, before capture.
+        # Never access or adapt the existing native artifact for a test.
+        conn = sqlite3.connect(self.db)
+        conn.execute('UPDATE col SET crt=1894676400')  # D3.1: Jan 15 04:00 +01.
+        conn.execute('UPDATE config SET val=? WHERE KEY=?', (b'-60', 'creationOffset'))
+        conn.commit()
+        conn.close()
+        self.pack()
+        self.args.now, self.args.tz = NATIVE_NOW, NATIVE_TZ
 
     def stage(self):
         interop.stage(self.args)
@@ -348,6 +365,7 @@ class HostCompatibility(Fixture):
         for field, value in [('package_sha256', 'b' * 64), ('expected_sha256', 'b' * 64),
                              ('decoded_sha256', 'b' * 64), ('raw_sha256', 'b' * 64),
                              ('start', '2030-01-14T10:00:00'), ('now', 1894701601),
+                             ('tz', NATIVE_TZ), ('utc_offset_secs', 3600),
                              ('pre_client_stamp_edits', 1),
                              ('pre_client_database_equal', False),
                              ('pre_client_media_equal', False),
@@ -363,6 +381,224 @@ class HostCompatibility(Fixture):
         neutral['notes']['1']['guid'] = 'changed-neutral'
         raw_path.write_text(json.dumps(neutral))
         self.rejects(lambda: self.verify('ready'), 'decoder-proof-changed')
+
+
+class NativeClock(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.native_clock()
+
+    def test_exact_native_full_proof_and_source_immutability(self):
+        source = interop.open_dir(self.expected)
+        try:
+            before = interop.scan_tree(source, digest=True)
+            package_hash = hashlib.sha256(self.package.read_bytes()).hexdigest()
+            package_stat = interop.signature(self.package.stat())
+            work = self.stage()
+            # Stage and host checks consume neutral evidence without SQLite.
+            with mock.patch.object(interop, 'sqlite_reader', side_effect=AssertionError('host SQLite')):
+                self.verify('ready')
+                report, golden = outputs(self.run)
+                save_outputs(self.run, report, golden)
+                self.verify()
+            for name in ('manifest.json', 'decoded/proof.json', 'evidence.json'):
+                value = json.loads((work / name).read_text())
+                self.assertEqual(value['tz'], 'Europe/Paris')
+                self.assertEqual(value['utc_offset_secs'], 3600)
+                self.assertEqual(value['start'], NATIVE_NOW)
+                self.assertEqual(value['now'], 1894698000)
+            scenario = json.loads((work / 'scenarios/rf4/package-interop.json').read_text())
+            self.assertEqual(scenario['clock'],
+                {'tz': 'Europe/Paris', 'start': NATIVE_NOW, 'mode': 'frozen'})
+            self.assertEqual(set(scenario), {'id', 'clock', 'steps'})  # No data/config rewrites.
+            for i in (1, 3):
+                self.assertEqual(scenario['steps'][i],
+                    {'observe': [{'db_dump': {'raw': True}}, 'timing']})
+            evidence = json.loads((work / 'evidence.json').read_text())
+            self.assertEqual(evidence['tables'], 12)
+            self.assertEqual(evidence['pre_client_stamp_edits'], 0)
+            self.assertEqual(evidence['oracle_open_edits'], 0)
+            self.assertEqual(evidence['import_col_mod_scm_ms'], 1894698000000)
+            self.assertEqual(before, interop.scan_tree(source, digest=True))
+            self.assertEqual(package_hash, hashlib.sha256(self.package.read_bytes()).hexdigest())
+            self.assertEqual(package_stat, interop.signature(self.package.stat()))
+        finally:
+            os.close(source)
+
+    def test_exact_admission_and_retained_utc_spellings(self):
+        self.assertEqual(interop.clock(NATIVE_NOW, NATIVE_TZ), (NATIVE_NOW, 1894698000))
+        self.assertEqual(interop.clock_offset(1894698000, NATIVE_TZ), 3600)
+        for spelling in (NOW, '2030-01-15T10:00:00+00:00', '2030-01-15T10:00:00'):
+            self.assertEqual(interop.clock(spelling, 'UTC'), ('2030-01-15T10:00:00', 1894701600))
+        for spelling in ('2000-01-01T00:00:00Z', '2037-12-31T23:59:59Z'):
+            self.assertEqual(interop.clock_offset(interop.clock(spelling, 'UTC')[1], 'UTC'), 0)
+        for now, tz in [(NATIVE_NOW, 'UTC'), (NOW, NATIVE_TZ),
+                        ('2030-01-15T09:00:00Z', NATIVE_TZ),  # Same instant, wrong local offset.
+                        ('2030-01-15T10:00:00+02:00', NATIVE_TZ),
+                        ('2030-01-15T10:00:00-01:00', NATIVE_TZ),
+                        ('2030-01-15T10:00:01+01:00', NATIVE_TZ),
+                        ('2030-01-16T10:00:00+01:00', NATIVE_TZ),
+                        ('2030-07-15T10:00:00+01:00', NATIVE_TZ),
+                        ('2030-01-15T10:00:00.0+01:00', NATIVE_TZ),
+                        ('2030-01-15T10:00:00', NATIVE_TZ),
+                        (NATIVE_NOW, 'Europe/Rome'), (NATIVE_NOW, 'Etc/GMT-1')]:
+            with self.subTest(now=now, tz=tz):
+                self.rejects(lambda: interop.clock(now, tz), 'clock-scope')
+        self.rejects(lambda: interop.clock_offset(1894698001, NATIVE_TZ), 'clock-scope')
+        # UTC still refuses a nonzero collection creation offset.
+        self.rejects(lambda: interop.timing_for(self.db, 1894701600), 'collection-clock-scope')
+
+    def test_decoder_independently_refuses_wrong_clock_scope_and_requires_tz(self):
+        interop.stage(self.args)
+        for now, tz in [(NOW, NATIVE_TZ), (NATIVE_NOW, 'UTC'),
+                        ('2030-01-16T10:00:00+01:00', NATIVE_TZ), (NATIVE_NOW, 'Europe/Rome')]:
+            self.args.now, self.args.tz = now, tz
+            self.rejects(self.decode, 'clock-scope')
+            self.assertFalse((self.run / 'interop/decoded/proof.json').exists())
+        with mock.patch.object(sys, 'argv', [str(HELPER), 'decode', '--package', 'unused',
+                '--expected', 'unused', '--output', 'unused', '--media-inventory', 'unused',
+                '--now', NATIVE_NOW]), mock.patch.object(sys, 'stderr', io.StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                interop.main()
+        self.assertEqual(error.exception.code, 2)
+
+    def test_d3_local_creation_date_rollover_boundary_and_clamp(self):
+        # Expected epoch seconds below are independent fixed D3 calendar examples.
+        # Includes the local creation midnight (23:00 UTC), exact R==now, and h=0/23.
+        cases = [(1894676400, 4, 0, 1894762800),  # D3.1 creation date.
+                 (1894590000, 4, 1, 1894762800),  # Created Jan 14 at 04:00 Paris.
+                 (1894661999, 4, 1, 1894762800),  # Jan 14 23:59:59 Paris.
+                 (1894662000, 4, 0, 1894762800),  # Jan 15 00:00 Paris.
+                 (1894663800, 4, 0, 1894762800),  # Jan 15 00:30 Paris (Jan 14 UTC).
+                 (1894590000, 0, 1, 1894748400),
+                 (1894590000, 9, 1, 1894780800),
+                 (1894590000, 10, 1, 1894784400),  # At rollover: next day, never now.
+                 (1894590000, 11, 0, 1894701600),
+                 (1894590000, 23, 0, 1894744800),
+                 (1894676400, 11, 0, 1894701600),  # Negative day clamps to zero.
+                 (1894698000, 4, 0, 1894762800)]  # Creation exactly now stays admitted.
+        for crt, hour, day, boundary in cases:
+            with self.subTest(crt=crt, hour=hour):
+                conn = sqlite3.connect(self.db)
+                conn.execute('UPDATE col SET crt=?', (crt,))
+                conn.execute('UPDATE config SET val=? WHERE KEY=?',
+                             (str(hour).encode(), 'rollover'))
+                conn.commit()
+                conn.close()
+                self.assertEqual(interop.timing_for(self.db, 1894698000, NATIVE_TZ),
+                    {'days_elapsed': day, 'now': 1894698000, 'utc_offset_secs': 3600,
+                     'next_day_at': boundary})
+
+    def test_native_config_schema_and_creation_bounds_still_refuse_before_open(self):
+        original = self.db.read_bytes()
+        cases = [('UPDATE config SET val=? WHERE KEY=?', (value, 'creationOffset'))
+                 for value in (b'0', b'60', b'-120', b'-60.0', b'true', b'"-60"', b'null', '-60')]
+        cases += [('UPDATE config SET val=? WHERE KEY=?', (value, 'rollover'))
+                  for value in (b'-1', b'24', b'4.0', b'true')]
+        cases += [('UPDATE config SET val=? WHERE KEY=?', (b'1', 'schedVer')),
+                  ('DELETE FROM config WHERE KEY=?', ('creationOffset',)),
+                  ('DELETE FROM config WHERE KEY=?', ('rollover',)),
+                  ('DELETE FROM config WHERE KEY=?', ('schedVer',)),
+                  ('UPDATE col SET ver=?', (17,)), ('UPDATE col SET ver=?', (19,)),
+                  ('UPDATE col SET crt=?', (1894698001,)), ('UPDATE col SET crt=?', (-1,))]
+        for sql, params in cases:
+            with self.subTest(sql=sql, params=params):
+                self.db.write_bytes(original)
+                conn = sqlite3.connect(self.db)
+                conn.execute(sql, params)
+                conn.commit()
+                conn.close()
+                self.pack()
+                self.rejects(self.stage)
+                self.assertFalse((self.run / 'interop/decoded/proof.json').exists())
+                shutil.rmtree(self.run / 'interop')
+
+    def test_native_manifest_decoder_and_scenario_mismatches_refuse(self):
+        work = self.stage()
+        for filename in ('manifest.json', 'decoded/proof.json'):
+            path = work / filename
+            original = json.loads(path.read_text())
+            path.chmod(0o600)
+            for key, value in [('tz', 'UTC'), ('tz', 'Europe/Rome'), ('utc_offset_secs', 0),
+                               ('utc_offset_secs', 3600.0), ('start', NOW),
+                               ('start', '2030-01-16T10:00:00+01:00'), ('now', 1894701600)]:
+                with self.subTest(filename=filename, key=key, value=value):
+                    path.write_text(json.dumps(dict(original, **{key: value})))
+                    self.rejects(lambda: self.verify('ready'))
+            path.write_text(json.dumps(original))
+        path = work / 'scenarios/rf4/package-interop.json'
+        original = json.loads(path.read_text())
+        path.chmod(0o600)
+        for key, value in [('tz', 'UTC'), ('start', NOW), ('start', '2030-01-15T09:00:00Z')]:
+            bad = copy.deepcopy(original)
+            bad['clock'][key] = value
+            path.write_text(json.dumps(bad))
+            self.rejects(lambda: self.verify('ready'), 'scenario-changed')
+        path.write_text(json.dumps(original))
+        self.verify('ready')
+
+    def test_native_proof_timing_and_raw_clock_value_binding(self):
+        work = self.stage()
+        path = work / 'decoded/proof.json'
+        original = json.loads(path.read_text())
+        path.chmod(0o600)
+        for field in ('days_elapsed', 'now', 'utc_offset_secs', 'next_day_at'):
+            bad = copy.deepcopy(original)
+            bad['timing'][field] += 1  # Even an otherwise in-range day/boundary must fail.
+            path.write_text(json.dumps(bad))
+            self.rejects(lambda: self.verify('ready'), 'collection-clock-scope')
+        for key, raw in [('creationOffset', b'0'), ('rollover', b'5'), ('schedVer', b'1')]:
+            bad = copy.deepcopy(original)
+            bad['clock_values'][key] = raw.hex()
+            path.write_text(json.dumps(bad))
+            self.rejects(lambda: self.verify('ready'), 'decoder-proof-changed')
+        path.write_text(json.dumps(original))
+        self.verify('ready')
+
+    def test_native_actual_timings_and_import_stamps_use_selected_epoch(self):
+        report, golden = self.valid_outputs()
+        for field in ('days_elapsed', 'now', 'utc_offset_secs', 'next_day_at'):
+            for indices in ((1,), (3,), (1, 3)):
+                bad = copy.deepcopy(golden)
+                for index in indices:
+                    bad['observations']['steps'][index]['timing'][field] += 1
+                save_outputs(self.run, report, bad)
+                self.rejects(self.verify, 'timing-difference')
+        for index in (1, 3):
+            for stamp in ('mod', 'scm'):
+                bad = copy.deepcopy(golden)
+                bad['observations']['steps'][index]['db_dump']['col']['1'][stamp] = 1894701600000
+                save_outputs(self.run, report, bad)
+                self.rejects(self.verify, 'database-difference')
+        for key, value in [('tz', 'UTC'), ('tz', 'Europe/Rome'),
+                           ('clock', {'start': '2030-01-15T09:00:00Z', 'mode': 'frozen'})]:
+            save_outputs(self.run, report, dict(golden, **{key: value}))
+            self.rejects(self.verify, 'golden-identity')
+        save_outputs(self.run, report, golden)
+        self.verify()
+
+    def test_native_full_raw_reviews_and_media_still_required(self):
+        report, golden = self.valid_outputs()
+        for index in (1, 3):
+            bad = copy.deepcopy(golden)
+            bad['observations']['steps'][index]['db_dump']['revlog'].clear()
+            save_outputs(self.run, report, bad)
+            self.rejects(self.verify, 'database-difference')
+        bad = copy.deepcopy(golden)
+        bad['observations']['steps'][4]['media_dir'] = {}
+        save_outputs(self.run, report, bad)
+        self.rejects(self.verify, 'media-difference')
+        # A native clock never waives pre-client raw storage class/value equality.
+        shutil.rmtree(self.run / 'interop')
+        variant = self.root / 'build/generated/variant.anki2'
+        shutil.copyfile(self.db, variant)
+        conn = sqlite3.connect(variant)
+        conn.execute('UPDATE revlog SET time=999')
+        conn.commit()
+        conn.close()
+        self.pack(data=variant.read_bytes())
+        self.rejects(self.stage, 'pre-client-database-difference')
+        self.assertFalse((self.run / 'interop/decoded/proof.json').exists())
 
 
 class Evidence(Fixture):
@@ -1260,7 +1496,7 @@ mg_package_interop_check "$@"
 
     def cli(self):
         return ['--package', str(self.package), '--expected', str(self.expected),
-                '--now', NOW, '--tz', 'UTC']
+                '--now', self.args.now, '--tz', self.args.tz]
 
     def events(self):
         return (self.root / 'events').read_text()
@@ -1279,6 +1515,7 @@ mg_package_interop_check "$@"
                       stage + '/goldens:/in/goldens', stage + '/out:/out'):
             self.assertIn(mount, args)
         self.assertIn('ORACLE_FIXTURES=/in/fixtures', args)
+        self.assertIn('TZ=UTC', args)
         self.assertNotIn('/must-never-be-mounted', ' '.join(args))
         self.assertEqual(args[-11:], ['oracle', 'harness', 'record', '--scenarios', '/in/scenarios',
             '--goldens', '/in/goldens', '--jobs', '1', '--report', '/out/report.json'])
@@ -1294,7 +1531,7 @@ mg_package_interop_check "$@"
         self.assertEqual(decoder[decoder.index('package-interop-decoder') + 1:],
             ['python3', '/decoder.py', 'decode', '--package', '/in/package.colpkg',
              '--expected', '/in/collection.anki2', '--output', '/out',
-             '--media-inventory', '/expected-media.json', '--now', NOW])
+             '--media-inventory', '/expected-media.json', '--now', NOW, '--tz', 'UTC'])
         mounts = [decoder[i + 1] for i, arg in enumerate(decoder[:-1]) if arg == '-v']
         self.assertEqual(len(mounts), 4)
         self.assertIn(stage + '/media-inventory.json:/expected-media.json:ro', mounts)
@@ -1307,6 +1544,24 @@ mg_package_interop_check "$@"
         self.assertIn('read_only: true', service)
         self.assertNotIn('volumes:', service)
         self.assertNotIn('ports:', service)
+
+    def test_native_clock_is_forwarded_to_decoder_and_actual_scenario(self):
+        self.native_clock()
+        package_hash = hashlib.sha256(self.package.read_bytes()).hexdigest()
+        db_hash = hashlib.sha256(self.db.read_bytes()).hexdigest()
+        result = self.invoke(*self.cli())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('status pass', self.events())
+        work = self.run / 'interop'
+        decoder = json.loads((work / 'decoder-args.json').read_text())
+        self.assertEqual(decoder[-4:], ['--now', NATIVE_NOW, '--tz', 'Europe/Paris'])
+        client = json.loads((work / 'out/fake-args.json').read_text())
+        self.assertIn('TZ=Europe/Paris', client)
+        scenario = json.loads((work / 'scenarios/rf4/package-interop.json').read_text())
+        self.assertEqual(scenario['clock'],
+            {'tz': 'Europe/Paris', 'start': NATIVE_NOW, 'mode': 'frozen'})
+        self.assertEqual(package_hash, hashlib.sha256(self.package.read_bytes()).hexdigest())
+        self.assertEqual(db_hash, hashlib.sha256(self.db.read_bytes()).hexdigest())
 
     def test_direct_proof_failure_never_reaches_oracle_build_or_open(self):
         variant_db = self.root / 'build/generated/variant.anki2'
@@ -1376,14 +1631,14 @@ if __name__ == '__main__':
         service_args = composition[composition.index('package-interop-decoder') + 1:]
         assert service_args[:3] == ['python3', '/decoder.py', 'decode']
         options = dict(zip(service_args[3::2], service_args[4::2]))
-        assert set(options) == {'--package', '--expected', '--output', '--media-inventory', '--now'}
+        assert set(options) == {'--package', '--expected', '--output', '--media-inventory', '--now', '--tz'}
         assert options['--package'] == '/in/package.colpkg'
         assert options['--expected'] == '/in/collection.anki2'
         assert options['--output'] == '/out'
         assert options['--media-inventory'] == '/expected-media.json'
         interop.decode(argparse.Namespace(package=str(work / 'fixtures/package.colpkg'),
             expected=str(work / 'fixtures/collection.anki2'), output=str(work / 'decoded'),
-            media_inventory=str(work / 'media-inventory.json'), now=options['--now']))
+            media_inventory=str(work / 'media-inventory.json'), now=options['--now'], tz=options['--tz']))
         sys.exit(0)
     if len(sys.argv) > 1 and sys.argv[1] == '--fake':
         sys.exit(fake(sys.argv[2], sys.argv[3], sys.argv[4:]))
