@@ -2,12 +2,14 @@
 //! is submitted with, the context its closure writes through, its result,
 //! and the pending result a submit returns.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::time::Duration;
 
 use meguri_model::changes::{ChangeSet, OpSource};
+use meguri_model::ids::{CardId, DeckId, NoteId};
 use meguri_model::rng::RandomSource;
 use meguri_model::time::EpochMillis;
 use meguri_storage::{StampMode, WriteScope};
@@ -166,6 +168,9 @@ pub struct OpContext<'s, 'c> {
     pub(crate) progress: Option<ProgressSink>,
     pub(crate) media_added: Vec<String>,
     pub(crate) media_removed: Vec<String>,
+    pub(crate) skipped_incoming_cards: BTreeSet<CardId>,
+    pub(crate) skipped_incoming_notes: BTreeSet<NoteId>,
+    pub(crate) skipped_incoming_decks: BTreeSet<DeckId>,
     pub(crate) pending_media: Vec<crate::media::PendingMedia>,
     pub(crate) collection_path: std::path::PathBuf,
     pub(crate) undo: &'c UndoManager,
@@ -259,6 +264,11 @@ impl<'c> OpContext<'_, 'c> {
     pub fn step<T>(&mut self, step: impl FnOnce(&mut Self) -> Result<T, EngineError>) -> Result<T, EngineError> {
         let savepoint = self.scope.savepoint()?;
         let media = (self.media_added.len(), self.media_removed.len());
+        let skipped = (
+            self.skipped_incoming_cards.clone(),
+            self.skipped_incoming_notes.clone(),
+            self.skipped_incoming_decks.clone(),
+        );
         let hooks = self.on_commit.len();
         let prepares = self.before_commit.len();
         let staged = self.pending_media.len();
@@ -276,6 +286,9 @@ impl<'c> OpContext<'_, 'c> {
                 self.scope.rollback_to_savepoint(savepoint)?;
                 self.media_added.truncate(media.0);
                 self.media_removed.truncate(media.1);
+                self.skipped_incoming_cards = skipped.0;
+                self.skipped_incoming_notes = skipped.1;
+                self.skipped_incoming_decks = skipped.2;
                 self.on_commit.truncate(hooks);
                 self.before_commit.truncate(prepares);
                 self.pending_media.truncate(staged);
@@ -294,6 +307,20 @@ impl<'c> OpContext<'_, 'c> {
     /// taking the commit/snapshot lock. Dropped on rollback.
     pub(crate) fn before_commit(&mut self, hook: impl FnOnce() -> Result<(), EngineError> + Send + 'static) {
         self.before_commit.push(Box::new(hook));
+    }
+
+    /// Report only incoming own-ID keys skipped by unsent live pending graves
+    /// in this merge (S1.1/H10.2). Repeated decisions retain one numeric ID.
+    /// This carries diagnostics; it does not make the operation a mutation.
+    pub fn report_skipped_incoming(
+        &mut self,
+        cards: impl IntoIterator<Item = CardId>,
+        notes: impl IntoIterator<Item = NoteId>,
+        decks: impl IntoIterator<Item = DeckId>,
+    ) {
+        self.skipped_incoming_cards.extend(cards);
+        self.skipped_incoming_notes.extend(notes);
+        self.skipped_incoming_decks.extend(decks);
     }
 
     /// Reports a media file the op added (U31 stages media inside the op).

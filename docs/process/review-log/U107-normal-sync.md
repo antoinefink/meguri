@@ -214,3 +214,22 @@ the begin result. Re-review of this binding has no P0–P2 findings.
 Implementation requires a small oracle-wrapper handoff as well as MG/helper
 work; the earlier no-driver-change claim was wrong. Existing partial exports
 remain saved. Actual live cases, cleanup tests and the batch gate are pending.
+
+## Typed skipped-row diagnostics
+
+The 15-file filtered delta is byte-exact to its runtime export and has a clear
+independent source review. Actual own-grave decisions produce sorted typed ID
+lists through results, events, FFI summaries and the Swift bridge. Empty
+constructors, no-op publication and rollback behavior remain unchanged.
+Filtered repair `183724Z-79187` uses full stored card rows in its rollback
+assertion and records that test convention. The prepared ordinal-order test
+correction preserves exact card membership and duplicates.
+
+Run `184521Z-83695` executes 61 cases: 60 pass, one fails. All 14 rename tests
+pass. The new repeated-key normal-sync case exposes a scratch bulk insert of
+duplicate fresh IDs; its regression remains enabled. Fix the staging behavior,
+not the fixture. FFI library run `185302Z-89044` passes all 69 cases, including
+nonempty conversion, summary and event payloads. Swift bridge run
+`181902Z-59842` regenerates bindings and passes both selected tests.
+The source delta remains incomplete until repeated-key behavior, actual live
+transport and the required integration gate are verified. No Unit trailer.

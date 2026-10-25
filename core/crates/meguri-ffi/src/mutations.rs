@@ -45,3 +45,37 @@ impl From<meguri_engine::OpResult<bool>> for BoolMutation {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summary_preserves_all_diagnostics_and_operation_metadata() {
+        let changes = crate::changes::sample();
+        let result = meguri_engine::OpResult {
+            value: (),
+            seq: meguri_engine::Seq(101),
+            generation: meguri_engine::Generation(7),
+            changes: std::sync::Arc::new(changes),
+            undo: None,
+            past_cancel_point: false,
+            timing: Default::default(),
+        };
+        let summary = MutationSummary::of(&result);
+        assert_eq!((summary.seq, summary.generation), (101, 7));
+        assert_eq!(summary.changes.skipped_incoming_cards, [71, 72]);
+        assert_eq!(summary.changes.skipped_incoming_notes, [71, 73]);
+        assert_eq!(summary.changes.skipped_incoming_decks, [71, 74]);
+        assert_eq!(summary.changes, ChangeSet::from(result.changes.as_ref()));
+    }
+
+    #[test]
+    fn default_model_conversion_keeps_diagnostics_empty() {
+        let model = meguri_model::changes::ChangeSet::empty(meguri_model::changes::OpSource::Maintenance);
+        let changes = ChangeSet::from(&model);
+        assert!(changes.skipped_incoming_cards.is_empty());
+        assert!(changes.skipped_incoming_notes.is_empty());
+        assert!(changes.skipped_incoming_decks.is_empty());
+    }
+}

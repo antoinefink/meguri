@@ -826,31 +826,28 @@ fn commit_rederives_live_membership_fields_siblings_and_standard_card_count() {
     assert_eq!(result.changes.cards.len(), 4); // moved, late, orphaned's 0 and 1
     let reader = h.collection.reader(ReaderRole::Query).unwrap();
     let cards = reader.cards_of_note(moved.id).unwrap();
-    assert_eq!(
-        cards.iter().map(|c| (c.ord, c.due)).collect::<Vec<_>>(),
-        [(0, 88), (1, 88)]
-    );
+    let mut ordinal_dues = cards.iter().map(|c| (c.ord, c.due)).collect::<Vec<_>>();
+    ordinal_dues.sort_unstable();
+    assert_eq!(ordinal_dues, [(0, 88), (1, 88)]);
     assert_eq!(reader.cards_of_note(changed.id).unwrap().len(), 1);
     assert!(reader.cards_of_note(cardless.id).unwrap().is_empty());
-    assert_eq!(
-        reader
-            .cards_of_note(complete.id)
-            .unwrap()
-            .iter()
-            .map(|c| c.ord)
-            .collect::<Vec<_>>(),
-        [0, 5]
-    );
+    let mut ordinals = reader
+        .cards_of_note(complete.id)
+        .unwrap()
+        .iter()
+        .map(|c| c.ord)
+        .collect::<Vec<_>>();
+    ordinals.sort_unstable();
+    assert_eq!(ordinals, [0, 5]);
     assert_eq!(reader.cards_of_note(late.id).unwrap().len(), 2);
-    assert_eq!(
-        reader
-            .cards_of_note(orphaned.id)
-            .unwrap()
-            .iter()
-            .map(|c| c.ord)
-            .collect::<Vec<_>>(),
-        [0, 1, 5]
-    );
+    let mut ordinals = reader
+        .cards_of_note(orphaned.id)
+        .unwrap()
+        .iter()
+        .map(|c| c.ord)
+        .collect::<Vec<_>>();
+    ordinals.sort_unstable();
+    assert_eq!(ordinals, [0, 1, 5]);
 }
 
 #[test]

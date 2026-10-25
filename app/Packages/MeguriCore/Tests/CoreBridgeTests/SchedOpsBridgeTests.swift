@@ -36,7 +36,7 @@ import MeguriCoreBindings
     @Test func resultKeepsCompleteHeadDiffAndOperationMetadata() {
         let raw = MeguriCoreBindings.SchedMutation(
             summary: .init(seq: 17, generation: 3, undoName: "Bury",
-                           changes: .init(wholeCollection: false, source: .userUndoable, cards: [], notes: [], notetypes: [], decks: [], deckConfigs: [], configKeys: [], tags: [], revlogAdded: [], revlogRemoved: [], mediaAdded: [], mediaRemoved: [], collectionRow: false), pastCancelPoint: false),
+                           changes: .init(wholeCollection: false, source: .userUndoable, cards: [], notes: [], notetypes: [], decks: [], deckConfigs: [], configKeys: [], tags: [], revlogAdded: [], revlogRemoved: [], mediaAdded: [], mediaRemoved: [], skippedIncomingCards: [], skippedIncomingNotes: [], skippedIncomingDecks: [], collectionRow: false), pastCancelPoint: false),
             count: 4, headDiff: ReviewSessionBridgeTests.diff)
         let result = CoreBridge.SchedMutation(raw)
         #expect(result.summary.seq == 17 && result.summary.undoName == "Bury" && result.count == 4)

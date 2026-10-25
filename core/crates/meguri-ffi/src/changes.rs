@@ -74,6 +74,9 @@ pub struct ChangeSet {
     pub revlog_removed: Vec<i64>,
     pub media_added: Vec<String>,
     pub media_removed: Vec<String>,
+    pub skipped_incoming_cards: Vec<i64>,
+    pub skipped_incoming_notes: Vec<i64>,
+    pub skipped_incoming_decks: Vec<i64>,
     /// A `col` column other than `mod` changed.
     pub collection_row: bool,
 }
@@ -149,6 +152,9 @@ impl From<&model::ChangeSet> for ChangeSet {
             revlog_removed: changes.revlog_removed.iter().map(|id| id.0).collect(),
             media_added: changes.media_added.clone(),
             media_removed: changes.media_removed.clone(),
+            skipped_incoming_cards: changes.skipped_incoming_cards.iter().map(|id| id.0).collect(),
+            skipped_incoming_notes: changes.skipped_incoming_notes.iter().map(|id| id.0).collect(),
+            skipped_incoming_decks: changes.skipped_incoming_decks.iter().map(|id| id.0).collect(),
             collection_row: changes.collection_row,
         }
     }
@@ -169,6 +175,8 @@ fn id_changes<T>(list: &[T], entry: impl Fn(&T) -> (i64, model::ChangeKind)) -> 
 /// change; deck 41 removed; deck config 51 added; config key `curDeck`
 /// updated; tag `leech` added; review-log entry 61 added and 62 removed;
 /// media `a.jpg` added and `b.mp3` removed; the `col` row changed.
+/// Synthetic diagnostics fill each list with independent numeric keys, including
+/// 71 in all three entity kinds.
 #[cfg(any(test, feature = "test-hooks"))]
 pub(crate) fn sample() -> model::ChangeSet {
     use meguri_model::ids::{CardId, DeckConfigId, DeckId, NoteId, NotetypeId, RevlogId};
@@ -218,6 +226,9 @@ pub(crate) fn sample() -> model::ChangeSet {
         revlog_removed: vec![RevlogId(62)],
         media_added: vec!["a.jpg".to_owned()],
         media_removed: vec!["b.mp3".to_owned()],
+        skipped_incoming_cards: vec![CardId(71), CardId(72)],
+        skipped_incoming_notes: vec![NoteId(71), NoteId(73)],
+        skipped_incoming_decks: vec![DeckId(71), DeckId(74)],
         collection_row: true,
     }
 }

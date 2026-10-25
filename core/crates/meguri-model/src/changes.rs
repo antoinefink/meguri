@@ -154,6 +154,11 @@ pub struct ChangeSet {
     pub revlog_removed: Vec<RevlogId>,
     pub media_added: Vec<String>,
     pub media_removed: Vec<String>,
+    /// Incoming own-ID keys skipped by this merge's unsent live pending graves
+    /// (S1.1). Diagnostics only: these do not contribute to mutation emptiness.
+    pub skipped_incoming_cards: Vec<CardId>,
+    pub skipped_incoming_notes: Vec<NoteId>,
+    pub skipped_incoming_decks: Vec<DeckId>,
     /// A `col` column other than `mod` changed (`scm`, `usn`, `ls`, ...).
     pub collection_row: bool,
 }
@@ -175,6 +180,9 @@ impl ChangeSet {
             revlog_removed: Vec::new(),
             media_added: Vec::new(),
             media_removed: Vec::new(),
+            skipped_incoming_cards: Vec::new(),
+            skipped_incoming_notes: Vec::new(),
+            skipped_incoming_decks: Vec::new(),
             collection_row: false,
         }
     }
@@ -210,5 +218,32 @@ impl ChangeSet {
             .binary_search_by_key(&id, |n| n.id)
             .ok()
             .map(|i| &self.notes[i])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_source_defaults_to_empty_diagnostics_which_do_not_make_a_mutation() {
+        for source in [
+            OpSource::UserUndoable,
+            OpSource::UserNonUndoable,
+            OpSource::SyncIncoming,
+            OpSource::LocalApi,
+            OpSource::Optimizer,
+            OpSource::Rollover,
+            OpSource::Maintenance,
+        ] {
+            let mut changes = ChangeSet::empty(source);
+            assert!(changes.skipped_incoming_cards.is_empty());
+            assert!(changes.skipped_incoming_notes.is_empty());
+            assert!(changes.skipped_incoming_decks.is_empty());
+            changes.skipped_incoming_cards = vec![CardId(1)];
+            changes.skipped_incoming_notes = vec![NoteId(1)];
+            changes.skipped_incoming_decks = vec![DeckId(1)];
+            assert!(changes.is_empty());
+        }
     }
 }

@@ -84,6 +84,10 @@ public struct ChangeSet: Sendable, Hashable {
     public let revlogRemoved: [Int64]
     public let mediaAdded: [String]
     public let mediaRemoved: [String]
+    /// Incoming own-ID keys skipped by this merge's unsent live pending graves.
+    public let skippedIncomingCards: [Int64]
+    public let skippedIncomingNotes: [Int64]
+    public let skippedIncomingDecks: [Int64]
     /// A collection-row column other than its modification time changed.
     public let collectionRow: Bool
 }
@@ -110,6 +114,9 @@ extension ChangeSet {
         revlogRemoved = changes.revlogRemoved
         mediaAdded = changes.mediaAdded
         mediaRemoved = changes.mediaRemoved
+        skippedIncomingCards = changes.skippedIncomingCards
+        skippedIncomingNotes = changes.skippedIncomingNotes
+        skippedIncomingDecks = changes.skippedIncomingDecks
         collectionRow = changes.collectionRow
     }
 }

@@ -343,6 +343,9 @@ mod tests {
             revlog_removed: vec![62],
             media_added: vec!["a.jpg".to_owned()],
             media_removed: vec!["b.mp3".to_owned()],
+            skipped_incoming_cards: vec![71, 72],
+            skipped_incoming_notes: vec![71, 73],
+            skipped_incoming_decks: vec![71, 74],
             collection_row: true,
         }
     }

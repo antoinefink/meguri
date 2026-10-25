@@ -394,6 +394,9 @@ fn run_op<T>(
         progress: spec.progress.clone(),
         media_added: Vec::new(),
         media_removed: Vec::new(),
+        skipped_incoming_cards: Default::default(),
+        skipped_incoming_notes: Default::default(),
+        skipped_incoming_decks: Default::default(),
         pending_media: Vec::new(),
         collection_path: collection.path().to_path_buf(),
         undo: &shared.undo,
@@ -442,6 +445,9 @@ fn run_op<T>(
         added: std::mem::take(&mut context.media_added),
         removed: std::mem::take(&mut context.media_removed),
     };
+    let skipped_cards = std::mem::take(&mut context.skipped_incoming_cards);
+    let skipped_notes = std::mem::take(&mut context.skipped_incoming_notes);
+    let skipped_decks = std::mem::take(&mut context.skipped_incoming_decks);
     let mut undo_notes = std::mem::take(&mut context.undo_notes);
     let hooks = std::mem::take(&mut context.on_commit);
     drop(context);
@@ -500,7 +506,11 @@ fn run_op<T>(
         env.touched
             .record(seq, journal.entries().map(|e| (e.table(), e.key())), journal.len());
     }
-    let change_set = Arc::new(derived.changes);
+    let mut change_set = derived.changes;
+    change_set.skipped_incoming_cards = skipped_cards.into_iter().collect();
+    change_set.skipped_incoming_notes = skipped_notes.into_iter().collect();
+    change_set.skipped_incoming_decks = skipped_decks.into_iter().collect();
+    let change_set = Arc::new(change_set);
     // The history changes before anyone sees the commit (engine/undo M2).
     let answer_owner = undo_notes
         .state

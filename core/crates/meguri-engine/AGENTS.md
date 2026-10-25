@@ -11,6 +11,7 @@
 - Every thread through `ThreadRegistry::spawn` (named, QoS, idle list for U32). No timed wake-ups while idle (R1854): wait on condvars without timeouts unless a caller asked for one or a WAL flush is pending (storage C9.2).
 - `monotonic.rs` is the crate's only system-clock read; collection time comes from the `OpenConfig` clock.
 - Tests open copies of `conformance/fixtures/storage/` (`tests/common`) and never name `CollectionBuilder` (layering-check). The 150k reader test and the tag rename over 150k notes use testkit's `bench::fixtures::profile_collection`, cached in `build/fixtures` (`tools/mg fixtures 150k` and `175k` make them; sizes count cards, not notes).
+- Whole persisted-row assertions use `Record::to_cells`; never derive `PartialEq` on production models just for tests.
 - Derived store (`derived_host.rs`): `DerivedHost::ports` puts its open step first; close the host after `Engine::close` so the drained ops are applied before it is marked clean. Its observer only captures and sends: never write the derived file or wait on the writer thread.
 - A derived builder holds the maintenance reader for one snapshot and checks the lifecycle at every batch: an opening or exclusive phase defers it, a close or replacement ends it. Set a builder's abort flag under the lifecycle lock, then notify `changed`, or a builder waiting for the phase to end misses it.
 - `CollectionCore.derived` holds a `Weak` to the host: the host keeps a `Collection`, so a strong reference would be a cycle.

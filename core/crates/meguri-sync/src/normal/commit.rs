@@ -354,6 +354,20 @@ pub(super) fn apply(
                 snapshot: hold.snapshot,
                 staged: targets,
             })?;
+            ctx.report_skipped_incoming(
+                outcome
+                    .skipped
+                    .iter()
+                    .filter_map(|&(table, id)| (table == Table::Cards).then_some(CardId(id))),
+                outcome
+                    .skipped
+                    .iter()
+                    .filter_map(|&(table, id)| (table == Table::Notes).then_some(NoteId(id))),
+                outcome
+                    .skipped
+                    .iter()
+                    .filter_map(|&(table, id)| (table == Table::Decks).then_some(DeckId(id))),
+            );
             Ok(outcome)
         })
         .map_err(engine_error)?;

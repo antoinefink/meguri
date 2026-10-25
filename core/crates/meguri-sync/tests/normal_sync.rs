@@ -1735,3 +1735,6 @@ fn real_current_card_changed_event_refuses_old_state_token() {
 mod field_rename;
 #[path = "normal_sync/large.rs"]
 mod large;
+
+#[path = "normal_sync/diagnostics.rs"]
+mod diagnostics;

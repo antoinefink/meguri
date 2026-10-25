@@ -821,6 +821,9 @@ fn typed_surface(
     assert_eq!(absent.count, 0);
     assert!(absent.summary.is_none());
     for summary in summaries {
+        assert!(summary.changes.skipped_incoming_cards.is_empty());
+        assert!(summary.changes.skipped_incoming_notes.is_empty());
+        assert!(summary.changes.skipped_incoming_decks.is_empty());
         let envelopes: Vec<_> = events
             .iter()
             .filter(|e| e.seq == summary.seq && matches!(&e.kind, CoreEventKind::Changes { .. }))

@@ -171,6 +171,9 @@ func withRawListener<T>(_ listener: RecordingListener, _ body: () async throws -
             revlogRemoved: [62],
             mediaAdded: ["a.jpg"],
             mediaRemoved: ["b.mp3"],
+            skippedIncomingCards: [71, 72],
+            skippedIncomingNotes: [71, 73],
+            skippedIncomingDecks: [71, 74],
             collectionRow: true)
         #expect(received == .changes(expected))
     }
