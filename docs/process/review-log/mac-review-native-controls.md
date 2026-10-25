@@ -41,4 +41,14 @@ remains failed; it is not reclassified by this focused result.
 
 The C17 repair's iPhone `054452Z-8891` and iPad `055000Z-13059` runs each
 passed all three journeys, including the AX5 waiting and completion actions.
-Native image review and the full gate from the original base remain pending.
+Snapshot run `snapshots/20261025T065800Z-82230` compared 20 unchanged images
+and recorded 80 candidate images across iPhone, iPad and Mac. The capture job
+passed; human baseline approval remains pending. Independent visual review
+checked 19 images with no P0–P2 findings for review and sample overview.
+Actions: see `ui-test` results above.
+
+Antoine's subsequent desktop screenshots reject the current production Home
+and sidebar composition: overridden row surfaces, wrapping names, detached
+previous-session information and unclear disabled Study state. Those findings
+remain open and are outside this terminal-image candidate approval. The full
+gate from the original batch base and human visual acceptance remain pending.
