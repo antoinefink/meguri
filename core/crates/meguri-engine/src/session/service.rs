@@ -23,7 +23,7 @@ use meguri_sched::{
     model::sched_config::SchedConfig,
     queue::{
         self, Counts, Environment, Kind,
-        rebuild_rules::{self, Action, CardImages, Context, Stamp},
+        rebuild_rules::{self, Action, Context, Stamp},
     },
     session::{
         QueueAnswer, Requeue, SessionQueue,
@@ -430,6 +430,8 @@ impl Wake for StreamWake {
         }
     }
 }
+#[cfg(feature = "test-hooks")]
+type ObserveHook = Arc<dyn Fn(&crate::CommitPayload) + Send + Sync>;
 struct Inner {
     events: crate::Subscription,
     wake: Arc<StreamWake>,
@@ -437,6 +439,8 @@ struct Inner {
     fail_application: AtomicU64,
     #[cfg(feature = "test-hooks")]
     before_prepare_hook: Mutex<Option<BeforePrepareHook>>,
+    #[cfg(feature = "test-hooks")]
+    observe_hook: Mutex<Option<ObserveHook>>,
     observing: AtomicBool,
     state: Mutex<State>,
     tx: mpsc::Sender<Work>,
@@ -468,7 +472,7 @@ enum Work {
         generation: Generation,
         seq: Seq,
         changes: Box<meguri_model::changes::ChangeSet>,
-        cards: Vec<crate::CardDelta>,
+        payload: crate::CommitPayload,
     },
     Barrier(mpsc::SyncSender<Result<(), EngineError>>, Duration),
     ApplicationBarrier(mpsc::SyncSender<()>),
@@ -568,6 +572,8 @@ impl ReviewService {
             fail_application: AtomicU64::new(0),
             #[cfg(feature = "test-hooks")]
             before_prepare_hook: Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            observe_hook: Mutex::new(None),
             observing: AtomicBool::new(false),
             state: Mutex::new(State {
                 binding: None,
@@ -630,6 +636,12 @@ impl ReviewService {
     pub fn clear_render_cache_for_testing(&self) {
         self.inner.state.lock().unwrap().render.clear();
     }
+    /// Gate deferred observation before it takes service state or reads images.
+    #[cfg(feature = "test-hooks")]
+    pub fn observe_hook_for_testing(&self, hook: Option<ObserveHook>) {
+        *self.inner.observe_hook.lock().unwrap() = hook;
+    }
+
     /// Wait for accepted U44 applications, leaving WAL/Done coverage untouched.
     #[cfg(feature = "test-hooks")]
     pub fn application_barrier_for_testing(&self) -> Result<(), EngineError> {
@@ -2827,11 +2839,18 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
             generation,
             seq,
             changes,
-            cards,
+            payload,
         } => {
             let (c, _) = bound(inner)?;
             if c.generation() != generation {
                 return Ok(());
+            }
+            #[cfg(feature = "test-hooks")]
+            {
+                let hook = inner.observe_hook.lock().unwrap().clone();
+                if let Some(hook) = hook {
+                    hook(&payload);
+                }
             }
             let owned = inner.owned.lock().unwrap().remove(&(generation.0, seq.0));
             let mut state = inner.state.lock().unwrap();
@@ -2846,24 +2865,28 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
                 seq: seq.0,
                 generation: generation.0,
             };
-            let images = cards
-                .iter()
-                .map(|c| CardImages {
-                    id: c.id,
-                    before: c.before.as_deref(),
-                    after: c.after.as_deref(),
-                })
-                .collect::<Vec<_>>();
-            let action = rebuild_rules::classify(
+            let action = rebuild_rules::classify_with(
                 &changes,
-                &images,
                 Context {
                     built: s.built,
                     commit: stamp,
                     owned: owned.then_some(stamp),
                     day_changed: false,
                 },
+                |id| payload.flag_only(id),
             );
+            let action = match action {
+                Ok(action) => action,
+                Err(error) => {
+                    let mut presentation = s.presentation.lock().unwrap();
+                    presentation.rebuild = true;
+                    presentation.restore_cache = false;
+                    s.cache.invalidate();
+                    // Do not project or emit a successful partial head. A later
+                    // request uses the existing rebuild path.
+                    return Err(error.into());
+                }
+            };
             if owned {
                 return Ok(());
             }
@@ -3069,7 +3092,7 @@ impl ChangeObserver for ReviewService {
                 generation: commit.generation,
                 seq: commit.seq,
                 changes: Box::new(commit.changes.clone()),
-                cards: commit.cards.to_vec(),
+                payload: commit.payload.clone(),
             })
             .map_err(invalid)
     }

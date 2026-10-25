@@ -71,6 +71,7 @@ pub(crate) const TOUCH_INDEX_LIMIT: usize = 1_000_000;
 pub(crate) struct TouchIndex {
     file_floor: Seq,
     key_floor: Seq,
+    local_modification: Seq,
     keys: BTreeMap<TouchKey, Seq>,
     tables: HashMap<Table, Seq>,
     limit: usize,
@@ -87,6 +88,7 @@ impl TouchIndex {
         TouchIndex {
             file_floor: floor,
             key_floor: floor,
+            local_modification: floor,
             keys: BTreeMap::new(),
             tables: HashMap::new(),
             limit,
@@ -97,8 +99,17 @@ impl TouchIndex {
     pub(crate) fn reset(&mut self, floor: Seq) {
         self.file_floor = floor;
         self.key_floor = floor;
+        self.local_modification = floor;
         self.keys.clear();
         self.tables.clear();
+    }
+
+    pub(crate) fn record_local_modification(&mut self, seq: Seq) {
+        self.local_modification = seq;
+    }
+
+    pub(crate) fn local_modification_since(&self, since: Seq) -> bool {
+        since < self.file_floor || self.local_modification > since
     }
 
     /// Records the keys a committed op changed.
@@ -200,6 +211,19 @@ mod tests {
         assert!(index.table_untouched(Table::Notes, Seq(11)));
         assert!(index.table_untouched(Table::Decks, Seq(10)));
         assert!(!index.table_untouched(Table::Decks, Seq(9)));
+    }
+
+    #[test]
+    fn modification_sequence_outlives_key_eviction_and_reset_invalidates_older_snapshots() {
+        let mut index = TouchIndex::with_limit(Seq(10), 1);
+        assert!(!index.local_modification_since(Seq(10)));
+        index.record_local_modification(Seq(11));
+        index.record(Seq(12), [(Table::Config, &key(1)), (Table::Config, &key(2))], 2);
+        assert!(index.local_modification_since(Seq(10)));
+        assert!(!index.local_modification_since(Seq(11)));
+        index.reset(Seq(13));
+        assert!(index.local_modification_since(Seq(12)));
+        assert!(!index.local_modification_since(Seq(13)));
     }
 
     #[test]

@@ -173,7 +173,7 @@ fn spilled_before_images_of_a_rolled_back_step_are_dropped() {
     assert_eq!(journal.len(), 5);
     assert_eq!(journal.held_bytes(), held);
     assert_eq!(journal.spilled_bytes(), spilled);
-    // A later step reuses the spill file from where the kept entries end.
+    // A later step appends without reusing any prior extent.
     edit(&mut scope, ids[39]);
     let entry = scope
         .journal()

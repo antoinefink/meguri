@@ -641,7 +641,7 @@ impl ChangeObserver for HostObserver {
                 }
             }
         }
-        let mark = commit.collection.map(CollectionMark::of);
+        let mark = commit.collection;
         if deltas.is_empty() && mark.is_none() {
             return Ok(());
         }

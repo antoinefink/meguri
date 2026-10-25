@@ -664,16 +664,35 @@ impl<'c> WriteScope<'c> {
 
     /// Commits: in a `Local` or `KeepMtime` scope with a change, `col.mod`
     /// is set to now first (S5).
-    pub fn commit(mut self) -> Result<Committed, StorageError> {
+    pub fn commit(self) -> Result<Committed, StorageError> {
+        self.commit_with(|_, _| Ok::<(), StorageError>(()))
+            .map(|(committed, ())| committed)
+    }
+
+    /// Secure caller-owned compact commit facts after final col.mod stamping,
+    /// including the requested local stamp even when its bytes are unchanged,
+    /// while any image/decode failure can still roll back. The callback must
+    /// not publish effects. Once COMMIT succeeds, only completed-commit errors
+    /// are returned in `Committed::post_commit_error`.
+    pub fn commit_with<T, E: From<StorageError>>(
+        mut self,
+        prepare: impl FnOnce(Option<&Journal>, Option<EpochMillis>) -> Result<T, E>,
+    ) -> Result<(Committed, T), E> {
         let col_mod = if self.mode.moves_col_mod() && self.changed {
             let now = self.now();
-            self.set_col_mod_unchecked(now)?;
+            self.set_col_mod_unchecked(now).map_err(E::from)?;
             Some(now)
         } else {
             None
         };
-        meguri_model::faultpoint!("storage.commit.before")?;
-        self.conn.execute_batch("COMMIT")?;
+        let facts = prepare(self.journal.as_ref(), col_mod)?;
+        meguri_model::faultpoint!("storage.commit.before")
+            .map_err(StorageError::from)
+            .map_err(E::from)?;
+        self.conn
+            .execute_batch("COMMIT")
+            .map_err(StorageError::from)
+            .map_err(E::from)?;
         self.open = false;
         let detach_error = if self.normal_stage {
             self.conn
@@ -688,12 +707,15 @@ impl<'c> WriteScope<'c> {
             .err()
             .map(StorageError::from)
             .or(detach_error);
-        Ok(Committed {
-            post_commit_error,
-            journal: self.journal.take(),
-            changed: self.changed,
-            col_mod,
-        })
+        Ok((
+            Committed {
+                post_commit_error,
+                journal: self.journal.take(),
+                changed: self.changed,
+                col_mod,
+            },
+            facts,
+        ))
     }
 
     /// Rolls back every write of the scope.

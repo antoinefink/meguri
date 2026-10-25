@@ -17,7 +17,7 @@ use meguri_sched::{
     model::{deck_sched::DeckSched, preset::PresetView, sched_config::SchedConfig},
     queue::{
         Kind,
-        rebuild_rules::{self, Action, CardImages, Context, Stamp},
+        rebuild_rules::{self, Action, Context, Stamp},
     },
     states::{
         engine::{AnswerState, SchedulingStates, State, StateInput, next_states},
@@ -384,31 +384,27 @@ impl AnswerCaches {
             if cache.scenario {
                 changes.config_keys.retain(|k| k.key == "curDeck");
             }
-            let images = c
-                .cards
-                .iter()
-                .map(|r| CardImages {
-                    id: r.id,
-                    before: r.before.as_deref(),
-                    after: r.after.as_deref(),
-                })
-                .collect::<Vec<_>>();
             let commit = Stamp {
                 seq: c.seq.0,
                 generation: c.generation.0,
             };
-            let action = rebuild_rules::classify(
+            let action = rebuild_rules::classify_with(
                 &changes,
-                &images,
                 Context {
                     built: cache.built,
                     commit,
                     owned: (owner == Some(cache.build) || restoring).then_some(commit),
                     day_changed: false,
                 },
+                |id| c.payload.flag_only(id),
             );
-            if action == Action::Rebuild {
-                cache.invalidate();
+            match action {
+                Ok(Action::Rebuild) => cache.invalidate(),
+                Ok(_) => {}
+                Err(error) => {
+                    cache.invalidate();
+                    tracing::warn!(seq = c.seq.0, %error, "answer cache journal access failed");
+                }
             }
             true
         });

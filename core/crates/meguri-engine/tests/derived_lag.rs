@@ -174,7 +174,7 @@ fn each_page(
 }
 
 impl DerivedComponent for CardMirror {
-    type Delta = Vec<Change>;
+    type Delta = meguri_engine::CommitPayload;
 
     fn schema(&self) -> ComponentSchema {
         ComponentSchema::new(MIRROR, 1)
@@ -186,30 +186,30 @@ impl DerivedComponent for CardMirror {
             .index(IndexDef::new("rows_nid", "rows", "(nid)"))
     }
 
-    fn capture(&self, commit: &ObservedCommit<'_>) -> Capture<Vec<Change>> {
-        if commit.cards.is_empty() {
+    fn capture(&self, commit: &ObservedCommit<'_>) -> Capture<Self::Delta> {
+        if commit.changes.cards.is_empty() {
             return Capture::Nothing;
         }
-        let changes: Vec<Change> = commit
-            .cards
-            .iter()
-            .map(|delta| match delta.after_card().unwrap() {
-                Some(card) => Change::Put(row_of(&card)),
-                None => Change::Remove(delta.id.0),
-            })
-            .collect();
-        let too_much = changes
-            .iter()
-            .any(|change| matches!(change, Change::Put(row) if Some(row.4) == self.rebuild_on_due));
-        if too_much {
-            return Capture::Rebuild;
+        if let Some(due) = self.rebuild_on_due {
+            for delta in commit.payload.cards() {
+                match delta.and_then(|d| d.after_card()) {
+                    Ok(Some(card)) if i64::from(card.due) == due => return Capture::Rebuild,
+                    Ok(_) => {}
+                    Err(_) => return Capture::Rebuild,
+                }
+            }
         }
-        Capture::Delta(changes)
+        Capture::Delta(commit.payload.clone())
     }
 
-    fn apply(&self, tables: &ComponentTables<'_>, delta: Vec<Change>) -> Result<(), EngineError> {
+    fn apply(&self, tables: &ComponentTables<'_>, delta: Self::Delta) -> Result<(), EngineError> {
         let table = tables.table("rows")?.to_owned();
-        for change in delta {
+        for delta in delta.cards() {
+            let delta = delta?;
+            let change = match delta.after_card()? {
+                Some(card) => Change::Put(row_of(&card)),
+                None => Change::Remove(delta.id.0),
+            };
             match change {
                 Change::Put(row) => {
                     if let Some((due, gate)) = &self.held_apply
@@ -363,12 +363,10 @@ impl ChangeObserver for HeldObserver {
     }
 
     fn observe(&self, commit: &ObservedCommit<'_>) -> Result<(), EngineError> {
-        let gives_due = commit.cards.iter().any(|delta| {
-            delta
-                .after_card()
-                .unwrap()
-                .is_some_and(|card| i64::from(card.due) == self.due)
-        });
+        let mut gives_due = false;
+        for delta in commit.payload.cards() {
+            gives_due |= delta?.after_card()?.is_some_and(|card| i64::from(card.due) == self.due);
+        }
         if gives_due {
             self.entered.store(true, Ordering::SeqCst);
             self.gate.pass();

@@ -350,3 +350,144 @@ fn untouched_and_absent_row_preconditions_hold_when_nothing_changed() {
         }
     ));
 }
+
+fn modification_since(collection: &meguri_engine::Collection, since: meguri_engine::Seq) -> bool {
+    collection
+        .run(
+            OpSpec::named("read modification sequence", OpSource::Rollover).stamp(meguri_storage::StampMode::Raw),
+            move |ctx| Ok(ctx.local_modification_since(since)),
+        )
+        .unwrap()
+        .value
+}
+
+#[test]
+fn local_modification_intent_survives_equal_stamps_but_excludes_raw_empty_and_rollback() {
+    use meguri_model::faultpoint::{self, Fault};
+    use meguri_storage::StampMode;
+    let h = common::fresh();
+    h.collection.check_rollover().unwrap();
+    h.collection
+        .run(OpSpec::named("seed config", OpSource::LocalApi), |ctx| {
+            ctx.scope().set_config("intent", &1_i64.into())?;
+            Ok(())
+        })
+        .unwrap();
+    let since = h
+        .collection
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .snapshot()
+        .unwrap()
+        .seq();
+    let before = col_mod(&h.collection);
+    assert!(!modification_since(&h.collection, since));
+    for mode in [StampMode::Local, StampMode::KeepMtime] {
+        h.collection
+            .run(OpSpec::named("equal config", OpSource::LocalApi).stamp(mode), |ctx| {
+                ctx.scope().set_config("intent", &1_i64.into())?;
+                ctx.scope().remove_config("missing-intent")?;
+                Ok(())
+            })
+            .unwrap();
+        h.collection
+            .run(OpSpec::named("empty local", OpSource::LocalApi).stamp(mode), |_| Ok(()))
+            .unwrap();
+        h.collection
+            .run(
+                OpSpec::named("rolled back step", OpSource::LocalApi).stamp(mode),
+                |ctx| {
+                    let mark = ctx.scope().savepoint()?;
+                    ctx.scope().set_config("intent", &2_i64.into())?;
+                    ctx.scope().rollback_to_savepoint(mark)?;
+                    Ok(())
+                },
+            )
+            .unwrap();
+        let failed =
+            h.collection
+                .run::<(), _>(OpSpec::named("rolled back op", OpSource::LocalApi).stamp(mode), |ctx| {
+                    ctx.scope().remove_config("intent")?;
+                    Err(EngineError::Internal {
+                        message: "rollback requested".into(),
+                    })
+                });
+        assert!(failed.is_err());
+        assert!(!modification_since(&h.collection, since));
+    }
+    h.collection
+        .run(
+            OpSpec::named("raw bookkeeping", OpSource::Rollover).stamp(StampMode::Raw),
+            |ctx| {
+                ctx.scope().set_config("lastUnburied", &0_i64.into())?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert!(!modification_since(&h.collection, since));
+    h.collection
+        .run(
+            OpSpec::named("incoming config", OpSource::SyncIncoming).stamp(StampMode::CallerSupplied),
+            |ctx| {
+                ctx.scope().set_config("incoming-intent", &3_i64.into())?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert!(!modification_since(&h.collection, since));
+    let failed = h
+        .collection
+        .run(OpSpec::named("commit failure", OpSource::LocalApi), |ctx| {
+            ctx.scope().set_config("intent", &4_i64.into())?;
+            faultpoint::arm("storage.commit.before", Fault::IoError(std::io::ErrorKind::Other));
+            Ok(())
+        });
+    faultpoint::disarm_all();
+    assert!(failed.is_err());
+    assert!(!modification_since(&h.collection, since));
+    assert_eq!(col_mod(&h.collection), before);
+    assert_eq!(
+        h.collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .config_value("intent")
+            .unwrap()
+            .unwrap()
+            .as_i64(),
+        Some(1)
+    );
+    for mode in [StampMode::Local, StampMode::KeepMtime] {
+        for remove in [false, true] {
+            let since = h
+                .collection
+                .reader(ReaderRole::Query)
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .seq();
+            let committed = h
+                .collection
+                .run(
+                    OpSpec::named("same instant config", OpSource::LocalApi).stamp(mode),
+                    move |ctx| {
+                        if remove {
+                            ctx.scope().remove_config("intent")?;
+                        } else {
+                            ctx.scope().set_config("intent", &2_i64.into())?;
+                        }
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            assert_eq!(col_mod(&h.collection), before);
+            assert!(modification_since(&h.collection, since));
+            assert!(!modification_since(&h.collection, committed.seq));
+        }
+    }
+    h.engine.close().unwrap();
+    let reopened = h.engine.open_raw(&h.path, common::open_config(&h.clock)).unwrap();
+    reopened.check_rollover().unwrap();
+    let fresh = reopened.reader(ReaderRole::Query).unwrap().snapshot().unwrap().seq();
+    assert!(!modification_since(&reopened, fresh));
+    assert!(modification_since(&reopened, since));
+}

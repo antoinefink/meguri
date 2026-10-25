@@ -216,6 +216,13 @@ impl<'c> OpContext<'_, 'c> {
         self.touched.untouched(table, key, since)
     }
 
+    /// Whether a committed Local/KeepMtime scope requested a modification
+    /// stamp after this snapshot, including an equal stored stamp. A snapshot
+    /// older than the current file or external invalidation is conservative.
+    pub fn local_modification_since(&self, since: Seq) -> bool {
+        self.touched.local_modification_since(since)
+    }
+
     pub fn source(&self) -> OpSource {
         self.source
     }

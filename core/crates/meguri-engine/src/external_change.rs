@@ -1,6 +1,6 @@
 //! Conservative cache invalidation, serialized on the writer (suspend S3).
 use crate::changes::{
-    observers::{self, ObservedCommit},
+    observers::{self, CommitPayload, ObservedCommit},
     stream::EventKind,
 };
 use crate::executor::{ExecShared, preconditions::TouchIndex};
@@ -27,11 +27,8 @@ pub(crate) fn notify(shared: &ExecShared, writer: &Writer, touched: &mut TouchIn
             seq,
             generation: shared.generation(),
             changes: &changes,
-            cards: &[],
-            revlog_added: &[],
-            revlog_removed: &[],
-            config: &[],
-            collection: Some(&col),
+            collection: Some(meguri_storage::derived::CollectionMark::of(&col)),
+            payload: CommitPayload::external(seq, shared.generation(), col),
         },
     );
     reservation.fill(shared.generation(), None, EventKind::Changes(changes));

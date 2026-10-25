@@ -1003,12 +1003,19 @@ fn post_snapshot_curdeck_survives_whole_config_replacement() {
             );
         }
         if r.path().ends_with("/chunk") {
-            collection
+            let before = collection
                 .run(OpSpec::named("select after snapshot", OpSource::UserUndoable), |ctx| {
+                    let before = ctx.scope().col()?.modified;
+                    assert_eq!(before.0, ctx.now().0);
                     ctx.scope().set_config("curDeck", &77_i64.into())?;
-                    Ok(())
+                    Ok(before)
                 })
-                .unwrap();
+                .unwrap()
+                .value;
+            assert_eq!(
+                collection.reader(ReaderRole::Query).unwrap().col().unwrap().modified,
+                before
+            );
         }
         default_reply(r.path(), scm, NOW + 1000)
     });
@@ -1017,6 +1024,7 @@ fn post_snapshot_curdeck_survives_whole_config_replacement() {
     assert_eq!(rows.config_value("curDeck").unwrap().unwrap().as_i64(), Some(77));
     assert_eq!(rows.config_entry("curDeck").unwrap().unwrap().entry.usn, Usn::PENDING);
     assert!(rows.col().unwrap().modified > rows.col().unwrap().last_sync);
+    assert_eq!(rows.col().unwrap().modified.0, rows.col().unwrap().last_sync.0 + 1);
     assert_eq!(
         meguri_sync::status::LocalRecord::read(&*rows).unwrap().offline_status(),
         meguri_sync::status::OfflineStatus::PendingChanges
@@ -1071,6 +1079,87 @@ fn post_snapshot_curdeck_survives_whole_config_replacement() {
     assert!(matches!(out.check.result, meguri_sync::status::CheckResult::NoChanges));
     assert!(out.merge.is_none());
     assert_eq!(methods(&clean), ["meta"]);
+}
+
+#[test]
+fn same_instant_post_snapshot_config_removal_keeps_final_mod_pending() {
+    for mode in [StampMode::Local, StampMode::KeepMtime] {
+        let f = Fixture::new(0);
+        f.collection
+            .run(OpSpec::named("seed removable config", OpSource::LocalApi), |ctx| {
+                ctx.scope().set_config("remove-after-snapshot", &1_i64.into())?;
+                Ok(())
+            })
+            .unwrap();
+        let collection = f.collection.clone();
+        let scm = schema(&f);
+        let stub = SyncStub::serve(move |r| {
+            if r.path().ends_with("/meta") {
+                return default_reply(r.path(), scm, NOW + 61_000);
+            }
+            if r.path().ends_with("applyChanges") {
+                return Reply::ok(
+                    br#"{"models":[],"decks":[[],[]],"tags":[],"conf":{"schedVer":2,"remove-after-snapshot":1}}"#,
+                );
+            }
+            if r.path().ends_with("/chunk") {
+                collection
+                    .run(
+                        OpSpec::named("remove after snapshot", OpSource::LocalApi).stamp(mode),
+                        |ctx| {
+                            assert_eq!(ctx.scope().col()?.modified.0, ctx.now().0);
+                            assert!(ctx.scope().remove_config("remove-after-snapshot")?.changed());
+                            Ok(())
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(
+                    collection.reader(ReaderRole::Query).unwrap().col().unwrap().modified.0,
+                    NOW
+                );
+            }
+            default_reply(r.path(), scm, NOW + 1000)
+        });
+        f.start(&stub.url()).wait().unwrap();
+        let rows = f.collection.reader(ReaderRole::Query).unwrap();
+        assert!(rows.config_entry("remove-after-snapshot").unwrap().is_none());
+        assert_eq!(rows.col().unwrap().modified.0, rows.col().unwrap().last_sync.0 + 1);
+        assert_eq!(
+            meguri_sync::status::LocalRecord::read(&*rows).unwrap().offline_status(),
+            meguri_sync::status::OfflineStatus::PendingChanges
+        );
+    }
+}
+
+#[test]
+fn post_snapshot_raw_day_bookkeeping_does_not_keep_final_mod_pending() {
+    let f = Fixture::new(0);
+    let collection = f.collection.clone();
+    let scm = schema(&f);
+    let stub = SyncStub::serve(move |r| {
+        if r.path().ends_with("/meta") {
+            return default_reply(r.path(), scm, NOW + 61_000);
+        }
+        if r.path().ends_with("/chunk") {
+            collection
+                .run(
+                    OpSpec::named("day bookkeeping after snapshot", OpSource::Rollover).stamp(StampMode::Raw),
+                    |ctx| {
+                        assert!(ctx.scope().set_config("lastUnburied", &(-1_i64).into())?.changed());
+                        Ok(())
+                    },
+                )
+                .unwrap();
+        }
+        default_reply(r.path(), scm, NOW + 1000)
+    });
+    f.start(&stub.url()).wait().unwrap();
+    let rows = f.collection.reader(ReaderRole::Query).unwrap();
+    assert_eq!(rows.col().unwrap().modified, rows.col().unwrap().last_sync);
+    assert_eq!(
+        meguri_sync::status::LocalRecord::read(&*rows).unwrap().offline_status(),
+        meguri_sync::status::OfflineStatus::NothingPending
+    );
 }
 
 #[test]

@@ -175,3 +175,25 @@ rename test that assumes card-ID order equals template-ordinal order
 and duplicates when correcting this test-only ordering assumption.
 The two large sync cases passed in the earlier full focused run; they were not
 repeated by this small-case filter. U107 remains unaccepted.
+
+## Commit payload and settings repair
+
+The bounded payload export used clean input `d50af3a2`, with 22 owned paths.
+Filtered repair `174954Z-32451` added the local modification sequence fact and
+fixed the test clock. Review is clear. Final stamping supplies the fact before
+COMMIT; the writer records it only after success. Local and KeepMtime writes
+count even when the stored timestamp stays equal. Raw day-clock work does not.
+The normal merge uses this fact above S. Config set/removal, empty writes,
+rollback and the following clean round have tests.
+
+New observer comparisons needed full stored card rows instead of unsupported
+typed equality. Filtered repair `180321Z-45065` preserves all columns and the
+None/Some checks. Rejected comments were removed without changing assertions
+or privacy rules. The source reviews and original failed runs remain retained.
+
+Focused combined run `180714Z-48860` passes all 199 executed cases across
+journal, savepoint, observer, queue, precondition, normal-sync and media checks.
+It includes the settings repair and media report error/resume cases. Allocation
+and original held-run memory runs are separate and pending at this checkpoint.
+The marker change belongs to U110 and is kept in its own source commit.
+The live-session cleanup repair, typed skipped IDs and batch gate remain open.

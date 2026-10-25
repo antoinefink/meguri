@@ -15,8 +15,8 @@
 //!   them back), so a column's affinity is applied.
 //! - Memory is bounded (R1851): a note's after-image is its digest and the
 //!   columns that changed (observers that need the content read it after
-//!   commit), and once the before-images held in memory pass the spill
-//!   threshold, further before-images go to an unnamed temporary file in
+//!   commit). Both image sides and savepoint replacements share one retained
+//!   byte limit; further images go to an unnamed temporary file in
 //!   the collection's directory, removed when the journal drops.
 
 use std::cmp::Ordering;
@@ -25,6 +25,8 @@ use std::fmt;
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
+#[cfg(feature = "test-hooks")]
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
 
 use sha2::{Digest, Sha256};
 
@@ -32,13 +34,13 @@ use crate::collation;
 use crate::error::StorageError;
 use crate::rows::{Cell, RowImage, RowKey, Table};
 
-/// Where and when a journal spills before-images.
+/// Where and when a journal spills full images.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JournalOptions {
-    /// Bytes of before-images held in memory; later ones spill.
+    /// Combined resident before/after/savepoint payload limit; later images spill.
     pub spill_threshold: usize,
     /// The directory of the spill file: the collection's directory. `None`
-    /// keeps every before-image in memory.
+    /// keeps every image in memory.
     pub spill_dir: Option<PathBuf>,
 }
 
@@ -55,7 +57,7 @@ impl JournalOptions {
         }
     }
 
-    /// Every before-image in memory.
+    /// Every image in memory (unbounded, for small storage-only callers).
     pub fn in_memory() -> JournalOptions {
         JournalOptions {
             spill_threshold: usize::MAX,
@@ -125,6 +127,11 @@ pub enum After {
     /// both created and deleted).
     Absent,
     Row(RowImage),
+    /// Encoded image in this journal's append-only backing file.
+    Spilled {
+        offset: u64,
+        len: u64,
+    },
     /// A note row: its digest instead of its image.
     Note(NoteDigest),
 }
@@ -207,22 +214,29 @@ pub struct Journal {
     index: HashMap<(Table, RowKey), usize>,
     /// Entries of `unicase` keys (`tags`), by that comparison.
     unicase: BTreeMap<UnicaseKey, usize>,
-    /// Bytes of before-images held in memory.
+    /// Bytes of all resident images, including savepoint replacements.
     held: usize,
     spill: Option<Spill>,
+    live_spilled: u64,
     /// Open savepoints, innermost last (`WriteScope::savepoint`).
     marks: Vec<Mark>,
+    /// Compact undo fact captured before images can spill.
+    col_mod_before: Option<i64>,
+    #[cfg(feature = "test-hooks")]
+    reads: AtomicUsize,
+    #[cfg(feature = "test-hooks")]
+    fail_reads: AtomicBool,
+    #[cfg(feature = "test-hooks")]
+    fail_after_reads: AtomicUsize,
 }
 
 /// The journal's state when a savepoint was taken, and the after-images of
-/// older entries replaced since, oldest first, so that rolling back to the
+/// older entries first replaced since, so that rolling back to the
 /// savepoint restores both.
 #[derive(Debug)]
 struct Mark {
     len: usize,
-    held: usize,
-    spill_len: u64,
-    replaced: Vec<(usize, After)>,
+    replaced: HashMap<usize, After>,
 }
 
 struct Spill {
@@ -250,7 +264,15 @@ impl Journal {
             unicase: BTreeMap::new(),
             held: 0,
             spill: None,
+            live_spilled: 0,
             marks: Vec::new(),
+            col_mod_before: None,
+            #[cfg(feature = "test-hooks")]
+            reads: AtomicUsize::new(0),
+            #[cfg(feature = "test-hooks")]
+            fail_reads: AtomicBool::new(false),
+            #[cfg(feature = "test-hooks")]
+            fail_after_reads: AtomicUsize::new(usize::MAX),
         }
     }
 
@@ -302,30 +324,104 @@ impl Journal {
     /// The row as it was before the operation; `None` when the operation
     /// created it. Reads a spilled image back from the spill file.
     pub fn before(&self, entry: &Entry) -> Result<Option<RowImage>, StorageError> {
+        #[cfg(feature = "test-hooks")]
+        if !matches!(entry.before, Before::Absent) {
+            self.test_read()?;
+        }
         match &entry.before {
             Before::Absent => Ok(None),
             Before::Held(image) => Ok(Some(image.clone())),
-            Before::Spilled { offset, len } => {
-                let spill = self.spill.as_ref().ok_or_else(|| StorageError::Io {
-                    detail: "the journal's spill file is gone".to_owned(),
-                })?;
-                let mut bytes = vec![0; usize::try_from(*len).unwrap_or(usize::MAX)];
-                spill.file.read_exact_at(&mut bytes, *offset).map_err(io)?;
-                decode(&bytes).map(Some).ok_or_else(|| StorageError::Io {
-                    detail: "a spilled before-image does not decode".to_owned(),
-                })
-            }
+            Before::Spilled { offset, len } => self.read_spill(*offset, *len).map(Some),
         }
     }
 
-    /// Bytes of before-images held in memory.
+    /// Final stored image. Notes deliberately retain only a digest, so requesting
+    /// their contents is an error, distinct from an absent row.
+    pub fn after(&self, entry: &Entry) -> Result<Option<RowImage>, StorageError> {
+        #[cfg(feature = "test-hooks")]
+        if matches!(entry.after, After::Row(_) | After::Spilled { .. }) {
+            self.test_read()?;
+        }
+        match &entry.after {
+            After::Absent => Ok(None),
+            After::Row(image) => Ok(Some(image.clone())),
+            After::Spilled { offset, len } => self.read_spill(*offset, *len).map(Some),
+            After::Note(_) => Err(StorageError::Mode {
+                detail: "note after-images contain a digest only".into(),
+            }),
+        }
+    }
+
+    /// Captured from the original stored collection row, without a payload read.
+    pub fn col_mod_before(&self) -> Option<i64> {
+        self.col_mod_before
+    }
+
+    #[cfg(feature = "test-hooks")]
+    fn test_read(&self) -> Result<(), StorageError> {
+        let read = self.reads.fetch_add(1, AtomicOrdering::Relaxed);
+        if self.fail_reads.load(AtomicOrdering::Relaxed) || read >= self.fail_after_reads.load(AtomicOrdering::Relaxed)
+        {
+            return Err(corrupt("injected image read I/O failure"));
+        }
+        Ok(())
+    }
+    #[cfg(feature = "test-hooks")]
+    pub fn image_reads(&self) -> usize {
+        self.reads.load(AtomicOrdering::Relaxed)
+    }
+    #[cfg(feature = "test-hooks")]
+    pub fn fail_image_reads(&self, fail: bool) {
+        self.fail_reads.store(fail, AtomicOrdering::Relaxed);
+        if !fail {
+            self.fail_after_reads.store(usize::MAX, AtomicOrdering::Relaxed);
+        }
+    }
+    #[cfg(feature = "test-hooks")]
+    pub fn fail_after_image_reads(&self, successful_reads: usize) {
+        self.fail_after_reads
+            .store(self.image_reads() + successful_reads, AtomicOrdering::Relaxed);
+    }
+    #[cfg(feature = "test-hooks")]
+    pub fn truncate_backing(&self) -> Result<(), StorageError> {
+        self.spill
+            .as_ref()
+            .ok_or_else(|| corrupt("no spill file"))?
+            .file
+            .set_len(0)
+            .map_err(io)
+    }
+    #[cfg(feature = "test-hooks")]
+    pub fn corrupt_backing(&self) -> Result<(), StorageError> {
+        self.spill
+            .as_ref()
+            .ok_or_else(|| corrupt("no spill file"))?
+            .file
+            .write_all_at(&[255; 32], 0)
+            .map_err(io)
+    }
+
+    fn read_spill(&self, offset: u64, len: u64) -> Result<RowImage, StorageError> {
+        let spill = self.spill.as_ref().ok_or_else(|| corrupt("missing backing file"))?;
+        let len = usize::try_from(len).map_err(|_| corrupt("invalid image length"))?;
+        let mut checksum = [0; 32];
+        spill.file.read_exact_at(&mut checksum, offset).map_err(io)?;
+        let mut bytes = vec![0; len];
+        spill.file.read_exact_at(&mut bytes, offset + 32).map_err(io)?;
+        if <[u8; 32]>::from(Sha256::digest(&bytes)) != checksum {
+            return Err(corrupt("image checksum mismatch"));
+        }
+        decode(&bytes).ok_or_else(|| corrupt("invalid image encoding"))
+    }
+
+    /// Bytes of all resident images, including savepoint replacements.
     pub fn held_bytes(&self) -> usize {
         self.held
     }
 
-    /// Bytes written to the spill file.
+    /// Encoded bytes of live spilled images (including checksum headers).
     pub fn spilled_bytes(&self) -> u64 {
-        self.spill.as_ref().map_or(0, |s| s.len)
+        self.live_spilled
     }
 
     /// Records one real change of the row `key`.
@@ -342,20 +438,16 @@ impl Journal {
                     let original = self.before(self.at(at))?;
                     After::Note(note_digest(original.as_deref(), &image))
                 }
-                Some(image) => After::Row(image),
+                Some(image) => self.keep_after(image)?,
                 None => After::Absent,
             };
             let replaced = std::mem::replace(&mut self.at_mut(at).after, after);
-            if let Some(mark) = self.marks.last_mut()
-                && at < mark.len
-            {
-                mark.replaced.push((at, replaced));
-            }
+            self.remember_replacement(at, replaced);
             return Ok(());
         }
         let after = match after {
             Some(image) if table == Table::Notes => After::Note(note_digest(before.as_deref(), &image)),
-            Some(image) => After::Row(image),
+            Some(image) => self.keep_after(image)?,
             None => After::Absent,
         };
         self.push(table, key, before, after)
@@ -363,10 +455,23 @@ impl Journal {
 
     /// Adds an entry for a key the journal does not hold yet.
     fn push(&mut self, table: Table, key: RowKey, before: Option<RowImage>, after: After) -> Result<(), StorageError> {
+        let col_mod_before = before.as_ref().and_then(|row| row.get(2)).and_then(Cell::as_i64);
         let before = match before {
             None => Before::Absent,
-            Some(image) => self.keep(image)?,
+            Some(image) => match self.keep(image) {
+                Ok(before) => before,
+                Err(error) => {
+                    // Undo accounting for the retained after-image when
+                    // storing its matching before-image fails.
+                    self.held -= after_bytes(&after);
+                    self.live_spilled -= after_spilled(&after);
+                    return Err(error);
+                }
+            },
         };
+        if table == Table::Col {
+            self.col_mod_before = col_mod_before;
+        }
         self.add_slot(table, &key, self.len);
         if self.chunks.last().is_none_or(|chunk| chunk.len() == CHUNK) {
             self.chunks.push(Vec::with_capacity(CHUNK));
@@ -395,25 +500,21 @@ impl Journal {
         let mut out = Journal::new(self.options.clone());
         for entry in self.entries() {
             let after = match later.entry(entry.table, &entry.key) {
-                None => entry.after.clone(),
+                None => out.copy_after(self, entry)?,
                 Some(next) => match (&entry.after, &next.after) {
                     (After::Note(first), After::Note(second)) => After::Note(NoteDigest {
                         sha256: second.sha256,
                         changed: first.changed.union(second.changed),
                     }),
-                    (_, after) => after.clone(),
+                    _ => out.copy_after(later, next)?,
                 },
             };
             out.push(entry.table, entry.key.clone(), self.before(entry)?, after)?;
         }
         for entry in later.entries() {
             if self.slot(entry.table, &entry.key).is_none() {
-                out.push(
-                    entry.table,
-                    entry.key.clone(),
-                    later.before(entry)?,
-                    entry.after.clone(),
-                )?;
+                let after = out.copy_after(later, entry)?;
+                out.push(entry.table, entry.key.clone(), later.before(entry)?, after)?;
             }
         }
         Ok(out)
@@ -423,9 +524,7 @@ impl Journal {
     pub(crate) fn push_mark(&mut self) {
         self.marks.push(Mark {
             len: self.len,
-            held: self.held,
-            spill_len: self.spilled_bytes(),
-            replaced: Vec::new(),
+            replaced: HashMap::new(),
         });
     }
 
@@ -434,11 +533,22 @@ impl Journal {
     /// that one, which may still roll back.
     pub(crate) fn release_mark(&mut self) {
         let Some(mark) = self.marks.pop() else { return };
-        if let Some(outer) = self.marks.last_mut() {
-            let len = outer.len;
-            outer
-                .replaced
-                .extend(mark.replaced.into_iter().filter(|(at, _)| *at < len));
+        for (at, after) in mark.replaced {
+            self.remember_replacement(at, after);
+        }
+    }
+
+    fn remember_replacement(&mut self, at: usize, after: After) {
+        // Only the first prior value per key belongs to a mark. Replacing the
+        // same key repeatedly cannot grow a second per-write metadata log.
+        if let Some(mark) = self.marks.last_mut()
+            && at < mark.len
+            && let std::collections::hash_map::Entry::Vacant(slot) = mark.replaced.entry(at)
+        {
+            slot.insert(after);
+        } else {
+            self.held -= after_bytes(&after);
+            self.live_spilled -= after_spilled(&after);
         }
     }
 
@@ -447,8 +557,10 @@ impl Journal {
     /// spill file) and older entries get back their after-images.
     pub(crate) fn rollback_mark(&mut self) {
         let Some(mark) = self.marks.pop() else { return };
-        for (at, after) in mark.replaced.into_iter().rev() {
-            self.at_mut(at).after = after;
+        for (at, after) in mark.replaced {
+            let current = std::mem::replace(&mut self.at_mut(at).after, after);
+            self.held -= after_bytes(&current);
+            self.live_spilled -= after_spilled(&current);
         }
         while self.len > mark.len {
             self.len -= 1;
@@ -460,6 +572,11 @@ impl Journal {
             if self.chunks.last().is_some_and(Vec::is_empty) {
                 self.chunks.pop();
             }
+            self.held -= before_bytes(&entry.before) + after_bytes(&entry.after);
+            self.live_spilled -= before_spilled(&entry.before) + after_spilled(&entry.after);
+            if entry.table == Table::Col {
+                self.col_mod_before = None;
+            }
             match &entry.key {
                 RowKey::Text(text) if entry.table.unicase_key() => {
                     self.unicase.remove(&UnicaseKey(text.clone()));
@@ -469,14 +586,31 @@ impl Journal {
                 }
             }
         }
-        self.held = mark.held;
-        if let Some(spill) = &mut self.spill {
-            spill.len = mark.spill_len;
+        // Extents are append-only, even across rollback. No surviving reference
+        // can ever observe a reused offset.
+    }
+
+    fn copy_after(&mut self, source: &Journal, entry: &Entry) -> Result<After, StorageError> {
+        match entry.after() {
+            After::Absent => Ok(After::Absent),
+            After::Note(digest) => Ok(After::Note(*digest)),
+            After::Row(_) | After::Spilled { .. } => {
+                let image = source.after(entry)?.ok_or_else(|| corrupt("missing final image"))?;
+                self.keep_after(image)
+            }
         }
     }
 
+    fn keep_after(&mut self, image: RowImage) -> Result<After, StorageError> {
+        Ok(match self.keep(image)? {
+            Before::Absent => After::Absent,
+            Before::Held(image) => After::Row(image),
+            Before::Spilled { offset, len } => After::Spilled { offset, len },
+        })
+    }
+
     fn keep(&mut self, image: RowImage) -> Result<Before, StorageError> {
-        let size = image_bytes(&image);
+        let size = retained_bytes(&image);
         let Some(dir) = &self.options.spill_dir else {
             self.held += size;
             return Ok(Before::Held(image));
@@ -494,10 +628,50 @@ impl Journal {
         })?;
         let bytes = encode(&image);
         let offset = spill.len;
-        spill.file.write_all_at(&bytes, offset).map_err(io)?;
+        let checksum: [u8; 32] = Sha256::digest(&bytes).into();
+        spill.file.write_all_at(&checksum, offset).map_err(io)?;
+        spill.file.write_all_at(&bytes, offset + 32).map_err(io)?;
         let len = bytes.len() as u64;
-        spill.len += len;
+        spill.len += 32 + len;
+        self.live_spilled += 32 + len;
         Ok(Before::Spilled { offset, len })
+    }
+}
+
+fn before_spilled(before: &Before) -> u64 {
+    match before {
+        Before::Spilled { len, .. } => 32 + len,
+        _ => 0,
+    }
+}
+fn after_spilled(after: &After) -> u64 {
+    match after {
+        After::Spilled { len, .. } => 32 + len,
+        _ => 0,
+    }
+}
+
+fn after_bytes(after: &After) -> usize {
+    match after {
+        After::Row(image) => retained_bytes(image),
+        _ => 0,
+    }
+}
+
+fn before_bytes(before: &Before) -> usize {
+    match before {
+        Before::Held(image) => retained_bytes(image),
+        _ => 0,
+    }
+}
+
+fn retained_bytes(image: &RowImage) -> usize {
+    image.capacity() * std::mem::size_of::<Cell>() + image.iter().map(Cell::heap_bytes).sum::<usize>()
+}
+
+fn corrupt(detail: &str) -> StorageError {
+    StorageError::Io {
+        detail: format!("write journal spill file: {detail}"),
     }
 }
 

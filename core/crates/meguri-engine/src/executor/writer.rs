@@ -15,7 +15,7 @@ use meguri_model::rng::RandomSource;
 use meguri_storage::{Initializers, OpenOptions, OpenedCollection, ReaderFactory, Writer, open_collection};
 
 use crate::cancel::CancelToken;
-use crate::changes::observers::{self, ObservedCommit};
+use crate::changes::observers::{self, CommitPayload, ObservedCommit};
 use crate::changes::stream::{EventKind, Reservation, Seq};
 use crate::changes::{self, MediaNotes};
 use crate::error::EngineError;
@@ -455,14 +455,23 @@ fn run_op<T>(
     }
     // Commit and take the seq under the commit lock, so a snapshot begun
     // under it knows exactly which commits it sees (O6).
-    let (committed, reservation) = {
+    let ((committed, derived), reservation) = {
         let mut last = shared.lock_commit();
-        let committed = scope.commit()?;
+        let committed = scope.commit_with(|journal, col_mod| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                changes::prepare(journal, spec.source, media, col_mod.is_some())
+            }))
+            .map_err(|payload| EngineError::from_panic(payload.as_ref()))?
+            .map_err(EngineError::from)
+        })?;
         let reservation = shared.stream.reserve();
         *last = reservation.seq();
         (committed, reservation)
     };
     let seq = reservation.seq();
+    if derived.local_modification {
+        env.touched.record_local_modification(seq);
+    }
     #[cfg(feature = "test-hooks")]
     {
         let hook = shared.after_commit.lock().unwrap().take();
@@ -485,8 +494,9 @@ fn run_op<T>(
         }
     }
     let observing = !shared.observers.is_empty() || shared.answer_caches.has_live();
-    let derived = changes::derive(committed.journal.as_ref(), spec.source, media, observing);
-    if let Some(journal) = &committed.journal {
+    let journal = committed.journal.map(Arc::new);
+    let payload = CommitPayload::new(seq, generation, journal.clone());
+    if let Some(journal) = &journal {
         env.touched
             .record(seq, journal.entries().map(|e| (e.table(), e.key())), journal.len());
     }
@@ -504,7 +514,7 @@ fn run_op<T>(
         source: spec.source,
         spec: &spec.undo,
         declared: spec.declared,
-        journal: committed.journal.map(Arc::new),
+        journal,
         changes: &change_set,
         notes: undo_notes,
     });
@@ -521,11 +531,8 @@ fn run_op<T>(
             seq,
             generation,
             changes: &change_set,
-            cards: &derived.cards,
-            revlog_added: &derived.revlog_added,
-            revlog_removed: &derived.revlog_removed,
-            config: &derived.config,
-            collection: derived.collection.as_ref(),
+            payload: payload.clone(),
+            collection: derived.collection,
         },
         answer_owner,
         restoring_answer,
@@ -550,11 +557,8 @@ fn run_op<T>(
                     seq,
                     generation,
                     changes: &change_set,
-                    cards: &derived.cards,
-                    revlog_added: &derived.revlog_added,
-                    revlog_removed: &derived.revlog_removed,
-                    config: &derived.config,
-                    collection: derived.collection.as_ref(),
+                    payload: payload.clone(),
+                    collection: derived.collection,
                 },
             );
         }

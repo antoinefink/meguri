@@ -62,7 +62,8 @@ pub(super) fn apply(
                     ..Default::default()
                 });
             }
-            let post_mod = !ctx.untouched_since(Table::Col, &RowKey::Id(1), hold.snapshot);
+            let post_mod = ctx.local_modification_since(hold.snapshot)
+                || !ctx.untouched_since(Table::Col, &RowKey::Id(1), hold.snapshot);
             ctx.scope().attach_normal_stage(&path)?;
             let mut outcome = MergeOutcome::default();
             let mut targets = Vec::new();

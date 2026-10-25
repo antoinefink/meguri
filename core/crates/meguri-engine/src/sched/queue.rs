@@ -13,7 +13,7 @@ use meguri_sched::{
     },
     queue::{
         self, Environment,
-        rebuild_rules::{self, Action, CardImages, Context, Stamp},
+        rebuild_rules::{self, Action, Context, Stamp},
     },
 };
 use meguri_storage::{ReadRows, ReaderRole};
@@ -64,6 +64,16 @@ impl QueueProvider {
     #[cfg(feature = "test-hooks")]
     pub fn notify_before_next_reader(&self, sender: std::sync::mpsc::Sender<ReaderRole>) {
         *self.before_reader.lock().unwrap() = Some(sender);
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub fn live_watch_count_for_testing(&self) -> usize {
+        self.watches
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|w| w.strong_count() > 0)
+            .count()
     }
 
     fn stamp(snapshot: &crate::readers::Snapshot<'_>) -> Stamp {
@@ -284,38 +294,39 @@ impl ChangeObserver for QueueProvider {
     }
     fn observe(&self, c: &ObservedCommit<'_>) -> Result<(), EngineError> {
         *self.tree.lock().unwrap() = None;
-        let images = c
-            .cards
-            .iter()
-            .map(|r| CardImages {
-                id: r.id,
-                before: r.before.as_deref(),
-                after: r.after.as_deref(),
-            })
-            .collect::<Vec<_>>();
         let commit = Stamp {
             seq: c.seq.0,
             generation: c.generation.0,
         };
+        let mut failure = None;
         self.watches.lock().unwrap().retain(|w| {
             let Some(w) = w.upgrade() else { return false };
             let mut w = w.lock().unwrap();
             if commit.seq > w.stamp.seq || commit.generation != w.stamp.generation {
-                let action = rebuild_rules::classify(
+                let action = rebuild_rules::classify_with(
                     c.changes,
-                    &images,
                     Context {
                         built: w.stamp,
                         commit,
                         owned: (w.ownership)(commit).then_some(commit),
                         day_changed: false,
                     },
+                    |id| c.payload.flag_only(id),
                 );
-                w.action = w.action.max(action);
+                match action {
+                    Ok(action) => w.action = w.action.max(action),
+                    Err(error) => {
+                        w.action = Action::Rebuild;
+                        failure = Some(error);
+                    }
+                }
             }
             true
         });
-        Ok(())
+        match failure {
+            Some(error) => Err(error.into()),
+            None => Ok(()),
+        }
     }
 }
 impl GenerationListener for QueueProvider {

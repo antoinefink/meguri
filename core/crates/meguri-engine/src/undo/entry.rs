@@ -223,8 +223,8 @@ impl Entry {
                     let Some(current) = scope.row_image(Table::Col, entry.key())? else {
                         return Ok(false);
                     };
-                    match (self.before(entry)?, entry.after()) {
-                        (Some(before), After::Row(after)) => changed_columns(&before, after)
+                    match (self.before(entry)?, self.journal.after(entry)?) {
+                        (Some(before), Some(after)) => changed_columns(&before, &after)
                             .into_iter()
                             .all(|i| i == COL_MOD || current.get(i) == after.get(i)),
                         _ => false,
@@ -233,7 +233,13 @@ impl Entry {
                 table => {
                     let expected = match entry.after() {
                         After::Absent => None,
-                        After::Row(image) => Some(journal::digest(image)),
+                        After::Row(_) | After::Spilled { .. } => {
+                            let image = self
+                                .journal
+                                .after(entry)?
+                                .ok_or_else(|| EngineError::internal("missing final journal row"))?;
+                            Some(journal::digest(&image))
+                        }
                         After::Note(note) => Some(note.sha256),
                     };
                     scope.row_digest(table, entry.key())? == expected
@@ -293,8 +299,8 @@ impl Entry {
             return Err(EngineError::internal("the collection has no col row"));
         };
         let mut image = current.clone();
-        if let (Some(before), After::Row(after)) = (self.before(entry)?, entry.after()) {
-            for i in changed_columns(&before, after) {
+        if let (Some(before), Some(after)) = (self.before(entry)?, self.journal.after(entry)?) {
+            for i in changed_columns(&before, &after) {
                 if i != COL_MOD {
                     image[i] = before[i].clone();
                 }
@@ -327,8 +333,7 @@ fn touched_notes(changes: &ChangeSet) -> BTreeSet<i64> {
 
 /// `col.mod` before the op, from its journal, when the op wrote `col`.
 fn col_mod_before(journal: &Journal) -> Option<i64> {
-    let entry = journal.entries().find(|entry| entry.table() == Table::Col)?;
-    journal.before(entry).ok().flatten()?.get(COL_MOD)?.as_i64()
+    journal.col_mod_before()
 }
 
 /// The key of the one note row a journal changed (there before and after),

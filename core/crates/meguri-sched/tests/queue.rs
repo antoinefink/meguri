@@ -286,3 +286,58 @@ fn rebuild_table_uses_payloads_generation_and_explicit_ownership() {
     });
     assert_eq!(classify_no_rows(&c), Action::None);
 }
+
+#[test]
+fn lazy_rebuild_proofs_do_not_read_images_before_compact_exits_and_propagate_errors() {
+    use meguri_model::{
+        changes::{CardChange, ChangeKind, ChangeSet, ConfigKeyChange, OpSource},
+        ids::{CardId, NoteId},
+    };
+    use meguri_sched::queue::rebuild_rules::{Action, Context, Stamp, classify_with};
+    let stamp = Stamp { seq: 2, generation: 1 };
+    let base = Context {
+        built: Stamp { seq: 1, ..stamp },
+        commit: stamp,
+        owned: None,
+        day_changed: false,
+    };
+    let mut changes = ChangeSet::empty(OpSource::UserUndoable);
+    changes.cards.push(CardChange {
+        id: CardId(4),
+        note_id: NoteId(7),
+        kind: ChangeKind::Updated,
+        memory_state_only: false,
+    });
+    for exit in 0..5 {
+        let mut changes = changes.clone();
+        let mut context = base;
+        match exit {
+            0 => context.day_changed = true,
+            1 => changes.whole_collection = true,
+            2 => changes.source = OpSource::SyncIncoming,
+            3 => context.built.generation += 1,
+            _ => changes.config_keys.push(ConfigKeyChange {
+                key: "curDeck".into(),
+                kind: ChangeKind::Updated,
+            }),
+        }
+        assert_eq!(
+            classify_with(&changes, context, |_| -> Result<bool, ()> {
+                panic!("decoder called before rebuild classification")
+            }),
+            Ok(Action::Rebuild)
+        );
+    }
+    assert_eq!(
+        classify_with(
+            &changes,
+            Context {
+                owned: Some(stamp),
+                ..base
+            },
+            |_| -> Result<bool, ()> { panic!("owned image read") }
+        ),
+        Ok(Action::None)
+    );
+    assert_eq!(classify_with(&changes, base, |_| Err("I/O")), Err("I/O"));
+}

@@ -27,33 +27,49 @@ pub struct Context {
     pub owned: Option<Stamp>,
     pub day_changed: bool,
 }
+/// Compatibility slice adapter. Production passes an on-demand raw-cell proof.
 pub fn classify(changes: &ChangeSet, images: &[CardImages<'_>], context: Context) -> Action {
+    let result = classify_with(changes, context, |id| {
+        Ok::<_, std::convert::Infallible>(
+            images
+                .iter()
+                .find(|r| r.id == id)
+                .is_some_and(|r| flag_only(r.before, r.after)),
+        )
+    });
+    match result {
+        Ok(action) => action,
+        Err(never) => match never {},
+    }
+}
+
+pub fn flag_only(before: Option<&[Cell]>, after: Option<&[Cell]>) -> bool {
+    match (before, after) {
+        (Some(a), Some(b)) if a.len() == 18 && b.len() == 18 => a
+            .iter()
+            .zip(b)
+            .enumerate()
+            .all(|(i, (a, b))| matches!(i, 4 | 5 | 16) || a == b),
+        _ => false,
+    }
+}
+
+/// Compact-fact exits precede payload access. An unreadable row cannot prove
+/// flag-only; callers must invalidate/rebuild on the returned error.
+pub fn classify_with<E>(
+    changes: &ChangeSet,
+    context: Context,
+    mut flag: impl FnMut(CardId) -> Result<bool, E>,
+) -> Result<Action, E> {
     if context.day_changed
         || changes.whole_collection
         || changes.source == OpSource::SyncIncoming
         || context.built.generation != context.commit.generation
     {
-        return Action::Rebuild;
+        return Ok(Action::Rebuild);
     }
     if context.owned == Some(context.commit) {
-        return Action::None;
-    }
-    for change in &changes.cards {
-        let flag_only = change.kind == ChangeKind::Updated
-            && images
-                .iter()
-                .find(|r| r.id == change.id)
-                .is_some_and(|r| match (r.before, r.after) {
-                    (Some(a), Some(b)) if a.len() == 18 && b.len() == 18 => a
-                        .iter()
-                        .zip(b)
-                        .enumerate()
-                        .all(|(i, (a, b))| matches!(i, 4 | 5 | 16) || a == b),
-                    _ => false,
-                });
-        if !flag_only {
-            return Action::Rebuild;
-        }
+        return Ok(Action::None);
     }
     if !changes.decks.is_empty()
         || !changes.deck_configs.is_empty()
@@ -73,11 +89,16 @@ pub fn classify(changes: &ChangeSet, images: &[CardImages<'_>], context: Context
             )
         })
     {
-        return Action::Rebuild;
+        return Ok(Action::Rebuild);
+    }
+    for change in &changes.cards {
+        if change.kind != ChangeKind::Updated || !flag(change.id)? {
+            return Ok(Action::Rebuild);
+        }
     }
     if !changes.notes.is_empty() || !changes.notetypes.is_empty() {
-        Action::Patch
+        Ok(Action::Patch)
     } else {
-        Action::None
+        Ok(Action::None)
     }
 }

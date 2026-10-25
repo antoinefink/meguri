@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use meguri_model::col::Col;
 use meguri_model::ids::NotetypeId;
 use meguri_model::time::EpochMillis;
-use meguri_storage::journal::{After, Journal};
+use meguri_storage::journal::Journal;
 use meguri_storage::rows::col::COL_KEY;
 use meguri_storage::{ReadRows, ReaderRole, Record, RowKey, StorageError, Table, WriteScope};
 
@@ -207,10 +207,10 @@ fn scm_changed(journal: &Journal) -> Result<bool, StorageError> {
     let Some(entry) = journal.entry(Table::Col, &COL_KEY) else {
         return Ok(false);
     };
-    let (Some(before), After::Row(after)) = (journal.before(entry)?, entry.after()) else {
+    let (Some(before), Some(after)) = (journal.before(entry)?, journal.after(entry)?) else {
         return Ok(true);
     };
     let before = Col::from_cells(&before)?;
-    let after = Col::from_cells(after)?;
+    let after = Col::from_cells(&after)?;
     Ok(before.schema_modified != after.schema_modified)
 }

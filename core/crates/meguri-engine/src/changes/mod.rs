@@ -14,36 +14,28 @@ use meguri_model::changes::{
 };
 use meguri_model::col::Col;
 use meguri_model::ids::{CardId, DeckConfigId, DeckId, NoteId, NotetypeId, RevlogId};
-use meguri_model::revlog::RevlogEntry;
-use meguri_storage::journal::{After, ColumnSet, Entry, Journal};
-use meguri_storage::{Cell, Record, RowImage, RowKey, Table};
-
-use observers::{CardDelta, ConfigDelta};
+use meguri_storage::derived::CollectionMark;
+use meguri_storage::journal::{ColumnSet, Entry, Journal};
+use meguri_storage::{Cell, Record, RowKey, StorageError, Table};
 
 /// The `cards` columns a memory-state-only change may touch (S1): `mod`,
 /// `usn` and `data`.
 const CARD_MOD: usize = 4;
 const CARD_USN: usize = 5;
 const CARD_DATA: usize = 17;
-const CARD_NID: usize = 1;
 /// `col.mod`.
 const COL_MOD: usize = 2;
 /// The `name` column of `fields` and `templates`.
 const PART_NAME: usize = 2;
-/// `config.val`.
-const CONFIG_VAL: usize = 3;
 
 /// What the writer needs from a committed op's journal.
 pub(crate) struct Derived {
     pub changes: ChangeSet,
-    pub cards: Vec<CardDelta>,
-    pub revlog_added: Vec<RevlogEntry>,
-    pub revlog_removed: Vec<RevlogEntry>,
-    pub config: Vec<ConfigDelta>,
     /// The `col` row after the op, when the op changed it.
-    pub collection: Option<Col>,
+    pub collection: Option<CollectionMark>,
     /// Rows the journal holds.
     pub rows: usize,
+    pub local_modification: bool,
 }
 
 /// Media names an op reported through its context.
@@ -53,36 +45,43 @@ pub(crate) struct MediaNotes {
     pub removed: Vec<String>,
 }
 
-/// Derives the change set (S1) and, when `payload` is set, the observers'
-/// row payloads (S2). A before-image that cannot be read back from the
-/// spill file counts as absent and is logged: the commit already stands.
-pub(crate) fn derive(journal: Option<&Journal>, source: OpSource, media: MediaNotes, payload: bool) -> Derived {
+/// Validates and secures S1 compact facts after final stamping and before
+/// COMMIT. No observer payload is retained here and no fallible image access
+/// is required to construct/publish the committed ChangeSet afterwards.
+pub(crate) fn prepare(
+    journal: Option<&Journal>,
+    source: OpSource,
+    media: MediaNotes,
+    local_modification: bool,
+) -> Result<Derived, StorageError> {
     let mut changes = ChangeSet::empty(source);
-    let mut cards = Vec::new();
-    let mut revlog_added = Vec::new();
-    let mut revlog_removed = Vec::new();
-    let mut config = Vec::new();
     let mut collection = None;
     let mut notetypes: BTreeMap<i64, (Option<ChangeKind>, bool)> = BTreeMap::new();
     let mut rows = 0;
 
-    for entry in journal.into_iter().flat_map(|journal| journal.entries()) {
+    for (journal, entry) in journal
+        .into_iter()
+        .flat_map(|journal| journal.entries().map(move |entry| (journal, entry)))
+    {
         rows += 1;
         let Some(kind) = kind_of(entry) else { continue };
         match entry.table() {
             Table::Col => {
-                if payload && let After::Row(image) = entry.after() {
-                    match Col::from_cells(image) {
-                        Ok(col) => collection = Some(col),
-                        Err(error) => tracing::warn!(%error, "the changed col row is unreadable"),
+                let before = journal.before(entry)?;
+                let after = journal.after(entry)?;
+                if let Some(image) = &after {
+                    collection = Some(CollectionMark::of(&Col::from_cells(image)?));
+                }
+                if let Some(image) = &before {
+                    Col::from_cells(image)?;
+                }
+                changes.collection_row = match (&before, &after) {
+                    (Some(before), Some(after)) => {
+                        let changed = ColumnSet::changed(before, after);
+                        (0..after.len()).any(|i| i != COL_MOD && changed.contains(i))
                     }
-                }
-                if kind != ChangeKind::Updated {
-                    changes.collection_row = true;
-                } else if let (Some(before), After::Row(after)) = (before_image(journal, entry), entry.after()) {
-                    let changed = ColumnSet::changed(&before, after);
-                    changes.collection_row = (0..after.len()).any(|i| i != COL_MOD && changed.contains(i));
-                }
+                    _ => true,
+                };
             }
             Table::Notes => {
                 if let RowKey::Id(id) = entry.key() {
@@ -91,49 +90,40 @@ pub(crate) fn derive(journal: Option<&Journal>, source: OpSource, media: MediaNo
             }
             Table::Cards => {
                 let RowKey::Id(id) = entry.key() else { continue };
-                let before = before_image(journal, entry);
-                let after = match entry.after() {
-                    After::Row(image) => Some(image.clone()),
-                    _ => None,
-                };
-                let note = after
+                let before = journal.before(entry)?;
+                let after = journal.after(entry)?;
+                // Decode card identities before the transaction becomes durable.
+                let before_card = before
+                    .as_deref()
+                    .map(meguri_model::card::Card::from_cells)
+                    .transpose()?;
+                let after_card = after.as_deref().map(meguri_model::card::Card::from_cells).transpose()?;
+                let note = after_card
                     .as_ref()
-                    .or(before.as_ref())
-                    .and_then(|image| image.get(CARD_NID))
-                    .and_then(Cell::as_i64)
-                    .unwrap_or_default();
+                    .or(before_card.as_ref())
+                    .ok_or_else(|| StorageError::Io {
+                        detail: "changed card has no image".into(),
+                    })?
+                    .note_id;
                 let memory_state_only = match (&before, &after) {
                     (Some(before), Some(after)) => memory_state_only(before, after),
                     _ => false,
                 };
                 changes.cards.push(CardChange {
                     id: CardId(*id),
-                    note_id: NoteId(note),
+                    note_id: note,
                     kind,
                     memory_state_only,
                 });
-                if payload {
-                    cards.push(CardDelta {
-                        id: CardId(*id),
-                        before,
-                        after,
-                    });
-                }
             }
             Table::Revlog => {
                 let RowKey::Id(id) = entry.key() else { continue };
                 match kind {
                     ChangeKind::Added => {
                         changes.revlog_added.push(RevlogId(*id));
-                        if payload && let After::Row(image) = entry.after() {
-                            push_revlog(&mut revlog_added, image);
-                        }
                     }
                     ChangeKind::Removed => {
                         changes.revlog_removed.push(RevlogId(*id));
-                        if payload && let Some(image) = before_image(journal, entry) {
-                            push_revlog(&mut revlog_removed, &image);
-                        }
                     }
                     ChangeKind::Updated => {}
                 }
@@ -153,34 +143,34 @@ pub(crate) fn derive(journal: Option<&Journal>, source: OpSource, media: MediaNo
             }
             Table::Config => {
                 let RowKey::Text(key) = entry.key() else { continue };
-                let key = String::from_utf8_lossy(key).into_owned();
+                let key = String::from_utf8(key.clone()).map_err(|_| meguri_storage::RowError {
+                    table: "config",
+                    column: "key",
+                    key: String::new(),
+                    reason: "invalid UTF-8 key".into(),
+                })?;
                 changes.config_keys.push(ConfigKeyChange { key: key.clone(), kind });
-                if payload {
-                    let value = |image: &RowImage| match image.get(CONFIG_VAL) {
-                        Some(Cell::Blob(bytes) | Cell::Text(bytes)) => Some(bytes.clone()),
-                        _ => None,
-                    };
-                    config.push(ConfigDelta {
-                        key,
-                        before: before_image(journal, entry).as_ref().and_then(value),
-                        after: match entry.after() {
-                            After::Row(image) => value(image),
-                            _ => None,
-                        },
-                    });
-                }
             }
             Table::Tags => {
-                let image = match entry.after() {
-                    After::Row(image) => Some(image.clone()),
-                    _ => before_image(journal, entry),
+                let image = if entry.exists_after() {
+                    journal.after(entry)?
+                } else {
+                    journal.before(entry)?
                 };
                 let name = match image.as_ref().and_then(|i| i.first()) {
-                    Some(Cell::Text(bytes)) => String::from_utf8_lossy(bytes).into_owned(),
-                    _ => match entry.key() {
-                        RowKey::Text(bytes) => String::from_utf8_lossy(bytes).into_owned(),
-                        other => other.to_string(),
-                    },
+                    Some(Cell::Text(bytes)) => {
+                        String::from_utf8(bytes.clone()).map_err(|_| meguri_storage::RowError {
+                            table: "tags",
+                            column: "tag",
+                            key: String::new(),
+                            reason: "invalid UTF-8 tag".into(),
+                        })?
+                    }
+                    _ => {
+                        return Err(StorageError::Io {
+                            detail: "changed tag has no stored name".into(),
+                        });
+                    }
                 };
                 changes.tags.push(TagChange { name, kind });
             }
@@ -196,8 +186,8 @@ pub(crate) fn derive(journal: Option<&Journal>, source: OpSource, media: MediaNo
                     continue;
                 };
                 let renamed = kind != ChangeKind::Updated
-                    || match (before_image(journal, entry), entry.after()) {
-                        (Some(before), After::Row(after)) => before.get(PART_NAME) != after.get(PART_NAME),
+                    || match (journal.before(entry)?, journal.after(entry)?) {
+                        (Some(before), Some(after)) => before.get(PART_NAME) != after.get(PART_NAME),
                         _ => true,
                     };
                 notetypes.entry(*notetype).or_default().1 |= renamed;
@@ -224,18 +214,13 @@ pub(crate) fn derive(journal: Option<&Journal>, source: OpSource, media: MediaNo
     changes.revlog_removed.sort();
     changes.media_added = sorted_unique(media.added);
     changes.media_removed = sorted_unique(media.removed);
-    cards.sort_by_key(|c: &CardDelta| c.id);
-    config.sort_by(|a: &ConfigDelta, b: &ConfigDelta| a.key.cmp(&b.key));
 
-    Derived {
+    Ok(Derived {
         changes,
-        cards,
-        revlog_added,
-        revlog_removed,
-        config,
         collection,
         rows,
-    }
+        local_modification,
+    })
 }
 
 /// The change kind of a journal entry; `None` for a row the op both created
@@ -246,24 +231,6 @@ fn kind_of(entry: &Entry) -> Option<ChangeKind> {
         (true, true) => Some(ChangeKind::Updated),
         (true, false) => Some(ChangeKind::Removed),
         (false, false) => None,
-    }
-}
-
-fn before_image(journal: Option<&Journal>, entry: &Entry) -> Option<RowImage> {
-    let journal = journal?;
-    match journal.before(entry) {
-        Ok(image) => image,
-        Err(error) => {
-            tracing::warn!(table = %entry.table(), key = %entry.key(), %error, "a journal before-image is unreadable");
-            None
-        }
-    }
-}
-
-fn push_revlog(out: &mut Vec<RevlogEntry>, image: &[Cell]) {
-    match RevlogEntry::from_cells(image) {
-        Ok(entry) => out.push(entry),
-        Err(error) => tracing::warn!(%error, "a changed review-log row is unreadable"),
     }
 }
 
