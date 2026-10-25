@@ -128,3 +128,4 @@ has-cd
 image-occlusion
 latex
 param_search
+learn_ahead_secs

@@ -221,3 +221,5 @@ timeLim
 activeDecks
 scm
 ls
+terminalState
+ReviewTerminalState

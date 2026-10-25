@@ -208,7 +208,7 @@ Returns the head item that `startSession(deckId)` would show first, or `Refused`
 
 **Current card.** The current card is item 0 of the last head the session gave the client (`Started`, `Accepted`, `Stale`, `NotAtHead`, `head`, a `QueueHeadChanged` or `CurrentCardChanged` event). After a rebuild, while the rebuilt queue still presents the current card, it stays item 0, ahead of the other presented cards, until it is answered or no longer presented (KTD7, R457). An answer accepts it wherever its entry is (C9 step 2) and removes that entry by P4 step 1's count rule for its list. The conformance executor never has a current card (`specs/conformance/session-ops.md` E2).
 
-**`head(sessionId, n)`** returns `{items, counts, validUntil}`: the current card first when the keep rule holds, then the queue's presented order (P2) without it, n items at most (1 to 10). It applies P3 first. When nothing is presented it returns no items, and the session emits `WaitingUntil` or `Finished` (C17).
+**`head(sessionId, n)`** returns `{items, counts, validUntil, terminalState}`: the current card first when the keep rule holds, then the queue's presented order (P2) without it, n items at most (1 to 10). It applies P3 first. When nothing is presented it returns no items, and the session emits `WaitingUntil` or `Finished` (C17). C17.1 defines the terminal state carried by every head.
 
 ## C5. `stateToken` (R727)
 
@@ -441,6 +441,54 @@ For every committed change set that is not the session's own answer, undo or red
 | `WaitingUntil{sessionId, instant}` | nothing is presented and the learning list holds held entries: `instant` = the smallest held `due` − L, when P3 will present that card (R622; U186 is its UI) |
 | `Finished{sessionId, state}` | nothing is presented and the learning list is empty; `state` is U41's `DeckStudyState` (`sched/counts#C7`) |
 | `PresetUnsupported{sessionId, presetIds}` | a rebuild meets a home preset Meguri cannot schedule (`sched/fsrs-policy#U4`); answering a card of it fails with `UnsupportedParams` and writes nothing |
+
+### C17.1 Terminal state in the head
+
+Every head carries `terminalState`, a `ReviewTerminalState` value:
+
+| Value | Required session state |
+|---|---|
+| `Active` | At least one head item is presented. |
+| `WaitingUntil{instant}` | No item is presented, and the session retains held learning. The instant is C17's smallest held `due` minus L. |
+| `Finished` | No item is presented, and the session retains no learning entry. This is a marker, without a `DeckStudyState` payload. |
+
+Capture this value with `items`, `counts` and `validUntil` from the same session
+projection, after P3. Include it in start results, answer outcomes, refreshed
+heads, restores and head diffs. Accepted answers use the accepted overlay and
+queue before the writer commits. Computing this value must not drain the writer
+or perform a separate deck query. C9's optimistic acceptance and budgets remain.
+
+Counts exclude held entries. C7's deadline does not identify the reason it
+expires. Neither field replaces this explicit terminal state.
+
+The client selects its review phase from the head it applies. It must not
+classify an empty head from a separate committed `DeckStudyState` query.
+That query may supply summary facts; those facts do not replace the head's
+terminal state. `Finished` means this session has no presented or held card,
+even if daily limits or buried cards leave other collection work.
+
+Session events retain C17's meanings and ordered delivery. A terminal event
+requests a head refresh; its payload must not override a newer applied head.
+Use the existing session identity and operation ordering when applying results.
+This contract adds no revision counter and no new persistence or sync format.
+
+Own regressions must check both directions with a fixed clock and a held writer:
+
+- Accept Easy on the last learning card inside learn-ahead. The head is empty
+  and `Finished` before commit, while a committed deck query still sees learning.
+  Release the writer. The next head remains `Finished` at the same clock instant.
+- Accept Again with a 60-minute relearning step and 1,200-second learn-ahead.
+  The empty head is `WaitingUntil` before commit. After commit and repeated head
+  reads, its instant remains the same. At readiness, P3 presents the card and
+  the head becomes `Active`.
+- The bridge preserves all three values. The coordinator follows each applied
+  value despite conflicting committed summary facts or an older terminal event.
+
+For native coverage, keep a learning card beyond the session's learn-ahead edge.
+The `local-review` recipe uses `fixtures/synthetic-collections#F9.2`'s zero
+learn-ahead override. Its fixed-clock Check Now action retains `WaitingUntil`.
+The ordinary 10-minute step with 1,200-second learn-ahead still follows P2:
+the card is presented early, and Easy can exhaust the session.
 
 ## C18. Meguri tests
 

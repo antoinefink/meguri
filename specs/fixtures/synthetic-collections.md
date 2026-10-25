@@ -392,11 +392,16 @@ Committed (R1805): `decks-2000` (20,000 cards, 2,000 decks), `due-500k` (500,000
 | `recipe`, `description` | the name; one line |
 | `now` | the pinned instant, RFC 3339 with `Z` or `±HH:MM`; the offset is the collection's |
 | `rollover_hour` | optional, default 4 |
+| `learn_ahead_secs` | optional `collapseTime` seconds, with `sched/day-clock#D2`'s u32 range; default 1,200 |
 | `presets` | optional list of `{name, new_per_day?, reviews_per_day?}` added after `Default` |
 | `decks` | list of decks; each `name` (`::` nests; missing parents are created with `Default`; a deck listed twice or after its child is an error), `preset` (default `Default`), `notetype` (`basic`, `reversed`, `cloze`, `broken`; default `basic`), card counts by state `new`, `learning`, `due` (review due on or before today), `later` (review due after today), `suspended`, `buried` (each default 0), `tags`, `fields` (texts with `{n}`, the note's number in its deck from 1; drawn words when missing), `media` `{images, sounds, missing}` references per note (`missing` names files that are not written) |
 
 ### F9.2 Rules
 
+- `learn_ahead_secs` changes only the recipe collection's learn-ahead setting.
+  It leaves preset steps and generated histories unchanged. The `local-review`
+  recipe sets it to 0, so an Again answer's 10-minute relearning step remains
+  held at the pinned clock. Other recipes retain the default when omitted.
 - History: 120 days before the pinned day. Note types are created in the order basic, reversed, cloze, broken, only those used (`Meguri Basic` when none is): `Meguri Basic`, `Meguri Basic and Reverse` (two templates; both cards of a note share its state, so counts are even), `Meguri Cloze`, `Meguri Broken Template` (its back names a field the note type lacks: Anki refuses to save such a note type but reads and renders it, reporting the unknown field; it stands for note types from older releases or imports).
 - Buttons are drawn from fixed mixes (Again, Hard, Good, Easy): learning 10, 5, 80, 5; review 8, 4, 83, 5; relearning 10, 5, 83, 2. Answer times from fixed buckets: 1–3 s 20, 3–6 s 40, 6–12 s 30, 12–30 s 10.
 - Answers follow F4.4 and F5: a `learning` card has one answer in the 24 hours before the pinned day (so it is due now); a `due` card's last answer is 1 to 20 days before today; a `later` card's last answer is 1 to 3 days before today with its interval lengthened past today. A note is created one to two days before its first answer, or 1 to 30 days before `now` when it has none.
