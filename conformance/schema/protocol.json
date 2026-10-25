@@ -742,11 +742,12 @@
       "additionalProperties": false
     },
     "sync_info": {
-      "description": "Actor scenarios (sync-ops.md S8.3, S10.4): the run's endpoints, which the caller checks with check_endpoint before the first step, and the scenario's account, with which caller-played actors log in. Test credentials only.",
+      "description": "Actor scenarios (sync-ops.md S8.3, S8.4, S10.4): the run's endpoints, which the caller checks before the first step, the scenario's test account, and required route ownership metadata (mixed sessions) or null (replay).",
       "type": "object",
       "required": [
         "endpoints",
-        "account"
+        "account",
+        "route"
       ],
       "properties": {
         "endpoints": {
@@ -779,6 +780,32 @@
                 "null"
               ],
               "description": "host:port of the recorder in a recording run, else null."
+            }
+          },
+          "additionalProperties": false
+        },
+        "route": {
+          "description": "Mixed sessions report the exact caller-owned proxy name and trusted launch worker token (S8.4); replay reports null. The caller independently verifies worker identity and current-run ownership before publishing an edge.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "proxy",
+            "worker"
+          ],
+          "properties": {
+            "proxy": {
+              "type": "string",
+              "pattern": "^meguri-edge-[0-9a-f]{32}-[0-9a-f]{32}$",
+              "minLength": 77,
+              "maxLength": 77
+            },
+            "worker": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "minLength": 32,
+              "maxLength": 32
             }
           },
           "additionalProperties": false

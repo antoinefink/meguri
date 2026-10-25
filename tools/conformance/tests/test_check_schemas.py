@@ -8,6 +8,8 @@ import sys
 import tempfile
 import unittest
 
+from jsonschema import Draft202012Validator
+
 SCRIPT = Path(__file__).resolve().parents[1] / 'check_schemas.py'
 
 
@@ -20,6 +22,62 @@ def shared_validator(name):
 
 
 class SchemaChecks(unittest.TestCase):
+    def protocol_begin(self):
+        schema = json.loads((SCRIPT.parents[2] / "conformance/schema/protocol.json").read_text())
+        Draft202012Validator.check_schema(schema)
+        reply = {"ok": True, "scenario_id": "sync/route-metadata", "steps": 0,
+                 "sync": {"endpoints": {"actors": "http://proxy.example.invalid:40000/",
+                                        "converge": "http://127.0.0.1:40001/",
+                                        "upstream": "192.0.2.10:40001", "recorder": None},
+                          "account": {"username": "fixture-user", "password": "fixture-password"},
+                          "route": {"proxy": "meguri-edge-" + "a" * 32 + "-" + "b" * 32,
+                                    "worker": "c" * 32}}}
+        return Draft202012Validator(schema), reply
+
+    def test_begin_sync_metadata_requires_route_and_accepts_mixed_or_replay(self):
+        validate, reply = self.protocol_begin()
+        self.assertEqual(list(validate.iter_errors(reply)), [])
+        reply["sync"]["route"] = None
+        self.assertEqual(list(validate.iter_errors(reply)), [])
+        del reply["sync"]["route"]
+        self.assertTrue(list(validate.iter_errors(reply)))
+        del reply["sync"]  # A collection-only begin has no sync metadata.
+        self.assertEqual(list(validate.iter_errors(reply)), [])
+
+    def test_begin_sync_route_is_closed_and_requires_both_tokens(self):
+        validate, reply = self.protocol_begin()
+        route = reply["sync"]["route"]
+        malformed = [True, False, 0, "", [], {}, {"proxy": route["proxy"]},
+                     {"worker": route["worker"]}, dict(route, extra="unexpected")]
+        for field in ("proxy", "worker"):
+            for value in (None, True, 1, [], {}):
+                malformed.append(dict(route, **{field: value}))
+        for index, bad in enumerate(malformed):
+            with self.subTest(case=index):
+                reply["sync"]["route"] = bad
+                self.assertTrue(list(validate.iter_errors(reply)))
+        reply["sync"]["route"] = route
+        reply["sync"]["extra"] = True
+        self.assertTrue(list(validate.iter_errors(reply)))
+
+    def test_begin_sync_route_tokens_have_exact_lowercase_hex_shapes(self):
+        validate, reply = self.protocol_begin()
+        route = reply["sync"]["route"]
+        for field in ("proxy", "worker"):
+            value = route[field]
+            malformed = ["", value.upper(), value[:-1], value + "0", value + "\n",
+                         value + "\r\n", " " + value, value + " ", value[:-1] + "g"]
+            if field == "proxy":
+                malformed += ["meguri-oracle-" + "b" * 32,
+                              "meguri-edge-" + "a" * 31 + "-" + "b" * 33,
+                              "meguri-edge-" + "a" * 33 + "-" + "b" * 31]
+            for index, bad in enumerate(malformed):
+                with self.subTest(field=field, case=index):
+                    reply["sync"]["route"] = dict(route, **{field: bad})
+                    self.assertTrue(list(validate.iter_errors(reply)))
+        reply["sync"]["route"] = route
+        self.assertEqual(list(validate.iter_errors(reply)), [])
+
     def test_review_session_is_a_strict_collection_or_actor_local_marker(self):
         validate = shared_validator("scenario")
         observation = shared_validator("observation")
