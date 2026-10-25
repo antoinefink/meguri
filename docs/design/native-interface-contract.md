@@ -35,6 +35,7 @@ Passing checks alone do not establish native appearance.
 ## N2. Deck workspace
 
 - Deck selection is the main workspace. Show the real collection's deck tree and available counts.
+- The Decks root uses a native list, with ordinary-weight names and secondary count text. Let the system provide row surfaces, focus and hierarchy disclosure. Do not embed the list in another scroll view or draw navigation chevrons. Keep the full study breakdown on the selected deck. This replaces the custom card-like root rows (Antoine, 2026-10-25).
 - Make Study the selected deck's primary action. Use `ReviewCollection.startStudy(deckID:)` and its existing availability guard.
 - Center the selected deck and empty state in the available detail pane. Overflow content remains scrollable; fixed top padding is not the centering mechanism.
 - On Mac, use a content-sized Study button and simple deck-name/due-count sidebar rows. The selected deck shows the three labeled counts without filling the sidebar with that full sentence.

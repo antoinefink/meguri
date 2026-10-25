@@ -7,13 +7,17 @@ public enum HomeDeckListPreview: PreviewStates {
     public static var previewFixtures: [PreviewFixture] {
         PreviewState.allCases.map { state in PreviewFixture(state) {
             Group {
-                #if os(macOS)
-                GeometryReader { geometry in
-                    scrollContent(state: state, availableHeight: geometry.size.height)
+                if state == .typical || state == .overflow {
+                    HomeDeckTree(nodes: nodes(overflow: state == .overflow), select: { _ in })
+                } else {
+                    #if os(macOS)
+                    GeometryReader { geometry in
+                        scrollContent(state: state, availableHeight: geometry.size.height)
+                    }
+                    #else
+                    scrollContent(state: state)
+                    #endif
                 }
-                #else
-                scrollContent(state: state)
-                #endif
             }
             .background(.token(.backgroundPrimary))
             .navigationTitle(Text("Decks", bundle: .module))
@@ -33,7 +37,7 @@ public enum HomeDeckListPreview: PreviewStates {
                 case .empty: HomeCollectionEmptyContent(importAction: {})
                 case .loading: LoadingStateView(Text(verbatim: "Opening collection…"))
                 case .error: ErrorStateView(Text(verbatim: "Couldn’t Open Collection"), message: Text(verbatim: "The collection is open in another program."), retryIdentifier: "home.collection.retry", retry: {})
-                case .typical, .overflow: HomeDeckTree(nodes: nodes(overflow: state == .overflow), select: { _ in })
+                case .typical, .overflow: EmptyView() // Rendered by the native List above.
                 }
             }
             .padding(Spacing.medium)

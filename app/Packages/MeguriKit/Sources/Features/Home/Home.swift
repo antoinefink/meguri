@@ -9,16 +9,27 @@ public struct HomeView: View {
     public init(collection: ReviewCollection, deckID: Int64? = nil) { self.collection = collection; self.deckID = deckID }
     public var body: some View {
         Group {
-            #if os(macOS)
-            GeometryReader { geometry in
-                scrollContent(availableHeight: geometry.size.height)
+            if showsRootDeckList {
+                HomeDeckTree(nodes: collection.decks, navigation: collection.navigation,
+                    previousAnswerCount: collection.previousRecord?.answers.count, error: collection.error) { id in
+                    collection.navigation.openDeckPage(DeckID(id))
+                }
+            } else {
+                #if os(macOS)
+                GeometryReader { geometry in
+                    scrollContent(availableHeight: geometry.size.height)
+                }
+                #else
+                scrollContent()
+                #endif
             }
-            #else
-            scrollContent()
-            #endif
         }
         .navigationTitle(deckID == nil ? String(localized: "Decks", bundle: .module) : "")
         .accessibilityIdentifier("home.collection.screen")
+    }
+    private var showsRootDeckList: Bool {
+        guard case .ready = collection.state, !collection.decks.isEmpty else { return false }
+        return deckID.flatMap { collection.deck($0) } == nil
     }
     private var centersContent: Bool {
         #if os(macOS)
@@ -110,8 +121,6 @@ public struct HomeView: View {
             } else if collection.decks.isEmpty {
                 EmptyStateView(Text("No Decks", bundle: .module), systemImage: "rectangle.stack",
                     description: Text("This collection has no decks to study.", bundle: .module))
-            } else {
-                HomeDeckTree(nodes: collection.decks) { id in collection.navigation.openDeckPage(DeckID(id)) }
             }
         }
     }
@@ -214,41 +223,171 @@ struct HomeCollectionImportButton: View {
     }
 }
 
+/// Owns the root's native scroll container; never embed this list in a ScrollView.
 public struct HomeDeckTree: View {
     public let nodes: [CountedDeckNode]
     public let select: (Int64) -> Void
-    public init(nodes: [CountedDeckNode], select: @escaping (Int64) -> Void) { self.nodes = nodes; self.select = select }
+    private let navigation: AppNavigation?
+    private let previousAnswerCount: Int?
+    private let error: String?
+    @State private var rowFrames: [Int64: CGRect] = [:]
+    @State private var restoring: Int64?
+    @State private var tracking = false
+
+    public init(nodes: [CountedDeckNode], navigation: AppNavigation? = nil,
+                previousAnswerCount: Int? = nil, error: String? = nil,
+                select: @escaping (Int64) -> Void) {
+        self.nodes = nodes; self.navigation = navigation
+        self.previousAnswerCount = previousAnswerCount; self.error = error; self.select = select
+    }
+
     public var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.small) {
-            ForEach(nodes, id: \.id) { node in
-                Button { select(node.id) } label: {
-                    HStack(spacing: Spacing.small) {
-                        Image(systemName: node.filtered ? "line.3.horizontal.decrease.circle" : "rectangle.stack")
-                            .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: Spacing.xSmall) {
-                            Text(verbatim: node.name.components(separatedBy: "::").last ?? node.name)
-                                .font(.headline).fixedSize(horizontal: false, vertical: true)
-                                .foregroundStyle(.token(.textPrimary))
-                                .accessibilityIdentifier("home.deck.name.\(node.id)")
-                            DeckCounts(counts: node.counts)
-                                .accessibilityIdentifier("home.deck.rowCounts.\(node.id)")
-                        }
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.forward").accessibilityHidden(true)
+        GeometryReader { viewport in
+            ScrollViewReader { proxy in
+                List {
+                    if let previousAnswerCount, previousAnswerCount > 0 {
+                        Section {
+                            Text("\(previousAnswerCount) answers recorded", bundle: .module)
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("home.session.recorded")
+                        } header: { Text("Previous Session", bundle: .module) }
+                        .id(InfoAnchor.previousSession)
                     }
-                    .padding(Spacing.small)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .background(.token(.surface), in: .rect(cornerRadius: Radius.small))
+                    if let error {
+                        Text(verbatim: error)
+                            .foregroundStyle(.token(.statusError))
+                            .accessibilityIdentifier("home.collection.error")
+                            .id(InfoAnchor.error)
+                    }
+                    ForEach(nodes, id: \.id) { node in
+                        HomeDeckBranch(node: node, select: select, frameChanged: recordFrame)
+                    }
                 }
-                .buttonStyle(.plain)
-                .id(node.id)
-                .accessibilityIdentifier("home.deck.row.\(node.id)")
-                if !node.children.isEmpty {
-                    AnyView(HomeDeckTree(nodes: node.children, select: select))
-                        .padding(.leading, Spacing.large)
+                .coordinateSpace(name: "home.deck.list")
+                // List does not use the ScrollView target-layout modifier.
+                // Track actual row geometry, not lazy row creation, so cached
+                // off-screen rows cannot overwrite the saved navigation anchor.
+                .onChange(of: rowFrames) { _, frames in
+                    let visible = frames.filter { $0.value.maxY > 0 && $0.value.minY < viewport.size.height }
+                    if let restoring {
+                        guard visible[restoring] != nil else { return }
+                        self.restoring = nil
+                        tracking = true
+                    }
+                    guard tracking, let top = visible.min(by: { $0.value.minY < $1.value.minY })?.key else { return }
+                    navigation?.setScrollPosition(ScrollPosition(id: top, anchor: .top), for: .section(.home))
+                }
+                .task {
+                    tracking = false
+                    await Task.yield()
+                    let saved = navigation?.scrollPosition(for: .section(.home))
+                    if let id = saved?.viewID as? Int64, contains(id, in: nodes) {
+                        restoring = id
+                        proxy.scrollTo(id, anchor: .top)
+                        if let frame = rowFrames[id], frame.maxY > 0, frame.minY < viewport.size.height {
+                            restoring = nil
+                            tracking = true
+                        }
+                    } else {
+                        restoring = nil
+                        if saved?.edge == .top { scrollToTop(proxy) }
+                        tracking = true
+                    }
+                }
+                .onDisappear { tracking = false }
+                .onChange(of: navigation?.scrollPosition(for: .section(.home)).edge) { _, edge in
+                    if edge == .top {
+                        restoring = nil
+                        tracking = true
+                        scrollToTop(proxy)
+                    }
                 }
             }
         }
+    }
+
+    private enum InfoAnchor: Hashable { case previousSession, error }
+    private func recordFrame(_ id: Int64, _ frame: CGRect?) { rowFrames[id] = frame }
+    private func contains(_ id: Int64, in nodes: [CountedDeckNode]) -> Bool {
+        nodes.contains { $0.id == id || contains(id, in: $0.children) }
+    }
+    private func scrollToTop(_ proxy: ScrollViewProxy) {
+        if let previousAnswerCount, previousAnswerCount > 0 {
+            proxy.scrollTo(InfoAnchor.previousSession, anchor: .top)
+        } else if error != nil {
+            proxy.scrollTo(InfoAnchor.error, anchor: .top)
+        } else if let first = nodes.first {
+            proxy.scrollTo(first.id, anchor: .top)
+        }
+    }
+}
+
+private struct HomeDeckBranch: View {
+    let node: CountedDeckNode
+    let select: (Int64) -> Void
+    let frameChanged: (Int64, CGRect?) -> Void
+    @Environment(\.locale) private var locale
+    @State private var expanded = true
+
+    var body: some View {
+        Group {
+            if node.children.isEmpty {
+                row
+            } else {
+                DisclosureGroup(isExpanded: $expanded) {
+                    ForEach(node.children, id: \.id) { child in
+                        AnyView(HomeDeckBranch(node: child, select: select, frameChanged: frameChanged))
+                    }
+                } label: { row }
+                .accessibilityIdentifier("home.deck.disclosure.\(node.id)")
+            }
+        }
+        .id(node.id)
+    }
+
+    private var row: some View {
+        Button { select(node.id) } label: {
+            HStack {
+                if node.filtered {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .imageScale(.small)
+                        .accessibilityHidden(true)
+                }
+                VStack(alignment: .leading) {
+                    Text(verbatim: node.name.components(separatedBy: "::").last ?? node.name)
+                        .font(.body)
+                        .accessibilityIdentifier("home.deck.name.\(node.id)")
+                    if let subtitle {
+                        Text(verbatim: subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("home.deck.rowCounts.\(node.id)")
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        // Keep the row action distinct from its native disclosure control.
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(verbatim: node.name))
+        .accessibilityValue(Text("\(Text(node.counts.new, format: .number)) new · \(Text(node.counts.learning, format: .number)) learning · \(Text(node.counts.review, format: .number)) due", bundle: .module))
+        .accessibilityIdentifier("home.deck.row.\(node.id)")
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("home.deck.list")) } action: {
+            frameChanged(node.id, $0)
+        }
+        .onDisappear { frameChanged(node.id, nil) }
+    }
+
+    private var subtitle: String? {
+        let parts: [String?] = [
+            node.counts.new == 0 ? nil : String(localized: "\(node.counts.new.formatted(.number.locale(locale))) new", bundle: .module),
+            node.counts.learning == 0 ? nil : String(localized: "\(node.counts.learning.formatted(.number.locale(locale))) learning", bundle: .module),
+            node.counts.review == 0 ? nil : String(localized: "\(node.counts.review.formatted(.number.locale(locale))) due", bundle: .module),
+        ]
+        let visible = parts.compactMap { $0 }
+        return visible.isEmpty ? nil : visible.joined(separator: " · ")
     }
 }
 
