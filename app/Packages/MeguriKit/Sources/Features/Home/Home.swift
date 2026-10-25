@@ -123,34 +123,29 @@ public struct HomeView: View {
                 .font(.title)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                VStack {
+            Grid {
+                GridRow {
                     Text(deck.counts.new, format: .number)
                         .foregroundStyle(.token(deck.counts.new == 0 ? .countZero : .countNew))
                         .accessibilityLabel(Text("New", bundle: .module))
                         .accessibilityValue(Text(deck.counts.new, format: .number))
                         .accessibilityIdentifier("home.deck.counts.new")
-                    Text("New", bundle: .module).accessibilityHidden(true)
-                }
-                .frame(maxWidth: .infinity)
-                VStack {
                     Text(deck.counts.learning, format: .number)
                         .foregroundStyle(.token(deck.counts.learning == 0 ? .countZero : .countLearn))
                         .accessibilityLabel(Text("Learning", bundle: .module))
                         .accessibilityValue(Text(deck.counts.learning, format: .number))
                         .accessibilityIdentifier("home.deck.counts.learning")
-                    Text("Learning", bundle: .module).accessibilityHidden(true)
-                }
-                .frame(maxWidth: .infinity)
-                VStack {
                     Text(deck.counts.review, format: .number)
                         .foregroundStyle(.token(deck.counts.review == 0 ? .countZero : .countDue))
                         .accessibilityLabel(Text("Due", bundle: .module))
                         .accessibilityValue(Text(deck.counts.review, format: .number))
                         .accessibilityIdentifier("home.deck.counts.due")
+                }
+                GridRow {
+                    Text("New", bundle: .module).accessibilityHidden(true)
+                    Text("Learning", bundle: .module).accessibilityHidden(true)
                     Text("Due", bundle: .module).accessibilityHidden(true)
                 }
-                .frame(maxWidth: .infinity)
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home.deck.counts")

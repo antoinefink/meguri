@@ -39,4 +39,19 @@ The public fixture shows system sidebar surfaces and an enabled Study action
 after selection at default and minimum sizes. Visual review found the count
 row spread across the readable width. Keep that layout finding open for a
 content-sized count grid before the full integration gate.
+Filtered fix `cleanroom/20261025T074712Z-53226` uses a native Grid with two
+rows and implicit spacing. It preserves the three numeric accessibility
+fields, count colors and Study action. Native drive `074829Z-54339` passed
+21 steps, including default/minimum windows in light and dark appearance.
+The build reported zero errors and warnings; hierarchy checks found no issue.
+Final privacy `074853Z-56019` and similarity `075005Z-57794` passed.
+
+These captures exercise the production selected-deck view and sidebar with
+the generated local-review fixture, not the separate sample overview. They do
+not cover populated session history, long-name overflow or human acceptance.
+Existing saved-answer/restart journeys remain required in the full gate.
+Final independent source and visual review: P2 closed, no P0–P2 findings.
+The review receipt is complete and retained in `build/`.
+The original full gate base remains unchanged. This focused
+repair does not establish release or human visual acceptance.
 Human visual and baseline approval remain pending.
