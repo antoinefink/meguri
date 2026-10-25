@@ -18,3 +18,8 @@ Independent round one finds one P2: an already prepared next card can retain
 a missing image after arrivals are consumed on the visible card. Repair and
 a two-card regression remain required. Full integration, device media and
 hardware audio evidence remain open. This WIP is not accepted.
+
+Fixer run `214706Z-98477` clears the reviewed P2. Source review round two
+has no P0–P2 findings. Privacy `215554Z-7482` passes. The two-card test is
+present. Swift `215551Z-6751` fails on a WebKit API name; no tests run.
+The compiler fix remains open.

@@ -50,13 +50,21 @@ public final class ReviewPages: ReviewCardSurface {
     private var initialFocus = ReviewInitialFocus()
     private var hasPresented = false
     private var prepared: (ReviewRenderKey, CardUpdate)?
-    private var cards: [ReviewRenderKey: RenderedCard] = [:]
+    private var mediaRevision: UInt64 = 0
+    private var cards: [ReviewRenderKey: CardPayload] = [:]
+    // Internal render-provider seam for offscreen page tests without a core host.
+    var renderHead: (UInt64, [ReviewRenderKey], CardRenderPlatform) async throws -> [CardPayload] = { session, keys, platform in
+        try await Core.renderSessionHead(sessionID: session, keys: keys, platform: platform)
+            .map { CardPayload($0, audioPolicy: .init()) }
+    }
     private var domEditable = false
     private var composing = false
     private var committedMediaUpdate: CardUpdate?
     var onMediaReady: (() -> Void)?
-    public init(resolver: MediaPathResolver) {
-        let pair = CardPagePair(resolver: resolver)
+    public convenience init(resolver: MediaPathResolver) {
+        self.init(pair: CardPagePair(resolver: resolver))
+    }
+    init(pair: CardPagePair) {
         self.pair = pair
         pair.onCommitted = { [weak self] update, _ in
             self?.hasPresented = true
@@ -86,10 +94,12 @@ public final class ReviewPages: ReviewCardSurface {
         pages.ownsKeyboardFocus = true
         ReviewInputOwnership.focusCard(pages.current.webView)
     }
-    private func payload(_ rendered: RenderedCard, item: ReviewHeadItem) throws -> CardPayload {
-        return CardPayload(rendered, audioPolicy: CardAudioPolicy(
+    private func payload(_ rendered: CardPayload, item: ReviewHeadItem) -> CardPayload {
+        var result = rendered
+        result.audioPolicy = CardAudioPolicy(
             autoplay: item.homePreset.autoplay, interrupt: true,
-            replayQuestion: !item.homePreset.skipQuestionWhenReplayingAnswer))
+            replayQuestion: !item.homePreset.skipQuestionWhenReplayingAnswer)
+        return result
     }
     public func render(sessionID: UInt64, items: [ReviewHeadItem]) async throws {
         let missing = items.filter { cards[$0.renderKey] == nil }
@@ -99,7 +109,7 @@ public final class ReviewPages: ReviewCardSurface {
         let platform: CardRenderPlatform = .ios
         #endif
         if !missing.isEmpty {
-            let values = try await Core.renderSessionHead(sessionID: sessionID, keys: missing.map(\.renderKey), platform: platform)
+            let values = try await renderHead(sessionID, missing.map(\.renderKey), platform)
             guard values.count == missing.count else { throw BridgeError.internal("Incomplete rendered head") }
             for (item, card) in zip(missing, values) { cards[item.renderKey] = card }
         }
@@ -121,7 +131,12 @@ public final class ReviewPages: ReviewCardSurface {
     public func preload(item: ReviewHeadItem) async throws {
         guard let pair else { return }
         guard let rendered = cards[item.renderKey] else { throw BridgeError.internal("Missing preloaded card") }
-        prepared = (item.renderKey, try await pair.prepare(payload(rendered, item: item)))
+        let revision = mediaRevision
+        let update = try await pair.prepare(payload(rendered, item: item))
+        // An arrival can be delivered while the idle page is still settling.
+        // Do not publish that older preparation after its invalidation.
+        guard revision == mediaRevision else { return }
+        prepared = (item.renderKey, update)
     }
     public func reveal(inputTime: TimeInterval) async throws {
         _ = try await pair?.showAnswer(inputTime: inputTime)
@@ -133,10 +148,15 @@ public final class ReviewPages: ReviewCardSurface {
         guard inputActive, let pair, let committedMediaUpdate,
               committedMediaUpdate == pair.current.update, pair.current.presented,
               !pair.current.closed else { return false }
+        // Only the visible side is retried in place. Every idle preparation
+        // predates this arrival, including resources absent from the visible side.
+        // The next present re-prepares idle; the current DOM stays untouched.
+        mediaRevision &+= 1
+        prepared = nil
         try await pair.mediaArrived(names)
         return true
     }
     public func suspend() async { pair?.ownsKeyboardFocus = false; await pair?.suspend() }
     public func resume() async { await pair?.resume() }
-    public func close() { prepared = nil; committedMediaUpdate = nil; pair?.close() }
+    public func close() { mediaRevision &+= 1; prepared = nil; committedMediaUpdate = nil; pair?.close() }
 }

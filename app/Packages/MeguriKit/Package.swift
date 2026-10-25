@@ -81,6 +81,7 @@ let package = Package(
         .testTarget(
             name: "CardRenderingTests",
             dependencies: [
+                "AppModel",
                 "CardRendering",
                 .product(name: "CoreBridge", package: "MeguriCore"),
                 .product(name: "Instrumentation", package: "MeguriCore"),
