@@ -94,3 +94,7 @@ still outstanding. This baseline does not include the unverified production expo
 The local bridge keeps workspace opening and its action in one connection; saved
 workspace handles expired between separate calls in this setup. Mac-only catalog
 extraction was archived separately and restored for later cross-platform review.
+
+## Bounded prerequisite contracts, 2026-10-25
+
+Recovered the four already-authored contract/provenance files from the saved work; every SHA matches the spec-writer packet. The independent review of neutral rename F1–F5 and ChangeSet S1.1 found no P0–P2 findings. Publication privacy passed. Source session remains s-20261025T132312Z-c047b13c. This is the rename-only prerequisite inside U107; full U34 stays in M1 without a Unit trailer. U107 remains incomplete. The batch base remains 1416a520542a8c5daa38a23bfe398da704c3d6c9.

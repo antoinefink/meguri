@@ -10,3 +10,6 @@ integrity_check
 immutable
 unicase
 F_FULLFSYNC
+skipped_incoming_cards
+skipped_incoming_notes
+skipped_incoming_decks

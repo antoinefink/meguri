@@ -30,6 +30,49 @@ A value type (`meguri_model::changes`, KTD2), derived from the op's journal (U23
 - `schema_changed` is true when the note type was added or removed, or a `fields` or `templates` row of it was added, removed or renamed (ordinals are part of the key, so a reorder shows as renames). A change of only template text, CSS or field options is not a schema change.
 - A change set is empty when it lists nothing. An empty change set is never published (`engine/op-model` O4).
 
+### S1.1 Skipped incoming IDs (U107)
+
+The current mutation lists describe rows actually changed. They must not list
+a skipped row as added, updated or removed. Add three default-empty typed-ID
+lists to the existing change set:
+
+| Member | IDs |
+|---|---|
+| `skipped_incoming_cards` | incoming card IDs skipped by their own unsent live pending grave |
+| `skipped_incoming_notes` | incoming note IDs skipped by their own unsent live pending grave |
+| `skipped_incoming_decks` | incoming deck IDs skipped by their own unsent live pending grave |
+
+`sync/hold-back#H10.2` defines that decision. An absent note alone does not add
+its incoming card here. Merge-policy rejections for other reasons are outside
+these lists. Each list is numeric, ascending and duplicate-free. IDs may repeat
+across different entity kinds. Empty is the default for all other operations.
+
+Report the exact skipped keys of this merge, not retry history. The payload is
+bounded by the distinct staged incoming card/note/deck keys: at most one ID per
+such key, with no row contents or per-occurrence copies. Do not silently truncate
+the list. Keep these values in local operation/event data, without automatic
+external logs, analytics or sync. Include no names, note text, SQL, paths,
+endpoint/account values, credentials or arbitrary diagnostic strings.
+
+These diagnostics do not affect mutation emptiness, stamps, undo or observer
+invalidation. A successful operation returns them in its `OpResult` change set,
+including when actual rows are unchanged. A diagnostic-only no-op publishes no
+`Changes` event under S1/O4. When real mutations publish a change set, it carries
+the same lists with that operation's seq and generation. A rollback publishes
+no diagnostic change set and must not report the merge as applied.
+
+Preserve the lists through model-to-FFI conversion, operation summaries and
+published events. Existing constructors initialize them empty. Any adapter
+reading an older serialized change set supplies empty defaults for absent
+members. This adds no collection, package, server-wire or CloudKit field.
+Regenerate bindings and update all consumers together; mixed generated binary
+versions gain no compatibility guarantee from this source-level addition.
+
+Focused tests cover each entity kind, duplicate and ordering rules, a missing
+note without a card grave, committed/no-op results, rollback, empty defaults and
+nonempty model-to-FFI/event conversion. An exhaustive constructor is updated,
+not a reason to discard diagnostics required by the caller.
+
 ## S2. In-core observers
 
 - Implementations of the `ChangeObserver` port (registered by U38: U26, U41, U95, U100) run on the writer thread, after the commit and before the change set is published, in registration order.
