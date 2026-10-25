@@ -23,7 +23,7 @@ extension WebKitSuites {
             let configuration = CardWebConfiguration(store: .nonPersistent())
             let gate = SettlementGate()
             let controller = configuration.configuration.userContentController
-            controller.addScriptMessageHandler(gate, contentWorld: CardPage.world, name: "testPreloadHeld")
+            controller.add(gate, contentWorld: CardPage.world, name: "testPreloadHeld")
             defer {
                 gate.events.continuation.finish()
                 controller.removeScriptMessageHandler(forName: "testPreloadHeld", contentWorld: CardPage.world)
