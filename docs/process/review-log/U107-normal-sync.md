@@ -98,3 +98,17 @@ extraction was archived separately and restored for later cross-platform review.
 ## Bounded prerequisite contracts, 2026-10-25
 
 Recovered the four already-authored contract/provenance files from the saved work; every SHA matches the spec-writer packet. The independent review of neutral rename F1–F5 and ChangeSet S1.1 found no P0–P2 findings. Publication privacy passed. Source session remains s-20261025T132312Z-c047b13c. This is the rename-only prerequisite inside U107; full U34 stays in M1 without a Unit trailer. U107 remains incomplete. The batch base remains 1416a520542a8c5daa38a23bfe398da704c3d6c9.
+
+## Session routing and retained payload contracts
+
+Independent review of the published S8.4 per-session routing contract is clear.
+The existing native live runner needs a separately owned loopback route for each
+session; implementation and the 18 live sync cases remain outstanding.
+
+The storage journal J1–J4 and change-stream S2.1–S2.3 contracts cap retained
+before/after row bytes at 8 MiB. They require
+immutable same-commit reads, ownership through queued consumers, pre-COMMIT
+compact facts and explicit read-failure handling. Independent contract review
+found no P0–P2 issues. Privacy `170557Z-96547` and static checks `170631Z-96994`
+pass. Earlier rejected prose scans remain recorded in the contract packet.
+Implementation, allocation measurements and device limits are not yet verified.

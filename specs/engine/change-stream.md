@@ -86,6 +86,68 @@ not a reason to discard diagnostics required by the caller.
 - An observer that fails or panics does not undo the commit: the commit stands, the failure is logged, the remaining observers still run, and the change set is still published. Data an observer derives is rebuildable (U26).
 - Observers run only for ops whose change set is not empty.
 
+### S2.1 Journal-backed payload access
+
+ObservedCommit exposes the existing journal's immutable row payload through
+a small owned access handle (`storage/journal` J1-J3), rather than arrays of
+all decoded rows. Preserve every changed card's complete before/after images,
+added and removed review-log rows, config values on both sides and the final
+collection row already specified in S2. Note contents remain excluded.
+The handle binds one seq, generation and immutable journal; iteration is
+repeatable and each read returns that commit's stored image even after later
+commits or a collection close. Absence, spill I/O and row-decode errors are
+distinct outcomes. Access errors use a result that can carry storage errors,
+not only typed-row decoding errors.
+
+Cloning or queueing the handle retains backing ownership without reading or
+copying full rows. The writer keeps an owner across undo admission/discard,
+answer-cache observation and registered observer dispatch. A review worker
+or derived capture that outlives the callback retains an owned handle with
+its captured seq/generation. Undo retention is not a prerequisite for access.
+No callback or deferred consumer pins a collection transaction, and no such
+transaction or journal-row handle crosses the FFI boundary.
+
+### S2.2 Dispatch and downstream consumers
+
+There is still one observer invocation per nonempty committed operation,
+in registration order, after history/cache/restorer handling and before its
+single Changes publication. Spilling does not split dispatch into row/page
+notifications or remove SyncIncoming payloads. Multiple observers may read
+the same rows independently. An observer that needs an owned derived delta
+captures bounded work or the exact journal owner, not a second full-row copy.
+
+QueueProvider, answer caches, ReviewService and their queue classifiers must
+accept on-demand access. They must not collect or clone every full card into
+a vector when source, generation, ownership or compact ChangeSet facts suffice
+to classify the change. Keep queue invalidation, current-card updates and
+flag-only handling unchanged. ReviewService's writer
+callback still queues work without taking the service state mutex or waiting
+for its worker. Its deferred work retains the same generation/seq guards and
+projects only from complete successful reads.
+
+An unreadable payload fails the affected observer under S2: log the failure,
+continue remaining observers exactly once, and publish the committed
+ChangeSet. It cannot become an absent card or a successful partial refresh.
+Internal cache or deferred projection failures invalidate the affected
+derived state through the existing rebuild/error path. They cannot mark an
+incomplete projection ready or emit it as a successful head. J3 secures the
+ChangeSet facts before COMMIT, so all changed keys and real note IDs remain
+available even if a later observer read fails.
+No new client event or wire/FFI field is required for this in-core capability.
+
+### S2.3 Payload coverage and failure tests
+
+Verify independent repeated reads by multiple observers, queued ownership
+after undo discard and later writes, exact same-commit images, and all
+existing dispatch/publication ordering rules. Inject image read/decode
+failures and prove the absent/error distinction, observer isolation, cache
+invalidation and deferred projection failure behavior. Preserve no-op and
+whole-collection observer behavior. Cover revlog and config access too: a
+card-only test cannot support a general observer-payload memory claim.
+Run the allocator-backed 150k payload proof in `storage/journal` J4 through
+real consumers; existing dispatch, held-run and large-sync tests alone do
+not establish that memory bound.
+
 ## S3. The change stream
 
 - One ordered queue per engine carries every core→Swift event except progress (`engine/jobs` J5), host events (U135) and search results (U85), which have their own channels (KTD5, KTD9).
