@@ -89,3 +89,11 @@ Independent round six has no required findings. Phone `220222Z-14890`
 passes both strict Home cases: unique named actions, independent selection
 and expansion, and saved collapse after restart without reseeding. iPad,
 the full sidebar and final visual/integration evidence remain open.
+
+iPad `220506Z-17540` also passes both strict Home cases. The prior failed
+runs remain saved. The full sidebar and original-base gate still need
+their required evidence.
+
+Mac `220645Z-20518` passes the production review, undo, waiting and restart
+case in the VM. This supplements the mobile review results; it does not
+replace the remaining sidebar, performance or full-unit evidence.

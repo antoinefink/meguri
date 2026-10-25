@@ -28,6 +28,9 @@
 
 ## Shell (U150)
 
+- Check nested controls in the real accessibility tree. On iOS, a Button in a DisclosureGroup label produced duplicate actions and inherited identifiers. Keep selection and disclosure separate; scope any accessibility representation to the leaf control. DTO previews cannot prove this.
+- After media arrival, update resolver names and call the page API. Clear idle card state, including work still running. Keep the two-card test: current-page checks do not cover the next page.
+
 - Mac Settings is a separate native scene sharing the collection. `AppNavigation.sheetHost` assigns file sheets to main or Settings; an inactive or nonmatching host must not dismiss another host's sheet. FSRS admission remains on main. Original in-window Settings rules are superseded by `docs/design/native-interface-contract.md`.
 
 - `AppNavigation` (AppModel) is the only navigation state, above the layout switch; views read it and never keep their own section, selection, path or open sheet. A feature model that must survive a layout switch (drafts, a review session, Browse's search) is held by it (`featureState`, `ReviewPresentation.session`), never by a view.
