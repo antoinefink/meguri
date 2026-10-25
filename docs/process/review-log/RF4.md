@@ -1510,3 +1510,14 @@ checks. Private `222955Z-35522` and similarity `223058Z-36278` pass. The
 source check input, exact repair delta and receipts are retained under
 `build/unit-intake/RF4-export-resume/`. Native checks and UI copy remain
 open. The older testkit failures and required full gate remain open too.
+
+Native bridge run `223612Z-38715` passes 17 checks; AppModel export run
+`223812Z-40818` passes five. Bindings and Debug products are current. Lint
+`223446Z-37847` now reports only the three prior testkit failures.
+
+Held UI export `223938Z-42399` changes only four copy/catalog/test files.
+Source review has no P0–P2 findings and its privacy scan passes. Mac audit
+`224445Z-44643` passes one case with zero unsuppressed results and 36 existing
+exclusions. Actual light/dark renders keep the new text visible. Visual
+review finds one P2 in existing Mac button sizing and forced tint. Repair
+that platform-specific styling before accepting the screen.

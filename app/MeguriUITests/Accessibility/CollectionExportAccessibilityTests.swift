@@ -114,7 +114,7 @@ import UIKit
             }
         }
         let paragraphs = [
-            "settings.importExport.explanation": "The entire collection will be saved as a latest-format .colpkg. Media files, including images and audio, are excluded. Your saved reviews are included.",
+            "settings.importExport.explanation": "The .colpkg file includes every deck, note, card and saved review, plus images, audio and other media.",
             "settings.importExport.readyDetail": "This file captures the collection during preparation. Later reviews do not change this copy. Choose a destination to finish saving.",
             "settings.importExport.message": "The collection could not be exported. Check available space and collection access, then try again."
         ]

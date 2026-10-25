@@ -26,7 +26,7 @@ public struct SettingsView: View {
     }
 }
 
-/// The same collection-only Files actions appear in Settings render fixtures.
+/// The same collection file actions appear in Settings render fixtures.
 struct SettingsCollectionFilesSection: View {
     let collection: ReviewCollection?
     var present: ((SheetRoute) -> Void)? = nil
@@ -65,7 +65,7 @@ struct SettingsCollectionFilesSection: View {
             }
         } header: { Text("Collection Files", bundle: .module) }
         footer: {
-            Text("File export excludes images, audio and other media. No account or connection is needed.", bundle: .module)
+            Text("Save every deck, note, card and saved review in a .colpkg file, including images, audio and other media. No account or connection is needed.", bundle: .module)
         }
     }
 

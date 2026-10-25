@@ -231,16 +231,6 @@
         }
       }
     },
-    "Save a latest-format .colpkg containing every deck, note, card and saved review. Images, audio and other media are excluded. No account or connection is needed.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Save a latest-format .colpkg containing every deck, note, card and saved review. Images, audio and other media are excluded. No account or connection is needed."
-          }
-        }
-      }
-    },
     "Saved": {
       "localizations": {
         "en": {
@@ -341,12 +331,12 @@
         }
       }
     },
-    "The entire collection will be saved as a latest-format .colpkg. Media files, including images and audio, are excluded. Your saved reviews are included.": {
+    "The .colpkg file includes every deck, note, card and saved review, plus images, audio and other media.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The entire collection will be saved as a latest-format .colpkg. Media files, including images and audio, are excluded. Your saved reviews are included."
+            "value": "The .colpkg file includes every deck, note, card and saved review, plus images, audio and other media."
           }
         }
       }
@@ -621,12 +611,12 @@
         }
       }
     },
-    "File export excludes images, audio and other media. No account or connection is needed.": {
+    "Save every deck, note, card and saved review in a .colpkg file, including images, audio and other media. No account or connection is needed.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "File export excludes images, audio and other media. No account or connection is needed."
+            "value": "Save every deck, note, card and saved review in a .colpkg file, including images, audio and other media. No account or connection is needed."
           }
         }
       }

@@ -43,7 +43,7 @@ struct CollectionExportContent: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.large) {
-                    Text("The entire collection will be saved as a latest-format .colpkg. Media files, including images and audio, are excluded. Your saved reviews are included.", bundle: .module)
+                    Text("The .colpkg file includes every deck, note, card and saved review, plus images, audio and other media.", bundle: .module)
                         .accessibilityIdentifier("settings.importExport.explanation")
                     if presentation.busy {
                         ProgressView { Text(LocalizedStringKey(presentation.title), bundle: .module) }
