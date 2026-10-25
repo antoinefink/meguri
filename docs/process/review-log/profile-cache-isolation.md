@@ -11,6 +11,8 @@ Independent reviews of both exports found no P0–P2 findings. The first exact D
 
 The broader filtered-copy selftest failed because that environment intentionally omits agent configuration. It is retained as a failure.
 
-Full gate `20261025T092407Z-37753` finished with this Xcode failure as its only technical blocker. Its T1 checks were skipped after that failure. All other executed checks passed. Failed Xcode logs were copied under that run’s `retained-logs`; the invalid cache was archived in place without reuse or deletion. Apple verification of the repaired source remains pending.
+Full gate `20261025T092407Z-37753` finished with this Xcode failure as its only technical blocker. Its T1 checks were skipped after that failure. All other executed checks passed. Failed Xcode logs were copied under that run’s `retained-logs`; the invalid cache was archived in place without reuse or deletion. Apple verification was pending at this checkpoint.
 
 The integrated patch passed 70 selected main-checkout selftests in `20261025T110701Z-26974`, privacy scan `20261025T110637Z-26596`, and similarity scan `20261025T110702Z-27058`. No unit acceptance is claimed.
+
+Full gate `20261025T110905Z-28599` passed on clean commit `1416a520` from the original integration base. Its receipt has no blockers or incomplete runs. Xcode passed all 158 checks with one routed skip; the later Mac UI run passed. The 476 oracle tests and 16 fixture checks also passed. Snapshot deferrals, 15 pending live scenarios, disabled critic work, pending notices and final human evidence remain unaccepted. The technical boundary is closed; no new unit or release acceptance is claimed.
