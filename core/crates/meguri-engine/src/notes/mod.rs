@@ -33,3 +33,21 @@ pub(crate) fn op_spec(name: &'static str, source: OpSource, count: usize) -> OpS
     };
     spec.undo_step(name, StepKind::Other)
 }
+
+/// N6.3: sync removes controls without NFC or local save preferences.
+pub fn sync_field(field: &str) -> String {
+    meguri_text::normalize::field_as_saved(field, false).into_owned()
+}
+/// Compute only the incoming note's saved field data; never generate cards or
+/// register tags. The caller validated the note-type field count.
+pub fn prepare_sync_note(
+    note: &mut meguri_model::note::Note,
+    nt: &meguri_model::notetype::Notetype,
+    fields: &[String],
+) {
+    note.fields = fields.join("\u{1f}");
+    note.sort_field = meguri_text::checksum::sort_text_of(fields, nt.config.sort_field_idx as usize).into_owned();
+    note.checksum = meguri_text::checksum::note_checksum(fields.first().map_or("", String::as_str));
+    note.flags = 0;
+    note.data.clear();
+}

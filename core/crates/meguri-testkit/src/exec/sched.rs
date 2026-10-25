@@ -482,8 +482,13 @@ fn answer_op(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecErr
         session.held_queue.as_ref().map(|held| held.cache()),
     )
     .map_err(|e| ExecError::new("core_error", e.to_string()))?;
-    let request = prediction.answer(rating, spec.time_ms);
-    if let Some(held) = &session.held_queue {
+    let mut request = prediction.answer(rating, spec.time_ms);
+    if let Some(active) = &session.review_session {
+        request.session = Some(active.id());
+    }
+    if session.review_session.is_some() {
+        meguri_engine::sched::answer::answer(&collection, request)
+    } else if let Some(held) = &session.held_queue {
         held.answer(request)
     } else {
         meguri_engine::sched::answer::answer(&collection, request)
@@ -757,11 +762,15 @@ fn manual_op(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecErr
     };
     session.engine_collection()?;
     session.held_queue = None;
-    let result = session
-        .storage
-        .host()?
-        .review()
-        .sched_op(request, None, &Default::default());
+    let result = if let Some(active) = &session.review_session {
+        active.apply(request)
+    } else {
+        session
+            .storage
+            .host()?
+            .review()
+            .sched_op(request, None, &Default::default())
+    };
     session.day.clear();
     match result {
         Ok(_) => Ok(OpResult::Done),

@@ -174,6 +174,7 @@ pub struct OpContext<'s, 'c> {
     pub(crate) restore: Option<Restore>,
     /// The seq of the last committed op: what a snapshot begun now sees.
     pub(crate) last_seq: Seq,
+    pub(crate) touched: &'s crate::executor::preconditions::TouchIndex,
     /// Work for the writer once the op committed and published its change
     /// set (`OpContext::on_commit`); dropped when the op rolls back.
     pub(crate) on_commit: Vec<CommitHook>,
@@ -208,6 +209,11 @@ impl<'c> OpContext<'_, 'c> {
     /// The op's write scope: every write and every read inside the op.
     pub fn scope(&mut self) -> &mut WriteScope<'c> {
         self.scope
+    }
+
+    /// Sequence proof, independent of second-resolution row timestamps.
+    pub fn untouched_since(&self, table: meguri_storage::Table, key: &meguri_storage::RowKey, since: Seq) -> bool {
+        self.touched.untouched(table, key, since)
     }
 
     pub fn source(&self) -> OpSource {

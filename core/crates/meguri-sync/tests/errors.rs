@@ -164,6 +164,7 @@ fn every_kind_has_the_id_class_and_retry_of_e3() {
         ),
         (ErrorKind::LocalStorage, "local_storage", Actionable, No),
         (ErrorKind::SessionActive, "session_active", Silent, AfterTrigger),
+        (ErrorKind::CollectionCorrupt, "collection_corrupt", Actionable, No),
         (ErrorKind::ExclusiveBusy, "exclusive_busy", Transient, Auto),
         (ErrorKind::Cancelled, "cancelled", Silent, No),
         (ErrorKind::Interrupted, "interrupted", Silent, AfterTrigger),

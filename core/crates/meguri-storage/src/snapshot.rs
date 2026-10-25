@@ -51,3 +51,26 @@ impl Drop for ReadSnapshot<'_> {
         let _ = self.reader.conn.execute_batch("ROLLBACK");
     }
 }
+
+/// An owned, pinned sync-reader transaction. The engine retains the role lease
+/// while moving this connection through its writer barrier and job thread.
+#[derive(Debug)]
+pub struct SyncSnapshot {
+    pub(crate) reader: Reader,
+}
+impl Reader {
+    pub fn pin_sync(self) -> Result<SyncSnapshot, StorageError> {
+        if self.role() != crate::ReaderRole::Sync || !self.conn.is_autocommit() {
+            return Err(StorageError::TransactionOpen);
+        }
+        self.conn.execute_batch("BEGIN DEFERRED")?;
+        self.conn
+            .query_row("SELECT id FROM col WHERE id = 1", [], |r| r.get::<_, i64>(0))?;
+        Ok(SyncSnapshot { reader: self })
+    }
+}
+impl Drop for SyncSnapshot {
+    fn drop(&mut self) {
+        let _ = self.reader.conn.execute_batch("ROLLBACK");
+    }
+}

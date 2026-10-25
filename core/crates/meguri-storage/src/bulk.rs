@@ -151,3 +151,65 @@ impl WriteScope<'_> {
         Ok(changed)
     }
 }
+
+impl WriteScope<'_> {
+    /// One bounded set-based merge. Journal images are read back from SQLite,
+    /// including affinity conversion; equal rows produce no journal entry.
+    pub fn merge_sync_rows(&mut self, table: Table, images: &[RowImage]) -> Result<usize, StorageError> {
+        require_as_given(self, "merge_sync_rows")?;
+        if images.is_empty() {
+            return Ok(0);
+        }
+        if images.len() > crate::normal_stage::PAGE || images.iter().any(|r| r.len() != table.columns().len()) {
+            return Err(StorageError::Mode {
+                detail: "sync merge page width or size".into(),
+            });
+        }
+        let conn = self.conn();
+        let cols = quoted_columns(table);
+        conn.execute_batch(&format!("DROP TABLE IF EXISTS temp.meguri_sync_page; CREATE TEMP TABLE meguri_sync_page AS SELECT {cols} FROM {} WHERE 0;", table.name()))?;
+        let sql = format!(
+            "INSERT INTO temp.meguri_sync_page ({cols}) VALUES {}",
+            vec![format!("({})", vec!["?"; table.columns().len()].join(",")); images.len()].join(",")
+        );
+        conn.prepare_cached(&sql)?
+            .execute(params_from_iter(images.iter().flatten()))?;
+        // The temporary table has the target's affinities. Compare after the
+        // conversion, then preserve only the page's actual changed rows.
+        let mut changed = Vec::new();
+        let mut stmt = conn.prepare_cached(&format!("SELECT {cols} FROM temp.meguri_sync_page"))?;
+        let mut found = stmt.query([])?;
+        while let Some(row) = found.next()? {
+            let image = rows::row_image(row, table)?;
+            let prior = rows::select_compare(conn, table, &image)?;
+            if !matches!(&prior, Some((_, true))) {
+                changed.push((RowKey::of(table, &image), prior.map(|p| p.0)));
+            }
+        }
+        drop(found);
+        drop(stmt);
+        let join = table.columns()[..table.key_len()]
+            .iter()
+            .map(|c| format!("t.\"{c}\" = p.\"{c}\""))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let equal = table
+            .columns()
+            .iter()
+            .map(|c| format!("t.\"{c}\" IS p.\"{c}\" COLLATE BINARY"))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let set = table.columns()[table.key_len()..]
+            .iter()
+            .map(|c| format!("\"{c}\" = p.\"{c}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        conn.execute_batch(&format!("UPDATE {name} AS t SET {set} FROM temp.meguri_sync_page AS p WHERE {join} AND NOT ({equal}); INSERT INTO {name} ({cols}) SELECT {pcols} FROM temp.meguri_sync_page AS p WHERE NOT EXISTS (SELECT 1 FROM {name} AS t WHERE {join});", name=table.name(),pcols=table.columns().iter().map(|c|format!("p.\"{c}\"")).collect::<Vec<_>>().join(",")))?;
+        for (key, before) in &mut changed {
+            let after = rows::select_image(conn, table, key)?;
+            self.journal_change(table, key.clone(), before.take(), after)?;
+        }
+        conn.execute_batch("DROP TABLE temp.meguri_sync_page")?;
+        Ok(changed.len())
+    }
+}

@@ -22,6 +22,7 @@ mod render;
 pub mod sched;
 mod search;
 mod storage;
+mod sync;
 pub mod sync_guard;
 mod tags;
 mod text;

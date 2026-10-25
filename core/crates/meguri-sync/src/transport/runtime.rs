@@ -108,6 +108,13 @@ pub fn block_on<T>(
     runtime(threads)?.block_on(with_cancel(cancel, work))
 }
 
+/// Drive a stateful protocol whose owner must run cleanup after cancellation.
+/// Individual requests still use T9; dropping the whole protocol would skip
+/// H12's abort and undo transitions.
+pub(crate) fn drive<T>(threads: &ThreadRegistry, work: impl Future<Output = T>) -> Result<T, SyncError> {
+    Ok(runtime(threads)?.block_on(work))
+}
+
 /// The C8 hook: drops the runtime once no job runs on it; the next job
 /// creates a new one.
 pub fn shut_down() {

@@ -32,8 +32,17 @@ impl ProgressPhase {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ObjectCounts {
+    pub sent: u64,
+    pub received: u64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Progress {
+    /// Normal-sync object counts, retained across phase changes. Transport
+    /// byte progress uses its own job sink and never overwrites these values.
+    pub objects: Option<ObjectCounts>,
     pub phase: ProgressPhase,
     pub completed: u64,
     /// `None` while the amount of work is unknown.
@@ -66,6 +75,7 @@ struct State {
     phase_started: Duration,
     completed: u64,
     total: Option<u64>,
+    objects: Option<ObjectCounts>,
     last_delivery: Option<Duration>,
 }
 
@@ -105,6 +115,7 @@ impl ProgressSink {
                     completed: 0,
                     total: None,
                     last_delivery: None,
+                    objects: None,
                 }),
             }),
         }
@@ -145,6 +156,16 @@ impl ProgressSink {
         }
     }
 
+    /// H16/N11: object counts use the same 100 ms delivery throttle as all
+    /// job progress; neither a byte counter nor a phase reset is a decrease.
+    pub fn report_objects(&self, sent: u64, received: u64) {
+        {
+            let mut state = self.lock();
+            state.objects = Some(ObjectCounts { sent, received });
+        }
+        self.report(sent.saturating_add(received), None);
+    }
+
     /// Reports the counts of the current phase. Cheap when throttled.
     pub fn report(&self, completed: u64, total: Option<u64>) {
         let now = (self.inner.clock)();
@@ -171,6 +192,7 @@ impl State {
         Some((
             listener,
             Progress {
+                objects: self.objects,
                 phase: self.phase.clone(),
                 completed: self.completed,
                 total: self.total,

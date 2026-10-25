@@ -112,3 +112,18 @@ compact facts and explicit read-failure handling. Independent contract review
 found no P0–P2 issues. Privacy `170557Z-96547` and static checks `170631Z-96994`
 pass. Earlier rejected prose scans remain recorded in the contract packet.
 Implementation, allocation measurements and device limits are not yet verified.
+
+## Production checkpoint and focused diagnosis
+
+Integrated the production export from implementer session
+`s-20261025T134357Z-235af9a2`, then the filtered repairs from fixer session
+`s-20261025T162405Z-9dc656e4`. Independent review round 1 found a schema race
+between metadata and snapshot capture, plus missing undo targets for removed
+configuration keys. Both repairs have focused regression cases.
+
+Focused runs `162809Z-61925` and `164931Z-78983` failed during compilation;
+neither executed tests. The next run compiled the workspace and is still active
+at this checkpoint: 18 cases passed before its first 150k-card case. This is
+partial evidence only. Round 2 review, the remaining prerequisites, full focused
+results, privacy/similarity checks and the batch gate are pending. No Unit
+trailer is added.

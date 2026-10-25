@@ -400,6 +400,7 @@ fn run_op<T>(
         undo_notes: UndoNotes::default(),
         restore: meta.restore,
         last_seq: shared.last_seq(),
+        touched: env.touched,
         on_commit: Vec::new(),
         before_commit: Vec::new(),
         random: Arc::clone(&env.reopen.random),

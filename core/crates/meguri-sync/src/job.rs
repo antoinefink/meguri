@@ -158,7 +158,7 @@ impl JobOptions {
 /// One sync job. Its requests share one session key and one base, which a
 /// followed redirect replaces for the rest of the job (T4, T7).
 pub struct Job {
-    transport: Box<dyn SyncTransport>,
+    transport: Arc<dyn SyncTransport>,
     base: Endpoint,
     kind: ServerKind,
     host_key: Option<HostKey>,
@@ -172,6 +172,7 @@ pub struct Job {
     /// is not the job's result. Any refused redirect, before or after, leaves
     /// none.
     new_endpoint: Option<Endpoint>,
+    finish_sent: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl Job {
@@ -192,7 +193,7 @@ impl Job {
     ) -> Result<Job, SyncError> {
         check_stall_timeout(options.stall_timeout)?;
         Ok(Job {
-            transport,
+            transport: Arc::from(transport),
             base: options.base.clone(),
             kind: options.kind,
             host_key,
@@ -202,6 +203,7 @@ impl Job {
             progress: None,
             followed: false,
             new_endpoint: None,
+            finish_sent: None,
         })
     }
 
@@ -255,6 +257,35 @@ impl Job {
         with_cancel(&cancel, self.send(method, payload)).await
     }
 
+    pub(crate) fn on_finish_sent(&mut self, hook: impl FnOnce() + Send + 'static) {
+        self.finish_sent = Some(Box::new(hook));
+    }
+
+    /// Fire-and-forget, with independent cancellation. Never reads the answer
+    /// and never replaces the round's original failure.
+    pub(crate) fn abort(&self) {
+        let transport = self.transport.clone();
+        let url = self.base.method_url(Method::Abort);
+        let sync_header = framing::sync_header(
+            self.host_key.as_ref().map_or("", |k| k.as_str()),
+            client_identity(),
+            &self.session_key,
+        );
+        let stall_timeout = self.stall_timeout;
+        tokio::spawn(async move {
+            if let Ok(body) = CompressedBody::new(Source::Bytes(Bytes::from_static(b"{}")), Some(2), None) {
+                let _ = transport
+                    .post(TransportRequest {
+                        url,
+                        sync_header,
+                        body: Box::pin(body),
+                        stall_timeout,
+                    })
+                    .await;
+            }
+        });
+    }
+
     async fn send(&mut self, method: Method, payload: Payload) -> Result<ResponseBody, SyncError> {
         let (first, total, resend) = match payload {
             Payload::Json(json) => {
@@ -265,13 +296,16 @@ impl Job {
         };
         let mut source = first;
         loop {
-            let body = CompressedBody::new(source, total, self.progress.clone()).map_err(|err| {
+            let mut body = CompressedBody::new(source, total, self.progress.clone()).map_err(|err| {
                 SyncError::Network(NetworkError {
                     cause: NetworkCause::RequestBody,
                     head_arrived: false,
                     detail: err.to_string(),
                 })
             })?;
+            if method == Method::Finish {
+                body.on_sent(self.finish_sent.take());
+            }
             // The login's `k` is empty whatever key the job holds (T2).
             let key = match (&self.host_key, method) {
                 (Some(key), m) if m != Method::HostKey => key.as_str(),

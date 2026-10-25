@@ -271,6 +271,7 @@ impl Engine {
                 core: Arc::clone(&current.core),
                 generation: self.generation(),
                 privilege: None,
+                undo_session: None,
             }),
             None => Err(EngineError::unavailable(state.state.describe())),
         }
@@ -450,6 +451,7 @@ impl Engine {
             core: Arc::clone(&core),
             generation,
             privilege: Some(privilege),
+            undo_session: None,
         };
         // The registered open steps, then the day clock's first check, which
         // writes and unburies before anything reads counts (L2,
@@ -501,6 +503,7 @@ impl Engine {
             core,
             generation,
             privilege: None,
+            undo_session: None,
         })
     }
 
@@ -590,10 +593,17 @@ impl Engine {
         if self.lock_state().suspended {
             return Err(EngineError::unavailable("the collection is suspended"));
         }
+        if kind == JobKind::NormalSync && self.jobs().running().iter().any(|j| j.name == kind.name()) {
+            return Err(EngineError::Busy {
+                running_op: kind.name().into(),
+            });
+        }
         if kind == JobKind::Open {
             self.jobs().pause(false);
         }
-        if kind == JobKind::MediaSync && self.slot_holder().is_some_and(LongOp::replaces_collection) {
+        if (kind == JobKind::NormalSync && self.slot_holder().is_some())
+            || (kind == JobKind::MediaSync && self.slot_holder().is_some_and(LongOp::replaces_collection))
+        {
             return Err(EngineError::Busy {
                 running_op: self.slot_holder().map_or("collection replacement", LongOp::name).into(),
             });
@@ -710,7 +720,7 @@ impl<'s> Exclusive<'s> {
                 .jobs()
                 .running()
                 .into_iter()
-                .filter(|job| job.name == JobKind::MediaSync.name())
+                .filter(|job| job.name == JobKind::MediaSync.name() || job.name == JobKind::NormalSync.name())
                 .collect();
             if media.is_empty() {
                 break;
@@ -758,6 +768,7 @@ impl<'s> Exclusive<'s> {
             core: Arc::clone(&core),
             generation: engine.generation(),
             privilege: Some(privilege),
+            undo_session: None,
         };
         Ok(Exclusive {
             slot,

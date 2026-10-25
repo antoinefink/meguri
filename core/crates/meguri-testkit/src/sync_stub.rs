@@ -87,6 +87,9 @@ pub struct Recorded {
 }
 
 impl Recorded {
+    pub fn path(&self) -> &str {
+        self.head.path()
+    }
     /// A member of the `anki-sync` header.
     pub fn sync_member(&self, name: &str) -> Option<&Value> {
         self.sync_header.as_ref().and_then(|h| h.get(name))

@@ -25,7 +25,7 @@ use crate::rows::{self, Cell, Record, RowImage, RowKey, Table, col::COL_KEY, gra
 use crate::snapshot::ReadSnapshot;
 use crate::write_scope::WriteScope;
 
-mod sealed {
+pub(crate) mod sealed {
     /// The connection a [`super::ReadRows`] implementor reads with.
     pub trait Connected {
         fn connection(&self) -> &rusqlite::Connection;
@@ -69,6 +69,11 @@ pub struct StoredConfig {
 /// Typed reads (`model/row-records`): a row that cannot be read is
 /// [`StorageError::Row`]; a missing row is `None`.
 pub trait ReadRows: sealed::Connected {
+    /// Bounded stored-image page for normal sync and its captured overlay.
+    fn row_page(&self, table: Table, after: Option<&RowKey>) -> Result<Vec<RowImage>, StorageError> {
+        crate::normal_stage::page(self.connection(), "", table, after, false)
+    }
+
     fn answer_due_range(&self, today: u32) -> Result<Vec<crate::queries::due_range::DueRow>, StorageError> {
         crate::queries::due_range::read(self.connection(), today)
     }
@@ -471,3 +476,10 @@ fn page<R: Record>(conn: &Connection, after: Option<i64>, limit: usize) -> Resul
     }
     Ok(out)
 }
+
+impl sealed::Connected for crate::snapshot::SyncSnapshot {
+    fn connection(&self) -> &Connection {
+        &self.reader.conn
+    }
+}
+impl ReadRows for crate::snapshot::SyncSnapshot {}

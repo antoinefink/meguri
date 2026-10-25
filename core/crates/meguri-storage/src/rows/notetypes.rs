@@ -9,7 +9,7 @@ use meguri_model::time::EpochSecs;
 use meguri_model::usn::Usn;
 use rusqlite::Connection;
 
-use super::{Cell, RowCells, RowImage, RowKey, Table, select_image, select_where};
+use super::{Cell, RowCells, RowImage, Table};
 use crate::error::StorageError;
 
 /// The `notetypes` row of a note type.
@@ -45,7 +45,28 @@ pub(crate) fn template_cells(ntid: NotetypeId, template: &NotetypeTemplate) -> R
 
 /// Reads a note type with its fields and templates.
 pub(crate) fn get(conn: &Connection, id: NotetypeId) -> Result<Option<Notetype>, StorageError> {
-    let Some(head) = select_image(conn, Table::Notetypes, &RowKey::Id(id.0))? else {
+    get_prefixed(conn, "", id)
+}
+
+pub(crate) fn get_prefixed(conn: &Connection, prefix: &str, id: NotetypeId) -> Result<Option<Notetype>, StorageError> {
+    let read = |table: Table| -> Result<Vec<RowImage>, StorageError> {
+        let columns = table
+            .columns()
+            .iter()
+            .map(|c| format!("\"{c}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let key = if table == Table::Notetypes { "id" } else { "ntid" };
+        let mut stmt = conn.prepare_cached(&format!(
+            "SELECT {columns} FROM {prefix}{} WHERE {key}=?1 ORDER BY {}",
+            table.name(),
+            if key == "id" { "id" } else { "ord" }
+        ))?;
+        Ok(stmt
+            .query_map([id.0], |r| super::row_image(r, table))?
+            .collect::<rusqlite::Result<_>>()?)
+    };
+    let Some(head) = read(Table::Notetypes)?.pop() else {
         return Ok(None);
     };
     let row = RowCells {
@@ -61,7 +82,7 @@ pub(crate) fn get(conn: &Connection, id: NotetypeId) -> Result<Option<Notetype>,
         fields: Vec::new(),
         templates: Vec::new(),
     };
-    for cells in select_where(conn, Table::Fields, "ntid = ?1", &[Cell::Integer(id.0)])? {
+    for cells in read(Table::Fields)? {
         let row = RowCells {
             table: Table::Fields,
             cells: &cells,
@@ -73,7 +94,7 @@ pub(crate) fn get(conn: &Connection, id: NotetypeId) -> Result<Option<Notetype>,
             prior_ord: None,
         });
     }
-    for cells in select_where(conn, Table::Templates, "ntid = ?1", &[Cell::Integer(id.0)])? {
+    for cells in read(Table::Templates)? {
         let row = RowCells {
             table: Table::Templates,
             cells: &cells,

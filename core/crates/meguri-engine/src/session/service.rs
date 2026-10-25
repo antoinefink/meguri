@@ -682,7 +682,15 @@ impl ReviewService {
         bound(&self.inner)
     }
     pub fn active_session(&self) -> Option<SessionId> {
-        self.inner.state.lock().unwrap().session.as_ref().map(|s| s.id)
+        {
+            let state = self.inner.state.lock().unwrap();
+            if let Some(session) = &state.session {
+                return Some(session.id);
+            }
+        }
+        self.bound()
+            .ok()
+            .and_then(|(c, _)| *c.core.exec.active_session.lock().unwrap())
     }
     pub fn start(&self, deck: DeckId, resume: Option<CardId>) -> Result<StartResult, EngineError> {
         let _control = self.control.acquire();
@@ -1776,6 +1784,7 @@ fn bound(inner: &Inner) -> Result<(Collection, Arc<Journal>), EngineError> {
         core,
         generation: b.generation,
         privilege: None,
+        undo_session: None,
     };
     c.check_current()?;
     Ok((c, b.journal.clone()))
@@ -3124,5 +3133,95 @@ impl Drop for ReviewService {
         if let Some(worker) = self.worker.lock().unwrap().take() {
             let _ = worker.join();
         }
+    }
+}
+
+/// Collection-only review authority for protocol actors (S13). Uses the same
+/// registry and policy reservation as C5; owns no queue or selected deck.
+pub struct UnqueuedSession {
+    collection: Collection,
+    id: SessionId,
+    ended: bool,
+}
+impl std::fmt::Debug for UnqueuedSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UnqueuedSession").finish_non_exhaustive()
+    }
+}
+impl UnqueuedSession {
+    pub fn id(&self) -> SessionId {
+        self.id
+    }
+    pub fn collection(&self) -> Result<Collection, EngineError> {
+        self.collection.check_current()?;
+        let mut c = self.collection.clone();
+        c.undo_session = Some(self.id);
+        Ok(c)
+    }
+    pub fn end(mut self) -> Result<(), EngineError> {
+        self.release()?;
+        self.ended = true;
+        Ok(())
+    }
+    /// Queue-free actor actions still use U48 application and real undo tagging.
+    pub fn apply(
+        &self,
+        request: crate::sched::ops::Request,
+    ) -> Result<crate::OpResult<crate::sched::ops::ResultValue>, EngineError> {
+        if *self.collection.core.exec.active_session.lock().unwrap() != Some(self.id) {
+            return Err(EngineError::SessionActive);
+        }
+        crate::sched::ops::run_admitted(&self.collection, request, Some(self.id), &Default::default())
+    }
+    fn release(&self) -> Result<(), EngineError> {
+        let exec = self.collection.core.exec.clone();
+        let id = self.id;
+        self.collection
+            .run(OpSpec::named("end_unqueued_review", OpSource::Rollover), move |ctx| {
+                ctx.on_commit(move |_| {
+                    let mut active = exec.active_session.lock().unwrap();
+                    if *active == Some(id) {
+                        *active = None;
+                        *exec.fsrs_policy.review_active.lock().unwrap() = false;
+                    }
+                });
+                Ok(())
+            })?;
+        Ok(())
+    }
+}
+impl Drop for UnqueuedSession {
+    fn drop(&mut self) {
+        if !self.ended {
+            let _ = self.release();
+        }
+    }
+}
+impl ReviewService {
+    pub fn begin_unqueued_session(&self) -> Result<UnqueuedSession, EngineError> {
+        let _permit = self.control.acquire();
+        let (collection, journal) = self.bound()?;
+        journal.check(collection.generation())?;
+        let id = SessionId(NEXT_SESSION.fetch_add(1, Ordering::Relaxed));
+        let exec = collection.core.exec.clone();
+        let hooks = self.start_hooks.lock().unwrap().clone();
+        collection.run(OpSpec::named("begin_unqueued_review", OpSource::Rollover), move |ctx| {
+            if exec.active_session.lock().unwrap().is_some() || *exec.fsrs_policy.review_active.lock().unwrap() {
+                return Err(EngineError::SessionActive);
+            }
+            for hook in hooks {
+                hook.session_starting();
+            }
+            ctx.on_commit(move |_| {
+                *exec.fsrs_policy.review_active.lock().unwrap() = true;
+                *exec.active_session.lock().unwrap() = Some(id);
+            });
+            Ok(())
+        })?;
+        Ok(UnqueuedSession {
+            collection,
+            id,
+            ended: false,
+        })
     }
 }

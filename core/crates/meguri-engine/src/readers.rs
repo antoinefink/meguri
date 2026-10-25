@@ -167,6 +167,32 @@ impl<'a> ReaderLease<'a> {
         })
     }
 
+    /// H4: the lease stays on the job thread, excluding replacement until the
+    /// owned snapshot is dropped. Pinning and undo capture run on the writer.
+    pub fn capture_sync(
+        &mut self,
+        collection: &crate::Collection,
+    ) -> Result<(meguri_storage::snapshot::SyncSnapshot, crate::SyncHold), EngineError> {
+        if self.generation != collection.generation() || !std::ptr::eq(self.exec, &*collection.core.exec) {
+            return Err(EngineError::internal("sync reader belongs to another collection"));
+        }
+        let reader = self
+            .guard
+            .take()
+            .ok_or_else(|| EngineError::internal("sync reader already captured"))?;
+        let exec = collection.core.exec.clone();
+        let result = collection.run(
+            crate::OpSpec::named("sync_snapshot_barrier", crate::OpSource::Rollover),
+            move |ctx| {
+                let snapshot = reader.pin_sync()?;
+                let session = *exec.active_session.lock().unwrap();
+                let hold = ctx.begin_sync_hold(session)?;
+                Ok((snapshot, hold))
+            },
+        )?;
+        Ok(result.value)
+    }
+
     fn begin(&self) -> Result<ReadSnapshot<'_>, EngineError> {
         Ok(self.reader().begin_snapshot()?)
     }

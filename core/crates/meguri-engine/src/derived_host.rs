@@ -603,6 +603,7 @@ fn unprivileged(core: &Arc<CollectionCore>, generation: Generation) -> Collectio
         core: Arc::clone(core),
         generation,
         privilege: None,
+        undo_session: None,
     }
 }
 

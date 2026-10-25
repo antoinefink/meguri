@@ -82,3 +82,9 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-ffi) and binary(collection_export_memory)'
 threads-required = "num-test-threads"
+
+# U107: real server pauses, one-second answer durability, cancellation and
+# snapshot races must not compete with other test processes.
+[[profile.default.overrides]]
+filter = 'package(meguri-sync) and binary(normal_sync)'
+threads-required = "num-test-threads"

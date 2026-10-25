@@ -37,6 +37,7 @@ pub struct Collection {
     pub(crate) core: Arc<CollectionCore>,
     pub(crate) generation: Generation,
     pub(crate) privilege: Option<Privilege>,
+    pub(crate) undo_session: Option<crate::SessionId>,
 }
 
 /// Local work guard, independent of SQLite timestamps. `pending` includes
@@ -141,11 +142,14 @@ impl Collection {
     }
 
     /// Submits an op and returns at once (`engine/op-model` O2).
-    pub fn submit<T, F>(&self, spec: OpSpec, op: F) -> Pending<OpResult<T>>
+    pub fn submit<T, F>(&self, mut spec: OpSpec, op: F) -> Pending<OpResult<T>>
     where
         T: Send + 'static,
         F: FnOnce(&mut OpContext<'_, '_>) -> Result<T, EngineError> + Send + 'static,
     {
+        if spec.source == crate::OpSource::UserUndoable && spec.undo.session.is_none() {
+            spec.undo.session = self.undo_session;
+        }
         self.core.exec.submit_op(spec, self.generation, self.privilege, op)
     }
 

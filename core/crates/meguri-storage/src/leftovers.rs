@@ -54,7 +54,13 @@ pub fn cleanup(directory: &Path) -> Result<Vec<PathBuf>, StorageError> {
     Ok(removed)
 }
 fn reserved(name: &str) -> bool {
-    ["replace", "stage", "export", "backup", "media", "sidecar"]
+    matches!(
+        name,
+        "meguri-sync-stage.db"
+            | "meguri-sync-stage.db-journal"
+            | "meguri-sync-stage.db-wal"
+            | "meguri-sync-stage.db-shm"
+    ) || ["replace", "stage", "export", "backup", "media", "sidecar"]
         .iter()
         .any(|purpose| {
             name.strip_prefix(&format!(".meguri-tmp-{purpose}-"))

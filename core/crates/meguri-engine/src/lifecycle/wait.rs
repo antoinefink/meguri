@@ -346,6 +346,7 @@ impl Engine {
                     core: current.core.clone(),
                     generation: self.generation(),
                     privilege: None,
+                    undo_session: None,
                 });
             }
             let now = monotonic::now();

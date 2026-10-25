@@ -14,7 +14,7 @@ ankiweb = []
 # applies to every URL and proxy, and the AnkiWeb stand-in names, name pins
 # and extra trusted roots tests use (specs/sync/transport.md T12).
 # meguri-testkit turns it on.
-test-hooks = []
+test-hooks = ["meguri-model/test-hooks", "meguri-engine/test-hooks"]
 
 [dependencies]
 bytes.workspace = true
@@ -68,3 +68,7 @@ required-features = ["test-hooks"]
 [[test]]
 name = "errors"
 required-features = ["test-hooks", "ankiweb"]
+
+[[test]]
+name = "normal_sync"
+required-features = ["test-hooks"]

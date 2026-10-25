@@ -1036,6 +1036,8 @@ mod tests {
             storage: Storage::default(),
             day: Default::default(),
             held_queue: None,
+            sync: Default::default(),
+            review_session: None,
         };
         let file = session.storage.dir().unwrap().join(COLLECTION);
         fs::copy(
@@ -1105,4 +1107,18 @@ mod tests {
         assert_eq!(strip_field(&[0x00, 0x01], 9), None);
         assert_eq!(strip_field(&[0x0b], 9), None);
     }
+}
+
+pub(super) fn actor_dump(session: &mut Session<'_>) -> Result<Value, ExecError> {
+    let collection = collection(session)?;
+    collection.with_snapshot(|snapshot| {
+        let mut out = Map::new();
+        for table in DUMP_TABLES {
+            let rows = snapshot
+                .execute_raw(&format!("SELECT * FROM {table}"), &[])
+                .map_err(core)?;
+            out.insert(table.to_string(), db_dump_table_raw(table, &rows)?);
+        }
+        Ok(Value::Object(out))
+    })
 }

@@ -39,3 +39,5 @@ pub use status::{
     CheckOutcome, CheckResult, LocalRecord, OfflineStatus, ProbeOutcome, StatusMemory, StatusOutcome, SyncStatus,
 };
 pub use transport::{Method, Payload, SyncTransport};
+
+pub mod normal;

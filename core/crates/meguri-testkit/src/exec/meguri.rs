@@ -223,12 +223,14 @@ pub struct Session<'a> {
     /// The actor this session plays in a mixed run of an actor scenario;
     /// `None` elsewhere.
     pub actor: Option<Seat>,
+    pub(super) review_session: Option<meguri_engine::session::UnqueuedSession>,
     /// The session directory and the open collection (`exec/storage.rs`).
     pub storage: super::storage::Storage,
     /// The day clock's cached day (`sched/day-clock` D6; `exec/sched.rs`).
     pub day: meguri_engine::DayCache,
     /// E2 owns the real engine-held presentation and U44 chooser cache.
     pub held_queue: Option<meguri_engine::session::held::HeldQueue>,
+    pub(super) sync: super::sync::State,
 }
 
 impl Session<'_> {
@@ -236,6 +238,11 @@ impl Session<'_> {
     pub fn engine_collection(&mut self) -> Result<meguri_engine::Collection, ExecError> {
         if self.storage.promote(self.clock.clone(), self.random.clone())? {
             self.day.clear();
+        }
+        if let Some(session) = &self.review_session {
+            return session
+                .collection()
+                .map_err(|e| ExecError::new("core_error", e.to_string()));
         }
         self.storage.current_collection()
     }
@@ -300,7 +307,8 @@ impl MeguriExecutor {
     }
 
     /// The areas that have adapters, by name.
-    pub const AREAS: [&'static str; 15] = [
+    pub const AREAS: [&'static str; 16] = [
+        "sync",
         "undo",
         "media",
         "browser",
@@ -333,6 +341,7 @@ impl MeguriExecutor {
         let mut registry = Registry::default();
         for area in areas {
             match *area {
+                "sync" => super::sync::register(&mut registry),
                 "undo" => super::undo::register(&mut registry),
                 "media" => super::media::register(&mut registry),
                 "cards" => super::cards::register(&mut registry),
@@ -382,6 +391,8 @@ impl MeguriExecutor {
             storage: Default::default(),
             day: Default::default(),
             held_queue: None,
+            sync: Default::default(),
+            review_session: None,
         };
         if self.registry.fixture_backup_witness {
             session.storage.fixture_backup_witness();
@@ -557,6 +568,8 @@ impl MeguriExecutor {
                 storage: Default::default(),
                 day: Default::default(),
                 held_queue: None,
+                sync: Default::default(),
+                review_session: None,
             };
             if self.registry.fixture_backup_witness {
                 session.storage.fixture_backup_witness();

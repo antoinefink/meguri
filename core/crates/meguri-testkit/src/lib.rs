@@ -20,3 +20,5 @@ pub mod suite;
 pub mod sync_stub;
 pub mod timing;
 pub mod wallclock;
+
+pub mod normal_support;

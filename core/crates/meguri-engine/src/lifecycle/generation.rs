@@ -52,6 +52,7 @@ pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Pr
             core: Arc::clone(core),
             generation: core.exec.generation(),
             privilege: Some(privilege),
+            undo_session: None,
         };
         for listener in engine.ports().generation_listeners {
             if let Err(error) = listener.collection_reopened(&collection) {
@@ -78,6 +79,7 @@ pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Pr
             core: Arc::clone(core),
             generation: new,
             privilege: Some(privilege),
+            undo_session: None,
         }
     });
     if reopened {

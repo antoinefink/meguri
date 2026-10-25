@@ -511,13 +511,18 @@ fn a_refused_meguri_edge_stops_the_mixed_run_before_its_first_step() {
 }
 
 #[test]
-fn a_meguri_actor_scenario_is_pending_in_t1_while_meguri_cannot_play_actors() {
+fn a_meguri_actor_scenario_stays_pending_when_sync_area_is_excluded() {
     let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
     let log = dir.path().join("requests.jsonl");
     let report = t1(
         &Suite::open(dir.path()).unwrap(),
         &oracle(&log, &[]),
-        &MeguriExecutor::new(),
+        &MeguriExecutor::with(MeguriExecutor::area_registry(
+            &MeguriExecutor::AREAS
+                .into_iter()
+                .filter(|a| *a != "sync")
+                .collect::<Vec<_>>(),
+        )),
         None,
     );
     let outcome = only(&report);
@@ -540,7 +545,12 @@ fn a_meguri_actor_scenario_is_pending_in_t1_while_meguri_cannot_play_actors() {
     let report = t1(
         &Suite::open(dir.path()).unwrap(),
         &oracle(&log, &[]),
-        &MeguriExecutor::new(),
+        &MeguriExecutor::with(MeguriExecutor::area_registry(
+            &MeguriExecutor::AREAS
+                .into_iter()
+                .filter(|a| *a != "sync")
+                .collect::<Vec<_>>(),
+        )),
         None,
     );
     let outcome = only(&report);

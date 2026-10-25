@@ -358,13 +358,19 @@ pub enum ErrorKind {
     /// HTTP 501.
     ClientTooOld,
     /// HTTP 429, or any 5xx but 501.
-    ServerError { code: u16 },
+    ServerError {
+        code: u16,
+    },
     /// HTTP 400, or local data that cannot be sent (E7).
-    DbCheckRequired { origin: DbCheckOrigin },
+    DbCheckRequired {
+        origin: DbCheckOrigin,
+    },
     /// HTTP 407, from the proxy or the server.
     ProxyAuth,
     /// Any 4xx that E4 does not name.
-    UnexpectedStatus { code: u16 },
+    UnexpectedStatus {
+        code: u16,
+    },
     /// No route to the server: its name did not resolve, or the network or
     /// host is unreachable.
     Offline,
@@ -382,14 +388,20 @@ pub enum ErrorKind {
         self_hosted: bool,
     },
     /// A redirect that is not followed (transport.md T7).
-    RedirectRefused { code: u16 },
+    RedirectRefused {
+        code: u16,
+    },
     /// A 2xx answer that breaks the transport's checks or does not decode
     /// (E6).
     BadResponse,
     /// The job's base is not a valid endpoint (login-endpoints.md L1).
-    InvalidEndpoint { rule: EndpointRule },
+    InvalidEndpoint {
+        rule: EndpointRule,
+    },
     /// A caller value out of range.
-    InvalidInput { field: InvalidInput },
+    InvalidInput {
+        field: InvalidInput,
+    },
     /// The job's proxy cannot be used.
     ProxyUnusable,
     /// Builds with `test-hooks` only: the endpoint guard refused a URL.
@@ -398,7 +410,9 @@ pub enum ErrorKind {
     /// The server's own text, exactly as sent, possibly empty: `meta`
     /// answered `cont` false (R1514), a one-way upload answered something
     /// other than `OK`, or a media answer holds only `err`.
-    ServerMessage { text: String },
+    ServerMessage {
+        text: String,
+    },
     /// The server's clock and the device's differ by more than 300 s
     /// (meta-status.md M2, R1515).
     ClockIncorrect {
@@ -407,7 +421,10 @@ pub enum ErrorKind {
     },
     /// A one-way upload over the AnkiWeb limits (R1563, U109).
     #[cfg(feature = "ankiweb")]
-    UploadTooLarge { size_bytes: u64, limit_bytes: u64 },
+    UploadTooLarge {
+        size_bytes: u64,
+        limit_bytes: u64,
+    },
     /// `sanityCheck2` answered `bad` (R1533): the answer's counts when present.
     SanityCheckFailed {
         client: Option<SanityCounts>,
@@ -415,10 +432,19 @@ pub enum ErrorKind {
     },
     /// An incoming note type that would replace a local one has a different
     /// number of fields or templates (R1525).
-    NotetypeSchemaChanged { notetype_id: NotetypeId },
+    NotetypeSchemaChanged {
+        notetype_id: NotetypeId,
+    },
     /// An incoming note uses a note type the collection does not have
     /// (R1528).
-    MissingNotetype { notetype_id: NotetypeId, note_id: NoteId },
+    MissingNotetype {
+        notetype_id: NotetypeId,
+        note_id: NoteId,
+    },
+    NoteFieldsMismatch {
+        notetype_id: NotetypeId,
+        note_id: NoteId,
+    },
     /// A one-way download failed its integrity check (R1543).
     DownloadInvalid,
     /// The media sanity check still disagrees after the automatic re-sync
@@ -434,6 +460,9 @@ pub enum ErrorKind {
     /// A one-way sync is needed while a review session is open (R458); the
     /// job made no change.
     SessionActive,
+    /// Lifecycle Failed{Corrupt}: restore a backup or download the server's
+    /// collection. Normal sync and upload are refused; download remains allowed (E3).
+    CollectionCorrupt,
     /// Another exclusive job holds the collection.
     ExclusiveBusy,
     /// The job's cancel token fired.
@@ -473,11 +502,13 @@ impl ErrorKind {
             ErrorKind::SanityCheckFailed { .. } => "sanity_check_failed",
             ErrorKind::NotetypeSchemaChanged { .. } => "notetype_schema_changed",
             ErrorKind::MissingNotetype { .. } => "missing_notetype",
+            ErrorKind::NoteFieldsMismatch { .. } => "note_fields_mismatch",
             ErrorKind::DownloadInvalid => "download_invalid",
             ErrorKind::MediaResyncFailed => "media_resync_failed",
             ErrorKind::DiskFull { .. } => "disk_full",
             ErrorKind::LocalStorage => "local_storage",
             ErrorKind::SessionActive => "session_active",
+            ErrorKind::CollectionCorrupt => "collection_corrupt",
             ErrorKind::ExclusiveBusy => "exclusive_busy",
             ErrorKind::Cancelled => "cancelled",
             ErrorKind::Interrupted => "interrupted",
@@ -496,6 +527,7 @@ impl ErrorKind {
             | ErrorKind::BadResponse
             | ErrorKind::ExclusiveBusy => ErrorClass::Transient,
             ErrorKind::SessionActive | ErrorKind::Cancelled | ErrorKind::Interrupted => ErrorClass::Silent,
+            ErrorKind::CollectionCorrupt => ErrorClass::Actionable,
             _ => ErrorClass::Actionable,
         }
     }
@@ -511,6 +543,7 @@ impl ErrorKind {
             | ErrorKind::BadResponse
             | ErrorKind::ExclusiveBusy => Retry::Auto,
             ErrorKind::SessionActive | ErrorKind::Interrupted => Retry::AfterTrigger,
+            ErrorKind::CollectionCorrupt => Retry::No,
             _ => Retry::No,
         }
     }
@@ -652,3 +685,9 @@ impl fmt::Display for JobError {
 }
 
 impl std::error::Error for JobError {}
+
+impl From<StorageError> for JobError {
+    fn from(error: StorageError) -> Self {
+        crate::normal::storage_error(error)
+    }
+}

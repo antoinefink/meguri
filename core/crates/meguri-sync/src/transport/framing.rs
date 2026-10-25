@@ -106,6 +106,7 @@ pub(crate) struct CompressedBody {
     total: Option<u64>,
     taken: u64,
     done: bool,
+    sent: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl CompressedBody {
@@ -115,6 +116,7 @@ impl CompressedBody {
         progress: Option<ProgressSink>,
     ) -> io::Result<CompressedBody> {
         Ok(CompressedBody {
+            sent: None,
             source,
             encoder: Encoder::new(LEVEL)?,
             scratch: vec![0; CHUNK],
@@ -150,6 +152,10 @@ impl CompressedBody {
             progress.report(self.taken, self.total);
         }
         Ok(out)
+    }
+
+    pub(crate) fn on_sent(&mut self, hook: Option<Box<dyn FnOnce() + Send>>) {
+        self.sent = hook;
     }
 
     /// Ends the zstd frame.
@@ -197,7 +203,14 @@ impl Stream for CompressedBody {
             };
             match step {
                 Ok(out) if out.is_empty() => continue,
-                Ok(out) => return Poll::Ready(Some(Ok(Bytes::from(out)))),
+                Ok(out) => {
+                    if this.done
+                        && let Some(sent) = this.sent.take()
+                    {
+                        sent();
+                    }
+                    return Poll::Ready(Some(Ok(Bytes::from(out))));
+                }
                 Err(err) => {
                     this.done = true;
                     return Poll::Ready(Some(Err(err)));

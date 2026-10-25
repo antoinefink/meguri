@@ -81,6 +81,7 @@ pub struct WriteScope<'c> {
     journal: Option<Journal>,
     changed: bool,
     open: bool,
+    pub(crate) normal_stage: bool,
     /// Open savepoints, innermost last: whether the scope had a change when
     /// each was taken.
     savepoints: Vec<bool>,
@@ -132,6 +133,7 @@ impl<'c> WriteScope<'c> {
             journal: journal.map(Journal::new),
             changed: false,
             open: true,
+            normal_stage: false,
             savepoints: Vec::new(),
         })
     }
@@ -672,9 +674,19 @@ impl<'c> WriteScope<'c> {
         meguri_model::faultpoint!("storage.commit.before")?;
         self.conn.execute_batch("COMMIT")?;
         self.open = false;
+        let detach_error = if self.normal_stage {
+            self.conn
+                .execute_batch("DETACH DATABASE meguri_sync")
+                .err()
+                .map(StorageError::from)
+        } else {
+            None
+        };
+        self.normal_stage = false;
         let post_commit_error = meguri_model::faultpoint!("storage.commit.after")
             .err()
-            .map(StorageError::from);
+            .map(StorageError::from)
+            .or(detach_error);
         Ok(Committed {
             post_commit_error,
             journal: self.journal.take(),
@@ -687,6 +699,10 @@ impl<'c> WriteScope<'c> {
     pub fn rollback(mut self) -> Result<(), StorageError> {
         self.open = false;
         self.conn.execute_batch("ROLLBACK")?;
+        if self.normal_stage {
+            self.conn.execute_batch("DETACH DATABASE meguri_sync")?;
+            self.normal_stage = false;
+        }
         Ok(())
     }
 }
@@ -695,6 +711,9 @@ impl Drop for WriteScope<'_> {
     fn drop(&mut self) {
         if self.open {
             let _ = self.conn.execute_batch("ROLLBACK");
+        }
+        if self.normal_stage {
+            let _ = self.conn.execute_batch("DETACH DATABASE meguri_sync");
         }
     }
 }
