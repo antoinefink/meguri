@@ -165,6 +165,14 @@ impl WriteScope<'_> {
                 detail: "sync merge page width or size".into(),
             });
         }
+        // Every caller reduces its bounded page in received order. Refuse a
+        // broken caller before UPDATE FROM / INSERT SELECT can choose a row.
+        let mut keys = std::collections::BTreeSet::new();
+        if images.iter().any(|image| !keys.insert(RowKey::of(table, image))) {
+            return Err(StorageError::Mode {
+                detail: "sync merge duplicate key".into(),
+            });
+        }
         let conn = self.conn();
         let cols = quoted_columns(table);
         conn.execute_batch(&format!("DROP TABLE IF EXISTS temp.meguri_sync_page; CREATE TEMP TABLE meguri_sync_page AS SELECT {cols} FROM {} WHERE 0;", table.name()))?;

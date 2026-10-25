@@ -4,6 +4,13 @@ use crate::ids::{NoteId, NotetypeId};
 use crate::time::EpochSecs;
 use crate::usn::Usn;
 
+/// Scalar normal-sync preparation faults, carried without received text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SyncNoteFault {
+    MissingNotetype { note_id: NoteId, notetype_id: NotetypeId },
+    FieldsMismatch { note_id: NoteId, notetype_id: NotetypeId },
+}
+
 /// U+001F, which joins the field values in `flds` and deck name components.
 pub const FIELD_SEPARATOR: char = '\u{1f}';
 

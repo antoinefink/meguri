@@ -245,3 +245,53 @@ Own pending graves mask their keys. The pending/mtime test still applies after S
 The first contract review found a lost conditional note error; the repaired
 contract has no P0–P2 findings. Source provenance stays separate. Implementation
 and focused regressions for this correction remain pending.
+
+## Whole-route integration checks
+
+Route source has 24 files. Its hashes are checked. The worker
+metadata schema has a passing focused harness (`193423Z-16409`, eight
+internal cases). Rust formatting passes (`193537Z-17393`). Focused test run
+`193555Z-17762` executes 60 cases: 58 pass; two retain old assertions that
+Meguri cannot play a sync actor. Preserve the no-execution-in-T0 assertions
+while correcting these capability expectations. Self-test `193620Z-18166`
+passes nine cases; the quarantine fixture fails before producing its nested
+gate receipt. Its fixture does not list the newly registered transport job.
+
+Independent review also found an allocation/cleanup race: a helper can publish
+an edge after the owning CLI exits and its route has been released. Fix the
+allocation and sweep ordering, retain a closing fence and prove the paused
+allocation case. Actual transport and live sync checks remain pending.
+
+## Follow-up repair checkpoint
+
+Route run `193953Z-22375` repairs the allocation/sweep race with shared and
+exclusive admission and a persistent closing fence. Review round two confirms
+the P1 repair, but finds a P2 in cancellation cleanup of extra fixture owners.
+Their contexts must be registered before allocation. Focused Rust run
+`194943Z-29510` passes 60/60; self-test `194948Z-29776` passes 10/10. Real
+transport and live scenarios are still unrun.
+
+Repeated-row run `192926Z-13058` preserves the original duplicate fixture and
+adds six mechanism cases. Independent review finds a P2: validation replay
+work is absent from the declared write budget. Focused run `194405Z-25706`
+compiles and records 96 passing cases and one test setup write-mode error,
+then stalls on a nested reader acquisition in a new test. The integrator
+cancels that run via MG; all unfinished cases remain unverified. The budget
+and fixture repairs are in filtered run `194914Z-28664`.
+
+This is a WIP checkpoint only. Both findings, actual route execution, the
+original-base batch gate and U107 acceptance remain open.
+
+## Ordered-row repair verified
+
+Review round two clears the write-budget and fixture repairs. Focused run
+`195439Z-32853` executes 139 cases: 138 pass, including the original repeated-ID
+regression, all other normal-sync cases selected and the FFI library checks.
+The single new WAL assertion samples its evidence before the recorder stores it.
+Test-only run `195732Z-35011` preserves the one-second automatic flush deadline
+and captures the applied commit key. Independent review is clear; focused run
+`200039Z-37229` passes the corrected case. The earlier failed run remains saved.
+
+Route self-test `200344Z-39313` passes all 11 selected cases. Privacy check
+`200342Z-39122` passes across all 40 pending files, including new files. Actual
+transport, fresh large-merge coverage and the batch gate remain pending.

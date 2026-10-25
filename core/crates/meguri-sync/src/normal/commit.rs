@@ -8,7 +8,6 @@ use meguri_engine::{
     CancelToken, Collection, EngineError, OpSource, OpSpec, ProgressSink, SyncHold, SyncMerge, executor::catalog,
 };
 use meguri_model::{
-    card::Card,
     deck::Deck,
     deck_config::DeckConfig,
     grave::{Grave, GraveKind},
@@ -44,8 +43,15 @@ pub(super) fn apply(
     progress: ProgressSink,
 ) -> Result<MergeOutcome> {
     let path = stage.path().to_path_buf();
+    if cancel.is_cancelled() {
+        return Err(engine_error(EngineError::Cancelled));
+    }
     let rows = stage.incoming_count().map_err(super::storage_error)?;
-    let budget = Duration::from_micros(rows.saturating_mul(25).max(1));
+    let validations = stage.note_validation_count().map_err(super::storage_error)?;
+    // Full payload work is per distinct key; scalar live validation is per
+    // occurrence. Budget both conservatively without changing sanity counts
+    // or the distinct target set used for reconciliation and diagnostics.
+    let budget = Duration::from_micros(rows.saturating_add(validations).saturating_mul(25).max(1));
     let mut spec = OpSpec::new(catalog::SYNC_INCOMING_MERGE, OpSource::SyncIncoming)
         .stamp(StampMode::CallerSupplied)
         .cancel(cancel)
@@ -241,6 +247,10 @@ pub(super) fn apply(
                     stage::register_tag(ctx.scope(), &row.name, usn)?;
                 }
             }
+            // Replay against the actual live base after graves and object
+            // merges, before choosing any note payload. A post-S touch alone
+            // does not change eligibility. The executor rolls back this fault.
+            validate_live_notes(ctx)?;
             for table in [Table::Cards, Table::Notes, Table::Revlog] {
                 let mut after = None;
                 loop {
@@ -269,17 +279,11 @@ pub(super) fn apply(
                             continue;
                         }
                         let keep = match table {
-                            Table::Cards => {
-                                let row = Card::from_cells(&image).map_err(meguri_storage::StorageError::from)?;
+                            Table::Cards | Table::Notes => {
+                                let maximum = ctx.scope().staged_received_max(table, id)?;
                                 ctx.scope()
-                                    .card(row.id)?
-                                    .is_none_or(|local| stage::accepts(local.usn, local.mtime, row.mtime))
-                            }
-                            Table::Notes => {
-                                let row = Note::from_cells(&image).map_err(meguri_storage::StorageError::from)?;
-                                ctx.scope()
-                                    .note(row.id)?
-                                    .is_none_or(|local| stage::accepts(local.usn, local.mtime, row.mtime))
+                                    .sync_row_state(table, id)?
+                                    .is_none_or(|(usn, mtime)| stage::accepts(usn, mtime, maximum))
                             }
                             Table::Revlog => ctx.scope().revlog_entry(RevlogId(id))?.is_none(),
                             _ => unreachable!(),
@@ -288,9 +292,7 @@ pub(super) fn apply(
                             if table == Table::Notes {
                                 let mut note = Note::from_cells(&image).map_err(meguri_storage::StorageError::from)?;
                                 let nt = ctx.scope().notetype(note.notetype_id)?;
-                                stage::validate_note(&mut note, nt).map_err(|_| EngineError::Internal {
-                                    message: "live incoming note no longer valid".into(),
-                                })?;
+                                stage::validate_note(&mut note, nt).map_err(EngineError::SyncNote)?;
                                 accepted.push(note.to_cells());
                             } else {
                                 accepted.push(image);
@@ -350,6 +352,8 @@ pub(super) fn apply(
                 message: "server usn overflow".into(),
             })?);
             ctx.scope().put_col(&col)?;
+            targets.sort_unstable();
+            targets.dedup();
             ctx.report_sync_merge(SyncMerge {
                 snapshot: hold.snapshot,
                 staged: targets,
@@ -376,6 +380,50 @@ pub(super) fn apply(
     outcome.write_budget = budget;
     outcome.seq = Some(result.seq);
     Ok(outcome)
+}
+/// H6's scalar replay has page-bounded RAM even for one very repeated key.
+/// Keys are sorted on disk, but faults are selected by global receive order.
+fn validate_live_notes(ctx: &mut meguri_engine::OpContext<'_, '_>) -> std::result::Result<(), EngineError> {
+    let mut first: Option<(i64, meguri_model::note::SyncNoteFault)> = None;
+    let mut after = None;
+    loop {
+        ctx.check_cancel()?;
+        let page = ctx.scope().staged_note_validation_keys(after)?;
+        if page.is_empty() {
+            break;
+        }
+        after = page.last().copied();
+        for NoteId(id) in page {
+            if unsent_grave(ctx.scope(), id, GraveKind::Note)? {
+                continue;
+            }
+            let mut state = ctx.scope().sync_row_state(Table::Notes, id)?;
+            let mut ordinal = 0;
+            'records: loop {
+                ctx.check_cancel()?;
+                let records = ctx.scope().staged_note_validation_page(NoteId(id), ordinal)?;
+                if records.is_empty() {
+                    break;
+                }
+                for record in records {
+                    ordinal = record.ordinal;
+                    if state.is_none_or(|(usn, mtime)| stage::accepts(usn, mtime, record.mtime)) {
+                        if let Some(fault) = record.fault {
+                            if first.is_none_or(|(earlier, _)| record.ordinal < earlier) {
+                                first = Some((record.ordinal, fault));
+                            }
+                            break 'records;
+                        }
+                        state = Some((record.usn, record.mtime));
+                    }
+                }
+            }
+        }
+    }
+    match first {
+        Some((_, fault)) => Err(EngineError::SyncNote(fault)),
+        None => Ok(()),
+    }
 }
 fn grave_table(kind: GraveKind) -> Table {
     match kind {

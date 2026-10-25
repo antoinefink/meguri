@@ -88,3 +88,8 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-sync) and binary(normal_sync)'
 threads-required = "num-test-threads"
+
+# This small-fixture replay regression checks the same one-second journal handoff.
+[[profile.default.overrides]]
+filter = 'package(meguri-sync) and test(=normal::repeated::repeated_note_replay_declares_long_write_and_hands_off_durable_answer)'
+threads-required = "num-test-threads"

@@ -2,7 +2,14 @@
 //! SQL names come only from Table and Namespace; data always uses parameters.
 use crate::rows;
 use crate::{Cell, ReadRows, Record, RowImage, RowKey, StampMode, StorageError, Table, WriteScope};
-use meguri_model::{clock::Clock, ids::NotetypeId, notetype::Notetype};
+use meguri_model::{
+    clock::Clock,
+    ids::{NoteId, NotetypeId},
+    note::SyncNoteFault,
+    notetype::Notetype,
+    time::EpochSecs,
+    usn::Usn,
+};
 use rusqlite::{Connection, params_from_iter};
 use std::path::{Path, PathBuf};
 
@@ -113,6 +120,56 @@ fn save(conn: &Connection, prefix: &str, table: Table, image: &[Cell]) -> Result
     Ok(())
 }
 
+/// One received note's preparation result; no payload or error text is retained.
+#[derive(Clone, Copy, Debug)]
+pub struct NoteValidation {
+    pub ordinal: i64,
+    pub mtime: EpochSecs,
+    pub usn: Usn,
+    pub fault: Option<SyncNoteFault>,
+}
+
+fn received_max(conn: &Connection, prefix: &str, table: Table, id: i64) -> Result<EpochSecs, StorageError> {
+    Ok(EpochSecs(conn.query_row(
+        &format!("SELECT max_mod FROM {prefix}incoming_merge WHERE kind=?1 AND id=?2"),
+        (table.name(), id),
+        |r| r.get(0),
+    )?))
+}
+
+fn validation_page(
+    conn: &Connection,
+    prefix: &str,
+    id: NoteId,
+    after: i64,
+) -> Result<Vec<NoteValidation>, StorageError> {
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT ordinal,mod,usn,fault,ntid FROM {prefix}note_validation WHERE nid=?1 AND ordinal>?2 ORDER BY ordinal LIMIT {PAGE}"
+    ))?;
+    let records = stmt.query_map((id.0, after), |r| {
+        let notetype_id = NotetypeId(r.get(4)?);
+        let fault = match r.get::<_, i64>(3)? {
+            0 => None,
+            1 => Some(SyncNoteFault::MissingNotetype {
+                note_id: id,
+                notetype_id,
+            }),
+            2 => Some(SyncNoteFault::FieldsMismatch {
+                note_id: id,
+                notetype_id,
+            }),
+            _ => return Err(rusqlite::Error::InvalidQuery),
+        };
+        Ok(NoteValidation {
+            ordinal: r.get(0)?,
+            mtime: EpochSecs(r.get(1)?),
+            usn: Usn(r.get(2)?),
+            fault,
+        })
+    })?;
+    Ok(records.collect::<rusqlite::Result<_>>()?)
+}
+
 pub struct NormalStage {
     conn: Connection,
     path: PathBuf,
@@ -164,6 +221,11 @@ impl NormalStage {
                 ))?;
             }
         }
+        stage.conn.execute_batch(
+            "CREATE TABLE incoming_merge (kind TEXT NOT NULL, id INTEGER NOT NULL, max_mod INTEGER NOT NULL, PRIMARY KEY(kind,id)) WITHOUT ROWID;
+             CREATE TABLE note_validation (ordinal INTEGER PRIMARY KEY, nid INTEGER NOT NULL, mod INTEGER NOT NULL, usn INTEGER NOT NULL, fault INTEGER NOT NULL, ntid INTEGER NOT NULL);
+             CREATE INDEX note_validation_key ON note_validation(nid,ordinal);",
+        )?;
         Ok(stage)
     }
     pub fn copy_page(&self, table: Table, images: &[RowImage]) -> Result<(), StorageError> {
@@ -219,6 +281,54 @@ impl NormalStage {
     pub fn store(&self, ns: Namespace, table: Table, image: &[Cell]) -> Result<(), StorageError> {
         save(&self.conn, ns.prefix(), table, image)
     }
+    /// Independent of M's acceptance: one effective incoming payload and a
+    /// maximum comparison scalar per key, continued across all chunks (H6).
+    pub fn summarize_sync_row(&self, table: Table, image: &[Cell]) -> Result<(), StorageError> {
+        if !matches!(table, Table::Cards | Table::Notes | Table::Revlog) || image.len() != table.columns().len() {
+            return Err(bad("incoming summary table or width"));
+        }
+        let key = RowKey::of(table, image);
+        let prior = self.get(Namespace::Incoming, table, &key)?;
+        if table == Table::Revlog {
+            if prior.is_none() {
+                self.store(Namespace::Incoming, table, image)?;
+            }
+            return Ok(());
+        }
+        let mtime = table.stamps().mtime.ok_or_else(|| bad("incoming summary mtime"))?;
+        let usn = table.usn_column().ok_or_else(|| bad("incoming summary usn"))?;
+        let incoming_mod = image[mtime].as_i64().ok_or_else(|| bad("incoming summary mod"))?;
+        let RowKey::Id(id) = key else {
+            return Err(bad("incoming summary key"));
+        };
+        self.conn.execute(
+            "INSERT INTO incoming_merge(kind,id,max_mod) VALUES (?1,?2,?3) ON CONFLICT(kind,id) DO UPDATE SET max_mod=max(max_mod,excluded.max_mod)",
+            (table.name(), id, incoming_mod),
+        )?;
+        if prior
+            .as_ref()
+            .is_none_or(|row| row[usn].as_i64() != Some(-1) || row[mtime].as_i64().is_some_and(|m| m < incoming_mod))
+        {
+            self.store(Namespace::Incoming, table, image)?;
+        }
+        Ok(())
+    }
+    pub fn record_note_validation(
+        &self,
+        note: &meguri_model::note::Note,
+        fault: Option<SyncNoteFault>,
+    ) -> Result<(), StorageError> {
+        let code = match fault {
+            None => 0,
+            Some(SyncNoteFault::MissingNotetype { .. }) => 1,
+            Some(SyncNoteFault::FieldsMismatch { .. }) => 2,
+        };
+        self.conn.execute(
+            "INSERT INTO note_validation(ordinal,nid,mod,usn,fault,ntid) SELECT coalesce(max(ordinal),0)+1,?1,?2,?3,?4,?5 FROM note_validation",
+            (note.id.0, note.mtime.0, note.usn.0, code, note.notetype_id.0),
+        )?;
+        Ok(())
+    }
     pub fn store_record<R: Record>(&self, ns: Namespace, row: &R) -> Result<(), StorageError> {
         self.store(ns, R::TABLE, &row.to_cells())
     }
@@ -269,6 +379,15 @@ impl NormalStage {
                 .ok_or_else(|| bad("incoming row count overflow"))?;
         }
         Ok(count)
+    }
+    /// Append-only, contiguous ordinals count replay work independently of
+    /// distinct payloads. The primary-key maximum reads one indexed endpoint,
+    /// rather than scanning an unbounded occurrence log before writer admission.
+    pub fn note_validation_count(&self) -> Result<u64, StorageError> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT coalesce(max(ordinal),0) FROM note_validation", [], |r| r.get(0))?;
+        u64::try_from(count).map_err(|_| bad("negative note validation count"))
     }
     /// H9 compares M's remaining pending keys with the exact sent images.
     pub fn pending_unsent(&self) -> Result<bool, StorageError> {
@@ -333,6 +452,21 @@ impl WriteScope<'_> {
     }
     pub fn staged_image(&self, ns: Namespace, table: Table, key: &RowKey) -> Result<Option<RowImage>, StorageError> {
         get(self.conn(), &format!("meguri_sync.{}", ns.prefix()), table, key)
+    }
+    pub fn staged_received_max(&self, table: Table, id: i64) -> Result<EpochSecs, StorageError> {
+        received_max(self.conn(), "meguri_sync.", table, id)
+    }
+    pub fn staged_note_validation_keys(&self, after: Option<NoteId>) -> Result<Vec<NoteId>, StorageError> {
+        let filter = if after.is_some() { "WHERE id>?1" } else { "" };
+        let mut stmt = self.conn().prepare_cached(&format!(
+            "SELECT id FROM meguri_sync.incoming_notes {filter} ORDER BY id LIMIT {PAGE}"
+        ))?;
+        Ok(stmt
+            .query_map(params_from_iter(after.map(|id| id.0)), |r| Ok(NoteId(r.get(0)?)))?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+    pub fn staged_note_validation_page(&self, id: NoteId, after: i64) -> Result<Vec<NoteValidation>, StorageError> {
+        validation_page(self.conn(), "meguri_sync.", id, after)
     }
     pub fn staged_notetype(&self, id: NotetypeId) -> Result<Option<Notetype>, StorageError> {
         rows::notetypes::get_prefixed(self.conn(), "meguri_sync.incoming_", id)

@@ -4,6 +4,8 @@
 mod commit;
 mod holdback;
 mod outgoing;
+#[cfg(all(test, feature = "test-hooks"))]
+mod repeated;
 mod sanity;
 mod stage;
 #[cfg(feature = "test-hooks")]
@@ -455,6 +457,7 @@ fn io_error(error: std::io::Error) -> JobError {
 }
 pub(super) fn engine_error(error: EngineError) -> JobError {
     match error {
+        EngineError::SyncNote(fault) => stage::note_fault(fault),
         EngineError::Storage(e) => storage_error(e),
         EngineError::Cancelled => JobError::new(ErrorKind::Cancelled, None, "normal job cancelled"),
         EngineError::Busy { .. } => JobError::new(ErrorKind::ExclusiveBusy, None, "normal job already active"),

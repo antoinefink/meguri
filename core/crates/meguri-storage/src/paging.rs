@@ -14,6 +14,7 @@ use meguri_model::note::Note;
 use meguri_model::notetype::Notetype;
 use meguri_model::revlog::RevlogEntry;
 use meguri_model::tag::Tag;
+use meguri_model::usn::Usn;
 use rusqlite::{Connection, params_from_iter};
 
 use crate::connections::{Reader, Writer};
@@ -72,6 +73,28 @@ pub trait ReadRows: sealed::Connected {
     /// Bounded stored-image page for normal sync and its captured overlay.
     fn row_page(&self, table: Table, after: Option<&RowKey>) -> Result<Vec<RowImage>, StorageError> {
         crate::normal_stage::page(self.connection(), "", table, after, false)
+    }
+
+    /// Scalar normal-merge base; validation replay never loads a note body.
+    fn sync_row_state(
+        &self,
+        table: Table,
+        id: i64,
+    ) -> Result<Option<(Usn, meguri_model::time::EpochSecs)>, StorageError> {
+        use rusqlite::OptionalExtension;
+        if !matches!(table, Table::Cards | Table::Notes) {
+            return Err(StorageError::Mode {
+                detail: "sync scalar table".into(),
+            });
+        }
+        Ok(self
+            .connection()
+            .query_row(
+                &format!("SELECT usn,mod FROM {} WHERE id=?1", table.name()),
+                [id],
+                |row| Ok((Usn(row.get(0)?), meguri_model::time::EpochSecs(row.get(1)?))),
+            )
+            .optional()?)
     }
 
     fn answer_due_range(&self, today: u32) -> Result<Vec<crate::queries::due_range::DueRow>, StorageError> {

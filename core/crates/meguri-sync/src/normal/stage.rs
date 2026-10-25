@@ -10,7 +10,7 @@ use meguri_model::{
     clock::Clock,
     config::ConfigEntry,
     grave::{Grave, GraveKind},
-    note::Note,
+    note::{Note, SyncNoteFault},
     time::EpochSecs,
     usn::Usn,
 };
@@ -235,28 +235,32 @@ pub(super) fn register_tag(
 pub(super) fn accepts(local_usn: Usn, local_mtime: EpochSecs, incoming_mtime: EpochSecs) -> bool {
     local_usn != Usn::PENDING || local_mtime < incoming_mtime
 }
-pub(super) fn validate_note(note: &mut Note, nt: Option<meguri_model::notetype::Notetype>) -> Result<()> {
-    let nt = nt.ok_or_else(|| {
-        refuse(
-            ErrorKind::MissingNotetype {
-                notetype_id: note.notetype_id,
-                note_id: note.id,
-            },
-            Method::Chunk,
-        )
+pub(super) fn note_fault(fault: SyncNoteFault) -> JobError {
+    let kind = match fault {
+        SyncNoteFault::MissingNotetype { note_id, notetype_id } => ErrorKind::MissingNotetype { note_id, notetype_id },
+        SyncNoteFault::FieldsMismatch { note_id, notetype_id } => {
+            ErrorKind::NoteFieldsMismatch { note_id, notetype_id }
+        }
+    };
+    refuse(kind, Method::Chunk)
+}
+pub(super) fn validate_note(
+    note: &mut Note,
+    nt: Option<meguri_model::notetype::Notetype>,
+) -> std::result::Result<(), SyncNoteFault> {
+    let nt = nt.ok_or(SyncNoteFault::MissingNotetype {
+        notetype_id: note.notetype_id,
+        note_id: note.id,
     })?;
     let fields = note
         .field_values()
-        .map(|f| meguri_engine::notes::sync_field(f))
+        .map(meguri_engine::notes::sync_field)
         .collect::<Vec<_>>();
     if fields.is_empty() || fields.len() != nt.fields.len() {
-        return Err(refuse(
-            ErrorKind::NoteFieldsMismatch {
-                notetype_id: note.notetype_id,
-                note_id: note.id,
-            },
-            Method::Chunk,
-        ));
+        return Err(SyncNoteFault::FieldsMismatch {
+            notetype_id: note.notetype_id,
+            note_id: note.id,
+        });
     }
     meguri_engine::notes::prepare_sync_note(note, &nt, &fields);
     Ok(())
@@ -267,27 +271,46 @@ pub(super) fn chunk(stage: &NormalStage, chunk: IncomingChunk, clock: &dyn Clock
         return Err(JobError::bad_response(Method::Chunk, "chunk exceeds 250 objects"));
     }
     stage.write(clock, |scope| -> Result<()> {
-        let mut reviews = Vec::new();
-        let mut cards = Vec::new();
-        let mut notes = Vec::new();
+        // Fold the page's up-to-250 entries in their received sequence.
+        // Each entry observes earlier entries before the SQL batch is written.
+        let mut reviews = std::collections::BTreeMap::new();
+        let mut cards = std::collections::BTreeMap::new();
+        let mut notes = std::collections::BTreeMap::new();
         for row in chunk.revlog {
-            stage.store_record(Namespace::Incoming, &row).map_err(storage_error)?;
-            if scope.revlog_entry(row.id).map_err(storage_error)?.is_none() {
-                reviews.push(row.to_cells());
+            stage
+                .summarize_sync_row(Table::Revlog, &row.to_cells())
+                .map_err(storage_error)?;
+            if !reviews.contains_key(&row.id) && scope.revlog_entry(row.id).map_err(storage_error)?.is_none() {
+                reviews.insert(row.id, row);
             }
         }
-        scope.merge_sync_rows(Table::Revlog, &reviews).map_err(storage_error)?;
+        scope
+            .merge_sync_rows(
+                Table::Revlog,
+                &reviews.into_values().map(|r| r.to_cells()).collect::<Vec<_>>(),
+            )
+            .map_err(storage_error)?;
         for row in chunk.cards {
-            stage.store_record(Namespace::Incoming, &row).map_err(storage_error)?;
-            if scope
-                .card(row.id)
-                .map_err(storage_error)?
-                .is_none_or(|local| accepts(local.usn, local.mtime, row.mtime))
-            {
-                cards.push(row.to_cells());
+            stage
+                .summarize_sync_row(Table::Cards, &row.to_cells())
+                .map_err(storage_error)?;
+            let stored;
+            let local = if let Some(local) = cards.get(&row.id) {
+                Some(local)
+            } else {
+                stored = scope.card(row.id).map_err(storage_error)?;
+                stored.as_ref()
+            };
+            if local.is_none_or(|local: &meguri_model::card::Card| accepts(local.usn, local.mtime, row.mtime)) {
+                cards.insert(row.id, row);
             }
         }
-        scope.merge_sync_rows(Table::Cards, &cards).map_err(storage_error)?;
+        scope
+            .merge_sync_rows(
+                Table::Cards,
+                &cards.into_values().map(|r| r.to_cells()).collect::<Vec<_>>(),
+            )
+            .map_err(storage_error)?;
         for row in chunk.notes {
             let mut note = Note {
                 id: row.id,
@@ -303,20 +326,35 @@ pub(super) fn chunk(stage: &NormalStage, chunk: IncomingChunk, clock: &dyn Clock
                 fields: row.fields,
                 ..Default::default()
             };
-            let accepted = scope
-                .note(note.id)
-                .map_err(storage_error)?
-                .is_none_or(|local| accepts(local.usn, local.mtime, note.mtime));
-            if accepted {
-                let nt = scope.notetype(note.notetype_id).map_err(storage_error)?;
-                validate_note(&mut note, nt)?;
+            let stored;
+            let local = if let Some(local) = notes.get(&note.id) {
+                Some(local)
+            } else {
+                stored = scope.note(note.id).map_err(storage_error)?;
+                stored.as_ref()
+            };
+            let accepted = local.is_none_or(|local: &Note| accepts(local.usn, local.mtime, note.mtime));
+            // Preparation changes only this row's values. Even a hypothetical
+            // rejected version needs its scalar result for the live replay.
+            let nt = scope.notetype(note.notetype_id).map_err(storage_error)?;
+            let fault = validate_note(&mut note, nt).err();
+            if accepted && let Some(fault) = fault {
+                return Err(note_fault(fault));
             }
-            stage.store_record(Namespace::Incoming, &note).map_err(storage_error)?;
+            stage.record_note_validation(&note, fault).map_err(storage_error)?;
+            stage
+                .summarize_sync_row(Table::Notes, &note.to_cells())
+                .map_err(storage_error)?;
             if accepted {
-                notes.push(note.to_cells());
+                notes.insert(note.id, note);
             }
         }
-        scope.merge_sync_rows(Table::Notes, &notes).map_err(storage_error)?;
+        scope
+            .merge_sync_rows(
+                Table::Notes,
+                &notes.into_values().map(|r| r.to_cells()).collect::<Vec<_>>(),
+            )
+            .map_err(storage_error)?;
         Ok(())
     })?;
     Ok(count)

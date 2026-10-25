@@ -178,7 +178,8 @@ impl From<EngineError> for CoreError {
             EngineError::Unsupported { feature } => CoreError::Unsupported { feature },
             EngineError::InvalidArgument { message } => CoreError::InvalidArgument { message },
             EngineError::Internal { message } => CoreError::Internal { message },
-            EngineError::SchemaNotMarked { .. }
+            EngineError::SyncNote(_)
+            | EngineError::SchemaNotMarked { .. }
             | EngineError::SafetyBackupFailed(_)
             | EngineError::Storage(_)
             | EngineError::Media(_)
