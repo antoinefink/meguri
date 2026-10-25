@@ -97,3 +97,10 @@ their required evidence.
 Mac `220645Z-20518` passes the production review, undo, waiting and restart
 case in the VM. This supplements the mobile review results; it does not
 replace the remaining sidebar, performance or full-unit evidence.
+
+Final phone drive `220841Z-22856` passes all three captures with zero
+hierarchy issues. Independent visual review sees no clipping. Its parent
+selection frame is 165 by 40.67 points and disclosure is 165 by 44 points;
+long names and the complete selection hit region still need the full
+layout/accessibility checks. Do not infer that coverage from this fixture.
+Signed Mac build `221053Z-25531` passes and one latest preview is reopened.

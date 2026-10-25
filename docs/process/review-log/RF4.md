@@ -1480,3 +1480,19 @@ The shared full gate must still cover changes from
 `81c207573c20c337c8834e4ae8b4ee8f29603dbf`. This checkpoint adds no Unit
 trailer and accepts no milestone. File export with media remains separate
 prepared work. The full plan and final human evidence remain required.
+
+## Media file export resumed, 2026-10-25
+
+Starting commit: `0a67af5696d1cdcbe57ab1b0e41db016886812eb`, recorded in
+`build/unit-starts/RF4-export-media-resume-20261025.json` before work.
+The current pending integration base is
+`1416a520542a8c5daa38a23bfe398da704c3d6c9`; older bases above are historical.
+
+Reuse the retained backend with SHA-256
+`667129fecbd41cdaafc1b2cd16ecef33653c25f0f183d781cbad5c7d03437474`.
+Its 22 unchanged paths apply. The current error enum and Settings catalog
+need their two prepared hunks merged. The filtered implementer handles
+that forward port under session `s-20261025T134357Z-235af9a2`.
+E7/P15 apply. New checks and native UI work remain open.
+Media file import remains unsupported until its separate
+safe install path is implemented. No Unit or milestone is accepted here.
