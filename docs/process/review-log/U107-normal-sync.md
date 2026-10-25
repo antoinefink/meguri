@@ -74,3 +74,12 @@ one contiguous trailer block.
 
 The session ledger and intake packets retain the recorded roles and source hashes.
 U107 is not accepted.
+
+## Fixture validation after support
+
+Oracle run `140646Z-33304` recorded only the two changed cases, both successfully.
+Goldens check `140717Z-34200`, based on the unit start, reports all 697 scenarios
+fresh and valid schemas, including the 18 U107 cases. Asset privacy `140725Z-34489`
+passes. The oracle pin and locks are unchanged; no unchanged case was recorded.
+This proves the test inputs and expected data, not normal-sync execution. The
+production job and its acceptance checks remain outstanding.
