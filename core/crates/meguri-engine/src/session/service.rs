@@ -108,10 +108,17 @@ pub struct HeadItem {
     pub home_preset: HomePreset,
 }
 #[derive(Clone, Debug, PartialEq)]
+pub enum ReviewTerminalState {
+    Active,
+    WaitingUntil { instant: i64 },
+    Finished,
+}
+#[derive(Clone, Debug, PartialEq)]
 pub struct Head {
     pub items: Vec<HeadItem>,
     pub counts: Counts,
     pub valid_until: i64,
+    pub terminal_state: ReviewTerminalState,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Marks {
@@ -779,6 +786,7 @@ impl ReviewService {
                     items: Vec::new(),
                     counts: Counts::default(),
                     valid_until: 0,
+                    terminal_state: ReviewTerminalState::Finished,
                 },
                 last_answer: i64::MIN,
                 pending: Vec::new(),
@@ -1262,7 +1270,7 @@ impl ReviewService {
             })
             .map_err(invalid)?;
         if head.items.is_empty() {
-            if let Some(instant) = session.presentation.lock().unwrap().queue.waiting_until() {
+            if let ReviewTerminalState::WaitingUntil { instant } = head.terminal_state {
                 emit(
                     &c,
                     None,
@@ -2313,6 +2321,13 @@ fn project_snapshot(
     }
     p.queue.set_current(items.first().map(|i| i.card_id));
     let head = Head {
+        terminal_state: if !items.is_empty() {
+            ReviewTerminalState::Active
+        } else if let Some(instant) = p.queue.waiting_until() {
+            ReviewTerminalState::WaitingUntil { instant }
+        } else {
+            ReviewTerminalState::Finished
+        },
         counts: p.queue.value().counts,
         valid_until: p
             .queue
@@ -2326,13 +2341,17 @@ fn emit_empty(inner: &Inner, c: &Collection, id: SessionId, head: &Head) -> Resu
     if !head.items.is_empty() {
         return Ok(());
     }
-    let (waiting, deck) = {
+    // Projection releases the state lock; the session may have ended since then.
+    let deck = {
         let state = inner.state.lock().unwrap();
-        let s = state.session.as_ref().filter(|s| s.id == id).ok_or_else(no_session)?;
-        let p = s.presentation.lock().unwrap();
-        (p.queue.waiting_until(), s.deck)
+        state
+            .session
+            .as_ref()
+            .filter(|s| s.id == id)
+            .ok_or_else(no_session)?
+            .deck
     };
-    if let Some(instant) = waiting {
+    if let ReviewTerminalState::WaitingUntil { instant } = head.terminal_state {
         emit(
             c,
             None,

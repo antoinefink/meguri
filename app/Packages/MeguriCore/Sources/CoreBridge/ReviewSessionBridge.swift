@@ -296,20 +296,37 @@ public struct ReviewCounts: Sendable, Hashable {
     }
 }
 
+public enum ReviewTerminalState: Sendable, Hashable {
+    case active
+    case waitingUntil(instant: Int64)
+    case finished
+
+    init(_ value: MeguriCoreBindings.ReviewTerminalState) {
+        switch value {
+        case .active: self = .active
+        case .waitingUntil(let instant): self = .waitingUntil(instant: instant)
+        case .finished: self = .finished
+        }
+    }
+}
+
 public struct ReviewHead: Sendable, Hashable {
     public let items: [ReviewHeadItem]
     public let counts: ReviewCounts
     public let validUntil: Int64
+    public let terminalState: ReviewTerminalState
 
-    public init(items: [ReviewHeadItem], counts: ReviewCounts, validUntil: Int64) {
+    public init(items: [ReviewHeadItem], counts: ReviewCounts, validUntil: Int64, terminalState: ReviewTerminalState) {
         self.items = items
         self.counts = counts
         self.validUntil = validUntil
+        self.terminalState = terminalState
     }
     init(_ value: MeguriCoreBindings.ReviewHead) {
         items = value.items.map(ReviewHeadItem.init)
         counts = ReviewCounts(value.counts)
         validUntil = value.validUntil
+        terminalState = ReviewTerminalState(value.terminalState)
     }
 }
 

@@ -9,7 +9,7 @@ pub use journal::JournalStage;
 pub use service::RenderStage;
 pub use service::{
     AnswerOutcome, CurrentChange, Head, HeadDiff, HeadItem, HistoryRestore, HomePreset, Marks, PeekResult, Refusal,
-    ReviewService, SessionEvent, SessionStartHook, StartResult,
+    ReviewService, ReviewTerminalState, SessionEvent, SessionStartHook, StartResult,
 };
 pub(crate) use service::{Application, ProductionRestore};
 

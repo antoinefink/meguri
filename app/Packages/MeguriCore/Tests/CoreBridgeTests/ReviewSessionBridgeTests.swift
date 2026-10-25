@@ -28,7 +28,7 @@ import MeguriCoreBindings
                                 leechAction: 1))
     }
     static var head: MeguriCoreBindings.ReviewHead {
-        .init(items: [item], counts: .init(new: 11, learning: 12, review: 13), validUntil: 1_894_701_723)
+        .init(items: [item], counts: .init(new: 11, learning: 12, review: 13), validUntil: 1_894_701_723, terminalState: .active)
     }
     static var diff: MeguriCoreBindings.ReviewHeadDiff {
         .init(head: head, marks: [.init(added: true, restate: false, rerender: true, relabel: true)], removed: [-70, 71])
@@ -103,6 +103,20 @@ import MeguriCoreBindings
             #expect(CoreBridge.ReviewAnswerOutcome(.stale(freshHead: Self.head, notice: notice)) == .stale(freshHead: head, notice: notice))
         }
         #expect(CoreBridge.ReviewAnswerOutcome(.notAtHead(freshHead: Self.head)) == .notAtHead(freshHead: head))
+    }
+
+    @Test func headKeepsEveryAuthoritativeTerminalState() {
+        let cases: [(MeguriCoreBindings.ReviewTerminalState, CoreBridge.ReviewTerminalState)] = [
+            (.active, .active), (.waitingUntil(instant: -123), .waitingUntil(instant: -123)), (.finished, .finished),
+        ]
+        for (raw, expected) in cases {
+            let head = MeguriCoreBindings.ReviewHead(items: expected == .active ? [Self.item] : [],
+                counts: .init(new: 0, learning: 0, review: 0), validUntil: 456, terminalState: raw)
+            let mapped = CoreBridge.ReviewHead(head)
+            #expect(mapped.terminalState == expected)
+            #expect(mapped.validUntil == 456)
+            #expect(mapped.items.isEmpty == (expected != .active))
+        }
     }
 
     @Test func undoReasonsScopesAndFullStepTimingRemainTyped() {

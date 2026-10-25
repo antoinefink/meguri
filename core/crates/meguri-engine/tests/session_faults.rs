@@ -3,7 +3,7 @@ mod session_support;
 use meguri_engine::{
     OpSource, OpSpec, SessionId, UndoScope,
     executor::catalog,
-    session::{AnswerOutcome, JournalStage},
+    session::{AnswerOutcome, JournalStage, ReviewTerminalState},
 };
 use meguri_model::{
     clock::{Clock, StepClock, UtcOffset},
@@ -697,19 +697,81 @@ fn c17_last_acceptance_emits_finished_without_an_explicit_head_poll() {
 }
 
 #[test]
-fn c17_waiting_until_due_minus_learn_ahead_is_emitted_at_acceptance_before_writer_release() {
+fn c17_last_learning_easy_returns_finished_before_and_after_commit() {
     let h = Harness::new(1);
+    let (id, initial) = h.start();
+    let item = &initial.items[0];
+    let AnswerOutcome::Accepted { head_diff, .. } = h
+        .review
+        .answer(id, item.card_id, Rating::Again, item.state_token, EpochMillis(NOW), 10)
+        .unwrap()
+    else {
+        panic!("Again was not accepted");
+    };
+    assert_eq!(head_diff.head.terminal_state, ReviewTerminalState::Active);
+    h.settle();
+    let learning = h.review.head(id, 3).unwrap();
+    assert_eq!(learning.items[0].kind, meguri_sched::queue::Kind::Learning);
+    let (release, writer) = hold_writer(&h);
+    let finished = accepted(&h, id, learning);
+    let polled = h.review.head(id, 3).unwrap();
+    let committed_summary = meguri_engine::sched::queue::QueueProvider::default()
+        .deck_study_state(&h.collection, Some(DeckId(1)))
+        .unwrap();
+    let logs_before_release = h.logs();
+    release.send(()).unwrap();
+    writer.wait().unwrap();
+    h.settle();
+
+    assert!(finished.items.is_empty());
+    assert_eq!(finished.terminal_state, ReviewTerminalState::Finished);
+    assert_eq!(polled, finished);
+    assert!(committed_summary.learning_remaining_today > 0);
+    assert_eq!(logs_before_release.len(), 1, "Easy was still uncommitted");
+    let committed_head = h.review.head(id, 3).unwrap();
+    assert!(committed_head.items.is_empty());
+    assert_eq!(committed_head.terminal_state, ReviewTerminalState::Finished);
+    assert_eq!(h.clock.now_ms(), NOW);
+    assert_eq!(h.logs().len(), 2);
+}
+
+#[test]
+fn c17_waiting_until_due_minus_learn_ahead_is_emitted_at_acceptance_before_writer_release() {
+    assert_held_learning_terminal(false);
+}
+
+#[test]
+fn c17_relearning_head_keeps_waiting_until_across_polls_commit_and_readiness() {
+    assert_held_learning_terminal(true);
+}
+
+fn assert_held_learning_terminal(relearning: bool) {
+    let h = Harness::new(1);
+    let subject = h.cards[0];
     h.collection
-        .run(OpSpec::named("held learning fixture", OpSource::Maintenance), |ctx| {
-            let mut preset = ctx.scope().deck_config(meguri_model::ids::DeckConfigId(1))?.unwrap();
-            let mut fields = (*preset.config).clone();
-            fields.learn_steps = vec![60.0];
-            preset.config = meguri_model::proto::ProtoBlob::new(fields);
-            ctx.scope().put(&preset)?;
-            ctx.scope()
-                .set_config("collapseTime", &meguri_storage::ConfigValue::from(1200u64))?;
-            Ok(())
-        })
+        .run(
+            OpSpec::named("held learning fixture", OpSource::Maintenance),
+            move |ctx| {
+                let mut preset = ctx.scope().deck_config(meguri_model::ids::DeckConfigId(1))?.unwrap();
+                let mut fields = (*preset.config).clone();
+                fields.learn_steps = vec![60.0];
+                fields.relearn_steps = vec![60.0];
+                preset.config = meguri_model::proto::ProtoBlob::new(fields);
+                ctx.scope().put(&preset)?;
+                ctx.scope()
+                    .set_config("collapseTime", &meguri_storage::ConfigValue::from(1200u64))?;
+                if relearning {
+                    let mut card = ctx.scope().card(subject)?.unwrap();
+                    card.card_type = meguri_model::card::CardType::Review;
+                    card.queue = meguri_model::card::CardQueue::Review;
+                    card.due = 0;
+                    card.interval = 10;
+                    card.reps = 1;
+                    ctx.scope().put(&card)?;
+                }
+                Ok(())
+            },
+        )
         .unwrap();
     let (id, before) = h.start();
     let item = &before.items[0];
@@ -749,6 +811,7 @@ fn c17_waiting_until_due_minus_learn_ahead_is_emitted_at_acceptance_before_write
         }
     }
     let logs_before_release = h.logs();
+    let held_polls = [h.review.head(id, 3).unwrap(), h.review.head(id, 3).unwrap()];
     release.send(()).unwrap();
     writer.wait().unwrap();
     h.settle();
@@ -757,6 +820,14 @@ fn c17_waiting_until_due_minus_learn_ahead_is_emitted_at_acceptance_before_write
         panic!("the learning answer was not accepted");
     };
     assert!(head_diff.head.items.is_empty());
+    let terminal = ReviewTerminalState::WaitingUntil { instant: expected_wait };
+    assert_eq!(head_diff.head.terminal_state, terminal);
+    assert_eq!(head_diff.head.counts, meguri_sched::queue::Counts::default());
+    for head in held_polls {
+        assert!(head.items.is_empty());
+        assert_eq!(head.terminal_state, terminal);
+        assert_eq!(head.valid_until, head_diff.head.valid_until);
+    }
     assert_eq!(waits, vec![(id, expected_wait)]);
     assert!(!finished, "held learning must emit WaitingUntil");
     assert!(logs_before_release.is_empty());
@@ -770,6 +841,33 @@ fn c17_waiting_until_due_minus_learn_ahead_is_emitted_at_acceptance_before_write
     assert_eq!(i64::from(committed.due), expected_due);
     assert_eq!(committed.queue, meguri_model::card::CardQueue::Learning);
     assert_eq!(h.logs().len(), 1);
+    for _ in 0..2 {
+        let head = h.review.head(id, 3).unwrap();
+        assert!(head.items.is_empty());
+        assert_eq!(head.terminal_state, terminal);
+        assert_eq!(head.valid_until, head_diff.head.valid_until);
+    }
+    h.clock.set_now_ms(expected_wait * 1000);
+    let ready = h.review.head(id, 3).unwrap();
+    assert_eq!(ready.terminal_state, ReviewTerminalState::Active);
+    assert_eq!(ready.items[0].card_id, item.card_id);
+    h.review.end(id).unwrap();
+    let ended_stream = h.engine.stream().subscribe();
+    assert_eq!(
+        h.review.head(id, 3),
+        Err(meguri_engine::EngineError::InvalidArgument {
+            message: "NoSession".into()
+        })
+    );
+    while let Some(event) = ended_stream.try_recv() {
+        if let meguri_engine::EventKind::Extension(e) = &event.kind {
+            assert!(!matches!(
+                e.as_any().downcast_ref::<meguri_engine::session::SessionEvent>(),
+                Some(meguri_engine::session::SessionEvent::WaitingUntil { session_id, .. }
+                    | meguri_engine::session::SessionEvent::Finished { session_id, .. }) if *session_id == id
+            ));
+        }
+    }
 }
 
 #[test]

@@ -30,6 +30,7 @@ public final class ReviewCoordinator {
     private var sideIsAnswer = false
     private var frozenDisplaySeconds: UInt64?
     private var presentedKey: ReviewRenderKey?
+    private var terminalState: ReviewTerminalState?
     private var busy = false
     private var refreshPending = false
     private var forceQuestion = false
@@ -37,6 +38,7 @@ public final class ReviewCoordinator {
     private var version: UInt64 = 0
     private var preload: Task<Void, Never>?
     private var operation: Task<Void, Never>?
+    private(set) var summaryTask: Task<Void, Never>?
     private var deadlineTimer: Timer?
     private var endTask: Task<Bool, Never>?
     private var pauseRevision: UInt64 = 0
@@ -196,9 +198,9 @@ public final class ReviewCoordinator {
         case .presetUnsupported(let id, _) where id == sessionID:
             notice = "This preset needs a newer Meguri"; phase = .error
         case .waitingUntil(let id, let instant) where id == sessionID:
-            waitingUntil = Date(timeIntervalSince1970: Double(instant))
-        case .finished(let id, let state) where id == sessionID:
-            studyState = state
+            terminalChanged(.waitingUntil(instant: instant))
+        case .finished(let id, _) where id == sessionID:
+            terminalChanged(.finished)
         case .changes(let change):
             // Review commits are ordered. Retain accepted-vs-durable distinction.
             for card in change.cards where !change.revlogAdded.isEmpty {
@@ -208,6 +210,12 @@ public final class ReviewCoordinator {
             }
         default: break
         }
+    }
+
+    func terminalChanged(_ hint: ReviewTerminalState) {
+        // head() itself emits terminal events. A hint already satisfied by
+        // the applied head must not start another polling cycle.
+        if terminalState != hint { requestRefresh() }
     }
 
     func commitFailed(cardID: Int64, error: BridgeError) {
@@ -241,11 +249,15 @@ public final class ReviewCoordinator {
     }
 
     private func apply(_ head: ReviewHead, question: Bool, inputTime: TimeInterval? = nil) async throws {
+        summaryTask?.cancel(); summaryTask = nil
         counts = head.counts
+        terminalState = head.terminalState
         guard let sessionID else { return }
         let previous = item
         item = head.items.first
-        if let item {
+        switch head.terminalState {
+        case .active:
+            guard let item else { throw BridgeError.internal("Active review head has no item") }
             if !paused { activeTime.resume(at: uptime()) }
             studyState = nil; waitingUntil = nil
             try await surface.render(sessionID: sessionID, items: head.items)
@@ -268,14 +280,33 @@ public final class ReviewCoordinator {
                 preload?.cancel(); await preload?.value
                 preload = Task { try? await surface.preload(item: next) }
             }
-        } else {
+        case .waitingUntil, .finished:
             preload?.cancel(); await preload?.value; preload = nil
             timer.pause(at: uptime()); activeTime.pause(at: uptime()); surface.pair?.pauseAudio()
-            let state = try await client.studyState(deckID: record.deckID)
-            studyState = state
-            if let next = state.nextLearningReadyAt, state.learningRemainingToday > 0 {
-                waitingUntil = Date(timeIntervalSince1970: Double(next)); phase = .waiting
-            } else { waitingUntil = nil; phase = .finished; record.finished = state.finished }
+            studyState = nil
+            if case .waitingUntil(let instant) = head.terminalState {
+                waitingUntil = Date(timeIntervalSince1970: Double(instant)); phase = .waiting
+            } else { waitingUntil = nil; phase = .finished }
+            // Committed facts are optional and must not hold operation/lifecycle admission.
+            let revision = pauseRevision
+            summaryTask = Task { [weak self, client, deckID = record.deckID] in
+                do {
+                    let state = try await client.studyState(deckID: deckID)
+                    guard let self, !Task.isCancelled, self.sessionID == sessionID,
+                          self.pauseRevision == revision,
+                          self.phase == .waiting || self.phase == .finished else { return }
+                    self.studyState = state
+                    if self.phase == .finished, self.record.finished != state.finished {
+                        self.record.finished = state.finished
+                        self.enqueuePersistence()
+                    }
+                } catch {
+                    guard let self, !Task.isCancelled, self.sessionID == sessionID,
+                          self.pauseRevision == revision,
+                          self.phase == .waiting || self.phase == .finished else { return }
+                    self.notice = "Couldn’t load the study summary. \(error)"
+                }
+            }
         }
         undoStatus = try await client.undoStatus(sessionID: sessionID, redo: false)
         redoStatus = try await client.undoStatus(sessionID: sessionID, redo: true)
@@ -293,6 +324,7 @@ public final class ReviewCoordinator {
     }
 
     public func beginPause() {
+        summaryTask?.cancel()
         pauseRevision &+= 1
         paused = true
         (surface as? ReviewPages)?.inputActive = false
@@ -360,6 +392,7 @@ public final class ReviewCoordinator {
         return result
     }
     public func generationEnded() {
+        summaryTask?.cancel()
         paused = true; deadlineTimer?.invalidate(); preload?.cancel()
         sessionID = nil; phase = .ended; surface.close()
     }

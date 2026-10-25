@@ -11,6 +11,7 @@
 //! description: what it is for
 //! now: "2030-01-15T10:00:00+01:00"   # the pinned instant and UTC offset
 //! rollover_hour: 4                    # optional, default 4
+//! learn_ahead_secs: 1200              # optional, default 1200
 //! presets:                            # optional; Default (id 1) always exists
 //!   - {name: Light, new_per_day: 10, reviews_per_day: 50}
 //! decks:                              # parents of `A::B` are made when missing
@@ -63,10 +64,16 @@ pub struct Recipe {
     pub now: String,
     #[serde(default)]
     pub rollover_hour: Option<u8>,
+    #[serde(default = "default_learn_ahead_secs")]
+    pub learn_ahead_secs: u32,
     #[serde(default)]
     pub presets: Vec<PresetSpec>,
     #[serde(default)]
     pub decks: Vec<DeckSpec>,
+}
+
+fn default_learn_ahead_secs() -> u32 {
+    1200
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -304,7 +311,13 @@ pub fn generate_recipe(recipe: &Recipe, seed: u64, dir: &Path) -> Result<Manifes
     }
     let timeline = Timeline::new(now_ms, offset, rollover, SPAN_DAYS);
     // Recipe decks and tags are expanded: UI fixtures show their whole tree.
-    let mut out = Output::create(dir, &timeline, &base_config(&timeline), MediaMode::Files, false)?;
+    let mut config = base_config(&timeline);
+    for entry in &mut config {
+        if entry.key == "collapseTime" {
+            entry.value = recipe.learn_ahead_secs.to_string().into_bytes();
+        }
+    }
+    let mut out = Output::create(dir, &timeline, &config, MediaMode::Files, false)?;
     let mut ids = AllIds::default();
     let mut structure = Rng::stream(seed, Stream::Recipe, 0);
 

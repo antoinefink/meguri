@@ -3,6 +3,7 @@
 recipe: local-review
 description: "Four due text cards for local review, undo and process restart."
 now: "2030-01-15T10:00:00+01:00"
+learn_ahead_secs: 0
 decks:
   - name: "Local Review::Cards"
     new: 0

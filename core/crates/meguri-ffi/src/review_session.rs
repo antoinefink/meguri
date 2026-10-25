@@ -265,6 +265,24 @@ pub struct ReviewHead {
     pub items: Vec<ReviewHeadItem>,
     pub counts: ReviewCounts,
     pub valid_until: i64,
+    pub terminal_state: ReviewTerminalState,
+}
+
+#[derive(Clone, Debug, PartialEq, uniffi::Enum)]
+pub enum ReviewTerminalState {
+    Active,
+    WaitingUntil { instant: i64 },
+    Finished,
+}
+
+impl From<session::ReviewTerminalState> for ReviewTerminalState {
+    fn from(v: session::ReviewTerminalState) -> Self {
+        match v {
+            session::ReviewTerminalState::Active => Self::Active,
+            session::ReviewTerminalState::WaitingUntil { instant } => Self::WaitingUntil { instant },
+            session::ReviewTerminalState::Finished => Self::Finished,
+        }
+    }
 }
 
 impl From<session::Head> for ReviewHead {
@@ -273,6 +291,7 @@ impl From<session::Head> for ReviewHead {
             items: v.items.into_iter().map(Into::into).collect(),
             counts: v.counts.into(),
             valid_until: v.valid_until,
+            terminal_state: v.terminal_state.into(),
         }
     }
 }
@@ -946,6 +965,7 @@ pub(crate) mod tests {
                 review: 13,
             },
             valid_until: 1_894_701_723,
+            terminal_state: session::ReviewTerminalState::Active,
         }
     }
     pub(crate) fn sample_diff() -> session::HeadDiff {
@@ -1122,6 +1142,27 @@ pub(crate) mod tests {
             assert_eq!(ReviewTimeUnit::from(source), expected);
         }
     }
+    #[test]
+    fn heads_preserve_every_terminal_state() {
+        for (source, expected) in [
+            (session::ReviewTerminalState::Active, ReviewTerminalState::Active),
+            (
+                session::ReviewTerminalState::WaitingUntil { instant: -123 },
+                ReviewTerminalState::WaitingUntil { instant: -123 },
+            ),
+            (session::ReviewTerminalState::Finished, ReviewTerminalState::Finished),
+        ] {
+            let mut head = sample_head();
+            if source != session::ReviewTerminalState::Active {
+                head.items.clear();
+            }
+            head.terminal_state = source;
+            let mapped = ReviewHead::from(head);
+            assert_eq!(mapped.terminal_state, expected);
+            assert_eq!(mapped.valid_until, 1_894_701_723);
+        }
+    }
+
     #[test]
     fn admission_answer_and_diff_results_keep_refusals_notices_and_marks() {
         let head: ReviewHead = sample_head().into();

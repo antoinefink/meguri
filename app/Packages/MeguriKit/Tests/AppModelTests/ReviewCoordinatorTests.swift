@@ -99,6 +99,145 @@ import Testing
         #expect(timer.milliseconds(at: 200, capSeconds: 60) == 60_000)
     }
 
+    @Test func acceptedFinishedHeadWinsOverOlderLearningSummaryAndWaitingHint() async throws {
+        let fixture = Fixture()
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.client.summary = Self.summary(waiting: true)
+        fixture.client.answerHead = .accepted(headDiff: .init(head: Self.emptyHead(.finished), marks: [], removed: [1]),
+                                               leech: false, suspended: false, rolledOver: false)
+        fixture.model.rate(.easy); await fixture.model.settled()
+        #expect(fixture.model.phase == .finished)
+        #expect(fixture.model.waitingUntil == nil)
+        await fixture.model.summaryTask?.value
+        #expect(fixture.model.studyState?.learningRemainingToday == 1)
+        #expect(fixture.model.record.answers.count == 1)
+        fixture.model.terminalChanged(.waitingUntil(instant: 1_800_000_600))
+        await fixture.model.settled()
+        #expect(fixture.model.phase == .finished)
+        #expect(fixture.model.waitingUntil == nil)
+        #expect(fixture.client.headReads == 1)
+        fixture.model.terminalChanged(.finished)
+        await fixture.model.settled()
+        #expect(fixture.client.headReads == 1, "Matching terminal hints do not poll recursively")
+        _ = await fixture.model.end()
+    }
+
+    @Test func waitingHeadWinsOverFinishedSummaryAndFixedClockPollKeepsItsInstant() async throws {
+        let fixture = Fixture()
+        let instant: Int64 = 1_800_000_600
+        fixture.client.summary = Self.summary(waiting: false)
+        fixture.client.currentHead = Self.emptyHead(.waitingUntil(instant: instant))
+        await fixture.model.start()
+        #expect(fixture.model.phase == .waiting)
+        await fixture.model.summaryTask?.value
+        #expect(fixture.model.studyState?.finished == true)
+        #expect(fixture.model.waitingUntil == Date(timeIntervalSince1970: Double(instant)))
+        fixture.model.terminalChanged(.finished)
+        await fixture.model.settled()
+        fixture.model.requestRefresh(); await fixture.model.settled()
+        #expect(fixture.model.phase == .waiting)
+        #expect(fixture.model.waitingUntil == Date(timeIntervalSince1970: Double(instant)))
+        #expect(fixture.client.headReads == 2)
+        fixture.client.currentHead = Self.head(2)
+        fixture.model.requestRefresh(); await fixture.model.settled()
+        fixture.model.terminalChanged(.waitingUntil(instant: instant))
+        await fixture.model.settled()
+        #expect(fixture.model.phase == .question)
+        #expect(fixture.model.item?.cardId == 2)
+        #expect(fixture.model.waitingUntil == nil)
+        #expect(fixture.model.studyState == nil)
+        _ = await fixture.model.end()
+    }
+
+    @Test func waitingHeadSurvivesSummaryThrow() async {
+        let fixture = Fixture()
+        let instant: Int64 = 1_800_000_600
+        fixture.client.currentHead = Self.emptyHead(.waitingUntil(instant: instant))
+        await fixture.model.start()
+        await fixture.model.summaryTask?.value
+        #expect(fixture.model.phase == .waiting)
+        #expect(fixture.model.waitingUntil == Date(timeIntervalSince1970: Double(instant)))
+        #expect(fixture.model.studyState == nil)
+        #expect(fixture.model.notice?.contains("No empty head scripted") == true)
+        #expect(fixture.model.canFinish)
+        #expect(fixture.model.canUndo)
+        #expect(await fixture.model.end())
+    }
+
+    @Test func finishedHeadSurvivesSummaryThrow() async {
+        let fixture = Fixture()
+        fixture.client.currentHead = Self.emptyHead(.finished)
+        await fixture.model.start()
+        await fixture.model.summaryTask?.value
+        #expect(fixture.model.phase == .finished)
+        #expect(fixture.model.waitingUntil == nil)
+        #expect(fixture.model.studyState == nil)
+        #expect(fixture.model.notice?.contains("No empty head scripted") == true)
+        #expect(fixture.model.canFinish)
+        #expect(fixture.model.canUndo)
+        #expect(await fixture.model.end())
+    }
+
+    @Test func suspendedSummaryLeavesTerminalControlsUsableAndCannotOverwriteNewerState() async {
+        let instant: Int64 = 1_800_000_600
+        for terminal in [ReviewTerminalState.waitingUntil(instant: instant), .finished] {
+            for next in ["active", "terminal", "end", "generation"] {
+                let fixture = Fixture()
+                let held = SummaryGate(state: Self.summary(waiting: true))
+                defer { held.release() }
+                fixture.client.summaryGate = held
+                fixture.client.currentHead = Self.emptyHead(terminal)
+                let start = Task { await fixture.model.start() }
+                await held.requested()
+                let summaryTask = fixture.model.summaryTask
+                let expectedPhase: ReviewCoordinator.Phase = terminal == .finished ? .finished : .waiting
+                let applied = fixture.model.phase == expectedPhase
+                #expect(applied)
+                #expect(fixture.model.waitingUntil == (terminal == .finished ? nil : Date(timeIntervalSince1970: Double(instant))))
+                // Release on failure too: the pre-fix start operation waits before applying phase.
+                if !applied { held.release() }
+                await start.value
+                #expect(fixture.model.canFinish, "A suspended summary must not retain operation admission")
+                #expect(fixture.model.canUndo)
+                #expect(fixture.model.canRedo)
+                fixture.client.summaryGate = nil
+                switch next {
+                case "active":
+                    fixture.client.currentHead = Self.head(2)
+                    fixture.model.requestRefresh(); await fixture.model.settled()
+                case "terminal":
+                    // Same marker/session still needs cancellation of the older summary owner.
+                    fixture.client.summary = Self.summary(waiting: false)
+                    fixture.model.requestRefresh(); await fixture.model.settled()
+                    await fixture.model.summaryTask?.value
+                case "end":
+                    #expect(await fixture.model.end())
+                default:
+                    fixture.model.generationEnded()
+                }
+                held.release()
+                await summaryTask?.value
+                switch next {
+                case "active":
+                    #expect(fixture.model.phase == .question)
+                    #expect(fixture.model.item?.cardId == 2)
+                    #expect(fixture.model.studyState == nil)
+                    #expect(fixture.model.waitingUntil == nil)
+                case "terminal":
+                    #expect(fixture.model.phase == (terminal == .finished ? .finished : .waiting))
+                    #expect(fixture.model.studyState?.finished == true)
+                default:
+                    #expect(fixture.model.phase == .ended)
+                    #expect(fixture.model.sessionID == nil)
+                    #expect(fixture.model.studyState == nil)
+                }
+                #expect(fixture.model.notice == nil)
+                if next == "active" || next == "terminal" { #expect(await fixture.model.end()) }
+            }
+        }
+    }
+
     @Test func inactiveIntervalsAndResumeRefreshExcludeElapsedTime() async throws {
         let fixture = Fixture()
         await fixture.model.start()
@@ -169,6 +308,26 @@ import Testing
         func resume() async { calls.append("resume"); onResume?() }
         func close() { calls.append("close") }
     }
+    private final class SummaryGate {
+        let state: ReviewDeckStudyState
+        private var continuation: CheckedContinuation<ReviewDeckStudyState, Never>?
+        private var request: CheckedContinuation<Void, Never>?
+        private var didRequest = false
+        init(state: ReviewDeckStudyState) { self.state = state }
+        func value() async -> ReviewDeckStudyState {
+            await withCheckedContinuation {
+                continuation = $0; didRequest = true
+                request?.resume(); request = nil
+            }
+        }
+        func requested() async {
+            if didRequest { return }
+            await withCheckedContinuation { request = $0 }
+        }
+        func release() {
+            continuation?.resume(returning: state); continuation = nil
+        }
+    }
     private final class Client: ReviewSessionClient {
         var answers = 0
         var elapsed: [UInt64] = []
@@ -176,6 +335,8 @@ import Testing
         var ends = 0
         var headReads = 0
         var refusal: ReviewRefusal?
+        var summary: ReviewDeckStudyState?
+        var summaryGate: SummaryGate?
         var currentHead = ReviewCoordinatorTests.head(1)
         var answerHead = ReviewAnswerOutcome.accepted(headDiff: ReviewHeadDiff(head: ReviewCoordinatorTests.head(2), marks: [], removed: [1]), leech: false, suspended: false, rolledOver: false)
         func start(deckID: Int64) async throws -> ReviewStartResult {
@@ -193,8 +354,25 @@ import Testing
             .available(step: ReviewStepInfo(id: 1, name: "Answer Card", kind: .answer, session: sessionID, longWrite: nil))
         }
         func restore(sessionID: UInt64, redo: Bool) async throws -> ReviewHead { restores.append(redo); currentHead = ReviewCoordinatorTests.head(redo ? 2 : 1); return currentHead }
-        func studyState(deckID: Int64) async throws -> ReviewDeckStudyState { throw BridgeError.internal("No empty head scripted") }
+        func studyState(deckID: Int64) async throws -> ReviewDeckStudyState {
+            if let summaryGate { return await summaryGate.value() }
+            guard let summary else { throw BridgeError.internal("No empty head scripted") }
+            return summary
+        }
         func end(sessionID: UInt64) async throws { ends += 1 }
+    }
+    private static func emptyHead(_ terminal: ReviewTerminalState) -> ReviewHead {
+        ReviewHead(items: [], counts: .init(new: 0, learning: 0, review: 0), validUntil: Int64.max, terminalState: terminal)
+    }
+    private static func summary(waiting: Bool) -> ReviewDeckStudyState {
+        let counts = ReviewCounts(new: 0, learning: waiting ? 1 : 0, review: 0)
+        return ReviewDeckStudyState(deck: 1, queueCounts: counts, listCounts: counts,
+            difference: .init(new: 0, learning: 0, review: 0), finished: !waiting,
+            learningRemainingToday: waiting ? 1 : 0, learningLaterToday: 0,
+            nextLearningDue: waiting ? 1_800_000_600 : nil, nextLearningReadyAt: waiting ? 1_800_000_600 : nil,
+            reviewLimitReached: false, newLimitReached: false, learningRemaining: waiting ? 1 : 0,
+            secsUntilNextLearn: waiting ? 600 : 0, reviewRemaining: false, newRemaining: false,
+            siblingBuried: 0, userBuried: 0, tomorrow: .init(new: 0, learning: 0, review: 0), empty: !waiting)
     }
     private static func head(_ id: Int64) -> ReviewHead {
         let state = ReviewSchedulingState.new(position: 1)
@@ -209,6 +387,6 @@ import Testing
             homePreset: ReviewHomePreset(id: 1, autoplay: false, skipQuestionWhenReplayingAnswer: false, showTimer: false,
                 stopTimerOnAnswer: false, maximumAnswerSeconds: 60, questionSeconds: 0, answerSeconds: 0,
                 questionAction: 0, answerAction: 0, waitForAudio: false, leechAction: 0))
-        return ReviewHead(items: [item], counts: ReviewCounts(new: 1, learning: 0, review: 0), validUntil: Int64.max)
+        return ReviewHead(items: [item], counts: ReviewCounts(new: 1, learning: 0, review: 0), validUntil: Int64.max, terminalState: .active)
     }
 }

@@ -47,11 +47,9 @@ use cards::Target;
 use rng::{Rng, Stream};
 
 /// Bumped whenever the same request would give other rows; cached outputs
-/// carry it in their manifest. Version 4 is `fixtures/synthetic-collections`
-/// as specified (F10.4): a field's drawn length is its whole stored length,
-/// markup included, and media references are placed by field, only in
-/// fields long enough to hold them (F4.8, F3.2).
-pub const GENERATOR_VERSION: u32 = 4;
+/// carry it in their manifest. Version 5 adds the recipe learn-ahead setting
+/// and local-review's zero override (F9.1/F9.2).
+pub const GENERATOR_VERSION: u32 = 5;
 
 /// The default pinned instant: 2030-01-15T10:00:00Z, the scenarios' clock.
 pub const DEFAULT_NOW_MS: i64 = 1_894_701_600_000;

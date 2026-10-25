@@ -1013,6 +1013,7 @@ fn an_extracted_profile_holds_no_text_names_or_ids() {
         description: "distinctive text to look for".to_owned(),
         now: "2030-01-15T10:00:00+01:00".to_owned(),
         rollover_hour: None,
+        learn_ahead_secs: 1200,
         presets: Vec::new(),
         decks: vec![DeckSpec {
             name: private_deck.to_owned(),
@@ -1369,6 +1370,75 @@ fn worst_case_one_deck_all_due() {
 // --------------------------------------------------------------- recipes
 
 #[test]
+fn recipe_learn_ahead_only_changes_the_collection_setting() {
+    let held = Recipe::named("local-review").unwrap();
+    assert_eq!(held.learn_ahead_secs, 0, "F9.2 public learning must remain held");
+    let mut early = held.clone();
+    early.learn_ahead_secs = 1200;
+    let held_dir = tempfile::tempdir().unwrap();
+    let early_dir = tempfile::tempdir().unwrap();
+    let held_manifest = generate_recipe(&held, 1, held_dir.path()).unwrap();
+    generate_recipe(&early, 1, early_dir.path()).unwrap();
+    let held_path = collection(held_dir.path());
+    let early_path = collection(early_dir.path());
+    assert_eq!(held_manifest.counts.cards, 4);
+    assert_eq!(
+        text(&query(&held_path, "SELECT val FROM config WHERE KEY = 'collapseTime'")[0][0]),
+        "0"
+    );
+    assert_eq!(
+        text(&query(&early_path, "SELECT val FROM config WHERE KEY = 'collapseTime'")[0][0]),
+        "1200"
+    );
+    assert_eq!(
+        query(&held_path, "SELECT * FROM cards ORDER BY id"),
+        query(&early_path, "SELECT * FROM cards ORDER BY id")
+    );
+    assert_eq!(all_revlog(&held_path), all_revlog(&early_path));
+    assert_eq!(
+        query(&held_path, "SELECT * FROM deck_config ORDER BY id"),
+        query(&early_path, "SELECT * FROM deck_config ORDER BY id")
+    );
+    assert_eq!(
+        query(
+            &held_path,
+            "SELECT * FROM config WHERE KEY != 'collapseTime' ORDER BY KEY"
+        ),
+        query(
+            &early_path,
+            "SELECT * FROM config WHERE KEY != 'collapseTime' ORDER BY KEY"
+        )
+    );
+    for name in Recipe::names()
+        .unwrap()
+        .into_iter()
+        .filter(|name| name != "local-review")
+    {
+        assert_eq!(Recipe::named(&name).unwrap().learn_ahead_secs, 1200, "{name}");
+    }
+}
+
+#[test]
+fn recipe_learn_ahead_defaults_to_1200_and_requires_u32() {
+    let base = "recipe: horizon\ndescription: horizon\nnow: '2030-01-15T10:00:00Z'\n";
+    assert_eq!(Recipe::parse(base).unwrap().learn_ahead_secs, 1200);
+    for value in ["0", "4294967295"] {
+        assert_eq!(
+            Recipe::parse(&format!("{base}learn_ahead_secs: {value}\n"))
+                .unwrap()
+                .learn_ahead_secs,
+            value.parse::<u32>().unwrap()
+        );
+    }
+    for value in ["-1", "4294967296", "1.5", "null", "'1200'"] {
+        assert!(
+            Recipe::parse(&format!("{base}learn_ahead_secs: {value}\n")).is_err(),
+            "{value}"
+        );
+    }
+}
+
+#[test]
 fn the_recipes_give_their_decks_and_counts() {
     let names = Recipe::names().unwrap();
     for wanted in ["empty", "typical", "overflow", "error-prone", "review-ready"] {
@@ -1532,6 +1602,7 @@ fn a_failed_generation_leaves_the_previous_output() {
         description: "fails part-way".to_owned(),
         now: "2030-01-15T10:00:00Z".to_owned(),
         rollover_hour: None,
+        learn_ahead_secs: 1200,
         presets: Vec::new(),
         decks: vec![deck("A"), deck("A")],
     };
@@ -2060,11 +2131,18 @@ fn recipe_and_worst_case_histories_follow_the_answer_table() {
 // ------------------------------------------------------ collection rows
 
 /// The config rows of F6.2, as (key, JSON text).
-fn expected_config(offset_secs: i32, rollover: u8, today: i64, cur_model: i64, notes: u64) -> Vec<(String, String)> {
+fn expected_config(
+    offset_secs: i32,
+    rollover: u8,
+    today: i64,
+    cur_model: i64,
+    notes: u64,
+    learn_ahead: u32,
+) -> Vec<(String, String)> {
     let mut rows: Vec<(String, String)> = [
         ("activeDecks", "[1]".to_owned()),
         ("addToCur", "true".to_owned()),
-        ("collapseTime", "1200".to_owned()),
+        ("collapseTime", learn_ahead.to_string()),
         ("creationOffset", (-offset_secs / 60).to_string()),
         ("curDeck", "1".to_owned()),
         ("curModel", cur_model.to_string()),
@@ -2091,7 +2169,7 @@ fn expected_config(offset_secs: i32, rollover: u8, today: i64, cur_model: i64, n
 }
 
 /// F6: the rows besides notes, cards and the review log.
-fn check_collection_rows(path: &Path, now_ms: i64, offset_secs: i32, rollover: u8, recipe: bool) {
+fn check_collection_rows(path: &Path, now_ms: i64, offset_secs: i32, rollover: u8, recipe: bool, learn_ahead: u32) {
     let collection = open(path);
     let rows = collection.writer();
     let col = rows.col().unwrap();
@@ -2128,7 +2206,7 @@ fn check_collection_rows(path: &Path, now_ms: i64, offset_secs: i32, rollover: u
         .collect();
     assert_eq!(
         config,
-        expected_config(offset_secs, rollover, today, notetypes[0], notes)
+        expected_config(offset_secs, rollover, today, notetypes[0], notes, learn_ahead)
     );
 
     let collection = open(path);
@@ -2208,7 +2286,7 @@ fn check_collection_rows(path: &Path, now_ms: i64, offset_secs: i32, rollover: u
 fn collection_rows_are_those_of_a_new_collection() {
     let p = shape();
     let (dir, manifest) = run(&Request::new(p.clone(), 1500, 31));
-    assert_eq!(manifest.generator_version, 4, "F10.4");
+    assert_eq!(manifest.generator_version, 5, "F9.2/F10.4");
     assert_eq!(manifest.utc_offset_secs, p.utc_offset_secs);
     check_collection_rows(
         &collection(dir.path()),
@@ -2216,6 +2294,7 @@ fn collection_rows_are_those_of_a_new_collection() {
         p.utc_offset_secs,
         p.rollover_hour,
         false,
+        1200,
     );
     for name in Recipe::names().unwrap() {
         let recipe = Recipe::named(&name).unwrap();
@@ -2228,6 +2307,7 @@ fn collection_rows_are_those_of_a_new_collection() {
             offset,
             recipe.rollover_hour.unwrap_or(4),
             true,
+            recipe.learn_ahead_secs,
         );
     }
     // A recipe at +09:00 writes creationOffset -540 (minutes west).
@@ -2250,6 +2330,7 @@ fn note_tags_are_in_unicase_order() {
         description: "tag order".to_owned(),
         now: "2030-01-15T10:00:00Z".to_owned(),
         rollover_hour: None,
+        learn_ahead_secs: 1200,
         presets: Vec::new(),
         decks: vec![DeckSpec {
             name: "Tags".to_owned(),
@@ -2291,6 +2372,7 @@ fn requests_needing_a_million_positions_are_refused() {
         description: "too many notes".to_owned(),
         now: "2030-01-15T10:00:00Z".to_owned(),
         rollover_hour: None,
+        learn_ahead_secs: 1200,
         presets: Vec::new(),
         decks: vec![DeckSpec {
             name: "All".to_owned(),
@@ -2317,6 +2399,7 @@ fn recipe_deck_names_are_unique_under_unicase() {
         description: "one deck under two spellings".to_owned(),
         now: "2030-01-15T10:00:00Z".to_owned(),
         rollover_hour: None,
+        learn_ahead_secs: 1200,
         presets: Vec::new(),
         decks: vec![deck("Straße"), deck("STRASSE")],
     };
