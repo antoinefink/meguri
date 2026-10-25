@@ -34,5 +34,7 @@ family was removed. No oracle source was read by this repair.
 
 Independent source review found no P0–P2 findings. Gate-plan check
 `091834Z-21716` passed and selects the oracle suite for this script change.
-The complete oracle tests and full integration gate remain required.
+Complete oracle test run `091933Z-22774` passed all 476 cases with no skips,
+including every host check and the repaired source-boundary check. The full
+integration gate remains required.
 No unit acceptance is claimed.
