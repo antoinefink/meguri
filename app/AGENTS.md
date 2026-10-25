@@ -105,3 +105,4 @@
 
 - Hook routes have strict consumers in `MeguriSnapshotTests/TestHooks/RouteRegistryTests.swift` and `MeguriUITests/TestHooksTests.swift` (the invalid-route message). Include both when checking a new route; fixture launch alone misses these contracts.
 - UI cases that depend on each prior step should set `continueAfterFailure = false`: a failed AX lookup can consume minutes despite a short wait, then repeat for every later action. Keep the failure and all assertions; stop that case before dependent actions.
+- Direct AX reads require consent for the runner's current code identity. Ad-hoc rebuilds can revoke it while XCTest clicks still work. Verify trust with `VMAccessibilitySetupTests` in a fresh process using frozen products; `-25211` is a consent failure.

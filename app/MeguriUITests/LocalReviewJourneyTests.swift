@@ -12,32 +12,10 @@ final class LocalReviewJourneyTests: XCTestCase {
     #if os(macOS)
     /// Real key events and native accessibility focus run only in the UI VM.
     func testInitialKeyboardReviewAndNativeCloseBackActivation() throws {
-        let build = try BuildUnderTest.current()
-        guard build.hasHooks else { throw XCTSkip("generated fixtures require a hook build") }
-        let bundleIdentifier = try build.bundleIdentifier
-        guard bundleIdentifier.hasSuffix(".dev") else { throw XCTSkip("development container required") }
-        continueAfterFailure = false
-        let fixture = build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1")
-        let app = XCUIApplication()
-        app.launchArguments = MeguriLaunch(fixture: fixture, now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris",
-            locale: "en_US", animations: false).arguments
-        app.launch()
+        let (app, bundleIdentifier) = try startFreshReview()
         defer { app.terminate() }
-        addTeardownBlock { @MainActor in app.terminate() }
-        let enable = element(app, "home.policy.enable")
-        if enable.waitForExistence(timeout: 5) {
-            try app.bringToFront(bundleIdentifier: bundleIdentifier)
-            enable.clickOrTap()
-        }
-        let deck = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "home.deck.row.", "Cards")).firstMatch
-        XCTAssertTrue(deck.waitForExistence(timeout: 20), "Generate and stage local-review-1 in the VM before this suite")
-        try app.bringToFront(bundleIdentifier: bundleIdentifier)
-        deck.clickOrTap()
-        let study = element(app, "home.deck.study")
-        XCTAssertTrue(study.waitForExistence(timeout: 10))
-        try app.bringToFront(bundleIdentifier: bundleIdentifier)
-        study.clickOrTap()
         XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 10))
+        let firstQuestion = try cardSnapshot(app, answer: false)
         // No card click: Study must yield a keyboard-usable first question.
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         app.typeKey(" ", modifierFlags: [])
@@ -45,35 +23,41 @@ final class LocalReviewJourneyTests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         app.typeKey("4", modifierFlags: [])
         XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 10))
-        XCTAssertTrue(element(app, "review.session.back").isEnabled)
-        // Leave one earlier answer so Back stays enabled after the undo.
+        let secondQuestion = try cardSnapshot(app, answer: false)
+        XCTAssertNotEqual(secondQuestion.cardText, firstQuestion.cardText)
+        try assertStudyHistory(app, bundleIdentifier: bundleIdentifier, undo: true, redo: false)
+        // Accept a second answer using Return, then restore it through Study.
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         app.typeKey("\r", modifierFlags: [])
         XCTAssertTrue(element(app, "review.session.rate.easy").waitForExistence(timeout: 10))
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
-        app.typeKey("4", modifierFlags: [])
+        app.typeKey("\r", modifierFlags: [])
         XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 10))
+        let thirdQuestion = try cardSnapshot(app, answer: false)
+        XCTAssertNotEqual(thirdQuestion.cardText, secondQuestion.cardText)
 
-        let back = try focusNativeControl("review.session.back", in: app, bundleIdentifier: bundleIdentifier)
+        try performStudyCommand("Undo Answer", in: app, bundleIdentifier: bundleIdentifier)
+        try assertQuestion(secondQuestion, in: app)
+        try assertStudyHistory(app, bundleIdentifier: bundleIdentifier, undo: true, redo: true)
+        try performStudyCommand("Redo Answer", in: app, bundleIdentifier: bundleIdentifier)
+        try assertQuestion(thirdQuestion, in: app)
+        try assertStudyHistory(app, bundleIdentifier: bundleIdentifier, undo: true, redo: false)
+        try performStudyCommand("Undo Answer", in: app, bundleIdentifier: bundleIdentifier)
+        try assertQuestion(secondQuestion, in: app)
+        try assertStudyHistory(app, bundleIdentifier: bundleIdentifier, undo: true, redo: true)
+
+        // N3 keeps Undo/Redo in native menus; the touch-only Back focus case
+        // therefore moves to Back to Decks, the Mac's actual native Close.
+        let closeQuestion = try focusNativeControl("review.session.close", in: app, bundleIdentifier: bundleIdentifier)
         let question = try cardSnapshot(app, answer: false)
-        XCTAssertFalse(element(app, "review.session.redo").exists)
-        attach(app, "native-back-question-before-return")
+        assertNativeFocus(closeQuestion)
+        attach(app, "native-close-question-before-return")
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         app.typeKey("\r", modifierFlags: [])
-        assertNativeFocus(back)
+        assertNativeFocus(closeQuestion)
         XCTAssertEqual(try cardSnapshot(app, answer: false), question,
-            "Return on focused Back must not undo, reveal or rate")
-        XCTAssertFalse(element(app, "review.session.redo").exists)
-        attach(app, "native-back-return-keeps-question")
-
-        try app.bringToFront(bundleIdentifier: bundleIdentifier)
-        app.typeKey(" ", modifierFlags: [])
-        XCTAssertTrue(element(app, "review.session.redo").waitForExistence(timeout: 10), "Space on Back must undo; a review shortcut must not consume its key")
-        XCTAssertTrue(element(app, "review.session.reveal").exists)
-        assertNativeFocus(back) // The restored page must leave Back in control.
-        let undone = try cardSnapshot(app, answer: false)
-        XCTAssertNotEqual(undone.cardText, question.cardText, "Back must restore the previous card")
-        attach(app, "native-back-space-undoes")
+            "Return on focused Back to Decks must not dismiss, undo, reveal or rate")
+        attach(app, "native-close-return-keeps-question")
 
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         element(app, "review.session.reveal").clickOrTap()
@@ -86,23 +70,64 @@ final class LocalReviewJourneyTests: XCTestCase {
         assertNativeFocus(close)
         XCTAssertEqual(try cardSnapshot(app, answer: true), answer,
             "Return on focused Close must not dismiss, rate or advance")
-        XCTAssertTrue(element(app, "review.session.redo").exists)
+        assertNativeFocus(close)
         attach(app, "native-close-return-keeps-answer")
 
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         app.typeKey(" ", modifierFlags: [])
-        XCTAssertTrue(study.waitForExistence(timeout: 10), "Space on Close must dismiss the answer; its key must not rate Good")
+        XCTAssertTrue(element(app, "home.deck.study").waitForExistence(timeout: 10), "Space on Close must dismiss the answer; its key must not rate Good")
         XCTAssertFalse(element(app, "review.session.screen").exists)
         XCTAssertFalse(element(app, "review.session.rate.good").exists)
         XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"),
             "Closing must retain only the one answer left after undo")
-        XCTAssertTrue(waitForText(element(app, "home.deck.counts"), "0 new · 0 learning · 3 due"),
+        XCTAssertTrue(waitForDeckCounts(app, due: 3),
             "Closing must not rate the restored card")
         attach(app, "native-space-close")
+        try assertSavedAndRestart(app, bundleIdentifier: bundleIdentifier, answers: 1, evidence: "native-close", due: 3)
+    }
+
+    private func studyMenu(_ app: XCUIApplication) -> XCUIElement {
+        app.menuBars.menuBarItems["Study"]
+    }
+
+    private func performStudyCommand(_ title: String, in app: XCUIApplication, bundleIdentifier: String) throws {
+        let menu = studyMenu(app)
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        try click(menu, in: app, bundleIdentifier: bundleIdentifier)
+        let command = menu.menuItems[title]
+        XCTAssertTrue(command.waitForExistence(timeout: 10))
+        XCTAssertTrue(command.isEnabled, "Study > \(title) must be available to the card")
+        try click(command, in: app, bundleIdentifier: bundleIdentifier)
+    }
+
+    private func assertStudyHistory(_ app: XCUIApplication, bundleIdentifier: String, undo: Bool, redo: Bool) throws {
+        let menu = studyMenu(app)
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        try click(menu, in: app, bundleIdentifier: bundleIdentifier)
+        for (title, enabled) in [("Undo Answer", undo), ("Redo Answer", redo)] {
+            let command = menu.menuItems[title]
+            XCTAssertTrue(command.waitForExistence(timeout: 10))
+            XCTAssertEqual(command.isEnabled, enabled, "Study > \(title) must respect history and native input ownership")
+        }
+        // Escape belongs to the open menu and must not exit the review.
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        XCTAssertTrue(element(app, "review.session.screen").exists)
     }
 
     private struct CardSnapshot: Equatable {
         let cardText: [String]
+    }
+
+    private func assertQuestion(_ expected: CardSnapshot, in app: XCUIApplication) throws {
+        // Restoration is asynchronous: wait for the expected card's text,
+        // rather than accepting the still-visible question from before it.
+        for text in expected.cardText {
+            let rendered = app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", text, text)).firstMatch
+            XCTAssertTrue(rendered.waitForExistence(timeout: 10), "Restoration must show \(text)")
+        }
+        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 10))
+        XCTAssertEqual(try cardSnapshot(app, answer: false), expected, "Restoration must preserve exact card identity and question state")
     }
 
     private func cardSnapshot(_ app: XCUIApplication, answer: Bool) throws -> CardSnapshot {
@@ -378,7 +403,13 @@ final class LocalReviewJourneyTests: XCTestCase {
     #endif
 
     private func reachWaiting(_ app: XCUIApplication, bundleIdentifier: String) throws -> Int? {
+        #if os(macOS)
+        var easyQuestion: CardSnapshot?
+        #endif
         for rating in ["again", "hard", "good", "easy"] {
+            #if os(macOS)
+            if rating == "easy" { easyQuestion = try cardSnapshot(app, answer: false) }
+            #endif
             try reveal(app, bundleIdentifier: bundleIdentifier)
             for name in ["again", "hard", "good", "easy"] {
                 let button = element(app, "review.session.rate.\(name)")
@@ -387,12 +418,18 @@ final class LocalReviewJourneyTests: XCTestCase {
             }
             try click(element(app, "review.session.rate.\(rating)"), in: app, bundleIdentifier: bundleIdentifier)
         }
+        #if os(macOS)
+        try performStudyCommand("Undo Answer", in: app, bundleIdentifier: bundleIdentifier)
+        try assertQuestion(try XCTUnwrap(easyQuestion), in: app)
+        try assertStudyHistory(app, bundleIdentifier: bundleIdentifier, undo: true, redo: true)
+        #else
         let back = element(app, "review.session.back")
         XCTAssertTrue(back.waitForExistence(timeout: 10))
         XCTAssertTrue(back.isEnabled)
         try click(back, in: app, bundleIdentifier: bundleIdentifier)
         XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 10))
         XCTAssertTrue(element(app, "review.session.redo").exists)
+        #endif
         var answers = 3 // Four ratings, less the undone Easy.
         for _ in 0..<20 {
             let state = reviewState(app)
@@ -452,30 +489,30 @@ final class LocalReviewJourneyTests: XCTestCase {
             try click(enable, in: app, bundleIdentifier: bundleIdentifier)
         }
         try openDeck(app, bundleIdentifier: bundleIdentifier)
-        let freshCounts = waitForText(element(app, "home.deck.counts"), "0 new · 0 learning · 4 due")
+        let freshCounts = waitForDeckCounts(app, due: 4)
         if !freshCounts { attach(app, "review-fresh-counts") }
         XCTAssertTrue(freshCounts, "first launch must seed four due text cards")
         try click(element(app, "home.deck.study"), in: app, bundleIdentifier: bundleIdentifier)
         return (app, bundleIdentifier)
     }
 
-    private func assertSavedAndRestart(_ app: XCUIApplication, bundleIdentifier: String, answers: Int, evidence: String, extra: [String] = []) throws {
-        assertSavedOutcome(app, answers: answers, evidence: "\(evidence)-closed")
+    private func assertSavedAndRestart(_ app: XCUIApplication, bundleIdentifier: String, answers: Int, evidence: String, extra: [String] = [], due: Int = 0) throws {
+        assertSavedOutcome(app, answers: answers, evidence: "\(evidence)-closed", due: due)
         app.terminate()
         // No fixture and no study input: reuse the database without replaying answers.
         app.launchArguments = launchArguments(extra: extra)
         app.launch()
         XCTAssertTrue(element(app, "home.session.recorded").waitForExistence(timeout: 20))
         try openDeck(app, bundleIdentifier: bundleIdentifier)
-        assertSavedOutcome(app, answers: answers, evidence: "\(evidence)-restarted")
+        assertSavedOutcome(app, answers: answers, evidence: "\(evidence)-restarted", due: due)
     }
 
-    private func assertSavedOutcome(_ app: XCUIApplication, answers: Int, evidence: String) {
+    private func assertSavedOutcome(_ app: XCUIApplication, answers: Int, evidence: String, due: Int = 0) {
         let recorded = waitForText(element(app, "home.session.recorded"), "\(answers) answers recorded")
         // Home can appear before finishReview's asynchronous owner refresh applies.
         // Later-today learning is outside these counts; only the waiting case
         // must show the separate Waiting for Learning state before Close.
-        let counts = waitForText(element(app, "home.deck.counts"), "0 new · 0 learning · 0 due")
+        let counts = waitForDeckCounts(app, due: due)
         attach(app, "review-\(evidence)")
         XCTAssertTrue(recorded, "saved record must contain exactly the accepted, non-undone answers")
         XCTAssertTrue(counts, "authoritative deck counts must reflect the reviews before and after restart")
@@ -518,6 +555,23 @@ final class LocalReviewJourneyTests: XCTestCase {
     private func waitingTitle(_ app: XCUIApplication) -> XCUIElement {
         app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@",
             "Waiting for Learning", "Waiting for Learning")).firstMatch
+    }
+
+    private func waitForDeckCounts(_ app: XCUIApplication, due: Int) -> Bool {
+        #if os(macOS)
+        var ready = true
+        for (name, label, value) in [("new", "New", 0), ("learning", "Learning", 0), ("due", "Due", due)] {
+            let fields = app.staticTexts.matching(identifier: "home.deck.counts.\(name)")
+            let predicate = NSPredicate(format: "exists == true AND label == %@ AND value == %@", label, String(value))
+            let matched = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: fields.firstMatch)], timeout: 20) == .completed
+            XCTAssertEqual(fields.count, 1, "Each deck count must be a unique numeric accessibility field")
+            XCTAssertTrue(matched, "\(label) must expose the exact numeric value \(value)")
+            ready = ready && matched
+        }
+        return ready
+        #else
+        return waitForText(element(app, "home.deck.counts"), "0 new · 0 learning · \(due) due")
+        #endif
     }
 
     private func waitForText(_ element: XCUIElement, _ text: String) -> Bool {

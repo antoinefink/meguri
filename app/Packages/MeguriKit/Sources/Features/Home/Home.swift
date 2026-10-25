@@ -81,24 +81,34 @@ public struct HomeView: View {
                             Text(deck.counts.new, format: .number)
                                 .font(.title2)
                                 .foregroundStyle(.token(deck.counts.new == 0 ? .countZero : .countNew))
+                                .accessibilityLabel(Text("New", bundle: .module))
+                                .accessibilityValue(Text(deck.counts.new, format: .number))
+                                .accessibilityIdentifier("home.deck.counts.new")
                             Text("New", bundle: .module).font(.subheadline)
+                                .accessibilityHidden(true)
                         }
-                        .accessibilityElement(children: .combine)
                         VStack(spacing: Spacing.xSmall) {
                             Text(deck.counts.learning, format: .number)
                                 .font(.title2)
                                 .foregroundStyle(.token(deck.counts.learning == 0 ? .countZero : .countLearn))
+                                .accessibilityLabel(Text("Learning", bundle: .module))
+                                .accessibilityValue(Text(deck.counts.learning, format: .number))
+                                .accessibilityIdentifier("home.deck.counts.learning")
                             Text("Learning", bundle: .module).font(.subheadline)
+                                .accessibilityHidden(true)
                         }
-                        .accessibilityElement(children: .combine)
                         VStack(spacing: Spacing.xSmall) {
                             Text(deck.counts.review, format: .number)
                                 .font(.title2)
                                 .foregroundStyle(.token(deck.counts.review == 0 ? .countZero : .countDue))
+                                .accessibilityLabel(Text("Due", bundle: .module))
+                                .accessibilityValue(Text(deck.counts.review, format: .number))
+                                .accessibilityIdentifier("home.deck.counts.due")
                             Text("Due", bundle: .module).font(.subheadline)
+                                .accessibilityHidden(true)
                         }
-                        .accessibilityElement(children: .combine)
                     }
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("home.deck.counts")
                     #else
                     DeckCounts(counts: deck.counts)
