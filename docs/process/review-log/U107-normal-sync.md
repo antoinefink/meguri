@@ -83,3 +83,14 @@ fresh and valid schemas, including the 18 U107 cases. Asset privacy `140725Z-344
 passes. The oracle pin and locks are unchanged; no unchanged case was recorded.
 This proves the test inputs and expected data, not normal-sync execution. The
 production job and its acceptance checks remain outstanding.
+
+## Temporary local macOS feedback
+
+Antoine requested Xcode MCP on this Mac for the current iteration on 2026-10-25.
+The working baseline at `3ea7d5dd` built for My Mac in 89.282 seconds with no errors;
+launch completed in 12.139 seconds. One local app instance was verified. VM and
+mobile iteration checks are deferred, with required integration/final evidence
+still outstanding. This baseline does not include the unverified production export.
+The local bridge keeps workspace opening and its action in one connection; saved
+workspace handles expired between separate calls in this setup. Mac-only catalog
+extraction was archived separately and restored for later cross-platform review.

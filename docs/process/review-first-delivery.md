@@ -44,6 +44,12 @@ Unavailable features remain absent from the user flow.
 
 ## Execution
 
+For the current fast macOS pass, Antoine authorized local Xcode MCP build, run,
+debug and UI feedback on 2026-10-25. Defer VM and mobile iteration checks during
+this pass. Keep their integration and final requirements outstanding; a local
+build or launch does not supply that evidence. Keep the clean room and privacy
+boundaries unchanged.
+
 First connect the app to real review sessions using generated collections
 installed by the existing test hooks. This is integration proof, not proof that
 a user can import their own cards. Then add the safe local collection entry path;

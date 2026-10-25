@@ -1,5 +1,7 @@
 # tools/
 
+- Antoine's temporary macOS-first pass (2026-10-25) permits direct host Xcode MCP build/run/debug/UI feedback. Keep it scoped to Meguri; defer VM/mobile iterations without counting them as passes. Required integration gates still use MG. A Mac-only Xcode build can extract partial-platform catalog edits: preserve them separately for review rather than committing mobile entries marked stale.
+
 - For long jobs, save stdout/stderr to a file. Lost session handle: check PID/result before relaunching.
 
 - `cleanroom-image` builds the pinned Codex Linux runtime. `cleanroom --check` proves its boundaries without credentials; implementation/fixer runs require clean master plus a recorded session and export a patch, never write the real checkout. See `cleanroom/README.md`. Keep the command sandbox mandatory and forbidden sources/history/caches absent from its mounts.

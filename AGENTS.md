@@ -24,6 +24,8 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 - Manual device and reference checks are deferred until the final session (Antoine, 2026-10-20). Continue with automated VM tests. Final evidence remains required.
 
+- Temporary macOS-first pass (Antoine, 2026-10-25): use Xcode MCP on this Mac for Meguri build/run/debug and UI feedback. Defer VM and mobile iteration checks during this pass; retain their required integration and final evidence. This explicitly overrides the VM-only and MG-only rules for that local feedback loop, not clean-room or privacy rules.
+
 - Build, test and verify only through `tools/mg <job>` (`tools/mg --list`; contract in `tools/AGENTS.md`). Rust, oracle and sync-server work runs in Docker; Apple builds run on the host; simulators and Mac UI suites run in the macOS test VM.
 - Never perform the one-time user steps (`docs/process/one-time-setup.md`); `tools/mg doctor` lists the missing ones.
 
@@ -37,7 +39,7 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 ## Running tests and apps on this Mac
 
-The Mac is also Antoine's workstation. Unattended runs must never take over the screen. Everything that would disturb it runs in the macOS test VM (`docs/process/mac-ui-vm.md`), unthrottled: run it as soon and as often as useful, with the Mac locked or not.
+The Mac is also Antoine's workstation. Except for the authorized macOS-first pass above, unattended runs must never take over the screen. Everything that would disturb it runs in the macOS test VM (`docs/process/mac-ui-vm.md`), unthrottled: run it as soon and as often as useful, with the Mac locked or not.
 - Simulators live in the VM, in a pool: `tools/mg sim acquire <iphone|ipad>` (UDID at `.details.udid`), or `tools/scripts/sim-pool.sh acquire <kind>` inside scripts (it runs itself in the VM). Release them when done (`release <udid>`); a lease expires after 60 min unless renewed. Reach them only through `tools/mg` jobs (`run`, `drive`, `screenshot`, `record`, `a11y`, `snapshots`, `xcode-check`), never with `xcrun simctl` on this Mac. Never create, erase, delete, shut down or reboot a simulator, and never open Simulator.app.
 - Nothing drives this Mac's cursor or keyboard. Mac UI-driving suites (`tools/mg mac-ui`, `a11y --platform mac`, `drive --platform mac`) run only in the VM. Never run macOS XCUITest directly.
 - Antoine (2026-10-22) authorizes the orchestrator to restart `meguri-mac` when it stops answering. Stop only that VM after its jobs end, then start it headlessly. Check `tools/mg doctor` and run `tools/mg catch-up`.
