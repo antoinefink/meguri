@@ -1,7 +1,7 @@
 //! What `conformance/schema/scenario.schema.json` requires beyond the types the
 //! model reads: required draft-op arguments, lengths, unique items, patterns,
 //! the order of handoffs (dsl.md D4-D9) and the actor rules the schema cannot
-//! express (sync-ops.md S1, S2.3, S4.2). T0 loads every scenario through
+//! express (sync-ops.md S1, S2.3, S4.2, S13). T0 loads every scenario through
 //! these checks, so a schema violation is `invalid` there too, not only in
 //! `tools/mg goldens-check`. Change both together; `tests/scenario_format.rs`
 //! reads the schema's required draft arguments and checks this table.
@@ -14,8 +14,8 @@ use serde_json::{Map, Value};
 use super::FormatError;
 use super::model::{
     ActorName, CardsOrNotes, ClozeRequest, DUMP_TABLES, DraftArgs, FieldsCheckRequest, FsrsNextRequest,
-    IgnoredBeforeCountRequest, LegacyUpdate, LogicalRef, ObservationKind, RefKind, SaveDeckOptionsArgs, Scenario,
-    SearchRequest, Side, Step, SyncKind, TemplateRequest, TextRequest, canonical_search_texts,
+    IgnoredBeforeCountRequest, LegacyUpdate, LogicalRef, ObservationKind, RefKind, ReviewSession, SaveDeckOptionsArgs,
+    Scenario, SearchRequest, Side, Step, SyncKind, TemplateRequest, TextRequest, canonical_search_texts,
 };
 
 /// A draft-op argument's JSON shape (scenario.schema.json `$defs/step`).
@@ -86,6 +86,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
     }
     actors(s)?;
     opens(s)?;
+    review_sessions(s)?;
     let mut side: Option<Side> = None;
     for (index, step) in s.steps.iter().enumerate() {
         let at = |e: FormatError| FormatError::new(format!("step {index} ({}): {e}", step.name()));
@@ -264,6 +265,36 @@ fn opens(s: &Scenario) -> Result<(), FormatError> {
     if s.has_actors() {
         return Err(FormatError::new("an actor scenario has no open step"));
     }
+    Ok(())
+}
+
+/// sync-ops.md S13: each actor (or the sole collection) has its own session.
+fn review_sessions(s: &Scenario) -> Result<(), FormatError> {
+    let mut open = BTreeSet::new();
+    for ((index, step), by) in s.steps.iter().enumerate().zip(s.step_actors()) {
+        let why = match step {
+            Step::ReviewSession(ReviewSession::Begin) if !open.insert(by) => {
+                Some("review_session begin requires no open session")
+            }
+            Step::ReviewSession(ReviewSession::End) if !open.remove(&by) => {
+                Some("review_session end requires an open session")
+            }
+            Step::Reopen(_) if open.contains(&by) => Some("cannot close a collection with an open review_session"),
+            Step::Sync(sync)
+                if matches!(sync.kind, SyncKind::FullUpload | SyncKind::FullDownload) && open.contains(&by) =>
+            {
+                Some("cannot close a collection with an open review_session")
+            }
+            _ => None,
+        };
+        if let Some(why) = why {
+            return Err(FormatError::new(format!(
+                "step {index} ({}): {why} (sync-ops.md S13)",
+                step.name()
+            )));
+        }
+    }
+    // An open session at EOF is valid.
     Ok(())
 }
 

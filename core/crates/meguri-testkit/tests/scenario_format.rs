@@ -1468,6 +1468,187 @@ fn actor_scenario(text: &str) -> Result<scenario::Scenario, String> {
     scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).map_err(|e| e.to_string())
 }
 
+fn review_session_scenario(steps: Value, actors: Option<Value>) -> Result<scenario::Scenario, scenario::FormatError> {
+    let mut value = json!({
+        "id": "sync/review-session",
+        "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"},
+        "steps": steps,
+    });
+    if let Some(actors) = actors {
+        value["actors"] = actors;
+    }
+    scenario::Scenario::from_value(&value)
+}
+
+#[test]
+fn review_session_markers_are_local_and_keep_the_real_executor_pending() {
+    use meguri_testkit::exec::{Executor, MeguriExecutor};
+    use meguri_testkit::scenario::ReviewSession;
+
+    let parsed = actor_scenario(
+        "id: sync/review-session\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\n\
+         steps: [{review_session: begin}, {review_session: end}, {review_session: begin}]\n",
+    )
+    .unwrap();
+    assert!(matches!(parsed.steps[0], Step::ReviewSession(ReviewSession::Begin)));
+    assert!(matches!(parsed.steps[1], Step::ReviewSession(ReviewSession::End)));
+    assert!(!parsed.steps[0].is_global());
+    assert!(Step::NAMES.contains(&"review_session"));
+    assert!(parsed.needs().ops.contains("review_session"));
+    let executor = MeguriExecutor::new();
+    assert!(executor.missing(&parsed.needs()).ops.contains("review_session"));
+
+    let actors = Some(json!(["client_a", "meguri"]));
+    let oracle_only = review_session_scenario(json!([{"review_session": "begin"}]), actors.clone()).unwrap();
+    assert!(!oracle_only.needs_of_meguri_actors().ops.contains("review_session"));
+    let mixed = review_session_scenario(
+        json!([
+            {"review_session": "begin"}, {"actor": "meguri"},
+            {"review_session": "begin"}, {"actor": "client_a"},
+            {"review_session": "end"}, {"actor": "meguri"},
+            {"review_session": "end"}, {"review_session": "begin"},
+        ]),
+        actors,
+    )
+    .unwrap();
+    assert!(mixed.needs_of_meguri_actors().ops.contains("review_session"));
+    assert!(
+        executor
+            .missing(&mixed.needs_of_meguri_actors())
+            .ops
+            .contains("review_session")
+    );
+    assert_eq!(mixed.step_actors()[0].unwrap().as_str(), "client_a");
+    assert_eq!(mixed.step_actors()[2].unwrap().as_str(), "meguri");
+}
+
+#[test]
+fn review_session_requires_exact_strings_and_alternating_markers() {
+    for actors in [None, Some(json!(["meguri"]))] {
+        for bad in [
+            Value::Null,
+            json!(true),
+            json!(1),
+            json!(1.5),
+            json!([]),
+            json!(["begin"]),
+            json!({}),
+            json!({"begin": null}),
+            json!({"end": null}),
+            json!({"kind": "begin"}),
+            json!(""),
+            json!("Begin"),
+            json!("pause"),
+        ] {
+            assert!(review_session_scenario(json!([{"review_session": bad}]), actors.clone()).is_err());
+        }
+        for steps in [
+            json!([{"review_session": "end"}]),
+            json!([{"review_session": "begin"}, {"review_session": "begin"}]),
+            json!([{"review_session": "begin"}, {"review_session": "end"}, {"review_session": "end"}]),
+        ] {
+            let err = review_session_scenario(steps, actors.clone()).unwrap_err().to_string();
+            assert!(err.contains("sync-ops.md S13"), "{err}");
+        }
+        for steps in [
+            json!([{"review_session": "begin"}]), // An open EOF is valid.
+            json!([{"review_session": "begin"}, {"review_session": "end"}]),
+        ] {
+            assert!(review_session_scenario(steps, actors.clone()).is_ok());
+        }
+        for step in [
+            json!({"review_session": "begin", "reopen": {}}),
+            json!({"review_session": "begin", "extra": true}),
+        ] {
+            assert!(review_session_scenario(json!([step]), actors.clone()).is_err());
+        }
+    }
+    // Switching actors neither opens nor ends the other's session.
+    for steps in [
+        json!([{"review_session": "begin"}, {"actor": "meguri"}, {"review_session": "end"}]),
+        json!([{"review_session": "begin"}, {"actor": "meguri"}, {"review_session": "begin"},
+               {"actor": "client_a"}, {"review_session": "begin"}]),
+    ] {
+        assert!(review_session_scenario(steps, Some(json!(["client_a", "meguri"]))).is_err());
+    }
+    // Existing actor and non-actor rules still apply.
+    assert!(review_session_scenario(json!([{"review_session": "begin"}, {"actor": "meguri"}]), None).is_err());
+    assert!(
+        review_session_scenario(
+            json!([{"review_session": "begin"}, {"actor": "client_b"}]),
+            Some(json!(["meguri"]))
+        )
+        .is_err()
+    );
+    assert!(
+        review_session_scenario(
+            json!([{"review_session": "begin"}, {"sync": {"kind": "normal"}}]),
+            Some(json!(["meguri"]))
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("login")
+    );
+}
+
+#[test]
+fn open_review_sessions_guard_only_the_current_collections_closing_steps() {
+    for close in [
+        json!({"reopen": {}}),
+        json!({"sync": {"kind": "full_upload"}}),
+        json!({"sync": {"kind": "full_download"}}),
+    ] {
+        let actors = Some(json!(["meguri", "client_a"]));
+        let err = review_session_scenario(
+            json!([{"sync": {"kind": "login"}}, {"review_session": "begin"}, close.clone()]),
+            actors.clone(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("step 2") && err.contains("sync-ops.md S13"), "{err}");
+        assert!(
+            review_session_scenario(
+                json!([{"sync": {"kind": "login"}}, {"review_session": "begin"},
+                       {"review_session": "end"}, close.clone()]),
+                actors.clone(),
+            )
+            .is_ok()
+        );
+        assert!(
+            review_session_scenario(
+                json!([{"review_session": "begin"}, {"actor": "client_a"},
+                       {"sync": {"kind": "login"}}, close.clone()]),
+                actors.clone(),
+            )
+            .is_ok()
+        );
+        assert!(
+            review_session_scenario(
+                json!([{"sync": {"kind": "login"}}, {"review_session": "begin"}, {"actor": "client_a"},
+                       {"actor": "meguri"}, close]),
+                actors,
+            )
+            .is_err()
+        );
+    }
+    assert!(review_session_scenario(json!([{"review_session": "begin"}, {"reopen": {}}]), None).is_err());
+    assert!(
+        review_session_scenario(
+            json!([{"review_session": "begin"}, {"review_session": "end"}, {"reopen": {}}]),
+            None,
+        )
+        .is_ok()
+    );
+    assert!(
+        review_session_scenario(
+            json!([{"review_session": "begin"}, {"sync": {"kind": "login"}},
+                   {"sync": {"kind": "normal"}}, {"sync": {"kind": "status"}}, {"advance": "1m"}]),
+            Some(json!(["meguri"])),
+        )
+        .is_ok()
+    );
+}
+
 #[test]
 fn actor_scenarios_read_their_actors_server_and_ops() {
     use meguri_testkit::scenario::{Direction, NetFault, SyncKind};
@@ -1672,7 +1853,16 @@ fn the_wrong_password_is_the_accounts_password_followed_by_wrong() {
         "meguri-test-a-wrong"
     );
     // S4.4: the closed list of rejections, auth_failed among them.
-    assert_eq!(SyncSpec::REJECTIONS, ["auth_failed", "clock_incorrect", "network"]);
+    assert_eq!(
+        SyncSpec::REJECTIONS,
+        [
+            "auth_failed",
+            "clock_incorrect",
+            "network",
+            "sanity_check_failed",
+            "db_check_required"
+        ]
+    );
 }
 
 #[test]

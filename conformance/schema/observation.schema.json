@@ -910,7 +910,7 @@
             {
               "allOf": [
                 { "$ref": "#/$defs/rejection" },
-                { "properties": { "error": { "enum": ["auth_failed", "clock_incorrect", "network"] } } }
+                { "properties": { "error": { "enum": ["auth_failed", "clock_incorrect", "network", "sanity_check_failed", "db_check_required"] } } }
               ]
             }
           ]

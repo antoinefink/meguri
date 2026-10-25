@@ -11,7 +11,56 @@ import unittest
 SCRIPT = Path(__file__).resolve().parents[1] / 'check_schemas.py'
 
 
+def shared_validator(name):
+    spec = importlib.util.spec_from_file_location("schema_checks", SCRIPT)
+    checks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checks)
+    schemas = checks.load_schemas(SCRIPT.parents[2] / "conformance")
+    return checks.validator(schemas, name)
+
+
 class SchemaChecks(unittest.TestCase):
+    def test_review_session_is_a_strict_collection_or_actor_local_marker(self):
+        validate = shared_validator("scenario")
+        observation = shared_validator("observation")
+        for actors in (None, ["client_a", "meguri"]):
+            base = {"id": "sync/review-session",
+                    "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"}}
+            if actors is not None:
+                base["actors"] = actors
+            steps = [{"review_session": "begin"}, {"review_session": "end"}]
+            if actors is not None:
+                steps += [{"actor": "meguri"}, {"review_session": "begin"}]
+            self.assertEqual(list(validate.iter_errors(dict(base, steps=steps))), [])
+            for bad in (None, True, 1, 1.5, [], ["begin"], {}, {"begin": None},
+                        {"end": None}, {"kind": "begin"}, "", "Begin", "pause"):
+                with self.subTest(actors=actors, argument=bad):
+                    self.assertTrue(list(validate.iter_errors(
+                        dict(base, steps=[{"review_session": bad}]))))
+            for step in ({"review_session": "begin", "reopen": {}},
+                         {"review_session": "begin", "extra": True},
+                         {"review_sessions": "begin"}):
+                self.assertTrue(list(validate.iter_errors(dict(base, steps=[step]))), step)
+        # Markers produce the ordinary empty step output, with no invented key.
+        self.assertEqual(list(observation.iter_errors({"steps": [{}, {}]})), [])
+        self.assertTrue(list(observation.iter_errors({"steps": [{"review_session": {}}]})))
+
+    def test_sync_rejection_list_and_shapes_remain_closed(self):
+        validate = shared_validator("observation")
+        errors = ("auth_failed", "clock_incorrect", "network",
+                  "sanity_check_failed", "db_check_required")
+        for error in errors:
+            self.assertEqual(list(validate.iter_errors({"steps": [{"sync": {"error": error}}]})), [])
+            for bad in ({"error": error, "extra": True},
+                        {"error": error, "result": "ok"}):
+                self.assertTrue(list(validate.iter_errors({"steps": [{"sync": bad}]})), bad)
+        for bad in ({"error": "unknown"}, {"error": None}, {"error": True},
+                    {"error": 1}, {"error": ["network"]}, {"error": {"kind": "network"}},
+                    {}, [], "network", None):
+            self.assertTrue(list(validate.iter_errors({"steps": [{"sync": bad}]})), bad)
+        for result in ("ok", "no_changes", "normal_sync", "full_sync", "full_upload", "full_download"):
+            self.assertEqual(list(validate.iter_errors({"steps": [{"sync": {"result": result}}]})), [])
+
     def test_parallel_and_serial_report_all_errors_in_identical_order(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

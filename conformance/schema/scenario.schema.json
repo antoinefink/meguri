@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meguri.local/conformance/schema/scenario.schema.json",
-  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/dsl.md, and specs/conformance/sync-ops.md for actor scenarios. Authoritative for the scenario file format together with those specs. Not expressed here, checked when a scenario loads: an actor step names a declared actor, and each actor's first sync step has kind login (sync-ops.md S2.3, S4.2).",
+  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/dsl.md, and specs/conformance/sync-ops.md for actor scenarios. Authoritative for the scenario file format together with those specs. Not expressed here, checked when a scenario loads: an actor step names a declared actor, and each actor's first sync step has kind login (sync-ops.md S2.3, S4.2); review_session markers alternate per actor starting begin, with no reopen/full_upload/full_download while open (S13).",
   "title": "Meguri conformance scenario",
   "type": "object",
   "required": ["id", "clock"],
@@ -914,6 +914,11 @@
       "properties": {
         "advance": { "$ref": "#/$defs/duration" },
         "set_clock": { "$ref": "#/$defs/datetime" },
+        "review_session": {
+          "description": "sync-ops.md S13: begin or end on the current actor, or the collection without actors; output none. Alternation and collection-closing guards are checked at load, per actor; an open session at EOF is valid.",
+          "type": "string",
+          "enum": ["begin", "end"]
+        },
         "add_note": { "$ref": "#/$defs/note" },
         "answer": {
           "type": "object",

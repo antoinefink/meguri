@@ -186,7 +186,33 @@ pub struct SyncSpec {
 impl SyncSpec {
     /// The rejections a sync step records (S4.4, dsl.md D7.2): the list a
     /// Meguri sync adapter registers with `Registry::op_rejecting`.
-    pub const REJECTIONS: [&'static str; 3] = ["auth_failed", "clock_incorrect", "network"];
+    pub const REJECTIONS: [&'static str; 5] = [
+        "auth_failed",
+        "clock_incorrect",
+        "network",
+        "sanity_check_failed",
+        "db_check_required",
+    ];
+}
+
+/// The collection-local or actor-local review session marker (sync-ops.md S13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewSession {
+    Begin,
+    End,
+}
+
+impl<'de> Deserialize<'de> for ReviewSession {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // A derived unit enum also accepts a mapping; S13 requires a string.
+        match String::deserialize(deserializer)?.as_str() {
+            "begin" => Ok(Self::Begin),
+            "end" => Ok(Self::End),
+            other => Err(de::Error::custom(format!(
+                "review_session takes begin or end, found {other:?}"
+            ))),
+        }
+    }
 }
 
 /// How a `login` derives its credentials from the scenario's account
@@ -900,6 +926,8 @@ pub enum Step {
     SetClock(DateTimeText),
     AddNote(NoteSpec),
     Answer(AnswerSpec),
+    /// sync-ops.md S13: a marker, pending until the real executor supports it.
+    ReviewSession(ReviewSession),
     Observe(Vec<ObservationRequest>),
     /// record-ops.md W2.
     EditNote(EditNoteArgs),
@@ -1054,7 +1082,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 73] = [
+    pub const NAMES: [&'static str; 74] = [
         "advance",
         "set_clock",
         "add_note",
@@ -1064,6 +1092,7 @@ impl Step {
         "restore_media_trash",
         "empty_media_trash",
         "answer",
+        "review_session",
         "observe",
         "edit_note",
         "delete_notes",
@@ -1145,6 +1174,7 @@ impl Step {
             Step::SetClock(_) => "set_clock",
             Step::AddNote(_) => "add_note",
             Step::Answer(_) => "answer",
+            Step::ReviewSession(_) => "review_session",
             Step::Observe(_) => "observe",
             Step::EditNote(_) => "edit_note",
             Step::DeleteNotes(_) => "delete_notes",
