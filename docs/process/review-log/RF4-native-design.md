@@ -217,3 +217,22 @@ appearances and increased contrast on each platform. It found no P0–P2.
 The URL field now has full width on touch layouts. Root inspected the repaired
 XXXLarge iPhone and native Mac rows. These are candidate baselines, not human
 design approval; comparison checks and final evidence remain required.
+
+## Home fixture parity
+
+Start: `f1a6e81f`. The Home preview kept Import as a separate action and exposed
+it in populated lists. The real Home view already used the correct empty
+composition. The reviewer marked this fixture problem P2.
+
+Filtered patch `cleanroom/20261025T025952Z-58943`, session
+`s-20261025T024158Z-4e350e81`, changes only the fixture. It uses the shared empty
+content with an inert action, centers the empty Mac layout, and removes the
+extra populated-list action. It never opens a real collection.
+
+UI lint `20261025T030555Z-68979`, privacy `20261025T030556Z-69218` and similarity
+`20261025T030554Z-68751` passed. Candidate run
+`snapshots/20261025T030559Z-69788` compared 18 unchanged cells successfully and
+recorded 58 changed cells, with no failures or skips. Those include the earlier
+reviewed Mac native controls. Independent review found no P0–P2 in the new Home
+images on all three platforms. Root viewed the Mac empty state.
+Human baseline approval and the full integration gate remain pending.

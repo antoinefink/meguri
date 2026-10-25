@@ -6,27 +6,41 @@ public enum HomeDeckListPreview: PreviewStates {
     public static let previewID = "home.deckList"
     public static var previewFixtures: [PreviewFixture] {
         PreviewState.allCases.map { state in PreviewFixture(state) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.large) {
-                    switch state {
-                    case .empty: HomeCollectionEmptyContent()
-                    case .loading: LoadingStateView(Text(verbatim: "Opening collection…"))
-                    case .error: ErrorStateView(Text(verbatim: "Couldn’t Open Collection"), message: Text(verbatim: "The collection is open in another program."), retryIdentifier: "home.collection.retry", retry: {})
-                    case .typical, .overflow: HomeDeckTree(nodes: nodes(overflow: state == .overflow), select: { _ in })
-                    }
-                    if state == .empty || state == .typical || state == .overflow {
-                        HomeCollectionImportButton(canPresent: true, action: {})
-                    }
+            Group {
+                #if os(macOS)
+                GeometryReader { geometry in
+                    scrollContent(state: state, availableHeight: geometry.size.height)
                 }
-                .padding(Spacing.medium)
-                .frame(maxWidth: ContentWidth.readable, alignment: .leading)
-                .frame(maxWidth: .infinity)
+                #else
+                scrollContent(state: state)
+                #endif
             }
             .background(.token(.backgroundPrimary))
             .navigationTitle(Text("Decks", bundle: .module))
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home.collection.screen")
         } }
+    }
+    private static func scrollContent(state: PreviewState, availableHeight: CGFloat = 0) -> some View {
+        #if os(macOS)
+        let centersContent = state == .empty
+        #else
+        let centersContent = false
+        #endif
+        return ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.large) {
+                switch state {
+                case .empty: HomeCollectionEmptyContent(importAction: {})
+                case .loading: LoadingStateView(Text(verbatim: "Opening collection…"))
+                case .error: ErrorStateView(Text(verbatim: "Couldn’t Open Collection"), message: Text(verbatim: "The collection is open in another program."), retryIdentifier: "home.collection.retry", retry: {})
+                case .typical, .overflow: HomeDeckTree(nodes: nodes(overflow: state == .overflow), select: { _ in })
+                }
+            }
+            .padding(Spacing.medium)
+            .frame(maxWidth: ContentWidth.readable, alignment: .leading)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: centersContent ? availableHeight : 0, alignment: centersContent ? .center : .top)
+        }
     }
     private static func nodes(overflow: Bool) -> [CountedDeckNode] {
         let child = CountedDeckNode(id: 2, name: overflow ? "Japanese::Vocabulary with a longer deck title that wraps onto another line" : "Japanese::Vocabulary",

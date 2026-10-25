@@ -52,4 +52,9 @@ assertions are unchanged. There is no fallback after a failed build.
 Independent review found no P0–P2. All eight focused regressions passed without
 skips in `selftest/20261025T030022Z-60289`. Privacy
 `20261025T030023Z-60563` and similarity `20261025T030023Z-60504` passed.
-Native credential verification and the full gate remain pending.
+Native result `focused-mac-snapshot/20261025T031019Z-78148` passed the canonical
+Snapshot plan: 76 passes, zero failures, two existing skips. The unchanged
+`deviceSlotIsNonsynchronizingAndNeverContainsPassword` case passed. The source
+script was pinned to SHA-256
+`75961551c83fbe0fd437071af9edc0e9533f968448a1aaa3ea5551a79acb9487`.
+The full gate remains pending.
