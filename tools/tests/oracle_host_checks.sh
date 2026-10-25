@@ -445,16 +445,30 @@ t_the_network_probe_connects_when_a_route_exists() {
 }
 
 t_no_meguri_code_refers_to_oracle() {
-  local hits d
-  for d in core app; do
-    [ -d "$REPO/$d" ] || continue
-    hits="$(grep -rIEn '(\.\./)+oracle/|oracle/(driver|Dockerfile|entrypoint|requirements)' "$REPO/$d" 2>/dev/null | grep -v '/target/' | head -n 5)"
+  local hits rc mode
+  local pattern='(\.\./)+oracle/|oracle/(driver|Dockerfile|entrypoint|requirements)'
+  # Search shipped and newly added source, not ignored compiler caches.
+  # Tracked files remain checked even when an ignore rule matches them.
+  # The untracked traversal prunes ignored directories, so scan the index's
+  # working-tree files separately to retain forced-added source coverage.
+  for mode in tracked untracked; do
+    if [ "$mode" = tracked ]; then
+      hits="$(git -C "$REPO" grep -I -l -E "$pattern" -- core app 2>/dev/null)"
+    else
+      hits="$(git -C "$REPO" grep --untracked --exclude-standard -I -l -E "$pattern" -- core app 2>/dev/null)"
+    fi
+    rc=$?
+    if [ "$rc" -gt 1 ]; then
+      echo "Meguri source reference scan failed"
+      return 1
+    fi
     if [ -n "$hits" ]; then
-      echo "$d refers to oracle/:"
-      echo "$hits"
+      echo "Meguri source refers to oracle/:"
+      printf '%s\n' "$hits" | sed -n '1,5p'
       return 1
     fi
   done
+  return 0
 }
 
 # An implementer worktree has no oracle/ (U2's sparse checkout). tools/mg there

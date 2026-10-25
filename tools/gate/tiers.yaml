@@ -492,7 +492,7 @@ runs:
     class: tooling
     oracle: true
     local: false
-    triggers: [oracle/, tools/mg.d/oracle.sh]
+    triggers: [oracle/, tools/mg.d/oracle.sh, tools/tests/oracle_host_checks.sh]
     budget_s: 900
   - id: fixtures-check
     job: fixtures-check
