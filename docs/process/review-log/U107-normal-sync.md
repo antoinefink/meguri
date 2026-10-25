@@ -233,3 +233,15 @@ nonempty conversion, summary and event payloads. Swift bridge run
 `181902Z-59842` regenerates bindings and passes both selected tests.
 The source delta remains incomplete until repeated-key behavior, actual live
 transport and the required integration gate are verified. No Unit trailer.
+
+## Repeated incoming IDs
+
+The repeated-key failure needs a staging repair, not a weaker test. N6.5/W7.1
+now state ordered processing for repeated IDs, arbitrary strict i32 USNs and
+first-existing review rows. Card/note values use fixed metadata. The stage also
+stores each note's numeric validation record. Apply reads these records in order
+and checks the live row before commit.
+Own pending graves mask their keys. The pending/mtime test still applies after S.
+The first contract review found a lost conditional note error; the repaired
+contract has no P0–P2 findings. Source provenance stays separate. Implementation
+and focused regressions for this correction remain pending.

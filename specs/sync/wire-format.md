@@ -149,6 +149,12 @@ Unknown protobuf fields of the records (`model/protobuf-records` P4) have no JSO
 | `cards` | array of card tuples (W8) | no; missing means empty | only when not empty |
 | `notes` | array of note tuples (W9) | no; missing means empty | only when not empty |
 
+An array may repeat a row ID, with equal or different tuple values. The
+receiver preserves array order and uses `normal-sync` N6.5; it does not reject
+the chunk or treat it as a map with unique IDs. Each tuple occurrence counts
+toward the 250-object limit, not only distinct IDs. This differs from the
+JSON object member checks in W1.2.
+
 ### W7.2 Exchanges
 
 - `chunk`: request `{}`; response a chunk object. The client asks again until a response has `done` true.

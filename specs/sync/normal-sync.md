@@ -215,6 +215,49 @@ The server applies the client's cards and notes from `applyChunk` by the same ru
 
 So equal stamps leave each side with its own version, until a later change of that row on either side (scenario `sync/conflicts/tie-local-wins`). AE61 expects the server to end with the client's version on a tie; Anki's server keeps its own, and Meguri, which does not control the server, matches Anki: it keeps its local row and sends it.
 
+### N6.5 Repeated row IDs
+
+Repeated IDs in a chunk's card, note or review array are supported. Apply
+each array in its received order, including repeated occurrences; finish
+that chunk before the next one. An occurrence sees the result of earlier
+occurrences of that ID, also in earlier chunks. IDs in different tables
+remain independent. This is not a duplicate JSON-member rule.
+
+For cards and notes, use N6.2/N6.3 against that current row each time. An
+accepted tuple keeps its supplied `usn`, so it may change whether the next
+occurrence faces a pending row. Do not compare all occurrences against the
+row at the start of the chunk, choose the largest `mod`, or choose the last
+tuple before applying the acceptance rule. For example, all incoming tuples
+below have a nonpending USN:
+
+| Row before | Incoming `mod`, in order | Final row |
+|---|---|---|
+| absent | 30, 10 | second incoming row, `mod` 10 |
+| nonpending, `mod` 40 | 30, 10 | second incoming row, `mod` 10 |
+| pending, `mod` 20 | 10, 20 | original pending row |
+| pending, `mod` 20 | 30, 10 | second incoming row, `mod` 10: the first accepted row was no longer pending |
+| pending, `mod` 20 | 10, 30 | second incoming row, `mod` 30 |
+
+The result is identical if the two tuples arrive in separate chunks. If a
+tuple carries a USN that is pending under the receiver's existing rule, later
+occurrences must respect that pending state too; this adds no USN restriction.
+On the server, N6.4's pending-USN test still applies.
+
+For review rows, an existing row always stays. If initially absent, the first
+occurrence inserts its complete row and every later occurrence is ignored,
+even if its columns differ. Never assign another ID or use the last tuple.
+
+Normal decode and validation failures remain failures. In particular, an
+accepted note that fails N6.3 still fails the round even if a later occurrence
+would replace it. Notes kept by the pending-local rule still follow N6.3's
+no-check rule. Row compaction cannot turn an accepted-note failure into success.
+
+Bounded per-chunk reduction may pass one effective row per table/key to a
+set-based storage merge, provided it produces these ordered results. The
+scratch merged view, outgoing pending rows and sanity counts must agree
+with them. H6/H10 retain separate acceptance-dependent validation data for
+the live path; the row-choice summary alone does not preserve earlier errors.
+
 ## N7. Rows to the server (`applyChunk`, R1529)
 
 - The client collects the pending review rows, cards and notes of the outgoing view after N6, so a local row that N6 replaced is not sent, and one that N6 kept is.

@@ -83,6 +83,60 @@ What the server sends (its graves from `start`, its `applyChanges` answer, every
 - Staged notes carry the `flds` (control characters removed), `sfld` and `csum` of `normal-sync.md` N6.3, computed while staging (R1528) against the note type the commit will use: the staged incoming note type when H7 accepts it, otherwise the snapshot's.
 - The stage is attached to the writer connection only inside the commit op (H10) and detached before that op ends. Nothing else reads it.
 
+Repeated card/note/review IDs retain N6.5's received-order meaning. Scratch
+view M can reduce a bounded page against the row state it currently holds,
+then merge at most one effective row per table/key. The incoming target set
+still records every distinct received key, including rejected or identical
+occurrences; repetitions do not multiply targets or skipped-ID diagnostics.
+
+For each incoming card/note key, keep a bounded summary: the greatest received
+`mod`, and the effective row produced by N6.5 for that key starting absent.
+Compute that row in received order, using its current pending state at each
+occurrence. If every incoming tuple is nonpending, it is simply the final
+tuple; a tuple with pending USN may instead keep an earlier effective row.
+Across chunks, continue the same summary rather than starting it over.
+
+At commit, select the effective incoming row if the key is absent, the stored
+row is nonpending, or its pending `mod` is below the received maximum.
+Otherwise keep the live pending row. This reproduces received-order merging:
+every initial pending row below that maximum accepts the first maximum-mod
+occurrence and reaches the same later state. A row at or above the maximum
+accepts none. Thus pending live `mod` 20 with clean incoming `mod` 30 then 10
+ends at 10, even if scratch M initially protected a different pending row.
+
+For review keys, retain the first received row, independently of whether M
+already had that ID. Store these summaries in the existing scratch stage,
+with at most one effective payload per key, and process bounded pages. No
+full incoming row-history table or all-stream RAM buffer is required. These
+summaries decide row values, not acceptance-dependent note errors.
+
+H10.2 step 7 compares post-S cards/notes by the live pending/mtime rule; a
+post-S touch does not protect the whole key from an incoming merge. For exact
+validation at that live scalar state, keep one compact validation
+record per received note occurrence in the existing scratch stage: note ID,
+global receive ordinal, incoming `usn`/`mod`, and either success or the existing
+typed fault with numeric note/notetype IDs. No note body, field text, tags,
+SQL, path or arbitrary error string is repeated in these records. Across
+chunks the ordinal increases and the scalar state continues.
+A fault accepted on M's own path still fails staging before `finish`.
+Other acceptance-dependent faults stay deferred until live eligibility is
+known; a hypothetical absent-state fault cannot fail staging by itself.
+
+Validation records have at most one fixed-size record per received note
+tuple and are read in bounded pages, with ordinary stage resource/cancellation
+failure handling. This is input-sized scratch metadata, not a retained history
+service or a set of full row versions. Do not call it constant per-key disk
+space. RAM stays page-bounded and full incoming payload storage stays at most
+one effective row per key. An exact equivalent compact representation is
+allowed, but cannot omit conditional faults at other live thresholds.
+
+Preparing a received note for this metadata is side-effect-free. Field
+cleanup, checksum/sort calculation and tag splitting produce row values only;
+no tags are globally registered and no collection/journal stamp changes.
+An invalid hypothetical version records its typed fault without surfacing it
+unless that occurrence is accepted on M or the eligible live path. A locally
+rejected note must not fail merely because validation was computed internally.
+
 ## H7. Checks made while staging
 
 Each check fails the round before `finish` is sent (H12):
@@ -90,8 +144,11 @@ Each check fails the round before `finish` is sent (H12):
 | Check, against the snapshot and the stage | Kind |
 |---|---|
 | an incoming note type that `normal-sync.md` N5.2 accepts against the snapshot's note type with that id, whose field or template count differs from it | `notetype_schema_changed` (R1525) |
-| a staged note whose `mid` is neither a note type of the snapshot nor a staged incoming one | `missing_notetype` (R1528) |
-| a staged note whose field count differs from that note type's | `note_fields_mismatch` |
+| a note accepted on M's N6.3 path whose `mid` is neither a note type of the snapshot nor a staged incoming one | `missing_notetype` (R1528) |
+| a note accepted on M's N6.3 path whose field count differs from that note type's | `note_fields_mismatch` |
+
+The additional live-path checks of H6 are conditional and are evaluated
+at H10.2; they do not make a note rejected on M fail staging unconditionally.
 
 ## H8. Sanity counts (R1530)
 
@@ -123,6 +180,40 @@ The rules are `normal-sync.md`'s, applied to the live rows (not to V), in this o
 6. **Tags** (N5.5).
 7. **Cards and notes** (N6.2, N6.3), against the live rows: a live row that is pending with a `mod` equal to or greater than the incoming `mod` stays. Live rows of R and rows written after S are compared like any other.
 8. **Review rows** (N6.1): inserted only when no live row has the id.
+
+Within steps 7 and 8, repeated versions follow N6.5 in received order against
+the live row after preceding occurrences, using H6's equivalent summaries.
+Apply step 2's own-ID pending-grave
+skip to the entire incoming key; it must not be re-created by a later
+occurrence. R's rows and post-S rows keep the same pending/mtime protection
+on each comparison. A live review row wins over every incoming duplicate;
+when absent, only the first received review row is inserted. Incoming-target
+tracking remains independent of which versions were accepted, so H11's undo
+invalidation and the sorted unique skip diagnostics remain complete.
+
+Before applying note summaries, determine accepted validation paths from
+the actual live scalar rows after the grave phase. An own-ID unsent pending
+grave masks all incoming versions and their deferred faults for that key.
+For each unskipped key, stream its compact validation records in receive
+order, testing acceptance against its current live scalar state;
+an accepted valid occurrence updates the state with its incoming `usn`/`mod`,
+and an accepted invalid occurrence is a fault. A rejected occurrence is not a
+fault and does not update the state. Post-S touch alone never masks a fault.
+Read one key's state and bounded record pages at a time, rather than loading
+all validation records or simulated row states into RAM. An optional cached
+S-path result requires proof that its base was captured before R's overlay,
+adjusted for incoming graves, and exactly matches the live scalar base and
+validation inputs. A post-S touch or guessed mtime equality is no such proof;
+the ordinary replay path needs no S-derived shortcut.
+
+Across eligible keys, select the earliest fault by global receive ordinal,
+not by note ID or merge-page order. Return its existing typed note-validation
+kind/IDs and roll back the entire local merge; publish no applied diagnostics,
+USN marking or finalization. Once `finish` has been sent, H12's server-commit
+rules still apply. Only when eligible paths have no fault may their effective
+row summaries be merged. For M pending 40 and bad clean 30 then valid clean 10,
+live pending 20 fails at the first tuple; live pending 40 rejects both and
+remains unchecked. The result must hold within one chunk or across chunks.
 
 Merges are set-based from the attached stage, through a meguri-storage bulk-merge path that records each changed row's before and after images in the op's journal and skips rows equal to the stored row (`storage/ids-usn-mtime` S4), so the `SyncIncoming` change set and every observer see each change.
 
