@@ -127,3 +127,18 @@ at this checkpoint: 18 cases passed before its first 150k-card case. This is
 partial evidence only. Round 2 review, the remaining prerequisites, full focused
 results, privacy/similarity checks and the batch gate are pending. No Unit
 trailer is added.
+
+Focused run `170327Z-92729` finished: 35/38 pass, including both 150k cases.
+Failures remain enabled: post-snapshot `curDeck` pending status, held-deck
+reconciliation and the sanity-failure test's admission path. Round 2 source
+review confirms the earlier schema/config-undo repairs and finds no new P0–P2
+issue; the failed focused checks still require diagnosis. Static checks
+`172050Z-9413` pass for the original batch base.
+
+The six-file rename prerequisite has a clear independent source review and is
+integrated as WIP. Its first focused run `172233Z-12378` failed compilation:
+the new storage regression compares a note type without `PartialEq`. No rename
+tests ran. The correction must preserve complete aggregate equality checks.
+The initial formatting attempt could not reach Docker under sandbox limits;
+the authorized Docker run formatted successfully. Full U34 remains outside
+this prerequisite, and neither U34 nor U107 is accepted.

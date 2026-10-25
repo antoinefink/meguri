@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use meguri_model::ids::NotetypeId;
-use meguri_model::notetype::Notetype;
+use meguri_model::notetype::{Notetype, NotetypeField};
 use meguri_text::fold::folded;
 use meguri_text::normalize::nfc;
 
@@ -134,6 +134,20 @@ fn unique_in_list<'n>(names: impl Iterator<Item = &'n mut String>) {
         }
         earlier.insert(folded(name));
     }
+}
+
+/// N4's field-name steps over the complete final list. A rename keeps all
+/// other stored data, including legacy ordinals, rather than normalizing
+/// unrelated members of the aggregate (`field-rename` F2, F4).
+pub(crate) fn normalize_field_names(fields: &mut [NotetypeField]) -> Result<(), InvalidNotetype> {
+    if fields.is_empty() {
+        return Err(InvalidNotetype::NoField);
+    }
+    for (ord, field) in fields.iter_mut().enumerate() {
+        field.name = field_name(&field.name).ok_or(InvalidNotetype::EmptyFieldName { ord })?;
+    }
+    unique_in_list(fields.iter_mut().map(|field| &mut field.name));
+    Ok(())
 }
 
 /// Step 6: the sort field is a field, not a position. A field that carries

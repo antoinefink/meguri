@@ -12,6 +12,7 @@
 //! scopes without the executor, journal off; layering-check keeps it out of
 //! meguri-engine and meguri-ffi (edges.toml `[storage_builder]`).
 
+use std::collections::HashSet;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
@@ -516,9 +517,9 @@ impl<'c> WriteScope<'c> {
     }
 
     /// Writes a note type: its `notetypes` row, its `fields` and
-    /// `templates` rows (removing those past its last ordinal). When any of
-    /// them changes, the `notetypes` row is stamped even if its own columns
-    /// did not change (S1: template rows change with their note type).
+    /// `templates` rows (removing only keys absent from the aggregate).
+    /// When any of them changes, the `notetypes` row is stamped even if its
+    /// own columns did not change (S1: template rows change with their note type).
     pub fn put_notetype(&mut self, notetype: &Notetype) -> Result<Written, StorageError> {
         let id = notetype.id;
         let fields: Vec<RowImage> = notetype.fields.iter().map(|f| notetypes::field_cells(id, f)).collect();
@@ -538,14 +539,14 @@ impl<'c> WriteScope<'c> {
                     changing.push(cells.clone());
                 }
             }
-            let kept = Cell::Integer(wanted.len() as i64);
-            let stale = rows::select_where(
-                self.conn,
-                table,
-                "ntid = ?1 AND ord >= ?2",
-                &[Cell::Integer(id.0), kept],
-            )?;
-            for cells in stale.iter().chain(&changing) {
+            // Stored ordinals may have gaps: list length cannot identify
+            // stale children. Both sets are bounded to this note type.
+            let wanted_keys: HashSet<RowKey> = wanted.iter().map(|cells| RowKey::of(table, cells)).collect();
+            let existing = rows::select_where(self.conn, table, "ntid = ?1", &[Cell::Integer(id.0)])?;
+            let stale = existing
+                .iter()
+                .filter(|cells| !wanted_keys.contains(&RowKey::of(table, cells)));
+            for cells in stale.chain(&changing) {
                 self.remove_key(table, &RowKey::of(table, cells))?;
                 parts = Written::Updated;
             }

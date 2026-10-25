@@ -23,6 +23,7 @@
 pub mod clone;
 pub mod names;
 pub mod read;
+pub mod rename;
 pub mod stock;
 pub mod validate;
 pub mod write;
@@ -47,6 +48,7 @@ use crate::undo::entry::StepKind;
 use crate::undo::names as step_names;
 
 pub use names::{FieldNameCheck, FieldNameRefusal, InvalidNotetype, check_typed_field_name};
+pub use rename::{FieldIdentity, FieldRename, RenameFields, rename_fields};
 pub use stock::StockKind;
 pub use validate::{CheckKind, TemplateFailure, TemplateSide, template_failures};
 pub use write::AggregateDigest;
