@@ -44,6 +44,13 @@ Unavailable features remain absent from the user flow.
 
 ## Execution
 
+Antoine asked on 2026-10-25 to stop extended Anki sync harness work and return
+to app delivery. Park U107/U110/U111 with their gaps recorded. Continue the
+shared app and review workflow using RF1. This changes work priority only:
+the sync batch, technical failures and required gates remain open. Keep
+`1416a520542a8c5daa38a23bfe398da704c3d6c9` as the base covering pending master
+changes; resolve the open checks before their acceptance.
+
 For the current fast macOS pass, Antoine authorized local Xcode MCP build, run,
 debug and UI feedback on 2026-10-25. Defer VM and mobile iteration checks during
 this pass. Keep their integration and final requirements outstanding; a local
