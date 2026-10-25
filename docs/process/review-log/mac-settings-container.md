@@ -171,3 +171,21 @@ Full Mac result: `manual-transfer-check/20261025T005443Z-92346`.
 One native pass, zero failures, zero skips. Peer data matched and cleanup
 was confirmed. Import, reviews, export and media recovery checks passed.
 The shared integration gate remains pending.
+
+## Integration artifacts, 2026-10-25
+
+Full gate `20261025T011047Z-854` was cancelled after six hidden Mac launches
+failed. It remains incomplete. Fresh standalone output passed those six routes;
+the retained Xcode-check output failed them. Normal Debug output also passed.
+Only the failed check's DerivedData was preserved and refreshed. The normal
+configuration sequence then passed all 44 hidden launches in
+`xcode-check/20261025T015551Z-1520`, without a production repair or changed limits.
+
+That check exposed a separate stale app-hosted test output. The focused canonical
+Unit then Snapshot sequence preserved and refreshed only DerivedData-tests.
+`focused-mac-apphost-sequence/20261025T024415Z-42334` passed 468 Unit tests,
+with four skips, and ran the Snapshot tests successfully. Snapshot finished
+with 73 passes, three failed suites and two skips. Its failures are obsolete or
+missing public fixture baselines and the credential test's missing Keychain
+grant under the ad-hoc test host. Those remain open; startup is repaired.
+The existing S1(f) known issue remains recorded in the Unit result.
