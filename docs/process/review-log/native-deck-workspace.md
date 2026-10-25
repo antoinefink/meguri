@@ -23,6 +23,20 @@ The existing sample overview is insufficient evidence for this layout.
 Lint `073708Z-38161`, privacy `073752Z-39875` and similarity
 `073820Z-41959` passed. Native drive `073750Z-39500` failed compilation:
 `HomeSidebarDecks.body` exceeded Swift's type-checking budget. No UI steps ran.
-The source is retained as WIP for a focused compiler repair.
-Independent source/visual review and the full integration gate are pending.
+The source was retained as WIP `9b74443e` for a focused compiler repair.
+Filtered fix `cleanroom/20261025T074220Z-46642` separates the row's due count
+and localized accessibility value into typed values. Independent source review
+found no P0–P2 in the final change.
+
+Review also found the explicit sidebar-style modifier unnecessary and in
+conflict with the outer flat-render style. Integration dropped that hunk,
+restoring SidebarView exactly to the starting source. Chrome is unchanged.
+Live navigation keeps automatic system styling; flat snapshots keep their
+existing inset style. The opaque deck-row background removal remains.
+
+Native drive `074404Z-48610` passed all 14 steps with no hierarchy issue.
+The public fixture shows system sidebar surfaces and an enabled Study action
+after selection at default and minimum sizes. Visual review found the count
+row spread across the readable width. Keep that layout finding open for a
+content-sized count grid before the full integration gate.
 Human visual and baseline approval remain pending.

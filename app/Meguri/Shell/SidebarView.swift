@@ -45,9 +45,6 @@ struct SidebarView: View {
                     .accessibilityIdentifier("shell.root.sidebarDecks")
             }
         }
-        #if os(macOS)
-        .listStyle(.sidebar)
-        #endif
         .sidebarColumnChrome()
         .navigationTitle(Text(verbatim: "Meguri"))
     }

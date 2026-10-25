@@ -283,6 +283,8 @@ public struct HomeSidebarDecks: View {
             ForEach(Self.flatten(collection.decks), id: \.id) { deck in
                 Group {
                     #if os(macOS)
+                    let dueCount: UInt32 = collection.deck(deck.id)?.counts.review ?? 0
+                    let dueValue: Text = Text("\(Text(dueCount, format: .number)) due", bundle: .module)
                     // Native compact navigation may truncate visually; help keeps
                     // the full path, and accessibility keeps the path and due count.
                     HStack {
@@ -296,7 +298,7 @@ public struct HomeSidebarDecks: View {
                     .help(Text(verbatim: deck.path))
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(Text(verbatim: deck.path))
-                    .accessibilityValue(Text("\(Text(collection.deck(deck.id)?.counts.review ?? 0, format: .number)) due", bundle: .module))
+                    .accessibilityValue(dueValue)
                     #else
                     VStack(alignment: .leading, spacing: Spacing.xxSmall) {
                         Text(verbatim: deck.path)
