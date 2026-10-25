@@ -26,6 +26,23 @@ private final class ExportAccessWitness: CollectionExportDestinationAccess {
     }
 }
 @Suite struct CollectionExportMappingTests {
+    @Test func sourceRefusalsSurviveTheExistingTypedFailureReceipt() {
+        let cases: [(MeguriCoreBindings.CoreError, BridgeError)] = [
+            (.ExportSourceChanged, .exportSourceChanged),
+            (.ExportSourceInvalid, .exportSourceInvalid),
+            (.ExportFormatLimit, .exportFormatLimit),
+            (.Cancelled, .cancelled),
+            (.InsufficientSpace(required: 20, available: 1), .insufficientSpace(required: 20, available: 1)),
+            (.StaleGeneration(planned: 1, current: 2), .staleGeneration(planned: 1, current: 2)),
+            (.InvalidArgument(message: "destination refused"), .invalidArgument("destination refused")),
+            (.Internal(message: "generation failure"), .internal("generation failure"))
+        ]
+        for (raw, expected) in cases {
+            let failure = CoreBridge.CollectionExportFailure(MeguriCoreBindings.CollectionExportFailure(
+                cause: raw, publicationUncertain: false, destination: nil))
+            #expect(failure.cause == expected && !failure.publicationUncertain && failure.destination == nil)
+        }
+    }
     @Test func boundedReceiptPreservesAdmissionAndSnapshotFacts() {
         let receipt = CoreBridge.CollectionExportMetadata(MeguriCoreBindings.CollectionExportMetadata(
             operationId: 42, sourceGeneration: 3, admissionSeq: 100, snapshotModifiedMs: 77,

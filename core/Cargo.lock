@@ -1739,6 +1739,7 @@ dependencies = [
 name = "meguri-package"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "meguri-engine",
  "meguri-model",
  "meguri-storage",

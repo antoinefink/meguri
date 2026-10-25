@@ -1,8 +1,23 @@
-import CoreBridge
+@testable import CoreBridge
 import Foundation
 import Testing
 import Synchronization
 @testable import AppModel
+
+private struct RefusingExportService: CollectionExportService {
+    let cause: BridgeError
+    var prepareReal = false
+    var uncertain = false
+    func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
+        if prepareReal { return try await CoreCollectionExportService().prepare(operation: operation, progress: progress) }
+        if uncertain { throw ExportDestinationCompletionUncertain() }
+        throw CollectionExportFailure(cause: cause, destination: URL(fileURLWithPath: "/synthetic/do-not-display"))
+    }
+    func save(_ artifact: ExportedCollection, to: URL, operation: CollectionExportOperation) async throws {
+        if uncertain { throw ExportDestinationCompletionUncertain() }
+        throw CollectionExportFailure(cause: cause, destination: to)
+    }
+}
 
 extension ReviewCollectionStartupTests {
     @Test func exportWithoutStudyAdmissionRetriesDestinationAndReimportsCapturedReview() async throws {
@@ -183,6 +198,58 @@ extension ReviewCollectionStartupTests {
             coordinator.retryCompletion(); await coordinator.waitForCompletion()
             await coordinator.discard(); _ = await owner.close(); throw error
         }
+    }
+    @Test func exportReportGivesBoundedSourceActionsAndPreservesOtherFailures() async throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? files.removeItem(at: root) }
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600)); configuration.timeZone = TimeZone(secondsFromGMT: 0)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        await owner.start()
+        let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
+        owner.entry.inspect(source); await owner.entry.waitForCompletion()
+        owner.entry.confirm(); await owner.entry.waitForCompletion()
+        try #require(owner.state == .ready)
+        let generic = "The collection could not be exported. Check available space and collection access, then try again. Unused prepared output from an earlier launch is recovered when you prepare again."
+        let cases: [(BridgeError, String)] = [
+            (.exportSourceChanged, "The media source changed during export. Start a fresh export after changes finish."),
+            (.exportSourceInvalid, "A media item is unsafe or unreadable. Correct its name, type or read access, then start a fresh export."),
+            (.exportFormatLimit, "The collection or media exceeds the package format limits. Reduce the size or number of media files, then start a fresh export."),
+            (.cancelled, generic), (.insufficientSpace(required: 20, available: 1), generic),
+            (.staleGeneration(planned: 1, current: 2), generic),
+            (.internal("private path /synthetic/do-not-display and OS diagnostic"), generic),
+            (.invalidArgument("destination diagnostic"), generic)
+        ]
+        for (cause, expected) in cases {
+            let coordinator = CollectionExportCoordinator(owner: owner, service: RefusingExportService(cause: cause))
+            coordinator.prepare(); await coordinator.waitForCompletion()
+            #expect(coordinator.stage == .failed && coordinator.message == expected)
+            #expect(coordinator.artifact == nil && !coordinator.publicationUncertain)
+        }
+        // Actual report() precedence: destination and uncertain publication stay
+        // actionable as destination problems even when a source cause is present.
+        for uncertain in [false, true] {
+            let coordinator = CollectionExportCoordinator(owner: owner, service: RefusingExportService(
+                cause: .exportSourceInvalid, prepareReal: true, uncertain: uncertain))
+            do {
+                coordinator.prepare(); await coordinator.waitForCompletion()
+                try #require(coordinator.stage == .ready)
+                coordinator.chooseDestination(); await coordinator.waitForCompletion()
+                coordinator.save(to: root.appending(path: "destination.colpkg")); await coordinator.waitForCompletion()
+                #expect(coordinator.stage == .failed && coordinator.artifact != nil)
+                #expect(coordinator.publicationUncertain == uncertain)
+                #expect(coordinator.message == (uncertain
+                    ? "The new file may already be saved. Check the destination before trying again. The completed export is retained."
+                    : "The file could not be saved. The completed export is retained; choose another destination and try again."))
+                await coordinator.discard()
+            } catch {
+                coordinator.nativeCancelled(); await coordinator.waitForCompletion()
+                await coordinator.discard(); _ = await owner.close(); throw error
+            }
+        }
+        #expect(await owner.close())
     }
     @Test func noCollectionExplainsExportWithoutStartingWork() async throws {
         var configuration = LaunchConfiguration()

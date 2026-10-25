@@ -13,6 +13,12 @@ use crate::undo::reasons::DisabledReason;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineError {
+    /// The file export must restart against fresh source authority.
+    ExportSourceChanged,
+    /// Correct an unsafe or unreadable media item before retrying.
+    ExportSourceInvalid,
+    /// The collection or media exceeds the file format's supported limits.
+    ExportFormatLimit,
     /// Normal sync aborts its merge with the original typed preparation fault.
     SyncNote(meguri_model::note::SyncNoteFault),
     DeckOptionsInvalid(Vec<meguri_sched::options::Issue>),
@@ -155,6 +161,9 @@ impl From<OpenError> for EngineError {
 impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            EngineError::ExportSourceChanged => f.write_str("export source changed"),
+            EngineError::ExportSourceInvalid => f.write_str("export source item refused"),
+            EngineError::ExportFormatLimit => f.write_str("export format limit"),
             EngineError::SyncNote(_) => f.write_str("incoming collection contract"),
             EngineError::DeckOptionsInvalid(issues) => write!(f, "invalid deck options: {issues:?}"),
             EngineError::SchedOp(reason) => write!(f, "scheduling operation refused: {reason:?}"),

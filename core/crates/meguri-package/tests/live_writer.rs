@@ -420,3 +420,728 @@ fn live_writer_requires_maintenance_outside_an_existing_read_transaction_before_
     drop(reader);
     collection.close().unwrap();
 }
+
+// E7/P15 has an explicit opt-in seam. All tests above keep exercising P11.
+fn media_write(
+    reader: &Reader,
+    destination: &Path,
+    directory: &Path,
+    space: &dyn SpaceProvider,
+    cancel: &(dyn Fn() -> bool + Sync),
+) -> Result<meguri_package::MediaCollectionExportWritten, Error> {
+    let context = CollectionPackageWriteContext {
+        collection_directory: directory,
+        purpose: Purpose::Export,
+        finalisation: Finalisation::Replace,
+        clock: &clock(NOW),
+        random: &SeededRandom::new(7),
+        space,
+        is_cancelled: cancel,
+    };
+    let plan = meguri_package::preflight_media_collection_export_from_live(reader, destination, &context)?;
+    meguri_package::write_media_collection_export_from_live(reader, destination, &context, plan)
+}
+fn sha1_file(path: &Path) -> (u64, [u8; 20]) {
+    use sha1::{Digest, Sha1};
+    let mut input = File::open(path).unwrap();
+    let mut hash = Sha1::new();
+    let mut length = 0;
+    let mut chunk = [0; 64 * 1024];
+    loop {
+        let n = input.read(&mut chunk).unwrap();
+        if n == 0 {
+            break;
+        }
+        hash.update(&chunk[..n]);
+        length += n as u64;
+    }
+    (length, hash.finalize().into())
+}
+// Independent decoder for the writer's canonical protobuf subset. It deliberately
+// does not call the production map parser, package reader, or publication verifier.
+fn map_number(bytes: &mut &[u8]) -> u64 {
+    let mut value = 0;
+    for shift in (0..70).step_by(7) {
+        let b = bytes[0];
+        *bytes = &bytes[1..];
+        value |= u64::from(b & 127) << shift;
+        if b < 128 {
+            return value;
+        }
+    }
+    panic!("bad generated varint")
+}
+fn map_bytes<'a>(bytes: &mut &'a [u8]) -> &'a [u8] {
+    let n = map_number(bytes) as usize;
+    let (payload, rest) = bytes.split_at(n);
+    *bytes = rest;
+    payload
+}
+fn decoded_map(mut bytes: &[u8]) -> Vec<(String, u64, [u8; 20])> {
+    let mut records = Vec::new();
+    while !bytes.is_empty() {
+        assert_eq!(map_number(&mut bytes), 10);
+        let mut record = map_bytes(&mut bytes);
+        assert_eq!(map_number(&mut record), 10);
+        let name = String::from_utf8(map_bytes(&mut record).to_vec()).unwrap();
+        assert_eq!(map_number(&mut record), 16);
+        let length = map_number(&mut record);
+        assert_eq!(map_number(&mut record), 26);
+        let hash = map_bytes(&mut record).try_into().unwrap();
+        assert!(record.is_empty(), "no field 255 or invented metadata");
+        records.push((name, length, hash));
+    }
+    records
+}
+// Capture the real generated journal, including presence/absence and every
+// SQLite sidecar. Expected bytes come from the source before any export.
+fn media_journal_bytes(directory: &Path) -> Vec<(String, Option<Vec<u8>>)> {
+    [
+        "meguri-media.db",
+        "meguri-media.db-wal",
+        "meguri-media.db-shm",
+        "meguri-media.db-journal",
+    ]
+    .into_iter()
+    .map(|name| {
+        let bytes = match fs::read(directory.join(name)) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => panic!("generated journal read failed: {error}"),
+        };
+        (name.to_owned(), bytes)
+    })
+    .collect()
+}
+#[test]
+fn user_export_includes_direct_unregistered_empty_large_unicode_and_case_variant_media() {
+    use sha1::{Digest, Sha1};
+    let (directory, _, collection) = live();
+    let media = directory.path().join("collection.media");
+    fs::create_dir(&media).unwrap();
+    let note = add_note(&collection, NOW, "<img src=\"referenced.png\">");
+    for (name, bytes) in [
+        ("referenced.png", b"referenced".as_slice()),
+        ("unused.bin", b"unused"),
+        ("_static.css", b"static"),
+        ("empty", b""),
+        ("日本.mp3", b"Unicode"),
+        ("Case.png", b"upper"),
+        ("case.png", b"lower"),
+    ] {
+        fs::write(media.join(name), bytes).unwrap();
+    }
+    // This part requires a case-sensitive volume; Apple test infrastructure may
+    // provide one, otherwise test the rest without pretending two entries exist.
+    let case_distinct = fs::read(media.join("Case.png")).unwrap() == b"upper";
+    let large = media.join("large.bin");
+    File::create(&large).unwrap().set_len(104_857_601).unwrap();
+    fs::write(media.join("Thumbs.db"), b"OS metadata").unwrap();
+    fs::create_dir(media.join("child")).unwrap();
+    fs::write(media.join("child/not-exported"), b"no recursion").unwrap();
+    let store = meguri_storage::media::MediaStore::open(
+        &directory.path().join("collection.anki2"),
+        std::sync::Arc::new(clock(NOW)),
+    )
+    .unwrap();
+    assert_eq!(
+        store
+            .add("journal-pending.png", b"generated pending attachment")
+            .unwrap(),
+        "journal-pending.png"
+    );
+    let pending = store.pending().unwrap();
+    assert!(
+        pending
+            .iter()
+            .any(|item| item.name == "journal-pending.png" && item.sha1.is_some())
+    );
+    let counter = store.change_counter().unwrap();
+    assert!(counter > 0);
+    let diagnostics = store.diagnostics();
+    let journal = media_journal_bytes(directory.path());
+    let names = listing(&media);
+    let mut expected: Vec<_> = names
+        .iter()
+        .filter_map(|name| {
+            let path = media.join(name);
+            (path.is_file() && name != "Thumbs.db").then(|| {
+                let (length, hash) = sha1_file(&path);
+                (name.to_str().unwrap().to_owned(), length, hash)
+            })
+        })
+        .collect();
+    expected.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+    if case_distinct {
+        assert!(expected.iter().any(|e| e.0 == "Case.png") && expected.iter().any(|e| e.0 == "case.png"));
+    }
+    let source = source_bytes(directory.path());
+    let maintenance = collection.open_reader(ReaderRole::Maintenance).unwrap();
+    let output = directory.path().join("user.colpkg");
+    let written = media_write(&maintenance, &output, directory.path(), &StatvfsSpace, &|| false).unwrap();
+    written.source_validation.validate(&|| false).unwrap();
+    let mut zip = zip::ZipArchive::new(File::open(&output).unwrap()).unwrap();
+    assert_eq!(zip.len(), expected.len() + 4);
+    let map = zstd::stream::decode_all(zip.by_name("media").unwrap()).unwrap();
+    assert_eq!(decoded_map(&map), expected);
+    for (index, (_, length, hash)) in expected.iter().enumerate() {
+        let entry = zip.by_index(index + 3).unwrap();
+        assert_eq!(entry.name().unwrap().as_ref(), index.to_string());
+        assert_eq!(entry.compression(), zip::CompressionMethod::Stored);
+        let mut decoder = zstd::stream::read::Decoder::new(entry).unwrap();
+        let mut digest = Sha1::new();
+        let mut size = 0;
+        let mut chunk = [0; 64 * 1024];
+        loop {
+            let n = decoder.read(&mut chunk).unwrap();
+            if n == 0 {
+                break;
+            }
+            digest.update(&chunk[..n]);
+            size += n as u64;
+        }
+        assert_eq!(size, *length);
+        let actual: [u8; 20] = digest.finalize().into();
+        assert_eq!(actual, *hash);
+    }
+    let captured = directory.path().join("decoded-snapshot.anki2");
+    let mut file = File::create(&captured).unwrap();
+    std::io::copy(
+        &mut zstd::stream::read::Decoder::new(zip.by_name("collection.anki21b").unwrap()).unwrap(),
+        &mut file,
+    )
+    .unwrap();
+    drop(file);
+    let saved = open_collection(&captured, &OpenOptions::new(&clock(NOW), &SeededRandom::new(7))).unwrap();
+    assert!(saved.writer().note(note).unwrap().is_some());
+    assert_eq!(
+        saved.writer().col().unwrap().modified,
+        written.written.snapshot_modified
+    );
+    drop(saved);
+    drop(zip);
+    let inspection_context = meguri_package::CollectionPackageInspectContext {
+        collection_directory: directory.path(),
+        live_collection_size: 0,
+        reserved_space_bytes: 0,
+        clock: &clock(NOW),
+        random: &SeededRandom::new(7),
+        space: &StatvfsSpace,
+        is_cancelled: &|| false,
+    };
+    assert!(matches!(
+        meguri_package::inspect_collection_package(&output, &inspection_context),
+        Err(Error::UnsupportedMedia)
+    ));
+    assert_preserved(&source);
+    assert_eq!(listing(&media), names);
+    for (name, length, hash) in &expected {
+        assert_eq!(sha1_file(&media.join(name)), (*length, *hash));
+    }
+    assert_eq!(media_journal_bytes(directory.path()), journal);
+    assert_eq!(store.pending().unwrap(), pending);
+    assert_eq!(store.change_counter().unwrap(), counter);
+    assert_eq!(store.diagnostics(), diagnostics);
+    // The same real journal and independent pending facts must survive refusal.
+    fs::write(media.join(":.DS_Store"), b"unsafe colon name").unwrap();
+    let refused_names = listing(&media);
+    let refused_output = directory.path().join("refused.colpkg");
+    assert!(matches!(
+        media_write(&maintenance, &refused_output, directory.path(), &StatvfsSpace, &|| {
+            false
+        }),
+        Err(Error::ExportSourceInvalid { .. })
+    ));
+    assert!(!refused_output.exists());
+    assert_eq!(listing(&media), refused_names);
+    for (name, length, hash) in &expected {
+        assert_eq!(sha1_file(&media.join(name)), (*length, *hash));
+    }
+    assert_preserved(&source);
+    assert_eq!(media_journal_bytes(directory.path()), journal);
+    assert_eq!(store.pending().unwrap(), pending);
+    assert_eq!(store.change_counter().unwrap(), counter);
+    assert_eq!(store.diagnostics(), diagnostics);
+}
+
+static MEDIA_TEST_SERIAL: Mutex<()> = Mutex::new(());
+thread_local! { static MEDIA_ACTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) }; }
+fn media_action() {
+    MEDIA_ACTION.with(|action| {
+        if let Some(action) = action.borrow_mut().take() {
+            action();
+        }
+    });
+}
+struct MediaHook(&'static str);
+impl Drop for MediaHook {
+    fn drop(&mut self) {
+        meguri_model::faultpoint::disarm(self.0);
+        MEDIA_ACTION.with(|a| {
+            a.borrow_mut().take();
+        });
+    }
+}
+fn media_hook(point: &'static str, action: impl FnOnce() + 'static) -> MediaHook {
+    MEDIA_ACTION.with(|a| *a.borrow_mut() = Some(Box::new(action)));
+    meguri_model::faultpoint::arm(point, meguri_model::faultpoint::Fault::Callback(media_action));
+    MediaHook(point)
+}
+#[test]
+fn media_capture_rejects_same_length_rewrite_replacement_root_and_inventory_changes() {
+    let _serial = MEDIA_TEST_SERIAL.lock().unwrap();
+    for (point, change) in [
+        ("package.export.capture_chunk", 0),
+        ("package.export.capture_chunk", 1),
+        ("package.export.capture_chunk", 2),
+        ("package.export.before_verification", 3),
+        ("package.export.before_verification", 4),
+        ("package.export.before_verification", 5),
+    ] {
+        let (directory, _, collection) = live();
+        let media = directory.path().join("collection.media");
+        fs::create_dir(&media).unwrap();
+        let path = media.join("a");
+        fs::write(&path, [1; 128 * 1024]).unwrap();
+        let reader = collection.open_reader(ReaderRole::Maintenance).unwrap();
+        let destination = directory.path().join("user.colpkg");
+        fs::write(&destination, SENTINEL).unwrap();
+        let mutate = path.clone();
+        let root = media.clone();
+        let _hook = media_hook(point, move || match change {
+            0 => fs::write(mutate, [2; 128 * 1024]).unwrap(),
+            1 => {
+                fs::rename(&mutate, root.join("old")).unwrap();
+                fs::write(mutate, [1; 128 * 1024]).unwrap();
+            }
+            2 => {
+                fs::rename(&root, root.with_extension("old")).unwrap();
+                fs::create_dir(root).unwrap();
+            }
+            3 => fs::write(root.join("added"), b"new").unwrap(),
+            4 => fs::remove_file(mutate).unwrap(),
+            _ => fs::rename(mutate, root.join("renamed")).unwrap(),
+        });
+        assert!(media_write(&reader, &destination, directory.path(), &StatvfsSpace, &|| false).is_err());
+        assert_eq!(fs::read(&destination).unwrap(), SENTINEL);
+        assert!(
+            !listing(directory.path())
+                .iter()
+                .any(|n| n.to_string_lossy().starts_with(".meguri-"))
+        );
+    }
+}
+#[test]
+fn source_proof_detects_late_changes_and_initially_absent_root_becoming_present() {
+    for present in [false, true] {
+        let (directory, _, collection) = live();
+        let media = directory.path().join("collection.media");
+        if present {
+            fs::create_dir(&media).unwrap();
+            fs::write(media.join("a"), b"before").unwrap();
+        }
+        let reader = collection.open_reader(ReaderRole::Maintenance).unwrap();
+        let written = media_write(
+            &reader,
+            &directory.path().join("out"),
+            directory.path(),
+            &StatvfsSpace,
+            &|| false,
+        )
+        .unwrap();
+        if present {
+            fs::write(media.join("a"), b"AFTER!").unwrap();
+        } else {
+            fs::create_dir(&media).unwrap();
+        }
+        assert!(written.source_validation.validate(&|| false).is_err());
+    }
+}
+#[test]
+fn media_preflight_refuses_links_unsafe_names_invalid_utf8_and_sparse_uint32_overflow_without_writes() {
+    use std::os::unix::{ffi::OsStrExt, fs::symlink};
+    for case in 0..10 {
+        let (directory, source, collection) = live();
+        let media = directory.path().join("collection.media");
+        fs::create_dir(&media).unwrap();
+        match case {
+            0 => symlink(&source, media.join("link")).unwrap(),
+            1 => fs::hard_link(&source, media.join("alias")).unwrap(),
+            2 => fs::write(media.join("con.jpg"), b"unsafe").unwrap(),
+            3 => fs::write(media.join(std::ffi::OsStr::from_bytes(b"bad\xff")), b"bad").unwrap(),
+            4 => {
+                File::create(media.join("oversized"))
+                    .unwrap()
+                    .set_len(u64::from(u32::MAX) + 1)
+                    .unwrap();
+            }
+            5 => {
+                fs::remove_dir(&media).unwrap();
+                symlink(directory.path(), &media).unwrap();
+            }
+            6 => {
+                fs::remove_dir(&media).unwrap();
+                fs::write(&media, b"not a directory").unwrap();
+            }
+            7 => {
+                let wal = directory.path().join("collection.anki2-wal");
+                fs::hard_link(wal, media.join("aux-alias")).unwrap();
+            }
+            8 => fs::write(media.join(":.DS_Store"), b"unsafe colon name").unwrap(),
+            _ => fs::write(media.join(":xds_store"), b"unsafe colon name").unwrap(),
+        }
+        let before = listing(directory.path());
+        let reader = collection.open_reader(ReaderRole::Maintenance).unwrap();
+        let output = directory.path().join("out");
+        assert!(media_write(&reader, &output, directory.path(), &StatvfsSpace, &|| false).is_err());
+        assert_eq!(listing(directory.path()), before);
+        assert!(!output.exists());
+    }
+}
+#[test]
+fn existing_internal_staging_and_output_aliases_refuse_without_mutating_them() {
+    use std::os::unix::fs::symlink;
+    for case in 0..5 {
+        let (directory, _, collection) = live();
+        let media = directory.path().join("collection.media");
+        fs::create_dir(&media).unwrap();
+        let stage = directory.path().join(".meguri-stage-existing");
+        fs::create_dir(&stage).unwrap();
+        let snapshot = stage.join("snapshot.anki2");
+        fs::write(&snapshot, b"existing unpublished snapshot").unwrap();
+        let output = directory.path().join("out.colpkg");
+        match case {
+            0 => fs::hard_link(&snapshot, media.join("safe-snapshot.bin")).unwrap(),
+            1 => {
+                fs::write(&output, b"existing output").unwrap();
+                fs::hard_link(&output, media.join("safe-output.bin")).unwrap();
+            }
+            2 => {
+                fs::rename(&stage, directory.path().join("foreign")).unwrap();
+                symlink(directory.path().join("foreign"), &stage).unwrap();
+            }
+            3 => {
+                fs::remove_file(&snapshot).unwrap();
+                symlink(directory.path().join("collection.anki2"), &snapshot).unwrap();
+            }
+            _ => {
+                let temporary = directory.path().join(".meguri-tmp-export-existing");
+                fs::write(&temporary, b"unpublished output").unwrap();
+                fs::hard_link(temporary, media.join("safe-temp.bin")).unwrap();
+            }
+        }
+        let root_names = listing(directory.path());
+        let media_names = listing(&media);
+        let reader = collection.open_reader(ReaderRole::Maintenance).unwrap();
+        assert!(matches!(
+            media_write(&reader, &output, directory.path(), &StatvfsSpace, &|| false),
+            Err(Error::ExportSourceInvalid { .. })
+        ));
+        assert_eq!(listing(directory.path()), root_names);
+        assert_eq!(listing(&media), media_names);
+        if case != 2 && case != 3 {
+            assert_eq!(fs::read(&snapshot).unwrap(), b"existing unpublished snapshot");
+        }
+        if case == 1 {
+            assert_eq!(fs::read(&output).unwrap(), b"existing output");
+        }
+        if case == 2 {
+            assert!(fs::symlink_metadata(stage).unwrap().file_type().is_symlink());
+        }
+        if case == 3 {
+            assert!(fs::symlink_metadata(snapshot).unwrap().file_type().is_symlink());
+        }
+    }
+}
+#[test]
+fn pending_media_namespace_aliases_refuse_before_export_writes() {
+    use std::os::unix::fs::symlink;
+    for case in 0..4 {
+        let (directory, _, collection) = live();
+        let media = directory.path().join("collection.media");
+        let pending = directory.path().join("media.staging");
+        fs::create_dir(&media).unwrap();
+        fs::create_dir(&pending).unwrap();
+        let staged = pending.join("pending-file");
+        fs::write(&staged, b"pending operation bytes").unwrap();
+        fs::write(media.join("ordinary.bin"), b"live media bytes").unwrap();
+        match case {
+            0 => fs::hard_link(&staged, media.join("safe-pending.bin")).unwrap(),
+            1 => {
+                fs::rename(&pending, directory.path().join("retained-pending")).unwrap();
+                symlink(directory.path().join("retained-pending"), &pending).unwrap();
+            }
+            2 => {
+                fs::rename(&pending, directory.path().join("retained-pending")).unwrap();
+                fs::write(&pending, b"occupied namespace").unwrap();
+            }
+            _ => symlink(media.join("ordinary.bin"), pending.join("linked-file")).unwrap(),
+        }
+        let root_names = listing(directory.path());
+        let media_names = listing(&media);
+        let retained = if case == 1 || case == 2 {
+            directory.path().join("retained-pending")
+        } else {
+            pending.clone()
+        };
+        let pending_names = listing(&retained);
+        let original_files = source_bytes(directory.path());
+        let reader = collection.open_reader(ReaderRole::Maintenance).unwrap();
+        let destination = directory.path().join("out.colpkg");
+        assert!(matches!(
+            media_write(&reader, &destination, directory.path(), &StatvfsSpace, &|| false),
+            Err(Error::ExportSourceInvalid { .. })
+        ));
+        assert!(!destination.exists());
+        assert_eq!(listing(directory.path()), root_names);
+        assert_eq!(listing(&media), media_names);
+        assert_eq!(listing(&retained), pending_names);
+        assert_eq!(
+            fs::read(retained.join("pending-file")).unwrap(),
+            b"pending operation bytes"
+        );
+        assert_eq!(fs::read(media.join("ordinary.bin")).unwrap(), b"live media bytes");
+        if case == 0 {
+            assert_eq!(
+                fs::read(media.join("safe-pending.bin")).unwrap(),
+                b"pending operation bytes"
+            );
+        }
+        if case == 1 {
+            assert!(fs::symlink_metadata(&pending).unwrap().file_type().is_symlink());
+        }
+        if case == 2 {
+            assert_eq!(fs::read(&pending).unwrap(), b"occupied namespace");
+        }
+        if case == 3 {
+            assert!(
+                fs::symlink_metadata(pending.join("linked-file"))
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
+        }
+        assert_preserved(&original_files);
+    }
+}
+#[test]
+fn ignored_looking_symlinks_and_nonregular_entries_still_refuse() {
+    use std::{
+        ffi::CString,
+        os::unix::{ffi::OsStrExt, fs::symlink},
+    };
+    for link in [false, true] {
+        let (directory, source, collection) = live();
+        let media = directory.path().join("collection.media");
+        fs::create_dir(&media).unwrap();
+        let path = media.join(".DS_Store");
+        if link {
+            symlink(&source, &path).unwrap();
+        } else {
+            let name = CString::new(path.as_os_str().as_bytes()).unwrap();
+            // SAFETY: terminated path and fixed permissions; no pointer retained.
+            assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        }
+        let reader = collection.open_reader(ReaderRole::Maintenance).unwrap();
+        assert!(matches!(
+            media_write(
+                &reader,
+                &directory.path().join("out"),
+                directory.path(),
+                &StatvfsSpace,
+                &|| false
+            ),
+            Err(Error::ExportSourceInvalid { .. })
+        ));
+        assert!(fs::symlink_metadata(&path).is_ok());
+    }
+}
+#[test]
+#[cfg(not(target_vendor = "apple"))]
+fn non_apple_export_refuses_non_nfc_without_renaming() {
+    let (directory, _, collection) = live();
+    let media = directory.path().join("collection.media");
+    fs::create_dir(&media).unwrap();
+    fs::write(media.join("e\u{301}.png"), b"decomposed").unwrap();
+    let before = listing(&media);
+    let reader = collection.open_reader(ReaderRole::Maintenance).unwrap();
+    assert!(
+        media_write(
+            &reader,
+            &directory.path().join("out"),
+            directory.path(),
+            &StatvfsSpace,
+            &|| false
+        )
+        .is_err()
+    );
+    assert_eq!(listing(&media), before);
+}
+#[test]
+fn media_preflight_queries_shared_device_for_combined_concurrent_cost_before_writes() {
+    struct SharedVolume {
+        root: PathBuf,
+        queries: Mutex<Vec<PathBuf>>,
+    }
+    impl SpaceProvider for SharedVolume {
+        fn available_bytes(&self, requested: &Path) -> Result<u64, StorageError> {
+            let names = listing(&self.root);
+            assert!(!self.root.join("out").exists());
+            assert!(names.iter().all(|name| !name.to_string_lossy().starts_with(".meguri-")));
+            self.queries.lock().unwrap().push(requested.to_path_buf());
+            Ok(12 * 1024 * 1024)
+        }
+    }
+
+    let (fixture, _, opened) = live();
+    let media_folder = fixture.path().join("collection.media");
+    fs::create_dir(&media_folder).unwrap();
+    let source_file = File::create(media_folder.join("file")).unwrap();
+    source_file.set_len(8 * 1024 * 1024).unwrap();
+    let volume = SharedVolume {
+        root: fixture.path().to_path_buf(),
+        queries: Mutex::new(Vec::new()),
+    };
+    let maintenance = opened.open_reader(ReaderRole::Maintenance).unwrap();
+    let result = media_write(
+        &maintenance,
+        &fixture.path().join("out"),
+        fixture.path(),
+        &volume,
+        &|| false,
+    );
+    // The shared volume must fit the capture and archive at the same time.
+    match result {
+        Err(Error::InsufficientSpace { needed, .. }) => assert!(needed > 16 * 1024 * 1024),
+        _ => panic!("shared-volume preflight must report insufficient capacity"),
+    }
+    assert_eq!(volume.queries.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn cancellation_in_media_capture_compression_and_verification_preserves_destination() {
+    let _serial = MEDIA_TEST_SERIAL.lock().unwrap();
+    use std::sync::{Arc, atomic::AtomicBool};
+    for point in [
+        "package.export.capture_chunk",
+        "package.export.compress_chunk",
+        "package.export.verify_chunk",
+    ] {
+        let (directory, _, collection) = live();
+        let media = directory.path().join("collection.media");
+        fs::create_dir(&media).unwrap();
+        fs::write(media.join("a"), [1; 128 * 1024]).unwrap();
+        let before = sha1_file(&media.join("a"));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let token = cancelled.clone();
+        let _hook = media_hook(point, move || {
+            token.store(true, Ordering::SeqCst);
+        });
+        let reader = collection.open_reader(ReaderRole::Maintenance).unwrap();
+        let destination = directory.path().join("out");
+        fs::write(&destination, SENTINEL).unwrap();
+        assert!(matches!(
+            media_write(&reader, &destination, directory.path(), &StatvfsSpace, &|| cancelled
+                .load(Ordering::SeqCst)),
+            Err(Error::Cancelled)
+        ));
+        assert_eq!(fs::read(&destination).unwrap(), SENTINEL);
+        assert_eq!(sha1_file(&media.join("a")), before);
+        assert!(
+            !listing(directory.path())
+                .iter()
+                .any(|n| n.to_string_lossy().starts_with(".meguri-"))
+        );
+    }
+}
+
+#[test]
+fn reviews_can_commit_while_media_copy_and_compression_are_held() {
+    let _serial = MEDIA_TEST_SERIAL.lock().unwrap();
+    for point in ["package.export.capture_chunk", "package.export.compress_chunk"] {
+        let (directory, _, collection) = live();
+        let media = directory.path().join("collection.media");
+        fs::create_dir(&media).unwrap();
+        fs::write(media.join("a"), [1; 128 * 1024]).unwrap();
+        let reader = collection.open_reader(ReaderRole::Maintenance).unwrap();
+        let (entered, wait) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let output = directory.path().join("out");
+        std::thread::scope(|scope| {
+            let root = directory.path();
+            let task = scope.spawn(move || {
+                let _hook = media_hook(point, move || {
+                    entered.send(()).unwrap();
+                    released.recv_timeout(Duration::from_secs(30)).unwrap();
+                });
+                media_write(&reader, &output, root, &StatvfsSpace, &|| false).unwrap()
+            });
+            wait.recv_timeout(Duration::from_secs(30)).unwrap();
+            // A real storage transaction on the original writer completes
+            // before the held media work is allowed to proceed.
+            let note = add_note(&collection, NOW + 1000, "commit while media is held");
+            assert!(collection.writer().note(note).unwrap().is_some());
+            release.send(()).unwrap();
+            task.join().unwrap();
+        });
+    }
+}
+
+#[test]
+#[cfg(target_vendor = "apple")]
+fn apple_export_normalizes_only_archive_name_and_refuses_representable_nfc_collisions() {
+    let (directory, _, collection) = live();
+    let media = directory.path().join("collection.media");
+    fs::create_dir(&media).unwrap();
+    let decomposed = "e\u{301}.png";
+    fs::write(media.join(decomposed), b"bytes").unwrap();
+    let original = listing(&media);
+    let reader = collection.open_reader(ReaderRole::Maintenance).unwrap();
+    let path = directory.path().join("out");
+    media_write(&reader, &path, directory.path(), &StatvfsSpace, &|| false).unwrap();
+    let mut zip = zip::ZipArchive::new(File::open(&path).unwrap()).unwrap();
+    let map = decoded_map(&zstd::stream::decode_all(zip.by_name("media").unwrap()).unwrap());
+    assert_eq!(map[0].0, "é.png");
+    assert_eq!(listing(&media), original);
+    drop(zip);
+    // Normalization-insensitive Apple volumes cannot represent this collision.
+    fs::write(media.join("é.png"), b"other").unwrap();
+    if listing(&media).len() == 2 {
+        assert!(media_write(&reader, &path, directory.path(), &StatvfsSpace, &|| false).is_err());
+    }
+}
+
+#[test]
+fn media_disk_exhaustion_is_disk_full_with_destination_and_source_preserved() {
+    let _serial = MEDIA_TEST_SERIAL.lock().unwrap();
+    for point in [
+        "package.export.capture_chunk",
+        "package.export.compress_chunk",
+        "package.export.verify_chunk",
+    ] {
+        let (directory, _, collection) = live();
+        let media = directory.path().join("collection.media");
+        fs::create_dir(&media).unwrap();
+        fs::write(media.join("a"), [1; 128 * 1024]).unwrap();
+        let before = sha1_file(&media.join("a"));
+        let reader = collection.open_reader(ReaderRole::Maintenance).unwrap();
+        let destination = directory.path().join("out");
+        fs::write(&destination, SENTINEL).unwrap();
+        meguri_model::faultpoint::arm(
+            point,
+            meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::StorageFull),
+        );
+        let _hook = MediaHook(point);
+        assert!(matches!(
+            media_write(&reader, &destination, directory.path(), &StatvfsSpace, &|| false),
+            Err(Error::DiskFull)
+        ));
+        assert_eq!(fs::read(&destination).unwrap(), SENTINEL);
+        assert_eq!(sha1_file(&media.join("a")), before);
+        assert!(
+            !listing(directory.path())
+                .iter()
+                .any(|n| n.to_string_lossy().starts_with(".meguri-"))
+        );
+    }
+}

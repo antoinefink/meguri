@@ -363,7 +363,11 @@ fn prepare_export(
     let output = host.write_collection_export(&collection, cancel, progress)?;
     // Writer's Maintenance lease is gone before hashing and Ready.
     progress.set_phase(ProgressPhase::Named("Verifying completed export"));
-    let digest = digest(&output.path, cancel);
+    let digest = digest(&output.path, cancel).and_then(|identity| {
+        meguri_model::faultpoint!("ffi.collection_export.before_ready_sources").map_err(core)?;
+        output.validate_sources(cancel)?;
+        Ok(identity)
+    });
     let (byte_length, sha256) = match digest {
         Ok(value) if collection.is_current() => value,
         other => {
@@ -690,6 +694,87 @@ mod tests {
         if let Some(token) = CANCEL_AT_PUBLICATION.lock().unwrap().take() {
             token.cancel();
         }
+    }
+    static CHANGE_MEDIA_BEFORE_READY: Mutex<Option<PathBuf>> = Mutex::new(None);
+    fn change_media_before_ready() {
+        if let Some(path) = CHANGE_MEDIA_BEFORE_READY.lock().unwrap().take() {
+            fs::write(path, b"AFTER!").unwrap();
+        }
+    }
+    #[test]
+    fn source_changes_after_final_package_hash_never_deliver_ready() {
+        let _serial = SERIAL.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let (host, config) = host(root.path());
+        let media = config.collection_directory.join("collection.media");
+        // Host open may already own a media root; creating it here is test setup.
+        fs::create_dir_all(&media).unwrap();
+        let file = media.join("unregistered.bin");
+        fs::write(&file, b"before").unwrap();
+        *CHANGE_MEDIA_BEFORE_READY.lock().unwrap() = Some(file.clone());
+        let point = "ffi.collection_export.before_ready_sources";
+        meguri_model::faultpoint::arm(
+            point,
+            meguri_model::faultpoint::Fault::Callback(change_media_before_ready),
+        );
+        let c = host.collection().unwrap();
+        let generation = c.generation().0;
+        let seq = c.last_seq().0;
+        let source = c.path().to_owned();
+        let result = prepare_export(
+            &host,
+            c,
+            host.engine().clone(),
+            source,
+            generation,
+            seq,
+            Flow::reserve().unwrap(),
+            41,
+            &CancelToken::new(),
+            &ProgressSink::new(),
+        );
+        meguri_model::faultpoint::disarm(point);
+        assert!(result.is_err());
+        assert_eq!(fs::read(file).unwrap(), b"AFTER!");
+        assert!(!root.path().join("CollectionExports/owned").exists());
+        let artifact = prepare(&host);
+        drain_cleanup(&artifact);
+        host.close().unwrap();
+    }
+    #[test]
+    fn pending_media_hardlink_never_produces_a_ready_artifact() {
+        let _serial = SERIAL.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let (host, config) = host(root.path());
+        let pending = config.collection_directory.join("media.staging");
+        let media = config.collection_directory.join("collection.media");
+        fs::create_dir_all(&pending).unwrap();
+        fs::create_dir_all(&media).unwrap();
+        let staged_file = pending.join("pending-file");
+        let media_file = media.join("safe-pending.bin");
+        fs::write(&staged_file, b"pending operation bytes").unwrap();
+        fs::hard_link(&staged_file, &media_file).unwrap();
+        let collection = host.collection().unwrap();
+        let generation = collection.generation().0;
+        let sequence = collection.last_seq().0;
+        let source = collection.path().to_owned();
+        let result = prepare_export(
+            &host,
+            collection,
+            host.engine().clone(),
+            source,
+            generation,
+            sequence,
+            Flow::reserve().unwrap(),
+            42,
+            &CancelToken::new(),
+            &ProgressSink::new(),
+        );
+        assert!(matches!(result, Err(EngineError::ExportSourceInvalid)));
+        assert!(!root.path().join("CollectionExports").exists());
+        assert_eq!(fs::read(&staged_file).unwrap(), b"pending operation bytes");
+        assert_eq!(fs::read(&media_file).unwrap(), b"pending operation bytes");
+        host.close().unwrap();
     }
     fn host(root: &Path) -> (CoreHost, HostConfig) {
         let config = HostConfig::new(
@@ -1422,5 +1507,34 @@ mod tests {
             copy_bounded(&mut std::io::repeat(0), &mut std::io::sink(), size, &cancel),
             Err(EngineError::Cancelled)
         ));
+    }
+}
+
+#[cfg(test)]
+mod source_refusal_projection_tests {
+    use super::*;
+    #[test]
+    fn export_failure_preserves_source_refusals_and_other_causes() {
+        for (engine, expected) in [
+            (EngineError::ExportSourceChanged, CoreError::ExportSourceChanged),
+            (EngineError::ExportSourceInvalid, CoreError::ExportSourceInvalid),
+            (EngineError::ExportFormatLimit, CoreError::ExportFormatLimit),
+            (EngineError::Cancelled, CoreError::Cancelled),
+            (
+                EngineError::Storage(StorageError::InsufficientSpace {
+                    required: 20,
+                    available: 1,
+                }),
+                CoreError::InsufficientSpace {
+                    required: 20,
+                    available: 1,
+                },
+            ),
+        ] {
+            let failure = CollectionExportFailure::from(engine.clone());
+            assert_eq!(failure.cause, expected);
+            assert_eq!(EngineError::from(failure.cause), engine);
+            assert!(!failure.publication_uncertain && failure.destination.is_none());
+        }
     }
 }

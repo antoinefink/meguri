@@ -1496,3 +1496,17 @@ that forward port under session `s-20261025T134357Z-235af9a2`.
 E7/P15 apply. New checks and native UI work remain open.
 Media file import remains unsupported until its separate
 safe install path is implemented. No Unit or milestone is accepted here.
+
+Backend resume `221452Z-27924` preserves the retained implementation and
+merges only the two current-source conflicts. Source review round one has
+no P0–P2 findings. Core test `221915Z-30356` passes 89 selected checks.
+Private `221918Z-30616` retains the two known reader regions. Lint
+`222223Z-31842` finds two permission literals in the export tests and the
+three previously recorded testkit failures from the parked sync work.
+
+Fixer `222559Z-33439` changes only three files from that input. Round two
+review has no P0–P2 findings. Core test `222957Z-35781` passes all 89 selected
+checks. Private `222955Z-35522` and similarity `223058Z-36278` pass. The
+source check input, exact repair delta and receipts are retained under
+`build/unit-intake/RF4-export-resume/`. Native checks and UI copy remain
+open. The older testkit failures and required full gate remain open too.

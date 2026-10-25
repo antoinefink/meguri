@@ -281,3 +281,67 @@ fn removal_retry_rejects_replaced_directory_unknown_files_and_symlinks() {
     remove_collection_export(&next.directory, &next.protected_directories).unwrap();
     host.close().unwrap();
 }
+
+#[test]
+fn invalid_media_and_retained_output_hardlinks_refuse_before_recovery_mutates_output() {
+    let _serial = SERIAL.lock().unwrap();
+    for alias in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let config = config(root.path(), root.path().join("backups"), Arc::new(StatvfsSpace));
+        let host = CoreHost::open(config.clone()).unwrap();
+        let output = export(&host).unwrap();
+        let artifact = fs::read(&output.path).unwrap();
+        let marker = fs::read(output.directory.join("ownership")).unwrap();
+        let media = config.collection_directory.join("collection.media");
+        fs::create_dir_all(&media).unwrap();
+        if alias {
+            fs::hard_link(&output.path, media.join("old-export.bin")).unwrap();
+        } else {
+            fs::write(media.join("con.jpg"), b"unsafe name").unwrap();
+        }
+        assert!(matches!(export(&host), Err(EngineError::ExportSourceInvalid)));
+        assert_eq!(fs::read(&output.path).unwrap(), artifact);
+        assert_eq!(fs::read(output.directory.join("ownership")).unwrap(), marker);
+        assert!(media.join(if alias { "old-export.bin" } else { "con.jpg" }).is_file());
+        host.close().unwrap();
+    }
+}
+#[test]
+fn completed_host_export_retains_only_read_only_media_validation_authority() {
+    let _serial = SERIAL.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let config = config(root.path(), root.path().join("backups"), Arc::new(StatvfsSpace));
+    let host = CoreHost::open(config.clone()).unwrap();
+    let media = config.collection_directory.join("collection.media");
+    fs::create_dir_all(&media).unwrap();
+    fs::write(media.join("unregistered"), b"before").unwrap();
+    let output = export(&host).unwrap();
+    output.validate_sources(&CancelToken::new()).unwrap();
+    fs::write(media.join("unregistered"), b"AFTER!").unwrap();
+    assert!(matches!(
+        output.validate_sources(&CancelToken::new()),
+        Err(EngineError::ExportSourceChanged)
+    ));
+    assert!(output.path.is_file());
+    // Source authority owns no reader lease or engine/media writer lock.
+    host.close().unwrap();
+    assert!(output.path.is_file());
+    remove_collection_export(&output.directory, &output.protected_directories).unwrap();
+}
+
+#[test]
+fn media_format_limit_reaches_the_host_as_a_distinct_refusal() {
+    let _serial = SERIAL.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let config = config(root.path(), root.path().join("backups"), Arc::new(StatvfsSpace));
+    let host = CoreHost::open(config.clone()).unwrap();
+    let media = config.collection_directory.join("collection.media");
+    fs::create_dir_all(&media).unwrap();
+    fs::File::create(media.join("oversized.bin"))
+        .unwrap()
+        .set_len(u64::from(u32::MAX) + 1)
+        .unwrap();
+    assert!(matches!(export(&host), Err(EngineError::ExportFormatLimit)));
+    assert!(!root.path().join("CollectionExports").exists());
+    host.close().unwrap();
+}

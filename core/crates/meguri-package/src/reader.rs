@@ -1,13 +1,15 @@
-//! Bounded read-back verification for P11 publication. No entry name becomes
+//! Bounded read-back verification for P11/P15 publication. No entry name becomes
 //! a filesystem path. The collection is hashed in fixed-size decoded chunks.
 use crate::{Error, Result, cancelled, corrupt};
-use sha2::{Digest, Sha256};
+use sha1::Digest as Sha1Digest;
+use sha2::{Digest as Sha256Digest, Sha256};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
     path::Path,
 };
 
+#[cfg(test)]
 const NAMES: [&str; 4] = ["meta", "collection.anki21b", "collection.anki2", "media"];
 const META_LIMIT: u64 = 64 * 1024;
 const COLLECTION_LIMIT: u64 = 8 * 1024 * 1024 * 1024;
@@ -35,9 +37,9 @@ fn read_at(file: &mut File, offset: u64, bytes: &mut [u8]) -> Result<()> {
 
 /// Inspect the on-disk directory before ZipArchive can allocate its index.
 /// Also count actual records: trusting the EOCD count alone is insufficient.
-/// Require the four archive members emitted by the writer; a general
-/// inspect reader will permit other names under P8's 400,000-record bound.
-fn bounded_directory(file: &mut File, check: &(dyn Fn() -> bool + Sync)) -> Result<()> {
+/// Require the exact P11/P15 writer members and order. General inspection
+/// separately permits other names under P8's 400,000-record bound.
+fn bounded_directory(file: &mut File, media_count: usize, check: &(dyn Fn() -> bool + Sync)) -> Result<()> {
     cancelled(check)?;
     let length = file.metadata()?.len();
     let tail_length = length.min(65_535 + 22 + 20 + 56) as usize;
@@ -107,8 +109,8 @@ fn bounded_directory(file: &mut File, check: &(dyn Fn() -> bool + Sync)) -> Resu
     if count > 400_000 {
         return Err(corrupt("central directory entry limit"));
     }
-    if count != 4 {
-        return Err(corrupt("writer requires four entries"));
+    if count != media_count as u64 + 4 {
+        return Err(corrupt("writer entry count"));
     }
     let mut position = central_end
         .checked_sub(size)
@@ -119,7 +121,8 @@ fn bounded_directory(file: &mut File, check: &(dyn Fn() -> bool + Sync)) -> Resu
     if zip64_record_offset.is_some_and(|offset| offset.checked_add(prefix) != Some(central_end)) {
         return Err(corrupt("ZIP64 locator offset"));
     }
-    for expected in NAMES {
+    for index in 0..media_count + 4 {
+        let expected = writer_name(index, media_count);
         cancelled(check)?;
         if central_end.saturating_sub(position) < 46 {
             return Err(corrupt("ZIP directory record"));
@@ -265,74 +268,145 @@ pub(crate) fn zstd_read_fallible(
 }
 
 pub(crate) fn verify(path: &Path, expected: &SnapshotDigest, check: &(dyn Fn() -> bool + Sync)) -> Result<()> {
-    let mut file = File::open(path)?;
-    bounded_directory(&mut file, check)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|error| corrupt(format!("ZIP: {error}")))?;
-    if archive.len() != 4 {
+    verify_export(path, expected, &[], check)
+}
+fn writer_name(index: usize, media_count: usize) -> std::borrow::Cow<'static, str> {
+    match index {
+        0 => "meta".into(),
+        1 => "collection.anki21b".into(),
+        2 => "collection.anki2".into(),
+        n if n == media_count + 3 => "media".into(),
+        n => (n - 3).to_string().into(),
+    }
+}
+/// Validate the P15 writer output before publication; collection intake uses its own policy.
+pub(crate) fn verify_export(
+    path: &Path,
+    expected: &SnapshotDigest,
+    media: &[crate::export_capture::MediaFile],
+    check: &(dyn Fn() -> bool + Sync),
+) -> Result<()> {
+    let mut input = File::open(path)?;
+    bounded_directory(&mut input, media.len(), check)?;
+    let mut zip = zip::ZipArchive::new(input).map_err(|failure| corrupt(format!("ZIP: {failure}")))?;
+    let member_count = media.len() + 4;
+    if zip.len() != member_count {
         return Err(corrupt("writer entry count"));
     }
-    for (index, expected_name) in NAMES.into_iter().enumerate() {
-        let entry = archive
-            .by_index(index)
-            .map_err(|error| corrupt(format!("ZIP entry: {error}")))?;
-        if entry
+    for position in 0..member_count {
+        let member = zip
+            .by_index(position)
+            .map_err(|failure| corrupt(format!("ZIP entry: {failure}")))?;
+        let actual = member
             .name()
-            .map_err(|error| corrupt(format!("ZIP entry name: {error}")))?
-            .as_ref()
-            != expected_name
-        {
+            .map_err(|failure| corrupt(format!("ZIP entry name: {failure}")))?;
+        if actual.as_ref() != writer_name(position, media.len()).as_ref() {
             return Err(corrupt("ZIP entry names disagree with bounded directory"));
         }
     }
-    let mut total = 0;
-    let mut meta = Vec::new();
-    {
-        let entry = archive.by_index(0).map_err(|error| corrupt(format!("meta: {error}")))?;
-        bounded_read(entry, META_LIMIT, &mut total, check, |bytes| {
-            meta.extend_from_slice(bytes)
-        })?;
-    }
-    match meta_version(&meta)? {
-        3 => {}
+
+    let mut decoded_bytes = 0;
+    let mut metadata = Vec::new();
+    let member = zip.by_index(0).map_err(|failure| corrupt(format!("meta: {failure}")))?;
+    bounded_read(member, META_LIMIT, &mut decoded_bytes, check, |part| {
+        metadata.extend_from_slice(part)
+    })?;
+    match meta_version(&metadata)? {
+        3 => (),
         1 | 2 => return Err(Error::UnsupportedFormat),
         _ => return Err(Error::TooNew),
     }
-    let mut digest = Sha256::new();
-    {
-        let entry = archive
-            .by_index(1)
-            .map_err(|error| corrupt(format!("collection: {error}")))?;
-        let limit = decoded_limit(entry.compressed_size(), COLLECTION_LIMIT);
-        let count = zstd_read(entry, limit, &mut total, check, |bytes| digest.update(bytes))?;
-        let hash: [u8; 32] = digest.finalize().into();
-        if count != expected.length || hash != expected.sha256 {
-            return Err(corrupt("snapshot length or SHA-256"));
+
+    let member = zip
+        .by_index(1)
+        .map_err(|failure| corrupt(format!("collection: {failure}")))?;
+    let maximum = decoded_limit(member.compressed_size(), COLLECTION_LIMIT);
+    let mut collection_hash = Sha256::new();
+    let collection_length = zstd_read(member, maximum, &mut decoded_bytes, check, |part| {
+        collection_hash.update(part)
+    })?;
+    let collection_sha256: [u8; 32] = collection_hash.finalize().into();
+    if (collection_length, collection_sha256) != (expected.length, expected.sha256) {
+        return Err(corrupt("snapshot length or SHA-256"));
+    }
+
+    let member = zip
+        .by_index(2)
+        .map_err(|failure| corrupt(format!("placeholder: {failure}")))?;
+    let mut sqlite_header = [0_u8; 100];
+    let mut header_used = 0;
+    // Read through EOF for CRC validation, retaining only the fixed SQLite header.
+    let placeholder_length = bounded_read(member, TOTAL_LIMIT, &mut decoded_bytes, check, |part| {
+        let copied = part.len().min(sqlite_header.len() - header_used);
+        sqlite_header[header_used..header_used + copied].copy_from_slice(&part[..copied]);
+        header_used += copied;
+    })?;
+    if placeholder_length < 100 || &sqlite_header[..16] != b"SQLite format 3\0" || sqlite_header[18..20] != [1, 1] {
+        return Err(corrupt("placeholder SQLite header"));
+    }
+
+    for (number, source) in media.iter().enumerate() {
+        let mut content_hash = sha1::Sha1::new();
+        let required_length = u64::from(source.length());
+        // Media uses its declared uint32 length and the aggregate budget, without a ratio limit.
+        let length = zstd_read_fallible(
+            zip.by_index(number + 3)?,
+            required_length,
+            &mut decoded_bytes,
+            check,
+            |part| {
+                content_hash.update(part);
+                meguri_model::faultpoint!("package.export.verify_chunk")?;
+                Ok(())
+            },
+        )?;
+        let content_sha1: [u8; 20] = content_hash.finalize().into();
+        if (length, content_sha1) != (required_length, source.sha1) {
+            return Err(corrupt("media length or SHA-1"));
         }
     }
-    {
-        let entry = archive
-            .by_index(2)
-            .map_err(|error| corrupt(format!("placeholder: {error}")))?;
-        let mut header = Vec::with_capacity(100);
-        // Placeholder is also streamed in full to check its CRC. It shares
-        // the aggregate P8 budget and cannot allocate from a ZIP size field.
-        let count = bounded_read(entry, TOTAL_LIMIT, &mut total, check, |bytes| {
-            let take = bytes.len().min(100 - header.len());
-            header.extend_from_slice(&bytes[..take]);
+
+    let member = zip.by_index(media.len() + 3)?;
+    if media.is_empty() {
+        zstd_read(member, 0, &mut decoded_bytes, check, |_| {})?;
+    } else {
+        let maximum = decoded_limit(member.compressed_size(), crate::export_capture::MAP_LIMIT);
+        let mut next_source = media.iter();
+        let mut source = next_source.next();
+        let mut pending = Vec::with_capacity(160);
+        zstd_read_fallible(member, maximum, &mut decoded_bytes, check, |part| {
+            let mut consumed = 0;
+            while consumed < part.len() {
+                let required = source.ok_or_else(|| corrupt("extra media map record"))?;
+                let size = crate::media_map::encoded_record_length(required.name(), required.length()) as usize;
+                let copied = (size - pending.len()).min(part.len() - consumed);
+                pending.extend_from_slice(&part[consumed..consumed + copied]);
+                consumed += copied;
+                if pending.len() < size {
+                    continue;
+                }
+                let mut records_seen = 0;
+                crate::media_map::records(&pending, check, |record| {
+                    records_seen += 1;
+                    let decoded_fields = (record.name, record.length, record.sha1);
+                    if decoded_fields != (required.name(), required.length(), required.sha1.as_slice()) {
+                        return Err(corrupt("media map record differs from captured inventory"));
+                    }
+                    Ok(())
+                })?;
+                if records_seen != 1 {
+                    return Err(corrupt("media map record framing"));
+                }
+                pending.clear();
+                source = next_source.next();
+            }
+            Ok(())
         })?;
-        if count < 100 || &header[..16] != b"SQLite format 3\0" || header[18..20] != [1, 1] {
-            return Err(corrupt("placeholder SQLite header"));
+        if source.is_some() || !pending.is_empty() {
+            return Err(corrupt("missing media map record"));
         }
     }
-    {
-        let entry = archive
-            .by_index(3)
-            .map_err(|error| corrupt(format!("media: {error}")))?;
-        // Empty protobuf map is the writer contract. Reject at the first
-        // decoded byte rather than allocating a media map we cannot accept.
-        zstd_read(entry, 0, &mut total, check, |_| {})?;
-    }
-    drop(archive); // every ZIP/decoder handle closes before AtomicFile renames
+    drop(zip);
     cancelled(check)
 }
 

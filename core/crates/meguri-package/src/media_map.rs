@@ -17,9 +17,15 @@ pub(crate) fn validate(mut bytes: &[u8], check: &(dyn Fn() -> bool + Sync)) -> R
     }
     Ok(count)
 }
-fn entry(mut bytes: &[u8]) -> Result<()> {
+pub(crate) struct MediaRecord<'a> {
+    pub name: &'a str,
+    pub length: u32,
+    pub sha1: &'a [u8],
+}
+fn entry(mut bytes: &[u8]) -> Result<MediaRecord<'_>> {
     let mut name = "";
     let mut sha1: &[u8] = &[];
+    let mut length = 0;
     while !bytes.is_empty() {
         let (field, wire) = key(&mut bytes)?;
         match field {
@@ -27,7 +33,11 @@ fn entry(mut bytes: &[u8]) -> Result<()> {
                 require(wire, 2)?;
                 name = std::str::from_utf8(payload(&mut bytes)?).map_err(|_| corrupt("media UTF-8"))?;
             }
-            2 | 255 => {
+            2 => {
+                require(wire, 0)?;
+                length = varint(&mut bytes)? as u32;
+            }
+            255 => {
                 require(wire, 0)?;
                 varint(&mut bytes)?;
             }
@@ -45,7 +55,7 @@ fn entry(mut bytes: &[u8]) -> Result<()> {
     if name.is_empty() || name.len() > 120 || meguri_text::media_name::safe_media_name(name) != name {
         return Err(corrupt("unsafe media name"));
     }
-    Ok(())
+    Ok(MediaRecord { name, length, sha1 })
 }
 fn require(wire: u8, expected: u8) -> Result<()> {
     if wire == expected {
@@ -125,4 +135,59 @@ fn varint(bytes: &mut &[u8]) -> Result<u64> {
         }
     }
     Err(corrupt("media varint overflow"))
+}
+
+/// Borrowed records keep verification from duplicating the bounded decoded map.
+pub(crate) fn records(
+    mut bytes: &[u8],
+    check: &(dyn Fn() -> bool + Sync),
+    mut visit: impl FnMut(MediaRecord<'_>) -> Result<()>,
+) -> Result<()> {
+    while !bytes.is_empty() {
+        cancelled(check)?;
+        let (field, wire) = key(&mut bytes)?;
+        if field == 1 {
+            require(wire, 2)?;
+            visit(entry(payload(&mut bytes)?)?)?;
+        } else {
+            skip(&mut bytes, field, wire, 0)?;
+        }
+    }
+    Ok(())
+}
+fn varint_length(mut value: u64) -> u64 {
+    let mut n = 1;
+    while value >= 128 {
+        n += 1;
+        value >>= 7;
+    }
+    n
+}
+pub(crate) fn encoded_record_length(name: &str, length: u32) -> u64 {
+    let payload = 1 + varint_length(name.len() as u64) + name.len() as u64 + 1 + varint_length(u64::from(length)) + 22;
+    1 + varint_length(payload) + payload
+}
+fn write_varint(output: &mut impl std::io::Write, mut value: u64) -> std::io::Result<()> {
+    let mut bytes = [0; 10];
+    let mut n = 0;
+    while value >= 128 {
+        bytes[n] = value as u8 | 0x80;
+        value >>= 7;
+        n += 1;
+    }
+    bytes[n] = value as u8;
+    output.write_all(&bytes[..=n])
+}
+pub(crate) fn write_record(output: &mut impl std::io::Write, name: &str, length: u32, sha1: &[u8; 20]) -> Result<()> {
+    let payload = 1 + varint_length(name.len() as u64) + name.len() as u64 + 1 + varint_length(u64::from(length)) + 22;
+    output.write_all(&[10])?;
+    write_varint(output, payload)?;
+    output.write_all(&[10])?;
+    write_varint(output, name.len() as u64)?;
+    output.write_all(name.as_bytes())?;
+    output.write_all(&[16])?;
+    write_varint(output, u64::from(length))?;
+    output.write_all(&[26, 20])?;
+    output.write_all(sha1)?;
+    Ok(())
 }

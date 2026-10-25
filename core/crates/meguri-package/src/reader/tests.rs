@@ -245,3 +245,151 @@ fn optional_zip64_counts_with_ordinary_classic_fields_are_bounded_before_indexin
         matches!(check(&bytes, &expected(b"x")), Err(Error::Corrupt { detail }) if detail == "central directory entry limit")
     );
 }
+
+fn media_archive(names: &[&str], payloads: &[Vec<u8>]) -> Vec<u8> {
+    let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (name, bytes) in names.iter().zip(payloads) {
+        zip.start_file(
+            *name,
+            SimpleFileOptions::default().compression_method(CompressionMethod::Stored),
+        )
+        .unwrap();
+        zip.write_all(bytes).unwrap();
+    }
+    zip.finish().unwrap().into_inner()
+}
+fn check_media(bytes: &[u8], media: &[crate::export_capture::MediaFile]) -> Result<()> {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("input.colpkg");
+    std::fs::write(&path, bytes).unwrap();
+    verify_export(&path, &expected(b"x"), media, &|| false)
+}
+#[test]
+fn media_verifier_checks_numbered_entries_manifest_fields_and_payload_bytes() {
+    let payload = &[0x12, 0x34, 0x56, 0x78, 0x9a];
+    let payload_sha1: [u8; 20] = <sha1::Sha1 as sha1::Digest>::digest(payload).into();
+    let sources = [crate::export_capture::MediaFile::expected("m.bin", 5, payload_sha1)];
+    // P5 fixture bytes are specified here independently of the package encoder.
+    let record = [
+        vec![10, 31, 10, 5],
+        b"m.bin".to_vec(),
+        vec![16, 5, 26, 20],
+        payload_sha1.to_vec(),
+    ]
+    .concat();
+    let mut header = vec![0_u8; 100];
+    header[..16].copy_from_slice(b"SQLite format 3\0");
+    header[18..20].copy_from_slice(&[1, 1]);
+    let members = ["meta", "collection.anki21b", "collection.anki2", "0", "media"];
+    let contents = vec![vec![8, 3], frame(b"x"), header, frame(payload), frame(&record)];
+    let accepted = media_archive(&members, &contents);
+    check_media(&accepted, &sources).unwrap();
+    assert!(check(&accepted, &expected(b"x")).is_err(), "P11 requires four members");
+
+    for incorrect_number in ["1", "00", "-1", "unexpected"] {
+        let mut candidate_names = members;
+        candidate_names[3] = incorrect_number;
+        let candidate = media_archive(&candidate_names, &contents);
+        assert!(check_media(&candidate, &sources).is_err());
+    }
+    let without_payload = media_archive(
+        &["meta", "collection.anki21b", "collection.anki2", "media"],
+        &[
+            contents[0].clone(),
+            contents[1].clone(),
+            contents[2].clone(),
+            contents[4].clone(),
+        ],
+    );
+    assert!(check_media(&without_payload, &sources).is_err());
+    let archive_with_second_payload = media_archive(
+        &["meta", "collection.anki21b", "collection.anki2", "0", "1", "media"],
+        &[
+            contents[0].clone(),
+            contents[1].clone(),
+            contents[2].clone(),
+            contents[3].clone(),
+            frame(&[0xb1, 0xc2, 0xd3, 0xe4, 0xf5]),
+            contents[4].clone(),
+        ],
+    );
+    assert!(check_media(&archive_with_second_payload, &sources).is_err());
+
+    // Change name, length and digest separately without breaking protobuf framing.
+    let mut rejected_maps = Vec::new();
+    for field_offset in [4, 10, 13] {
+        let mut changed_record = record.clone();
+        changed_record[field_offset] ^= 1;
+        rejected_maps.push(changed_record);
+    }
+    rejected_maps.extend([Vec::new(), vec![10, 0], [record.clone(), record.clone()].concat()]);
+    for invalid_map in rejected_maps {
+        let mut candidate_contents = contents.clone();
+        candidate_contents[4] = frame(&invalid_map);
+        let candidate = media_archive(&members, &candidate_contents);
+        assert!(check_media(&candidate, &sources).is_err());
+    }
+
+    let mut damaged_checksum = frame(payload);
+    *damaged_checksum.last_mut().unwrap() ^= 1;
+    let mut trailing_byte = frame(payload);
+    trailing_byte.push(0);
+    let invalid_payloads = [
+        frame(&[0x12, 0x34, 0x56, 0x78, 0x9b]),
+        frame(&payload[..4]),
+        frame(&[0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc]),
+        damaged_checksum,
+        trailing_byte,
+        frame(payload)[..5].to_vec(),
+        vec![0x28, 0xb5, 0x2f, 0xfd, 0, 0x90, 1, 0, 0],
+    ];
+    for invalid_payload in invalid_payloads {
+        let mut candidate_contents = contents.clone();
+        candidate_contents[3] = invalid_payload;
+        let candidate = media_archive(&members, &candidate_contents);
+        assert!(check_media(&candidate, &sources).is_err());
+    }
+
+    let mut second_record = record.clone();
+    second_record[4] = b'n';
+    let combined_records = [record, second_record].concat();
+    let mut duplicate_directory_name = media_archive(
+        &["meta", "collection.anki21b", "collection.anki2", "0", "1", "media"],
+        &[
+            contents[0].clone(),
+            contents[1].clone(),
+            contents[2].clone(),
+            contents[3].clone(),
+            contents[3].clone(),
+            frame(&combined_records),
+        ],
+    );
+    let fifth_record = duplicate_directory_name
+        .windows(4)
+        .enumerate()
+        .filter(|(_, signature)| *signature == b"PK\x01\x02")
+        .nth(4)
+        .unwrap()
+        .0;
+    duplicate_directory_name[fifth_record + 46] = b'0';
+    let two_sources = [
+        crate::export_capture::MediaFile::expected("m.bin", 5, payload_sha1),
+        crate::export_capture::MediaFile::expected("n.bin", 5, payload_sha1),
+    ];
+    assert!(check_media(&duplicate_directory_name, &two_sources).is_err());
+
+    let mut corrupt_zip_payload = accepted;
+    let mut local_header = 0;
+    for _ in 0..3 {
+        let name_length = usize::from(u16_at(&corrupt_zip_payload, local_header + 26));
+        let extra_length = usize::from(u16_at(&corrupt_zip_payload, local_header + 28));
+        let stored_length = u32_at(&corrupt_zip_payload, local_header + 18) as usize;
+        local_header += 30 + name_length + extra_length + stored_length;
+    }
+    let payload_start = local_header
+        + 30
+        + usize::from(u16_at(&corrupt_zip_payload, local_header + 26))
+        + usize::from(u16_at(&corrupt_zip_payload, local_header + 28));
+    corrupt_zip_payload[payload_start + 5] ^= 1;
+    assert!(check_media(&corrupt_zip_payload, &sources).is_err());
+}

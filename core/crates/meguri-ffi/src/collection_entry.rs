@@ -42,19 +42,28 @@ pub enum PackageFailure {
     Io { detail: String },
 }
 impl From<PackageError> for PackageFailure {
-    fn from(e: PackageError) -> Self {
-        match e {
-            PackageError::TooNew => Self::TooNew,
-            PackageError::UnsupportedFormat => Self::UnsupportedFormat,
-            PackageError::UnsupportedMedia => Self::UnsupportedMedia,
-            PackageError::SchemaUnsupported { gate } => Self::SchemaUnsupported { gate: gate.into() },
-            PackageError::Corrupt { detail } => Self::Corrupt { detail },
-            PackageError::InsufficientSpace { needed, available } => Self::InsufficientSpace { needed, available },
-            PackageError::DiskFull => Self::DiskFull,
-            PackageError::SourceNotFinalised => Self::SourceNotFinalised,
-            PackageError::DestinationExists => Self::DestinationExists,
-            PackageError::Cancelled => Self::Cancelled,
-            PackageError::Io { detail } => Self::Io { detail },
+    fn from(package_failure: PackageError) -> Self {
+        use PackageError as Input;
+        match package_failure {
+            Input::Cancelled => Self::Cancelled,
+            Input::DestinationExists => Self::DestinationExists,
+            Input::DiskFull => Self::DiskFull,
+            Input::SourceNotFinalised => Self::SourceNotFinalised,
+            Input::TooNew => Self::TooNew,
+            Input::UnsupportedMedia => Self::UnsupportedMedia,
+            Input::UnsupportedFormat => Self::UnsupportedFormat,
+            Input::SchemaUnsupported { gate } => Self::SchemaUnsupported { gate: gate.into() },
+            Input::InsufficientSpace { needed, available } => Self::InsufficientSpace { needed, available },
+            Input::Corrupt { detail } => Self::Corrupt { detail },
+            Input::Io { detail } => Self::Io { detail },
+            export_failure @ (Input::ExportFormatLimit
+            | Input::ExportSourceInvalid { .. }
+            | Input::ExportSourceChanged) => {
+                // RF2 and forced backup retain collection-only publication.
+                Self::Io {
+                    detail: export_failure.to_string(),
+                }
+            }
         }
     }
 }

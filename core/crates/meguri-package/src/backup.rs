@@ -393,19 +393,28 @@ fn io_cause(error: std::io::Error) -> BackupFailureCause {
     engine_cause(StorageError::from(error).into())
 }
 impl From<WriteError> for BackupFailureCause {
-    fn from(error: WriteError) -> Self {
-        match error {
-            WriteError::TooNew => Self::TooNew,
-            WriteError::UnsupportedFormat => Self::UnsupportedFormat,
-            WriteError::UnsupportedMedia => Self::UnsupportedMedia,
-            WriteError::SchemaUnsupported { gate } => Self::SchemaUnsupported { gate },
-            WriteError::Corrupt { detail } => Self::Corrupt { detail },
-            WriteError::InsufficientSpace { needed, available } => Self::InsufficientSpace { needed, available },
-            WriteError::DiskFull => Self::DiskFull,
-            WriteError::SourceNotFinalised => Self::SourceNotFinalised,
-            WriteError::DestinationExists => Self::DestinationExists,
-            WriteError::Cancelled => Self::Cancelled,
-            WriteError::Io { detail } => Self::Io { detail },
+    fn from(package_failure: WriteError) -> Self {
+        use WriteError as Input;
+        match package_failure {
+            Input::Cancelled => Self::Cancelled,
+            Input::DestinationExists => Self::DestinationExists,
+            Input::DiskFull => Self::DiskFull,
+            Input::SourceNotFinalised => Self::SourceNotFinalised,
+            Input::TooNew => Self::TooNew,
+            Input::UnsupportedMedia => Self::UnsupportedMedia,
+            Input::UnsupportedFormat => Self::UnsupportedFormat,
+            Input::SchemaUnsupported { gate } => Self::SchemaUnsupported { gate },
+            Input::InsufficientSpace { needed, available } => Self::InsufficientSpace { needed, available },
+            Input::Corrupt { detail } => Self::Corrupt { detail },
+            Input::Io { detail } => Self::Io { detail },
+            export_failure @ (Input::ExportFormatLimit
+            | Input::ExportSourceInvalid { .. }
+            | Input::ExportSourceChanged) => {
+                // RF2 and forced backup retain collection-only publication.
+                Self::Io {
+                    detail: export_failure.to_string(),
+                }
+            }
         }
     }
 }

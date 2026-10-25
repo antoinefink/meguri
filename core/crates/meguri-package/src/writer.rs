@@ -16,7 +16,7 @@ use std::{
 };
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
-fn source_error(error: StandaloneSnapshotError) -> Error {
+pub(crate) fn source_error(error: StandaloneSnapshotError) -> Error {
     match error {
         StandaloneSnapshotError::SourceNotFinalised => Error::SourceNotFinalised,
         StandaloneSnapshotError::Storage(error) => error.into(),
@@ -109,7 +109,7 @@ fn resolved_path(path: &Path) -> Option<PathBuf> {
     })
 }
 
-fn check_source_alias(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn check_source_alias(source: &Path, destination: &Path) -> Result<()> {
     let aliases = resolved_path(destination)
         .zip(resolved_path(source))
         .is_some_and(|(a, b)| a == b)
@@ -125,7 +125,7 @@ fn check_source_alias(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
-fn check_exclusive_destination(destination: &Path, finalisation: Finalisation) -> Result<()> {
+pub(crate) fn check_exclusive_destination(destination: &Path, finalisation: Finalisation) -> Result<()> {
     if finalisation == Finalisation::ExclusiveCreate {
         match destination.symlink_metadata() {
             Ok(_) => return Err(Error::DestinationExists),
@@ -160,6 +160,16 @@ fn publish_snapshot(
     staging: &Path,
     destination: &Path,
     context: &CollectionPackageWriteContext<'_>,
+) -> Result<()> {
+    publish_snapshot_with_media(snapshot, staging, destination, context, None)
+}
+
+pub(crate) fn publish_snapshot_with_media(
+    snapshot: &Path,
+    staging: &Path,
+    destination: &Path,
+    context: &CollectionPackageWriteContext<'_>,
+    captured: Option<&crate::export_capture::ExportSourceValidation>,
 ) -> Result<()> {
     cancelled(context.is_cancelled)?;
     let placeholder = staging.join("collection.anki2");
@@ -213,24 +223,71 @@ fn publish_snapshot(
         zip.write_all(&buffer[..n])?;
     }
     drop(notice);
+    if let Some(captured) = captured {
+        for (index, expected) in captured.files.iter().enumerate() {
+            cancelled(context.is_cancelled)?;
+            let size = u64::from(expected.length());
+            let zip64 = size >= u64::from(u32::MAX) - size / 128 - 1024 * 1024;
+            zip.start_file(index.to_string(), stored.large_file(zip64))?;
+            let mut encoder = zstd::stream::write::Encoder::new(&mut zip, 3)?;
+            encoder.set_pledged_src_size(Some(size))?;
+            encoder.include_contentsize(true)?;
+            encoder.include_checksum(true)?;
+            let mut input = File::open(staging.join(index.to_string()))?;
+            loop {
+                cancelled(context.is_cancelled)?;
+                let n = input.read(&mut buffer)?;
+                if n == 0 {
+                    break;
+                }
+                encoder.write_all(&buffer[..n])?;
+                meguri_model::faultpoint!("package.export.compress_chunk")?;
+            }
+            encoder.finish()?;
+        }
+    }
     zip.start_file("media", stored)?;
     let mut media = zstd::stream::write::Encoder::new(&mut zip, 3)?;
-    media.set_pledged_src_size(Some(0))?;
+    let map_length = captured
+        .map(|c| crate::export_capture::map_length(&c.files))
+        .transpose()?
+        .unwrap_or(0);
+    media.set_pledged_src_size(Some(map_length))?;
     media.include_contentsize(true)?;
     media.include_checksum(true)?;
+    if let Some(captured) = captured {
+        for file in &captured.files {
+            cancelled(context.is_cancelled)?;
+            crate::media_map::write_record(&mut media, file.name(), file.length(), &file.sha1)?;
+        }
+    }
     media.finish()?;
     zip.finish()?;
     cancelled(context.is_cancelled)?;
     // AtomicFile's verifier has a storage error type. Preserve the package's
     // typed reason separately; never flatten cancellation or corrupt input.
     let mut verification_error = None;
-    let verify = |path: &Path| match reader::verify(path, &expected, context.is_cancelled) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            verification_error = Some(error);
-            Err(StorageError::Io {
-                detail: "package verification failed".into(),
-            })
+    let verify = |path: &Path| {
+        let result: Result<()> = (|| {
+            if captured.is_some() {
+                meguri_model::faultpoint!("package.export.before_verification")?;
+            }
+            match captured {
+                Some(captured) => {
+                    reader::verify_export(path, &expected, &captured.files, context.is_cancelled)?;
+                    captured.validate(context.is_cancelled)
+                }
+                None => reader::verify(path, &expected, context.is_cancelled),
+            }
+        })();
+        match result {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                verification_error = Some(error);
+                Err(StorageError::Io {
+                    detail: "package verification failed".into(),
+                })
+            }
         }
     };
     let published = match context.finalisation {

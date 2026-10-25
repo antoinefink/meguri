@@ -1,4 +1,4 @@
-//! Host inputs for the collection-only export worker. This never gates on study admission.
+//! Host inputs for the media-inclusive user export worker. This never gates on study admission.
 use crate::{CoreHost, HostConfig};
 use meguri_engine::{CancelToken, Collection, EngineError};
 use meguri_package::{CollectionPackageWriteContext, Finalisation, LiveCollectionPackageWritten};
@@ -35,6 +35,16 @@ pub struct WrittenCollectionExport {
     pub protected_directories: Vec<PathBuf>,
     pub space: std::sync::Arc<dyn meguri_storage::space::SpaceProvider>,
     pub written: LiveCollectionPackageWritten,
+    source_validation: meguri_package::ExportSourceValidation,
+}
+
+impl WrittenCollectionExport {
+    /// Delivery boundary: run after the completed package's final hash, before Ready.
+    pub fn validate_sources(&self, cancel: &CancelToken) -> Result<(), EngineError> {
+        self.source_validation
+            .validate(&|| cancel.is_cancelled())
+            .map_err(package_error)
+    }
 }
 
 impl CoreHost {
@@ -47,7 +57,9 @@ impl CoreHost {
         progress: &meguri_engine::ProgressSink,
     ) -> Result<WrittenCollectionExport, EngineError> {
         self.review().flush_for_background()?;
-        progress.set_phase(meguri_engine::ProgressPhase::Named("Capturing and writing collection"));
+        progress.set_phase(meguri_engine::ProgressPhase::Named(
+            "Capturing and writing collection and media",
+        ));
         cancel.check()?;
         let config = &self.export;
         let parent = config
@@ -74,7 +86,18 @@ impl CoreHost {
             is_cancelled: &is_cancelled,
         };
         // The actual DB+WAL P10 budget precedes every output mutation, including recovery.
-        meguri_package::preflight_collection_package_from_live(&reader, &path, &context).map_err(package_error)?;
+        let mut plan = meguri_package::preflight_media_collection_export_from_live(&reader, &path, &context)
+            .map_err(package_error)?;
+        if let Ok((retained, _)) = ownership(&directory) {
+            plan.protect_retained_outputs(
+                &[
+                    directory.join(MARKER),
+                    directory.join(retained).join("Meguri-Collection.colpkg"),
+                ],
+                &is_cancelled,
+            )
+            .map_err(package_error)?;
+        }
         cancel.check()?;
         if directory.symlink_metadata().is_ok() {
             // Only a durable never-handed-off/completed marker permits recovery.
@@ -102,8 +125,8 @@ impl CoreHost {
         meguri_storage::atomic_file::sync_directory(&directory)?;
         meguri_storage::atomic_file::sync_directory(&root)?;
         meguri_storage::atomic_file::sync_directory(parent)?;
-        let written =
-            meguri_package::write_collection_package_from_live(&reader, &path, &context).map_err(package_error)?;
+        let completed = meguri_package::write_media_collection_export_from_live(&reader, &path, &context, plan)
+            .map_err(package_error)?;
         drop(reader);
         cancel.check()?;
         if !collection.is_current() {
@@ -117,7 +140,8 @@ impl CoreHost {
         Ok(WrittenCollectionExport {
             directory,
             path,
-            written,
+            written: completed.written,
+            source_validation: completed.source_validation,
             protected_directories: protected,
             space: config.disk_space_provider.clone(),
         })
@@ -130,6 +154,9 @@ fn io(error: std::io::Error) -> EngineError {
 fn package_error(error: meguri_package::CollectionPackageWriteError) -> EngineError {
     match error {
         meguri_package::CollectionPackageWriteError::Cancelled => EngineError::Cancelled,
+        meguri_package::CollectionPackageWriteError::ExportSourceChanged => EngineError::ExportSourceChanged,
+        meguri_package::CollectionPackageWriteError::ExportSourceInvalid { .. } => EngineError::ExportSourceInvalid,
+        meguri_package::CollectionPackageWriteError::ExportFormatLimit => EngineError::ExportFormatLimit,
         other => EngineError::Internal {
             message: format!("collection export: {other}"),
         },
@@ -358,4 +385,44 @@ impl CollectionExportRemoval {
 /// One-shot cleanup for paths whose ownership marker is still present.
 pub fn remove_collection_export(directory: &Path, protected: &[PathBuf]) -> Result<(), EngineError> {
     CollectionExportRemoval::default().remove(directory, protected)
+}
+
+#[cfg(test)]
+mod export_refusal_tests {
+    use super::*;
+    use meguri_package::CollectionPackageWriteError as PackageError;
+    #[test]
+    fn package_refusals_preserve_only_known_source_reasons() {
+        assert_eq!(
+            package_error(PackageError::ExportSourceChanged),
+            EngineError::ExportSourceChanged
+        );
+        assert_eq!(
+            package_error(PackageError::ExportSourceInvalid {
+                detail: "never displayed".into()
+            }),
+            EngineError::ExportSourceInvalid
+        );
+        assert_eq!(
+            package_error(PackageError::ExportFormatLimit),
+            EngineError::ExportFormatLimit
+        );
+        assert_eq!(package_error(PackageError::Cancelled), EngineError::Cancelled);
+        for error in [
+            PackageError::DiskFull,
+            PackageError::InsufficientSpace {
+                needed: 10,
+                available: 1,
+            },
+            PackageError::DestinationExists,
+            PackageError::Corrupt {
+                detail: "generation failure".into(),
+            },
+            PackageError::Io {
+                detail: "unknown I/O".into(),
+            },
+        ] {
+            assert!(matches!(package_error(error), EngineError::Internal { .. }));
+        }
+    }
 }

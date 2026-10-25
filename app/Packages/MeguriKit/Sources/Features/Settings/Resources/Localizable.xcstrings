@@ -1,6 +1,36 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "The media source changed during export. Start a fresh export after changes finish.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The media source changed during export. Start a fresh export after changes finish."
+          }
+        }
+      }
+    },
+    "A media item is unsafe or unreadable. Correct its name, type or read access, then start a fresh export.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A media item is unsafe or unreadable. Correct its name, type or read access, then start a fresh export."
+          }
+        }
+      }
+    },
+    "The collection or media exceeds the package format limits. Reduce the size or number of media files, then start a fresh export.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The collection or media exceeds the package format limits. Reduce the size or number of media files, then start a fresh export."
+          }
+        }
+      }
+    },
     "Imports and exports include collection and media. After the collection finishes, media needs a separate decision and can change both sides. Unfinished media leaves the operation partial.": {
       "localizations": {
         "en": {

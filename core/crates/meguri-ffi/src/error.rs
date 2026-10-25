@@ -9,6 +9,12 @@ use meguri_engine::EngineError;
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Error)]
 pub enum CoreError {
+    /// The file export must restart against fresh source authority.
+    ExportSourceChanged,
+    /// Correct an unsafe or unreadable media item before retrying.
+    ExportSourceInvalid,
+    /// The collection or media exceeds the file format's supported limits.
+    ExportFormatLimit,
     DeckOptionsInvalid {
         issues: Vec<crate::deck_options::OptionIssue>,
     },
@@ -94,6 +100,9 @@ pub enum CoreError {
 impl fmt::Display for CoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            CoreError::ExportSourceChanged => f.write_str("export source changed"),
+            CoreError::ExportSourceInvalid => f.write_str("export source item refused"),
+            CoreError::ExportFormatLimit => f.write_str("export format limit"),
             CoreError::DeckOptionsInvalid { .. } => write!(f, "{self:?}"),
             CoreError::SchedOpRefused { .. } => write!(f, "{self:?}"),
             CoreError::Stale { .. } => write!(f, "{self:?}"),
@@ -137,6 +146,9 @@ impl From<EngineError> for CoreError {
             EngineError::SchedOp(reason) => CoreError::SchedOpRefused { refusal: reason.into() },
             EngineError::InvalidTypeAnswerReplacement => CoreError::InvalidTypeAnswerReplacement,
             EngineError::Cancelled => CoreError::Cancelled,
+            EngineError::ExportSourceChanged => CoreError::ExportSourceChanged,
+            EngineError::ExportSourceInvalid => CoreError::ExportSourceInvalid,
+            EngineError::ExportFormatLimit => CoreError::ExportFormatLimit,
             EngineError::Busy { running_op } => CoreError::Busy { running_op },
             EngineError::SessionActive => CoreError::SessionActive,
             EngineError::CollectionUnavailable { reason } => CoreError::Unavailable { reason },
@@ -229,6 +241,9 @@ impl From<CoreError> for EngineError {
 
             CoreError::InvalidTypeAnswerReplacement => EngineError::InvalidTypeAnswerReplacement,
             CoreError::Cancelled => EngineError::Cancelled,
+            CoreError::ExportSourceChanged => EngineError::ExportSourceChanged,
+            CoreError::ExportSourceInvalid => EngineError::ExportSourceInvalid,
+            CoreError::ExportFormatLimit => EngineError::ExportFormatLimit,
             CoreError::Busy { running_op } => EngineError::Busy { running_op },
             CoreError::Unavailable { reason } => EngineError::CollectionUnavailable { reason },
             CoreError::Unsupported { feature } => EngineError::Unsupported { feature },

@@ -1,5 +1,12 @@
-//! Collection-only latest-format package publication (package/container P11).
+//! Latest-format package publication: collection-only P11 and opt-in file-export P15.
 mod backup;
+mod export_capture;
+mod file_export;
+pub use export_capture::ExportSourceValidation;
+pub use file_export::{
+    MediaCollectionExportPlan, MediaCollectionExportWritten, preflight_media_collection_export_from_live,
+    write_media_collection_export_from_live,
+};
 mod server_copy;
 pub use server_copy::{PublishedServerCopy, ServerCopyKind, preserve_server_copy};
 pub mod entry;
@@ -46,17 +53,32 @@ pub struct CollectionPackageWriteContext<'a> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CollectionPackageWriteError {
+    /// Explicit file-export source/format refusals; never intake or backup policy.
+    ExportSourceChanged,
+    ExportSourceInvalid {
+        detail: String,
+    },
+    ExportFormatLimit,
     TooNew,
     UnsupportedFormat,
     UnsupportedMedia,
-    SchemaUnsupported { gate: meguri_storage::OpenError },
-    Corrupt { detail: String },
-    InsufficientSpace { needed: u64, available: u64 },
+    SchemaUnsupported {
+        gate: meguri_storage::OpenError,
+    },
+    Corrupt {
+        detail: String,
+    },
+    InsufficientSpace {
+        needed: u64,
+        available: u64,
+    },
     DiskFull,
     SourceNotFinalised,
     DestinationExists,
     Cancelled,
-    Io { detail: String },
+    Io {
+        detail: String,
+    },
 }
 impl fmt::Display for CollectionPackageWriteError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -73,6 +95,7 @@ impl From<StorageError> for Error {
         match error {
             StorageError::InsufficientSpace { .. } => Self::DiskFull,
             StorageError::DestinationExists => Self::DestinationExists,
+            StorageError::Sqlite { code: 13, .. } => Self::DiskFull, // SQLite SQLITE_FULL
             other => Self::Io {
                 detail: other.to_string(),
             },

@@ -208,11 +208,25 @@ public final class CollectionExportCoordinator {
             message = "The collection was replaced. Discard this export and prepare a new one."
         } else if destination {
             message = "The file could not be saved. The completed export is retained; choose another destination and try again."
+        } else if let cause = (error as? CollectionExportFailure)?.cause ?? (error as? BridgeError),
+                  let refusal = sourceRefusalMessage(cause) {
+            message = refusal
         } else if let failure = error as? CollectionExportFailure,
                   case .busy(let operation) = failure.cause {
             message = "Export is blocked by \(operation). Output is retained to protect any provider still reading it."
         } else {
             message = "The collection could not be exported. Check available space and collection access, then try again. Unused prepared output from an earlier launch is recovered when you prepare again."
+        }
+    }
+    private func sourceRefusalMessage(_ cause: BridgeError) -> String? {
+        switch cause {
+        case .exportSourceChanged:
+            return "The media source changed during export. Start a fresh export after changes finish."
+        case .exportSourceInvalid:
+            return "A media item is unsafe or unreadable. Correct its name, type or read access, then start a fresh export."
+        case .exportFormatLimit:
+            return "The collection or media exceeds the package format limits. Reduce the size or number of media files, then start a fresh export."
+        default: return nil
         }
     }
     public var availabilityMessage: String? {
