@@ -38,6 +38,9 @@ OK = {"sync": {"result": "ok"}}
 AUTH_FAILED = {"sync": {"error": "auth_failed"}}
 STATUS = {"sync": {"kind": "status"}}
 MOON = {"add_note": {"notetype": "Pair", "deck": "Words", "fields": ["moon", "luna"]}}
+BEGIN = {"review_session": "begin"}
+END = {"review_session": "end"}
+COL = {"db_dump": {"tables": ["col"]}}
 
 
 def result(value):
@@ -96,11 +99,14 @@ class ForwardProxy:
     strips /<actor>/<step> from each request, remembers it in `seen` and
     forwards it to the server. A request of an (actor, step) in `refuse` gets
     the server's answer to credentials or a host key it does not know instead:
-    403 with the body 403 (specs/sync/transport.md T14)."""
+    403 with the body 403 (specs/sync/transport.md T14). A request of an
+    (actor, step, path) in `fail` gets that HTTP status with an empty body,
+    without reaching the server."""
 
-    def __init__(self, refuse=()):
+    def __init__(self, refuse=(), fail=None):
         self.seen: list[tuple[str, int, str]] = []
         self.refuse = set(refuse)
+        self.fail = dict(fail or {})
         lock = threading.Lock()
         proxy = self
 
@@ -126,7 +132,13 @@ class ForwardProxy:
                     self.end_headers()
                     self.wfile.write(b"403")
                     return
-                hop = ("proxy-connection", "connection", "transfer-encoding", "content-length")
+                status = proxy.fail.get((actor, int(step), "/" + rest))
+                if status is not None:
+                    self.send_response(status)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                hop =("proxy-connection", "connection", "transfer-encoding", "content-length")
                 headers = {k: v for k, v in self.headers.items() if k.lower() not in hop}
                 headers["Content-Length"] = str(len(body))
                 conn = http.client.HTTPConnection(url.hostname, url.port, timeout=30)
@@ -343,6 +355,19 @@ class Checks(unittest.TestCase):
             "duplicate actor": (actor_scenario("t/x", ["client_a", "client_a"], []), None),
             "bad actor name": (actor_scenario("t/x", ["meguri_1"], []), None),
             "no actors": (actor_scenario("t/x", [], []), None),
+            # S13: per actor, begin and end alternate from begin; nothing that
+            # closes the collection while a session is open.
+            "end before begin": (actor_scenario("t/x", ["client_a", "client_c"],
+                                                [BEGIN, {"actor": "client_c"}, END]), 2),
+            "begin twice": (actor_scenario("t/x", ["client_a"], [BEGIN, {"advance": "1m"}, BEGIN]), 2),
+            "reopen in a session": (actor_scenario("t/x", ["client_a"], [BEGIN, {"reopen": {}}]), 1),
+            "full_upload in a session": (actor_scenario("t/x", ["client_a"],
+                                                        [login, BEGIN, {"sync": {"kind": "full_upload"}}]), 2),
+            "full_download in a session": (actor_scenario("t/x", ["client_a"],
+                                                          [login, BEGIN, {"sync": {"kind": "full_download"}}]), 2),
+            "review_session start": (actor_scenario("t/x", ["client_a"], [{"review_session": "start"}]), 0),
+            "review_session mapping": (actor_scenario("t/x", ["client_a"], [{"review_session": {}}]), 0),
+            "end without actors": ({"id": "t/x", "clock": {"tz": "UTC", "start": START}, "steps": [END]}, 0),
         }
         with WorkerProcess("UTC") as w:
             results = {case: w.request({"cmd": "run", "scenario": sc}) for case, (sc, _) in cases.items()}
@@ -545,6 +570,128 @@ class AuthFailed(unittest.TestCase):
                 err = resp[3].get("error", {})
                 self.assertEqual((resp[3]["ok"], err.get("kind"), err.get("step")), (False, "invalid_scenario", 3))
                 self.assertEqual({s for (_, s, _) in proxy.seen}, {1, 2})
+
+
+def download_then(steps):
+    """client_a uploads the setup at 10:01; client_c downloads it at 10:02 and
+    runs `steps` from step 7 on."""
+    return UPLOAD[:2] + UPLOAD[3:] + [
+        {"actor": "client_c"}, {"advance": "1m"}, {"sync": {"kind": "login"}}, {"sync": {"kind": "full_download"}},
+    ] + steps
+
+
+class RoundFailures(unittest.TestCase):
+    """S4.4: a failed sanity check and an HTTP 400 in a normal's round, told
+    apart by what they leave; every other failure stays a run error."""
+
+    def test_a_refused_sanity_check_moves_scm_only(self):
+        steps = download_then([
+            {"advance": "1m"},                                                                  # 7
+            MOON,                                                                               # 8
+            # The new note and card look synced, so the round sends neither and
+            # the counts differ (specs/sync/normal-sync.md N8).
+            {"db_exec": {"sql": "UPDATE notes SET usn = 0 WHERE id = (SELECT max(id) FROM notes)"}},
+            {"db_exec": {"sql": "UPDATE cards SET usn = 0 WHERE id = (SELECT max(id) FROM cards)"}},
+            {"observe": [COL]},                                                                 # 11
+            {"advance": "1m"},                                                                  # 12
+            {"sync": {"kind": "normal"}},                                                       # 13
+            {"observe": [COL]},                                                                 # 14
+            STATUS,                                                                             # 15
+        ])
+        with WorkerProcess("UTC") as w:
+            out = run(self, w, actor_scenario("t/sanity", ["client_a", "client_c"], steps))
+        self.assertEqual(out[13], {"sync": {"error": "sanity_check_failed"}})
+        before, after = out[11]["db_dump"]["col"]["1"], out[14]["db_dump"]["col"]["1"]
+        # scm is the failure's instant, 10:04; mod, ls and usn are as before.
+        self.assertEqual(after["scm"], (epoch(START, "UTC") + 4 * 60) * 1000)
+        self.assertEqual({k: v for k, v in after.items() if k != "scm"}, {k: v for k, v in before.items() if k != "scm"})
+        self.assertEqual(out[15], result("full_sync"))
+
+    def test_a_400_in_the_round_leaves_scm_and_fails_again(self):
+        trio = {"add_notetype": {"name": "Trio", "fields": ["Word", "Meaning"],
+                                 "templates": [{"name": "Recall", "front": "{{Meaning}}", "back": "{{Word}}"}]}}
+        steps = download_then([
+            {"advance": "1m"},                                                                  # 7
+            trio,                                                                               # 8
+            {"add_note": {"notetype": "Trio", "deck": "Words", "fields": ["730108", "830108"]}},  # 9
+            # The note type looks synced: the server cannot apply the note.
+            {"db_exec": {"sql": "UPDATE notetypes SET usn = 0 WHERE name = 'Trio'"}},          # 10
+            {"observe": [COL]},                                                                 # 11
+            {"advance": "1m"},                                                                  # 12
+            {"sync": {"kind": "normal"}},                                                       # 13
+            {"observe": [COL]},                                                                 # 14
+            {"advance": "1m"},                                                                  # 15
+            {"sync": {"kind": "normal"}},                                                       # 16
+            {"observe": [COL]},                                                                 # 17
+        ])
+        with WorkerProcess("UTC") as w:
+            out = run(self, w, actor_scenario("t/refuses", ["client_a", "client_c"], steps))
+        self.assertEqual([out[13], out[16]], [{"sync": {"error": "db_check_required"}}] * 2)
+        self.assertEqual(out[14], out[11])
+        self.assertEqual(out[17], out[11])
+
+    def test_other_failures_stay_run_errors(self):
+        # A 500 inside a normal's round leaves scm as a 400 does, and a 400 of
+        # a full sync is no round: both stay anki_error. The failing step is
+        # each run's last (a failed step stays next).
+        cases = {
+            "500 in the round": (download_then([{"advance": "1m"}, MOON, {"sync": {"kind": "normal"}}]),
+                                 ("client_c", 9, "/sync/applyChanges"), 500),
+            "400 of a full_download": (download_then([]), ("client_c", 6, "/sync/download"), 400),
+        }
+        for case, (steps, where, status) in cases.items():
+            with self.subTest(case=case):
+                with ForwardProxy(fail={where: status}) as proxy:
+                    with WorkerProcess("UTC", extra_env={"ORACLE_SYNC_RECORDER": proxy.address}) as w:
+                        sc = actor_scenario("t/other", ["client_a", "client_c"], steps)
+                        begun = w.request({"cmd": "begin", "scenario": sc})
+                        resp = [w.request({"cmd": "step"}) for _ in steps]
+                        w.request({"cmd": "end"})
+                self.assertTrue(begun["ok"] and all(r["ok"] for r in resp[:-1]), resp)
+                err = resp[-1].get("error", {})
+                self.assertEqual((resp[-1]["ok"], err.get("kind"), err.get("step")), (False, "anki_error", len(steps) - 1))
+                self.assertIn(where, proxy.seen)
+
+    def test_scm_at_the_frozen_instant_cannot_tell_the_kinds_apart(self):
+        from driver.errors import DriverError
+        from driver.ops.sync_client import round_failure_kind
+
+        self.assertEqual(round_failure_kind(1000, 5000, 5000), "sanity_check_failed")
+        self.assertEqual(round_failure_kind(1000, 1000, 5000), "db_check_required")
+        with self.assertRaises(DriverError) as caught:
+            round_failure_kind(5000, 5000, 5000)
+        self.assertEqual(caught.exception.kind, "invalid_scenario")
+
+
+class ReviewSession(unittest.TestCase):
+    def test_review_session_records_nothing_and_changes_nothing(self):
+        # S13: the oracle plays a Meguri actor as Anki, so the normal sync in
+        # the session sends the answer and empties the undo history; the
+        # session may stay open at the end, and a scenario without actors has
+        # one.
+        steps = [
+            {"advance": "1m"}, {"sync": {"kind": "login"}}, {"sync": {"kind": "full_upload"}},  # 0-2
+            {"observe": ["db_dump"]},                                                            # 3
+            BEGIN,                                                                               # 4
+            {"observe": ["db_dump"]},                                                            # 5
+            {"advance": "1m"},                                                                   # 6
+            {"answer": {"card": "#c1", "rating": "good"}},                                       # 7
+            {"sync": {"kind": "normal"}},                                                        # 8
+            END,                                                                                 # 9
+            {"observe": ["undo_status"]},                                                        # 10
+            BEGIN,                                                                               # 11
+        ]
+        plain = {"id": "t/plain", "clock": {"tz": "UTC", "start": START}, "setup": SETUP,
+                 "steps": [{"observe": ["db_dump"]}, BEGIN, END, {"observe": ["db_dump"]}]}
+        with WorkerProcess("UTC") as w:
+            out = run(self, w, actor_scenario("t/session", ["meguri"], steps))
+            alone = run(self, w, plain)
+        self.assertEqual([out[i] for i in (4, 9, 11)], [{}] * 3)
+        self.assertEqual(out[5], out[3])
+        self.assertEqual(out[8], result("no_changes"))
+        self.assertEqual(out[10], {"undo_status": {"undo": None, "redo": None}})
+        self.assertEqual(alone[1:3], [{}, {}])
+        self.assertEqual(alone[3], alone[0])
 
 
 class Status(unittest.TestCase):
