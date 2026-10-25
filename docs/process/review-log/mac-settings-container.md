@@ -112,3 +112,29 @@ Its ID counts, button roles and scroll checks all passed: one test,
 zero failures or skips. Similarity
 `20261025T002334Z-62439` also passed. The broader gate and unit acceptance
 remain pending.
+
+## Prepare action investigation
+
+Start: `a05e6aa61a6e98ea8db7ffdb42e7e0a64ef29a0a`.
+The first full Mac run `manual-transfer-check/20261025T002532Z-64603`
+stopped at synthetic media staging, before any UI test. A read-only probe
+verified two synthetic files against saved test recipes. Their recorded
+container identity differed from the current one.
+
+A temporary VM repair helper moved only those two files into a new exclusive
+test archive, verified their bytes and file identity, and synced directories
+and its receipt. Review R1 found a durability gap; R2 found it closed.
+`fixture-preflight-facts/20261025T002949Z-69840` records the repair.
+The temporary helper was removed. The staging rules were unchanged.
+
+`manual-transfer-check/20261025T003000Z-70265` passed staging and real login,
+opened the workflow and clicked Prepare Import. The preview did not appear.
+Failure-only facts retain the prior login result and no progress. This does
+not distinguish a missed pointer action from an early preparation refusal.
+
+Filtered diagnostic export `cleanroom/20261025T003800Z-75516` adds only
+bounded control geometry before the existing click and after a missing
+preview. It retains the existing query, input and assertions. Independent
+review found no P0–P2. Build `20261025T004215Z-77257`, focused privacy and
+similarity `20261025T004227Z-78392` passed. Native execution remains pending.
+No unit or full gate is accepted by this investigation.

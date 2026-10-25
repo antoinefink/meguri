@@ -8,6 +8,8 @@ import AppKit
 /// reviewable content; no fixture installs its collection into the app.
 /// Integrator stages controlled-rig.json through its controlled forwarding job.
 @MainActor final class ManualTransferJourneyTests: XCTestCase {
+    private var confirmDiagnosticTarget: XCUIElement?
+    private var prepareGeometry: (id: String, lines: [String])?
     private struct Rig: Decodable {
         let endpoint: String
         let username: String
@@ -699,22 +701,30 @@ import AppKit
     }
     #endif
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
+        func tracked(_ target: XCUIElement) -> XCUIElement {
+            if id == "settings.anki.confirm" { confirmDiagnosticTarget = target }
+            return target
+        }
         #if os(macOS)
         let workflow = app.descendants(matching: .any).matching(identifier: "settings.anki.transferWorkflow").firstMatch
         if id != "settings.anki.transferWorkflow", id.hasPrefix("settings.anki."), workflow.exists {
             // Native toolbar items can be siblings of the identified content.
             let sheet = app.sheets.containing(.any, identifier: "settings.anki.transferWorkflow").firstMatch
             let scope = sheet.exists ? sheet : workflow
-            return scope.descendants(matching: .any).matching(identifier: id).firstMatch
+            return tracked(scope.descendants(matching: .any).matching(identifier: id).firstMatch)
         }
         #endif
-        return app.descendants(matching: .any).matching(identifier: id).firstMatch
+        return tracked(app.descendants(matching: .any).matching(identifier: id).firstMatch)
     }
     private func click(_ target: XCUIElement, _ app: XCUIApplication, _ bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         try reveal(target, app, bundle)
         waitUntilReady(target, app)
         #if os(macOS)
+        let id = target.identifier
+        if id == "settings.anki.prepareImport" || id == "settings.anki.prepareExport" {
+            prepareGeometry = (id, prepareGeometryFacts(app, id, target))
+        }
         target.click()
         #else
         target.tap()
@@ -1107,6 +1117,54 @@ import AppKit
         return "unknown"
     }
     #if os(macOS)
+    private func prepareGeometryFacts(_ app: XCUIApplication, _ id: String, _ target: XCUIElement) -> [String] {
+        guard id == "settings.anki.prepareImport" || id == "settings.anki.prepareExport" else { return [] }
+        let controlID = NSPredicate(format: "identifier == %@", id)
+        let rootID = NSPredicate(format: "identifier == %@", "settings.anki.transferWorkflow")
+        let all = app.descendants(matching: .any), controls = all.matching(controlID), roots = all.matching(rootID)
+        let owners = app.sheets.containing(rootID), windows = app.windows.containing(rootID)
+        let exists = target.exists, targetFrame = exists ? target.frame : .zero
+        let center = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
+        var lines = ["controlID=\(id) sheetCount=\(app.sheets.count) owningSheetCount=\(owners.count)",
+                     "workflowRootCount=\(roots.count) controlCount=\(controls.count) nativeButtonCount=\(app.buttons.matching(controlID).count) owningWindowCount=\(windows.count)",
+                     "targetExists=\(exists) targetRole=\(exists ? Int(target.elementType.rawValue) : -1) targetEnabled=\(exists && target.isEnabled) targetHittable=\(exists && target.isHittable)",
+                     "targetCenter=[\(center.x),\(center.y)]"]
+        func frame(_ value: CGRect, _ key: String) {
+            lines.append("\(key)=[\(value.origin.x),\(value.origin.y),\(value.width),\(value.height)]")
+            lines.append("\(key)CenterContained=\(exists && !value.isNull && !value.isEmpty && value.contains(center))")
+        }
+        frame(targetFrame, "targetFrame")
+        lines.append("ambiguous=\(controls.count != 1 || roots.count != 1 || owners.count != 1 || windows.count != 1)")
+        guard controls.count == 1, roots.count == 1, owners.count == 1, windows.count == 1 else { return lines }
+        let owner = owners.firstMatch, root = roots.firstMatch
+        let ownerRoots = owner.descendants(matching: .any).matching(rootID).count
+        let ownerControls = owner.descendants(matching: .any).matching(controlID).count
+        lines += ["ownerWorkflowRootCount=\(ownerRoots) ownerControlCount=\(ownerControls) ownerNativeButtonCount=\(owner.buttons.matching(controlID).count)",
+                  "rootControlCount=\(root.descendants(matching: .any).matching(controlID).count)"]
+        guard ownerRoots == 1, ownerControls == 1 else { return lines }
+        let rootFrame = root.frame, sheetFrame = owner.frame, windowFrame = windows.firstMatch.frame
+        frame(rootFrame, "workflowRootFrame"); frame(sheetFrame, "owningSheetFrame"); frame(windowFrame, "owningWindowFrame")
+        frame(sheetFrame.intersection(windowFrame), "sheetWindowViewport")
+        frame(rootFrame.intersection(sheetFrame).intersection(windowFrame), "rootSheetWindowViewport")
+        let control = controls.firstMatch, children = control.children(matching: .any), childCount = children.count
+        lines += ["nativeButtonDescendantCount=\(control.descendants(matching: .button).count) immediateChildCount=\(childCount) childrenTruncated=\(childCount > 8)"]
+        for index in 0..<min(childCount, 8) {
+            let child = children.element(boundBy: index)
+            lines.append("child\(index)Role=\(child.elementType.rawValue)"); frame(child.frame, "child\(index)Frame")
+        }
+        let viewports = [owner.scrollViews, owner.tables, owner.collectionViews].map { $0.containing(controlID) }
+        let viewportCount = viewports.reduce(0) { $0 + $1.count }; var emitted = 0
+        lines += ["actualScrollOwnerCount=\(viewportCount)", "scrollOwnersTruncated=\(viewportCount > 4)"]
+        for query in viewports {
+            for index in 0..<min(query.count, 4 - emitted) {
+                let viewport = query.element(boundBy: index)
+                lines.append("scrollOwner\(emitted)Role=\(viewport.elementType.rawValue)"); frame(viewport.frame, "scrollOwner\(emitted)Frame")
+                frame(viewport.frame.intersection(rootFrame).intersection(sheetFrame).intersection(windowFrame), "scrollOwner\(emitted)Viewport")
+                emitted += 1
+            }
+        }
+        return lines
+    }
     private func attachGeometry(_ app: XCUIApplication, _ name: String, _ bundle: String) {
         // Geometry and closed disclosure facts only; never emit AX text or inspect account controls.
         let appState = app.state
@@ -1291,6 +1349,12 @@ import AppKit
             return line
         }
         var lines = [String]()
+        #if os(macOS)
+        if let target, target === confirmDiagnosticTarget, !target.exists, let prepareGeometry {
+            lines += prepareGeometry.lines.map { "beforePrepare.\($0)" }
+            lines += prepareGeometryFacts(app, prepareGeometry.id, element(app, prepareGeometry.id)).map { "afterMissingPreview.\($0)" }
+        }
+        #endif
         if let target { lines.append(state(target, "target")) }
         let result = element(app, "settings.anki.result")
         lines.append("resultCategory=\(transferResultCategory(result))")
