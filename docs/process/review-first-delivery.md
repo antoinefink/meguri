@@ -57,9 +57,11 @@ existing attach points for later providers. The next step covers local entry,
 using the package/replace primitives required by the chosen supported format.
 Reuse prepared specs and code before writing replacements.
 
-Work one delivery item at a time on master. Record its starting commit, use the
-filtered implementer/fixer and one independent reviewer, and keep focused tests
-and a full gate for the integrated Swift/FFI change. Review includes correctness,
+Work on master in coherent batches of 3–5 related units when useful, following
+Antoine's 2026-10-25 goal. Record each unit's starting commit, use the filtered
+implementer/fixer and independent review, and retain separate commits and focused
+checks per unit. Run one full gate covering the complete integration batch.
+Review includes correctness,
 plan conformance, clean-room boundaries and rendered UI quality. VM checks that
 cannot run stay queued and must pass before final acceptance.
 
