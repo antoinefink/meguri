@@ -278,10 +278,11 @@ An endpoint is the base URL a client syncs with. The worker derives every endpoi
 
 ### S8.4 Per-session Meguri edge
 
-This section specifies Meguri's test transport. Scenario data and the
-existing reply to `begin` remain unchanged. Each mixed session takes its
-target solely from the `sync.endpoints.actors` member it just received.
-Replay allocates no edge.
+This section specifies Meguri's test transport. Each mixed session takes its
+target from `sync.endpoints.actors` and its ownership tokens from `sync.route`
+in the same `begin` response. Replay allocates no edge. The route ownership
+extension below corrects the earlier assumption that parent-side worker
+teardown ordering alone could protect a published edge.
 
 **Handoff.** `tools/mg` supplies `conformance run --live` with
 `--meguri-edge-cmd`: a JSON array of command arguments, as for the existing
@@ -292,7 +293,7 @@ JSON request from stdin and writes one JSON response to stdout:
 
 | Request | Successful response |
 |---|---|
-| `{"cmd":"acquire","target":<actors endpoint>}` | `{"endpoint":<host endpoint>,"lease":<opaque token>}` |
+| `{"cmd":"acquire","target":<actors endpoint>,"route":{"proxy":<token>,"worker":<token>},"expected_worker":<trusted checkout token>}` | `{"endpoint":<host endpoint>,"lease":<opaque token>}` |
 | `{"cmd":"release","lease":<opaque token>}` | `{"released":true}` |
 
 This handoff runs in the existing native T1 lane: MG launches the CLI on the
@@ -318,6 +319,16 @@ port, whose host exactly matches the fault-service host in the run's trusted
 an absent/invalid port and the fault-service API port. The target is the
 reported actors endpoint, never the reported upstream or converge endpoint.
 No scenario, actor step or account value can set a helper command or target.
+The trusted launch factory assigns the expected worker identity before
+starting the driver and retains it with Worker. Exclusive checkout gives
+Parties that identity independently of the worker's response. Parties and
+the helper require `route.worker` to equal this `expected_worker`, then check
+that the tokens belong to the checkout/run, the named proxy still has the
+reported listen endpoint and its upstream belongs to that specific worker's
+retained namespace. Do not obtain expected identity from `begin`, including
+by copying its token into another field. Reject missing trusted context or
+any mismatch before edge publication or proxy deletion. A consistent tuple
+for a different worker in the same run is still refused.
 
 The helper starts one forwarder with an immutable target for this lease. It
 uses the existing edge pattern: one attachment to `oracle-internal` and one
@@ -337,22 +348,74 @@ edge does. It adds no HTTP decoding, caching or request rewriting. Independent
 sessions retain independent leases even for identical scenarios, actor names
 or worker processes; a forwarder is never retargeted for another session.
 
-**Lifetime.** Parties owns the lease from successful acquire until the mixed
-steps finish or fail. It stops actor work and releases the edge before sending
-`end`, so a deleted proxy's port cannot remain reachable through an old lease.
-After a successful `begin`, validation or allocation failure still attempts
-`end`. All later exits, malformed responses, step errors, worker failure and
-cancellation release any acquired lease and end or close/reap the worker.
-An owned lease may be released more than once. Removal requires both the
-lease token and the current MG run's ownership; another run's token fails.
+**Route ownership from creation.** MG supplies opaque current-run and unique
+worker tokens to the trusted worker launch, outside scenario data. The
+container receives its ownership labels before it starts; every mixed
+session's proxy receives its run-owned unique name before it is created.
+`ORACLE_SYNC_EDGE_OWNER` is a fresh 32-digit lowercase hexadecimal run token;
+`ORACLE_SYNC_WORKER` is a distinct 32-digit lowercase hexadecimal worker token,
+also stored in the container label `meguri.mg.worker`. A mixed proxy's exact
+name is `meguri-edge-<owner>-<32-digit lowercase hexadecimal session token>`.
+`route.proxy` is that name and `route.worker` is the worker token. The helper
+gets the same owner through trusted MG configuration and checks the existing
+checkout/project/run/purpose labels as well as this token. Container cleanup
+requires a match on every ownership field, not just the proxy-name prefix.
+The worker reports those exact proxy/worker tokens in `sync.route`. Missing
+trusted ownership configuration prevents mixed `begin` from creating a route.
+
+For mixed sessions, deletion belongs to the host owner from proxy creation,
+not only after acquire succeeds. The worker's session close, EOF, error and
+independent process exit must not delete that proxy. This is the bounded
+exception to S8.1's worker-deletes rule. The existing named fault proxy keeps
+its listener allocated until the host explicitly deletes it; no new public
+fault-service control endpoint or general lease service is required.
+
+Retain the upstream namespace too. The backend server uses a per-session
+port inside a pooled worker container. Retaining only the proxy listener
+would still allow an old edge to reach a later server at that old upstream.
+A container-local lifetime holder must therefore own the worker container
+and its network attachment independently of the driver process, starting
+before mixed `begin`. Driver EOF or self-exit leaves that namespace held.
+Each pooled worker has a separate container/namespace; checking a worker out
+gives one interactive session exclusive use of it. Keep `--jobs 4` concurrent:
+each active mixed session uses its worker's own namespace. A shared container
+or global session lock is insufficient. Do not let driver exit trigger
+automatic container removal; the holder, not the driver, controls its lifetime.
+While any published edge may refer to it, the namespace is quarantined:
+no replacement driver, new session, new exec, backend listener or reassigned container
+address may use it. Its original backend may remain alive or stop; stopping
+is safe only because nothing can bind a replacement endpoint there. Host
+stdio retention or delaying child reap does not establish this guarantee.
+Use the existing worker launch/lifetime wrapper for this bounded ownership;
+it needs no general command server or arbitrary process-management API.
+
+**Release and failure.** Parties stops actor work and releases the edge before
+`end`. Release verifies removal of every publication and forwarding connection
+for that lease before deleting its exact proxy. Only after this succeeds may
+the worker be reused or its container/namespace retired. A proxy-delete error
+is reported; it may leave a harmless reserved proxy, never a published route
+to a replacement backend. An owned release is idempotent; foreign tokens fail.
+
+After successful `begin`, validation or allocation failure still attempts
+`end`. That closes session data/server resources but does not free a retained
+mixed proxy or permit worker reuse while edge removal is unresolved. On later
+errors, malformed responses or cancellation, stop steps, attempt the same
+edge-first cleanup and end or close/reap the driver. Independent driver exit
+is a run failure; its lifetime holder and proxy remain owned until cleanup.
+Do not keep a failed session eligible for the worker pool.
 
 The helper labels every allocated container with the existing MG run label
 and its edge purpose, including containers created before an interrupted
-acquire can return a token. Normal cleanup and the run's cancellation trap
-remove these containers. They leave the shared fault service and other runs'
-containers intact. Helper invocations have bounded process lifetimes and are
-cancelled with the run. Cleanup failure is reported as a run error; it never
-turns a failed execution into a pass. Credentials never enter helper requests,
+acquire can return a token. Normal cleanup and the cancellation trap first
+remove this run's edges, then its named mixed proxies, then its retained
+worker containers. Run-owned proxy names and worker labels support this sweep
+even when no begin/acquire response reached the caller. If edge removal cannot
+be proved, retain the proxy and worker namespace; report cleanup failure and
+keep the run failed. Do not delete them merely because a deadline expired or
+the CLI exited. MG must not restart/recreate the shared fault service while
+any edge publication remains unresolved. Cleanup leaves other runs, projects
+and the shared service intact. Helper invocations remain bounded and cancelled
+with the run. Credentials never enter helper requests,
 arguments, labels or diagnostics; transport details stay in ephemeral run
 state, outside scenarios, goldens and committed reports.
 
@@ -361,12 +424,30 @@ returned-edge rejection before any actor step, exact Seat routing, acquisition
 failure, each early exit after acquisition, idempotent owned release, foreign
 release refusal and interrupted allocation cleanup. Concurrent mixed runs
 exercise distinct proxies and retain isolation when either run ends.
+Inject driver self-exit and EOF before/after begin response, lost acquire
+responses, helper timeout, edge-removal failure and proxy-delete failure.
+With two valid same-run workers, substitute B's complete target/proxy/worker
+tuple into A's response. A's trusted checkout identity must cause refusal
+before publication or deletion, while B stays usable. Cover missing trusted
+identity, mismatches and the correctly bound path, including when both
+workers use the same numeric backend port in distinct namespaces.
+Prove that no old proxy port or upstream address/port can be reused behind
+a surviving edge; attempt a later session and require refusal/quarantine until
+removal is confirmed. Cover pre-token owned sweeps, whole-run cancellation,
+normal reuse after cleanup and foreign-resource preservation. A service
+restart must be refused while an edge remains unresolved.
+Include two concurrently active worker containers using the same numeric
+backend port in distinct namespaces. After one driver exits with edge removal
+blocked, its old edge must never reach the other worker. The unaffected
+session must still make progress under `--jobs 4`.
 Transport tests retain reset and half-close behavior and prove no
 upstream request during readiness checks. Published T1 scenarios then run
 through production sync, first serially and then concurrently, preserving
 the replay-first and real capability checks of S10.3. Stub dispatch tests
-alone do not establish transport parity. Existing schemas, scenarios, goldens
-and oracle pins require no change for this handoff.
+alone do not establish transport parity. The neutral interactive protocol
+and its implementation must add the route member together. Scenario inputs,
+golden observations and oracle pins are not changed by this specification;
+any resulting driver freshness update follows the normal validation process.
 
 ## S9. Recordings of oracle-client exchanges (R1933)
 
@@ -414,14 +495,14 @@ The parties executor drives one worker per actor scenario through `begin`, `step
 
 - `begin` takes `caller_actors`: the Meguri actors the caller plays (none in the replay). When the caller plays the first actor, it runs the setup on Meguri first and passes the real note and card ids the setup created, in creation order, as `ids`. The worker creates collections only for the actors it plays, runs the setup when it plays the first actor, starts the server, and creates the fault proxy when the run needs one. It answers with:
   - `ids`: the real ids its setup created, when it ran the setup;
-  - `sync`: `{endpoints: {actors, converge, upstream, recorder}, account: {username, password}}`. `upstream` and `recorder` are `null` when the run has no fault proxy or no recorder. The caller's Meguri actors log in with `account` (and S4.5's derived password for `credentials: wrong_password`).
+  - `sync`: `{endpoints: {actors, converge, upstream, recorder}, account: {username, password}, route: null | {proxy, worker}}`. `upstream` and `recorder` are `null` when the run has no fault proxy or no recorder. `route` is required and contains the two opaque ownership tokens of S8.4 for a mixed session, otherwise `null`. The caller's Meguri actors log in with `account` (and S4.5's derived password for `credentials: wrong_password`).
 - The caller checks every endpoint (S8.3), then sends one `step` request for each scenario step, in order:
   - A step the worker runs (a global step, or any step while an oracle actor is current): `{"cmd": "step"}`. The response's `ids` lists the real ids the step created; the caller adds them to the id table of its Meguri actors.
   - A step of a caller-played actor: the caller runs it on Meguri's executor, then sends `{"cmd": "step", "done": {"output": <the step's output>, "notes": [<real ids>], "cards": [<real ids>]}}` with the real ids the step created, in creation order. The worker records the output as that step's and adds the ids to the scenario's table.
   - `converge`, when the caller plays actors: `{"cmd": "step", "dumps": {<actor>: <raw dump>, ...}}`, with exactly the caller-played actors.
   - `advance` and `set_clock` run on the worker as global steps; the caller also applies them to each Meguri actor's clock.
 - The worker answers `protocol_error` when a step it runs comes with `done`, when a caller-played step comes without `done`, or when `dumps` does not match the caller-played actors.
-- `end` returns every step's output, the caller's included, stops the server and deletes the fault proxy.
+- `end` reports the complete step observations and stops the session server. Worker-owned proxies are deleted here. Caller-owned mixed routes instead follow S8.4's edge-first release, including after EOF or error.
 
 ### S10.5 Errors
 

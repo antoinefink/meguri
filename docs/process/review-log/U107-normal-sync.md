@@ -197,3 +197,20 @@ It includes the settings repair and media report error/resume cases. Allocation
 and original held-run memory runs are separate and pending at this checkpoint.
 The marker change belongs to U110 and is kept in its own source commit.
 The live-session cleanup repair, typed skipped IDs and batch gate remain open.
+
+The allocation run `181049Z-51995` passes the 150k-card width test. Original
+held-run memory check `181135Z-51994` also passes. These are Rust heap/payload
+proofs; device and process limits remain separate requirements.
+
+## Whole-route lifetime correction
+
+Worker exit can delete its proxy and stop its backend. Parent-only cleanup
+cannot keep the old route safe. The corrected S8.4/S10.4 contract assigns the
+proxy and worker namespace to the caller before begin. A container-local holder
+keeps the namespace separate after driver exit; cleanup removes edge, proxy,
+then namespace. Failed cleanup retains the remaining resources.
+The expected worker comes from trusted launch/checkout state, independently of
+the begin result. Re-review of this binding has no P0–P2 findings.
+Implementation requires a small oracle-wrapper handoff as well as MG/helper
+work; the earlier no-driver-change claim was wrong. Existing partial exports
+remain saved. Actual live cases, cleanup tests and the batch gate are pending.
