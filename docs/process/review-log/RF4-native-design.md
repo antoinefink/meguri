@@ -208,3 +208,12 @@ Independent source review found no P0–P2. UI lint
 `20261025T024405Z-41252`, privacy `20261025T024406Z-41468` and similarity
 `20261025T024406Z-41481` passed. Native renders, replacement baselines and the
 shared integration gate remain pending. No unit is accepted by this repair.
+
+Candidate generation `snapshots/20261025T025651Z-52051` completed on iPhone,
+iPad and Mac: 175 recorded fixture cells, zero generation failures, 23 settings
+probes captured, and 490 device-only cells deferred. Deferred cells did not pass.
+Native review checked all five states, with small windows, large text, both
+appearances and increased contrast on each platform. It found no P0–P2.
+The URL field now has full width on touch layouts. Root inspected the repaired
+XXXLarge iPhone and native Mac rows. These are candidate baselines, not human
+design approval; comparison checks and final evidence remain required.
