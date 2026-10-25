@@ -166,3 +166,8 @@ one pass, zero failures, zero skips. Prepare is visible after scrolling;
 Done closes the sheet. Fresh trust: `20261025T005316Z-89916`, one pass
 and zero skips.
 The full workflow and integration gate remain pending.
+
+Full Mac result: `manual-transfer-check/20261025T005443Z-92346`.
+One native pass, zero failures, zero skips. Peer data matched and cleanup
+was confirmed. Import, reviews, export and media recovery checks passed.
+The shared integration gate remains pending.

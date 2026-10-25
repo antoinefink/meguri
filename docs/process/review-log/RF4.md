@@ -1457,3 +1457,26 @@ Independent review: no P0–P2 findings. Focused verification:
 failing reopen/durability case. The prior failure remains recorded at
 `swift-test/20261024T155625Z-94217`; its assertion was preserved.
 This repair does not accept RF4 or replace its pending integration gate.
+
+## Native review cycle checkpoint — 2026-10-25
+
+Mac source: `8d6e12c9`. The native test passed, as did the separate peer
+comparison. Import and export include media. The app retained an answer and
+its device login across restart. Media cancellation, resume and a second
+account passed their checks. Teardown is confirmed.
+
+| Platform | Manual-transfer-check receipt | Result |
+| --- | --- | --- |
+| iPhone | `20261024T181626Z-95983` | Pass |
+| iPad | `20261024T185244Z-98513` | Pass |
+| Mac | `20261025T005443Z-92346` | Pass |
+
+Each native run reports one pass and zero failures or skips. The Mac run also
+reports complete native work and matching peer data. Its detailed repair
+record is `mac-settings-container.md`. The requested persistent local service
+remains healthy and running. No connection values are recorded here.
+
+The shared full gate must still cover changes from
+`81c207573c20c337c8834e4ae8b4ee8f29603dbf`. This checkpoint adds no Unit
+trailer and accepts no milestone. File export with media remains separate
+prepared work. The full plan and final human evidence remain required.
