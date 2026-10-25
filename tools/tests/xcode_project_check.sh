@@ -486,10 +486,11 @@ fi
 # --- VM execution (the devices phase) ---------------------------------------
 VM_MARK="mg-xcode-check: remote exit"
 
-# Force Xcode to recopy only the generated Debug widget when Snapshot opts
-# into team signing. Refuse symlinks anywhere from the checkout to that copy.
-remove_team_snapshot_embedded_widget() {
+# Force Xcode to recopy the generated widget before every Mac Debug test build.
+# Refuse symlinks anywhere from the checkout to an existing copy.
+remove_mac_debug_embedded_widget() {
   local widget="$DD_TESTS/Build/Products/Debug/Meguri.app/Contents/PlugIns/MeguriWidget.appex"
+  [ -e "$widget" ] || [ -L "$widget" ] || return 0
   if ! python3 - "$REPO" "$WORK" "$DD_TESTS" "$widget" <<'PY'
 from pathlib import Path
 import sys
@@ -516,11 +517,11 @@ except (OSError, RuntimeError, ValueError):
     sys.exit(1)
 PY
   then
-    echo "xcode_project_check: unsafe Team Snapshot embedded widget path"
+    echo "xcode_project_check: unsafe Mac Debug embedded widget path"
     return 1
   fi
   if ! rm -rf "$widget" 2>/dev/null; then
-    echo "xcode_project_check: cannot remove the Team Snapshot embedded widget"
+    echo "xcode_project_check: cannot remove the Mac Debug embedded widget"
     return 1
   fi
 }
@@ -760,9 +761,11 @@ test_in_vm() {
   esac
   profile_cache_check "$log" || return 70
   case "$dest" in platform=macOS*) sdk=macosx build_dest="$dest" ;; esac
+  if [ "$sdk" = macosx ] && [ "$config" = Debug ]; then
+    remove_mac_debug_embedded_widget >>"$log" 2>&1 || return 70
+  fi
   if [ "$sdk" = macosx ] && [ "$plan" = Snapshot ] && [ "$signing" = team ]; then
     [ "$config" = Debug ] || { echo "xcode_project_check: Team Snapshot requires Debug" >>"$log"; return 70; }
-    remove_team_snapshot_embedded_widget >>"$log" 2>&1 || return 70
     signing_args=(MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration)
   fi
   # Unit excludes the app-hosted Snapshot target. An old incomplete copy

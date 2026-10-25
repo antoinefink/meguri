@@ -58,3 +58,25 @@ Snapshot plan: 76 passes, zero failures, two existing skips. The unchanged
 script was pinned to SHA-256
 `75961551c83fbe0fd437071af9edc0e9533f968448a1aaa3ea5551a79acb9487`.
 The full gate remains pending.
+
+## Mac Debug signing changes, 2026-10-25
+
+Gate `20261025T031426Z-94062`, at `d6075d6c` from base
+`81c207573c20c337c8834e4ae8b4ee8f29603dbf`, failed Mac Unit validation.
+The earlier Team Snapshot left its signed widget inside the ad-hoc app.
+The filtered fix `cleanroom/20261025T035851Z-98124` removes that exact embedded
+copy before every Mac Debug test build. The build recreates it. Existing path
+checks, Profile checks and signing argument scopes remain enforced.
+Independent source review found no P0–P2. All ten focused regressions passed in
+`selftest/20261025T045859Z-57591`; privacy `20261025T050034Z-60566` passed.
+Similarity `20261025T045908Z-57978` passed on the repair diff.
+
+Native cycle `focused-mac-signing-cycle/20261025T045929Z-58991` exercised Team
+Snapshot, ad-hoc Unit and Team Snapshot again without clearing DerivedData.
+The actual results were 1/0/0, 18/0/0 and 1/0/0 (passed/failed/skipped).
+Its temporary coverage guard incorrectly expected 19 Unit tests, so the job
+receipt remains failed. Independent review counted all 18 selected EventTests
+in source and the native log. The separate top-level clock-value test explains
+the broader count of 19. The temporary helper expectation was corrected; the
+native cycle was not repeated for this counting error. This focused evidence
+does not replace the required full gate from the original base.
