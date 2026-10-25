@@ -1586,3 +1586,13 @@ shape differs from the actual XCTest name; a focused repair is pending.
 Selftest `234729Z-83661` passes 11 of 12 cases. One phase assertion needs to
 account for the earlier refusal when a fixture adds a directory. Preserve that
 refusal. These are WIP checks, without a Unit trailer or acceptance claim.
+
+Metadata fixer `235222Z-87486` has no source findings in round five. Selftest
+`235517Z-90998` passes all 12 cases; its privacy scan passes. Mac
+`235520Z-91274` has one passed native case and retains the package attachment,
+but collection errors at the directory guard. APFS reports two links for the
+empty output directory and four after two files. The guard incorrectly treats
+that expected change as replacement. File and directory identities need their
+own checks; keep file link limits and all binding/inventory assertions.
+The actual package is retained for the separate offline proof. No native job,
+unit or full interoperability acceptance is claimed from this failed receipt.

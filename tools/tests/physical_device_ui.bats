@@ -1041,33 +1041,35 @@ assert len(args) == 11 and args[:4] == ['xcresulttool', 'export', 'attachments',
 bundle = Path(args[4])
 run = bundle.parent
 filename = json.loads((run / 'expected-source.json').read_text())['native_filename']
+stem = Path(filename).stem
 method = 'CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace()'
 exported = run / 'native-media-attachments'
 assert bundle == run / 'mac.xcresult'
-assert args[5:] == ['--output-path', str(exported), '--test-id', method, '--filter', '*' + filename + '*']
+assert args[5:] == ['--output-path', str(exported), '--test-id', method, '--filter', '*.colpkg']
 assert exported.is_dir() and not list(exported.iterdir())
 mode = os.environ.get('FX_ATTACHMENT_MODE', 'success')
 if mode == 'export-error':
     print('synthetic subprocess output must stay private', file=sys.stderr)
     sys.exit(1)
 name = '00000000-0000-4000-8000-000000000007.colpkg'
+human_suffix = '_0_00000000-0000-4000-8000-000000000008.colpkg'
 payload = exported / name
 source = bundle / 'native-attachment.colpkg'
 if source.exists() and mode != 'missing-package':
     shutil.copyfile(source, payload)
 attachment = {'exportedFileName': name,
-              'suggestedHumanReadableName': filename + '_0_' + name,
+              'suggestedHumanReadableName': stem + human_suffix,
               'isAssociatedWithFailure': False, 'configurationName': 'Synthetic',
               'deviceName': 'Synthetic', 'deviceId': 'synthetic', 'timestamp': 1}
 manifest = [{'testIdentifier': method, 'attachments': [attachment]}]
 if mode == 'wrong-test':
     manifest[0]['testIdentifier'] = 'MediaTests/testAudio()'
 elif mode == 'wrong-name':
-    attachment['suggestedHumanReadableName'] = 'prefix-' + filename + '_0_' + name
+    attachment['suggestedHumanReadableName'] = 'prefix-' + stem + human_suffix
 elif mode == 'wrong-delimiter':
-    attachment['suggestedHumanReadableName'] = filename + 'suffix_0_' + name
+    attachment['suggestedHumanReadableName'] = stem + 'suffix' + human_suffix
 elif mode == 'wrong-token':
-    attachment['suggestedHumanReadableName'] = 'Meguri-Media-' + 'f' * 32 + '.colpkg_0_' + name
+    attachment['suggestedHumanReadableName'] = 'Meguri-Media-' + 'f' * 32 + human_suffix
 elif mode == 'failure-marker':
     attachment['isAssociatedWithFailure'] = True
 elif mode == 'missing-marker':
@@ -1149,7 +1151,7 @@ media_run() {
     : >"$STUB_LOG"
     if [ "$platform" = mac ]; then
       mg ui-test --platform mac --suite CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace
-      called '^xcrun xcresulttool export attachments --path .*/mac.xcresult --output-path .*/native-media-attachments --test-id CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace\(\) --filter \*Meguri-Media-[a-f0-9]{32}\.colpkg\*$'
+      called '^xcrun xcresulttool export attachments --path .*/mac.xcresult --output-path .*/native-media-attachments --test-id CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace\(\) --filter \*\.colpkg$'
       not_called '^media-(copy-in|copy-out|simctl|fetch|ssh)'
     else
       media_run --platform ipad
@@ -1163,6 +1165,7 @@ media_run() {
     [ "$(cat "$dir/native-media-export/$filename")" = native-saved-package ]
     if [ "$platform" = mac ]; then
       called "^media-mac-attachment $filename$"
+      [ "$(ls -A "$dir/native-media-attachments")" = $'00000000-0000-4000-8000-000000000007.colpkg\nmanifest.json' ]
       local save_line capture_line
       save_line="$(grep -n '^media-mac-attachment ' "$STUB_LOG" | cut -d: -f1)"
       capture_line="$(grep -n '^xcrun xcresulttool export attachments ' "$STUB_LOG" | cut -d: -f1)"
@@ -1482,10 +1485,10 @@ PY
     : >"$STUB_LOG"
     FX_ATTACHMENT_MODE="$mode" mg ui-test --platform mac --suite CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace
     [ "$status" -eq 2 ]
-    called '^xcrun xcresulttool export attachments --path .*/mac.xcresult --output-path .*/native-media-attachments --test-id CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace\(\) --filter \*Meguri-Media-[a-f0-9]{32}\.colpkg\*$'
+    called '^xcrun xcresulttool export attachments --path .*/mac.xcresult --output-path .*/native-media-attachments --test-id CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace\(\) --filter \*\.colpkg$'
     [ "$(grep -c '^xcrun xcresulttool export attachments ' "$STUB_LOG")" -eq 1 ]
     phase=manifest
-    [ "$mode" != export-error ] || phase=export
+    case "$mode" in export-error|directory) phase=export ;; esac
     [ "$(field .details.native_media_capture_failure.phase)" = "$phase" ]
     [ "$(field .details.native_media_export)" = null ]
     [ "$(field '[.artifacts[] | select(.kind | startswith("native-media"))] | length')" = 0 ]
@@ -1509,7 +1512,9 @@ capture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(capture)
 base = Path(sys.argv[2])
 filename = 'Meguri-Media-' + '2' * 32 + '.colpkg'
+stem = Path(filename).stem
 basename = '00000000-0000-4000-8000-000000000007.colpkg'
+human_name = stem + '_0_00000000-0000-4000-8000-000000000008.colpkg'
 original = b'native-A'
 foreign = b'foreignB'
 
@@ -1535,7 +1540,7 @@ for case in ('success', 'occupied', 'wrong-owner', 'wrong-bundle', 'export-occup
     escaped = root / 'escaped.colpkg'
     escaped.write_bytes(foreign)
     manifest = [{'testIdentifier': capture.METHOD, 'attachments': [{
-        'exportedFileName': basename, 'suggestedHumanReadableName': filename + '_0_' + basename,
+        'exportedFileName': basename, 'suggestedHumanReadableName': human_name,
         'isAssociatedWithFailure': False}]}]
     if case == 'occupied':
         output.write_bytes(foreign)
@@ -1560,7 +1565,7 @@ for case in ('success', 'occupied', 'wrong-owner', 'wrong-bundle', 'export-occup
         exported_calls.append(args)
         assert args == ['xcrun', 'xcresulttool', 'export', 'attachments', '--path', str(bundle),
                         '--output-path', str(exported), '--test-id', capture.METHOD,
-                        '--filter', '*' + filename + '*']
+                        '--filter', '*.colpkg']
         assert kwargs == {'check': True, 'stdout': capture.subprocess.DEVNULL,
                           'stderr': capture.subprocess.DEVNULL}
         assert not list(exported.iterdir())

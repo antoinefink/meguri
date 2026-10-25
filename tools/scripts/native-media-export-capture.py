@@ -209,7 +209,7 @@ def mac_capture(run, filename, bundle):
                 subprocess.run([
                     'xcrun', 'xcresulttool', 'export', 'attachments',
                     '--path', str(bundle), '--output-path', str(exported),
-                    '--test-id', METHOD, '--filter', '*' + filename + '*',
+                    '--test-id', METHOD, '--filter', '*.colpkg',
                 ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 verify_bundle()
                 verify_directory()
@@ -231,10 +231,12 @@ def mac_capture(run, filename, bundle):
                     basename = attachment_basename(attachment.get('exportedFileName'))
                     require(attachment.get('isAssociatedWithFailure') is False,
                             'failure attachment is not native destination evidence')
-                    # XCTest appends an index and UUID to the exact attachment name.
-                    # Require the delimiter and complete suffix, never a substring.
-                    require(attachment.get('suggestedHumanReadableName')
-                            == filename + '_0_' + basename,
+                    # XCTest replaces the extension with an index and independent UUID.
+                    # Require the run's exact stem, delimiter and complete suffix.
+                    human_name = attachment.get('suggestedHumanReadableName')
+                    require(isinstance(human_name, str)
+                            and re.fullmatch(re.escape(Path(filename).stem)
+                                             + '_0_' + UUID + r'\.colpkg', human_name),
                             "attachment does not match this run's exact filename")
 
                     def verify_exports():
