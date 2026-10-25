@@ -29,6 +29,8 @@ public final class ReviewCollection {
     private var mediaRevision: UInt64 = 0
     private var mediaTask: Task<Void, Never>?
     private var mediaCloseTask: Task<Void, Never>?
+    private var mediaArrivals = ReviewMediaArrivals()
+    private weak var mediaArrivalReview: ReviewCoordinator?
     private var sceneActive = true
     private var applicationActive = true
     private var windowVisible = true
@@ -296,8 +298,10 @@ public final class ReviewCollection {
         case .rolledOver, .timeZoneChanged: refreshCounts()
         case .changes(let changes):
             refreshCounts()
-            if changes.wholeCollection || !changes.mediaAdded.isEmpty || !changes.mediaRemoved.isEmpty { scheduleMediaRefresh() }
-        case .mediaArrived: scheduleMediaRefresh()
+            if changes.wholeCollection || !changes.mediaAdded.isEmpty || !changes.mediaRemoved.isEmpty {
+                scheduleMediaRefresh(names: changes.mediaAdded, generation: event.generation)
+            }
+        case .mediaArrived(let names): scheduleMediaRefresh(names: names, generation: event.generation)
         case .collectionReplaced(let next):
             guard preparedGeneration != next else { return }
             exportOwner?.generationChanged()
@@ -534,9 +538,7 @@ public final class ReviewCollection {
             let model = ReviewCoordinator(deckID: deckID, surface: makeReviewSurface(resolver),
                 store: records, clock: configuration.clock)
             model.onPolicyRefusal = { [weak self] in self?.pendingDeck = deckID }
-            reviewVisible = true
-            review = model
-            navigation.startReview(ReviewPresentation(deck: DeckID(rawValue: deckID), session: model))
+            presentReview(model)
             await model.start()
             if !reviewIsActive { model.beginPause(); try await model.pause() }
             if model.sessionID == nil {
@@ -545,6 +547,11 @@ public final class ReviewCollection {
                 else { error = model.notice }
             }
         } catch { self.error = String(describing: error) }
+    }
+    func presentReview(_ model: ReviewCoordinator) {
+        reviewVisible = true
+        review = model
+        navigation.startReview(ReviewPresentation(deck: DeckID(rawValue: model.record.deckID), session: model))
     }
     public func finishReview() async {
         guard let review else { return }
@@ -637,6 +644,8 @@ public final class ReviewCollection {
         await lifecycleTask?.value
         if state == .noFile || state == .unopened {
             closed = true; events?.cancel(); events = nil
+            review?.generationEnded(); review = nil; navigation.endReview()
+            invalidateMedia(); await mediaCloseTask?.value
             return true
         }
         if review != nil { await finishReview(); if review != nil { return false } }
@@ -651,22 +660,37 @@ public final class ReviewCollection {
     }
     private func invalidateMedia() {
         mediaRevision &+= 1
+        mediaArrivals = ReviewMediaArrivals(); mediaArrivalReview = nil
         let old = resolver; resolver = nil
         let previous = mediaCloseTask
         mediaCloseTask = Task { await previous?.value; await old?.close() }
     }
-    private func scheduleMediaRefresh() {
+    // The ordered event consumer and focused media-binding tests share admission.
+    func scheduleMediaRefresh(names: [String], generation expected: UInt64) {
+        guard expected == generation, !closed, !closing else { return }
+        if mediaArrivalReview !== review {
+            mediaArrivals = ReviewMediaArrivals(); mediaArrivalReview = review
+        }
+        if review != nil, !mediaArrivals.insert(names) {
+            mediaArrivals = ReviewMediaArrivals(); mediaArrivalReview = nil
+            review?.mediaUnavailable()
+        }
         mediaRevision &+= 1
         guard foreground, state == .ready, !opening else { return }
-        Task { await refreshMedia() }
+        // One refresh task owns all subsequent revisions; no task per event.
+        if mediaTask == nil { beginMediaRefresh() }
     }
     func mediaResolverForReview() async -> MediaPathResolver? {
         await refreshMedia()
         return resolver
     }
     private func refreshMedia() async {
-        if let mediaTask { await mediaTask.value; return }
+        if mediaTask == nil { beginMediaRefresh() }
+        await mediaTask?.value
+    }
+    private func beginMediaRefresh() {
         let task = Task {
+            defer { mediaTask = nil }
             var observed: UInt64
             repeat {
                 observed = mediaRevision
@@ -675,30 +699,34 @@ public final class ReviewCollection {
                     await mediaCloseTask?.value
                     let snapshot = try await loadMediaIndex()
                     let root = configuration.collectionLocation.directory.appending(path: "collection.media", directoryHint: .isDirectory)
-                    guard expected == generation, observed == mediaRevision, !closed, foreground else { continue }
+                    guard expected == generation, observed == mediaRevision, !closed, !closing, foreground else { continue }
                     guard Self.acceptsMedia(snapshot, generation: expected, root: root) else {
                         throw BridgeError.unavailable(reason: "Media journal binding differs from the open collection")
                     }
                     let names = snapshot.names.map { MediaPathResolver.TrackedName(name: $0.name, caseKey: $0.caseKey) }
-                    if let resolver { await resolver.update(trackedNames: names) }
-                    else {
+                    if let resolver {
+                        await resolver.update(trackedNames: names)
+                        guard expected == generation, observed == mediaRevision, !closed, !closing, foreground,
+                              self.resolver === resolver else { continue }
+                    } else {
                         let bound = try await MediaPathResolver.open(root: root, trackedNames: names)
-                        guard expected == generation, observed == mediaRevision, !closed else { await bound.close(); continue }
+                        guard expected == generation, observed == mediaRevision, !closed, !closing, foreground else { await bound.close(); continue }
                         resolver = bound
                     }
+                    let arrived = mediaArrivals.take()
+                    if let review, mediaArrivalReview === review { review.mediaArrived(arrived) }
+                    mediaArrivalReview = nil
                 } catch {
-                    if expected == generation, observed == mediaRevision {
+                    if expected == generation, observed == mediaRevision, !closed, !closing {
                         invalidateMedia()
                         self.error = "Couldn’t read the collection media journal. \(error)"
                         review?.mediaUnavailable()
                         break
                     }
                 }
-            } while observed != mediaRevision && foreground && !closed
+            } while observed != mediaRevision && foreground && !closed && !closing
         }
         mediaTask = task
-        await task.value
-        mediaTask = nil
     }
     static func acceptsMedia(_ snapshot: MediaNameSnapshot, generation: UInt64, root: URL) -> Bool {
         snapshot.generation == generation && snapshot.root.isFileURL &&

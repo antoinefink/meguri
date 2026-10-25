@@ -42,11 +42,19 @@ public final class ReviewCoordinator {
     private var deadlineTimer: Timer?
     private var endTask: Task<Bool, Never>?
     private var pauseRevision: UInt64 = 0
+    private var mediaArrivals = ReviewMediaArrivals()
+    private var mediaPresentationRevision: UInt64 = 0
+    // An internal seam lets model tests observe retries without unhosted WebKit.
+    var retryMedia: ([String]) async throws -> Bool
 
     public init(deckID: Int64, surface: any ReviewCardSurface, store: ReviewRecordStore,
                 clock: AppClock = .system, client: any ReviewSessionClient = CoreReviewSessionClient(),
                 uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.surface = surface; self.store = store; self.clock = clock; self.client = client; self.uptime = uptime
+        retryMedia = { names in
+            guard let pages = surface as? ReviewPages else { return false }
+            return try await pages.retryMedia(names)
+        }
         record = ReviewRecord(deckID: deckID, startedAt: clock.now())
         surface.onAction = { [weak self] action in
             switch action {
@@ -57,6 +65,7 @@ public final class ReviewCoordinator {
             }
         }
         surface.onRecovery = { [weak self] in self?.requestRefresh(question: true) }
+        (surface as? ReviewPages)?.onMediaReady = { [weak self] in self?.mediaPresentationReady() }
     }
     public var pair: CardPagePair? { surface.pair }
     public var canFinish: Bool { !busy && phase != .ended }
@@ -246,6 +255,43 @@ public final class ReviewCoordinator {
     private func completeOperation() {
         busy = false
         if refreshPending && !paused { refresh() }
+        else { retryArrivedMedia() }
+    }
+
+    func mediaArrived(_ names: [String]) {
+        guard phase != .ended else { return }
+        guard mediaArrivals.insert(names) else { mediaUnavailable(); return }
+        retryArrivedMedia()
+    }
+    func mediaPresentationReady() {
+        mediaPresentationRevision &+= 1
+        retryArrivedMedia()
+    }
+    private func retryArrivedMedia() {
+        guard !busy, !paused, sessionID != nil, phase == .question || phase == .answer,
+              !mediaArrivals.isEmpty else { return }
+        let names = mediaArrivals.take(), revision = pauseRevision, expected = sessionID
+        let presentation = mediaPresentationRevision
+        busy = true
+        operation = Task {
+            var deferred = false
+            do {
+                deferred = !(try await retryMedia(names))
+            } catch {
+                if revision == pauseRevision, sessionID == expected, phase != .ended {
+                    notice = "Couldn’t refresh card media. Try again, or return to Home."
+                    phase = .error
+                }
+            }
+            guard sessionID == expected, phase != .ended else { busy = false; return }
+            if deferred || revision != pauseRevision {
+                if !mediaArrivals.insert(names) { mediaUnavailable() }
+                // Presentation/resume owns the next attempt; never spin on readiness.
+                busy = false
+                if refreshPending && !paused { refresh() }
+                else if presentation != mediaPresentationRevision { retryArrivedMedia() }
+            } else { completeOperation() }
+        }
     }
 
     private func apply(_ head: ReviewHead, question: Bool, inputTime: TimeInterval? = nil) async throws {
@@ -365,9 +411,11 @@ public final class ReviewCoordinator {
                 timer.resume(at: uptime()); activeTime.resume(at: uptime())
             }
             busy = false
+            retryArrivedMedia()
         } catch { paused = true; busy = false; fail(error); throw error }
     }
     public func mediaUnavailable() {
+        mediaArrivals = ReviewMediaArrivals()
         beginPause()
         notice = "Collection media is unavailable. Return to Home and try again."
         phase = .error
@@ -383,6 +431,7 @@ public final class ReviewCoordinator {
                 record.endedAt = clock.now()
                 try await persist()
                 sessionID = nil; phase = .ended; surface.close()
+                mediaArrivals = ReviewMediaArrivals()
                 return true
             } catch { fail(error); return false }
         }
@@ -395,6 +444,7 @@ public final class ReviewCoordinator {
         summaryTask?.cancel()
         paused = true; deadlineTimer?.invalidate(); preload?.cancel()
         sessionID = nil; phase = .ended; surface.close()
+        mediaArrivals = ReviewMediaArrivals()
     }
     private func persist() async throws {
         record.activeMilliseconds = activeTime.milliseconds(at: uptime(), capSeconds: UInt32.max)

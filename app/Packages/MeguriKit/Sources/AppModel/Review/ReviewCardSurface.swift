@@ -18,6 +18,27 @@ public protocol ReviewCardSurface: AnyObject {
     func close()
 }
 
+/// Coalesced filenames, bounded even when a review stays paused during sync.
+struct ReviewMediaArrivals {
+    private var names: Set<String> = []
+    private var bytes = 0
+    var isEmpty: Bool { names.isEmpty }
+
+    mutating func insert(_ arrivals: [String]) -> Bool {
+        for name in arrivals where !names.contains(name) {
+            let size = name.utf8.count
+            guard names.count < 65_536, size <= 16 * 1_024 * 1_024 - bytes else { return false }
+            names.insert(name); bytes += size
+        }
+        return true
+    }
+    mutating func take() -> [String] {
+        let result = names.sorted()
+        names.removeAll(); bytes = 0
+        return result
+    }
+}
+
 /// Persistent page pair, shared by all adaptive presentations of one session.
 public final class ReviewPages: ReviewCardSurface {
     public let pair: CardPagePair?
@@ -32,12 +53,16 @@ public final class ReviewPages: ReviewCardSurface {
     private var cards: [ReviewRenderKey: RenderedCard] = [:]
     private var domEditable = false
     private var composing = false
+    private var committedMediaUpdate: CardUpdate?
+    var onMediaReady: (() -> Void)?
     public init(resolver: MediaPathResolver) {
         let pair = CardPagePair(resolver: resolver)
         self.pair = pair
-        pair.onCommitted = { [weak self] _, _ in
+        pair.onCommitted = { [weak self] update, _ in
             self?.hasPresented = true
+            self?.committedMediaUpdate = update
             self?.establishInitialFocus()
+            self?.onMediaReady?()
         }
         pair.behaviorPresenter = presenter
         pair.configureLinks(preferExternalBrowser: false, approvals: CardSchemeApprovals())
@@ -100,9 +125,18 @@ public final class ReviewPages: ReviewCardSurface {
     }
     public func reveal(inputTime: TimeInterval) async throws {
         _ = try await pair?.showAnswer(inputTime: inputTime)
+        committedMediaUpdate = pair?.current.update
         if !inputActive { pair?.pauseAudio() }
+    }
+    /// False keeps arrivals pending until the native presentation is committed.
+    func retryMedia(_ names: [String]) async throws -> Bool {
+        guard inputActive, let pair, let committedMediaUpdate,
+              committedMediaUpdate == pair.current.update, pair.current.presented,
+              !pair.current.closed else { return false }
+        try await pair.mediaArrived(names)
+        return true
     }
     public func suspend() async { pair?.ownsKeyboardFocus = false; await pair?.suspend() }
     public func resume() async { await pair?.resume() }
-    public func close() { prepared = nil; pair?.close() }
+    public func close() { prepared = nil; committedMediaUpdate = nil; pair?.close() }
 }

@@ -276,7 +276,7 @@ import Testing
         #expect(!ReviewInputOwnership.admits(cardFocused: true, editing: false, paused: false, repeated: true))
     }
 
-    private final class Fixture {
+    final class Fixture {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let client = Client()
         let surface = Surface()
@@ -287,10 +287,11 @@ import Testing
             store = ReviewRecordStore(file: directory.appending(path: "session.json"))
             model = ReviewCoordinator(deckID: 1, surface: surface, store: store,
                 clock: .fixed(Date(timeIntervalSince1970: 1_800_000_000)), client: client, uptime: { [weak self] in self?.now ?? 0 })
+            model.retryMedia = { [surface] names in surface.arrivals.append(names); return true }
         }
         isolated deinit { try? FileManager.default.removeItem(at: directory) }
     }
-    private final class Surface: ReviewCardSurface {
+    final class Surface: ReviewCardSurface {
         var pair: CardPagePair? { nil }
         var onAction: ((CardBridgeAction) -> Void)?
         var onRecovery: (() -> Void)?
@@ -299,6 +300,7 @@ import Testing
         var presented: [Int64] = []
         var calls: [String] = []
         var onResume: (() -> Void)?
+        var arrivals: [[String]] = []
         func load() async throws { calls.append("load") }
         func render(sessionID: UInt64, items: [ReviewHeadItem]) async throws { calls.append("render") }
         func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws { presented.append(item.cardId); calls.append("present") }
@@ -308,7 +310,7 @@ import Testing
         func resume() async { calls.append("resume"); onResume?() }
         func close() { calls.append("close") }
     }
-    private final class SummaryGate {
+    final class SummaryGate {
         let state: ReviewDeckStudyState
         private var continuation: CheckedContinuation<ReviewDeckStudyState, Never>?
         private var request: CheckedContinuation<Void, Never>?
@@ -328,7 +330,7 @@ import Testing
             continuation?.resume(returning: state); continuation = nil
         }
     }
-    private final class Client: ReviewSessionClient {
+    final class Client: ReviewSessionClient {
         var answers = 0
         var elapsed: [UInt64] = []
         var restores: [Bool] = []
