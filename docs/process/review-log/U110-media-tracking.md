@@ -48,3 +48,14 @@ acceptance. Source was clean at `8a9cf700` for this run.
 Prepared intake review `meguri-u110-intake-review-r1.json` has no P0–P2
 findings. Original source-session records were recovered through the session
 store in `729430fa`, `a674aac7` and `56b1f153`. No Unit trailer.
+
+## Reference support dependency
+
+The prepared Oracle media operations were recovered in an isolated experiment.
+Run `194334Z-24591` executes 95 checks: 94 pass, one existing backup interval
+check fails with the prepared global file-stat setting. All six recovered
+tracking cases and the same-time rewrite case pass. The seven experimental
+paths are saved outside main, then restored to their exact earlier hashes.
+The failed result remains recorded; no backup assertion or contract is changed.
+Reference fixture execution needs a compatible stat mode before this intake
+can land. U107 transport verification proceeds with the existing stat mode.
