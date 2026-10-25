@@ -59,3 +59,16 @@ trap now lives in `app/AGENTS.md`, outside the compiled package target.
 Full sidebar/keyboard interaction, remaining platform checks, saved current
 deck readback, the rest of U152 and the original-base integration gate remain
 open. This is a partial app delivery checkpoint, with no Unit trailer.
+
+## Mobile integration repair
+
+Phone `213300Z-84370` fails all three review cases at deck entry. Drive
+`213620Z-88368` stages the generated collection and proves a P1: the parent
+disclosure identifier replaces the child row identifier. It also reports
+unnamed native controls. The generated screen has no visible clipping.
+
+Fixer export `213802Z-90850` adds scoped native accessibility metadata and
+two production Home cases. Privacy `214430Z-96643` passes. Source review
+finds one P2: the restart case observes optimistic collapse before the save
+finishes. Runtime checks and repairs remain pending. Existing review tests
+are unchanged.

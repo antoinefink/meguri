@@ -261,7 +261,10 @@ public struct HomeDeckTree: View {
                         ForEach(nodes, id: \.id) { node in
                             HomeDeckBranch(node: node, select: select, isExpanded: isExpanded, setExpanded: setExpanded, frameChanged: recordFrame)
                         }
-                    } header: { Text("Decks", bundle: .module) }
+                    } header: {
+                        Text("Decks", bundle: .module)
+                            .accessibilityIdentifier("home.deck.header")
+                    }
                     if let error {
                         Section {
                             Text(verbatim: error)
@@ -364,6 +367,12 @@ private struct HomeDeckBranch: View {
                         AnyView(HomeDeckBranch(node: child, select: select, isExpanded: isExpanded, setExpanded: setExpanded, frameChanged: frameChanged))
                     }
                 } label: { row }
+                // Contain preserves the native disclosure and selection as separate
+                // elements, and scopes metadata to this branch rather than its rows.
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(Text(verbatim: node.name))
+                .accessibilityValue(expanded.wrappedValue
+                    ? Text("Expanded", bundle: .module) : Text("Collapsed", bundle: .module))
                 .accessibilityIdentifier("home.deck.disclosure.\(node.id)")
             }
         }
@@ -473,6 +482,10 @@ private struct HomeSidebarBranch: View {
                     }
                 } label: { row }
                 .tag(SidebarItem.deck(DeckID(node.id)))
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(Text(verbatim: path))
+                .accessibilityValue(expanded.wrappedValue
+                    ? Text("Expanded", bundle: .module) : Text("Collapsed", bundle: .module))
                 .accessibilityIdentifier("home.sidebar.disclosure.\(node.id)")
             }
         }
@@ -499,6 +512,7 @@ private struct HomeSidebarBranch: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .listRowBackground(ColorToken.surface.color)
+            .accessibilityElement(children: .combine)
             .accessibilityLabel(Text(verbatim: path))
             #endif
         }
