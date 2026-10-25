@@ -1521,3 +1521,10 @@ Source review has no P0–P2 findings and its privacy scan passes. Mac audit
 exclusions. Actual light/dark renders keep the new text visible. Visual
 review finds one P2 in existing Mac button sizing and forced tint. Repair
 that platform-specific styling before accepting the screen.
+
+Style fixer `230104Z-51614` changes only ExportSheet.swift. Mac labels use
+regular system controls with an external target; touch metrics and all
+actions stay intact. Source round two has no required findings. Mac audit
+`230700Z-54534` passes one case with the same 36 existing exclusions.
+Independent light/dark visual review closes the P2. Touch audits and actual
+media-inclusive native destination/independent archive checks remain open.

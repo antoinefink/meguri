@@ -68,26 +68,42 @@ struct CollectionExportContent: View {
                     }
                     if presentation.canPrepare {
                         Button(action: prepare) {
-                            Text("Prepare Export", bundle: .module).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                            actionLabel("Prepare Export")
                         }
+                            #if os(macOS)
+                            .frame(minWidth: 28, minHeight: 28)
+                            .contentShape(Rectangle())
+                            #endif
                             .accessibilityIdentifier("settings.importExport.prepare")
                     }
                     if presentation.canSave {
                         Button(action: choose) {
-                            Text("Choose Save Location", bundle: .module).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                            actionLabel("Choose Save Location")
                         }
+                            #if os(macOS)
+                            .frame(minWidth: 28, minHeight: 28)
+                            .contentShape(Rectangle())
+                            #endif
                             .accessibilityIdentifier("settings.importExport.choose")
                     }
                     if presentation.canRetryCompletion {
                         Button(action: retry) {
-                            Text("Retry Export Cleanup", bundle: .module).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                            actionLabel("Retry Export Cleanup")
                         }
+                            #if os(macOS)
+                            .frame(minWidth: 28, minHeight: 28)
+                            .contentShape(Rectangle())
+                            #endif
                             .accessibilityIdentifier("settings.importExport.retryCleanup")
                     }
                     if presentation.canDiscard {
                         Button(action: discard) {
-                            Text("Discard Prepared Export", bundle: .module).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                            actionLabel("Discard Prepared Export")
                         }
+                            #if os(macOS)
+                            .frame(minWidth: 28, minHeight: 28)
+                            .contentShape(Rectangle())
+                            #endif
                             .accessibilityIdentifier("settings.importExport.discard")
                     }
                 }
@@ -100,10 +116,12 @@ struct CollectionExportContent: View {
             .background(.token(.backgroundPrimary))
             .safeAreaInset(edge: .bottom) {
                 Button(action: close) {
-                    Text(presentation.busy ? LocalizedStringKey("Cancel Export") : LocalizedStringKey("Done"), bundle: .module)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
+                    actionLabel(presentation.busy ? LocalizedStringKey("Cancel Export") : LocalizedStringKey("Done"))
                 }
+                    #if os(macOS)
+                    .frame(minWidth: 28, minHeight: 28)
+                    .contentShape(Rectangle())
+                    #endif
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("settings.importExport.close")
                     .padding(Spacing.large)
@@ -111,13 +129,25 @@ struct CollectionExportContent: View {
                     .background(.token(.backgroundPrimary))
             }
             .buttonStyle(.bordered)
+            #if os(macOS)
+            .controlSize(.regular)
+            #else
             .tint(ColorToken.textPrimary.color)
+            #endif
             .navigationTitle(Text("Export Collection", bundle: .module))
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
         }
         .interactiveDismissDisabled(presentation.busy)
+    }
+
+    private func actionLabel(_ title: LocalizedStringKey) -> some View {
+        Text(title, bundle: .module)
+            #if !os(macOS)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+            #endif
     }
 }
 public enum CollectionExportPreview: PreviewStates {
