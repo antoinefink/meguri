@@ -42,3 +42,35 @@ Complete-intake privacy check `20261025T133607Z-94310` rejected only the two old
 golden files for the changed test inputs. They are retained under ignored build
 storage and will not be published. Both scenarios remain enabled and require
 fresh records. The other 16 prepared goldens remain in the intake.
+
+## Grammar support
+
+Filtered implementer session `s-20261025T134357Z-235af9a2` exported support in
+`cleanroom/20261025T134422Z-4951`; only standard MG formatting followed.
+Rust grammar check `135224Z-17688` passed all 47 cases. Schema test `135212Z-17253`
+failed because a marker result was accepted despite its no-output contract.
+Independent review confirmed this P2; its earlier clear receipt was superseded.
+
+Filtered fixer `s-20261025T135952Z-cc91c1ec`, run `140017Z-26669`, added one explicit
+false property. It preserves draft keys and the original assertion. Schema run
+`140155Z-28699` now passes all five inner tests. Re-review has no P0–P2 findings.
+Similarity `140154Z-28468` passes. Rust source is unchanged from the 47-case pass.
+
+Prepared oracle support is in `89de0e5c`: all 25 focused tests and privacy passed,
+and independent review is clear. The two changed inputs still need oracle records.
+The normal executor and its acceptance checks remain outstanding.
+
+## Intake metadata
+
+The early intake commits placed role data in their message bodies. Those pushed
+commits stay intact. This table records the source sessions; new code commits use
+one contiguous trailer block.
+
+| Source commit | Role | Session |
+| --- | --- | --- |
+| `b74696b2` | spec-writer | `s-20261025T132312Z-c047b13c` |
+| `8e201054`, `89de0e5c` | oracle-maintainer | `s-20261025T132746Z-35ca6910` |
+| `1aac94de` | implementer | `s-20261025T134357Z-235af9a2` |
+
+The session ledger and intake packets retain the recorded roles and source hashes.
+U107 is not accepted.

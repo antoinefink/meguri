@@ -56,6 +56,7 @@
     "step_output": {
       "type": "object",
       "properties": {
+        "review_session": false,
         "add_note": {
           "type": "object",
           "required": ["note", "cards"],
