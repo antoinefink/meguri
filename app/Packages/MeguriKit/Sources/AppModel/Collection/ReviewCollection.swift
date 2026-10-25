@@ -404,6 +404,10 @@ public final class ReviewCollection {
         return deck(deckID).map { !$0.studyCollapsed } ?? false
     }
 
+    public func isStudyExpansionPending(deckID: Int64) -> Bool {
+        pendingStudyCollapse[deckID] != nil
+    }
+
     /// Each native disclosure binds to the same owner in Home and the sidebar.
     @discardableResult public func setStudyExpanded(deckID: Int64, expanded: Bool,
                                                    includingDescendants: Bool = false) -> Task<Void, Never> {

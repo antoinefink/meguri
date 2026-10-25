@@ -72,3 +72,13 @@ two production Home cases. Privacy `214430Z-96643` passes. Source review
 finds one P2: the restart case observes optimistic collapse before the save
 finishes. Runtime checks and repairs remain pending. Existing review tests
 are unchanged.
+
+Phone `214357Z-94952` passes the three existing review cases and fails both
+new Home cases. Drive `214913Z-160` confirms duplicate parent actions.
+iPad `215059Z-2933` passes all three existing review cases.
+
+Fixer `215428Z-5554` separates the iOS controls in one row, supplies full
+names and exposes the existing pending save state. Source round five has
+no required findings. Privacy `215814Z-10877` passes. Phone
+`215738Z-9164` still fails both Home cases on an unnamed native control;
+its review case passes. Native acceptance remains open.

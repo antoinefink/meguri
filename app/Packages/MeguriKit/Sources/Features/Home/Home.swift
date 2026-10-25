@@ -16,6 +16,7 @@ public struct HomeView: View {
                 HomeDeckTree(nodes: collection.decks, navigation: collection.navigation,
                     previousAnswerCount: collection.previousRecord?.answers.count, error: collection.error,
                     isExpanded: { collection.studyExpanded(deckID: $0) },
+                    isExpansionPending: { collection.isStudyExpansionPending(deckID: $0) },
                     setExpanded: { id, expanded, descendants in
                         collection.setStudyExpanded(deckID: id, expanded: expanded, includingDescendants: descendants)
                     }) { id in
@@ -238,6 +239,7 @@ public struct HomeDeckTree: View {
     private let previousAnswerCount: Int?
     private let error: String?
     private let isExpanded: ((Int64) -> Bool)?
+    private let isExpansionPending: ((Int64) -> Bool)?
     private let setExpanded: ((Int64, Bool, Bool) -> Void)?
     @State private var rowFrames: [Int64: CGRect] = [:]
     @State private var restoring: Int64?
@@ -246,11 +248,13 @@ public struct HomeDeckTree: View {
     public init(nodes: [CountedDeckNode], navigation: AppNavigation? = nil,
                 previousAnswerCount: Int? = nil, error: String? = nil,
                 isExpanded: ((Int64) -> Bool)? = nil,
+                isExpansionPending: ((Int64) -> Bool)? = nil,
                 setExpanded: ((Int64, Bool, Bool) -> Void)? = nil,
                 select: @escaping (Int64) -> Void) {
         self.nodes = nodes; self.navigation = navigation
         self.previousAnswerCount = previousAnswerCount; self.error = error; self.select = select
         self.isExpanded = isExpanded; self.setExpanded = setExpanded
+        self.isExpansionPending = isExpansionPending
     }
 
     public var body: some View {
@@ -259,7 +263,9 @@ public struct HomeDeckTree: View {
                 List {
                     Section {
                         ForEach(nodes, id: \.id) { node in
-                            HomeDeckBranch(node: node, select: select, isExpanded: isExpanded, setExpanded: setExpanded, frameChanged: recordFrame)
+                            HomeDeckBranch(node: node, ancestors: [], depth: 0, select: select,
+                                isExpanded: isExpanded, isExpansionPending: isExpansionPending,
+                                setExpanded: setExpanded, frameChanged: recordFrame)
                         }
                     } header: {
                         Text("Decks", bundle: .module)
@@ -346,11 +352,18 @@ public struct HomeDeckTree: View {
 
 private struct HomeDeckBranch: View {
     let node: CountedDeckNode
+    let ancestors: [String]
+    let depth: Int
     let select: (Int64) -> Void
     let isExpanded: ((Int64) -> Bool)?
+    let isExpansionPending: ((Int64) -> Bool)?
     let setExpanded: ((Int64, Bool, Bool) -> Void)?
     let frameChanged: (Int64, CGRect?) -> Void
     @Environment(\.locale) private var locale
+
+    private var path: String {
+        node.name.contains("::") ? node.name : (ancestors + [node.name]).joined(separator: "::")
+    }
 
     private var expanded: Binding<Bool> {
         Binding(get: { isExpanded?(node.id) ?? !node.studyCollapsed },
@@ -359,25 +372,70 @@ private struct HomeDeckBranch: View {
 
     var body: some View {
         Group {
+            #if os(macOS)
             if node.children.isEmpty {
                 row
             } else {
                 DisclosureGroup(isExpanded: expanded) {
                     ForEach(node.children, id: \.id) { child in
-                        AnyView(HomeDeckBranch(node: child, select: select, isExpanded: isExpanded, setExpanded: setExpanded, frameChanged: frameChanged))
+                        childBranch(child)
                     }
                 } label: { row }
                 // Contain preserves the native disclosure and selection as separate
                 // elements, and scopes metadata to this branch rather than its rows.
                 .accessibilityElement(children: .contain)
-                .accessibilityLabel(Text(verbatim: node.name))
+                .accessibilityLabel(Text(verbatim: path))
                 .accessibilityValue(expanded.wrappedValue
                     ? Text("Expanded", bundle: .module) : Text("Collapsed", bundle: .module))
                 .accessibilityIdentifier("home.deck.disclosure.\(node.id)")
             }
+            #else
+            HStack {
+                row
+                if !node.children.isEmpty {
+                    disclosure
+                }
+            }
+            .padding(.leading, CGFloat(depth) * Spacing.medium)
+            if expanded.wrappedValue {
+                ForEach(node.children, id: \.id) { child in
+                    childBranch(child)
+                }
+            }
+            #endif
         }
         .id(node.id)
     }
+
+    private func childBranch(_ child: CountedDeckNode) -> some View {
+        AnyView(HomeDeckBranch(node: child, ancestors: path.components(separatedBy: "::"), depth: depth + 1,
+            select: select, isExpanded: isExpanded, isExpansionPending: isExpansionPending,
+            setExpanded: setExpanded, frameChanged: frameChanged))
+    }
+
+    #if !os(macOS)
+    private var disclosure: some View {
+        // Only this leaf owns disclosure semantics; selection and child rows are siblings.
+        DisclosureGroup(isExpanded: expanded) { EmptyView() } label: { EmptyView() }
+            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(verbatim: path))
+            .accessibilityValue(disclosureValue)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { expanded.wrappedValue.toggle() }
+            .accessibilityIdentifier("home.deck.disclosure.\(node.id)")
+    }
+
+    private var disclosureValue: Text {
+        if isExpansionPending?(node.id) == true {
+            return expanded.wrappedValue
+                ? Text("Expanded, saving", bundle: .module) : Text("Collapsed, saving", bundle: .module)
+        }
+        return expanded.wrappedValue
+            ? Text("Expanded", bundle: .module) : Text("Collapsed", bundle: .module)
+    }
+    #endif
 
     private var row: some View {
         Button { select(node.id) } label: {
@@ -405,9 +463,12 @@ private struct HomeDeckBranch: View {
         }
         // Keep the row action distinct from its native disclosure control.
         .buttonStyle(.plain)
-        .accessibilityLabel(Text(verbatim: node.name))
+        .accessibilityLabel(Text(verbatim: path))
         .accessibilityValue(Text("\(Text(node.counts.new, format: .number)) new · \(Text(node.counts.learning, format: .number)) learning · \(Text(node.counts.review, format: .number)) due", bundle: .module))
         .accessibilityIdentifier("home.deck.row.\(node.id)")
+        #if os(macOS)
+        .help(Text(verbatim: path))
+        #endif
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("home.deck.list")) } action: {
             frameChanged(node.id, $0)
         }

@@ -23,12 +23,13 @@ final class HomeTests: XCTestCase {
         XCTAssertTrue(child.waitForNonExistence(timeout: 10))
         XCTAssertTrue(parent.exists, "Collapsing must retain the parent's selection action")
         XCTAssertFalse(app.buttons["home.deck.study"].exists, "Disclosure must not select a deck")
-        XCTAssertEqual(disclosure.value as? String, "Collapsed")
+        assertSettled(disclosure, value: "Collapsed")
         try assertHierarchy(app)
 
         disclosure.tap()
         XCTAssertTrue(child.waitForExistence(timeout: 10))
         XCTAssertEqual(child.identifier, childID)
+        assertSettled(disclosure, value: "Expanded")
         child.tap()
         try assertPage(app, rowIdentifier: childID)
         try backToDecks(app)
@@ -47,9 +48,11 @@ final class HomeTests: XCTestCase {
         let child = try row(app, named: "Local Review::Cards")
         let parentID = parent.identifier
         let childID = child.identifier
-        try disclosure(app, rowIdentifier: parentID).tap()
-        // Home publishes the saved tree after the collection-owned write completes.
+        let parentDisclosure = try disclosure(app, rowIdentifier: parentID)
+        parentDisclosure.tap()
+        // Child visibility is optimistic; only the settled value proves completion.
         XCTAssertTrue(child.waitForNonExistence(timeout: 10))
+        assertSettled(parentDisclosure, value: "Collapsed")
         app.terminate()
 
         // In particular, do not pass -MeguriFixture again: it replaces the database.
@@ -121,6 +124,12 @@ final class HomeTests: XCTestCase {
 
     private func assertCounts(_ row: XCUIElement) {
         XCTAssertEqual(row.value as? String, "0 new · 0 learning · 4 due")
+    }
+
+    private func assertSettled(_ disclosure: XCUIElement, value: String) {
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: disclosure)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed,
+            "Wait for the collection-owned expansion write before continuing")
     }
 
     private func assertPage(_ app: XCUIApplication, rowIdentifier: String) throws {
