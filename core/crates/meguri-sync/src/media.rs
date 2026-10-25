@@ -218,10 +218,10 @@ impl Stage<'_> {
         let cancel = self.cancel.clone();
         let snapshot = &mut self.snapshot;
         let progress = &mut self.progress;
-        // register_full_report's callback and hashing are outside the journal
-        // guard. Its cheap per-file stat reuse is retained, with cancellation.
+        // Storage owns the marker fast path; changed-folder callbacks and
+        // hashing remain outside the journal guard, with cancellation.
         let report = runtime::blocking_work(|| {
-            service.store().register_full_report(|seen, _| {
+            service.store().check_changes_report_with_progress(|seen, _| {
                 snapshot.totals.checked = checked_before + seen as u64;
                 progress(snapshot);
                 !cancel.is_cancelled()

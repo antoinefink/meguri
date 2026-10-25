@@ -267,14 +267,33 @@ impl MediaStore {
         self.check_changes_report().map(|_| ())
     }
     pub fn check_changes_report(&self) -> Result<super::MediaCheckReport> {
-        let current = stamp(&fs::metadata(self.media_dir())?);
+        self.check_changes_report_with_progress(|_, _| true)
+    }
+    /// A matching marker skips file work; otherwise the callback can cancel
+    /// between files and while hashing, outside the journal guard.
+    pub fn check_changes_report_with_progress(
+        &self,
+        progress: impl FnMut(usize, usize) -> bool,
+    ) -> Result<super::MediaCheckReport> {
+        // Refuse suspended stores before touching the folder or callbacks.
+        drop(self.db()?);
+        let current = match fs::metadata(self.media_dir()) {
+            Ok(metadata) => stamp(&metadata),
+            Err(error) => {
+                // No scan ran: replace any previous report with this failure's
+                // zero counts before callers recover progress from the journal.
+                let mut report = super::MediaCheckReport::started(self.inner.clock.now_ms());
+                self.finish_check_report(&mut report)?;
+                return Err(error.into());
+            }
+        };
         if journal_db::marker(&*self.db()?)?.as_deref() == Some(&current) {
             let mut report = super::MediaCheckReport::started(self.inner.clock.now_ms());
             report.completed = true;
             self.finish_check_report(&mut report)?;
             return Ok(report);
         }
-        self.register_full_report(|_, _| true)
+        self.register_full_report(progress)
     }
     /// The callback cancels by returning false; completed records remain valid.
     pub fn register_full(&self, progress: impl FnMut(usize, usize) -> bool) -> Result<()> {

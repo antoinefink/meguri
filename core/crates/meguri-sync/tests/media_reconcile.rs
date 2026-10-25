@@ -158,6 +158,287 @@ fn uploaded(stub: &SyncStub) -> Vec<Vec<u8>> {
 }
 
 #[test]
+fn same_owner_unchanged_media_stage_skips_listing_and_hashing() {
+    with_collection(|h| {
+        let store = h.media.store();
+        store
+            .bind_sync_owner(&MediaBaselineOwner::new("configured-owner-111"))
+            .unwrap();
+        h.media.add("cached.png", b"cached").unwrap();
+        store.check_changes_report().unwrap();
+        let entry = store.sync_entry("cached.png").unwrap().unwrap();
+        assert!(store.acknowledge(&entry.name, entry.change_counter).unwrap());
+        let before = store.diagnostics();
+        let marker = store.change_marker().unwrap();
+        assert!(marker.is_some());
+        let counter = store.change_counter().unwrap();
+        let stub = SyncStub::serve(|head| match head.index {
+            0 => begin(0),
+            _ => panic!("unchanged media must only begin"),
+        });
+        let result = h
+            .run(&stub, |snapshot, _| assert_eq!(snapshot.totals.checked, 0))
+            .unwrap();
+        assert_eq!(result, MediaSyncResult::default());
+        let report = store.last_check_report().unwrap().unwrap();
+        assert!(report.completed);
+        assert_eq!((report.listed, report.seen, report.hashed), (false, 0, 0));
+        assert_eq!(store.diagnostics(), before);
+        assert_eq!(store.change_marker().unwrap(), marker);
+        assert_eq!(store.change_counter().unwrap(), counter);
+        assert_eq!(paths(&stub), ["/msync/begin"]);
+    });
+}
+
+#[test]
+fn missing_media_folder_stage_fails_with_fresh_zero_counts_and_resumes() {
+    with_collection(|h| {
+        let store = h.media.store();
+        store
+            .bind_sync_owner(&MediaBaselineOwner::new("configured-owner-111"))
+            .unwrap();
+        fs::write(store.media_dir().join("cached.png"), b"cached").unwrap();
+        let successful = store.register_full_report(|_, _| true).unwrap();
+        assert!(successful.completed && successful.listed);
+        assert_eq!((successful.seen, successful.hashed, successful.added), (1, 1, 1));
+        let entry = store.sync_entry("cached.png").unwrap().unwrap();
+        assert!(store.acknowledge(&entry.name, entry.change_counter).unwrap());
+        let before = store.diagnostics();
+        let marker = store.change_marker().unwrap();
+        assert!(marker.is_some());
+        let counter = store.change_counter().unwrap();
+        let cached = store.sync_entry("cached.png").unwrap();
+        let moved = store.media_dir().with_file_name("missing-media");
+        fs::rename(store.media_dir(), &moved).unwrap();
+        let stub = SyncStub::serve(|head| match head.index {
+            0 => begin(0),
+            _ => panic!("restored unchanged media must only begin"),
+        });
+        let failure = h
+            .run(&stub, |snapshot, _| {
+                assert_eq!(snapshot.totals, MediaSyncResult::default())
+            })
+            .unwrap_err();
+        assert_eq!(failure.error.kind, meguri_sync::ErrorKind::LocalStorage);
+        assert_eq!(failure.snapshot.phase, MediaPhase::Checking);
+        assert_eq!(failure.snapshot.totals, MediaSyncResult::default());
+        assert!(stub.requests().is_empty());
+        let failed = store.last_check_report().unwrap().unwrap();
+        assert_ne!(failed, successful);
+        assert!(!failed.completed && !failed.listed);
+        assert_eq!(
+            (
+                failed.seen,
+                failed.hashed,
+                failed.added,
+                failed.changed,
+                failed.removed,
+                failed.renamed,
+                failed.skipped,
+            ),
+            (0, 0, 0, 0, 0, 0, 0)
+        );
+        assert_eq!(store.diagnostics(), before);
+        assert_eq!(store.change_marker().unwrap(), marker);
+        assert_eq!(store.change_counter().unwrap(), counter);
+        assert_eq!(store.sync_entry("cached.png").unwrap(), cached);
+        assert!(!store.pending_any().unwrap());
+        fs::rename(moved, store.media_dir()).unwrap();
+        assert_eq!(h.run(&stub, |_, _| {}).unwrap(), MediaSyncResult::default());
+        let restored = store.last_check_report().unwrap().unwrap();
+        assert!(restored.completed);
+        assert_eq!((restored.listed, restored.seen, restored.hashed), (false, 0, 0));
+        assert_eq!(store.diagnostics(), before);
+        assert_eq!(store.change_marker().unwrap(), marker);
+        assert_eq!(store.change_counter().unwrap(), counter);
+        assert_eq!(store.sync_entry("cached.png").unwrap(), cached);
+        assert!(!store.pending_any().unwrap());
+        assert_eq!(paths(&stub), ["/msync/begin"]);
+    });
+}
+
+#[test]
+fn changed_folder_media_stage_finds_and_uploads_an_external_add() {
+    with_collection(|h| {
+        let store = h.media.store();
+        store
+            .bind_sync_owner(&MediaBaselineOwner::new("configured-owner-111"))
+            .unwrap();
+        h.media.add("cached.png", b"cached").unwrap();
+        store.check_changes_report().unwrap();
+        let entry = store.sync_entry("cached.png").unwrap().unwrap();
+        assert!(store.acknowledge(&entry.name, entry.change_counter).unwrap());
+        let cached = store.sync_entry("cached.png").unwrap().unwrap();
+        let before = store.diagnostics();
+        let marker = store.change_marker().unwrap();
+        let directory = fs::File::open(store.media_dir()).unwrap();
+        let previous = directory.metadata().unwrap().modified().unwrap();
+        fs::write(store.media_dir().join("outside.png"), b"outside").unwrap();
+        directory
+            .set_times(fs::FileTimes::new().set_modified(previous + Duration::from_secs(1)))
+            .unwrap();
+        let stub = SyncStub::serve(|head| match head.index {
+            0 => begin(0),
+            1 => envelope(json!([1, 1])),
+            2 => envelope(json!("OK")),
+            _ => panic!("unexpected request"),
+        });
+        let result = h.run(&stub, |_, _| {}).unwrap();
+        assert_eq!(result.checked, 2);
+        assert_eq!(result.uploaded_files, 1);
+        assert_eq!(result.bytes_uploaded, 7);
+        assert_eq!(uploaded(&stub), [b"outside".to_vec()]);
+        let report = store.last_check_report().unwrap().unwrap();
+        assert!(report.completed && report.listed);
+        assert_eq!((report.seen, report.hashed, report.added), (2, 1, 1));
+        assert_eq!(store.diagnostics().scans, before.scans + 1);
+        assert_eq!(store.diagnostics().hashes, before.hashes + 1);
+        assert_ne!(store.change_marker().unwrap(), marker);
+        assert_eq!(store.sync_entry("cached.png").unwrap(), Some(cached));
+        let outside = store.sync_entry("outside.png").unwrap().unwrap();
+        assert_eq!(outside.sha1, Some(sha(b"outside")));
+        assert_eq!(outside.sync_state, MediaSyncState::Live);
+        assert!(!store.pending_any().unwrap());
+    });
+}
+
+#[test]
+fn media_stage_reset_or_rebind_requires_one_comparison_and_reuses_file_facts() {
+    for rebind in [false, true] {
+        with_collection(|h| {
+            let store = h.media.store();
+            let owner = if rebind {
+                "previous-owner"
+            } else {
+                "configured-owner-111"
+            };
+            store.bind_sync_owner(&MediaBaselineOwner::new(owner)).unwrap();
+            h.media.add("cached.png", b"cached").unwrap();
+            store.check_changes_report().unwrap();
+            let cached = store.sync_entry("cached.png").unwrap().unwrap();
+            assert!(store.acknowledge(&cached.name, cached.change_counter).unwrap());
+            let before = store.diagnostics();
+            let marker = store.change_marker().unwrap();
+            assert!(marker.is_some());
+            if !rebind {
+                store.reset_sync().unwrap();
+                assert!(store.change_marker().unwrap().is_none());
+                assert_eq!(store.sync_entry("cached.png").unwrap().unwrap().sha1, cached.sha1);
+            }
+            let stub = SyncStub::serve(|head| match head.index {
+                0 => begin(0),
+                1 => envelope(json!([1, 1])),
+                2 => envelope(json!("OK")),
+                3 => begin(1),
+                _ => panic!("unexpected request"),
+            });
+            let result = h.run(&stub, |_, _| {}).unwrap();
+            assert_eq!((result.checked, result.uploaded_files), (1, 1));
+            let report = store.last_check_report().unwrap().unwrap();
+            assert!(report.completed && report.listed);
+            assert_eq!((report.seen, report.hashed, report.added), (1, 0, 1));
+            assert_eq!(store.diagnostics().scans, before.scans + 1);
+            assert_eq!(store.diagnostics().hashes, before.hashes);
+            assert_eq!(store.change_marker().unwrap(), marker);
+            let after = store.sync_entry("cached.png").unwrap().unwrap();
+            assert_eq!(
+                (after.sha1, after.size, after.mtime_secs, after.mtime_nanos),
+                (cached.sha1, cached.size, cached.mtime_secs, cached.mtime_nanos)
+            );
+            assert_eq!(after.sync_state, MediaSyncState::Live);
+            assert!(!after.dirty);
+            let compared = store.diagnostics();
+            assert_eq!(h.run(&stub, |_, _| {}).unwrap().checked, 0);
+            assert_eq!(store.diagnostics(), compared);
+            let report = store.last_check_report().unwrap().unwrap();
+            assert!(report.completed);
+            assert_eq!((report.listed, report.seen, report.hashed), (false, 0, 0));
+        });
+    }
+}
+
+#[test]
+fn changed_folder_media_stage_cancellation_keeps_honest_reports_and_resumes() {
+    for during_hash in [false, true] {
+        with_collection(|h| {
+            let store = h.media.store();
+            store
+                .bind_sync_owner(&MediaBaselineOwner::new("configured-owner-111"))
+                .unwrap();
+            store.check_changes_report().unwrap();
+            let marker = store.change_marker().unwrap();
+            assert!(marker.is_some());
+            let before = store.diagnostics();
+            let directory = fs::File::open(store.media_dir()).unwrap();
+            let previous = directory.metadata().unwrap().modified().unwrap();
+            let bytes = vec![7; 131_072];
+            fs::write(store.media_dir().join("first.png"), &bytes).unwrap();
+            fs::write(store.media_dir().join("second.png"), &bytes).unwrap();
+            directory
+                .set_times(fs::FileTimes::new().set_modified(previous + Duration::from_secs(1)))
+                .unwrap();
+            let stub = SyncStub::serve(|head| match head.index {
+                0 => begin(0),
+                1 => envelope(json!([2, 2])),
+                2 => envelope(json!("OK")),
+                _ => panic!("unexpected request"),
+            });
+            let observed = store.clone();
+            let old_marker = marker.clone();
+            let mut hash_callbacks = 0;
+            let failure = h
+                .run(&stub, move |snapshot, cancel| {
+                    if snapshot.phase != MediaPhase::Checking {
+                        return;
+                    }
+                    // Re-enter the journal from progress: no guard may span it.
+                    assert_eq!(observed.change_marker().unwrap(), old_marker);
+                    if during_hash {
+                        if observed.diagnostics().hashes == before.hashes + 1 {
+                            hash_callbacks += 1;
+                            if hash_callbacks == 2 {
+                                cancel.cancel();
+                            }
+                        }
+                    } else if snapshot.totals.checked == 1 {
+                        cancel.cancel();
+                    }
+                })
+                .unwrap_err();
+            assert_eq!(failure.error.kind, meguri_sync::ErrorKind::Cancelled);
+            assert_eq!(failure.snapshot.totals.checked, 1);
+            assert!(stub.requests().is_empty());
+            assert_eq!(store.change_marker().unwrap(), marker);
+            let failed = store.last_check_report().unwrap().unwrap();
+            assert!(!failed.completed && failed.listed);
+            let committed = u64::from(!during_hash);
+            assert_eq!((failed.seen, failed.hashed, failed.added), (1, 1, committed));
+            assert_eq!(store.entries().unwrap().len() as u64, committed);
+            assert_eq!(store.pending().unwrap().len() as u64, committed);
+            for entry in store.entries().unwrap() {
+                assert_eq!(entry.sha1, Some(sha(&bytes)));
+                assert_eq!(entry.size, bytes.len() as u64);
+                assert!(entry.dirty);
+            }
+            assert_eq!(store.diagnostics().scans, before.scans + 1);
+            assert_eq!(store.diagnostics().hashes, before.hashes + 1);
+            let result = h.run(&stub, |_, _| {}).unwrap();
+            assert_eq!((result.checked, result.uploaded_files), (2, 2));
+            let report = store.last_check_report().unwrap().unwrap();
+            assert!(report.completed && report.listed);
+            assert_eq!(
+                (report.seen, report.hashed, report.added),
+                (2, 2 - committed, 2 - committed)
+            );
+            assert_eq!(store.diagnostics().scans, before.scans + 2);
+            assert_eq!(store.diagnostics().hashes, before.hashes + 3 - committed);
+            assert_ne!(store.change_marker().unwrap(), marker);
+            assert!(!store.pending_any().unwrap());
+        });
+    }
+}
+
+#[test]
 fn lists_every_page_before_download_and_resumes_sixty_as_25_25_10() {
     with_collection(|h| {
         let listings = Arc::new(AtomicUsize::new(0));

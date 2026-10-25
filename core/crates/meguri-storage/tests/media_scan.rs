@@ -24,6 +24,85 @@ fn media_reopening_preserves_the_unchanged_folder_fast_path() {
     assert_eq!(store.diagnostics().scans, 1);
     assert!(store.entries().unwrap().iter().any(|e| e.name == "outside.png"));
 }
+
+#[test]
+fn marker_report_skips_callbacks_and_refuses_suspension_before_folder_access() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+    store.check_changes_report().unwrap();
+    let before = store.diagnostics();
+    let report = store
+        .check_changes_report_with_progress(|_, _| panic!("matching marker must skip file callbacks"))
+        .unwrap();
+    assert!(report.completed);
+    assert_eq!((report.listed, report.seen, report.hashed), (false, 0, 0));
+    assert_eq!(store.last_check_report().unwrap(), Some(report));
+    assert_eq!(store.diagnostics(), before);
+    assert!(store.try_close().unwrap());
+    let moved = dir.path().join("suspended-media");
+    fs::rename(store.media_dir(), &moved).unwrap();
+    let result = store.check_changes_report_with_progress(|_, _| panic!("suspended store invoked callback"));
+    assert_eq!(result, Err(MediaError::Database("media journal is closed".into())));
+    assert_eq!(store.diagnostics(), before);
+    fs::rename(moved, store.media_dir()).unwrap();
+    store.resume().unwrap();
+    assert!(!store.check_changes_report().unwrap().listed);
+}
+
+#[test]
+fn marker_preflight_io_failure_replaces_a_nonempty_report_and_recovers() {
+    for with_progress in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+        fs::write(store.media_dir().join("cached.png"), b"cached").unwrap();
+        let successful = store.register_full_report(|_, _| true).unwrap();
+        assert!(successful.completed && successful.listed);
+        assert_eq!((successful.seen, successful.hashed, successful.added), (1, 1, 1));
+        let before = store.diagnostics();
+        let marker = store.change_marker().unwrap();
+        assert!(marker.is_some());
+        let counter = store.change_counter().unwrap();
+        let entries = store.entries().unwrap();
+        let moved = dir.path().join("missing-media");
+        fs::rename(store.media_dir(), &moved).unwrap();
+        let result = if with_progress {
+            store.check_changes_report_with_progress(|_, _| panic!("missing folder invoked callback"))
+        } else {
+            store.check_changes_report()
+        };
+        assert!(matches!(result, Err(MediaError::Io(_))));
+        let failed = store.last_check_report().unwrap().unwrap();
+        assert_ne!(failed, successful);
+        assert!(!failed.completed && !failed.listed);
+        assert_eq!(
+            (
+                failed.seen,
+                failed.hashed,
+                failed.added,
+                failed.changed,
+                failed.removed,
+                failed.renamed,
+                failed.skipped,
+            ),
+            (0, 0, 0, 0, 0, 0, 0)
+        );
+        assert_eq!(store.diagnostics(), before);
+        assert_eq!(store.change_marker().unwrap(), marker);
+        assert_eq!(store.change_counter().unwrap(), counter);
+        assert_eq!(store.entries().unwrap(), entries);
+        fs::rename(moved, store.media_dir()).unwrap();
+        let restored = store
+            .check_changes_report_with_progress(|_, _| panic!("restored marker must skip callbacks"))
+            .unwrap();
+        assert!(restored.completed);
+        assert_eq!((restored.listed, restored.seen, restored.hashed), (false, 0, 0));
+        assert_eq!(store.last_check_report().unwrap(), Some(restored));
+        assert_eq!(store.diagnostics(), before);
+        assert_eq!(store.change_counter().unwrap(), counter);
+        assert_eq!(store.entries().unwrap(), entries);
+    }
+}
+
 fn run_scan_hook() {
     let hook = SCAN_HOOK.lock().unwrap().take();
     if let Some(hook) = hook {
