@@ -11,7 +11,7 @@ use meguri_model::proto::{BlobMessage, ProtoBlob};
 use meguri_model::time::{EpochMillis, EpochSecs};
 use meguri_model::usn::Usn;
 use meguri_storage::journal::After;
-use meguri_storage::{JournalOptions, ReadRows, RowImage, RowKey, StampMode, Table, Writer, Written};
+use meguri_storage::{Cell, JournalOptions, ReadRows, RowImage, RowKey, StampMode, Table, Writer, Written};
 
 fn unknown<M: BlobMessage>(blob: &ProtoBlob<M>) -> ProtoBlob<M> {
     let mut bytes = blob.to_bytes().into_owned();
@@ -64,6 +64,47 @@ fn images(writer: &Writer, id: NotetypeId) -> Vec<(Table, RowKey, RowImage)> {
             (table, key, image)
         })
         .collect()
+}
+
+fn aggregate_images(nt: &Notetype) -> Vec<(Table, RowKey, RowImage)> {
+    let mut rows = vec![(
+        Table::Notetypes,
+        RowKey::Id(nt.id.0),
+        vec![
+            Cell::Integer(nt.id.0),
+            Cell::text(&nt.name),
+            Cell::Integer(nt.mtime.0),
+            Cell::Integer(i64::from(nt.usn.0)),
+            Cell::Blob(nt.config.to_bytes().into_owned()),
+        ],
+    )];
+    rows.extend(nt.fields.iter().map(|field| {
+        (
+            Table::Fields,
+            RowKey::Pair(nt.id.0, i64::from(field.ord)),
+            vec![
+                Cell::Integer(nt.id.0),
+                Cell::Integer(i64::from(field.ord)),
+                Cell::text(&field.name),
+                Cell::Blob(field.config.to_bytes().into_owned()),
+            ],
+        )
+    }));
+    rows.extend(nt.templates.iter().map(|template| {
+        (
+            Table::Templates,
+            RowKey::Pair(nt.id.0, i64::from(template.ord)),
+            vec![
+                Cell::Integer(nt.id.0),
+                Cell::Integer(i64::from(template.ord)),
+                Cell::text(&template.name),
+                Cell::Integer(template.mtime.0),
+                Cell::Integer(i64::from(template.usn.0)),
+                Cell::Blob(template.config.to_bytes().into_owned()),
+            ],
+        )
+    }));
+    rows
 }
 
 #[test]
@@ -139,7 +180,7 @@ fn gapped_swaps_remove_only_absent_keys_and_journal_stored_images_for_this_aggre
     let stored = writer.notetype(nt.id).unwrap().unwrap();
     edited.mtime = EpochSecs((NOW_MS + 60_000) / 1000);
     edited.usn = Usn::PENDING;
-    assert_eq!(stored, edited);
+    assert_eq!(images(writer, nt.id), aggregate_images(&edited));
     assert_eq!(stored.config.to_bytes(), edited.config.to_bytes());
     for (actual, expected) in stored.fields.iter().zip(&edited.fields) {
         assert_eq!(actual.config.to_bytes(), expected.config.to_bytes());

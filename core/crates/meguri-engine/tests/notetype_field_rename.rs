@@ -506,7 +506,20 @@ fn gapped_legacy_ordinals_preserve_children_metadata_and_atomic_undo_redo_rollba
         assert_eq!(new.fields.iter().map(|f| f.ord).collect::<Vec<_>>(), [0, 4]);
         assert_eq!(new.templates.iter().map(|t| t.ord).collect::<Vec<_>>(), [0, 7]);
         assert_eq!(new.fields[index].name, new_name);
-        assert_eq!(new.fields[1 - index], old.fields[1 - index]);
+        assert_eq!(
+            (
+                new.fields[1 - index].ord,
+                &new.fields[1 - index].name,
+                new.fields[1 - index].config.id,
+                new.fields[1 - index].config.to_bytes(),
+            ),
+            (
+                old.fields[1 - index].ord,
+                &old.fields[1 - index].name,
+                old.fields[1 - index].config.id,
+                old.fields[1 - index].config.to_bytes(),
+            )
+        );
         for (before, after) in old.fields.iter().zip(&new.fields) {
             assert_eq!(before.config.to_bytes(), after.config.to_bytes());
         }
@@ -514,7 +527,26 @@ fn gapped_legacy_ordinals_preserve_children_metadata_and_atomic_undo_redo_rollba
             let mut expected = before.clone();
             expected.config.q_format = expected.config.q_format.replace(old_name, new_name);
             expected.config.a_format = expected.config.a_format.replace(old_name, new_name);
-            assert_eq!(after, &expected);
+            expected.config.q_format_browser = expected.config.q_format_browser.replace(old_name, new_name);
+            expected.config.a_format_browser = expected.config.a_format_browser.replace(old_name, new_name);
+            assert_eq!(
+                (
+                    after.ord,
+                    &after.name,
+                    after.mtime,
+                    after.usn,
+                    after.config.id,
+                    after.config.to_bytes()
+                ),
+                (
+                    expected.ord,
+                    &expected.name,
+                    expected.mtime,
+                    expected.usn,
+                    expected.config.id,
+                    expected.config.to_bytes(),
+                )
+            );
             assert_eq!(after.config.to_bytes(), expected.config.to_bytes());
         }
         assert_eq!(new.config.other(), old.config.other());

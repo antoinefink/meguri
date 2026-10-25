@@ -142,3 +142,36 @@ tests ran. The correction must preserve complete aggregate equality checks.
 The initial formatting attempt could not reach Docker under sandbox limits;
 the authorized Docker run formatted successfully. Full U34 remains outside
 this prerequisite, and neither U34 nor U107 is accepted.
+
+Filtered fixer `172405Z-14357` repaired the storage test comparison and two
+invalid server fixtures: a server deck carried client-pending USN -1, and the
+sanity test supplied equal metadata that correctly bypassed the round. Their
+replacement assertions preserve and extend the original behavior checks.
+Independent source review confirms these diagnoses. The same-instant config
+pending bug remains open; counting all config USNs would incorrectly include
+day-clock bookkeeping and received positive USNs.
+
+The real rename/upload/fresh-peer regression is included from implementer
+session `s-20261025T172143Z-1e9723c8`, with a separate filtered repair
+`172954Z-18122` for its mistaken template-stamp expectation. Re-review is clear;
+template stamps remain captured data. The test exercises complete wire objects
+and unknown metadata, with actual normal jobs and unchanged schema stamps.
+
+Focused compilation `173407Z-21279` exposed two more unsupported equality
+assertions in the engine rename tests, after the storage compile repair.
+No tests executed in that run. Both require complete-data comparisons; the
+Use existing stored fields and opaque bytes for these test assertions.
+Similarity `172439Z-14974` passed the prior checkpoint (58 files, zero flags).
+Later deltas still need their checks. U107 and the batch gate remain open.
+
+Filtered test repair `173619Z-22958` corrected the remaining unsupported
+equalities using complete stored scalars and protobuf bytes. It also replaced
+text rejected by the private scan; the guard is unchanged. Focused run
+`173937Z-25330` compiled and executed: 79 pass, two fail. The actual rename
+upload/fresh-peer regression passes, as do corrected sanity and held-deck cases.
+The remaining failures are the known same-instant config pending bug and a
+rename test that assumes card-ID order equals template-ordinal order
+(actual ordinals 5, 0, 1 versus expected 0, 1, 5). Preserve exact membership
+and duplicates when correcting this test-only ordering assumption.
+The two large sync cases passed in the earlier full focused run; they were not
+repeated by this small-case filter. U107 remains unaccepted.

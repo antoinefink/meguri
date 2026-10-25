@@ -243,21 +243,42 @@ fn sanity_bad_keeps_counts_and_moves_only_scm() {
     f.clock.step_ms(60000);
     let before = f.images();
     let scm = schema(&f);
+    let (abort, aborted) = mpsc::sync_channel(1);
     let stub = SyncStub::serve(move |r| {
+        if r.path().ends_with("abort") {
+            let _ = abort.send(());
+        }
         if r.path().ends_with("sanityCheck2") {
             Reply::ok(br#"{"status":"bad","c":[[0,0,0],1,1,0,0,8,1,1],"s":[[0,0,0],2,2,0,0,8,1,1]}"#)
         } else {
-            default_reply(r.path(), scm, NOW + 60000)
+            // Keep server mod unequal to the baseline local mod. Advancing
+            // this reply's clock by 60 s would make meta.mod equal NOW.
+            default_reply(r.path(), scm, NOW)
         }
     });
     let error = f.start(&stub.url()).wait().unwrap_err();
-    assert!(matches!(
+    aborted.recv_timeout(Duration::from_secs(2)).unwrap();
+    let client = meguri_sync::wire::sanity::SanityCounts {
+        due: [0, 0, 0],
+        cards: 1,
+        notes: 1,
+        revlog: 0,
+        graves: 0,
+        notetypes: 8,
+        decks: 1,
+        deck_configs: 1,
+    };
+    assert_eq!(
         error.kind,
         ErrorKind::SanityCheckFailed {
-            client: Some(_),
-            server: Some(_)
+            client: Some(client),
+            server: Some(meguri_sync::wire::sanity::SanityCounts {
+                cards: 2,
+                notes: 2,
+                ..client
+            }),
         }
-    ));
+    );
     let after = f.images();
     for ((table, a), (_, b)) in before.iter().zip(&after) {
         if *table != Table::Col {
@@ -272,6 +293,10 @@ fn sanity_bad_keeps_counts_and_moves_only_scm() {
     }
     let col = f.collection.reader(ReaderRole::Query).unwrap().col().unwrap();
     assert!(col.schema_modified > col.last_sync);
+    let requests = methods(&stub);
+    assert!(requests.contains(&"sanityCheck2".into()));
+    assert!(requests.contains(&"abort".into()));
+    assert!(!requests.contains(&"finish".into()));
 }
 #[test]
 fn accepted_notetype_count_change_refused_before_finish() {
@@ -968,6 +993,10 @@ fn post_snapshot_curdeck_survives_whole_config_replacement() {
     let collection = f.collection.clone();
     let scm = schema(&f);
     let stub = SyncStub::serve(move |r| {
+        if r.path().ends_with("/meta") {
+            // The server is newer, so it sends the whole config table.
+            return default_reply(r.path(), scm, NOW + 61_000);
+        }
         if r.path().ends_with("applyChanges") {
             return Reply::ok(
                 br#"{"models":[],"decks":[[],[]],"tags":[],"conf":{"curDeck":1,"schedVer":2,"remote":true}}"#,
@@ -981,13 +1010,90 @@ fn post_snapshot_curdeck_survives_whole_config_replacement() {
                 })
                 .unwrap();
         }
-        default_reply(r.path(), scm, NOW)
+        default_reply(r.path(), scm, NOW + 1000)
     });
     f.start(&stub.url()).wait().unwrap();
     let rows = f.collection.reader(ReaderRole::Query).unwrap();
     assert_eq!(rows.config_value("curDeck").unwrap().unwrap().as_i64(), Some(77));
     assert_eq!(rows.config_entry("curDeck").unwrap().unwrap().entry.usn, Usn::PENDING);
     assert!(rows.col().unwrap().modified > rows.col().unwrap().last_sync);
+    assert_eq!(
+        meguri_sync::status::LocalRecord::read(&*rows).unwrap().offline_status(),
+        meguri_sync::status::OfflineStatus::PendingChanges
+    );
+    // Received config rows carry positive server USNs, not pending -1.
+    assert_eq!(rows.config_entry("remote").unwrap().unwrap().entry.usn, Usn(5));
+    let expected_config: serde_json::Map<String, Value> = rows
+        .config_keys()
+        .unwrap()
+        .into_iter()
+        .map(|key| {
+            let row = rows.config_entry(&key).unwrap().unwrap();
+            (key, serde_json::from_slice(&row.entry.value).unwrap())
+        })
+        .collect();
+    drop(rows);
+
+    let next = SyncStub::serve(move |r| {
+        if r.path().ends_with("/meta") {
+            // Server mod equals the preceding finish time; the pending
+            // config-only edit must make the client newer this round.
+            default_reply(r.path(), scm, NOW + 61_000)
+        } else {
+            default_reply(r.path(), scm, NOW + 2000)
+        }
+    });
+    let out = f.start(&next.url()).wait().unwrap();
+    assert!(matches!(
+        out.check.result,
+        meguri_sync::status::CheckResult::Normal { local_is_newer: true }
+    ));
+    assert!(!out.merge.unwrap().one_way);
+    let requests = next.requests();
+    let sent = json_body(requests.iter().find(|r| r.path().ends_with("applyChanges")).unwrap());
+    assert_eq!(sent["changes"]["conf"], Value::Object(expected_config));
+    assert_eq!(sent["changes"]["conf"]["curDeck"], 77);
+    assert_eq!(sent["changes"]["conf"]["remote"], true);
+    assert_eq!(sent["changes"]["conf"]["schedVer"], 2);
+    assert_eq!(sent["changes"]["models"], json!([]));
+    assert_eq!(sent["changes"]["decks"], json!([[], []]));
+    assert_eq!(sent["changes"]["tags"], json!([]));
+    let rows = f.collection.reader(ReaderRole::Query).unwrap();
+    assert_eq!(rows.config_entry("curDeck").unwrap().unwrap().entry.usn, Usn(0));
+    assert_eq!(rows.col().unwrap().modified, rows.col().unwrap().last_sync);
+    assert_eq!(
+        meguri_sync::status::LocalRecord::read(&*rows).unwrap().offline_status(),
+        meguri_sync::status::OfflineStatus::NothingPending
+    );
+    drop(rows);
+    let clean = SyncStub::serve(move |r| default_reply(r.path(), scm, NOW + 62_000));
+    let out = f.start(&clean.url()).wait().unwrap();
+    assert!(matches!(out.check.result, meguri_sync::status::CheckResult::NoChanges));
+    assert!(out.merge.is_none());
+    assert_eq!(methods(&clean), ["meta"]);
+}
+
+#[test]
+fn received_config_server_usns_leave_clean_status() {
+    let f = Fixture::new(0);
+    let scm = schema(&f);
+    let stub = SyncStub::serve(move |r| {
+        if r.path().ends_with("/meta") {
+            return default_reply(r.path(), scm, NOW + 61_000);
+        }
+        if r.path().ends_with("applyChanges") {
+            return Reply::ok(br#"{"models":[],"decks":[[],[]],"tags":[],"conf":{"schedVer":2,"remote":true}}"#);
+        }
+        default_reply(r.path(), scm, NOW + 1000)
+    });
+    f.start(&stub.url()).wait().unwrap();
+    let rows = f.collection.reader(ReaderRole::Query).unwrap();
+    assert_eq!(rows.config_entry("remote").unwrap().unwrap().entry.usn, Usn(5));
+    assert_eq!(rows.col().unwrap().modified, rows.col().unwrap().last_sync);
+    assert_eq!(
+        meguri_sync::status::LocalRecord::read(&*rows).unwrap().offline_status(),
+        meguri_sync::status::OfflineStatus::NothingPending
+    );
 }
 
 fn check_sync_config_undo(conf: Value) {
@@ -1096,8 +1202,26 @@ fn empty_config_replacement_clears_held_answer_and_config_undo() {
 fn rejected_newer_local_deck_still_drops_whole_held_answer_run() {
     let f = Fixture::new(1);
     baseline(&f);
+    let baseline_deck = f
+        .collection
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .deck(DeckId(1))
+        .unwrap()
+        .unwrap();
     let active = f.host.review().begin_unqueued_session().unwrap();
     f.answer(f.cards[0], Some(active.id()));
+    let scoped = active.collection().unwrap();
+    let held = scoped.held_back_run(Some(active.id())).unwrap();
+    assert!(!held.is_empty());
+    assert!(held.touches(Table::Decks, &RowKey::Id(1)));
+    let before = held
+        .before(Table::Decks, &RowKey::Id(1))
+        .unwrap()
+        .unwrap()
+        .before
+        .unwrap();
+    assert_eq!(before[3].as_i64(), Some(i64::from(baseline_deck.usn.0)));
     let mut remote = f
         .collection
         .reader(ReaderRole::Query)
@@ -1107,6 +1231,12 @@ fn rejected_newer_local_deck_still_drops_whole_held_answer_run() {
         .unwrap();
     remote.name = "remote old name".into();
     remote.mtime = EpochSecs(remote.mtime.0 - 1);
+    // The live answer is pending, but a server object carries a server USN.
+    // V has the older pre-answer deck, so this object is accepted there and
+    // rejected against the newer live deck at commit.
+    remote.usn = Usn(5);
+    assert!(baseline_deck.mtime < remote.mtime);
+    assert!(remote.mtime < EpochSecs(NOW / 1000));
     let body = format!(
         r#"{{"models":[],"decks":[[{}],[]],"tags":[]}}"#,
         meguri_model::schema11::deck_to_json(&remote)
@@ -1120,6 +1250,13 @@ fn rejected_newer_local_deck_still_drops_whole_held_answer_run() {
         }
     });
     f.start(&stub.url()).wait().unwrap();
+    assert_eq!(methods(&stub).last().unwrap(), "finish");
+    let sent = stub
+        .requests()
+        .into_iter()
+        .find(|r| r.path().ends_with("applyChanges"))
+        .unwrap();
+    assert!(json_body(&sent)["changes"]["decks"][0].as_array().unwrap().is_empty());
     assert_eq!(
         active
             .collection()
@@ -1138,6 +1275,19 @@ fn rejected_newer_local_deck_still_drops_whole_held_answer_run() {
             .unwrap()
             .name,
         "remote old name"
+    );
+    assert!(scoped.held_back_run(Some(active.id())).unwrap().is_empty());
+    assert_eq!(card(&f, f.cards[0]).reps, 1);
+    assert_eq!(card(&f, f.cards[0]).usn, Usn::PENDING);
+    assert_eq!(
+        f.collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .deck(DeckId(1))
+            .unwrap()
+            .unwrap()
+            .usn,
+        Usn::PENDING
     );
 }
 #[test]
@@ -1492,5 +1642,7 @@ fn real_current_card_changed_event_refuses_old_state_token() {
         AnswerOutcome::Stale { .. }
     ));
 }
+#[path = "normal_sync/field_rename.rs"]
+mod field_rename;
 #[path = "normal_sync/large.rs"]
 mod large;
