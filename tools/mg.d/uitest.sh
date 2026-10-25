@@ -67,9 +67,102 @@ mg_ui_test__physical_check() {
   MG_UI_PHYSICAL_DEVICE="$1"
 }
 
+# This one case (or its containing class) needs the generated media fixture
+# and a native destination capture. No other selector acquires this evidence.
+mg_ui_test__media_selected() {
+  local selector
+  for selector in $1; do
+    case "$selector" in
+      CollectionEntryJourneyTests|CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# Keep VM reachability queued; a refused capture or missing package is an error.
+mg_ui_test__media_command() {
+  local rc
+  MG_UI_MEDIA_COMMAND_OUTPUT="$("$@" 2>&1)"
+  rc=$?
+  [ "$rc" -ne 0 ] || return 0
+  if mvl_unreachable "$rc" "$MG_UI_MEDIA_COMMAND_OUTPUT"; then
+    mg__mac_vm_unreachable "the VM could not run native media destination capture" native-media-export
+    return 2
+  fi
+  return 1
+}
+
+mg_ui_test__media_prepare() {
+  local runner="$1" rc
+  if [ "$runner" != vm ]; then
+    mg_failure native-media-export "native media destination capture requires the leased test VM"
+    mg_status error
+    return 1
+  fi
+  # Source guard and stable per-run output; never honor an ambient handoff.
+  case "$MG_RUN_DIR" in "$MG_ROOT/build/mg/ui-test/"*) ;; *) return 1 ;; esac
+  MG_UI_MEDIA_NAME="$(python3 "$MG_ROOT/tools/scripts/native-media-export-capture.py" identity "$MG_RUN_DIR")" || {
+    mg_failure native-media-source "requires the closed, generated typical-1 fixture and an own-run destination"
+    mg_status error
+    return 1
+  }
+  [[ "$MG_UI_MEDIA_NAME" =~ ^Meguri-Media-[a-f0-9]{32}\.colpkg$ ]] || return 1
+  mg_vm_fixture "$MG_ROOT/build/fixtures/recipes/typical-1"
+  rc=$?
+  [ "$rc" -eq 0 ] || { [ "$rc" -ne 2 ] || mg_queued_settle; return "$rc"; }
+  if [ "$MG_UI_MEDIA_PLATFORM" != mac ]; then
+    mg_mac_vm_copy_in "$MG_ROOT/tools/scripts/native-media-export-capture.py" "$MG_RUN_DIR/native-media-export" || return $?
+    export TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT="$MG_RUN_DIR/native-media-export"
+  fi
+  export TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME="$MG_UI_MEDIA_NAME"
+  MG_UI_MEDIA_READY=1
+}
+
+# Called only after a successful run and checked summary. The exact media case
+# must also be present and Passed; Saved/hash alone is no content/client proof.
+mg_ui_test__media_capture() {
+  local prefix="$1" platform="$2" device="$3" tree container diagnostic
+  MG_UI_MEDIA_PHASE=tree
+  tree="$(xcrun xcresulttool get test-results tests --path "$prefix.xcresult" 2>/dev/null)" || return 1
+  jq -e '[.. | objects | select(.nodeType? == "Test Case")
+      | select(.nodeIdentifier? | strings | test("^(MeguriUITests/)?CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace(\\(\\))?$"))] as $cases
+      | ($cases | length) == 1 and $cases[0].result == "Passed"' <<<"$tree" >/dev/null 2>&1 || return 1
+  MG_UI_MEDIA_PHASE=copy
+  if [ "$platform" != mac ]; then
+    mg_ui_test__media_command mg_simctl get_app_container "$device" com.antoinefink.meguri.dev data || return $?
+    container="$MG_UI_MEDIA_COMMAND_OUTPUT"
+    # Validate before passing the response to any file-reading VM command.
+    [[ "$device" =~ ^[A-Fa-f0-9]{8}(-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}$ ]] || return 1
+    [[ "$container" =~ ^/Users/[A-Za-z0-9._-]+/Library/Developer/CoreSimulator/Devices/[A-Fa-f0-9-]+/data/Containers/Data/Application/[A-Fa-f0-9]{8}(-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}$ ]] || return 1
+    case "$container" in */Devices/"$device"/data/Containers/Data/Application/*) ;; *) return 1 ;; esac
+    mg_ui_test__media_command mg_mac_vm_ssh "python3 $(mvl_q "$MG_ROOT/tools/scripts/native-media-export-capture.py" simulator "$MG_RUN_DIR" "$container" "$device" "$MG_UI_MEDIA_NAME")" || return $?
+    mg_sim_fetch "$MG_RUN_DIR/native-media-export/$MG_UI_MEDIA_NAME" || return $?
+  else
+    MG_UI_MEDIA_PHASE=export
+    diagnostic="$(python3 "$MG_ROOT/tools/scripts/native-media-export-capture.py" mac \
+      "$MG_RUN_DIR" "$MG_UI_MEDIA_NAME" "$prefix.xcresult" 2>&1)" || {
+      case "$diagnostic" in
+        FIXED-PHASE:export) MG_UI_MEDIA_PHASE=export ;;
+        FIXED-PHASE:manifest) MG_UI_MEDIA_PHASE=manifest ;;
+        FIXED-PHASE:copy) MG_UI_MEDIA_PHASE=copy ;;
+      esac
+      return 1
+    }
+  fi
+  MG_UI_MEDIA_PHASE=receipt
+  python3 "$MG_ROOT/tools/scripts/native-media-export-capture.py" receipt "$MG_RUN_DIR" "$MG_UI_MEDIA_NAME" >/dev/null 2>&1 || return 1
+  mg_artifact native-media-export "$MG_RUN_DIR/native-media-export/$MG_UI_MEDIA_NAME" "file received by native destination; content/client proof pending"
+  mg_artifact native-media-source "$MG_RUN_DIR/expected-source.json" "closed original typical-1 file hashes and manifest identity"
+  mg_artifact native-media-receipt "$MG_RUN_DIR/native-media-export.json" "destination SHA256 and size; E7.4 acceptance pending"
+  mg_detail native_media_export "$(cat "$MG_RUN_DIR/native-media-export.json")"
+}
+
 mg_ui_test() {
   local platform=iphone device="" config=Debug suites="" only=() build_args=() s result since udid
   local physical="" inventory="" run_args="" MG_UI_PHYSICAL_DEVICE=""
+  local media="" MG_UI_MEDIA_READY="" MG_UI_MEDIA_PLATFORM="" MG_UI_MEDIA_DEVICE="" MG_UI_MEDIA_NAME="" MG_UI_MEDIA_PHASE=""
+  local TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME
+  unset TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME
   while [ "$#" -gt 0 ]; do
     [ "$1" = --list-physical-devices ] || run_args=1
     case "$1" in
@@ -113,6 +206,11 @@ mg_ui_test() {
     [ -z "$device" ] && [ "$platform" != mac ] || { mg_ui_test__usage "--physical-device conflicts with --device and --platform mac"; return 0; }
   fi
   [ -n "$suites" ] || { mg_ui_test__usage "name at least one --suite"; return 0; }
+  if mg_ui_test__media_selected "$suites"; then
+    media=1
+    [ -z "$physical" ] || { mg_ui_test__usage "native media export capture is unsupported on physical devices; use the leased VM"; return 0; }
+  fi
+  MG_UI_MEDIA_PLATFORM="$platform"
   for s in $suites; do only[${#only[@]}]="-only-testing:MeguriUITests/$s"; done
   mg_detail suites "$(printf '%s\n' $suites | jq -R . | jq -sc .)"
   mg_detail platform "$(jq -n --arg p "$platform" '$p')"
@@ -141,6 +239,14 @@ mg_ui_test() {
     mg_mac_ui_begin || return 0
     mg_app_build mac "$config" ${build_args[0]+"${build_args[@]}"} || return 0
     mg_mac_ui_take || return 0
+    if [ -n "$media" ]; then
+      mg_ui_test__media_prepare "$MG_MAC_RUNNER"
+      result=$?
+      if [ "$result" -ne 0 ]; then
+        if [ "$result" -eq 2 ]; then mg_queued_settle; else mg_status error; fi
+        return 0
+      fi
+    fi
     since="$(mg_app_log_now)"
     mg_app_xcodebuild_test "$MG_RUN_DIR/mac" mac "platform=macOS,arch=arm64" "$config" "${only[@]}"
     result=$?
@@ -165,6 +271,15 @@ mg_ui_test() {
     udid="$MG_SIM_UDID"
     mg_sim_check_runtime "$udid" || return 0
   fi
+  MG_UI_MEDIA_DEVICE="$udid"
+  if [ -n "$media" ]; then
+    mg_ui_test__media_prepare "$MG_SIM_RUNNER"
+    result=$?
+    if [ "$result" -ne 0 ]; then
+      if [ "$result" -eq 2 ]; then mg_queued_settle; else mg_status error; fi
+      return 0
+    fi
+  fi
   mg_sim_prepare "$udid" || return 0
   mg_app_xcodebuild_test "$MG_RUN_DIR/$platform" "$platform" "id=$udid" "$config" "${only[@]}"
   result=$?
@@ -176,7 +291,7 @@ mg_ui_test() {
 # mac-input; independent failures were already recorded). 4: the test VM
 # could not be reached (queued, mac-vm).
 mg_ui_test__report() {
-  local prefix="$1" result="$2" summary f cases
+  local prefix="$1" result="$2" summary f cases capture_result
   if [ "$result" -eq 4 ] && [ "${3:-}" != physical ]; then
     mg_status pass
     mg_queued_settle
@@ -234,6 +349,30 @@ mg_ui_test__report() {
     elif ! jq -e '.outcome == "Passed" and .passed > 0 and .failed == 0' <<<"$summary" >/dev/null; then
       mg_failure ui-test-results "UI tests require a Passed outcome, at least one passed test and zero failed tests"
       result=1
+    fi
+  fi
+  if [ "$result" -eq 0 ] && [ -n "${MG_UI_MEDIA_READY:-}" ]; then
+    if ! jq -e '.skipped == 0' <<<"$summary" >/dev/null; then
+      mg_failure native-media-export "native media destination capture requires a non-skipped run"
+      result=1
+    else
+      mg_ui_test__media_capture "$prefix" "$MG_UI_MEDIA_PLATFORM" "$MG_UI_MEDIA_DEVICE"
+      capture_result=$?
+      if [ "$capture_result" -eq 2 ]; then
+        mg_status pass
+        mg_queued_settle
+        return 0
+      elif [ "$capture_result" -ne 0 ]; then
+        mg_detail native_media_capture_failure "$(jq -nc --arg phase "$MG_UI_MEDIA_PHASE" '{phase: $phase}')"
+        case "$MG_UI_MEDIA_PHASE" in
+          tree) mg_failure native-media-export "FIXED-PHASE:tree: exact media method missing, duplicate or not Passed; no export evidence registered" ;;
+          export) mg_failure native-media-export "FIXED-PHASE:export: own-run selective attachment export refused; no export evidence registered" ;;
+          manifest) mg_failure native-media-export "FIXED-PHASE:manifest: expected one safe matching nonfailure package attachment; no export evidence registered" ;;
+          copy) mg_failure native-media-export "FIXED-PHASE:copy: retained native package copy refused; no export evidence registered" ;;
+          receipt) mg_failure native-media-export "FIXED-PHASE:receipt: fixture or destination receipt validation failed; no export evidence registered" ;;
+        esac
+        result=2
+      fi
     fi
   fi
   if [ -n "$summary" ]; then

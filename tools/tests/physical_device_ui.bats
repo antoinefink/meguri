@@ -66,6 +66,7 @@ case "$*" in
   "xcresulttool get build-results --path "*) echo "{\"errorCount\":0,\"warningCount\":0}" ;;
   "xcresulttool get test-results summary --path "*) cat "$FX_SUMMARY"; exit "${FX_SUMMARY_RC:-0}" ;;
   "xcresulttool get test-results tests --path "*) cat "$FX_TESTS"; exit "${FX_TESTS_RC:-0}" ;;
+  "xcresulttool export attachments "*) export-native-attachment "$@" ;;
   *) exit 97 ;;
 esac'
   stub plutil 'echo "plutil $*" >>"$STUB_LOG"
@@ -959,4 +960,705 @@ EOF
     [ "$(field .status)" = pass ]
     [ "$(field '.summary | "\(.passed) \(.failed) \(.skipped)"')" = "2 0 $skipped" ]
   done
+}
+
+# Native media destination capture extends the same ui-test dispatcher. These
+# synthetic files stand in for already-generated fixtures and a native save;
+# no app, VM, database, media generator or package producer runs here.
+native_media_fakes() {
+  mkdir -p "$SB/build/fixtures/recipes/typical-1/collection.media"
+  echo generated-database >"$SB/build/fixtures/recipes/typical-1/collection.anki2"
+  echo '{"recipe":"typical","seed":1}' >"$SB/build/fixtures/recipes/typical-1/manifest.json"
+  echo generated-image >"$SB/build/fixtures/recipes/typical-1/collection.media/image.png"
+  echo generated-sound >"$SB/build/fixtures/recipes/typical-1/collection.media/sound.wav"
+  echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' >"$FX_SUMMARY"
+  test_tree '[{nodeType:"Test Case", nodeIdentifier:"CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace()", result:"Passed"}]'
+  export FX_NATIVE_DOCS="$BATS_TEST_TMPDIR/native-documents"
+  mkdir -p "$FX_NATIVE_DOCS"
+  echo stale-old-package >"$FX_NATIVE_DOCS/Meguri-Collection.colpkg"
+  export FX_CONTAINER="/Users/meguri/Library/Developer/CoreSimulator/Devices/$SIM/data/Containers/Data/Application/00000000-0000-4000-8000-000000000004"
+  cat >>"$SB/tools/mg.d/zz-physical-fakes.sh" <<'EOF'
+mg_app_build() { echo "media-build $*" >>"$STUB_LOG"; }
+mg_mac_ui_begin() { MG_MAC_RUNNER="${FX_RUNNER:-vm}"; }
+mg_mac_ui_take() { echo mac-take >>"$STUB_LOG"; }
+mg_sim_take() { MG_SIM_RUNNER="${FX_RUNNER:-vm}"; echo sim-take >>"$STUB_LOG"; }
+mg_app_log_now() { echo synthetic-time; }
+mg_app_mac_input_refused() { return 1; }
+mg_vm_fixture() {
+  echo "media-stage $*" >>"$STUB_LOG"
+  if [ "${FX_STAGE_QUEUED:-0}" = 1 ]; then
+    mg_queued_part mac-vm native-media-export "synthetic unavailable VM"
+    mg_status warn
+    return 2
+  fi
+}
+mg_mac_vm_copy_in() { echo "media-copy-in $*" >>"$STUB_LOG"; }
+mg_app_xcodebuild_test() {
+  echo "media-test $*" >>"$STUB_LOG"
+  echo "media-handoff ${TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT:-unset}" >>"$STUB_LOG"
+  echo "media-name ${TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME:-unset}" >>"$STUB_LOG"
+  mkdir -p "$1.xcresult"
+  if [ -n "${TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME:-}" ] && [ "${FX_MISSING:-0}" = 0 ]; then
+    local filename="$TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME"
+    [[ "$filename" =~ ^Meguri-Media-[a-f0-9]{32}\.colpkg$ ]] || return 98
+    [ "${FX_MEDIA_ORDER:-before}" != before ] || echo old-method-overwrite >"$FX_NATIVE_DOCS/Meguri-Collection.colpkg"
+    [ ! -e "$FX_NATIVE_DOCS/$filename" ] || return 99
+    echo "media-first-save $filename" >>"$STUB_LOG"
+    echo first-save >"$FX_NATIVE_DOCS/$filename"
+    echo "media-replace $filename" >>"$STUB_LOG"
+    echo native-saved-package >"$FX_NATIVE_DOCS/$filename"
+    [ "${FX_MEDIA_ORDER:-before}" != after ] || echo old-method-overwrite >"$FX_NATIVE_DOCS/Meguri-Collection.colpkg"
+    if [ "$2" = mac ]; then
+      cp "$FX_NATIVE_DOCS/$filename" "$1.xcresult/native-attachment.colpkg"
+      echo "media-mac-attachment $filename" >>"$STUB_LOG"
+    fi
+  fi
+  [ "${FX_SOURCE_CHANGED:-0}" = 0 ] || echo changed >>"$MG_ROOT/build/fixtures/recipes/typical-1/collection.anki2"
+  return "${FX_RESULT:-0}"
+}
+mg_simctl() { echo "media-simctl $*" >>"$STUB_LOG"; printf '%s\n' "$FX_CONTAINER"; }
+mg_mac_vm_ssh() {
+  echo "media-ssh $*" >>"$STUB_LOG"
+  [ "${FX_CAPTURE_QUEUED:-0}" = 0 ] || return 255
+  [ "${FX_MISSING:-0}" = 0 ] || return 1
+  case "$1" in *"$(mvl_q "$TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME")") ;; *) return 97 ;; esac
+  cp "$FX_NATIVE_DOCS/$TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME" \
+    "$TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT/$TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME"
+}
+mg_sim_fetch() { echo "media-fetch $*" >>"$STUB_LOG"; }
+mg_mac_vm_copy_out() { echo "media-copy-out $*" >>"$STUB_LOG"; }
+EOF
+  cat >"$BIN/export-native-attachment" <<'EOF'
+#!/usr/bin/env python3
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+assert len(args) == 11 and args[:4] == ['xcresulttool', 'export', 'attachments', '--path']
+bundle = Path(args[4])
+run = bundle.parent
+filename = json.loads((run / 'expected-source.json').read_text())['native_filename']
+method = 'CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace()'
+exported = run / 'native-media-attachments'
+assert bundle == run / 'mac.xcresult'
+assert args[5:] == ['--output-path', str(exported), '--test-id', method, '--filter', '*' + filename + '*']
+assert exported.is_dir() and not list(exported.iterdir())
+mode = os.environ.get('FX_ATTACHMENT_MODE', 'success')
+if mode == 'export-error':
+    print('synthetic subprocess output must stay private', file=sys.stderr)
+    sys.exit(1)
+name = '00000000-0000-4000-8000-000000000007.colpkg'
+payload = exported / name
+source = bundle / 'native-attachment.colpkg'
+if source.exists() and mode != 'missing-package':
+    shutil.copyfile(source, payload)
+attachment = {'exportedFileName': name,
+              'suggestedHumanReadableName': filename + '_0_' + name,
+              'isAssociatedWithFailure': False, 'configurationName': 'Synthetic',
+              'deviceName': 'Synthetic', 'deviceId': 'synthetic', 'timestamp': 1}
+manifest = [{'testIdentifier': method, 'attachments': [attachment]}]
+if mode == 'wrong-test':
+    manifest[0]['testIdentifier'] = 'MediaTests/testAudio()'
+elif mode == 'wrong-name':
+    attachment['suggestedHumanReadableName'] = 'prefix-' + filename + '_0_' + name
+elif mode == 'wrong-delimiter':
+    attachment['suggestedHumanReadableName'] = filename + 'suffix_0_' + name
+elif mode == 'wrong-token':
+    attachment['suggestedHumanReadableName'] = 'Meguri-Media-' + 'f' * 32 + '.colpkg_0_' + name
+elif mode == 'failure-marker':
+    attachment['isAssociatedWithFailure'] = True
+elif mode == 'missing-marker':
+    del attachment['isAssociatedWithFailure']
+elif mode == 'duplicate-attachment':
+    manifest[0]['attachments'].append(dict(attachment))
+elif mode == 'extra-record':
+    manifest.append({'testIdentifier': 'MediaTests/testAudio()', 'attachments': []})
+elif mode == 'extra-export':
+    (exported / 'unrelated-screen.png').write_bytes(b'unrelated-screen')
+elif mode in ('escape', 'absolute', 'wrong-extension'):
+    attachment['exportedFileName'] = {'escape': '../escape.colpkg', 'absolute': '/tmp/escape.colpkg',
+                                      'wrong-extension': name + '.png'}[mode]
+elif mode in ('linked-payload', 'hardlink-payload', 'fifo', 'directory', 'empty'):
+    payload.unlink()
+    if mode == 'linked-payload':
+        payload.symlink_to(source)
+    elif mode == 'hardlink-payload':
+        os.link(source, payload)
+    elif mode == 'fifo':
+        os.mkfifo(payload)
+    elif mode == 'directory':
+        payload.mkdir()
+    else:
+        payload.touch()
+elif mode == 'malformed-manifest':
+    manifest = {'unexpected': []}
+manifest_path = exported / 'manifest.json'
+manifest_path.write_text(json.dumps(manifest))
+if mode == 'linked-manifest':
+    manifest_path.unlink()
+    manifest_path.symlink_to(source)
+EOF
+  chmod +x "$BIN/export-native-attachment"
+}
+
+media_run() {
+  mg ui-test --device "$SIM" --suite CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace "$@"
+}
+
+@test "native media export gates exact selector or whole class and stages before execution" {
+  native_media_fakes
+  local selector stage_line test_line
+  for selector in CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace CollectionEntryJourneyTests; do
+    : >"$STUB_LOG"
+    mg ui-test --device "$SIM" --suite "$selector"
+    [ "$status" -eq 0 ]
+    [ "$(field .status)" = pass ]
+    called "^media-stage $SB/build/fixtures/recipes/typical-1$"
+    called "^media-copy-in $SB/tools/scripts/native-media-export-capture.py $SB/build/mg/ui-test/[^ /]+/native-media-export$"
+    stage_line="$(grep -n '^media-stage ' "$STUB_LOG" | cut -d: -f1)"
+    test_line="$(grep -n '^media-test ' "$STUB_LOG" | cut -d: -f1)"
+    [ "$stage_line" -lt "$test_line" ]
+    called '^media-simctl get_app_container '
+    called "^media-fetch $SB/build/mg/ui-test/[^ /]+/native-media-export/Meguri-Media-[a-f0-9]{32}\.colpkg$"
+    [ "$(field .details.native_media_export.external_content_client_proof)" = pending ]
+    [ "$(field .details.native_media_export.e7_4_acceptance)" = pending ]
+    [ "$(field .details.native_media_export.native_destination.bytes)" -gt 0 ]
+    [[ "$(field .details.native_media_export.native_destination.sha256)" =~ ^[a-f0-9]{64}$ ]]
+    [ -f "$(dirname "$result")/expected-source.json" ]
+    jq -e '.fixture == "build/fixtures/recipes/typical-1" and (.files | has("manifest.json") and has("collection.anki2") and has("collection.media/image.png") and has("collection.media/sound.wav"))' \
+      "$(dirname "$result")/expected-source.json"
+  done
+  for selector in CollectionEntryJourneyTests/testNativeExportCancelSaveReplaceReimportAndDurableReview CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplaceExtra MediaTests; do
+    : >"$STUB_LOG"
+    TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT=/untrusted/output TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME=../untrusted.colpkg mg ui-test --device "$SIM" --suite "$selector"
+    [ "$status" -eq 0 ]
+    not_called '^media-(stage|copy|simctl|fetch|ssh)'
+    called '^media-handoff unset$'
+    called '^media-name unset$'
+    [ "$(field .details.native_media_export)" = null ]
+  done
+}
+
+@test "native media export captures only own run package on Mac and iPad" {
+  native_media_fakes
+  local platform dir filename
+  for platform in mac ipad; do
+    : >"$STUB_LOG"
+    if [ "$platform" = mac ]; then
+      mg ui-test --platform mac --suite CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace
+      called '^xcrun xcresulttool export attachments --path .*/mac.xcresult --output-path .*/native-media-attachments --test-id CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace\(\) --filter \*Meguri-Media-[a-f0-9]{32}\.colpkg\*$'
+      not_called '^media-(copy-in|copy-out|simctl|fetch|ssh)'
+    else
+      media_run --platform ipad
+      called '^media-fetch .*/native-media-export/Meguri-Media-[a-f0-9]{32}\.colpkg$'
+      not_called '^media-copy-out '
+    fi
+    [ "$status" -eq 0 ]
+    dir="$(dirname "$result")"
+    filename="$(field .details.native_media_export.native_filename)"
+    [[ "$filename" =~ ^Meguri-Media-[a-f0-9]{32}\.colpkg$ ]]
+    [ "$(cat "$dir/native-media-export/$filename")" = native-saved-package ]
+    if [ "$platform" = mac ]; then
+      called "^media-mac-attachment $filename$"
+      local save_line capture_line
+      save_line="$(grep -n '^media-mac-attachment ' "$STUB_LOG" | cut -d: -f1)"
+      capture_line="$(grep -n '^xcrun xcresulttool export attachments ' "$STUB_LOG" | cut -d: -f1)"
+      [ "$save_line" -lt "$capture_line" ]
+    fi
+    [ "$(field '[.artifacts[] | select(.kind | startswith("native-media"))] | length')" = 3 ]
+    not_called 'Library/Application Support|Preferences|credentials|host-lease|xcrun simctl'
+  done
+}
+
+@test "native media export never captures failed skipped cancelled or unexecuted cases" {
+  native_media_fakes
+  local mode
+  for mode in failed skipped cancelled no-tests wrong-case; do
+    : >"$STUB_LOG"
+    echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' >"$FX_SUMMARY"
+    case "$mode" in
+      failed) FX_RESULT=1 media_run ;;
+      skipped)
+        echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":1}' >"$FX_SUMMARY"
+        media_run ;;
+      cancelled) FX_RESULT=2 media_run ;;
+      no-tests)
+        echo '{"result":"Passed","passedTests":0,"failedTests":0,"skippedTests":0}' >"$FX_SUMMARY"
+        media_run ;;
+      wrong-case)
+        test_tree '[{nodeType:"Test Case", nodeIdentifier:"MediaTests/testAudio()", result:"Passed"}]'
+        media_run ;;
+    esac
+    [ "$status" -ne 0 ]
+    not_called '^media-(simctl|fetch|copy-out|ssh)'
+    [ "$(field '[.artifacts[] | select(.kind | startswith("native-media"))] | length')" = 0 ]
+  done
+}
+
+@test "native media export validates simulator locations before collection" {
+  native_media_fakes
+  local path valid="$FX_CONTAINER"
+  for path in / /tmp/other "$valid/../other" "$valid/" "$valid"$'\n/tmp/other' \
+      "${valid/$SIM/00000000-0000-4000-8000-000000000099}" '/Users/$(touch forbidden)/Library/Developer/CoreSimulator/Devices/x'; do
+    : >"$STUB_LOG"
+    FX_CONTAINER="$path" media_run
+    [ "$status" -ne 0 ]
+    not_called '^media-(ssh|fetch|copy-out)'
+    [ "$(field .details.native_media_export)" = null ]
+  done
+}
+
+@test "native media export requires package original source identity and VM capture" {
+  native_media_fakes
+  local platform
+  for platform in mac iphone; do
+    : >"$STUB_LOG"
+    if [ "$platform" = mac ]; then
+      FX_MISSING=1 mg ui-test --platform mac --suite CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace
+    else
+      FX_MISSING=1 media_run
+    fi
+    [ "$status" -eq 2 ]
+    [ "$(field .details.native_media_export)" = null ]
+    [ "$(field '[.artifacts[] | select(.kind | startswith("native-media"))] | length')" = 0 ]
+  done
+  : >"$STUB_LOG"
+  FX_SOURCE_CHANGED=1 media_run
+  [ "$status" -eq 2 ]
+  [ "$(field .details.native_media_export)" = null ]
+  : >"$STUB_LOG"
+  FX_SOURCE_CHANGED=1 mg ui-test --platform mac --suite CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace
+  [ "$status" -eq 2 ]
+  [ "$(field .details.native_media_capture_failure.phase)" = receipt ]
+  [ "$(field .details.native_media_export)" = null ]
+  [ "$(field '[.artifacts[] | select(.kind | startswith("native-media"))] | length')" = 0 ]
+  : >"$STUB_LOG"
+  FX_RUNNER=host media_run
+  [ "$status" -eq 2 ]
+  not_called '^media-(stage|test|simctl|ssh|fetch)'
+  : >"$STUB_LOG"
+  mg ui-test --physical-device "$PHONE" --suite CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace
+  [ "$status" -eq 2 ]
+  not_called '^media-|^xcrun xcdevice|^host-lease'
+}
+
+@test "native media export leaves unavailable VM staging and capture queued" {
+  native_media_fakes
+  FX_STAGE_QUEUED=1 media_run
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  not_called '^media-test '
+  : >"$STUB_LOG"
+  FX_CAPTURE_QUEUED=1 media_run
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  not_called '^media-fetch '
+  [ "$(field .details.native_media_export)" = null ]
+}
+
+@test "native media export source guard rejects open fixtures links and foreign run paths" {
+  native_media_fakes
+  local recipe="$SB/build/fixtures/recipes/typical-1" outside="$BATS_TEST_TMPDIR/foreign"
+  echo pending >"$recipe/collection.anki2-wal"
+  media_run
+  [ "$status" -eq 2 ]
+  not_called '^media-stage |^media-test '
+  rm "$recipe/collection.anki2-wal"
+  mv "$recipe/collection.media/image.png" "$BATS_TEST_TMPDIR/image.png"
+  ln -s "$BATS_TEST_TMPDIR/image.png" "$recipe/collection.media/image.png"
+  media_run
+  [ "$status" -eq 2 ]
+  not_called '^media-stage |^media-test '
+  mkdir -p "$outside"
+  run python3 "$SB/tools/scripts/native-media-export-capture.py" identity "$outside"
+  [ "$status" -ne 0 ]
+  [ ! -e "$outside/native-media-export" ]
+  local own="$SB/build/mg/ui-test/source-guard"
+  mkdir -p "$own"
+  ln -s "$outside" "$own/native-media-export"
+  run python3 "$SB/tools/scripts/native-media-export-capture.py" identity "$own"
+  [ "$status" -ne 0 ]
+  [ ! -e "$outside/expected-source.json" ]
+}
+
+@test "native media export names remain fresh across runs and either whole-class method order" {
+  native_media_fakes
+  local platform order filename previous=""
+  for platform in mac iphone; do
+  for order in before after before after; do
+    : >"$STUB_LOG"
+    if [ "$order" = before ]; then
+      test_tree '[
+        {nodeType:"Test Case", nodeIdentifier:"CollectionEntryJourneyTests/testNativeExportCancelSaveReplaceReimportAndDurableReview()", result:"Passed"},
+        {nodeType:"Test Case", nodeIdentifier:"CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace()", result:"Passed"}]'
+    else
+      test_tree '[
+        {nodeType:"Test Case", nodeIdentifier:"CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace()", result:"Passed"},
+        {nodeType:"Test Case", nodeIdentifier:"CollectionEntryJourneyTests/testNativeExportCancelSaveReplaceReimportAndDurableReview()", result:"Passed"}]'
+    fi
+    echo '{"result":"Passed","passedTests":2,"failedTests":0,"skippedTests":0}' >"$FX_SUMMARY"
+    if [ "$platform" = mac ]; then
+      FX_MEDIA_ORDER="$order" TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME=../ignored.colpkg \
+        mg ui-test --platform mac --suite CollectionEntryJourneyTests
+    else
+      FX_MEDIA_ORDER="$order" TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME=../ignored.colpkg \
+        mg ui-test --device "$SIM" --suite CollectionEntryJourneyTests
+    fi
+    [ "$status" -eq 0 ]
+    filename="$(field .details.native_media_export.native_filename)"
+    [[ "$filename" =~ ^Meguri-Media-[a-f0-9]{32}\.colpkg$ ]]
+    [ "$filename" != "$previous" ]
+    called "^media-name $filename$"
+    called "^media-first-save $filename$"
+    called "^media-replace $filename$"
+    if [ "$platform" = mac ]; then
+      called "^media-mac-attachment $filename$"
+      not_called '^media-(ssh|copy-out|simctl|fetch)'
+    else
+      called "^media-fetch .*/native-media-export/$filename$"
+    fi
+    [ "$(jq -r .native_filename "$(dirname "$result")/expected-source.json")" = "$filename" ]
+    [ "$(cat "$(dirname "$result")/native-media-export/$filename")" = native-saved-package ]
+    [ "$(cat "$FX_NATIVE_DOCS/Meguri-Collection.colpkg")" = old-method-overwrite ]
+    previous="$filename"
+  done
+  done
+}
+
+@test "native media capture pins descriptors and rejects deterministic substitution and mutation" {
+  run python3 - "$SB/tools/scripts/native-media-export-capture.py" "$BATS_TEST_TMPDIR/capture" <<'PY'
+import importlib.util
+import os
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location('capture', sys.argv[1])
+capture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(capture)
+base = Path(sys.argv[2])
+filename = 'Meguri-Media-' + '1' * 32 + '.colpkg'
+original = b'native-A'
+foreign = b'foreignB'
+
+for invalid in ('Meguri-Collection.colpkg', '../' + filename, filename + '\n',
+                filename.replace('1', 'G'), '/tmp/' + filename):
+    try:
+        capture.package_name(invalid)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('unsafe filename accepted')
+
+for case in ('success', 'occupied', 'file-replacement', 'file-symlink',
+             'directory-replacement', 'directory-symlink', 'same-length-mutation',
+             'destination-mutation', 'initial-symlink', 'initial-directory-symlink', 'hardlink', 'fifo'):
+    root = base / case
+    source_dir = root / 'Documents/RF2 Import Tests'
+    output_dir = root / 'own-run/native-media-export'
+    source_dir.mkdir(parents=True)
+    output_dir.mkdir(parents=True)
+    source = source_dir / filename
+    output = output_dir / filename
+    escaped = root / 'escaped.colpkg'
+    escaped.write_bytes(foreign)
+    source.write_bytes(original)
+    before = source.stat()
+    if case == 'occupied':
+        output.write_bytes(foreign)
+    elif case == 'initial-symlink':
+        source.unlink()
+        source.symlink_to(escaped)
+    elif case == 'initial-directory-symlink':
+        original_dir = source_dir.with_name('original-folder')
+        source_dir.rename(original_dir)
+        source_dir.symlink_to(original_dir, target_is_directory=True)
+    elif case == 'hardlink':
+        os.link(source, root / 'extra-link')
+    elif case == 'fifo':
+        source.unlink()
+        os.mkfifo(source)
+    fired = False
+    source_reads = []
+    read = os.read
+
+    def intercept(fd, count):
+        global fired
+        metadata = os.fstat(fd)
+        is_source = (metadata.st_dev, metadata.st_ino) == (before.st_dev, before.st_ino)
+        if not fired and ((is_source and case != 'destination-mutation')
+                          or (not is_source and case == 'destination-mutation')):
+            fired = True
+            if case in ('file-replacement', 'file-symlink'):
+                source.rename(source_dir / 'retained.colpkg')
+                if case == 'file-symlink':
+                    source.symlink_to(escaped)
+                else:
+                    source.write_bytes(foreign)
+            elif case in ('directory-replacement', 'directory-symlink'):
+                source_dir.rename(source_dir.with_name('retained-folder'))
+                if case == 'directory-symlink':
+                    substitute = root / 'substitute'
+                    substitute.mkdir()
+                    (substitute / filename).write_bytes(foreign)
+                    source_dir.symlink_to(substitute, target_is_directory=True)
+                else:
+                    source_dir.mkdir()
+                    source.write_bytes(foreign)
+            elif case == 'same-length-mutation':
+                source.write_bytes(foreign)
+                # Explicitly different metadata; no clock resolution or sleeps.
+                os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+            elif case == 'destination-mutation':
+                output.write_bytes(foreign)
+        block = read(fd, count)
+        if is_source:
+            source_reads.append(block)
+        return block
+
+    try:
+        with patch.object(capture.os, 'read', side_effect=intercept):
+            capture.copy_package(source, output)
+    except (ValueError, OSError):
+        assert case != 'success', case
+        if case == 'occupied':
+            assert output.read_bytes() == foreign
+        else:
+            assert not output.exists(), case
+    else:
+        assert case == 'success', case
+        assert output.read_bytes() == original
+        assert capture.file_identity(output)['bytes'] == len(original)
+    if case.startswith(('file-', 'directory-')):
+        assert fired and b''.join(source_reads) == original, case
+    if case in ('same-length-mutation', 'destination-mutation'):
+        assert fired, case
+    assert not (root / 'own-run/native-media-export.json').exists()
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "native media export Mac refuses absent failed skipped duplicate or unrelated methods before export" {
+  native_media_fakes
+  local mode
+  for mode in failed-run skipped-summary cancelled no-tests wrong-case failed-case skipped-case duplicate missing-tree; do
+    : >"$STUB_LOG"
+    echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' >"$FX_SUMMARY"
+    test_tree '[{nodeType:"Test Case", nodeIdentifier:"CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace()", result:"Passed"}]'
+    case "$mode" in
+      failed-run) FX_RESULT=1 mg ui-test --platform mac --suite CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace ;;
+      cancelled) FX_RESULT=2 mg ui-test --platform mac --suite CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace ;;
+      *)
+        case "$mode" in
+          skipped-summary) echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":1}' >"$FX_SUMMARY" ;;
+          no-tests) echo '{"result":"Passed","passedTests":0,"failedTests":0,"skippedTests":0}' >"$FX_SUMMARY" ;;
+          wrong-case) test_tree '[{nodeType:"Test Case", nodeIdentifier:"MediaTests/testAudio()", result:"Passed"}]' ;;
+          failed-case) test_tree '[{nodeType:"Test Case", nodeIdentifier:"CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace()", result:"Failed"}]' ;;
+          skipped-case) test_tree '[{nodeType:"Test Case", nodeIdentifier:"CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace()", result:"Skipped"}]' ;;
+          duplicate) test_tree '[{nodeType:"Test Case", nodeIdentifier:"CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace()", result:"Passed"}, {nodeType:"Test Case", nodeIdentifier:"MeguriUITests/CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace()", result:"Passed"}]' ;;
+          missing-tree) echo invalid >"$FX_TESTS" ;;
+        esac
+        mg ui-test --platform mac --suite CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace
+        ;;
+    esac
+    [ "$status" -ne 0 ]
+    not_called '^xcrun xcresulttool export attachments '
+    not_called '^media-(ssh|copy-out|simctl|fetch)'
+    [ "$(field .details.native_media_export)" = null ]
+    [ "$(field '[.artifacts[] | select(.kind | startswith("native-media"))] | length')" = 0 ]
+    [ -z "$(ls -A "$(dirname "$result")/native-media-export")" ]
+  done
+}
+
+@test "native media export Mac selective attachment capture refuses malformed foreign or unsafe exports" {
+  native_media_fakes
+  local mode phase
+  for mode in export-error wrong-test wrong-name wrong-delimiter wrong-token failure-marker missing-marker \
+      duplicate-attachment extra-record extra-export escape absolute wrong-extension linked-payload \
+      hardlink-payload fifo directory empty missing-package malformed-manifest linked-manifest; do
+    : >"$STUB_LOG"
+    FX_ATTACHMENT_MODE="$mode" mg ui-test --platform mac --suite CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace
+    [ "$status" -eq 2 ]
+    called '^xcrun xcresulttool export attachments --path .*/mac.xcresult --output-path .*/native-media-attachments --test-id CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace\(\) --filter \*Meguri-Media-[a-f0-9]{32}\.colpkg\*$'
+    [ "$(grep -c '^xcrun xcresulttool export attachments ' "$STUB_LOG")" -eq 1 ]
+    phase=manifest
+    [ "$mode" != export-error ] || phase=export
+    [ "$(field .details.native_media_capture_failure.phase)" = "$phase" ]
+    [ "$(field .details.native_media_export)" = null ]
+    [ "$(field '[.artifacts[] | select(.kind | startswith("native-media"))] | length')" = 0 ]
+    [ -z "$(ls -A "$(dirname "$result")/native-media-export")" ]
+    ! grep -q 'synthetic subprocess output must stay private' "$(dirname "$result")/log.txt"
+    not_called '^media-(ssh|copy-out|simctl|fetch)'
+  done
+}
+
+@test "native media export Mac attachment capture pins manifest payload and own-run descriptors" {
+  run python3 - "$SB/tools/scripts/native-media-export-capture.py" "$BATS_TEST_TMPDIR/mac-attachments" <<'PY'
+import importlib.util
+import json
+import os
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location('capture', sys.argv[1])
+capture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(capture)
+base = Path(sys.argv[2])
+filename = 'Meguri-Media-' + '2' * 32 + '.colpkg'
+basename = '00000000-0000-4000-8000-000000000007.colpkg'
+original = b'native-A'
+foreign = b'foreignB'
+
+for case in ('success', 'occupied', 'wrong-owner', 'wrong-bundle', 'export-occupied',
+             'export-symlink', 'ancestor-symlink', 'bundle-symlink',
+             'manifest-symlink', 'file-symlink', 'hardlink', 'fifo',
+             'missing-package', 'ancestor-replacement', 'folder-replacement', 'file-replacement',
+             'same-length-mutation', 'rehash-mutation', 'destination-mutation',
+             'manifest-mutation', 'extra-export'):
+    root = base / case
+    run = root / 'own-run'
+    output_dir = run / 'native-media-export'
+    output_dir.mkdir(parents=True)
+    output = output_dir / filename
+    bundle = run / 'mac.xcresult'
+    bundle.mkdir()
+    exported = run / 'native-media-attachments'
+    source = exported / basename
+    manifest_path = exported / 'manifest.json'
+    expected = run / 'expected-source.json'
+    expected.write_text(json.dumps({'native_filename': filename if case != 'wrong-owner'
+                                   else 'Meguri-Media-' + '3' * 32 + '.colpkg'}))
+    escaped = root / 'escaped.colpkg'
+    escaped.write_bytes(foreign)
+    manifest = [{'testIdentifier': capture.METHOD, 'attachments': [{
+        'exportedFileName': basename, 'suggestedHumanReadableName': filename + '_0_' + basename,
+        'isAssociatedWithFailure': False}]}]
+    if case == 'occupied':
+        output.write_bytes(foreign)
+    elif case == 'wrong-bundle':
+        bundle = root / 'foreign.xcresult'
+        bundle.mkdir()
+    elif case == 'export-occupied':
+        exported.mkdir()
+        (exported / 'foreign').write_bytes(foreign)
+    elif case == 'export-symlink':
+        exported.symlink_to(root, target_is_directory=True)
+    elif case in ('ancestor-symlink', 'bundle-symlink'):
+        directory = run if case == 'ancestor-symlink' else bundle
+        retained = directory.with_name(directory.name + '-retained')
+        directory.rename(retained)
+        directory.symlink_to(retained, target_is_directory=True)
+    before = None
+    exported_calls = []
+
+    def export(args, **kwargs):
+        global before
+        exported_calls.append(args)
+        assert args == ['xcrun', 'xcresulttool', 'export', 'attachments', '--path', str(bundle),
+                        '--output-path', str(exported), '--test-id', capture.METHOD,
+                        '--filter', '*' + filename + '*']
+        assert kwargs == {'check': True, 'stdout': capture.subprocess.DEVNULL,
+                          'stderr': capture.subprocess.DEVNULL}
+        assert not list(exported.iterdir())
+        source.write_bytes(original)
+        manifest_path.write_text(json.dumps(manifest))
+        if case == 'missing-package':
+            source.unlink()
+        elif case == 'manifest-symlink':
+            manifest_path.unlink()
+            manifest_path.symlink_to(escaped)
+        elif case == 'file-symlink':
+            source.unlink()
+            source.symlink_to(escaped)
+        elif case == 'hardlink':
+            os.link(source, root / 'extra-link')
+        elif case == 'fifo':
+            source.unlink()
+            os.mkfifo(source)
+        else:
+            before = source.stat()
+
+    read = os.read
+    fired = False
+    source_reads = []
+    source_read_calls = 0
+
+    def intercept(fd, count):
+        global fired, source_read_calls
+        metadata = os.fstat(fd)
+        is_source = before is not None and (metadata.st_dev, metadata.st_ino) == (before.st_dev, before.st_ino)
+        if is_source:
+            source_read_calls += 1
+        delayed = case in ('rehash-mutation', 'destination-mutation')
+        if is_source and not fired and (not delayed or source_read_calls == 3):
+            fired = True
+            if case in ('ancestor-replacement', 'folder-replacement'):
+                directory = run if case == 'ancestor-replacement' else exported
+                directory.rename(directory.with_name(directory.name + '-retained'))
+                exported.mkdir(parents=True)
+                source.write_bytes(foreign)
+            elif case == 'file-replacement':
+                source.rename(exported / 'retained.colpkg')
+                source.write_bytes(foreign)
+            elif case in ('same-length-mutation', 'rehash-mutation'):
+                source.write_bytes(foreign)
+                os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+            elif case == 'destination-mutation':
+                output.write_bytes(foreign)
+            elif case == 'manifest-mutation':
+                manifest_path.write_text('[]')
+            elif case == 'extra-export':
+                (exported / 'unrelated-screen.png').write_bytes(foreign)
+        block = read(fd, count)
+        if is_source:
+            source_reads.append(block)
+        return block
+
+    try:
+        with patch.object(capture.subprocess, 'run', side_effect=export), \
+             patch.object(capture.os, 'read', side_effect=intercept):
+            capture.mac_capture(run, filename, bundle)
+    except (ValueError, OSError):
+        assert case != 'success', case
+        if case == 'occupied':
+            assert output.read_bytes() == foreign
+        else:
+            assert not output.exists(), case
+        if case == 'ancestor-replacement':
+            assert not (root / 'own-run-retained/native-media-export' / filename).exists()
+    else:
+        assert case == 'success', case
+        assert output.read_bytes() == original
+        assert source.read_bytes() == original
+        assert capture.file_identity(output)['bytes'] == len(original)
+    assert escaped.read_bytes() == foreign
+    if case in ('wrong-owner', 'wrong-bundle', 'export-occupied', 'export-symlink',
+                'ancestor-symlink', 'bundle-symlink'):
+        assert not exported_calls, case
+    else:
+        assert len(exported_calls) == 1, case
+    if case in ('ancestor-replacement', 'folder-replacement', 'file-replacement'):
+        assert fired and b''.join(source_reads) == original, case
+        assert source.read_bytes() == foreign, case
+    if case in ('same-length-mutation', 'rehash-mutation', 'destination-mutation', 'manifest-mutation', 'extra-export'):
+        assert fired, case
+    assert not (run / 'native-media-export.json').exists()
+
+# CLI ownership is checked before an exporter can inspect a foreign result.
+with patch.object(capture, 'ROOT', base), \
+     patch.object(capture.subprocess, 'run', side_effect=AssertionError('foreign export')):
+    for run_path in (base / 'foreign', base / 'build/mg/ui-test/../foreign'):
+        with patch.object(sys, 'argv', ['capture', 'mac', str(run_path), filename, str(run_path / 'mac.xcresult')]):
+            try:
+                capture.main()
+            except (ValueError, OSError):
+                pass
+            else:
+                raise AssertionError('foreign run accepted')
+PY
+  [ "$status" -eq 0 ]
 }

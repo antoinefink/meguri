@@ -24,97 +24,16 @@ import notify
         let build = try BuildUnderTest.current()
         let bundle = try build.bundleIdentifier
         let app = XCUIApplication()
-        let settings = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.settings",
-            sidebarIdentifier: "shell.root.sidebar.settings", compactLabel: "Settings", timeout: 10), app.debugDescription)
-        try click(settings, app, bundle)
-        let settingsContent = element(app, "settings.root.content")
-        XCTAssertTrue(settingsContent.waitForExistence(timeout: 10), "Native navigation must open Settings: \(app.debugDescription)")
-        let export = app.buttons["settings.root.exportCollection"].firstMatch
-        let exportReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            settingsContent.exists && export.exists && export.isEnabled && export.isHittable
-        }, object: nil)
-        XCTAssertEqual(XCTWaiter().wait(for: [exportReady], timeout: 10), .completed, app.debugDescription)
-        capture(app, "export-native-settings-route")
-        try click(export, app, bundle)
-        let prepare = try XCTUnwrap(waitForHittable(app.buttons.matching(identifier: "settings.importExport.prepare")), app.debugDescription)
-        try click(prepare, app, bundle)
-        XCTAssertTrue(element(app, "settings.importExport.ready").waitForExistence(timeout: 30), app.debugDescription)
-        try click(element(app, "settings.importExport.choose"), app, bundle)
-        capturePicker(app)
         #if os(macOS)
-        let savePanel = app.sheets.matching(identifier: "save-panel").firstMatch
-        XCTAssertTrue(savePanel.waitForExistence(timeout: 10))
-        try click(savePanel.buttons.matching(NSPredicate(format: "identifier == %@ OR title == %@", "CancelButton", "Cancel")).firstMatch, app, bundle)
         let folder = FileManager.default.temporaryDirectory.appending(path: "RF3-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let saved = folder.appending(path: "Meguri-Collection.colpkg")
         #else
-        try cancelNativeExportPicker(app, bundle)
-        let delegateReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            let choose = self.element(app, "settings.importExport.choose")
-            return self.element(app, "settings.importExport.ready").exists
-                && choose.exists && choose.isEnabled && choose.isHittable
-        }, object: nil)
-        let delegateResult = XCTWaiter().wait(for: [delegateReady], timeout: 10)
-        if delegateResult != .completed { capturePicker(app) }
-        XCTAssertEqual(delegateResult, .completed, "Native cancellation must return the export to Ready: \(app.debugDescription)")
-        // The native local folder is installed by the existing public source hook.
-        let saved = URL(fileURLWithPath: "/RF2 Import Tests/Meguri-Collection.colpkg")
+        let folder: URL? = nil
         #endif
-        XCTAssertTrue(element(app, "settings.importExport.ready").waitForExistence(timeout: 10))
-        for replacement in [false, true] {
-            let choose = app.buttons.matching(identifier: "settings.importExport.choose").firstMatch
-            let chooseReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                choose.exists && choose.isEnabled && choose.isHittable
-            }, object: nil)
-            guard XCTWaiter().wait(for: [chooseReady], timeout: 30) == .completed else {
-                capture(app, "export-native-choose-not-ready")
-                XCTFail("Native export Choose must be enabled and hittable: \(app.debugDescription)")
-                return
-            }
-            try click(choose, app, bundle)
-            #if os(macOS)
-            XCTAssertTrue(savePanel.waitForExistence(timeout: 10))
-            try app.bringToFront(bundleIdentifier: bundle)
-            app.typeKey("g", modifierFlags: [.command, .shift])
-            let go = savePanel.sheets.matching(identifier: "GoToWindow").firstMatch
-            let path = go.textFields.matching(identifier: "PathTextField").firstMatch
-            XCTAssertTrue(path.waitForExistence(timeout: 10), app.debugDescription)
-            try app.bringToFront(bundleIdentifier: bundle); path.typeKey("a", modifierFlags: .command)
-            try app.bringToFront(bundleIdentifier: bundle); path.typeText(folder.path)
-            XCTAssertEqual(path.value as? String, folder.path, app.debugDescription)
-            try app.bringToFront(bundleIdentifier: bundle); path.typeKey(.return, modifierFlags: [])
-            let save = savePanel.buttons.matching(identifier: "OKButton").firstMatch
-            let saveReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                !go.exists && save.exists && save.isEnabled && save.isHittable
-            }, object: nil)
-            XCTAssertEqual(XCTWaiter().wait(for: [saveReady], timeout: 10), .completed, app.debugDescription)
-            try click(save, app, bundle)
-            if replacement {
-                let replace = app.buttons.matching(NSPredicate(format: "title == %@ OR label == %@", "Replace", "Replace")).firstMatch
-                XCTAssertTrue(replace.waitForExistence(timeout: 10), app.debugDescription)
-                try click(replace, app, bundle)
-            }
-            #else
-            try selectLocalExportFolder(app, bundle)
-            let save = app.buttons.matching(identifier: "DOCPicker.actionButton").firstMatch
-            let saveReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                save.exists && save.isEnabled && save.isHittable
-            }, object: nil)
-            XCTAssertEqual(XCTWaiter().wait(for: [saveReady], timeout: 10), .completed,
-                "The destination folder must offer an enabled, hittable native Save action")
-            capture(app, "export-native-save-ready")
-            try click(save, app, bundle)
-            if replacement {
-                guard confirmNativeExportReplacement(app) else { return }
-            }
-            #endif
-            XCTAssertTrue(element(app, "settings.importExport.saved").waitForExistence(timeout: 30), app.debugDescription)
-            #if os(macOS)
-            XCTAssertTrue(FileManager.default.fileExists(atPath: saved.path), "NSSavePanel must save the expected collection filename at \(saved.path)")
-            #endif
-        }
+        let saved = try exerciseNativeExport(app, bundle, destinationFolder: folder)
+        let settingsContent = element(app, "settings.root.content")
+        let prepare = app.buttons.matching(identifier: "settings.importExport.prepare").firstMatch
         let discard = app.buttons["settings.importExport.discard"].firstMatch
         try click(discard, app, bundle)
         let discarded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -171,6 +90,213 @@ import notify
         app.launch()
         XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
         capture(app, "export-reimport-durable-review")
+    }
+    /// Destination proof only: generated media and its existing review history
+    /// are exported without reviews, database edits or media-file reimport.
+    func testNativeMediaExportCancelSaveReplace() throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        let bundle = try build.bundleIdentifier
+        guard build.hasHooks, bundle.hasSuffix(".dev") else { throw XCTSkip("Requires development fixture hooks") }
+        #if os(iOS) && !targetEnvironment(simulator)
+        throw XCTSkip("Native media export capture requires the leased test VM")
+        #else
+        let filename = try XCTUnwrap(ProcessInfo.processInfo.environment["MEGURI_NATIVE_MEDIA_EXPORT_NAME"],
+            "Run this capture through tools/mg ui-test")
+        guard filename.range(of: #"^Meguri-Media-[a-f0-9]{32}\.colpkg$"#, options: .regularExpression)?.lowerBound == filename.startIndex,
+              filename.utf8.count == 52 else {
+            XCTFail("Native media capture requires its own safe per-run filename")
+            throw NSError(domain: "CollectionEntryJourneyTests", code: 4)
+        }
+        let app = XCUIApplication()
+        #if os(iOS)
+        // Installs the local Files folder only; this source is never imported.
+        let importSource: URL? = build.repositoryRoot.appending(path: "app/Fixtures/CollectionEntry/review.colpkg")
+        #else
+        let importSource: URL? = nil
+        #endif
+        app.launchArguments = MeguriLaunch(
+            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/typical-1"),
+            importSource: importSource, now: "2030-01-15T10:00:00+01:00",
+            timeZone: "Europe/Paris", locale: "en_US", animations: false).arguments
+        app.launch()
+        addTeardownBlock { @MainActor in app.terminate() }
+        #if os(macOS)
+        let folder = FileManager.default.temporaryDirectory.appending(
+            path: "RF3-Media-\(filename.dropFirst(13).prefix(32))", directoryHint: .isDirectory)
+        // Retain the actual native destination in XCTest before normal cleanup.
+        XCTAssertNil(try? FileManager.default.attributesOfItem(atPath: folder.path),
+                     "Native media capture requires a fresh owned folder")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        #else
+        let folder: URL? = nil
+        #endif
+        let saved = try exerciseNativeExport(app, bundle, destinationFolder: folder, destinationFilename: filename)
+        #if os(macOS)
+        XCTAssertEqual(saved, folder.appending(path: filename))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: saved.path))
+        let attachment = XCTAttachment(contentsOfFile: saved)
+        attachment.name = filename
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        #else
+        _ = saved
+        #endif
+        capture(app, "media-export-native-destination-received")
+        #endif
+    }
+
+    private func openCollectionSettings(_ app: XCUIApplication, _ bundle: String) throws {
+        #if os(macOS)
+        try app.bringToFront(bundleIdentifier: bundle)
+        let settings = app.windows.containing(.any, identifier: "settings.root.content").firstMatch
+        if !settings.exists {
+            let main = app.windows.matching(identifier: "main").firstMatch
+            XCTAssertTrue(main.waitForExistence(timeout: 10))
+            let frame = main.frame
+            let keyboardTarget = try XCTUnwrap(!frame.isNull && !frame.isEmpty
+                && frame.origin.x.isFinite && frame.origin.y.isFinite
+                && frame.width.isFinite && frame.height.isFinite ? main : nil,
+                "Native keyboard target must have a finite, nonempty window frame")
+            keyboardTarget.typeKey(",", modifierFlags: .command)
+        }
+        XCTAssertTrue(element(app, "settings.root.content").waitForExistence(timeout: 30),
+            "Command-comma must open the native Settings scene")
+        try click(element(app, "settings.root.collection"), app, bundle)
+        #else
+        let settings = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.settings",
+            sidebarIdentifier: "shell.root.sidebar.settings", compactLabel: "Settings", timeout: 10), app.debugDescription)
+        try click(settings, app, bundle)
+        #endif
+    }
+
+    private func exerciseNativeExport(_ app: XCUIApplication, _ bundle: String,
+                                      destinationFolder: URL?, destinationFilename: String? = nil) throws -> URL {
+        try openCollectionSettings(app, bundle)
+        let settingsContent = element(app, "settings.root.content")
+        XCTAssertTrue(settingsContent.waitForExistence(timeout: 10), "Native navigation must open Settings: \(app.debugDescription)")
+        let export = app.buttons["settings.root.exportCollection"].firstMatch
+        let exportReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            settingsContent.exists && export.exists && export.isEnabled && export.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [exportReady], timeout: 10), .completed, app.debugDescription)
+        capture(app, "export-native-settings-route")
+        try click(export, app, bundle)
+        let prepare = try XCTUnwrap(waitForHittable(app.buttons.matching(identifier: "settings.importExport.prepare")), app.debugDescription)
+        try click(prepare, app, bundle)
+        XCTAssertTrue(element(app, "settings.importExport.ready").waitForExistence(timeout: 30), app.debugDescription)
+        try click(element(app, "settings.importExport.choose"), app, bundle)
+        capturePicker(app)
+        #if os(macOS)
+        let savePanel = app.sheets.matching(identifier: "save-panel").firstMatch
+        XCTAssertTrue(savePanel.waitForExistence(timeout: 10))
+        try click(savePanel.buttons.matching(NSPredicate(format: "identifier == %@ OR title == %@", "CancelButton", "Cancel")).firstMatch, app, bundle)
+        let folder = try XCTUnwrap(destinationFolder)
+        let saved = folder.appending(path: destinationFilename ?? "Meguri-Collection.colpkg")
+        #else
+        try cancelNativeExportPicker(app, bundle)
+        let delegateReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let choose = self.element(app, "settings.importExport.choose")
+            return self.element(app, "settings.importExport.ready").exists
+                && choose.exists && choose.isEnabled && choose.isHittable
+        }, object: nil)
+        let delegateResult = XCTWaiter().wait(for: [delegateReady], timeout: 10)
+        if delegateResult != .completed { capturePicker(app) }
+        XCTAssertEqual(delegateResult, .completed, "Native cancellation must return the export to Ready: \(app.debugDescription)")
+        // The native local folder is installed by the existing public source hook.
+        let saved = URL(fileURLWithPath: "/RF2 Import Tests").appending(path: destinationFilename ?? "Meguri-Collection.colpkg")
+        #endif
+        XCTAssertTrue(element(app, "settings.importExport.ready").waitForExistence(timeout: 10))
+        for replacement in [false, true] {
+            let choose = app.buttons.matching(identifier: "settings.importExport.choose").firstMatch
+            let chooseReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                choose.exists && choose.isEnabled && choose.isHittable
+            }, object: nil)
+            guard XCTWaiter().wait(for: [chooseReady], timeout: 30) == .completed else {
+                capture(app, "export-native-choose-not-ready")
+                XCTFail("Native export Choose must be enabled and hittable: \(app.debugDescription)")
+                throw NSError(domain: "CollectionEntryJourneyTests", code: 2)
+            }
+            try click(choose, app, bundle)
+            #if os(macOS)
+            XCTAssertTrue(savePanel.waitForExistence(timeout: 10))
+            try app.bringToFront(bundleIdentifier: bundle)
+            app.typeKey("g", modifierFlags: [.command, .shift])
+            let go = savePanel.sheets.matching(identifier: "GoToWindow").firstMatch
+            let path = go.textFields.matching(identifier: "PathTextField").firstMatch
+            XCTAssertTrue(path.waitForExistence(timeout: 10), app.debugDescription)
+            try app.bringToFront(bundleIdentifier: bundle); path.typeKey("a", modifierFlags: .command)
+            try app.bringToFront(bundleIdentifier: bundle); path.typeText(folder.path)
+            XCTAssertEqual(path.value as? String, folder.path, app.debugDescription)
+            try app.bringToFront(bundleIdentifier: bundle); path.typeKey(.return, modifierFlags: [])
+            let save = savePanel.buttons.matching(identifier: "OKButton").firstMatch
+            let saveReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                !go.exists && save.exists && save.isEnabled && save.isHittable
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter().wait(for: [saveReady], timeout: 10), .completed, app.debugDescription)
+            if let destinationFilename {
+                try selectNativeExportFilename(savePanel.textFields, destinationFilename, app, bundle)
+            }
+            try click(save, app, bundle)
+            if replacement {
+                let replace = app.buttons.matching(NSPredicate(format: "title == %@ OR label == %@", "Replace", "Replace")).firstMatch
+                XCTAssertTrue(replace.waitForExistence(timeout: 10), app.debugDescription)
+                try click(replace, app, bundle)
+            }
+            #else
+            try selectLocalExportFolder(app, bundle)
+            if let destinationFilename {
+                try selectNativeExportFilename(app.textFields, destinationFilename, app, bundle)
+            }
+            let save = app.buttons.matching(identifier: "DOCPicker.actionButton").firstMatch
+            let saveReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                save.exists && save.isEnabled && save.isHittable
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter().wait(for: [saveReady], timeout: 10), .completed,
+                "The destination folder must offer an enabled, hittable native Save action")
+            capture(app, "export-native-save-ready")
+            try click(save, app, bundle)
+            if replacement {
+                guard confirmNativeExportReplacement(app) else { throw NSError(domain: "CollectionEntryJourneyTests", code: 3) }
+            }
+            #endif
+            XCTAssertTrue(element(app, "settings.importExport.saved").waitForExistence(timeout: 30), app.debugDescription)
+            let ownerCompleted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                let choose = self.element(app, "settings.importExport.choose")
+                let discard = self.element(app, "settings.importExport.discard")
+                return choose.exists && choose.isEnabled && choose.isHittable
+                    && discard.exists && discard.isEnabled && discard.isHittable
+                    && !self.element(app, "settings.importExport.progress").exists
+                    && !self.element(app, "settings.importExport.retryCleanup").exists
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter().wait(for: [ownerCompleted], timeout: 10), .completed,
+                "The native destination and export owner must finish before continuing")
+            #if os(macOS)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: saved.path), "NSSavePanel must save the expected collection filename at \(saved.path)")
+            #endif
+        }
+        return saved
+    }
+    // Select the real native filename field by its exact current filename,
+    // never a search field or an app hook. Both saves enter the same owned name.
+    private func selectNativeExportFilename(_ fields: XCUIElementQuery, _ filename: String,
+                                            _ app: XCUIApplication, _ bundle: String) throws {
+        let stem = String(filename.dropLast(".colpkg".count))
+        let names = ["Meguri-Collection", "Meguri-Collection.colpkg", stem, filename]
+        let candidates = fields.matching(NSPredicate(format: "value IN %@", names))
+        let field = try XCTUnwrap(waitForHittable(candidates), app.debugDescription)
+        XCTAssertEqual(candidates.count, 1, "The native save picker must expose one filename field")
+        let previous = try XCTUnwrap(field.value as? String)
+        let entered = previous.hasSuffix(".colpkg") ? filename : stem
+        try click(field, app, bundle)
+        #if os(macOS)
+        field.typeKey("a", modifierFlags: .command)
+        field.typeText(entered)
+        #else
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count) + entered)
+        #endif
+        XCTAssertEqual(field.value as? String, entered, "The native destination must use this run's exact filename")
     }
     #if os(iOS)
     private func confirmNativeExportReplacement(_ app: XCUIApplication) -> Bool {

@@ -1576,3 +1576,13 @@ native case, but the job errors during file collection and registers no export
 proof. Preserve both outcomes. Source round three has no P0–P1 findings and
 records an unused iOS value as P2. Native capture and mobile builds remain
 unfinished. No Unit or gate is accepted.
+
+Filtered native-save repair `234205Z-81529` uses one XCTest file attachment
+on Mac and keeps the touch path. Source round four has no P0–P2 findings.
+Private `234734Z-84386` and similarity `235112Z-86891` pass. Native
+`234731Z-83926` has one passed case; collection of its attachment still errors.
+Its result metadata shows the attachment is present. The tool's assumed name
+shape differs from the actual XCTest name; a focused repair is pending.
+Selftest `234729Z-83661` passes 11 of 12 cases. One phase assertion needs to
+account for the earlier refusal when a fixture adds a directory. Preserve that
+refusal. These are WIP checks, without a Unit trailer or acceptance claim.
