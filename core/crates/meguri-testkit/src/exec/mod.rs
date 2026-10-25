@@ -18,6 +18,7 @@ mod notes;
 mod notetypes;
 mod oracle;
 pub mod parties;
+mod parties_edge;
 mod render;
 pub mod sched;
 mod search;
@@ -156,6 +157,14 @@ pub trait SegmentExecutor: Executor {
 /// One worker for one interactive session. Dropping it before a successful
 /// `end` stops the worker instead of reusing it, so no session stays open.
 pub trait Interactive {
+    /// Identity assigned by the trusted launch factory, never by a reply.
+    fn worker_identity(&self) -> Option<&str> {
+        None
+    }
+
+    /// Permanently exclude a failed or unresolved session from the idle pool.
+    fn quarantine(&mut self) {}
+
     /// Sends one request; an error response is an [`ExecError`] with the
     /// protocol's kind and step.
     fn request(&mut self, request: &Value) -> Result<Value, ExecError>;

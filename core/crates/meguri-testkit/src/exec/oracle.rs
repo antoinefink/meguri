@@ -4,10 +4,11 @@
 //! worker command that starts the oracle image through `docker compose run -i`,
 //! with the handoff directory of live chains mounted.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Condvar, Mutex, MutexGuard};
 
+use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use super::{ExecError, Executor, Handoff, Interactive, Needs, SegmentExecutor, SegmentOutput, SegmentRequest};
@@ -36,9 +37,25 @@ impl Hello {
     }
 }
 
+// Validate duplicate route fields before the JSON Value representation can
+// collapse them. Parties still receives a successful begin with malformed
+// sync, so its guard attempts end before quarantining the worker.
+#[derive(Deserialize)]
+struct BeginWire {
+    #[serde(rename = "sync")]
+    _sync: RouteWire,
+}
+
+#[derive(Deserialize)]
+struct RouteWire {
+    #[serde(rename = "route", deserialize_with = "Option::deserialize")]
+    _route: Option<super::parties::Route>,
+}
+
 #[derive(Debug)]
 struct Worker {
     tz: String,
+    identity: Option<String>,
     child: Child,
     stdin: Option<ChildStdin>,
     stdout: BufReader<ChildStdout>,
@@ -46,7 +63,24 @@ struct Worker {
 
 impl Worker {
     fn start(command: &[String], tz: &str) -> Result<Worker, ExecError> {
-        let args: Vec<String> = command.iter().map(|a| a.replace("{tz}", tz)).collect();
+        // Only a factory command explicitly requesting the identity establishes
+        // trusted context. Assign it before spawning, outside protocol data.
+        let identity = if command.iter().any(|a| a.contains("{worker}")) {
+            let mut bytes = [0_u8; 16];
+            std::fs::File::open("/dev/urandom")
+                .and_then(|mut f| f.read_exact(&mut bytes))
+                .map_err(|_| ExecError::new("worker_start", "worker identity unavailable"))?;
+            Some(bytes.iter().map(|b| format!("{b:02x}")).collect::<String>())
+        } else {
+            None
+        };
+        let args: Vec<String> = command
+            .iter()
+            .map(|a| {
+                a.replace("{tz}", tz)
+                    .replace("{worker}", identity.as_deref().unwrap_or(""))
+            })
+            .collect();
         let (program, rest) = args
             .split_first()
             .ok_or_else(|| ExecError::new("worker_start", "empty worker command"))?;
@@ -62,6 +96,7 @@ impl Worker {
         };
         Ok(Worker {
             tz: tz.to_owned(),
+            identity,
             child,
             stdin: Some(stdin),
             stdout: BufReader::new(stdout),
@@ -93,7 +128,15 @@ impl Worker {
                 .unwrap_or_default();
             return Err(died(format!("the worker exited {status}").trim_end().to_owned()));
         }
-        observe::parse_json(&response).map_err(|_| died(format!("non-JSON line: {:.200}", response.trim_end())))
+        let mut value: Value =
+            observe::parse_json(&response).map_err(|_| died("worker returned non-JSON".to_owned()))?;
+        if request.get("cmd").and_then(Value::as_str) == Some("begin")
+            && value.get("ok") == Some(&Value::Bool(true))
+            && serde_json::from_str::<BeginWire>(&response).is_err()
+        {
+            value["sync"] = Value::Null;
+        }
+        Ok(value)
     }
 }
 
@@ -185,7 +228,7 @@ impl OracleExecutor {
         let response = worker.request(&json!({"cmd": "hello"}))?;
         let hello = Hello::from_response(&response)
             .filter(|_| response.get("ok") == Some(&Value::Bool(true)))
-            .ok_or_else(|| ExecError::new("worker_start", format!("no hello from the worker: {response}")))?;
+            .ok_or_else(|| ExecError::new("worker_start", "no hello from the worker"))?;
         if let Some(pin) = &self.pin
             && (hello.anki_version != pin.anki_version || hello.lock_sha256 != pin.lock_sha256)
         {
@@ -322,6 +365,7 @@ impl SegmentExecutor for OracleExecutor {
             pool: self,
             worker: Some(worker),
             ended: false,
+            failed: false,
         }))
     }
 }
@@ -333,9 +377,18 @@ struct Session<'a> {
     pool: &'a OracleExecutor,
     worker: Option<Worker>,
     ended: bool,
+    failed: bool,
 }
 
 impl Interactive for Session<'_> {
+    fn worker_identity(&self) -> Option<&str> {
+        self.worker.as_ref().and_then(|w| w.identity.as_deref())
+    }
+
+    fn quarantine(&mut self) {
+        self.failed = true;
+    }
+
     fn request(&mut self, request: &Value) -> Result<Value, ExecError> {
         let worker = self
             .worker
@@ -351,6 +404,7 @@ impl Interactive for Session<'_> {
             }
         };
         if response.get("ok") != Some(&Value::Bool(true)) {
+            self.failed = true;
             return Err(protocol_error(response.get("error").and_then(Value::as_object)));
         }
         self.ended = request.get("cmd").and_then(Value::as_str) == Some("end");
@@ -361,7 +415,7 @@ impl Interactive for Session<'_> {
 impl Drop for Session<'_> {
     fn drop(&mut self) {
         let Some(worker) = self.worker.take() else { return };
-        if self.ended {
+        if self.ended && !self.failed {
             self.pool.checkin(worker);
         } else {
             drop(worker);

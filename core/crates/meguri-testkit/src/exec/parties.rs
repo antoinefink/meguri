@@ -7,10 +7,11 @@
 //! [`check_endpoint`] (R1876), so no client connects to an endpoint the guard
 //! refuses.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use super::meguri::{Actors, MeguriExecutor, NewIds, SyncAccount};
+use super::parties_edge::{EdgeLease, unavailable};
 use super::sync_guard::check_endpoint;
 use super::{ExecError, Interactive, SegmentExecutor};
 use crate::scenario::{ActorName, LoadedScenario, Step};
@@ -22,6 +23,16 @@ use crate::scenario::{ActorName, LoadedScenario, Step};
 pub struct SyncInfo {
     pub endpoints: Endpoints,
     pub account: SyncAccount,
+    #[serde(deserialize_with = "route_object")]
+    pub route: Option<Route>,
+}
+
+/// Caller-owned mixed route; strict shape, then checked against checkout identity.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Route {
+    pub proxy: String,
+    pub worker: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -55,10 +66,8 @@ impl SyncInfo {
 pub struct Parties<'a> {
     pub oracle: &'a dyn SegmentExecutor,
     pub meguri: &'a MeguriExecutor,
-    /// The Meguri edge (S8.1): the endpoint on the runner's host through
-    /// which Meguri actors reach the fault proxy. `None` until the first
-    /// Meguri sync adapter wires it (U105).
-    pub meguri_edge: Option<&'a str>,
+    /// Native runner capability, never supplied by scenario data (S8.4).
+    pub meguri_edge_cmd: Option<&'a [String]>,
 }
 
 impl Parties<'_> {
@@ -113,65 +122,181 @@ impl Parties<'_> {
 
         let mut worker = self.oracle.interactive(&scenario.clock.tz)?;
         let begun = worker.request(&begin)?;
-        let edge = actors.as_ref().and(self.meguri_edge);
-        let sync = match begun
-            .get("sync")
-            .cloned()
-            .ok_or_else(|| ExecError::new("protocol_error", "begin reported no sync endpoints"))
-            .and_then(|v| from_value::<SyncInfo>(v, "begin's sync"))
-            .and_then(|sync| check(&sync, edge).map(|()| sync))
-        {
-            Ok(sync) => sync,
-            Err(e) => {
-                // No step has run, so nothing has connected (S8.3); `end`
-                // stops the server before the session is reported.
-                let _ = worker.request(&json!({"cmd": "end"}));
-                return Err(e);
-            }
-        };
-        table.extend(&ids_in(&begun, "begin")?);
-        if let Some(actors) = actors.as_mut() {
-            actors.seat(edge, &sync.account);
-        }
-
-        let mut session = Steps {
-            worker: worker.as_mut(),
+        // The guard owns every resource after a successful begin, including
+        // validation failures and unwinding. Stop actors, release, then end.
+        let mut session = PartySession {
+            worker,
             actors,
-            table,
+            lease: None,
+            ended: false,
         };
-        for ((index, step), by) in scenario.steps.iter().enumerate().zip(scenario.step_actors()) {
-            session.step(index, step, by).map_err(|e| e.at_step(index))?;
+        let result = (|| {
+            let sync = begun
+                .get("sync")
+                .cloned()
+                .ok_or_else(|| ExecError::new("protocol_error", "begin reported no sync endpoints"))
+                .and_then(sync_info)?;
+            check(&sync)?;
+            if session.actors.is_some() {
+                let route = sync
+                    .route
+                    .as_ref()
+                    .ok_or_else(|| unavailable("mixed begin needs route ownership"))?;
+                let expected = session
+                    .worker
+                    .worker_identity()
+                    .filter(|s| lower_hex(s))
+                    .ok_or_else(|| unavailable("missing trusted worker identity"))?;
+                if route.worker != expected || !proxy_name(&route.proxy) {
+                    return Err(unavailable("mixed route ownership mismatch"));
+                }
+                let command = self
+                    .meguri_edge_cmd
+                    .ok_or_else(|| unavailable("mixed execution needs an edge helper"))?;
+                session.lease = Some(EdgeLease::acquire(command, &sync.endpoints.actors, route, expected)?);
+                let lease = session.lease.as_ref().expect("acquired lease");
+                lease.check_endpoint()?;
+                session
+                    .actors
+                    .as_mut()
+                    .expect("mixed actors")
+                    .seat(Some(&lease.endpoint), &sync.account);
+            }
+            if session.actors.is_none() && sync.route.is_some() {
+                return Err(unavailable("replay begin must have null route"));
+            }
+            table.extend(&ids_in(&begun, "begin")?);
+            let mut steps = Steps {
+                worker: session.worker.as_mut(),
+                actors: session.actors.take(),
+                table,
+            };
+            // Keep actors inside this scope even when a step fails.
+            for ((index, step), by) in scenario.steps.iter().enumerate().zip(scenario.step_actors()) {
+                steps.step(index, step, by).map_err(|e| e.at_step(index))?;
+            }
+            Ok(())
+        })();
+        let ended = session.finish(result)?;
+        let decoded = (|| {
+            let steps = ended
+                .pointer("/observations/steps")
+                .and_then(Value::as_array)
+                .cloned()
+                .ok_or_else(|| ExecError::new("protocol_error", "end returned no observations"))?;
+            if steps.len() != scenario.steps.len() {
+                return Err(ExecError::new(
+                    "protocol_error",
+                    format!(
+                        "end returned {} outputs for {} steps",
+                        steps.len(),
+                        scenario.steps.len()
+                    ),
+                ));
+            }
+            Ok(json!({"steps": steps}))
+        })();
+        if decoded.is_err() {
+            session.worker.quarantine();
         }
-        let ended = worker.request(&json!({"cmd": "end"}))?;
-        let steps = ended
-            .pointer("/observations/steps")
-            .and_then(Value::as_array)
-            .cloned()
-            .ok_or_else(|| ExecError::new("protocol_error", "end returned no observations"))?;
-        if steps.len() != scenario.steps.len() {
-            return Err(ExecError::new(
-                "protocol_error",
-                format!(
-                    "end returned {} outputs for {} steps",
-                    steps.len(),
-                    scenario.steps.len()
-                ),
-            ));
-        }
-        Ok(json!({"steps": steps}))
+        decoded
     }
 }
 
-/// Every reported endpoint, and the Meguri edge when Meguri plays an actor,
-/// through the guard (S8.3). A refusal is `endpoint_refused`.
-fn check(sync: &SyncInfo, edge: Option<&str>) -> Result<(), ExecError> {
-    let mut endpoints = sync.endpoints();
-    endpoints.extend(edge.map(|e| ("meguri edge", e)));
-    for (what, endpoint) in endpoints {
+fn route_object<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Route>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        value @ Value::Object(_) => serde_json::from_value(value)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        _ => Err(serde::de::Error::custom("route must be an object or null")),
+    }
+}
+
+fn lower_hex(token: &str) -> bool {
+    token.len() == 32 && token.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+fn proxy_name(name: &str) -> bool {
+    name.strip_prefix("meguri-edge-")
+        .and_then(|s| s.split_once('-'))
+        .is_some_and(|(owner, session)| lower_hex(owner) && lower_hex(session))
+}
+
+// Invalid account values must never be interpolated into diagnostics. Keep
+// missing endpoint names useful without forwarding serde's offending values.
+fn sync_info(value: Value) -> Result<SyncInfo, ExecError> {
+    serde_json::from_value(value.clone()).map_err(|_| {
+        let missing = ["actors", "converge", "upstream", "recorder"]
+            .into_iter()
+            .find(|name| value.get("endpoints").and_then(|v| v.get(*name)).is_none());
+        let detail = missing.map_or_else(
+            || "begin's sync is malformed".to_owned(),
+            |name| format!("begin's sync: missing field `{name}`"),
+        );
+        ExecError::new("protocol_error", detail)
+    })
+}
+
+/// Every reported endpoint through the guard before allocation (S8.3).
+fn check(sync: &SyncInfo) -> Result<(), ExecError> {
+    for (what, endpoint) in sync.endpoints() {
         check_endpoint(endpoint)
-            .map_err(|refused| ExecError::new("endpoint_refused", format!("the {what} endpoint: {refused}")))?;
+            .map_err(|_| ExecError::new("endpoint_refused", format!("the {what} endpoint was refused (R1876)")))?;
     }
     Ok(())
+}
+
+/// Cleanup is attempted once on normal/error returns; Drop handles unwinding.
+struct PartySession<'s, 'a> {
+    worker: Box<dyn Interactive + 's>,
+    actors: Option<Actors<'a>>,
+    lease: Option<EdgeLease<'s>>,
+    ended: bool,
+}
+
+impl PartySession<'_, '_> {
+    fn cleanup(&mut self) -> Result<Value, ExecError> {
+        drop(self.actors.take());
+        let released = self.lease.take().map_or(Ok(()), |mut lease| lease.release());
+        self.ended = true; // Never retry an end or release and hide its first error.
+        let ended = self.worker.request(&json!({"cmd": "end"}));
+        if released.is_err() || ended.is_err() {
+            self.worker.quarantine();
+        }
+        combine(ended, released)
+    }
+
+    fn finish(&mut self, result: Result<(), ExecError>) -> Result<Value, ExecError> {
+        let ended = self.cleanup();
+        if result.is_err() || ended.is_err() {
+            self.worker.quarantine();
+        }
+        match result {
+            Ok(()) => ended,
+            Err(error) => combine(Err(error), ended.map(|_| ())),
+        }
+    }
+}
+
+impl Drop for PartySession<'_, '_> {
+    fn drop(&mut self) {
+        if !self.ended {
+            self.worker.quarantine();
+            let _ = self.cleanup();
+        }
+    }
+}
+
+fn combine<T>(result: Result<T, ExecError>, cleanup: Result<(), ExecError>) -> Result<T, ExecError> {
+    match (result, cleanup) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(mut error), Err(cleanup)) => {
+            error.detail.push_str(&format!("; cleanup: {cleanup}"));
+            Err(error)
+        }
+        (Err(error), _) | (_, Err(error)) => Err(error),
+    }
 }
 
 /// The steps of one session: which side runs each, and the id table they

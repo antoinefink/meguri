@@ -161,3 +161,60 @@ fn responses_keep_seventeen_digit_floats_exact() {
     let x = out["steps"][0]["stats"]["retention"].as_f64().unwrap();
     assert_eq!(x.to_bits(), 39.430133835633676_f64.to_bits());
 }
+
+#[test]
+fn exclusive_checkouts_keep_factory_identity_and_quarantine_after_end() {
+    use meguri_testkit::exec::SegmentExecutor;
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("interactive.py");
+    fs::write(&script, r#"
+import json,sys
+for line in sys.stdin:
+    cmd=json.loads(line)['cmd']
+    if cmd=='exit': sys.exit(7)
+    if cmd=='hello':
+        print(json.dumps({'ok':True,'anki_version':'26.9.3','lock_sha256':'a'*64,'driver_sha256':'b'*64,'tz':'UTC'}),flush=True)
+    else: print('{"ok":true}',flush=True)
+"#).unwrap();
+    let pool = OracleExecutor::new(
+        vec![
+            "python3".into(),
+            "-I".into(),
+            "-B".into(),
+            script.display().to_string(),
+            "{worker}".into(),
+        ],
+        4,
+    );
+    let mut active = Vec::new();
+    for _ in 0..4 {
+        let session = pool.interactive("UTC").unwrap();
+        let identity = session.worker_identity().unwrap().to_owned();
+        assert_eq!(identity.len(), 32);
+        assert!(active.iter().all(|(id, _)| id != &identity));
+        active.push((identity, session));
+    }
+    let (failed, mut session) = active.remove(0);
+    session.quarantine();
+    session.request(&json!({"cmd":"end"})).unwrap();
+    drop(session);
+    let replacement = pool.interactive("UTC").unwrap();
+    assert_ne!(replacement.worker_identity().unwrap(), failed);
+    assert!(
+        active
+            .iter()
+            .all(|(id, _)| id != replacement.worker_identity().unwrap())
+    );
+    drop(replacement);
+    // A peer remained active throughout; safe successful end reuses its exact
+    // identity. Quarantining A never consumed all four pool slots.
+    let (safe, mut session) = active.remove(0);
+    session.request(&json!({"cmd":"end"})).unwrap();
+    drop(session);
+    let mut reused = pool.interactive("UTC").unwrap();
+    assert_eq!(reused.worker_identity().unwrap(), safe);
+    assert_eq!(reused.request(&json!({"cmd":"exit"})).unwrap_err().kind, "worker_died");
+    drop(reused);
+    assert_ne!(pool.interactive("UTC").unwrap().worker_identity().unwrap(), safe);
+}

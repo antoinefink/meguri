@@ -345,9 +345,8 @@ pub struct LiveRun<'a> {
     pub meguri: &'a MeguriExecutor,
     /// `None`: live chains are errors (no directory to hand over through).
     pub handoff_root: Option<&'a Path>,
-    /// The Meguri edge of mixed runs (sync-ops.md S8.1); `None` until the
-    /// first Meguri sync adapter wires it (U105).
-    pub meguri_edge: Option<&'a str>,
+    /// Runner-supplied per-session allocation command (sync-ops.md S8.4).
+    pub meguri_edge_cmd: Option<&'a [String]>,
 }
 
 /// Options of the freshness check.
@@ -979,7 +978,7 @@ impl Suite {
         let parties = Parties {
             oracle: live.oracle,
             meguri: live.meguri,
-            meguri_edge: live.meguri_edge,
+            meguri_edge_cmd: live.meguri_edge_cmd,
         };
         let replay = match parties.replay(loaded) {
             Ok(actual) => self.judge(

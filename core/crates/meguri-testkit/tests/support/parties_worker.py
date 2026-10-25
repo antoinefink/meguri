@@ -35,7 +35,10 @@ def endpoint(name, default):
 
 
 def reply(value):
-    sys.stdout.write(json.dumps(value, separators=(",", ":")) + "\n")
+    encoded = json.dumps(value, separators=(",", ":"))
+    if os.environ.get("ROUTE_DUPLICATE") and isinstance(value.get("sync", {}).get("route"), dict):
+        encoded = encoded.replace('"route":{"proxy":', '"route":{"worker":"foreign","proxy":')
+    sys.stdout.write(encoded + "\n")
     sys.stdout.flush()
 
 
@@ -112,11 +115,37 @@ def main():
                          "recorder": endpoint("RECORDER", "")}
             for name in filter(None, os.environ.get("OMIT", "").split(",")):
                 del endpoints[name]
+            if session.caller and os.environ.get("MIXED_BAD_IDS"):
+                ids = {"notes": "bad", "cards": []}
+            route = None
+            if session.caller:
+                route = {"proxy": "meguri-edge-" + "a" * 32 + "-" + "b" * 32,
+                         "worker": os.environ.get("WORKER", "")}
+                if os.environ.get("ROUTE_WORKER"):
+                    route["worker"] = os.environ["ROUTE_WORKER"]
+                if os.environ.get("ROUTE_PROXY"):
+                    route["proxy"] = os.environ["ROUTE_PROXY"]
+                if os.environ.get("ROUTE_EXTRA"):
+                    route["extra"] = "refused"
+                if os.environ.get("ROUTE_ARRAY"):
+                    route = [route["proxy"], route["worker"]]
+                if os.environ.get("ROUTE_NULL"):
+                    route = None
+            sync = {"endpoints": endpoints, "route": route,
+                    "account": {"username": "user1", "password": "test-only"}}
+            if os.environ.get("OMIT_ROUTE"):
+                del sync["route"]
+            if os.environ.get("BEGIN_EXIT"):
+                sys.exit(7)
             reply({"ok": True, "scenario_id": session.id, "steps": len(session.steps), "ids": ids,
-                   "sync": {"endpoints": endpoints,
-                            "account": {"username": "user1", "password": "test-only"}}})
+                   "sync": sync})
         elif cmd == "step":
             index = len(session.outputs)
+            if session.caller and os.environ.get("MIXED_STEP_EXIT"):
+                sys.exit(7)
+            if session.caller and os.environ.get("MIXED_STEP_ERROR"):
+                error("stand_in_step_error")
+                continue
             if index >= len(session.steps):
                 error("no_more_steps")
                 continue
@@ -147,8 +176,36 @@ def main():
                 output, created = session.play(op, args)
                 ids = created or ids
             session.outputs.append(output)
-            reply({"ok": True, "index": index, "observation": output, "ids": ids})
+            reply({"ok": True, "index": -1 if session.caller and os.environ.get("MIXED_BAD_INDEX") else index, "observation": output, "ids": ids})
         elif cmd == "end":
+            if session.caller and os.environ.get("MIXED_END_ERROR"):
+                error("stand_in_end_error")
+                session = None
+                continue
+            if session.caller and os.environ.get("MIXED_BAD_END"):
+                reply({"ok": True})
+                session = None
+                continue
+            route = None
+            if session.caller:
+                route = {"proxy": "meguri-edge-" + "a" * 32 + "-" + "b" * 32,
+                         "worker": os.environ.get("WORKER", "")}
+                if os.environ.get("ROUTE_WORKER"):
+                    route["worker"] = os.environ["ROUTE_WORKER"]
+                if os.environ.get("ROUTE_PROXY"):
+                    route["proxy"] = os.environ["ROUTE_PROXY"]
+                if os.environ.get("ROUTE_EXTRA"):
+                    route["extra"] = "refused"
+                if os.environ.get("ROUTE_ARRAY"):
+                    route = [route["proxy"], route["worker"]]
+                if os.environ.get("ROUTE_NULL"):
+                    route = None
+            sync = {"endpoints": endpoints, "route": route,
+                    "account": {"username": "user1", "password": "test-only"}}
+            if os.environ.get("OMIT_ROUTE"):
+                del sync["route"]
+            if os.environ.get("BEGIN_EXIT"):
+                sys.exit(7)
             reply({"ok": True, "scenario_id": session.id, "observations": {"steps": session.outputs}})
             session = None
         else:

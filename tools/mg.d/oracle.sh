@@ -43,7 +43,7 @@ mg_oracle__inputs_hash() {
   (
     cd "$1" || exit 1
     {
-      printf '%s\n' Dockerfile Dockerfile.dockerignore entrypoint.sh requirements.lock
+      printf '%s\n' Dockerfile Dockerfile.dockerignore entrypoint.sh worker_holder.py requirements.lock
       find driver -type f ! -path '*/__pycache__/*' ! -name '*.pyc'
     } | LC_ALL=C sort | while IFS= read -r f; do
       mode=644
@@ -155,7 +155,7 @@ mg_oracle__cleanup() {
 # mg_oracle__unstage <staged oracle dir>: deletes the copied image inputs (the
 # driver among them) and keeps requirements.in and requirements.lock.
 mg_oracle__unstage() {
-  rm -rf "$1/driver" "$1/Dockerfile" "$1/Dockerfile.dockerignore" "$1/entrypoint.sh"
+  rm -rf "$1/driver" "$1/Dockerfile" "$1/Dockerfile.dockerignore" "$1/entrypoint.sh" "$1/worker_holder.py"
 }
 
 # mg_oracle__hello <tag> <context> <tz> <out file>: one worker, one hello.
@@ -302,9 +302,11 @@ mg_oracle__recorder() {
 # gets.
 mg_oracle__sync_faults() {
   [ -z "$MG_ORACLE_SYNC_FAULTS" ] || return 0
-  echo "oracle: starting sync-faults (toxiproxy) for actor scenarios" >&2
-  if ! mg_compose --profile oracle-sync up --detach --wait --wait-timeout 60 sync-faults >&2 </dev/null; then
-    mg_failure sync-faults "the sync-faults service (toxiproxy) did not start or become healthy; see log.txt"
+  # Service replacement waits for launch admission. Workers share admission
+  # during launch, then run their sessions independently.
+  if ! python3 -I -B "$MG_ROOT/tools/mg.d/conformance-admission.py" \
+    --root "$MG_ROOT" --project "$(mg_compose_project)" --ensure >&2; then
+    mg_failure sync-faults "sync-faults unavailable or restart refused by retained route ownership"
     mg_status error
     return 1
   fi
@@ -982,7 +984,7 @@ mg_oracle_bump() {
 mg_oracle__bump() {
   local version="$1" jobs="$2" staging="$MG_RUN_DIR/staging" old_tag
   mkdir -p "$staging/oracle"
-  (cd "$MG_ORACLE_DIR" && cp Dockerfile Dockerfile.dockerignore entrypoint.sh requirements.in "$staging/oracle/" &&
+  (cd "$MG_ORACLE_DIR" && cp Dockerfile Dockerfile.dockerignore entrypoint.sh worker_holder.py requirements.in "$staging/oracle/" &&
     tar -cf - --exclude __pycache__ --exclude '*.pyc' driver | tar -xf - -C "$staging/oracle")
   sed "s/^anki==.*/anki==$version/" "$MG_ORACLE_DIR/requirements.in" >"$staging/oracle/requirements.in"
   echo "oracle: locking anki==$version" >&2

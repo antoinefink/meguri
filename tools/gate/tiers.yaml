@@ -180,6 +180,16 @@ runs:
     class: tooling
     triggers: [tools/, docker/, .claude/, .gitattributes, .gitignore]
     budget_s: 2400
+  - id: conformance-route-transport
+    job: conformance-route-test
+    tier: T0
+    placement: host
+    class: conformance
+    needs: [oracle]
+    oracle_files: true
+    local: false
+    triggers: [core/crates/meguri-testkit/src/exec/, tools/mg, tools/mg.d/conformance, tools/mg.d/oracle.sh, tools/tests/conformance_edge, docker/compose.yml]
+    budget_s: 900
   - id: selftest-host
     job: selftest-host
     tier: T0

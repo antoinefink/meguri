@@ -70,6 +70,7 @@ fn oracle(log: &Path, env: &[String]) -> OracleExecutor {
     let mut command = vec![
         "env".to_owned(),
         "TZ={tz}".to_owned(),
+        "WORKER={worker}".to_owned(),
         format!("LOCK={LOCK}"),
         format!("LOG={}", log.display()),
     ];
@@ -95,12 +96,29 @@ fn requests(log: &Path) -> Vec<Value> {
         .collect()
 }
 
+fn edge_command(log: &Path, mode: &str, endpoint: &str) -> Vec<String> {
+    vec![
+        "python3".into(),
+        "-I".into(),
+        "-B".into(),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/support/parties_edge.py")
+            .display()
+            .to_string(),
+        log.display().to_string(),
+        mode.into(),
+        endpoint.into(),
+    ]
+}
+
 fn t1(suite: &Suite, oracle: &OracleExecutor, meguri: &MeguriExecutor, edge: Option<&str>) -> Report {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let command = edge_command(log.path(), "ok", edge.unwrap_or("http://127.0.0.1:41234/"));
     let live = LiveRun {
         oracle,
         meguri,
         handoff_root: None,
-        meguri_edge: edge,
+        meguri_edge_cmd: Some(&command),
     };
     suite.run_live(&[], &live, "test")
 }
@@ -444,14 +462,16 @@ steps:
     let begins: Vec<Value> = requests(&log).into_iter().filter(|r| r["cmd"] == "begin").collect();
     assert_eq!(begins[1]["ids"], json!({"notes": [5001], "cards": [6001]}));
     // The setup ran on the Meguri actor's new collection, seeded for that
-    // actor (sync-ops.md S2.5), and the actor synced with no edge
-    // configured.
+    // actor (sync-ops.md S2.5), and synced through its allocated edge.
     let loaded = meguri_testkit::scenario::load(&dir.path().join("scenarios/sync/meguri-first.yaml")).unwrap();
     let first = meguri_model::rng::SeededRandom::new(meguri_testkit::exec::actor_seed(&loaded, "meguri")).next_u64();
     let seen = take_seen();
     assert_eq!(seen[0], format!("new collection at {START}"));
     assert_eq!(seen[1], format!("setup on {first}"));
-    assert_eq!(seen[2], format!("login meguri as user1 via None at {START}"));
+    assert_eq!(
+        seen[2],
+        format!("login meguri as user1 via Some(\"http://127.0.0.1:41234/\") at {START}")
+    );
 }
 
 #[test]
@@ -590,4 +610,353 @@ fn a_reference_replays_on_the_worker_without_running_any_meguri_actor() {
     assert_eq!(report.failures().len(), 1);
     assert_eq!(report.totals()["reference"], 0);
     assert!(only(&report).reference.is_some());
+}
+
+fn direct_mixed(
+    dir: &Path,
+    log: &Path,
+    env: &[String],
+    meguri: &MeguriExecutor,
+    command: Option<&[String]>,
+) -> Result<Value, ExecError> {
+    let loaded = meguri_testkit::scenario::load(&dir.join("scenarios/sync/mixed.yaml")).unwrap();
+    let oracle = oracle(log, env);
+    meguri_testkit::exec::parties::Parties {
+        oracle: &oracle,
+        meguri,
+        meguri_edge_cmd: command,
+    }
+    .mixed(&loaded)
+}
+
+fn commands(log: &Path) -> Vec<String> {
+    requests(log)
+        .iter()
+        .map(|r| r["cmd"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[test]
+fn mixed_checks_all_reported_endpoints_before_acquiring() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    for name in ["ACTORS", "CONVERGE", "UPSTREAM", "RECORDER"] {
+        let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+        let log = dir.path().join("events");
+        let command = edge_command(&log, "ok", "http://127.0.0.1:41234/");
+        let error = direct_mixed(
+            dir.path(),
+            &log,
+            &[format!("{name}=http://203.0.113.9:80/")],
+            &meguri_actor(sync, dump),
+            Some(&command),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, "endpoint_refused");
+        assert_eq!(commands(&log), ["hello", "begin", "end"]);
+    }
+    take_seen();
+}
+
+#[test]
+fn returned_edge_is_checked_before_any_step_and_known_leases_are_released() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    for endpoint in [
+        "http://203.0.113.9:1234/",
+        "http://localhost:1234/",
+        "http://127.0.0.1/",
+        "https://127.0.0.1:1234/",
+        "http://127.0.0.1:1234/path",
+        "http://127.0.0.1:0/",
+        "http://127.0.0.1:1234/?x=1",
+        "http://user@127.0.0.1:1234/",
+    ] {
+        take_seen();
+        let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+        let log = dir.path().join("events");
+        let command = edge_command(&log, "ok", endpoint);
+        let error = direct_mixed(dir.path(), &log, &[], &meguri_actor(sync, dump), Some(&command)).unwrap_err();
+        assert_eq!(error.kind, "endpoint_refused", "{error}");
+        assert_eq!(commands(&log), ["hello", "begin", "acquire", "release", "end"]);
+        assert_eq!(take_seen(), [format!("new collection at {START}")]);
+    }
+}
+
+#[test]
+fn acquire_failures_are_errors_and_always_end_the_session() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    for (mode, released) in [
+        ("exit", false),
+        ("invalid-json", false),
+        ("unknown", true),
+        ("empty", true),
+        ("empty-lease", false),
+        ("response-exit", true),
+    ] {
+        let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+        let log = dir.path().join("events");
+        let command = edge_command(&log, mode, "http://127.0.0.1:41234/");
+        let error = direct_mixed(dir.path(), &log, &[], &meguri_actor(sync, dump), Some(&command)).unwrap_err();
+        assert_eq!(error.kind, "sync_unavailable", "{error}");
+        let mut expected = vec!["hello", "begin", "acquire"];
+        if released {
+            expected.push("release");
+        }
+        expected.push("end");
+        assert_eq!(commands(&log), expected);
+        assert!(!error.to_string().contains("41234"));
+    }
+    take_seen();
+}
+
+fn actor_error(_: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
+    Err(ExecError::new("actor_error", "synthetic actor error"))
+}
+
+fn actor_panic(_: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
+    panic!("synthetic actor cancellation");
+}
+
+#[test]
+fn every_post_acquire_error_releases_once_before_end() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    for (flag, kind) in [
+        ("MIXED_BAD_IDS", "protocol_error"),
+        ("MIXED_STEP_ERROR", "stand_in_step_error"),
+        ("MIXED_BAD_INDEX", "protocol_error"),
+        ("MIXED_END_ERROR", "stand_in_end_error"),
+        ("MIXED_BAD_END", "protocol_error"),
+    ] {
+        let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+        let log = dir.path().join("events");
+        let command = edge_command(&log, "ok", "http://127.0.0.1:41234/");
+        let error = direct_mixed(
+            dir.path(),
+            &log,
+            &[format!("{flag}=1")],
+            &meguri_actor(sync, dump),
+            Some(&command),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, kind, "{error}");
+        let cmds = commands(&log);
+        assert_eq!(&cmds[cmds.len() - 2..], ["release", "end"]);
+        assert_eq!(cmds.iter().filter(|c| *c == "release").count(), 1);
+    }
+    for op in [actor_error as meguri_testkit::exec::OpFn, actor_panic] {
+        let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+        let log = dir.path().join("events");
+        let command = edge_command(&log, "ok", "http://127.0.0.1:41234/");
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            direct_mixed(dir.path(), &log, &[], &meguri_actor(op, dump), Some(&command))
+        }));
+        assert!(result.is_err() || result.unwrap().is_err());
+        let cmds = commands(&log);
+        assert_eq!(&cmds[cmds.len() - 2..], ["release", "end"]);
+    }
+    // A dead worker cannot receive end; its interactive owner closes/reaps it.
+    let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+    let log = dir.path().join("events");
+    let command = edge_command(&log, "ok", "http://127.0.0.1:41234/");
+    let error = direct_mixed(
+        dir.path(),
+        &log,
+        &["MIXED_STEP_EXIT=1".into()],
+        &meguri_actor(sync, dump),
+        Some(&command),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, "worker_died");
+    assert_eq!(commands(&log).last().unwrap(), "release");
+    assert!(error.detail.contains("cleanup:"), "{error}");
+    take_seen();
+}
+
+#[test]
+fn cleanup_failure_stays_an_error_and_preserves_the_actor_error() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    for op in [sync as meguri_testkit::exec::OpFn, actor_error] {
+        let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+        let log = dir.path().join("events");
+        let command = edge_command(&log, "release-fail", "http://127.0.0.1:41234/");
+        let error = direct_mixed(dir.path(), &log, &[], &meguri_actor(op, dump), Some(&command)).unwrap_err();
+        assert!(error.to_string().contains("sync_unavailable"));
+        if error.kind == "actor_error" {
+            assert!(error.detail.contains("cleanup:"));
+        }
+        let cmds = commands(&log);
+        assert_eq!(&cmds[cmds.len() - 2..], ["release", "end"]);
+        assert_eq!(cmds.iter().filter(|c| *c == "release").count(), 1);
+    }
+    take_seen();
+}
+
+#[test]
+fn missing_helper_follows_replay_and_real_capabilities() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+    let log = dir.path().join("events");
+    let oracle = oracle(&log, &[]);
+    let meguri = meguri_actor(sync, dump);
+    let live = LiveRun {
+        oracle: &oracle,
+        meguri: &meguri,
+        handoff_root: None,
+        meguri_edge_cmd: None,
+    };
+    let report = Suite::open(dir.path()).unwrap().run_live(&[], &live, "test");
+    let outcome = only(&report);
+    assert_eq!(outcome.status, Status::Error);
+    assert!(outcome.message.starts_with("mixed run: sync_unavailable"));
+    assert_eq!(commands(&log).iter().filter(|c| *c == "step").count(), 8);
+    assert_eq!(commands(&log).iter().filter(|c| *c == "end").count(), 2);
+    take_seen();
+}
+
+#[test]
+fn concurrent_sessions_receive_only_their_just_returned_actor_route() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    take_seen();
+    let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+    let events = dir.path().join("edges");
+    std::thread::scope(|scope| {
+        let mut threads = Vec::new();
+        for port in [31001, 31002] {
+            let events = &events;
+            let root = dir.path();
+            threads.push(scope.spawn(move || {
+                let log = root.join(format!("worker-{port}"));
+                let command = edge_command(events, "barrier", &format!("http://127.0.0.1:{}/", port + 10000));
+                direct_mixed(
+                    root,
+                    &log,
+                    &[format!("ACTORS=http://172.20.0.5:{port}/")],
+                    &meguri_actor(sync, dump),
+                    Some(&command),
+                )
+                .unwrap();
+            }));
+        }
+        for thread in threads {
+            thread.join().unwrap();
+        }
+    });
+    let calls = requests(&events);
+    let acquired: Vec<_> = calls.iter().filter(|c| c["cmd"] == "acquire").collect();
+    assert_eq!(acquired.len(), 2);
+    assert_ne!(acquired[0]["target"], acquired[1]["target"]);
+    assert!(
+        acquired
+            .iter()
+            .all(|c| c.as_object().unwrap().len() == 4 && c["expected_worker"] == c["route"]["worker"])
+    );
+    let released: Vec<_> = calls.iter().filter(|c| c["cmd"] == "release").collect();
+    assert_eq!(released.len(), 2);
+    assert_ne!(released[0]["lease"], released[1]["lease"]);
+    let seen = take_seen();
+    for port in [41001, 41002] {
+        assert!(
+            seen.iter()
+                .any(|s| s.contains(&format!("Some(\"http://127.0.0.1:{port}/\")"))),
+            "{seen:?}"
+        );
+    }
+}
+
+#[test]
+fn malformed_or_unsuccessful_release_never_passes_or_releases_twice() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    for mode in ["release-unknown", "release-json", "release-exit"] {
+        let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+        let log = dir.path().join("events");
+        let command = edge_command(&log, mode, "http://127.0.0.1:41234/");
+        let error = direct_mixed(dir.path(), &log, &[], &meguri_actor(sync, dump), Some(&command)).unwrap_err();
+        assert_eq!(error.kind, "sync_unavailable");
+        let cmds = commands(&log);
+        assert_eq!(&cmds[cmds.len() - 2..], ["release", "end"]);
+        assert_eq!(cmds.iter().filter(|c| *c == "release").count(), 1);
+    }
+    take_seen();
+}
+
+#[test]
+fn route_members_and_checkout_identity_are_required_before_publication() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    for (flag, kind) in [
+        ("OMIT_ROUTE=1", "protocol_error"),
+        ("ROUTE_EXTRA=1", "protocol_error"),
+        ("ROUTE_ARRAY=1", "protocol_error"),
+        ("ROUTE_DUPLICATE=1", "protocol_error"),
+        ("ROUTE_NULL=1", "sync_unavailable"),
+        ("ROUTE_PROXY=other", "sync_unavailable"),
+        ("ROUTE_WORKER=cccccccccccccccccccccccccccccccc", "sync_unavailable"),
+    ] {
+        let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+        let log = dir.path().join("events");
+        let command = edge_command(&log, "ok", "http://127.0.0.1:41234/");
+        let error = direct_mixed(
+            dir.path(),
+            &log,
+            &[flag.into()],
+            &meguri_actor(sync, dump),
+            Some(&command),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, kind, "{error}");
+        assert_eq!(commands(&log), ["hello", "begin", "end"]);
+    }
+    take_seen();
+}
+
+#[test]
+fn missing_factory_identity_cannot_be_recovered_from_begin() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+    let log = dir.path().join("events");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/parties_worker.py");
+    // No factory placeholder: a valid-looking worker reply is not authority.
+    let oracle = OracleExecutor::new(
+        vec![
+            "env".into(),
+            format!("LOCK={LOCK}"),
+            format!("LOG={}", log.display()),
+            "WORKER=cccccccccccccccccccccccccccccccc".into(),
+            "python3".into(),
+            "-I".into(),
+            "-B".into(),
+            script.display().to_string(),
+        ],
+        4,
+    );
+    let command = edge_command(&log, "ok", "http://127.0.0.1:41234/");
+    let loaded = meguri_testkit::scenario::load(&dir.path().join("scenarios/sync/mixed.yaml")).unwrap();
+    let meguri = meguri_actor(sync, dump);
+    let error = meguri_testkit::exec::parties::Parties {
+        oracle: &oracle,
+        meguri: &meguri,
+        meguri_edge_cmd: Some(&command),
+    }
+    .mixed(&loaded)
+    .unwrap_err();
+    assert_eq!(error.kind, "sync_unavailable");
+    assert_eq!(commands(&log), ["hello", "begin", "end"]);
+    take_seen();
+}
+
+#[test]
+fn complete_peer_tuple_is_refused_against_checkout_identity_before_helper() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tree(&[("sync/mixed", MIXED, mixed_golden())]);
+    let log = dir.path().join("events");
+    let command = edge_command(&log, "ok", "http://127.0.0.1:41234/");
+    let peer = "c".repeat(32);
+    let env = [
+        format!("ROUTE_WORKER={peer}"),
+        format!("ROUTE_PROXY=meguri-edge-{}-{peer}", "a".repeat(32)),
+        "ACTORS=http://172.20.0.5:31002/".into(),
+        "UPSTREAM=172.20.0.11:27701".into(),
+    ];
+    let error = direct_mixed(dir.path(), &log, &env, &meguri_actor(sync, dump), Some(&command)).unwrap_err();
+    assert_eq!(error.kind, "sync_unavailable");
+    assert_eq!(commands(&log), ["hello", "begin", "end"]);
+    take_seen();
 }

@@ -147,6 +147,7 @@ utilities:
   - {job: session, why: sessions}
   - {job: oracle, why: its tree helpers}
   - {job: conformance, why: its oracle file lookup}
+  - {job: conformance-route-test, why: conformance.sh route infrastructure harness}
   - {job: goldens-check, why: conformance.sh}
   - {job: harvest-report, why: conformance.sh}
   - {job: harvest-inventory, why: conformance.sh}

@@ -33,8 +33,9 @@ const USAGE: &str = "usage: meguri-cli conformance <command> [options]
 
 common options:
   --conformance DIR   the conformance tree (default: the nearest conformance/ above the current directory)
-  --oracle-cmd JSON   the worker command as a JSON array, {tz} for the zone
+  --oracle-cmd JSON   the worker argv JSON, {tz} for zone, {worker} for trusted identity
                       (default: $MEGURI_ORACLE_WORKER)
+  --meguri-edge-cmd JSON  native T1 per-session edge helper, a JSON argv array
   --jobs N            oracle workers at once (default 12)
 
 exit status: 0 pass, 1 failures, 2 usage or setup errors";
@@ -49,6 +50,7 @@ const SHOWN_CHANGES: usize = 20;
 struct Options {
     conformance: Option<PathBuf>,
     oracle_cmd: Option<String>,
+    meguri_edge_cmd: Option<Vec<String>>,
     jobs: usize,
     live: bool,
     lane: Option<String>,
@@ -67,6 +69,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
     let mut o = Options {
         conformance: None,
         oracle_cmd: None,
+        meguri_edge_cmd: None,
         jobs: 12,
         live: false,
         lane: None,
@@ -86,6 +89,14 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
         match arg.as_str() {
             "--conformance" => o.conformance = Some(value(arg)?.into()),
             "--oracle-cmd" => o.oracle_cmd = Some(value(arg)?),
+            "--meguri-edge-cmd" => {
+                let command: Vec<String> = serde_json::from_str(&value(arg)?)
+                    .map_err(|_| "--meguri-edge-cmd needs a JSON array of strings".to_owned())?;
+                if command.is_empty() || command.iter().any(String::is_empty) {
+                    return Err("--meguri-edge-cmd needs nonempty arguments".to_owned());
+                }
+                o.meguri_edge_cmd = Some(command);
+            }
             "--jobs" => o.jobs = value(arg)?.parse().map_err(|_| "--jobs needs a number".to_owned())?,
             "--live" | "--oracle" => o.live = true,
             "--lane" => o.lane = Some(value(arg)?),
@@ -202,7 +213,7 @@ fn run(options: &Options) -> Result<i32, String> {
             oracle: &oracle,
             meguri: &meguri,
             handoff_root: options.handoff_dir.as_deref(),
-            meguri_edge: None,
+            meguri_edge_cmd: options.meguri_edge_cmd.as_deref(),
         };
         let report = suite.run_live(&options.rest, &live, &lane);
         (report, oracle.hello())
@@ -289,7 +300,7 @@ fn diff(options: &Options) -> Result<i32, String> {
             oracle: &oracle,
             meguri: &meguri,
             handoff_root: options.handoff_dir.as_deref(),
-            meguri_edge: None,
+            meguri_edge_cmd: options.meguri_edge_cmd.as_deref(),
         };
         let file = suite
             .discover(&[])
@@ -503,4 +514,26 @@ fn to_json(options: &Options) -> Result<i32, String> {
         }
     }
     Ok(status)
+}
+
+#[cfg(test)]
+mod edge_option_tests {
+    use super::parse_options;
+
+    #[test]
+    fn edge_command_is_a_literal_argv_capability() {
+        let options = parse_options(&[
+            "--live".into(),
+            "--meguri-edge-cmd".into(),
+            r#"["helper","$(touch never)","a b","{tz}"]"#.into(),
+        ])
+        .unwrap();
+        assert_eq!(
+            options.meguri_edge_cmd.unwrap(),
+            ["helper", "$(touch never)", "a b", "{tz}"]
+        );
+        for value in ["[]", "[1]", "[\"\"]", "[\"helper\",\"\"]", "{}", "not-json"] {
+            assert!(parse_options(&["--meguri-edge-cmd".into(), value.into()]).is_err());
+        }
+    }
 }

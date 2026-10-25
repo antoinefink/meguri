@@ -104,7 +104,7 @@ fn t1<'a>(oracle: &'a dyn SegmentExecutor, meguri: &'a MeguriExecutor) -> LiveRu
         oracle,
         meguri,
         handoff_root: None,
-        meguri_edge: None,
+        meguri_edge_cmd: None,
     }
 }
 
@@ -1112,8 +1112,16 @@ fn actor_scenarios_are_live_or_pending_in_t0_and_never_run_there() {
     assert_eq!(two.status, Status::Live, "{}", report.render_text());
     assert!(two.live && two.active);
     assert_eq!(two.repro, "tools/mg conformance --live smoke/sync/two-party");
-    // A Meguri actor that syncs: pending until Meguri plays actors and
-    // syncs, never invalid or failed.
+    // The actual executor now supports this Meguri actor. T0 still lists it.
+    let downloads = find(&report, "smoke/sync/meguri-downloads");
+    assert_eq!(downloads.status, Status::Live, "{}", report.render_text());
+    assert!(downloads.live);
+    assert!(downloads.missing.is_none());
+    assert!(report.failures().is_empty(), "{}", report.render_text());
+
+    // An explicitly insufficient registry retains negative capability coverage.
+    let registry = MeguriExecutor::area_registry(&["clock", "text", "storage", "notetypes", "cards"]);
+    let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
     let downloads = find(&report, "smoke/sync/meguri-downloads");
     assert_eq!(downloads.status, Status::Pending, "{}", report.render_text());
     assert!(downloads.live);
@@ -1165,7 +1173,8 @@ fn every_committed_actor_scenario_loads_and_is_never_invalid_in_t0() {
         .iter()
         .find(|o| o.scenario == "smoke/sync/meguri-downloads")
         .unwrap();
-    assert_ne!(downloads.status, Status::Live, "Meguri cannot play an actor yet");
+    assert_eq!(downloads.status, Status::Live, "{}", report.render_text());
+    assert!(downloads.missing.is_none());
 }
 
 #[test]

@@ -190,7 +190,7 @@ fn a_chain_hands_the_collection_both_ways_and_passes_against_the_golden() {
         oracle: &oracle,
         meguri: &meguri,
         handoff_root: Some(handoff.path()),
-        meguri_edge: None,
+        meguri_edge_cmd: None,
     };
     let report = Suite::open(dir.path()).unwrap().run_live(&[], &live, "test");
     let outcome = &report.outcomes[0];
@@ -219,7 +219,7 @@ fn chains_whose_ids_nest_as_paths_run_at_once_in_their_own_handoff_directories()
             oracle: &oracle,
             meguri: &meguri,
             handoff_root: Some(handoff.path()),
-            meguri_edge: None,
+            meguri_edge_cmd: None,
         };
         let report = Suite::open(dir.path()).unwrap().run_live(&[], &live, "test");
         assert_eq!(report.outcomes.len(), 2);
@@ -264,7 +264,7 @@ fn what_the_oracle_observes_of_meguris_collection_is_compared() {
         oracle: &oracle,
         meguri: &meguri,
         handoff_root: Some(handoff.path()),
-        meguri_edge: None,
+        meguri_edge_cmd: None,
     };
     let report = Suite::open(dir.path()).unwrap().run_live(&[], &live, "test");
     let outcome = &report.outcomes[0];
@@ -291,7 +291,7 @@ fn an_oracle_that_refuses_meguris_collection_fails_t1() {
         oracle: &oracle,
         meguri: &meguri,
         handoff_root: Some(handoff.path()),
-        meguri_edge: None,
+        meguri_edge_cmd: None,
     };
     let report = Suite::open(dir.path()).unwrap().run_live(&[], &live, "test");
     let outcome = &report.outcomes[0];
@@ -314,7 +314,7 @@ fn a_chain_meguri_cannot_join_yet_is_pending_and_fails_only_when_active() {
             oracle: &oracle,
             meguri: &meguri,
             handoff_root: Some(handoff.path()),
-            meguri_edge: None,
+            meguri_edge_cmd: None,
         };
         let report = Suite::open(dir.path()).unwrap().run_live(&[], &live, "test");
         let outcome = &report.outcomes[0];
@@ -334,7 +334,7 @@ fn without_a_handoff_directory_a_chain_is_an_error() {
         oracle: &oracle,
         meguri: &meguri,
         handoff_root: None,
-        meguri_edge: None,
+        meguri_edge_cmd: None,
     };
     let report = Suite::open(dir.path()).unwrap().run_live(&[], &live, "test");
     assert_eq!(report.outcomes[0].status, Status::Error);

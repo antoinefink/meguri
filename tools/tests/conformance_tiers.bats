@@ -32,6 +32,7 @@ fixture_report() {
     '{tier:$tier, totals:{pending:0, reference:0, ($status):1}, failed:(if ($status=="pass" or $status=="reference") then 0 else 1 end), wall_ms:1,
       scenarios:[{scenario:"smoke/fixture", status:$status, fails:($status!="pass" and $status!="reference"), message:"fixture", repro:"fixture"}]}' >"$2"
 }
+mg_conf__edges_cleanup() { echo edges-cleanup >>"$CALLS"; }
 mg_conf__docker_ok() { echo docker-check >>"$CALLS"; }
 mg_conf__record_stale() { echo freshness >>"$CALLS"; }
 mg_oracle__actor_scenarios() { echo actors >>"$CALLS"; echo smoke/fixture; }
@@ -156,4 +157,47 @@ PY
   [ "$status" -eq 0 ]
   jq -e '.summary.total==1 and .summary.passed==0 and .summary.failed==0 and .summary.skipped==0 and .summary.reference==1 and .summary.pending==0 and .details.lanes.live.totals.reference==1' "$result"
   python3 "$SB/tools/tests/validate_result.py" "$result"
+}
+
+@test "conformance native T1 receives a direct host helper argv" {
+  mg conformance --live-only --lane native
+  [ "$status" -eq 0 ]
+  jq -e 'index("--meguri-edge-cmd") as $i | .[$i+1] | fromjson |
+    .[0:3]==["python3","-I","-B"] and (.[3]|endswith("/tools/mg.d/conformance-edge.py")) and
+    index("--run")!=null and index("--project")!=null and index("--root")!=null' "$CALLS.args"
+  grep -qx edges-cleanup "$CALLS"
+}
+
+@test "generic MG cleanup never bypasses a failed whole-route sweep" {
+  cat >>"$SB/tools/mg.d/zz-conformance-fixture.sh" <<'EOF'
+mg_job fx-route-cleanup host fx_route_cleanup "fixture route cleanup"
+mg_conf__edges_cleanup() { echo edge-sweep >>"$CALLS"; [ "$ROUTE_REMOVE" = yes ]; }
+fx_route_cleanup() {
+  mkdir -p "$MG_RUN_DIR/edge-owners"
+  if mg__remove_run_containers; then mg_status pass; else
+    mg_failure reserved "route removal unproved"
+    mg_status error
+  fi
+}
+EOF
+  cat >"$SB/stubs/docker" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$CALLS.docker"
+case "$1" in
+  ps) printf '%s\n' own-edge own-worker ordinary ;;
+  inspect) printf '%s\n' '[{"Id":"own-edge","Config":{"Labels":{"meguri.mg.edge-owner":"held"}}},{"Id":"own-worker","Config":{"Labels":{"meguri.mg.edge-owner":"held"}}},{"Id":"ordinary","Config":{"Labels":{}}}]' ;;
+esac
+EOF
+  chmod +x "$SB/stubs/docker"
+  export ROUTE_REMOVE=no
+  mg fx-route-cleanup
+  [ "$status" -eq 2 ]
+  grep -qx edge-sweep "$CALLS"
+  [ ! -e "$CALLS.docker" ]
+  export ROUTE_REMOVE=yes
+  mg fx-route-cleanup
+  [ "$status" -eq 0 ]
+  grep -qx 'stop -t 10 ordinary' "$CALLS.docker"
+  grep -qx 'rm -f ordinary' "$CALLS.docker"
+  ! grep -Eq '^(stop|rm).*own-' "$CALLS.docker"
 }

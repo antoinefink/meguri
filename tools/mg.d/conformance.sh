@@ -9,6 +9,8 @@
 
 mg_job conformance host mg_conformance \
   "Conformance: T0 by default, T0+T1 with --live, T1 with --live-only; [--lane native|docker|all] [--jobs N] [filter...]"
+mg_job conformance-route-test host mg_conf_routes \
+  "Real conformance edge/retained namespace transport lifecycle (neutral socket fixtures, no scenario acceptance)"
 mg_job goldens-check host mg_goldens_check \
   "Golden freshness, schemas and changed values since a revision: [--base <rev>] (default HEAD)"
 mg_job harvest-report host mg_harvest_report \
@@ -54,12 +56,42 @@ mg_conf__dev() {
     dev bash -c "$1" </dev/null
 }
 
+# Edges carry their own purpose/checkout/run ownership, including pre-token
+# resources. This cleanup does not touch sync-faults or another MG run.
+mg_conf__owner_register() {
+  python3 -I -B "$MG_ROOT/tools/mg.d/conformance-owners.py" \
+    --root "$MG_ROOT" --project "$(mg_compose_project)" --run "$MG_RUN_ID" --run-dir "$MG_RUN_DIR" \
+    --owner "$1" --image "$2" --faults "$3"
+}
+
+mg_conf__edges_cleanup() {
+  # The parent reads durable launch records after the job tree has stopped.
+  local contexts owner image faults rc=0
+  if ! contexts="$(python3 -I -B "$MG_ROOT/tools/mg.d/conformance-owners.py" \
+    --root "$MG_ROOT" --project "$(mg_compose_project)" --run "$MG_RUN_ID" --run-dir "$MG_RUN_DIR" --list)"; then
+    mg_failure live/edge-cleanup "conformance owner context invalid; reservations retained"
+    mg_status error
+    return 1
+  fi
+  while IFS=$'\t' read -r owner image faults; do
+    [ -n "$owner" ] || continue
+    if ! python3 -I -B "$MG_ROOT/tools/mg.d/conformance-edge.py" \
+      --root "$MG_ROOT" --project "$(mg_compose_project)" --run "$MG_RUN_ID" \
+      --owner "$owner" --image "$image" --faults "$faults" --cleanup; then
+      mg_failure live/edge-cleanup "conformance route cleanup failed; reservation retained"
+      mg_status error
+      rc=1
+    fi
+  done <<EOF
+$contexts
+EOF
+  return "$rc"
+}
+
 mg_conf__cleanup() {
-  local ids
-  ids="$(docker ps -aq --filter "label=meguri.mg.run-id=$MG_RUN_ID" 2>/dev/null)"
-  # shellcheck disable=SC2086 # one container id per word
-  [ -z "$ids" ] || docker rm -f $ids >/dev/null 2>&1
-  return 0
+  mg_conf__edges_cleanup || return 1
+  # Generic cleanup must never bypass route ownership, even on a second hook.
+  mg__remove_unreserved_run_containers
 }
 
 # mg_conf__cli_native <args...>: meguri-cli on the host (macOS).
@@ -119,7 +151,7 @@ mg_conformance() {
   if [ "$lane" != native ] || [ "$live" = true ]; then
     mg_conf__docker_ok || return 0
   fi
-  trap 'mg_conf__cleanup; exit 143' TERM
+  mg_on_exit mg_conf__cleanup
   MG_CONF_LANES=""
   local failed=false rc actors
 
@@ -245,21 +277,32 @@ EOF
 # this run's fault proxy API (ORACLE_SYNC_FAULTS), which meguri-cli checks with
 # the endpoint guard before it starts any worker (sync-ops.md S8.3).
 mg_conf__live_replay() {
-  local jobs="$1" live="$MG_RUN_DIR/t1-live.json" handoff="$MG_RUN_DIR/handoff" cmd rc
+  local jobs="$1" live="$MG_RUN_DIR/t1-live.json" handoff="$MG_RUN_DIR/handoff" cmd edge_cmd rc
   shift
   if [ -z "${MG_ORACLE_TAG:-}" ]; then
     mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 1
   fi
   mkdir -p "$handoff" "$MG_ROOT/conformance/fixtures"
-  cmd="$(jq -nc --arg p "$(mg_compose_project)" --arg f "$MG_ROOT/docker/compose.yml" --arg l "meguri.mg.run-id=$MG_RUN_ID" \
-    --arg h "$handoff:/handoff" --arg x "$MG_ROOT/conformance/fixtures:/fixtures:ro" --arg faults "$MG_ORACLE_SYNC_FAULTS" \
-    '["docker", "compose", "-p", $p, "-f", $f, "run", "--rm", "-T", "--no-deps", "--label", $l, "-e", "TZ={tz}",
-      "-v", $h, "-e", "ORACLE_HANDOFF=/handoff", "-v", $x, "-e", "ORACLE_FIXTURES=/fixtures"]
-     + (if $faults == "" then [] else ["-e", "ORACLE_SYNC_FAULTS=" + $faults] end) + ["oracle"]')"
+  MG_CONF_EDGE_IMAGE="meguri-oracle:$MG_ORACLE_TAG"
+  local owner
+  owner="$(python3 -I -B -c 'import uuid; print(uuid.uuid4().hex)')" || return 1
+  # Do not expose transport details through MG report artifacts.
+  mg_conf__owner_register "$owner" "$MG_CONF_EDGE_IMAGE" "${MG_ORACLE_SYNC_FAULTS:-sync-faults:8474}" || return 1
+  cmd="$(jq -nc --arg root "$MG_ROOT" --arg project "$(mg_compose_project)" --arg run "$MG_RUN_ID" \
+    --arg owner "$owner" --arg handoff "$handoff" --arg faults "${MG_ORACLE_SYNC_FAULTS:-sync-faults:8474}" \
+    '["python3", "-I", "-B", ($root + "/tools/mg.d/conformance-worker.py"),
+      "--root", $root, "--project", $project, "--run", $run, "--owner", $owner,
+      "--worker", "{worker}", "--handoff", $handoff, "--faults", $faults, "--tz", "{tz}"]')"
+  edge_cmd="$(jq -nc --arg root "$MG_ROOT" --arg project "$(mg_compose_project)" --arg run "$MG_RUN_ID" \
+    --arg owner "$owner" --arg image "$MG_CONF_EDGE_IMAGE" --arg faults "${MG_ORACLE_SYNC_FAULTS:-sync-faults:8474}" \
+    '["python3", "-I", "-B", ($root + "/tools/mg.d/conformance-edge.py"),
+      "--root", $root, "--project", $project, "--run", $run, "--owner", $owner,
+      "--image", $image, "--faults", $faults]')"
   MEGURI_ORACLE_TAG="$MG_ORACLE_TAG" MEGURI_ORACLE_CONTEXT="$MG_ORACLE_DIR" ORACLE_SYNC_FAULTS="$MG_ORACLE_SYNC_FAULTS" \
     mg_conf__cli_native conformance run --live --conformance "$MG_ROOT/conformance" --lane live-oracle \
-    --oracle-cmd "$cmd" --jobs "$jobs" --handoff-dir "$handoff" --report "$live" "$@"
+    --oracle-cmd "$cmd" --meguri-edge-cmd "$edge_cmd" --jobs "$jobs" --handoff-dir "$handoff" --report "$live" "$@"
   rc=$?
+  mg_conf__edges_cleanup || rc=1
   mg_conf__lane_report live "$live" "$rc" || return 1
   mg_detail oracle "$(jq -c '.oracle // null' "$live")"
   [ "$rc" -eq 0 ]
@@ -511,6 +554,57 @@ mg_harvest_inventory() {
     mg_status pass
   else
     mg_failure inventory "the inventory, its tests or its check failed; see log.txt" "tools/mg harvest-inventory"
+    mg_status fail
+  fi
+}
+
+# Real infrastructure tests run on the MG host; never grant dev Docker access.
+mg_conf_routes() {
+  local cancel_phase="" ready_fd=""
+  if [ "$#" -eq 4 ] && [ "$1" = --cancel-fixture ] && [ "$3" = --ready-fd ]; then
+    cancel_phase="$2"; ready_fd="$4"; shift 4
+    case "$cancel_phase" in before-token|published) ;; *) return 1 ;; esac
+    case "$ready_fd" in ''|*[!0-9]*) return 1 ;; esac
+  fi
+  [ "$#" -eq 0 ] || { mg_conf__usage "tools/mg conformance-route-test" "unexpected arguments"; return 0; }
+  mg_conf__docker_ok || return 0
+  # The interrupted fixture deliberately has no job exit hook; the MG parent
+  # alone must discover its additional owner after the harness is terminated.
+  [ -n "$cancel_phase" ] || mg_on_exit mg_conf__cleanup
+  mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 0
+  mg_oracle__sync_faults || return 0
+  local owner peer image rc handoff="$MG_RUN_DIR/handoff"
+  owner="$(python3 -I -B -c 'import uuid; print(uuid.uuid4().hex)')" || return 1
+  peer="$(python3 -I -B -c 'import uuid; print(uuid.uuid4().hex)')" || return 1
+  image="meguri-oracle:$MG_ORACLE_TAG"
+  mkdir -p "$handoff"
+  mg_conf__owner_register "$owner" "$image" "$MG_ORACLE_SYNC_FAULTS" || return 1
+  mg_conf__owner_register "$peer" "$image" "$MG_ORACLE_SYNC_FAULTS" || return 1
+  if [ -n "$cancel_phase" ]; then
+    MEGURI_ORACLE_TAG="$MG_ORACLE_TAG" MEGURI_ORACLE_CONTEXT="$MG_ORACLE_DIR" \
+      python3 -I -B "$MG_ROOT/tools/tests/conformance_edge_infra.py" --root "$MG_ROOT" \
+      --project "$(mg_compose_project)" --run "$MG_RUN_ID" --run-dir "$MG_RUN_DIR" \
+      --image "$image" --owner "$owner" --peer-owner "$peer" --handoff "$handoff" \
+      --cancel-fixture "$cancel_phase" --ready-fd "$ready_fd"
+    # A cancellation fixture cannot finish successfully by itself.
+    mg_failure route-cancellation "cancellation fixture exited without MG cancellation"
+    mg_status error
+    return 1
+  fi
+  mg_conf__cli_native conformance to-json "$MG_ROOT/conformance/scenarios/smoke/sync/meguri-downloads.yaml" \
+    >"$MG_RUN_DIR/route-scenario.json" || return 1
+  MEGURI_ORACLE_TAG="$MG_ORACLE_TAG" MEGURI_ORACLE_CONTEXT="$MG_ORACLE_DIR" \
+    python3 -I -B "$MG_ROOT/tools/tests/conformance_edge_infra.py" --root "$MG_ROOT" \
+    --project "$(mg_compose_project)" --run "$MG_RUN_ID" --run-dir "$MG_RUN_DIR" --image "$image" --owner "$owner" --peer-owner "$peer" --handoff "$handoff" \
+    --scenario "$MG_RUN_DIR/route-scenario.json"
+  rc=$?
+  mg_conf__edges_cleanup || rc=1
+  if [ "$rc" -eq 0 ]; then
+    mg_count total 1; mg_count passed 1
+    mg_message "conformance route transport lifecycle passed; published T1 remains separate"
+    mg_status pass
+  else
+    mg_failure route-transport "whole-route infrastructure checks failed; inspect log and retained ownership"
     mg_status fail
   fi
 }

@@ -274,8 +274,22 @@ mg__run_job() {
 # ignores while its job runs, and once the `docker` CLI wrapping the compose
 # plugin gets a signal, the plugin exits without stopping the container.
 mg__remove_run_containers() {
+  # Ownership cleanup must run in this parent too: job traps may have been
+  # killed. Never let the generic run-label sweep destroy a reserved route.
+  if [ -e "$MG_RUN_DIR/edge-owners" ] || [ -L "$MG_RUN_DIR/edge-owners" ]; then
+    mg_conf__edges_cleanup || return 1
+  fi
+  mg__remove_unreserved_run_containers
+}
+
+mg__remove_unreserved_run_containers() {
   local ids
   ids="$(docker ps -aq --filter "label=meguri.mg.run-id=$MG_RUN_ID" 2>/dev/null)"
+  [ -n "$ids" ] || return 0
+  # Fail closed on inspection failure. Legacy resources lack edge-owner;
+  # route resources require the whole-route helper regardless of job label.
+  # shellcheck disable=SC2086
+  ids="$(docker inspect $ids 2>/dev/null | jq -er '[.[] | select(.Config.Labels["meguri.mg.edge-owner"] == null) | .Id] | join(" ")')" || return 1
   [ -n "$ids" ] || return 0
   echo "tools/mg: stopping and removing the run's container: $(printf '%s' "$ids" | tr '\n' ' ')"
   # shellcheck disable=SC2086 # one container id per word

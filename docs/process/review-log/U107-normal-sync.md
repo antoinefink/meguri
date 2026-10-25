@@ -295,3 +295,12 @@ and captures the applied commit key. Independent review is clear; focused run
 Route self-test `200344Z-39313` passes all 11 selected cases. Privacy check
 `200342Z-39122` passes across all 40 pending files, including new files. Actual
 transport, fresh large-merge coverage and the batch gate remain pending.
+
+## Route follow-up
+
+Round three review has no P0–P2 findings. Owner contexts are saved before
+allocation. Parent cleanup reads all contexts. Self-test `200344Z-39313`
+passes 11 checks. The transport run is active; its result remains pending.
+
+Core lint `200411Z-39826` fails: apply takes nine arguments and three labels
+use conversions. Fix these before the batch gate.
