@@ -276,6 +276,98 @@ An endpoint is the base URL a client syncs with. The worker derives every endpoi
 - The runner also checks the toxiproxy API endpoint it gives the workers (`ORACLE_SYNC_FAULTS`) before it starts any worker, since a worker connects to that API when a session begins.
 - Golden recording (`tools/mg oracle record`), `tools/mg oracle compare` and recording runs run whole scenarios in the oracle harness, with no Rust on the path. There, the endpoints come only from the worker's environment, which `tools/mg` sets, and the network isolation of S8.2 keeps every connection inside `oracle-internal`.
 
+### S8.4 Per-session Meguri edge
+
+This section specifies Meguri's test transport. Scenario data and the
+existing reply to `begin` remain unchanged. Each mixed session takes its
+target solely from the `sync.endpoints.actors` member it just received.
+Replay allocates no edge.
+
+**Handoff.** `tools/mg` supplies `conformance run --live` with
+`--meguri-edge-cmd`: a JSON array of command arguments, as for the existing
+worker command. The runner passes this allocation capability through LiveRun
+to Parties; a single endpoint shared by concurrent sessions is insufficient.
+The command runs directly, without shell expansion. Each invocation reads one
+JSON request from stdin and writes one JSON response to stdout:
+
+| Request | Successful response |
+|---|---|
+| `{"cmd":"acquire","target":<actors endpoint>}` | `{"endpoint":<host endpoint>,"lease":<opaque token>}` |
+| `{"cmd":"release","lease":<opaque token>}` | `{"released":true}` |
+
+This handoff runs in the existing native T1 lane: MG launches the CLI on the
+Mac host, and that CLI invokes the host helper. Docker publishes the returned
+loopback port on that same host. The Docker T0 lane does not allocate an edge;
+MG continues to refuse a Docker-only live lane. A host loopback endpoint must
+never be installed in a client running in another network namespace. This
+adds neither a Docker socket nor oracle-network membership to dev or filtered
+implementation containers. Only the MG host helper manages Docker resources
+within the current checkout's project and run.
+
+Requests and responses admit only those members, with nonempty strings where
+shown. A malformed response, unsuccessful process exit or allocation failure
+is a run error (`sync_unavailable`), never `pending` or a missing capability.
+A refused endpoint remains `endpoint_refused`. A missing allocation command
+for an otherwise supported mixed run is `sync_unavailable`. No synthetic
+successful sync result, alternate server or database copy replaces the edge.
+
+**Allocation.** Before invoking acquire, Parties checks every endpoint from
+`begin` under S8.3. The helper accepts only an HTTP root URL, with an explicit
+port, whose host exactly matches the fault-service host in the run's trusted
+`ORACLE_SYNC_FAULTS` configuration. It refuses credentials, query, fragment,
+an absent/invalid port and the fault-service API port. The target is the
+reported actors endpoint, never the reported upstream or converge endpoint.
+No scenario, actor step or account value can set a helper command or target.
+
+The helper starts one forwarder with an immutable target for this lease. It
+uses the existing edge pattern: one attachment to `oracle-internal` and one
+to a publishing network, with Docker selecting a fresh host port published
+only on `127.0.0.1`. The returned endpoint is an HTTP root URL with that
+literal address and explicit port. Parties validates both its exact shape
+and S8.3 before giving it and the reported account to the existing Seat.
+The helper exposes no host control listener, proxy API or caller-selected
+route. It does not change the shared fault service's networks or publish its
+ports. Its only data route ends at this session's fault proxy; external
+destinations and the real-clock rig are excluded.
+
+Allocation readiness checks inspect the listener and published mapping;
+they send no client request through the proxy before the first step. The
+forwarder preserves TCP resets and orderly half-closes as the existing rig
+edge does. It adds no HTTP decoding, caching or request rewriting. Independent
+sessions retain independent leases even for identical scenarios, actor names
+or worker processes; a forwarder is never retargeted for another session.
+
+**Lifetime.** Parties owns the lease from successful acquire until the mixed
+steps finish or fail. It stops actor work and releases the edge before sending
+`end`, so a deleted proxy's port cannot remain reachable through an old lease.
+After a successful `begin`, validation or allocation failure still attempts
+`end`. All later exits, malformed responses, step errors, worker failure and
+cancellation release any acquired lease and end or close/reap the worker.
+An owned lease may be released more than once. Removal requires both the
+lease token and the current MG run's ownership; another run's token fails.
+
+The helper labels every allocated container with the existing MG run label
+and its edge purpose, including containers created before an interrupted
+acquire can return a token. Normal cleanup and the run's cancellation trap
+remove these containers. They leave the shared fault service and other runs'
+containers intact. Helper invocations have bounded process lifetimes and are
+cancelled with the run. Cleanup failure is reported as a run error; it never
+turns a failed execution into a pass. Credentials never enter helper requests,
+arguments, labels or diagnostics; transport details stay in ephemeral run
+state, outside scenarios, goldens and committed reports.
+
+**Verification.** Focused tests cover target rejection before allocation,
+returned-edge rejection before any actor step, exact Seat routing, acquisition
+failure, each early exit after acquisition, idempotent owned release, foreign
+release refusal and interrupted allocation cleanup. Concurrent mixed runs
+exercise distinct proxies and retain isolation when either run ends.
+Transport tests retain reset and half-close behavior and prove no
+upstream request during readiness checks. Published T1 scenarios then run
+through production sync, first serially and then concurrently, preserving
+the replay-first and real capability checks of S10.3. Stub dispatch tests
+alone do not establish transport parity. Existing schemas, scenarios, goldens
+and oracle pins require no change for this handoff.
+
 ## S9. Recordings of oracle-client exchanges (R1933)
 
 - A recording run records the exchanges between the oracle actors and the server, with request and response bodies zstd-decoded, so that the sync area can describe the protocol from them and compare Meguri's requests with them semantically (U105, U117).
