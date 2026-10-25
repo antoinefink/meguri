@@ -12,7 +12,8 @@
 # and the test plans, launches the Mac Debug app hidden on Home and on every
 # test-hook route and checks it stays up, then runs the Unit plan, the
 # app-hosted tests, TestHooksTests and the agent driver's DriveScriptTests
-# (into <work dir>/DerivedData-tests).
+# (into <work dir>/DerivedData-tests, or DerivedData-tests-profile for
+# Profile/Performance).
 #
 # Phases: `builds` is everything up to the Mac checks (no launch, no
 # simulator, no test run, no TAP plan line); `devices` is the rest: the
@@ -678,10 +679,15 @@ PY
 }
 
 profile_cache_check() {
-  if ! profile_cache check >>"$1" 2>&1; then
-    VM_PRODUCTS_BLOCKED="retained Profile/Performance cache failed its persistent proof or current policy; see $1"
-    return 1
-  fi
+  # Pending or unproven Profile products in either root block every test build
+  # and copy, including ordinary plans after an earlier rejected invocation.
+  local DD_TESTS
+  for DD_TESTS in "$WORK/DerivedData-tests" "$WORK/DerivedData-tests-profile"; do
+    if ! profile_cache check >>"$1" 2>&1; then
+      VM_PRODUCTS_BLOCKED="retained Profile/Performance cache failed its persistent proof or current policy; see $1"
+      return 1
+    fi
+  done
 }
 
 # xctestrun_for <scheme> <plan> <config> <sdk>: newest matching test root.
@@ -738,6 +744,11 @@ vm_session_result() {
 test_in_vm() {
   local name="$1" scheme="$2" plan="$3" config="$4" dest="$5" result="$WORK/$1.xcresult" log="$LOGS/$1.log" xctestrun code p inputs=() rc policy_report sdk=iphonesimulator build_dest="generic/platform=iOS Simulator"
   local signing="${MEGURI_APP_SIGNING-adhoc}" signing_args=()
+  local DD_TESTS="$WORK/DerivedData-tests"
+  # Other configurations can prune retained Profile products during a build.
+  if [ "$config" = Profile ] || [ "$plan" = Performance ]; then
+    DD_TESTS="$WORK/DerivedData-tests-profile"
+  fi
   shift 5
   VM_QUEUE_REASON=""
   if [ -n "$VM_PRODUCTS_BLOCKED" ]; then
