@@ -236,3 +236,17 @@ recorded 58 changed cells, with no failures or skips. Those include the earlier
 reviewed Mac native controls. Independent review found no P0–P2 in the new Home
 images on all three platforms. Root viewed the Mac empty state.
 Human baseline approval and the full integration gate remain pending.
+
+## Mac sample action target
+
+Start: `d6075d6c`. Gate `20261025T031426Z-94062` failed the Mac accessibility
+audit because `sample.deckOverview.addNotes` measured 88 by 24 points, below
+the unchanged 28-point minimum. The Mac UI suite reported the same defect.
+Filtered patch `cleanroom/20261025T043049Z-31271`, fixer session
+`s-20261024T174115Z-511e3ad6`, adds the existing minimum frame and hit shape
+to that Mac button. It retains the native appearance, identifier and action.
+Independent source review found no P0–P2. Focused audit
+`a11y/20261025T050152Z-62285` passed its all-state, text-size and appearance
+case, with no failures or skips. UI lint `20261025T045908Z-57866`, privacy
+`20261025T050034Z-60566` and similarity `20261025T045908Z-57978` passed.
+Updated render evidence and the required full gate remain pending.

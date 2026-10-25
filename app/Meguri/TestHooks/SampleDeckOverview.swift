@@ -76,6 +76,10 @@ extension TestHooks {
                         ) {
                             Button {} label: { Text(verbatim: "Add Notes") }
                                 .accessibilityIdentifier("sample.deckOverview.addNotes")
+                                #if os(macOS)
+                                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                                .contentShape(Rectangle())
+                                #endif
                         }
                     case let .error(name):
                         title(name)
