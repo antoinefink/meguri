@@ -20,6 +20,7 @@ RUN useradd --system --uid 10001 --home-dir /scratch --no-create-home oracle \
  && mkdir -p /scratch && chown oracle /scratch
 
 COPY entrypoint.sh /opt/oracle/entrypoint.sh
+COPY worker_holder.py /opt/oracle/worker_holder.py
 COPY driver/ /opt/oracle/driver/
 
 ENV PYTHONPATH=/opt/oracle \

@@ -21,7 +21,9 @@ A run has a fault proxy when the scenario has a net_fault step or the caller
 plays actors: a toxiproxy proxy, created through the API that
 ORACLE_SYNC_FAULTS names, with a name unique to the run, listen port 0 and
 upstream <worker address>:<server port>; every actor syncs through it, and it
-is deleted at session end. The worker address is the local address of the
+is deleted at session end for replay only. A mixed run's caller owns its
+proxy from creation and removes it after all published edges are gone. The
+worker address is the local address of the
 route to the toxiproxy (or recorder) host. Nothing connects to the server
 through it before the first step.
 
@@ -34,6 +36,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -113,9 +116,11 @@ class Toxiproxy:
 class FaultProxy:
     """The run's toxiproxy proxy in front of the server (S5, S8.1)."""
 
-    def __init__(self, api: Toxiproxy, upstream: str) -> None:
+    def __init__(self, api: Toxiproxy, upstream: str, owner: str | None = None) -> None:
         self.api = api
-        self.name = f"meguri-oracle-{uuid.uuid4().hex}"
+        self.caller_owned = owner is not None
+        prefix = f"meguri-edge-{owner}" if self.caller_owned else "meguri-oracle"
+        self.name = f"{prefix}-{uuid.uuid4().hex}"
         created = api.call("POST", "/proxies", {
             "name": self.name, "listen": "0.0.0.0:0", "upstream": upstream, "enabled": True,
         })
@@ -123,7 +128,8 @@ class FaultProxy:
             listen = created["listen"]
             self.port = int(listen.rpartition(":")[2])
         except (TypeError, KeyError, ValueError) as exc:
-            self.delete()
+            if not self.caller_owned:
+                self.delete()
             raise _unavailable("toxiproxy did not report the proxy's listen port") from exc
         self.host = api.host
 
@@ -151,6 +157,17 @@ class SyncRun:
         self.base: str | None = None
         self.clock_file: str | None = None
         self.proxy: FaultProxy | None = None
+        owner = None
+        self.route_worker = None
+        if session.caller_actors:
+            owner = os.environ.get("ORACLE_SYNC_EDGE_OWNER", "")
+            self.route_worker = os.environ.get("ORACLE_SYNC_WORKER", "")
+            if (
+                not re.fullmatch(r"[0-9a-f]{32}", owner)
+                or not re.fullmatch(r"[0-9a-f]{32}", self.route_worker)
+                or owner == self.route_worker
+            ):
+                raise _unavailable("mixed routes require distinct trusted ORACLE_SYNC_EDGE_OWNER and ORACLE_SYNC_WORKER tokens")
         self.recorder = os.environ.get("ORACLE_SYNC_RECORDER") or None
         steps = session.scenario.get("steps", [])
         needs_faults = bool(session.caller_actors) or any(
@@ -170,7 +187,7 @@ class SyncRun:
         try:
             self._start_server(listen, session.scenario.get("server", {}).get("clock_offset_secs", 0))
             if api is not None:
-                self.proxy = FaultProxy(api, f"{self.address}:{self.port}")
+                self.proxy = FaultProxy(api, f"{self.address}:{self.port}", owner=owner)
         except BaseException:
             self.close()
             raise
@@ -245,11 +262,12 @@ class SyncRun:
                 "recorder": self.recorder,
             },
             "account": {"username": USERNAME, "password": PASSWORD},
+            "route": {"proxy": self.proxy.name, "worker": self.route_worker} if self.route_worker is not None else None,
         }
 
     def close(self) -> None:
         try:
-            if self.proxy is not None:
+            if self.proxy is not None and not self.proxy.caller_owned:
                 self.proxy.delete()
         finally:
             self.proxy = None

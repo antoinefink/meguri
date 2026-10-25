@@ -19,6 +19,7 @@ import threading
 import unittest
 import urllib.parse
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from driver.harness import WorkerProcess
@@ -223,6 +224,7 @@ class TwoParty(unittest.TestCase):
             "actors": f"http://127.0.0.1:{port}/", "converge": f"http://127.0.0.1:{port}/",
             "upstream": None, "recorder": None,
         })
+        self.assertIsNone(begun["sync"]["route"])
         # The stray proxies above lead nowhere: a sync through them would fail.
         self.assertTrue(all(s["ok"] for s in steps), steps)
         self.assertEqual(steps[12]["observation"]["converge"]["differences"], {"client_a": [], "client_c": []})
@@ -815,13 +817,21 @@ class Faults(unittest.TestCase):
         tmp = tempfile.mkdtemp(dir=os.environ.get("ORACLE_SCRATCH_ROOT"))
         col = Collection(os.path.join(tmp, "collection.anki2"))
         try:
-            with WorkerProcess("UTC") as w:
+            owner, worker = uuid.uuid4().hex, uuid.uuid4().hex
+            with WorkerProcess("UTC", extra_env={"ORACLE_SYNC_EDGE_OWNER": owner, "ORACLE_SYNC_WORKER": worker}) as w:
                 bad_caller = w.request({"cmd": "begin", "scenario": sc, "caller_actors": ["client_a"]})
                 bad_ids = w.request({"cmd": "begin", "scenario": sc, "caller_actors": ["meguri"],
                                      "ids": {"notes": [], "cards": []}})
                 begun = w.request({"cmd": "begin", "scenario": sc, "caller_actors": ["meguri"]})
                 self.assertTrue(begun["ok"], begun)
                 sync = begun["sync"]
+                from driver.ops.sync_server import Toxiproxy
+
+                api = Toxiproxy(FAULTS)
+                proxy_name = sync["route"]["proxy"]
+                self.addCleanup(api.call, "DELETE", f"/proxies/{proxy_name}", ok_statuses=(404,))
+                self.assertEqual(sync["route"]["worker"], worker)
+                self.assertRegex(proxy_name, rf"^meguri-edge-{owner}-[0-9a-f]{{32}}$")
                 servers = sync_servers()
                 server_env = environ_of(servers[0]) if len(servers) == 1 else {}
                 resp = [w.request({"cmd": "step"}) for _ in range(6)]  # 0-5 run on the worker
@@ -871,6 +881,7 @@ class Faults(unittest.TestCase):
         self.assertEqual(resp[10]["observation"], {"ids": {"#n1": t, "#n2": 7, "#c1": t, "#c2": 8}})
         self.assertEqual(resp[11]["observation"]["converge"]["differences"], {"client_a": [], "meguri": []})
         self.assertEqual(ended["observations"]["steps"][8], added)
+        self.assertEqual(api.call("GET", f"/proxies/{proxy_name}")["name"], proxy_name)
         self.assertEqual(self.proxies(), [])
 
 
