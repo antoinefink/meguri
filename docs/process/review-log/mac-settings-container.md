@@ -138,3 +138,31 @@ preview. It retains the existing query, input and assertions. Independent
 review found no P0–P2. Build `20261025T004215Z-77257`, focused privacy and
 similarity `20261025T004227Z-78392` passed. Native execution remains pending.
 No unit or full gate is accepted by this investigation.
+
+## Scroll visibility correction
+
+Start: `ae36fbeab24fa41710508a465880b2bf640f4892`.
+`manual-transfer-check/20261025T004441Z-80959` retained the absent-preview
+failure. Its fixed-control facts show a unique enabled native button with
+center Y 914, below its owning scroll viewport, which ends at Y 866.
+XCTest still reported that button as hittable. The click therefore had no
+visible preparation effect. These facts justify a test navigation repair.
+
+Final filtered export: `cleanroom/20261025T005019Z-86552`, fixer session
+`s-20261024T174115Z-511e3ad6`. Mac reveal now requires the target center to
+be inside its identified scroll viewport before clicking. Discovery covers
+a Form that is itself the scroll view. Native confirmation and toolbar
+controls without that owner keep their prior behavior. The same condition
+is checked at loop exit and during the final wait. Scroll limits, directions,
+native clicks and all transfer assertions are unchanged. Production UI and
+the transfer coordinator are unchanged.
+
+The existing sheet preflight also checks Prepare visibility without starting
+preparation. Independent review found no P0–P2. Build
+`20261025T005128Z-87477`, focused privacy and similarity
+`20261025T005151Z-88696` passed.
+Native result: `vm-transfer-identity-frozen/20261025T005319Z-89915`,
+one pass, zero failures, zero skips. Prepare is visible after scrolling;
+Done closes the sheet. Fresh trust: `20261025T005316Z-89916`, one pass
+and zero skips.
+The full workflow and integration gate remain pending.

@@ -45,6 +45,31 @@ import AppKit
         XCTAssertEqual(sheet.buttons.matching(identifier: "settings.anki.closeTransfer").count, 1,
                        "The native sheet must expose its Done control.")
 
+        let prepareButtons = sheet.buttons.matching(identifier: "settings.anki.prepareImport")
+        XCTAssertEqual(prepareButtons.count, 1, "The native sheet must expose exactly one Prepare Import control.")
+        let prepare = prepareButtons.firstMatch
+        try reveal(prepare, app, bundle)
+        let workflow = sheet.descendants(matching: .any)
+            .matching(identifier: "settings.anki.transferWorkflow").firstMatch
+        var owners = [workflow.scrollViews, workflow.tables, workflow.collectionViews].flatMap {
+            $0.containing(.any, identifier: "settings.anki.prepareImport").allElementsBoundByIndex
+        }
+        if workflow.exists, [.scrollView, .table, .collectionView].contains(workflow.elementType),
+           workflow.descendants(matching: .any).matching(identifier: "settings.anki.prepareImport").firstMatch.exists {
+            owners.append(workflow)
+        }
+        XCTAssertFalse(owners.isEmpty, "Prepare Import must have an identified owning scroll viewport.")
+        let window = app.windows.containing(.any, identifier: "settings.anki.transferWorkflow").firstMatch
+        XCTAssertTrue(owners.contains { owner in
+            guard prepare.exists, owner.exists, window.exists else { return false }
+            let frame = prepare.frame, viewport = owner.frame.intersection(window.frame)
+            guard [frame, viewport].allSatisfy({
+                !$0.isNull && !$0.isEmpty && [$0.origin.x, $0.origin.y, $0.width, $0.height].allSatisfy { $0.isFinite }
+            }) else { return false }
+            let center = CGPoint(x: frame.midX, y: frame.midY)
+            return center.x.isFinite && center.y.isFinite && viewport.contains(center)
+        }, "Revealed Prepare Import center must lie inside its owning scroll/window viewport.")
+
         try closeTransfer(app, bundle)
         XCTAssertFalse(element(app, "settings.anki.transferWorkflow").exists,
                        "Done must remove the workflow root.")
@@ -757,6 +782,12 @@ import AppKit
         let containers = [app.collectionViews, app.tables, app.scrollViews]
         #endif
         func container(owning identifier: String) -> XCUIElement? {
+            #if os(macOS)
+            if surface.exists, [.scrollView, .table, .collectionView].contains(surface.elementType),
+               surface.identifier == identifier || surface.descendants(matching: .any).matching(identifier: identifier).firstMatch.exists {
+                return surface
+            }
+            #endif
             for query in containers {
                 let identified = query.matching(identifier: identifier).firstMatch
                 if identified.exists { return identified }
@@ -767,6 +798,21 @@ import AppKit
         }
         let targetIdentifier = target.exists ? target.identifier : ""
         let targetScroll = targetIdentifier.isEmpty ? nil : container(owning: targetIdentifier)
+        func targetReady() -> Bool {
+            guard target.exists && target.isHittable else { return false }
+            #if os(macOS)
+            if let owner = targetScroll {
+                guard owner.exists, window.exists else { return false }
+                let frame = target.frame, viewport = owner.frame.intersection(window.frame)
+                guard [frame, viewport].allSatisfy({
+                    !$0.isNull && !$0.isEmpty && [$0.origin.x, $0.origin.y, $0.width, $0.height].allSatisfy { $0.isFinite }
+                }) else { return false }
+                let center = CGPoint(x: frame.midX, y: frame.midY)
+                return center.x.isFinite && center.y.isFinite && viewport.contains(center)
+            }
+            #endif
+            return true
+        }
         let scroll = targetScroll ?? { () -> XCUIElement? in
             let settingsIDs = ["settings.root.content", "settings.anki.endpoint", "settings.anki.loginIdentity"]
             for id in settingsIDs {
@@ -797,7 +843,7 @@ import AppKit
         var searchesRemaining = 16
         for _ in 0..<24 {
             let targetExists = target.exists
-            if targetExists && target.isHittable { break }
+            if targetReady() { break }
             guard let scroll, scroll.exists else { break }
             let searchUpward = !targetExists && upwardSearchesRemaining > 0
             if searchUpward {
@@ -835,7 +881,7 @@ import AppKit
             start.press(forDuration: 0, thenDragTo: end)
             #endif
         }
-        let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in target.exists && target.isHittable }, object: nil)
+        let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in targetReady() }, object: nil)
         let outcome = XCTWaiter().wait(for: [visible], timeout: 30)
         if outcome != .completed {
             #if os(macOS)
