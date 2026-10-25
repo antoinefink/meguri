@@ -23,3 +23,9 @@ Fixer run `214706Z-98477` clears the reviewed P2. Source review round two
 has no P0–P2 findings. Privacy `215554Z-7482` passes. The two-card test is
 present. Swift `215551Z-6751` fails on a WebKit API name; no tests run.
 The compiler fix remains open.
+
+Fixer `215644Z-8454` changes only the reported API spelling. Swift
+`220051Z-12682` passes all 24 selected tests with no warnings or skips.
+Both real two-card cases pass, as does the prior DOM/input/script case.
+The reviewed P2 and compiler failure are closed. Required full-unit and
+integration evidence remains open; no Unit trailer is added.

@@ -82,3 +82,10 @@ names and exposes the existing pending save state. Source round five has
 no required findings. Privacy `215814Z-10877` passes. Phone
 `215738Z-9164` still fails both Home cases on an unnamed native control;
 its review case passes. Native acceptance remains open.
+
+Semantic fix `220116Z-14148` uses the supported SwiftUI accessibility
+representation for the same visible disclosure action. Pixels are unchanged.
+Independent round six has no required findings. Phone `220222Z-14890`
+passes both strict Home cases: unique named actions, independent selection
+and expansion, and saved collapse after restart without reseeding. iPad,
+the full sidebar and final visual/integration evidence remain open.

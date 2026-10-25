@@ -419,12 +419,13 @@ private struct HomeDeckBranch: View {
         DisclosureGroup(isExpanded: expanded) { EmptyView() } label: { EmptyView() }
             .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
             .contentShape(Rectangle())
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text(verbatim: path))
-            .accessibilityValue(disclosureValue)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction { expanded.wrappedValue.toggle() }
-            .accessibilityIdentifier("home.deck.disclosure.\(node.id)")
+            .accessibilityRepresentation {
+                Button { expanded.wrappedValue.toggle() } label: {
+                    Text(verbatim: path)
+                }
+                .accessibilityValue(disclosureValue)
+                .accessibilityIdentifier("home.deck.disclosure.\(node.id)")
+            }
     }
 
     private var disclosureValue: Text {
