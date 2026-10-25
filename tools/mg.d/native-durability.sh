@@ -29,15 +29,16 @@ mg_native_durability() {
   # Build before taking the measurement lease. Pin the target even if the
   # caller's Cargo environment normally cross-compiles. Reuse this dedicated
   # target cache across runs without replacing Xcode's shared core products.
+  # Missing locked test dependencies may download here, outside measurement.
   for package in meguri-engine meguri-ffi; do
     json="$MG_RUN_DIR/$package-build.jsonl"
     log="$MG_RUN_DIR/$package-build.log"
     if [ "$package" = meguri-engine ]; then
-      (cd core && cargo test --locked --offline -p meguri-engine --test suspend --test wal_durability \
+      (cd core && cargo test --locked -p meguri-engine --test suspend --test wal_durability \
         --target aarch64-apple-darwin --target-dir "$target" --no-run \
         --message-format json-render-diagnostics) >"$json" 2>"$log"
     else
-      (cd core && cargo test --locked --offline -p meguri-ffi --features test-hooks --test collection_ffi \
+      (cd core && cargo test --locked -p meguri-ffi --features test-hooks --test collection_ffi \
         --target aarch64-apple-darwin --target-dir "$target" --no-run \
         --message-format json-render-diagnostics) >"$json" 2>"$log"
     fi

@@ -31,6 +31,10 @@ EOF
   cat >"$BIN/cargo" <<'EOF'
 #!/bin/bash
 echo "cargo $*" >>"$STUB_LOG"
+if [ "${FX_CACHE_COLD:-}" = 1 ] && [[ " $* " == *" --offline "* ]]; then
+  echo "fake missing cached native test dependency" >&2
+  exit 42
+fi
 package=""; previous=""
 for arg in "$@"; do
   if [ "$previous" = -p ]; then package="$arg"; fi
@@ -85,7 +89,7 @@ mg() {
 field() { jq -r "$@" "$result"; }
 
 @test "native durability builds before leasing, runs three suites once and retains timing" {
-  MEGURI_BENCH_FIXTURES=/must-not-use mg
+  FX_CACHE_COLD=1 MEGURI_BENCH_FIXTURES=/must-not-use mg
   [ "$status" -eq 0 ]
   [ "$(field .status)" = pass ]
   [ "$(field .summary.passed)" -eq 6 ]
