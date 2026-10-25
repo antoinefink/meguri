@@ -144,6 +144,33 @@
           "type": "object",
           "additionalProperties": { "anyOf": [{ "$ref": "#/$defs/sha1" }, { "type": "null" }] }
         },
+        "media_quick_check": {
+          "description": "media-sync-ops.md V1: after the change check a media sync begins with, entries pending for the next media sync; null for a deletion.",
+          "type": "object",
+          "additionalProperties": { "anyOf": [{ "$ref": "#/$defs/sha1" }, { "type": "null" }] }
+        },
+        "media_sync": {
+          "description": "media-sync-ops.md V3: what one media sync did, or a rejection of the op's closed list.",
+          "anyOf": [
+            {
+              "type": "object",
+              "required": ["uploaded_files", "uploaded_deletions", "downloaded_files", "downloaded_deletions"],
+              "additionalProperties": false,
+              "properties": {
+                "uploaded_files": { "type": "integer", "minimum": 0 },
+                "uploaded_deletions": { "type": "integer", "minimum": 0 },
+                "downloaded_files": { "type": "integer", "minimum": 0 },
+                "downloaded_deletions": { "type": "integer", "minimum": 0 }
+              }
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/rejection" },
+                { "properties": { "error": { "enum": ["network"] } } }
+              ]
+            }
+          ]
+        },
         "db_exec": {
           "description": "specs/conformance/record-ops.md W1: the rows the statement returned; [] when none.",
           "type": "object",

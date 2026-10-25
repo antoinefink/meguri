@@ -194,6 +194,8 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `trash_media` | `{names: [...]}`: move these files to the media trash | none | stable (`media-ops.md` F6) |
 | `restore_media_trash` | `{}` | none | stable (`media-ops.md` F7) |
 | `empty_media_trash` | `{}` | none | stable (`media-ops.md` F8) |
+| `media_reset` | `{}`: reset the media sync state as logging out does | none | stable (`media-sync-ops.md` V2) |
+| `media_sync` | `{}`: the current actor runs one media sync to its end | `{uploaded_files, uploaded_deletions, downloaded_files, downloaded_deletions}`; rejection `network` | stable (actor scenarios, `media-sync-ops.md` V3) |
 | `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | stable (`record-ops.md` W1) |
 | `reopen` | `{}`: close the collection and open it again from its file | none | stable (`sync-ops.md` S6) |
 | `adopt` | `{}`: the collection's notes and cards that have no logical id get the next `#nN` and `#cN`, in ascending id order; not in actor scenarios | `{notes, cards}`: how many got one | stable (`normalized-dump.md` N5) |

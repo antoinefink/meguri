@@ -1,0 +1,30 @@
+# What the change check never sends and what it sends as deletions
+# (specs/sync/media-tracking.md T4.3, specs/media/media-files.md M7, M8):
+# .DS_Store, Thumbs.db and empty files never become pending. A pending file
+# that is emptied, and one that grows past 104857600 bytes, become pending
+# deletions; once they hold 1 byte to 100 MiB again they are pending files
+# with their new hashes. The clock moves before each outside change so that
+# the folder's time moves (specs/conformance/media-ops.md F12).
+id: sync/media/tracking/skip-transitions
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: keep.jpg, text: "keep"}
+    - {name: grow.bin, text: "small"}
+    - {name: empty.png, text: "e"}
+steps:
+  - observe: [media_quick_check]
+  - advance: 1s
+  - media_outside:
+      - {name: grow.bin, fill: {size: 104857601, byte: 1}}
+      - {name: empty.png, text: ""}
+      - {name: .DS_Store, text: "finder"}
+      - {name: Thumbs.db, text: "explorer"}
+      - {name: new-empty.png, text: ""}
+  - observe: [media_quick_check]
+  - advance: 1s
+  - media_outside:
+      - {name: grow.bin, text: "small again"}
+      - {name: empty.png, text: "e2"}
+      - {name: new-empty.png, text: "filled"}
+  - observe: [media_quick_check]

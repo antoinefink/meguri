@@ -1,0 +1,26 @@
+# Reset, then media sync against a server that already holds the same
+# files (specs/sync/media-tracking.md T11, R1502): client_a uploads three
+# files, Meguri downloads them, resets its media sync state, and its next
+# media sync transfers nothing and leaves nothing pending. After the reset
+# every file is pending, as for a client that never synced.
+id: sync/media/tracking/reset-identical
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+actors: [client_a, meguri]
+setup:
+  media_files:
+    - {name: a.mp3, text: "alpha"}
+    - {name: b.jpg, text: "bravo"}
+    - {name: c.png, text: "charlie"}
+steps:
+  - sync: {kind: login}
+  - media_sync: {}
+  - advance: 1m
+  - actor: meguri
+  - sync: {kind: login}
+  - media_sync: {}
+  - observe: [media_pending]
+  - advance: 1m
+  - media_reset: {}
+  - observe: [media_pending]
+  - media_sync: {}
+  - observe: [media_pending, media_dir]

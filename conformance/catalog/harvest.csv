@@ -1025,7 +1025,7 @@ h46c1ebf32143,rust,supplementary,sync,not-applicable,"Receiving an upload while 
 h54c23550e27f,rust,tag,sync,in-scope,"a sync the server cannot apply (a note whose note type it lacks) fails with the database-check kind and leaves both sides able to sync again; the scenario needs a driver kind that tells this failure from a failed sanity check (U107), meguri-sync stub tests cover the status mapping meanwhile",,deferred
 h55c7436ac179,rust,tag,sync,in-scope,U111/U117: a media sanity-count mismatch must be distinguished from a matching count and trigger the defined recovery path.,,deferred
 h59143f82a4f9,rust,tag,sync,in-scope,"a transfer that stops moving fails after the stall timeout while a steady one never times out; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
-h5c5b47431921,rust,tag,sync,in-scope,"registering outside additions, rewrites and removals in the media folder",media/register/outside-changes,done
+h5c5b47431921,rust,tag,sync,in-scope,"registering outside additions, rewrites and removals in the media folder, and the folder-time shortcut",media/register/outside-changes sync/media/tracking/quick-check sync/media/tracking/skip-transitions,done
 h62b3f29862b5,rust,tag,sync,not-applicable,Accepting a media-session start through an alternate HTTP method tests server routing; Meguri does not expose that server endpoint (R1879).,,done
 h65243b54e871,rust,tag,sync,in-scope,"U111/U117: externally added media, edited content and deletions must propagate in both directions and leave both clients with matching live files.",,deferred
 h6b1ce6691f8e,rust,tag,sync,in-scope,"a never-synced new collection against a new account finds no changes online, and a sync then writes nothing",sync/meta/status,done

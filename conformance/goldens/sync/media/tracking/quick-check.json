@@ -1,0 +1,54 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "media_quick_check": {
+          "f.jpg": "3096162fbd55879be22401d1d65d5904893354f3",
+          "g.jpg": "4788e8da4ac944791115f4f4bd6112765eb340a6"
+        }
+      },
+      {},
+      {
+        "media_quick_check": {
+          "f.jpg": "3096162fbd55879be22401d1d65d5904893354f3",
+          "g.jpg": "4788e8da4ac944791115f4f4bd6112765eb340a6"
+        }
+      },
+      {},
+      {},
+      {
+        "media_dir": {
+          "clip.mp3": {
+            "sha1": "e3a93fa81145b26d1eb0f2cc8c6863142df2c832",
+            "size": 4
+          },
+          "f.jpg": {
+            "sha1": "a8d71aa69a7f36014978b4d918ddbbdaae16de6c",
+            "size": 5
+          },
+          "g.jpg": {
+            "sha1": "4788e8da4ac944791115f4f4bd6112765eb340a6",
+            "size": 5
+          }
+        },
+        "media_quick_check": {
+          "clip.mp3": "e3a93fa81145b26d1eb0f2cc8c6863142df2c832",
+          "f.jpg": "3096162fbd55879be22401d1d65d5904893354f3",
+          "g.jpg": "4788e8da4ac944791115f4f4bd6112765eb340a6"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "11fa83ab09fcb04e1b83ed3e81a1c4b3683d5e5245a315306d1e1fea6afc85f8",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sync/media/tracking/quick-check",
+  "scenario_sha256": "46b99ef91a78a7c5909cd9bd689c800f07df5771abad1a8ea417e73957763a58",
+  "tz": "UTC"
+}

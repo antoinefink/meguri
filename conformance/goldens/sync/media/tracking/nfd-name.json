@@ -1,0 +1,38 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "media_dir": {
+          "café.mp3": {
+            "sha1": "91c489cb245f6627d97c2c8a047398017897eaae",
+            "size": 3
+          },
+          "plain.png": {
+            "sha1": "4b369ec8d5ad47a8e3f8144d219e077a293d3840",
+            "size": 3
+          }
+        },
+        "media_quick_check": {
+          "plain.png": "4b369ec8d5ad47a8e3f8144d219e077a293d3840"
+        }
+      },
+      {
+        "media_quick_check": {
+          "plain.png": "4b369ec8d5ad47a8e3f8144d219e077a293d3840"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "11fa83ab09fcb04e1b83ed3e81a1c4b3683d5e5245a315306d1e1fea6afc85f8",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sync/media/tracking/nfd-name",
+  "scenario_sha256": "3259d5ce3e3f58162a191cc2365cf282de05f718c78e3c45507d55fafe15dfc6",
+  "tz": "UTC"
+}

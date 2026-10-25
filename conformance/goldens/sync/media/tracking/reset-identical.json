@@ -1,0 +1,83 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {
+        "media_sync": {
+          "downloaded_deletions": 0,
+          "downloaded_files": 0,
+          "uploaded_deletions": 0,
+          "uploaded_files": 3
+        }
+      },
+      {},
+      {},
+      {
+        "sync": {
+          "result": "ok"
+        }
+      },
+      {
+        "media_sync": {
+          "downloaded_deletions": 0,
+          "downloaded_files": 3,
+          "uploaded_deletions": 0,
+          "uploaded_files": 0
+        }
+      },
+      {
+        "media_pending": {}
+      },
+      {},
+      {},
+      {
+        "media_pending": {
+          "a.mp3": "be76331b95dfc399cd776d2fc68021e0db03cc4f",
+          "b.jpg": "962665711e0e6ff33104712f82068162cdb1f9c0",
+          "c.png": "d8cd10b920dcbdb5163ca0185e402357bc27c265"
+        }
+      },
+      {
+        "media_sync": {
+          "downloaded_deletions": 0,
+          "downloaded_files": 0,
+          "uploaded_deletions": 0,
+          "uploaded_files": 0
+        }
+      },
+      {
+        "media_dir": {
+          "a.mp3": {
+            "sha1": "be76331b95dfc399cd776d2fc68021e0db03cc4f",
+            "size": 5
+          },
+          "b.jpg": {
+            "sha1": "962665711e0e6ff33104712f82068162cdb1f9c0",
+            "size": 5
+          },
+          "c.png": {
+            "sha1": "d8cd10b920dcbdb5163ca0185e402357bc27c265",
+            "size": 7
+          }
+        },
+        "media_pending": {}
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "11fa83ab09fcb04e1b83ed3e81a1c4b3683d5e5245a315306d1e1fea6afc85f8",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sync/media/tracking/reset-identical",
+  "scenario_sha256": "b5a5045a5d4e2e21af010c3f47d52c54b8c3346e9e3c015bd61b9e09184f83c0",
+  "tz": "UTC"
+}

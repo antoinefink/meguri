@@ -261,3 +261,12 @@ apkg_legacy
 anki21b
 # Backup ops (backup-ops.md, U126): the backups config key's member.
 minimum_interval_mins
+
+# Media sync ops, observation and output members (media-sync-ops.md, U110).
+media_quick_check
+media_reset
+media_sync
+uploaded_files
+uploaded_deletions
+downloaded_files
+downloaded_deletions

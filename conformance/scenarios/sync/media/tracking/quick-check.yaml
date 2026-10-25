@@ -1,0 +1,22 @@
+# The change check a media sync begins with (specs/sync/media-tracking.md
+# T4): the first check lists the folder and registers both files. A rewrite
+# in place in the same instant leaves the folder's time equal to the marker,
+# so the next check lists nothing and the rewrite goes unseen. A new file a
+# second later moves the folder's time: the check lists the folder and adds
+# clip.mp3, while f.jpg, whose size and time still match its entry, is not
+# hashed again and keeps its first hash (media_dir shows the bytes on disk).
+id: sync/media/tracking/quick-check
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: f.jpg, text: "f one"}
+    - {name: g.jpg, text: "g one"}
+steps:
+  - observe: [media_quick_check]
+  - media_outside:
+      - {name: f.jpg, text: "f two"}
+  - observe: [media_quick_check]
+  - advance: 1s
+  - media_outside:
+      - {name: clip.mp3, text: "clip"}
+  - observe: [media_quick_check, media_dir]

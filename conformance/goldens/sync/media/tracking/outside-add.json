@@ -1,0 +1,33 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "media_quick_check": {}
+      },
+      {},
+      {},
+      {
+        "media_quick_check": {
+          "clip.mp3": "5788972c4ea36bfdd985ad8c2d17ba8b6eb4d63a"
+        }
+      },
+      {
+        "media_quick_check": {
+          "clip.mp3": "5788972c4ea36bfdd985ad8c2d17ba8b6eb4d63a"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "11fa83ab09fcb04e1b83ed3e81a1c4b3683d5e5245a315306d1e1fea6afc85f8",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sync/media/tracking/outside-add",
+  "scenario_sha256": "92d121abcc9de5b7c1e78ec59f2685525d42a4e303de8228249f615d0f49af94",
+  "tz": "UTC"
+}

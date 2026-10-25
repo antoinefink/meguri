@@ -1,0 +1,12 @@
+# AE79 slice (specs/sync/media-tracking.md T4.3): a tool writes clip.mp3
+# straight into the media folder. The next change check finds exactly one
+# pending add, and a check with nothing new reports the same single entry.
+id: sync/media/tracking/outside-add
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe: [media_quick_check]
+  - advance: 1s
+  - media_outside:
+      - {name: clip.mp3, text: "subtitle clip audio"}
+  - observe: [media_quick_check]
+  - observe: [media_quick_check]

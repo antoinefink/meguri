@@ -1,0 +1,33 @@
+# Reset with changes pending (specs/sync/media-tracking.md T11): after
+# Meguri has the server's three files, b.jpg is deleted and d.gif added in
+# the folder, and the change check records both. The reset forgets the
+# deletion: the next media sync downloads b.jpg again and uploads d.gif,
+# which then reaches client_a.
+id: sync/media/tracking/reset-pending
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+actors: [client_a, meguri]
+setup:
+  media_files:
+    - {name: a.mp3, text: "alpha"}
+    - {name: b.jpg, text: "bravo"}
+    - {name: c.png, text: "charlie"}
+steps:
+  - sync: {kind: login}
+  - media_sync: {}
+  - advance: 1m
+  - actor: meguri
+  - sync: {kind: login}
+  - media_sync: {}
+  - advance: 1m
+  - media_outside:
+      - {name: d.gif, text: "delta"}
+      - {name: b.jpg, remove: true}
+  - observe: [media_quick_check]
+  - media_reset: {}
+  - observe: [media_pending]
+  - media_sync: {}
+  - observe: [media_pending, media_dir]
+  - advance: 1m
+  - actor: client_a
+  - media_sync: {}
+  - observe: [media_dir]

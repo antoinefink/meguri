@@ -865,3 +865,27 @@ deviations:
     scenarios: [sync/holdback/deleted-note]
     pointer: /steps/26/db_exec/rows
     transform: {replace: [[0]]}
+  # specs/sync/media-tracking.md T5: Meguri renames a media file whose name is
+  # not in NFC to its NFC form on every platform and registers that name
+  # (R1574). Anki registers it under its NFC form only on Apple platforms and
+  # skips it elsewhere, so the oracle (Linux) neither registers nor renames it.
+  - id: media-nfd-renamed-check
+    requirement: R1574
+    summary: The NFD-named café.mp3 is registered as the NFC name café.mp3 and is pending, at both checks; no deletion of the NFD name is recorded. Anki on Linux skips the file.
+    test: sync/media/tracking/nfd-name
+    scenarios: [sync/media/tracking/nfd-name]
+    pointer: /steps/*/media_quick_check
+    transform:
+      replace:
+        "café.mp3": "91c489cb245f6627d97c2c8a047398017897eaae"
+        plain.png: "4b369ec8d5ad47a8e3f8144d219e077a293d3840"
+  - id: media-nfd-renamed-dir
+    requirement: R1574
+    summary: The folder lists the file under its NFC name after the check renamed it; Anki leaves the NFD name on disk.
+    test: sync/media/tracking/nfd-name
+    scenarios: [sync/media/tracking/nfd-name]
+    pointer: /steps/0/media_dir
+    transform:
+      replace:
+        "café.mp3": {sha1: "91c489cb245f6627d97c2c8a047398017897eaae", size: 3}
+        plain.png: {sha1: "4b369ec8d5ad47a8e3f8144d219e077a293d3840", size: 3}

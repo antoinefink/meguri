@@ -29,7 +29,22 @@ later removes a rejected comment; no test condition changes.
 
 The six prepared scenarios/goldens and related neutral contracts have been
 recovered byte-for-byte from `0387ff4d` into a separate intake packet. They are
-not integrated or certified here. Quick-check/reset grammar and adapters,
-remaining edge cases, measured T10/T12 budgets, the 19k resume check and the
+integrated with additive shared-contract updates and independent intake review.
+All 12 scenario/golden files match their prepared hashes. Runtime and freshness
+checks are not yet certified here. Quick-check/reset grammar and adapters,
+remaining edge cases, measured T10/T12 budgets and the
 required original-base batch gate remain pending. No Unit trailer or U110
 acceptance is claimed.
+
+## Large upload resume check
+
+Focused Docker run `20261025T193326Z-15565` passes the enabled 19,000-file
+regression. It cancels after 9,500 acknowledgements, resumes the remaining
+9,500, checks every uploaded name occurs once, and checks one inventory per
+push. This uses the production media stage with the controlled local test
+transport. It does not supply reference-server parity, device budgets or UI
+acceptance. Source was clean at `8a9cf700` for this run.
+
+Prepared intake review `meguri-u110-intake-review-r1.json` has no P0–P2
+findings. Original source-session records were recovered through the session
+store in `729430fa`, `a674aac7` and `56b1f153`. No Unit trailer.

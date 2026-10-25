@@ -1,0 +1,15 @@
+# A file whose name is in NFD (specs/sync/media-tracking.md T5): Meguri
+# renames it to its NFC form and registers that name, and records nothing
+# for the NFD name, also at the next check after the rename moved the
+# folder's time. The oracle runs Anki on Linux, which skips names that are
+# not in NFC; conformance/deviations.yaml holds Meguri's values
+# (media-nfd-renamed-check, media-nfd-renamed-dir).
+id: sync/media/tracking/nfd-name
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: "café.mp3", text: "nfd"}
+    - {name: plain.png, text: "nfc"}
+steps:
+  - observe: [media_quick_check, media_dir]
+  - observe: [media_quick_check]

@@ -14,7 +14,7 @@ What normal, one-way and media sync do to data (R1926–R1933) is the sync area'
 - A scenario that declares `actors` is an actor scenario. Each actor is one client with its own collection. All actors sync with one Anki sync server that exists for one run of the scenario (S3).
 - An actor scenario needs the oracle for its server, so it is live (dsl.md D9): T0 never runs it (S10.2).
 - An actor scenario has no `handoff` step: single-collection live chains (D9.2) and actors do not mix.
-- The top-level key `server` and the ops `actor`, `sync`, `net_fault` and `converge` exist only in actor scenarios. `reopen` and the observation `db_dump` work in every scenario.
+- The top-level key `server` and the ops `actor`, `sync`, `net_fault`, `converge` and `media_sync` (`media-sync-ops.md` V3) exist only in actor scenarios. `reopen` and the observation `db_dump` work in every scenario.
 
 ## S2. Actors
 
