@@ -1,0 +1,58 @@
+# Decks, presets and note types merge by modification time, and ties go to
+# the incoming side on both ends (R1524; specs/sync/normal-sync.md N5.2 to
+# N5.4, N5.8):
+# - deck Words: both sides change it at 10:03, a tie. The server takes the
+#   Meguri actor's version and the Meguri actor takes the server's (client_a's):
+#   they end holding each other's version, and client_a's next round takes
+#   the Meguri actor's from the server.
+# - deck Verbs: client_a at 10:03, the Meguri actor at 10:05: the Meguri
+#   actor's version wins everywhere.
+# - preset Slow: the Meguri actor at 10:03, client_a at 10:04: client_a's
+#   version wins everywhere.
+# - note type Pair: client_a changes its CSS at 10:03; on the Meguri actor
+#   Pair is not pending but carries a later `mtime_secs` (written with
+#   db_exec), so it keeps its own and sends nothing: the parties differ.
+# 10:03 is epoch second 1894701780, 10:05 is 1894701900.
+id: sync/conflicts/object-mtime
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  presets: [{name: Slow, new_per_day: 5}]
+  decks:
+    - {name: Words, preset: Slow}
+    - Verbs
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - advance: 1m
+  - legacy_update: {deck: Words, patch: {desc: "Words, as the Meguri actor has them", mod: 1894701780, usn: -1}}
+  - legacy_update: {preset: Slow, patch: {maxTaken: 50}}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = mtime_secs + 7200 WHERE name = 'Pair'"}
+  - actor: client_a
+  - legacy_update: {deck: Words, patch: {desc: "Words, as client_a has them", mod: 1894701780, usn: -1}}
+  - legacy_update: {deck: Verbs, patch: {desc: "Verbs, as client_a has them", mod: 1894701780, usn: -1}}
+  - legacy_update: {notetype: Pair, patch: {css: ".card { color: navy; }", mod: 1894701780, usn: -1}}
+  - advance: 1m
+  - legacy_update: {preset: Slow, patch: {maxTaken: 70}}
+  - sync: {kind: normal}
+  - actor: meguri
+  - advance: 1m
+  - legacy_update: {deck: Verbs, patch: {desc: "Verbs, as the Meguri actor has them", mod: 1894701900, usn: -1}}
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [decks, deck_config, notetypes]}
+  - actor: client_a
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [decks, deck_config, notetypes]}

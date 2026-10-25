@@ -1,0 +1,60 @@
+# A normal sync in both directions (specs/sync/normal-sync.md N3 to N9;
+# R1519, R1521, R1523, R1527, R1529, R1531). After client_a uploads and the
+# Meguri actor downloads, client_a adds three notes and answers five cards,
+# then syncs; the Meguri actor syncs and receives them. It then adds a note,
+# answers a card and edits a note, and syncs; client_a receives those. The
+# dumps after each round pin rows and stamps per party (`col.mod`, `ls`,
+# `usn`, every row's `usn`), and all parties converge.
+# 10:03 is epoch second 1894701780.
+id: sync/normal/two-way
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Words, fields: [sun, sol]}
+    - {notetype: Pair, deck: Words, fields: [moon, luna]}
+    - {notetype: Pair, deck: Words, fields: [star, estrella]}
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - actor: client_a
+  - advance: 1m
+  - add_note: {notetype: Pair, deck: Words, fields: [sky, cielo]}
+  - add_note: {notetype: Pair, deck: Words, fields: [sea, mar]}
+  - add_note: {notetype: Pair, deck: Words, fields: ["730107", "830107"]}
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - answer: {card: "#c2", rating: again, time_ms: 9000}
+  - answer: {card: "#c3", rating: easy, time_ms: 2000}
+  - answer: {card: "#c4", rating: hard, time_ms: 6000}
+  - answer: {card: "#c5", rating: good, time_ms: 4000}
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, revlog]}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, revlog, decks, deck_config, notetypes, graves, tags]}
+  - advance: 1m
+  - add_note: {notetype: Pair, deck: Words, fields: [wind, viento]}
+  - answer: {card: "#c6", rating: good, time_ms: 5000}
+  - edit_note: {note: "#n1", fields: [sun, "sol; astro"]}
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, revlog, decks]}
+  - actor: client_a
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, revlog, decks]}
+  - converge: {}

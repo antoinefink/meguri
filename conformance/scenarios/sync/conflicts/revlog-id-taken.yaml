@@ -1,0 +1,40 @@
+# A review row is inserted only when no row holds its id (R1527; specs/sync/
+# normal-sync.md N6.1; storage/ids-usn-mtime.md I4). client_a answers card #c1
+# and the Meguri actor answers card #c2 at the same instant, so both review
+# rows get the same id. The Meguri actor ignores the incoming row and sends
+# its own, which the server ignores in turn: each side keeps its own row,
+# while the card rows travel as usual. The sanity counts still agree.
+id: sync/conflicts/revlog-id-taken
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Words, fields: [sun, sol]}
+    - {notetype: Pair, deck: Words, fields: [moon, luna]}
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - advance: 1m
+  - answer: {card: "#c2", rating: good, time_ms: 2000}
+  - actor: client_a
+  - answer: {card: "#c1", rating: easy, time_ms: 7000}
+  - advance: 1m
+  - sync: {kind: normal}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe: ["card(#c1)", "card(#c2)", "revlog(#c1)", "revlog(#c2)"]
+  - actor: client_a
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe: ["card(#c1)", "card(#c2)", "revlog(#c1)", "revlog(#c2)"]

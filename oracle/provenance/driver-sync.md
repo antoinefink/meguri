@@ -37,3 +37,15 @@ S4.2, S4.4; `specs/sync/meta-status.md` M6); no code was copied.
 | `pylib/anki/collection.py`, `pylib/anki/sync.py`, `proto/anki/sync.proto` | `sync_status(auth)` and its three required values (no changes, normal sync, full sync) |
 | `rslib/src/backend/sync.rs` | the status answers from the col row first, then from an answer the backend remembers for 300 s, then asks `meta`; a collection sync and a successful one-way sync store their own outcome there; the memory belongs to the backend, so the op runs on the actor's open collection and never reopens it |
 | `rslib/src/sync/collection/status.rs`, `rslib/src/collection/timestamps.rs` | the offline answer from `ls`, `scm` and `mod`; the online check is the same as a collection sync's, so a refused clock reaches Python as the same sync error, mapped to `clock_incorrect` as for `normal` |
+
+## `sanity_check_failed`, `db_check_required` and `review_session` (U107)
+
+Read at tag 26.09.3 for the two rejections and the `review_session` op of
+`ops/sync_client.py` (`sync-ops.md` S4.4, S13); no code was copied.
+`review_session` does nothing on the oracle and needed no Anki source.
+
+| Anki file | Read for |
+|---|---|
+| `rslib/src/error/network.rs`, `rslib/src/backend/error.rs` | an HTTP 400 is the database-check sync kind and a refused sanity check its own kind; both reach Python as `SyncError` of the "other" kind with the same message, the translation of `sync-sanity-check-failed` (`ftl/core/sync.ftl`); a 500 is the server-error kind with another message |
+| `rslib/src/sync/collection/normal.rs`, `rslib/src/collection/timestamps.rs`, `rslib/src/storage/collection_timestamps.rs` | a failed round is rolled back and aborted; only a refused sanity check then sets `scm` to the current instant, touching no other `col` column, so the driver tells the two apart by the actor's `scm` before and after the `normal` |
+| `rslib/src/sync/collection/protocol.rs` | the method names under `/sync/` (`applyChanges`, `download`) the driver tests fail with a stand-in recorder |

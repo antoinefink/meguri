@@ -1,0 +1,50 @@
+# The server cannot apply a request of the round (specs/sync/normal-sync.md
+# N10, N13; errors.md E4; R1532). The Meguri actor adds a note type and a note
+# of it, then marks the note type as already synced (db_exec), so its round
+# sends the note without its note type. The server answers that applyChunk
+# with HTTP 400: the round fails with db_check_required, the actor's
+# collection is as before the round (its rows still pending, `scm`
+# unchanged), and the server keeps nothing of it. The next round fails the
+# same way: no one-way sync is forced. client_a syncs normally with nothing
+# new.
+id: sync/conflicts/server-refuses
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - advance: 1m
+  - add_notetype:
+      name: Trio
+      fields: [Word, Meaning]
+      templates: [{name: Recall, front: "{{Meaning}}", back: "{{Word}}"}]
+  - add_note: {notetype: Trio, deck: Words, fields: ["730108", "830108"]}
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - db_exec: {sql: "UPDATE notetypes SET usn = 0 WHERE name = 'Trio'"}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, revlog]}
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, revlog]}
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col]}
+  - actor: client_a
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, revlog]}

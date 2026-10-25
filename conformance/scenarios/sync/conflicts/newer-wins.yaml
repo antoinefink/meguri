@@ -1,0 +1,52 @@
+# The later edit wins (R1527; specs/sync/normal-sync.md N6.2, N6.3):
+# - note #n1: client_a edits it at 10:04, the Meguri actor at 10:05; the
+#   Meguri actor keeps its pending note and sends it, and the server takes it;
+# - note #n2: the Meguri actor edits it at 10:03, client_a at 10:04; the
+#   incoming note replaces the pending local one, which is then not sent;
+# - card #c3: client_a flags it at 10:04, which keeps its `mod` of 10:00
+#   (tags/flags-and-marked.md F2); on the Meguri actor it is not pending but
+#   its `mod` is an hour later (written with db_exec): a card that is not
+#   pending is replaced whatever its `mod`.
+# Every party converges on the newer versions.
+id: sync/conflicts/newer-wins
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Words, fields: [sun, sol]}
+    - {notetype: Pair, deck: Words, fields: [moon, luna]}
+    - {notetype: Pair, deck: Words, fields: [star, estrella]}
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - advance: 1m
+  - edit_note: {note: "#n2", fields: [moon, "luna (meguri)"]}
+  - db_exec: {sql: "UPDATE cards SET mod = mod + 3600 WHERE id = (SELECT max(id) FROM cards)"}
+  - actor: client_a
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: [sun, "sol (desktop)"]}
+  - edit_note: {note: "#n2", fields: [moon, "luna (desktop)"]}
+  - set_flag: {cards: ["#c3"], flag: 2}
+  - sync: {kind: normal}
+  - actor: meguri
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: [sun, "sol (meguri)"]}
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [notes, cards]}
+  - actor: client_a
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [notes, cards]}
+  - converge: {}

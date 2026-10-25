@@ -1,0 +1,48 @@
+# AE64 (R1530, R1533; specs/sync/normal-sync.md N8, N10): the Meguri actor
+# adds a note and then marks its note and card as already synced (db_exec), so
+# its round sends nothing of them and its counts exceed the server's. The
+# server answers the sanity check with `bad`: the round fails with
+# sanity_check_failed, the actor's collection is as before the round except
+# `scm`, which is now the failure's instant, and the server keeps nothing of
+# the round. The actor's next status check calls for a one-way sync, while
+# client_a still syncs normally with nothing new.
+# 10:04 is epoch second 1894701840.
+id: sync/conflicts/sanity-bad
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Words, fields: [sun, sol]}
+    - {notetype: Pair, deck: Words, fields: [moon, luna]}
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - advance: 1m
+  - add_note: {notetype: Pair, deck: Words, fields: [star, estrella]}
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - db_exec: {sql: "UPDATE notes SET usn = 0 WHERE id = (SELECT max(id) FROM notes)"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0 WHERE id = (SELECT max(id) FROM cards)"}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, revlog]}
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, revlog]}
+  - advance: 1m
+  - sync: {kind: normal}
+  - sync: {kind: status}
+  - actor: client_a
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, revlog]}

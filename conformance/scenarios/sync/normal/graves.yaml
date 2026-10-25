@@ -1,0 +1,47 @@
+# Deletions in both directions (specs/sync/normal-sync.md N4; storage/
+# graves.md G2, G4; R1521, R1522). client_a deletes a note and syncs; the
+# Meguri actor deletes another note, then syncs: it sends its graves, removes
+# client_a's note and card and stores their graves with its own round's usn.
+# client_a then receives the Meguri actor's graves with its own round's usn.
+# The parties hold the same rows but different grave stamps, so they are
+# compared by their dumps, not by converge (specs/conformance/sync-ops.md S12).
+id: sync/normal/graves
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Words, fields: [sun, sol]}
+    - {notetype: Pair, deck: Words, fields: [moon, luna]}
+    - {notetype: Pair, deck: Words, fields: [star, estrella]}
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - actor: client_a
+  - advance: 1m
+  - delete_notes: {notes: ["#n1"]}
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, graves]}
+  - actor: meguri
+  - advance: 1m
+  - delete_notes: {notes: ["#n2"]}
+  - observe:
+      - db_dump: {tables: [graves]}
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, graves]}
+  - actor: client_a
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, graves]}

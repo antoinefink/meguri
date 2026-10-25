@@ -1,0 +1,45 @@
+# The day rolled over since the last unbury: the cards buried on the Meguri
+# actor are restored before the round exchanges anything (specs/sync/
+# normal-sync.md N2; sched/day-clock.md D7; R1520, R599). Card #c1 is buried
+# by the user and #c2 by the scheduler (written with db_exec on day 0, which
+# stamps nothing). A day later client_a adds a note and syncs, so the Meguri
+# actor's round is a normal one in which the server's config, with the
+# server's own `lastUnburied`, replaces the actor's: had the actor not
+# unburied before the exchange, its cards would stay buried. Afterwards both
+# cards are back in the new queue with their `mod` and `usn` unchanged.
+# The clock moves straight from the burial to the actor's sync, so both
+# executors run their day query at the same instant (sched/day-clock.md
+# D14.2).
+id: sync/normal/unbury-before-sync
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Words, fields: [sun, sol]}
+    - {notetype: Pair, deck: Words, fields: [moon, luna]}
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - advance: 1m
+  - db_exec: {sql: "UPDATE cards SET queue = -3 WHERE id = (SELECT min(id) FROM cards)"}
+  - db_exec: {sql: "UPDATE cards SET queue = -2 WHERE id = (SELECT max(id) FROM cards)"}
+  - db_exec: {sql: "SELECT queue, mod, usn FROM cards ORDER BY id"}
+  - actor: client_a
+  - advance: 1d
+  - add_note: {notetype: Pair, deck: Words, fields: [star, estrella]}
+  - sync: {kind: normal}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe: ["card(#c1)", "card(#c2)"]
+  - db_exec: {sql: "SELECT queue, mod, usn FROM cards ORDER BY id"}

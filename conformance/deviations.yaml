@@ -759,3 +759,109 @@ deviations:
     scenarios: [package/backup-triggers/reopen]
     pointer: /steps/3/backup
     transform: {replace: {name: null}}
+
+  - id: sync-holdback-newest-answer-undo
+    requirement: R726
+    summary: After the sync in a session of 30 answers, the 30th answer can still be undone on Meguri; Anki's undo history is empty.
+    test: sync/holdback/newest-answer
+    scenarios: [sync/holdback/newest-answer]
+    pointer: /steps/41/undo_status
+    transform: {replace: {undo: answer_card, redo: null}}
+  - id: sync-holdback-newest-answer-status
+    requirement: R726
+    summary: The held-back answer is still pending, so Meguri's sync status right after the sync reports a normal sync; Anki remembers no changes.
+    test: sync/holdback/newest-answer
+    scenarios: [sync/holdback/newest-answer]
+    pointer: /steps/42/sync
+    transform: {replace: {result: normal_sync}}
+  - id: sync-holdback-newest-answer-revlog
+    requirement: R726
+    summary: A client that downloads after the sync holds 29 review rows, not 30.
+    test: sync/holdback/newest-answer
+    scenarios: [sync/holdback/newest-answer]
+    pointer: /steps/47/db_exec/rows
+    transform: {replace: [[29]]}
+  - id: sync-holdback-newest-answer-card
+    requirement: R726
+    summary: A client that downloads after the sync sees card #c30 as before its answer (new, no reviews).
+    test: sync/holdback/newest-answer
+    scenarios: [sync/holdback/newest-answer]
+    pointer: /steps/48/db_exec/rows
+    transform: {replace: [[0, 0, 0]]}
+  - id: sync-holdback-run-with-flag-undo
+    requirement: R726
+    summary: After the sync, the flag set after the newest answer can still be undone on Meguri.
+    test: sync/holdback/run-with-flag
+    scenarios: [sync/holdback/run-with-flag]
+    pointer: /steps/14/undo_status
+    transform: {replace: {undo: set_flag, redo: null}}
+  - id: sync-holdback-run-with-flag-cards
+    requirement: R726
+    summary: A later download sees the row that #c2 held before its answer and flag.
+    test: sync/holdback/run-with-flag
+    scenarios: [sync/holdback/run-with-flag]
+    pointer: /steps/19/db_exec/rows
+    transform: {replace: [[1, 0], [0, 0], [0, 0]]}
+  - id: sync-holdback-run-with-flag-deck-new
+    requirement: R726
+    summary: The server's deck counts one new card studied today, as the deck stood after the first answer.
+    test: sync/holdback/run-with-flag
+    scenarios: [sync/holdback/run-with-flag]
+    pointer: /steps/20/legacy_json/decks/Words/newToday
+    transform: {replace: [0, 1]}
+  - id: sync-holdback-run-with-flag-deck-time
+    requirement: R726
+    summary: The server's deck counts the 3000 ms of the first answer only.
+    test: sync/holdback/run-with-flag
+    scenarios: [sync/holdback/run-with-flag]
+    pointer: /steps/20/legacy_json/decks/Words/timeToday
+    transform: {replace: [0, 3000]}
+  - id: sync-holdback-incoming-newer-card-pending
+    requirement: R726
+    summary: The held-back answer's review row is still pending after the first round; the card itself was replaced by the newer remote one.
+    test: sync/holdback/incoming-newer-card
+    scenarios: [sync/holdback/incoming-newer-card]
+    pointer: /steps/18/db_exec/rows
+    transform: {replace: [[1]]}
+  - id: sync-holdback-incoming-newer-card-status
+    requirement: R726
+    summary: With that review row pending, Meguri's sync status right after the round reports a normal sync.
+    test: sync/holdback/incoming-newer-card
+    scenarios: [sync/holdback/incoming-newer-card]
+    pointer: /steps/19/sync
+    transform: {replace: {result: normal_sync}}
+  - id: sync-holdback-incoming-newer-card-revlog
+    requirement: R726
+    summary: A client that downloads after the first round holds client_a's review row only.
+    test: sync/holdback/incoming-newer-card
+    scenarios: [sync/holdback/incoming-newer-card]
+    pointer: /steps/24/db_exec/rows
+    transform: {replace: [[1]]}
+  - id: sync-holdback-deck-change-not-applied-names
+    requirement: R726
+    summary: Until the next round sends the deck, the server keeps client_a's rename, so a client that downloads sees Vocabulary.
+    test: sync/holdback/deck-change-not-applied
+    scenarios: [sync/holdback/deck-change-not-applied]
+    pointer: /steps/24/db_exec/rows
+    transform: {replace: [[Default], [Vocabulary]]}
+  - id: sync-holdback-deleted-note-graves
+    requirement: R726
+    summary: The held-back deletion's two graves are still pending after the first round.
+    test: sync/holdback/deleted-note
+    scenarios: [sync/holdback/deleted-note]
+    pointer: /steps/19/db_exec/rows
+    transform: {replace: [[2]]}
+  - id: sync-holdback-deleted-note-notes
+    requirement: R726
+    summary: A client that downloads after the first round still holds the note, in client_a's version.
+    test: sync/holdback/deleted-note
+    scenarios: [sync/holdback/deleted-note]
+    pointer: /steps/25/db_exec/rows
+    transform: {replace: [[3]]}
+  - id: sync-holdback-deleted-note-revlog
+    requirement: R726
+    summary: A client that downloads after the first round holds no review row.
+    test: sync/holdback/deleted-note
+    scenarios: [sync/holdback/deleted-note]
+    pointer: /steps/26/db_exec/rows
+    transform: {replace: [[0]]}

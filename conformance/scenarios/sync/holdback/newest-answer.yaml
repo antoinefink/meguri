@@ -1,0 +1,111 @@
+# AE9, core part (R88, R726, R365; specs/sync/hold-back.md H4, H5, H10):
+# in a review session with 30 answers, a normal sync holds the newest answer
+# back. The server and a client that downloads afterwards hold 29 review rows
+# and card #c30 as it was before its answer, while the Meguri actor can still
+# undo that answer and reports pending changes. Once the session has ended,
+# the next sync uploads it and every party holds all 30.
+# Anki does not sync during a review session (R726), so the oracle playing the
+# Meguri actor uploads all 30 answers at once and keeps nothing undoable: the
+# deviations sync-holdback-newest-answer-* in conformance/deviations.yaml give
+# Meguri's values at the steps where the two differ.
+id: sync/holdback/newest-answer
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri, client_c]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Words, fields: ["front 1", "back 1"]}
+    - {notetype: Pair, deck: Words, fields: ["front 2", "back 2"]}
+    - {notetype: Pair, deck: Words, fields: ["front 3", "back 3"]}
+    - {notetype: Pair, deck: Words, fields: ["front 4", "back 4"]}
+    - {notetype: Pair, deck: Words, fields: ["front 5", "back 5"]}
+    - {notetype: Pair, deck: Words, fields: ["front 6", "back 6"]}
+    - {notetype: Pair, deck: Words, fields: ["front 7", "back 7"]}
+    - {notetype: Pair, deck: Words, fields: ["front 8", "back 8"]}
+    - {notetype: Pair, deck: Words, fields: ["front 9", "back 9"]}
+    - {notetype: Pair, deck: Words, fields: ["front 10", "back 10"]}
+    - {notetype: Pair, deck: Words, fields: ["front 11", "back 11"]}
+    - {notetype: Pair, deck: Words, fields: ["front 12", "back 12"]}
+    - {notetype: Pair, deck: Words, fields: ["front 13", "back 13"]}
+    - {notetype: Pair, deck: Words, fields: ["front 14", "back 14"]}
+    - {notetype: Pair, deck: Words, fields: ["front 15", "back 15"]}
+    - {notetype: Pair, deck: Words, fields: ["front 16", "back 16"]}
+    - {notetype: Pair, deck: Words, fields: ["front 17", "back 17"]}
+    - {notetype: Pair, deck: Words, fields: ["front 18", "back 18"]}
+    - {notetype: Pair, deck: Words, fields: ["front 19", "back 19"]}
+    - {notetype: Pair, deck: Words, fields: ["front 20", "back 20"]}
+    - {notetype: Pair, deck: Words, fields: ["front 21", "back 21"]}
+    - {notetype: Pair, deck: Words, fields: ["front 22", "back 22"]}
+    - {notetype: Pair, deck: Words, fields: ["front 23", "back 23"]}
+    - {notetype: Pair, deck: Words, fields: ["front 24", "back 24"]}
+    - {notetype: Pair, deck: Words, fields: ["front 25", "back 25"]}
+    - {notetype: Pair, deck: Words, fields: ["front 26", "back 26"]}
+    - {notetype: Pair, deck: Words, fields: ["front 27", "back 27"]}
+    - {notetype: Pair, deck: Words, fields: ["front 28", "back 28"]}
+    - {notetype: Pair, deck: Words, fields: ["front 29", "back 29"]}
+    - {notetype: Pair, deck: Words, fields: ["front 30", "back 30"]}
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - advance: 1m
+  - review_session: begin
+  - answer: {card: "#c1", rating: good, time_ms: 1100}
+  - answer: {card: "#c2", rating: good, time_ms: 1200}
+  - answer: {card: "#c3", rating: good, time_ms: 1300}
+  - answer: {card: "#c4", rating: good, time_ms: 1400}
+  - answer: {card: "#c5", rating: good, time_ms: 1500}
+  - answer: {card: "#c6", rating: good, time_ms: 1600}
+  - answer: {card: "#c7", rating: good, time_ms: 1700}
+  - answer: {card: "#c8", rating: good, time_ms: 1800}
+  - answer: {card: "#c9", rating: good, time_ms: 1900}
+  - answer: {card: "#c10", rating: good, time_ms: 2000}
+  - answer: {card: "#c11", rating: good, time_ms: 2100}
+  - answer: {card: "#c12", rating: good, time_ms: 2200}
+  - answer: {card: "#c13", rating: good, time_ms: 2300}
+  - answer: {card: "#c14", rating: good, time_ms: 2400}
+  - answer: {card: "#c15", rating: good, time_ms: 2500}
+  - answer: {card: "#c16", rating: good, time_ms: 2600}
+  - answer: {card: "#c17", rating: good, time_ms: 2700}
+  - answer: {card: "#c18", rating: good, time_ms: 2800}
+  - answer: {card: "#c19", rating: good, time_ms: 2900}
+  - answer: {card: "#c20", rating: good, time_ms: 3000}
+  - answer: {card: "#c21", rating: good, time_ms: 3100}
+  - answer: {card: "#c22", rating: good, time_ms: 3200}
+  - answer: {card: "#c23", rating: good, time_ms: 3300}
+  - answer: {card: "#c24", rating: good, time_ms: 3400}
+  - answer: {card: "#c25", rating: good, time_ms: 3500}
+  - answer: {card: "#c26", rating: good, time_ms: 3600}
+  - answer: {card: "#c27", rating: good, time_ms: 3700}
+  - answer: {card: "#c28", rating: good, time_ms: 3800}
+  - answer: {card: "#c29", rating: good, time_ms: 3900}
+  - answer: {card: "#c30", rating: good, time_ms: 4000}
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe: [undo_status]
+  - sync: {kind: status}
+  - actor: client_c
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - db_exec: {sql: "SELECT count(*) FROM revlog"}
+  - db_exec: {sql: "SELECT reps, type, queue FROM cards ORDER BY id DESC LIMIT 1"}
+  - actor: meguri
+  - advance: 1m
+  - review_session: end
+  - sync: {kind: normal}
+  - observe: [undo_status]
+  - sync: {kind: status}
+  - actor: client_c
+  - advance: 1m
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT count(*) FROM revlog"}
+  - db_exec: {sql: "SELECT reps, type, queue FROM cards ORDER BY id DESC LIMIT 1"}

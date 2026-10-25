@@ -1,0 +1,51 @@
+# Two clients give two different decks, and two different note types, the
+# same name, and sync one after the other (R1524; specs/sync/normal-sync.md
+# N5.9). client_a renames deck Alpha and note type Pair; the Meguri actor
+# renames deck Beta and note type Duo to the same names. In the Meguri actor's
+# round the server receives Beta and Duo first and appends `+` to them, while
+# the Meguri actor appends `+` to the incoming Alpha and Pair, stamped with the
+# round's usn so they are not sent back. Both sides end with the two names
+# swapped; client_a's next round takes the server's names.
+# 10:03 is epoch second 1894701780, 10:04 is 1894701840.
+id: sync/conflicts/name-collisions
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Alpha, Beta]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+    - name: Duo
+      fields: [Question, Answer]
+      templates: [{name: Card, front: "{{Question}}", back: "{{Answer}}"}]
+  notes:
+    - {notetype: Pair, deck: Alpha, fields: [sun, sol]}
+    - {notetype: Duo, deck: Beta, fields: [moon, luna]}
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - actor: client_a
+  - advance: 1m
+  - legacy_update: {deck: Alpha, patch: {name: Gamma, mod: 1894701780, usn: -1}}
+  - legacy_update: {notetype: Pair, patch: {name: Shared, mod: 1894701780, usn: -1}}
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [decks, notetypes]}
+  - actor: meguri
+  - advance: 1m
+  - legacy_update: {deck: Beta, patch: {name: Gamma, mod: 1894701840, usn: -1}}
+  - legacy_update: {notetype: Duo, patch: {name: Shared, mod: 1894701840, usn: -1}}
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [decks, notetypes]}
+  - actor: client_a
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [decks, notetypes]}

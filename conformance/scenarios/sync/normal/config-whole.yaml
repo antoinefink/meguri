@@ -1,0 +1,56 @@
+# The config table travels whole, from the side whose collection was changed
+# later (specs/sync/normal-sync.md N5.1, N5.6, N5.7; storage/config-table.md
+# C9; R1523, R1526).
+# - Round 1: the Meguri actor set a key at 10:03, client_a another at 10:04
+#   and synced, so the server is newer: the Meguri actor receives the server's
+#   whole table (its own key is gone), every row with the round's usn and the
+#   merge time 10:05.
+# - Round 2: the Meguri actor sets a key and moves `crt` back by 60 s (the
+#   same scheduler day), so it is newer: it sends its whole table and `crt`,
+#   and every row of its table takes usn 0; client_a's next round receives
+#   them.
+# The day stays the same, so no scheduler write differs between parties.
+id: sync/normal/config-whole
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - advance: 1m
+  - set_config: {key: x_meguri_first, value: {a: 1, b: [true, "x"]}}
+  - actor: client_a
+  - advance: 1m
+  - set_config: {key: x_desktop, value: [1, 2.5]}
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, config]}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, config]}
+  - advance: 1m
+  - set_config: {key: x_meguri_second, value: "zwei"}
+  - db_exec: {sql: "UPDATE col SET crt = crt - 60"}
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, config]}
+  - actor: client_a
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, config]}
+  - converge: {}

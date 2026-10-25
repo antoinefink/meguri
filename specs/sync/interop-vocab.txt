@@ -65,3 +65,12 @@ freelist_count
 sqlite_stat1
 page_count
 page_size
+# Normal reconciliation and hold-back (U107)
+flds
+mid
+guid
+newToday
+timeToday
+lastUnburied
+curDeck
+normalize_note_text

@@ -1,0 +1,61 @@
+# A note deleted in the held-back run stays deleted when the server sends an
+# edit of it (specs/sync/hold-back.md H10.2; KTD7). client_a edits note #n1
+# and syncs. In a session the Meguri actor answers #c1 and then deletes #n1,
+# so the run [Delete Note, Answer Card] is held back: the round sends neither
+# the graves nor the review, and skips the incoming #n1 because the local
+# deletion is pending and was not sent. The run is dropped. After the session
+# ends, the next round sends the graves and the review, and every party ends
+# without #n1.
+# The oracle playing the Meguri actor sends the graves at once; deviations
+# sync-holdback-deleted-note-* give Meguri's values (R726).
+id: sync/holdback/deleted-note
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri, client_c]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Words, fields: [sun, sol]}
+    - {notetype: Pair, deck: Words, fields: [moon, luna]}
+    - {notetype: Pair, deck: Words, fields: [star, estrella]}
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - actor: client_a
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: [sun, "sol (desktop)"]}
+  - sync: {kind: normal}
+  - actor: meguri
+  - advance: 1m
+  - review_session: begin
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - delete_notes: {notes: ["#n1"]}
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe: [undo_status]
+  - db_exec: {sql: "SELECT count(*) FROM graves WHERE usn = -1"}
+  - db_exec: {sql: "SELECT count(*) FROM notes"}
+  - actor: client_c
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - db_exec: {sql: "SELECT count(*) FROM notes"}
+  - db_exec: {sql: "SELECT count(*) FROM revlog"}
+  - actor: meguri
+  - advance: 1m
+  - review_session: end
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT count(*) FROM graves WHERE usn = -1"}
+  - actor: client_c
+  - advance: 1m
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT count(*) FROM notes"}
+  - db_exec: {sql: "SELECT count(*) FROM revlog"}

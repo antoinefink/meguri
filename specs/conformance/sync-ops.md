@@ -1,7 +1,7 @@
 # Multi-party sync scenarios
 
 Spec: conformance/sync-ops
-Requirements: R1876, R1883, R1884, R1926, R1927, R1932, R1933; R1499 (`auth_failed`), R1559 (`status`)
+Requirements: R1876, R1883, R1884, R1926, R1927, R1932, R1933; R1499 (`auth_failed`), R1559 (`status`), R1530 and R1533 (`sanity_check_failed`), R88 and R726 (`review_session`)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/smoke/sync/, conformance/scenarios/sync/
 
@@ -136,8 +136,11 @@ A sync that fails records `{sync: {error: <kind>}}` (dsl.md D7.3). The list of k
 | `auth_failed` | The server refused the credentials of a `login`, or the host key of any later request, with HTTP 403 (R1499). After it the actor holds no host key, whatever an earlier `login` gave it, so its next `sync` step must be a `login` (S4.2). The actor's collection does not change. |
 | `clock_incorrect` | The status check found the server's clock more than 300 s from the actor's, ahead or behind. Only `normal` and `status` make the status check, so only they get this kind (`status` only when it asks the server). The actor's collection does not change. |
 | `network` | The request did not complete at the network level: the connection was refused, reset or closed before the response's headers arrived, or no data moved for the client's stall timeout. |
+| `sanity_check_failed` | A `normal` whose incremental sync got `bad` from the server's sanity check (`specs/sync/normal-sync.md` N8). The round's changes are undone on the actor and on the server; the actor's schema time becomes the current instant, its modification time, last-sync time and update sequence number stay, so its next `normal` reports a one-way sync. |
+| `db_check_required` | A `normal` whose incremental sync got HTTP 400 from the server on one of its requests: the server could not apply it, for example a note whose note type it lacks (`specs/sync/errors.md` E4). The round's changes are undone on the actor and on the server; the actor's schema time stays, so its next `normal` runs the same round and fails the same way until the data is repaired. |
 
-- Any other failure is a run error (`anki_error` on the oracle) until the sync area adds its kind with the driver (U106, U118). Among these: a server error, a conflict, a failed sanity check, and a connection reset after the response's headers arrived (Anki reports that as a sync error, not a network error).
+- Any other failure is a run error (`anki_error` on the oracle) until the sync area adds its kind with the driver (U111, U118). Among these: a server error, a conflict, and a connection reset after the response's headers arrived (Anki reports that as a sync error, not a network error).
+- Anki's client reports `sanity_check_failed` and `db_check_required` as the same sync error with the same message. They differ in what they leave: only a failed sanity check moves the actor's schema time. An executor tells them apart by that, or by its own error kinds, never by the message (R1887).
 - A failed sync leaves the actor's collection as Anki's client leaves it on that failure. The scenario observes it, and the golden records it.
 - Kinds come from the error's class and kind, never from its message text (R1887).
 
@@ -351,5 +354,21 @@ The parties executor drives one worker per actor scenario through `begin`, `step
 - BLOB digests compare bytes: an actor's dump matches only when Meguri encodes each record's protobuf bytes as Anki does.
 - FSRS memory states inside `cards.data` compare as text, exactly; O7's tolerances do not apply to dumps.
 - `converge` does not check the history fields of S7.3, so it cannot show that a Meguri actor sets the `col` row's `mod`, `usn` and `ls`, or the `usn` and `mtime_secs` of config entries, as Anki does. The sync area pins those per party with `db_dump` observations (`{db_dump: {tables: [col, config]}}`) after each kind of round, in its own scenarios.
-- Media sync, server errors and the other faults of R1932: their kinds and arguments come with U111 and U118, and with the units whose scenarios first reach them (a failed sanity check: U107). Wrong credentials came with U105 (S4.5, `auth_failed`); the `status` kind with U106. `specs/sync/errors.md` E10 maps Meguri's error kinds to this list.
-- Graves and tags a client receives are stamped with the update sequence number of its own round, while the sender and the server hold the earlier round's (oracle, `sync/wire/records-down`). `converge` would report those `usn` columns of a receiver as differences, so scenarios in which deletions or new tags cross a sync observe the parties with `db_dump` instead of `converge`, as `sync/wire/records-down` and `records-up` do. Whether S7.3 should exclude them is open (U107).
+- Media sync, server errors and the other faults of R1932: their kinds and arguments come with U111 and U118. Wrong credentials came with U105 (S4.5, `auth_failed`); the `status` kind with U106; `sanity_check_failed` and `db_check_required` with U107 (S4.4). `specs/sync/errors.md` E10 maps Meguri's error kinds to this list.
+- Graves and tags a client receives are stamped with the update sequence number of its own round, while the sender and the server hold the earlier round's (oracle, `sync/wire/records-down`; `specs/sync/normal-sync.md` N4.3, N5.5). `converge` reports those `usn` columns of a receiver as differences, so scenarios in which deletions or new tags cross a sync observe each party with `db_dump` instead of `converge` (`sync/normal/graves`, `sync/conflicts/deletion-vs-edit`). S7.3 does not exclude them (decided with U107): each party's value is fixed by the rules, and a `db_dump` of the Meguri actor compared with the golden pins it, which an exclusion would hide.
+
+## S13. `review_session`
+
+Meguri holds the newest answers of a review session back from a normal sync (R88, R726; `specs/sync/hold-back.md`). Anki's collection library has no review session, so the scenario language marks one with an op of its own.
+
+```yaml
+- review_session: begin
+- answer: {card: "#c1", rating: good}
+- review_session: end
+```
+
+- **Argument** `begin` or `end`. **Output** none (`{}`). It works on the current actor (on the collection, in a scenario without actors), and changes nothing in the collection.
+- **Meguri.** `begin` opens a review session as U43's active-session registry knows it, without building a queue, selecting a deck or writing anything. While it is open, every undoable op the actor's steps run belongs to it (`engine/undo` M1, the step's session), and `answer` still answers the card it names, with no check of the queue's head. A normal sync of the actor then holds back as `hold-back.md` says. `end` ends the session as dismissing its summary does (KTD6).
+- **Oracle.** Both forms do nothing and record `{}`. The oracle playing a Meguri actor therefore syncs as Anki does: everything pending goes up and the undo history is emptied. Each scenario that shows hold-back lists Meguri's values where they differ in `conformance/deviations.yaml` (`hold-back.md` H17).
+- **Checked when the scenario loads**, per actor in step order: `begin` and `end` alternate, starting with `begin`. A session may stay open at the end. An actor with an open session runs no `reopen`, `full_upload` or `full_download` (they close the collection).
+- **Capability.** Meguri declares `review_session` once its executor has U43's session registry and U107's hold-back (S10.2).

@@ -1,0 +1,53 @@
+# The newest answer and its later flag remain in the captured run
+# (specs/sync/hold-back.md H4; engine/undo.md M8; R88, R726).
+# This round sends #c1's answer and its deck counters. The server retains
+# the row that #c2 held before its answer and flag. Both local steps remain
+# undoable. A later explicit round after the session ends sends the rest.
+# The oracle playing the Meguri actor uploads everything at once; deviations
+# sync-holdback-run-with-flag-* give Meguri's values (R726).
+id: sync/holdback/run-with-flag
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri, client_c]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Words, fields: [sun, sol]}
+    - {notetype: Pair, deck: Words, fields: [moon, luna]}
+    - {notetype: Pair, deck: Words, fields: [star, estrella]}
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - advance: 1m
+  - review_session: begin
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - answer: {card: "#c2", rating: good, time_ms: 4000}
+  - set_flag: {cards: ["#c2"], flag: 3}
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe: [undo_status]
+  - actor: client_c
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - db_exec: {sql: "SELECT reps, flags FROM cards ORDER BY id"}
+  - observe:
+      - legacy_json: {decks: [Words]}
+  - actor: meguri
+  - advance: 1m
+  - review_session: end
+  - sync: {kind: normal}
+  - actor: client_c
+  - advance: 1m
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT reps, flags FROM cards ORDER BY id"}
+  - observe:
+      - legacy_json: {decks: [Words]}

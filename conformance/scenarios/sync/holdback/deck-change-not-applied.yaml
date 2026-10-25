@@ -1,0 +1,56 @@
+# A staged incoming row that targets a row of the held-back run drops the run,
+# even when the merge does not apply it (specs/sync/hold-back.md H10.2, H11;
+# KTD7; R1524). client_a renames deck Words at 10:03 and syncs. In a session
+# the Meguri actor answers #c1 at 10:05, which changes the deck's counts, and
+# syncs at 10:06: it sends nothing (the run is held back and the deck as it
+# was before the run is not pending), and the incoming rename is older than
+# the local deck, so it is not applied. The answer can no longer be undone.
+# The next round sends the deck, and every party ends with the old name.
+# The oracle playing the Meguri actor sends the deck in the first round, so
+# the server holds the old name at once; deviation
+# sync-holdback-deck-change-not-applied-names gives Meguri's value (R726).
+id: sync/holdback/deck-change-not-applied
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri, client_c]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - actor: client_a
+  - advance: 1m
+  - legacy_update: {deck: Words, patch: {name: Vocabulary, mod: 1894701780, usn: -1}}
+  - advance: 1m
+  - sync: {kind: normal}
+  - actor: meguri
+  - advance: 1m
+  - review_session: begin
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe: [undo_status]
+  - db_exec: {sql: "SELECT name FROM decks ORDER BY id"}
+  - actor: client_c
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - db_exec: {sql: "SELECT name FROM decks ORDER BY id"}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: normal}
+  - review_session: end
+  - actor: client_c
+  - advance: 1m
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT name FROM decks ORDER BY id"}
+  - db_exec: {sql: "SELECT count(*) FROM revlog"}
