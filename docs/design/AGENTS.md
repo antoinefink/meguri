@@ -1,6 +1,6 @@
 # docs/design/
 
-- Use system SwiftUI styles by default. Change control styling only for a task or accessibility need; check the native result.
+- Follow the Apple design objective and exception rules in `native-interface-contract.md`. Platform defaults outrank token conventions; check the exact native result.
 
 - Read `brief.md`, `workflow.md` and the active screen contract before UI work. Keep functional checks, user design agreement and final verification separate. HTML feedback does not approve native baselines.
 - Mockups use one navigable entry point under `build/`; never put generated examples in `references/`. Confirm the exact source/product when reviewing a running native app.

@@ -4,10 +4,25 @@ This contract defines Antoine's agreed macOS direction for the current native pr
 Source: Antoine's approved HTML preview and feedback on 2026-10-24.
 The HTML specifies hierarchy and behavior. It does not specify native control measurements.
 
+## Design objective and precedence
+
+Meguri should look and behave like an app designed by Apple on each platform.
+Use native controls and platform defaults for typography, colors, sizing, spacing and interaction.
+Customize only for a concrete functional, compatibility or verified accessibility need.
+Keep exceptions minimal and document the need and verification in the active screen contract or change log.
+Design tokens alone do not justify overrides. Cosmetic exceptions require Antoine's explicit approval.
+Preserve user-authored study-card styling and rendering compatibility.
+
+Antoine approved this direction on 2026-10-25. It takes precedence over R1992, R1994 and KTD20 where they require tokens instead of platform defaults.
+Existing token assets and lint checks constrain justified custom values; they do not require replacing native defaults.
+Keep accessibility checks and functional color meanings. An accessibility override needs evidence from the affected control and state.
+Verify the exact built app visually, including disabled, selected and keyboard-focus states where applicable.
+Passing checks alone do not establish native appearance.
+
 ## N1. Scope and authority
 
 - Use native SwiftUI controls, semantic styles, SF Symbols and macOS menus.
-- Use system styles, control sizes and fonts by default. Change styling only to meet a task or accessibility need.
+- Apply the design objective and exception rules above to every screen and shared component.
 - Keep Settings category navigation visible without a sidebar-toggle toolbar button. Align row labels and controls vertically; avoid excess row space caused by nested control frames.
 - Keep the existing collection, review, import, export and server-transfer behavior functional.
 - Apply shared control lessons to iOS and iPadOS while keeping their native touch targets and navigation patterns. Inspect their native renders too. The agreed workspace composition in this contract targets macOS.

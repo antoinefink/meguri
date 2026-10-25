@@ -1,6 +1,6 @@
 # Meguri design brief
 
-Version 2 (2026-10-24; U9, R2001). This file says what Meguri should feel like and why. `workflow.md` defines the design work before and after code. `rubric.md` turns the brief into rules with ids, `screen-inventory.yaml` lists the screens, `decisions.md` logs Antoine's picks and vetoes, and the component gallery (`designsystem/gallery` route) shows the parts screens are built from.
+Version 3 (2026-10-25; U9, R2001). This file says what Meguri should feel like and why. `workflow.md` defines the design work before and after code. `rubric.md` turns the brief into rules with ids, `screen-inventory.yaml` lists the screens, `decisions.md` logs Antoine's picks and vetoes, and the component gallery (`designsystem/gallery` route) shows justified shared components.
 
 ## Feel
 
@@ -9,8 +9,8 @@ Meguri feels like an app Apple would ship on each platform: calm, quick and quie
 ## Principles
 
 1. **Content first, controls separate.** Card faces, lists and charts are content. Navigation and controls sit on a separate layer in Liquid Glass: the sidebar, tab bar, toolbars, the answer button bar and floating controls (R1996). This describes layers, not a requirement for controls at the top. Content never gets glass, and glass is never stacked on glass.
-2. **System components first.** Lists, forms, split views, tab bars, toolbars, tables, search fields, sheets, inspectors and menus are used wherever they fit (R1995). A custom view is built only when no system component does the job, and then from the gallery's components.
-3. **One vocabulary.** Colours, spacing, corner radii and motion come from named tokens; text uses system text styles; icons are SF Symbols (R1992, R1993, R1998). The same token means the same thing everywhere: New is blue, Learn red, Due green (R32), Again red and Good green (R355).
+2. **Native defaults.** Use system controls and their platform defaults. Customize only for a concrete functional, compatibility or verified accessibility need. Document minimal exceptions under `native-interface-contract.md`; cosmetic exceptions require Antoine's approval.
+3. **Tokens for exceptions.** A shared token does not justify replacing system colors, sizing, spacing, radii or motion. Use tokens only for justified custom values (R1992, R1994, KTD20, as superseded on 2026-10-25). Keep system text styles and SF Symbols (R1993, R1998). Functional color meanings remain: New blue, Learn red, Due green (R32), Again red and Good green (R355).
 4. **Accessible by construction.** Every screen works at the largest Dynamic Type sizes, in dark mode and with Increase Contrast, Reduce Transparency, Reduce Motion, VoiceOver, Voice Control, Switch Control and Full Keyboard Access (R1977–R1982). Colour is never the only cue. Text wraps before it truncates.
 5. **Motion explains change.** Animations show where something came from or went; they are short, and with Reduce Motion they become crossfades or cuts (R1976, R1992). Nothing animates on the review path that would delay the next card.
 6. **Each platform on its own terms.** The Mac has menus, keyboard shortcuts, pointer hover and resizable windows; iPad has the sidebar, inspector, pointer and keyboard; iPhone puts the frequent actions within thumb reach. One design, adapted, never a phone layout stretched to a window.

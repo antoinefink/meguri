@@ -36,9 +36,9 @@
 
 ## Design system
 
-- UI code takes colours, spacing, radii, motion and content widths (`ContentWidth`: a readable column, centred in wide windows) only from `DesignSystem/Tokens/`, text from system styles, icons from SF Symbols, glass only from `DesignSystem/Chrome/` (KTD20). `tools/mg lint-ui` enforces it on every Swift file under `app/` except tests and MeguriCore; inline `swiftlint:` comments fail it, and the only exemption is a reasoned entry in `tools/lint-ui/allowlist.tsv`. Lint is not a build phase: run it before building.
+- Platform defaults take precedence over DesignSystem tokens (Antoine, 2026-10-25; `docs/design/native-interface-contract.md`). Use system semantic colors and implicit layout metrics; do not add styling or fixed content widths to satisfy token conventions. Justified custom values use the existing tokens; glass stays in `DesignSystem/Chrome/`. `tools/mg lint-ui` rejects raw custom values, not unmodified system controls or implicit defaults. Inline `swiftlint:` comments remain forbidden; exceptions go in `tools/lint-ui/allowlist.tsv` with a reason.
 - A new colour token needs a colour set with light, dark and both increased-contrast variants and a `role` naming the backgrounds it is drawn on; `ContrastTests` and `TokenCoverageTests` (`tools/mg swift-test --package MeguriKit`) check them. Increase Contrast has no public environment setter: tests resolve colours with `EnvironmentValues._colorSchemeContrast`, and `NSAppearance`'s high-contrast names do not select the catalog's high-contrast variants.
-- Reusable components go into `ComponentGallery.entries` first (route `designsystem/gallery`, identifiers `designsystem.gallery.<component>.<state>`); the gallery's VStack is deliberately not lazy so UI tests see off-screen entries.
+- Justified custom reusable components go into `ComponentGallery.entries` first (route `designsystem/gallery`, identifiers `designsystem.gallery.<component>.<state>`); direct system components need no wrapper or gallery entry. The gallery's VStack is deliberately not lazy so UI tests see off-screen entries.
 
 ## Collection entry (RF2)
 

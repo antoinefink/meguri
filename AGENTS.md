@@ -29,6 +29,7 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 ## Agent docs
 
+- **Design objective:** Meguri should look and behave like an app designed by Apple. Use native controls and platform defaults for typography, colors, sizing, spacing and interaction. Customize only for a concrete functional, compatibility or verified accessibility need; document minimal exceptions. Design tokens alone do not justify overrides. Preserve user-authored study-card styling. Authority: `docs/design/native-interface-contract.md`.
 - UI work starts with `docs/design/workflow.md` and the active screen contract; a passing build alone is not design agreement. Verify the exact built app when showing a preview.
 
 - Add or update an `AGENTS.md` in a subdirectory when it has conventions or traps the code doesn't make obvious.

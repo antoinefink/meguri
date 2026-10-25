@@ -6,7 +6,7 @@ Use this with `brief.md`, the screen's contract and `rubric.md` before changing 
 
 Write down the screen's main task, its primary action, what must stay visible and what can wait until requested. Use the existing contract or change notes; a second large plan is not needed.
 
-Use native SwiftUI controls with system styles and sizes. A custom style needs a task or accessibility reason.
+Apply the design objective and exception rules in `native-interface-contract.md` across platforms. Preserve system defaults before adding modifiers. Shared tokens and mobile layouts do not justify Mac overrides.
 
 Choose a system pattern for the task. Read the Apple HIG and compare system apps. Use native lists, forms, menus, navigation and Settings, with clear groups, aligned controls and plain text.
 
@@ -44,7 +44,7 @@ Inspect both collapsed and expanded disclosures. Use leading content inside a di
 
 Inspect empty, normal, loading, busy, error and long-content states. Check the main action, alignment, groups, text wrapping and control placement. No clipping does not mean the screen is clear.
 
-Then inspect the exact native build. Record its source commit or input digest and product path. Replacing the wrong running copy invalidates the review; choose the built product by path and confirm its identity. Never use an older prototype as evidence for current production behavior.
+Then inspect the exact native build. Record its source commit or input digest and product path. Replacing the wrong running copy invalidates the review; choose the built product by path and confirm its identity. Never use an older prototype as evidence for current production behavior. Compare overridden controls with unmodified system controls, including disabled, selected and keyboard-focus states. Record each exception's need and verification.
 
 Keep these outcomes separate:
 

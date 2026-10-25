@@ -12,6 +12,8 @@
 # A number in a spacing, padding, inset or radius position is allowed only when
 # it is zero. Patterns skip comments and string literals unless a variant says
 # otherwise.
+# Native platform defaults take precedence (Antoine, 2026-10-25). These patterns
+# constrain explicit custom values; they do not require styling system controls.
 
 only_rules:
   - custom_rules
@@ -20,14 +22,14 @@ custom_rules:
   raw-color:
     name: Raw colour value
     regex: '(?:\b(?:Color(?:\s*\.\s*Resolved)?|UIColor|NSColor|CGColor)\s*(?:\.\s*init\s*)?\(\s*(?:\.\w+\s*,\s*)?(?:red|white|hue|gray|hex|srgbRed|calibratedRed|deviceRed|displayP3Red|calibratedWhite|deviceWhite|calibratedHue|deviceHue|genericGrayGamma2_2Gray)\s*:|#colorLiteral\s*\()'
-    message: "Colours come from ColorToken (DesignSystem/Tokens/ColorTokens.swift and Colors.xcassets), never from raw values (R1992, R1994)."
+    message: "Keep system semantic colors. Justified custom colors use ColorToken, never raw values (native-interface-contract.md)."
     severity: error
     excluded: '/app/Packages/MeguriKit/Sources/DesignSystem/Tokens/'
     excluded_match_kinds: [comment, doccomment, string]
   raw-color--hex-string:
     name: Hex colour literal
     regex: '"#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})"'
-    message: "Hex colour literals are raw colours: use a ColorToken (R1994)."
+    message: "Keep system semantic colors. Justified custom colors use ColorToken, never hex literals (native-interface-contract.md)."
     severity: error
     excluded: '/app/Packages/MeguriKit/Sources/DesignSystem/Tokens/'
     match_kinds: [string]
@@ -42,7 +44,7 @@ custom_rules:
   numeric-spacing:
     name: Numeric spacing
     regex: '(?:\.(?:padding|safeAreaPadding|contentMargins)\s*\(\s*(?:(?:\[[^\]]*\]|\.\w+)\s*,\s*)?|\b(?:spacing|horizontalSpacing|verticalSpacing|minLength)\s*:\s*|\.list(?:Row|Section)Spacing\s*\(\s*|\b(?:NS|UI|NSDirectional)?EdgeInsets\s*\([^)]*?\b(?:top|leading|left|bottom|trailing|right)\s*:\s*)-?(?<![\w.])(?:\d*[1-9]\d*(?:\.\d+)?|\d+\.\d*[1-9]\d*)(?![\w.])'
-    message: "Spacing, padding and insets use Spacing tokens (4-pt scale); only 0 may be written as a number (R1992, R1994)."
+    message: "Keep implicit system spacing. Justified custom spacing uses Spacing tokens; only 0 may be a number (native-interface-contract.md)."
     severity: error
     excluded: '/app/Packages/MeguriKit/Sources/DesignSystem/Tokens/'
     excluded_match_kinds: [comment, doccomment, string]
@@ -50,7 +52,7 @@ custom_rules:
   numeric-radius:
     name: Numeric corner radius
     regex: '(?:\bcornerRadius\s*:\s*|\.cornerRadius\s*\(\s*|\b(?:topLeading|topTrailing|bottomLeading|bottomTrailing)Radius\s*:\s*)(?<![\w.])(?:\d*[1-9]\d*(?:\.\d+)?|\d+\.\d*[1-9]\d*)(?![\w.])'
-    message: "Corner radii use Radius tokens or a concentric shape, never numbers (R1992)."
+    message: "Keep native control shapes. Justified custom radii use Radius tokens or a concentric shape, never numbers (native-interface-contract.md)."
     severity: error
     excluded: '/app/Packages/MeguriKit/Sources/DesignSystem/Tokens/'
     excluded_match_kinds: [comment, doccomment, string]
@@ -58,7 +60,7 @@ custom_rules:
   raw-motion:
     name: Animation outside Motion tokens
     regex: '(?:(?:\bwithAnimation|\.animation)\s*\(\s*(?:Animation\s*)?\.(?:default|linear|easeIn|easeOut|easeInOut|spring|bouncy|snappy|smooth|interactiveSpring|interpolatingSpring|timingCurve)\b|\bAnimation\s*\.\s*(?:linear|easeIn|easeOut|easeInOut|spring|bouncy|snappy|smooth|interactiveSpring|interpolatingSpring|timingCurve)\b|\.transition\s*\(\s*(?:AnyTransition\s*)?\.(?:move|slide|push|scale|offset)\b)'
-    message: "Animations and moving transitions come from Motion tokens, which carry the Reduce Motion alternative (R1992)."
+    message: "Keep automatic system motion. Justified explicit animations use Motion tokens with Reduce Motion alternatives (native-interface-contract.md)."
     severity: error
     excluded: '/app/Packages/MeguriKit/Sources/DesignSystem/Tokens/'
     excluded_match_kinds: [comment, doccomment, string]

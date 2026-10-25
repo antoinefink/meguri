@@ -1,6 +1,6 @@
 # Meguri design rubric
 
-Version 1 (U9, R2001). The critic grades screenshots and contact sheets against these rules and cites them as `rubric v1 <rule id>` (R1983). Rule ids are stable: a rule that changes meaning gets a new id, and a retired rule stays listed as retired. Bump the version when a rule is added, changed or retired, and note it under Changes.
+Version 2 (U9, R2001). The critic grades screenshots and contact sheets against these rules and cites them as `rubric v2 <rule id>` (R1983). Rule ids are stable: a rule that changes meaning gets a new id, and a retired rule stays listed as retired. Bump the version when a rule is added, changed or retired, and note it under Changes.
 
 ## Owners
 
@@ -30,10 +30,11 @@ Each rule has an owner. Where the owner is a tool, the tool's result is the sour
 | Id | Rule | Owner | Usually |
 |---|---|---|---|
 | `platform-system-components` | System components (lists, forms, split views, tab bars, toolbars, tables, search fields, sheets, inspectors, menus) are used wherever they fit (R1995). | critic | high |
+| `platform-native-defaults` | Preserve each platform's default typography, colors, control sizing, spacing and interaction. Overrides need a documented functional, compatibility or verified accessibility reason; tokens alone are not a reason. Compare the exact native build with unmodified system controls, including relevant disabled, selected and focus states. Cosmetic exceptions need Antoine's approval (`native-interface-contract.md`, 2026-10-25). | critic | high |
 | `platform-no-custom-bars` | No custom tab bars, custom navigation bars or hamburger menus (R1995). | `lint:custom-tab-bar`, `lint:custom-navigation-bar`, `lint:hamburger-menu`; critic for look-alikes built under other names | high |
 | `platform-idioms` | Each platform's idioms hold: Mac menus, shortcuts, hover and resizable windows; iPad sidebar, inspector, pointer and keyboard; iPhone thumb reach and navigation stacks. | critic | medium |
 | `platform-adaptivity` | The layout works at every supported width: small and large iPhone, iPad compact and regular, resizable iPhone windows, Mac windows from minimum to large. | critic | high |
-| `components-from-gallery` | Screens are built from DesignSystem components; a new reusable component is added to the gallery first (R1999). | critic | medium |
+| `components-native-or-justified-shared` | Use native components directly. Register justified custom reusable components in the gallery; do not add wrappers merely to satisfy gallery conventions (R1999, superseded 2026-10-25). | critic | medium |
 
 ### Liquid Glass and content
 
@@ -49,7 +50,7 @@ Each rule has an owner. Where the owner is a tool, the tool's result is the sour
 
 | Id | Rule | Owner | Usually |
 |---|---|---|---|
-| `color-tokens-only` | Every colour is a named token with light, dark and increased-contrast variants (R1992, R1994). | `lint:raw-color`, `test:TokenCoverageTests` | medium |
+| `color-native-or-justified-token` | Preserve system semantic colors and control appearance. Justified custom colors use tokens with light, dark and increased-contrast variants (R1992, R1994, superseded 2026-10-25). | critic; `lint:raw-color`, `test:TokenCoverageTests` for custom values only | medium |
 | `color-contrast` | Text meets 4.5:1 and large text and non-text UI 3:1 against what it is drawn on, in light, dark and increased contrast (R1979). | `test:ContrastTests` for token pairs; `audit` for text over images, glass and system materials | high |
 | `color-not-only-cue` | Colour is never the only cue: counts keep column titles or labels, ratings keep their names, states keep symbols (R187, R1982). | critic, VoiceOver scripts (U253) | high |
 | `color-meaning` | A token means the same everywhere: New blue, Learn red, Due green, zero dimmed (R32); Again red, Good green, Hard and Easy neutral (R355). | critic | medium |
@@ -68,8 +69,8 @@ Each rule has an owner. Where the owner is a tool, the tool's result is the sour
 
 | Id | Rule | Owner | Usually |
 |---|---|---|---|
-| `layout-spacing-tokens` | Spacing, padding and insets come from the 4-pt Spacing scale (R1992, R1994). | `lint:numeric-spacing` | medium |
-| `layout-radius-tokens` | Corner radii come from Radius tokens, concentric with their container where they sit in one (R1992). | `lint:numeric-radius` for numbers; critic for concentricity | medium |
+| `layout-native-spacing` | Preserve implicit system spacing, padding and insets. Justified custom spacing uses Spacing tokens; do not add modifiers merely to use tokens. | critic; `lint:numeric-spacing` for custom values only | medium |
+| `layout-native-shapes` | Preserve standard control shapes and corner radii. Justified custom shapes use Radius tokens or concentric system shapes. | critic; `lint:numeric-radius` for custom values only | medium |
 | `layout-alignment` | Elements share alignment lines and the system's layout margins and readable width; spacing rhythm is consistent. | critic | medium |
 | `layout-states` | Every screen state the inventory lists exists and is designed: empty, typical, overflow, error, loading (R1970). | `states`; critic for design quality | medium |
 
@@ -86,7 +87,7 @@ Each rule has an owner. Where the owner is a tool, the tool's result is the sour
 
 | Id | Rule | Owner | Usually |
 |---|---|---|---|
-| `motion-tokens` | Animations and moving transitions come from Motion tokens, each with a Reduce Motion alternative (R1992). | `lint:raw-motion`, `test:TokenCoverageTests` | medium |
+| `motion-native-or-justified-token` | Preserve automatic system motion. Justified explicit animations use Motion tokens with Reduce Motion alternatives. | critic; `lint:raw-motion`, `test:TokenCoverageTests` for custom motion only | medium |
 | `motion-continuity` | Transitions show continuity: no jump cuts, layout pops or partial frames; with Reduce Motion a crossfade replaces movement (R1976). | `contact-sheet`; critic | high |
 
 ### Icons
@@ -102,17 +103,27 @@ Each rule has an owner. Where the owner is a tool, the tool's result is the sour
 |---|---|---|---|
 | `stats-no-activity-rings` | Streak, goal and heatmap visuals do not resemble Apple's Activity rings: no concentric ring progress (R1997). | critic | high |
 
+### Retired rules
+
+| Id | Rule | Owner | Usually |
+|---|---|---|---|
+| `color-tokens-only` | Retired in v2; replaced by `color-native-or-justified-token`. | retired | retired |
+| `layout-spacing-tokens` | Retired in v2; replaced by `layout-native-spacing`. | retired | retired |
+| `layout-radius-tokens` | Retired in v2; replaced by `layout-native-shapes`. | retired | retired |
+| `motion-tokens` | Retired in v2; replaced by `motion-native-or-justified-token`. | retired | retired |
+| `components-from-gallery` | Retired in v2; replaced by `components-native-or-justified-shared`. | retired | retired |
+
 ## Lint rule index
 
 The `lint-ui` rule ids, for reading gate output (`app/.swiftlint.yml` holds the patterns):
 
 | Lint rule | Rubric rule |
 |---|---|
-| `raw-color` | `color-tokens-only` |
+| `raw-color` | `color-native-or-justified-token` |
 | `fixed-font-size` | `type-system-styles` |
-| `numeric-spacing` | `layout-spacing-tokens` |
-| `numeric-radius` | `layout-radius-tokens` |
-| `raw-motion` | `motion-tokens` |
+| `numeric-spacing` | `layout-native-spacing` |
+| `numeric-radius` | `layout-native-shapes` |
+| `raw-motion` | `motion-native-or-justified-token` |
 | `content-shadow` | `depth-no-content-shadows` |
 | `glass-outside-chrome` | `glass-control-layer-only` |
 | `custom-tab-bar`, `custom-navigation-bar`, `hamburger-menu` | `platform-no-custom-bars` |
@@ -121,4 +132,5 @@ The `lint-ui` rule ids, for reading gate output (`app/.swiftlint.yml` holds the 
 
 ## Changes
 
+- v2 (2026-10-25, Antoine): require native platform defaults, document exceptions and replace token-only rules. Existing lint patterns constrain explicit custom values; they do not enforce native appearance.
 - v1 (U9): first version.

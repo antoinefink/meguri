@@ -545,7 +545,9 @@ critic_stub() {
 }
 
 answer() { # issues JSON
-  jq -n --argjson i "$1" '{rubric_version: 1, screens: ["sample.deckOverview"], issues: $i}' >"$BATS_TEST_TMPDIR/answer.json"
+  local version
+  version="$(sed -n 's/^Version \([0-9][0-9]*\).*/\1/p' "$SB/docs/design/rubric.md")"
+  jq -n --argjson v "$version" --argjson i "$1" '{rubric_version: $v, screens: ["sample.deckOverview"], issues: $i}' >"$BATS_TEST_TMPDIR/answer.json"
   export FX_ANSWER="$BATS_TEST_TMPDIR/answer.json"
 }
 
@@ -650,7 +652,7 @@ PY
   answer "$(jq -c '.[0].rule = "made-up-rule"' <<<"$TRUNCATION")"
   mg critic snap1 --ledger build/status.yaml
   [ "$(field .status)" = error ]
-  [[ "$(field '.failures[0].message')" == *"rule made-up-rule is not in rubric v1"* ]]
+  [[ "$(field '.failures[0].message')" == *"rule made-up-rule is not in rubric v"* ]]
   [ ! -f "$SB/build/status.yaml" ]
 }
 
