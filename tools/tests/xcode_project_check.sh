@@ -500,6 +500,148 @@ VM_LOST=""
 VM_LOST_UNREACHABLE=""
 VM_QUEUE_REASON=""
 VM_HIDDEN_COPIED=""
+# Every test copy includes retained products from earlier builds. The RAM
+# reason preserves this invocation's diagnostics; pending/proof files outside
+# Products enforce the same boundary across invocations and interruptions.
+VM_PRODUCTS_BLOCKED=""
+
+# profile_cache <check|begin|finish> [selected run]: bounded Profile cache
+# receipt. Hash small generated plists; inventory product file identities and
+# metadata, never large binaries or directory timestamps (Debug touches them).
+# A successful build clears pending only after current policy validation and
+# an unchanged cache or regenerated selected run. No cache products change here.
+profile_cache() {
+  python3 - "$DD_TESTS" "$REPO" "$LOGS" "$@" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+
+cache, repo, logs = map(Path, sys.argv[1:4])
+action = sys.argv[4]
+products = cache / "Build/Products"
+pending = cache / ".profile-performance-pending.json"
+proof = cache / ".profile-performance-checked.json"
+
+
+def require(condition, reason):
+    if not condition:
+        raise ValueError(reason)
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def identity(path):
+    s = path.lstat()
+    # No directory times: ordinary Debug builds touch Products and parents.
+    base = [s.st_dev, s.st_ino, s.st_mode]
+    if not stat.S_ISDIR(s.st_mode):
+        base += [s.st_size, s.st_mtime_ns, s.st_ctime_ns]
+    if path.is_symlink():
+        base += [os.readlink(path)]
+    return base
+
+
+def walk_error(error):
+    raise error
+
+
+def snapshot():
+    roots, runs, entries = [], {}, []
+    if products.exists():
+        for path in sorted(products.iterdir()):
+            name = path.name.lower()
+            if name.startswith(("profile", "performance")) and path.suffix != ".xctestrun":
+                roots.append(path)
+            if path.suffix == ".xctestrun":
+                data = path.read_bytes()
+                if "profile" in name or "performance" in name or b"__TESTROOT__/Profile" in data:
+                    require(not path.is_symlink(), "symlinked Profile/Performance generated run")
+                    runs[path.name] = [identity(path), digest(data)]
+        for root in roots:
+            require(root.is_dir() and not root.is_symlink(), "invalid Profile/Performance product directory")
+            paths = [root]
+            for directory, dirs, files in os.walk(root, onerror=walk_error):
+                paths.extend(Path(directory) / name for name in dirs + files)
+            for path in sorted(paths):
+                if path.is_symlink():
+                    require(os.path.commonpath([str(root), str(path.resolve(strict=True))]) == str(root),
+                            "Profile/Performance product symlink escapes its product directory")
+                entries.append([str(path.relative_to(products)), identity(path)])
+    return {"version": 1, "cache": [str(cache.resolve()), identity(products) if products.exists() else None],
+            "products": digest(json.dumps(entries, sort_keys=True).encode()), "runs": runs,
+            "has_products": bool(roots)}
+
+
+def write_state(path, value):
+    cache.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("w") as out:
+        json.dump(value, out, sort_keys=True)
+        out.flush()
+        os.fsync(out.fileno())
+    os.replace(temporary, path)
+
+
+def validate_runs(current):
+    require(current["runs"], "Profile/Performance products have no generated run")
+    for name in current["runs"]:
+        report = logs / "retained-performance-policy.json"
+        with report.open("w") as out:
+            rc = subprocess.call([sys.executable, str(repo / "tools/scripts/performance-test-policy.py"),
+                                  str(products / name), str(repo / "app/TestPlans/Performance.xctestplan")], stdout=out)
+        (logs / "retained-performance-policy.status").write_text(str(rc) + "\n")
+        print(f"xcode_project_check: retained Performance test policy exit {rc}; report: {report}")
+        print("xcode_project_check: retained Performance test policy aggregate: " + report.read_text().strip())
+        require(rc == 0, "current Performance policy rejected retained cache")
+    require(snapshot() == current, "Profile/Performance cache changed during validation")
+
+
+try:
+    if action != "finish":
+        require(not os.path.lexists(pending), "persistent unchecked Profile/Performance cache (pending build or rejection)")
+    current = snapshot()
+    if action in ("check", "begin"):
+        if current["has_products"] or current["runs"] or os.path.lexists(proof):
+            require(proof.is_file(), "unmarked retained Profile/Performance cache; preserve and refresh DerivedData-tests separately")
+            require(json.loads(proof.read_text()) == current, "changed or unproven retained Profile/Performance cache")
+            validate_runs(current)
+        if action == "begin":
+            write_state(pending, current)
+    elif action == "finish":
+        before = json.loads(pending.read_text())
+        selected = Path(sys.argv[5])
+        require(selected.parent == products and selected.name in current["runs"], "selected generated run is outside Profile/Performance cache")
+        require(current == before or before["runs"].get(selected.name) != current["runs"][selected.name], "selected generated run was not regenerated by this build")
+        validate_runs(current)
+        write_state(proof, current)
+        pending.unlink()
+    else:
+        raise ValueError("unknown Profile cache action")
+except (OSError, ValueError, KeyError, TypeError) as error:
+    print(f"xcode_project_check: Profile/Performance cache blocked: {error}")
+    # A policy rejection must stay blocked even if the next invocation's
+    # source policy changes back. Never remove or refresh an existing pending.
+    if not os.path.lexists(pending):
+        try:
+            write_state(pending, {"blocked": str(error)})
+        except OSError as state_error:
+            print(f"xcode_project_check: cannot persist blocked cache state: {state_error}")
+    sys.exit(1)
+PY
+}
+
+profile_cache_check() {
+  if ! profile_cache check >>"$1" 2>&1; then
+    VM_PRODUCTS_BLOCKED="retained Profile/Performance cache failed its persistent proof or current policy; see $1"
+    return 1
+  fi
+}
 
 # xctestrun_for <scheme> <plan> <config> <sdk>: newest matching test root.
 xctestrun_for() {
@@ -553,9 +695,13 @@ vm_session_result() {
 # still be going on in the VM (VM_LOST), or 72 when the VM could not be
 # reached (VM_QUEUE_REASON; U19c).
 test_in_vm() {
-  local name="$1" scheme="$2" plan="$3" config="$4" dest="$5" result="$WORK/$1.xcresult" log="$LOGS/$1.log" xctestrun code p inputs=() rc sdk=iphonesimulator build_dest="generic/platform=iOS Simulator"
+  local name="$1" scheme="$2" plan="$3" config="$4" dest="$5" result="$WORK/$1.xcresult" log="$LOGS/$1.log" xctestrun code p inputs=() rc policy_report sdk=iphonesimulator build_dest="generic/platform=iOS Simulator"
   shift 5
   VM_QUEUE_REASON=""
+  if [ -n "$VM_PRODUCTS_BLOCKED" ]; then
+    echo "xcode_project_check: not run: $VM_PRODUCTS_BLOCKED" >"$log"
+    return 70
+  fi
   if [ -n "$VM_LOST" ]; then
     echo "xcode_project_check: not run: $VM_LOST" >"$log"
     if [ -n "$VM_LOST_UNREACHABLE" ]; then
@@ -564,6 +710,10 @@ test_in_vm() {
     fi
     return 71
   fi
+  # Check retained evidence before any build (including earlier Mac/Debug
+  # plans) can replace it, as well as immediately before whole-Products copy.
+  : >"$log"
+  profile_cache_check "$log" || return 70
   case "$dest" in platform=macOS*) sdk=macosx build_dest="$dest" ;; esac
   # Unit excludes the app-hosted Snapshot target. An old incomplete copy
   # inside its host app can make signing fail before any Unit test builds.
@@ -574,13 +724,29 @@ test_in_vm() {
       return 70
     fi
   fi
+  if [ "$config" = Profile ] || [ "$plan" = Performance ]; then
+    VM_PRODUCTS_BLOCKED="unchecked Profile/Performance products from $name; see $log"
+    profile_cache begin >>"$log" 2>&1 || return 70
+  fi
   if ! xcodebuild build-for-testing -project "$PROJECT" -scheme "$scheme" -testPlan "$plan" -configuration "$config" \
-    -destination "$build_dest" -derivedDataPath "$DD_TESTS" >"$log" 2>&1; then
+    -destination "$build_dest" -derivedDataPath "$DD_TESTS" >>"$log" 2>&1; then
     echo "xcode_project_check: the build for testing failed" >>"$log"
     return 70
   fi
   xctestrun="$(xctestrun_for "$scheme" "$plan" "$config" "$sdk")"
   [ -n "$xctestrun" ] || { echo "xcode_project_check: no $scheme $plan xctestrun for $config in $DD_TESTS/Build/Products" >>"$log" && return 70; }
+  if [ "$config" = Profile ] || [ "$plan" = Performance ]; then
+    policy_report="$LOGS/$name-performance-policy.json"
+    python3 "$REPO/tools/scripts/performance-test-policy.py" "$xctestrun" "$REPO/app/TestPlans/Performance.xctestplan" >"$policy_report" 2>>"$log"
+    rc=$?
+    printf '%s\n' "$rc" >"$LOGS/$name-performance-policy.status"
+    echo "xcode_project_check: Performance test policy exit $rc; report: $policy_report" >>"$log"
+    echo "xcode_project_check: Performance test policy aggregate: $(cat "$policy_report")" >>"$log"
+    [ "$rc" -eq 0 ] || return 70
+    profile_cache finish "$xctestrun" >>"$log" 2>&1 || return 70
+    VM_PRODUCTS_BLOCKED=""
+  fi
+  profile_cache_check "$log" || return 70
   if ! mvl_copy_in "$VM_SSH" "$VM_NAME" "$WORK" "$DD_TESTS/Build/Products" 2>>"$log"; then
     echo "xcode_project_check: $MVL_REASON" >>"$log"
     [ -z "$MVL_UNREACHABLE" ] || { VM_QUEUE_REASON="$MVL_REASON" && return 72; }

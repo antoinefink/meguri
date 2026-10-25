@@ -49,9 +49,11 @@ PY
 
 setup() {
   SB="$BATS_TEST_TMPDIR/repo"
-  mkdir -p "$SB/tools/tests" "$SB/tools/scripts" "$SB/app/Meguri/App"
+  mkdir -p "$SB/tools/tests" "$SB/tools/scripts" "$SB/app/Meguri/App" "$SB/app/TestPlans"
   cp "$REPO_ROOT/tools/tests/xcode_project_check.sh" "$SB/tools/tests/"
   cp "$REPO_ROOT/tools/scripts/mac-vm-lib.sh" "$SB/tools/scripts/"
+  cp "$REPO_ROOT/tools/scripts/performance-test-policy.py" "$SB/tools/scripts/"
+  cp "$REPO_ROOT/app/TestPlans/Performance.xctestplan" "$SB/app/TestPlans/"
   # Keep regression-only application usable for behavioral RED on the old
   # runner, which has not extracted this helper yet.
   if [ -f "$REPO_ROOT/tools/scripts/mac-hidden-launch.sh" ]; then
@@ -101,6 +103,10 @@ case "$name $*" in
       esac
       shift
     done
+    if { [ "$config" = Profile ] || [ "$plan" = Performance ]; } && [ "${STUB_PERFORMANCE_NOOP:-0}" = 1 ]; then
+      echo "xcodebuild: Profile build completed without product changes"
+      exit 0
+    fi
     mkdir -p "$dd/Build/Products"
     sdk=iphonesimulator root="$config-iphonesimulator"
     case "$dest" in platform=macOS*) sdk=macosx root="$config" ;; esac
@@ -115,9 +121,43 @@ case "$name $*" in
       fi
     fi
     [ "${STUB_NO_XCTESTRUN:-}" != "$sdk" ] || exit 0
-    echo "__TESTROOT__/$root/" >"$dd/Build/Products/${scheme}_${plan}_${sdk}27.0-arm64.xctestrun"
+    run="$dd/Build/Products/${scheme}_${plan}_${sdk}27.0-arm64.xctestrun"
     mkdir -p "$dd/Build/Products/$root/Meguri.app"
     echo "$sdk:$config:$plan" >"$dd/Build/Products/$root/Meguri.app/Info.plist"
+    if [ "$config" = Profile ] || [ "$plan" = Performance ]; then
+      # Preserve an older passing run while leaving new partial products.
+      # Neither a failed build nor a successful build missing its new run
+      # may let that older run certify these products.
+      if [ "${STUB_PERFORMANCE_BUILD_FAIL:-0}" = 1 ]; then
+        echo partial-build >"$dd/Build/Products/$root/partial-product"
+        exit 65
+      fi
+      [ "${STUB_PERFORMANCE_MISSING_RUN:-0}" != 1 ] || exit 0
+      python3 - "$run" "$root" <<'PY'
+import os
+import plistlib
+import sys
+
+path, root = sys.argv[1:]
+target = {"IsUITestBundle": True, "UITargetAppPath": f"__TESTROOT__/{root}/Meguri.app"}
+flags = ("UITargetAppMainThreadCheckerEnabled", "UITargetAppPerformanceAntipatternCheckerEnabled")
+mode = os.environ.get("STUB_PERFORMANCE_FLAGS", "false")
+if mode != "omitted":
+    target.update({flag: flag == mode for flag in flags})
+injection = os.environ.get("STUB_PERFORMANCE_INJECTION")
+if injection:
+    target["TestingEnvironmentVariables"] = {"DYLD_INSERT_LIBRARIES": f"/Xcode/{injection}.dylib"}
+with open(path, "wb") as output:
+    plistlib.dump({"TestConfigurations": [{"TestTargets": [target]}],
+                  "__xctestrun_metadata__": {"FormatVersion": 2}}, output)
+if os.environ.get("STUB_PERFORMANCE_MALFORMED") == "1":
+    # Retain the selection marker, but make the generated plist unreadable.
+    with open(path, "ab") as output:
+        output.write(b"<broken")
+PY
+    else
+      echo "__TESTROOT__/$root/" >"$run"
+    fi
     ;;
   "xcrun xcresulttool get build-results "*) echo '{"errorCount":0,"warningCount":0,"warnings":[]}' ;;
   "xcrun xcresulttool get "*)
@@ -222,7 +262,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 [ -f "$run" ] || { echo "xcodebuild: error: no xctestrun at $(unmap "$run")"; exit 70; }
-root="$(sed -n "s|__TESTROOT__/\(.*\)/|\1|p" "$run")"
+root="$(sed -n 's|.*__TESTROOT__/\([^/]*\)/.*|\1|p' "$run" | head -n 1)"
 product="$(dirname "$run")/$root/Meguri.app/Info.plist"
 [ -f "$product" ] || { echo "xcodebuild: error: missing test product $product"; exit 70; }
 echo "vm-test-products $root $(cat "$product")" >>"$STUB_LOG"
@@ -293,6 +333,342 @@ not_called() { ! grep -E "$1" "$STUB_LOG"; }
 tap_line() { grep -qxE "$1" <<<"$output" || { echo "no TAP line matches: $1" && echo "$output" && return 1; }; }
 # no_vm_failure: no lease or test run failed (the stubbed builds do).
 no_vm_failure() { ! grep -E '^not ok [0-9]+ (lease|.*-app-hosted|mac-unit|.*TestHooksTests|.*DriveScriptTests)' <<<"$output" || { echo "$output" && return 1; }; }
+
+# Earlier Debug copies are allowed; after the Profile build starts, neither
+# that build's products nor any retained products may cross into the VM on
+# rejection. Check the transport boundary as well as actual test execution.
+assert_profile_phase_stopped() {
+  local products profile_line
+  products="$(cd "$BATS_TEST_TMPDIR/work" && pwd -P)/DerivedData-tests/Build/Products"
+  [ "$status" -ne 0 ]
+  tap_line 'ok [0-9]+ iphone-Debug-TestHooksTests: Passed .*'
+  tap_line 'not ok [0-9]+ iphone-Profile-TestHooksTests: .*'
+  tap_line 'not ok [0-9]+ iphone-Debug-DriveScriptTests: .*'
+  tap_line 'not ok [0-9]+ ipad-Debug-TestHooksTests: .*'
+  tap_line '# xcode_project_check: not run: unchecked Profile/Performance products from iphone-Profile-TestHooksTests; see .*'
+  called '^vm-xcodebuild .*Meguri_UI_.* -destination id=POOL-iphone .*TestHooksTests$'
+  called "^vm-ssh rm -rf '$products' && mkdir -p "
+  [ -f "$products/Profile-iphonesimulator/Meguri.app/Info.plist" ]
+  [ ! -e "$VM_FS$products/Profile-iphonesimulator" ]
+  [ -z "$(find "$VM_FS$products" -name '*Performance*' -print)" ]
+  profile_line="$(grep -n '^xcodebuild build-for-testing .* -configuration Profile ' "$STUB_LOG" | cut -d: -f1)"
+  [ -n "$profile_line" ]
+  # No later Products transport (including a Debug copy containing Profile),
+  # test execution or test build, regardless of its plan or destination.
+  ! tail -n "+$((profile_line + 1))" "$STUB_LOG" |
+    grep -E '^vm-xcodebuild |^xcodebuild build-for-testing |^vm-ssh .*DerivedData-tests/Build/Products'
+  not_called '^vm-test-products Profile-'
+  not_called '^vm-xcodebuild .*DriveScriptTests'
+  not_called '^vm-xcodebuild .* -destination id=POOL-ipad '
+  ! grep -E '^ok [0-9]+ (iphone-Profile-TestHooksTests|iphone-Debug-DriveScriptTests|ipad-Debug-TestHooksTests)' <<<"$output"
+}
+
+assert_profile_policy_rejected() {
+  local report="$BATS_TEST_TMPDIR/work/logs/iphone-Profile-TestHooksTests-performance-policy"
+  assert_profile_phase_stopped
+  [ "$(cat "$report.status")" = 1 ]
+  jq -e '.status == "fail" and .source_policy_disabled == true' "$report.json"
+  tap_line '# xcode_project_check: Performance test policy exit 1; report: .*'
+}
+
+assert_profile_policy_passes() {
+  local report="$BATS_TEST_TMPDIR/work/logs/iphone-Profile-TestHooksTests-performance-policy"
+  check_project --phase devices
+  no_vm_failure
+  [ "$(cat "$report.status")" = 0 ]
+  jq -e '.status == "pass" and .source_policy_disabled == true and .ui_targets == 1' "$report.json"
+  tap_line 'ok [0-9]+ iphone-Profile-TestHooksTests: Passed .*'
+  tap_line 'ok [0-9]+ iphone-Debug-DriveScriptTests: Passed .*'
+  tap_line 'ok [0-9]+ ipad-Debug-TestHooksTests: Passed .*'
+  called '^vm-test-products Profile-iphonesimulator iphonesimulator:Profile:Performance$'
+  called '^vm-xcodebuild .*Meguri-Profile_Performance_.* -destination id=POOL-iphone '
+  called '^vm-xcodebuild .* -destination id=POOL-iphone .*DriveScriptTests$'
+  called '^vm-xcodebuild .* -destination id=POOL-ipad '
+  local profile drive ipad
+  profile="$(grep -n '^vm-test-products Profile-' "$STUB_LOG" | cut -d: -f1)"
+  drive="$(grep -n '^vm-xcodebuild .*DriveScriptTests$' "$STUB_LOG" | cut -d: -f1)"
+  ipad="$(grep -n '^vm-xcodebuild .* -destination id=POOL-ipad ' "$STUB_LOG" | cut -d: -f1)"
+  [ "$profile" -lt "$drive" ] && [ "$drive" -lt "$ipad" ]
+}
+
+@test "generated false checker flags allow Profile execution and later Debug and iPad runs" {
+  assert_profile_policy_passes
+  jq -e 'all(.flags[]; .false == 1 and .true == 0 and .missing == 0)' \
+    "$BATS_TEST_TMPDIR/work/logs/iphone-Profile-TestHooksTests-performance-policy.json"
+}
+
+@test "omitted generated checker flags allow Profile execution and later Debug and iPad runs" {
+  STUB_PERFORMANCE_FLAGS=omitted assert_profile_policy_passes
+  jq -e 'all(.flags[]; .missing == 1 and .true == 0 and .false == 0)' \
+    "$BATS_TEST_TMPDIR/work/logs/iphone-Profile-TestHooksTests-performance-policy.json"
+}
+
+@test "enabled generated main thread checker blocks all remaining Products transports and runs" {
+  STUB_PERFORMANCE_FLAGS=UITargetAppMainThreadCheckerEnabled check_project --phase devices
+  assert_profile_policy_rejected
+  jq -e '.reason == "policy" and .flags.UITargetAppMainThreadCheckerEnabled.true == 1' \
+    "$BATS_TEST_TMPDIR/work/logs/iphone-Profile-TestHooksTests-performance-policy.json"
+}
+
+@test "enabled generated performance checker blocks all remaining Products transports and runs" {
+  STUB_PERFORMANCE_FLAGS=UITargetAppPerformanceAntipatternCheckerEnabled check_project --phase devices
+  assert_profile_policy_rejected
+  jq -e '.reason == "policy" and .flags.UITargetAppPerformanceAntipatternCheckerEnabled.true == 1' \
+    "$BATS_TEST_TMPDIR/work/logs/iphone-Profile-TestHooksTests-performance-policy.json"
+}
+
+@test "generated MainThreadChecker injection blocks all remaining Products transports and runs" {
+  STUB_PERFORMANCE_INJECTION=libMainThreadChecker check_project --phase devices
+  assert_profile_policy_rejected
+  jq -e '.reason == "policy" and .main_thread_checker_injections == 1' \
+    "$BATS_TEST_TMPDIR/work/logs/iphone-Profile-TestHooksTests-performance-policy.json"
+}
+
+@test "generated libRPAC injection blocks all remaining Products transports and runs" {
+  STUB_PERFORMANCE_INJECTION=libRPAC check_project --phase devices
+  assert_profile_policy_rejected
+  jq -e '.reason == "policy" and .performance_antipattern_checker_injections == 1' \
+    "$BATS_TEST_TMPDIR/work/logs/iphone-Profile-TestHooksTests-performance-policy.json"
+}
+
+@test "malformed generated Profile plist blocks all remaining Products transports and runs" {
+  STUB_PERFORMANCE_MALFORMED=1 check_project --phase devices
+  assert_profile_policy_rejected
+  jq -e '.reason == "malformed"' "$BATS_TEST_TMPDIR/work/logs/iphone-Profile-TestHooksTests-performance-policy.json"
+}
+
+@test "missing selected Profile xctestrun blocks all remaining Products transports and runs" {
+  STUB_PERFORMANCE_MISSING_RUN=1 check_project --phase devices
+  assert_profile_phase_stopped
+  tap_line '# xcode_project_check: no Meguri-Profile Performance xctestrun for Profile in .*'
+}
+
+@test "failed Profile build cannot leak unchecked partial products through later Debug or iPad runs" {
+  STUB_PERFORMANCE_BUILD_FAIL=1 check_project --phase devices
+  assert_profile_phase_stopped
+  tap_line '# xcode_project_check: the build for testing failed'
+}
+
+# Cross-invocation assertions include the earliest Mac Unit build/transport,
+# not just the later Profile run. The same fake VM and local cache survive.
+assert_retained_cache_stopped() {
+  [ "$status" -ne 0 ]
+  tap_line 'not ok [0-9]+ mac-unit: .*'
+  tap_line 'not ok [0-9]+ mac-app-hosted: .*'
+  tap_line 'not ok [0-9]+ iphone-Profile-TestHooksTests: .*'
+  tap_line '# xcode_project_check: Profile/Performance cache blocked: .*'
+  not_called '^xcodebuild build-for-testing '
+  not_called '^vm-ssh .*DerivedData-tests/Build/Products'
+  not_called '^vm-xcodebuild '
+  [ -f "$BATS_TEST_TMPDIR/work/DerivedData-tests/.profile-performance-pending.json" ]
+}
+
+@test "rejected Profile cache blocks the next invocation before its first Mac or Debug test build and copy" {
+  STUB_PERFORMANCE_FLAGS=UITargetAppMainThreadCheckerEnabled check_project --phase devices
+  assert_profile_policy_rejected
+  local products="$BATS_TEST_TMPDIR/work/DerivedData-tests/Build/Products"
+  cp "$products/Profile-iphonesimulator/Meguri.app/Info.plist" "$BATS_TEST_TMPDIR/rejected-product"
+  : >"$STUB_LOG"
+  check_project --phase devices
+  assert_retained_cache_stopped
+  tap_line '# xcode_project_check: Profile/Performance cache blocked: persistent unchecked .*'
+  cmp "$products/Profile-iphonesimulator/Meguri.app/Info.plist" "$BATS_TEST_TMPDIR/rejected-product"
+  # The earlier Debug cache is not overwritten either.
+  [ -f "$products/Meguri_Unit_macosx27.0-arm64.xctestrun" ]
+}
+
+@test "Profile build failure preserves a blocking receipt despite earlier valid test metadata" {
+  assert_profile_policy_passes
+  local dd="$BATS_TEST_TMPDIR/work/DerivedData-tests" run
+  run="$dd/Build/Products/Meguri-Profile_Performance_iphonesimulator27.0-arm64.xctestrun"
+  cp "$run" "$BATS_TEST_TMPDIR/old-passing-run"
+  cp "$dd/.profile-performance-checked.json" "$BATS_TEST_TMPDIR/old-proof"
+  : >"$STUB_LOG"
+  STUB_PERFORMANCE_BUILD_FAIL=1 check_project --phase devices
+  [ "$status" -ne 0 ]
+  tap_line '# xcode_project_check: the build for testing failed'
+  called '^xcodebuild build-for-testing .* -configuration Profile '
+  cmp "$run" "$BATS_TEST_TMPDIR/old-passing-run"
+  cmp "$dd/.profile-performance-checked.json" "$BATS_TEST_TMPDIR/old-proof"
+  [ "$(cat "$dd/Build/Products/Profile-iphonesimulator/partial-product")" = partial-build ]
+  : >"$STUB_LOG"
+  check_project --phase devices
+  assert_retained_cache_stopped
+  cmp "$run" "$BATS_TEST_TMPDIR/old-passing-run"
+  [ -f "$dd/Build/Products/Profile-iphonesimulator/partial-product" ]
+}
+
+@test "successful no-op Profile build revalidates untouched products and continues through Drive and iPad" {
+  assert_profile_policy_passes
+  local dd="$BATS_TEST_TMPDIR/work/DerivedData-tests" log line
+  cp "$dd/.profile-performance-checked.json" "$BATS_TEST_TMPDIR/before-noop-proof"
+  : >"$STUB_LOG"
+  STUB_PERFORMANCE_NOOP=1 assert_profile_policy_passes
+  cmp "$dd/.profile-performance-checked.json" "$BATS_TEST_TMPDIR/before-noop-proof"
+  [ ! -e "$dd/.profile-performance-pending.json" ]
+  called '^xcodebuild build-for-testing .* -configuration Profile '
+  log="$BATS_TEST_TMPDIR/work/logs/iphone-Profile-TestHooksTests.log"
+  line="$(grep -n '^xcodebuild: Profile build completed without product changes$' "$log" | cut -d: -f1)"
+  [ -n "$line" ]
+  tail -n "+$((line + 1))" "$log" | grep -q '^xcode_project_check: retained Performance test policy exit 0;'
+  jq -e '.status == "pass" and .source_policy_disabled == true and .ui_targets == 1' \
+    "$BATS_TEST_TMPDIR/work/logs/retained-performance-policy.json"
+}
+
+@test "successful Profile build missing a new generated run cannot certify products with the old passing run" {
+  assert_profile_policy_passes
+  : >"$STUB_LOG"
+  STUB_PERFORMANCE_MISSING_RUN=1 check_project --phase devices
+  [ "$status" -ne 0 ]
+  tap_line '# xcode_project_check: Profile/Performance cache blocked: selected generated run was not regenerated by this build'
+  local line
+  line="$(grep -n '^xcodebuild build-for-testing .* -configuration Profile ' "$STUB_LOG" | cut -d: -f1)"
+  ! tail -n "+$((line + 1))" "$STUB_LOG" | grep -E '^vm-xcodebuild |^vm-ssh .*DerivedData-tests/Build/Products'
+  : >"$STUB_LOG"
+  check_project --phase devices
+  assert_retained_cache_stopped
+}
+
+@test "Profile products lacking a receipt stop execution even when their test metadata passes policy" {
+  assert_profile_policy_passes
+  local dd="$BATS_TEST_TMPDIR/work/DerivedData-tests"
+  rm "$dd/.profile-performance-checked.json"
+  : >"$STUB_LOG"
+  check_project --phase devices
+  assert_retained_cache_stopped
+  tap_line '# xcode_project_check: Profile/Performance cache blocked: unmarked retained .*'
+  [ -f "$dd/Build/Products/Meguri-Profile_Performance_iphonesimulator27.0-arm64.xctestrun" ]
+  [ -f "$dd/Build/Products/Profile-iphonesimulator/Meguri.app/Info.plist" ]
+}
+
+@test "legacy Profile product directory without any generated run blocks the earliest Products copy" {
+  local dd="$BATS_TEST_TMPDIR/work/DerivedData-tests"
+  mkdir -p "$dd/Build/Products/Profile-iphonesimulator/Meguri.app"
+  echo legacy-partial >"$dd/Build/Products/Profile-iphonesimulator/Meguri.app/keep"
+  check_project --phase devices
+  assert_retained_cache_stopped
+  [ "$(cat "$dd/Build/Products/Profile-iphonesimulator/Meguri.app/keep")" = legacy-partial ]
+}
+
+@test "unchanged checked Profile cache is revalidated and reused before next Mac and Debug runs" {
+  assert_profile_policy_passes
+  local dd="$BATS_TEST_TMPDIR/work/DerivedData-tests"
+  [ -f "$dd/.profile-performance-checked.json" ]
+  [ ! -e "$dd/.profile-performance-pending.json" ]
+  # A failing Mac Unit build after preflight preserves its revalidation log
+  # and lets us prove preflight used the current real validator and plan.
+  : >"$STUB_LOG"
+  STUB_MAC_UNIT_BUILD_FAIL=1 check_project --phase devices
+  tap_line 'ok [0-9]+ mac-app-hosted: Passed .*'
+  tap_line 'ok [0-9]+ iphone-Profile-TestHooksTests: Passed .*'
+  called '^vm-xcodebuild .*Meguri_Snapshot_macosx'
+  grep -q '^xcode_project_check: retained Performance test policy exit 0;' "$BATS_TEST_TMPDIR/work/logs/mac-unit.log"
+  [ ! -e "$dd/.profile-performance-pending.json" ]
+  : >"$STUB_LOG"
+  check_project --phase devices
+  no_vm_failure
+  tap_line 'ok [0-9]+ mac-unit: Passed .*'
+  called '^vm-xcodebuild .*Meguri_Unit_macosx'
+}
+
+@test "changed current source policy rejects checked retained cache before earliest Products copy and stays blocked" {
+  assert_profile_policy_passes
+  cp "$SB/app/TestPlans/Performance.xctestplan" "$BATS_TEST_TMPDIR/original-plan"
+  python3 - "$SB/app/TestPlans/Performance.xctestplan" <<'PY'
+import json
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+plan = json.loads(path.read_text())
+plan["defaultOptions"]["mainThreadCheckerDetectionPolicy"] = {"enabled": True}
+path.write_text(json.dumps(plan))
+PY
+  : >"$STUB_LOG"
+  check_project --phase devices
+  assert_retained_cache_stopped
+  [ "$(cat "$BATS_TEST_TMPDIR/work/logs/retained-performance-policy.status")" = 1 ]
+  jq -e '.status == "fail" and .source_policy_disabled == false' "$BATS_TEST_TMPDIR/work/logs/retained-performance-policy.json"
+  cp "$BATS_TEST_TMPDIR/original-plan" "$SB/app/TestPlans/Performance.xctestplan"
+  : >"$STUB_LOG"
+  check_project --phase devices
+  assert_retained_cache_stopped
+  tap_line '# xcode_project_check: Profile/Performance cache blocked: persistent unchecked .*'
+}
+
+@test "current real validator changes are applied to retained cache before the earliest Products copy" {
+  assert_profile_policy_passes
+  # Increase the minimum UI target count in this test's validator copy. The
+  # retained plist and source plan remain unchanged, with their old proof.
+  python3 - "$SB/tools/scripts/performance-test-policy.py" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text()
+old = 'report["ui_targets"] > 0'
+assert source.count(old) == 1
+path.write_text(source.replace(old, 'report["ui_targets"] > 1'))
+PY
+  : >"$STUB_LOG"
+  check_project --phase devices
+  assert_retained_cache_stopped
+  [ "$(cat "$BATS_TEST_TMPDIR/work/logs/retained-performance-policy.status")" = 1 ]
+  jq -e '.status == "fail" and .source_policy_disabled == true and .ui_targets == 1' "$BATS_TEST_TMPDIR/work/logs/retained-performance-policy.json"
+}
+
+@test "failure to write persistent pending state prevents the next Profile build from starting" {
+  assert_profile_policy_passes
+  local dd="$BATS_TEST_TMPDIR/work/DerivedData-tests"
+  cp "$dd/.profile-performance-checked.json" "$BATS_TEST_TMPDIR/before-proof"
+  # Opening the atomic-write staging path must fail, even as root.
+  mkdir "$dd/.profile-performance-pending.json.tmp"
+  : >"$STUB_LOG"
+  check_project --phase devices
+  [ "$status" -ne 0 ]
+  tap_line 'not ok [0-9]+ iphone-Profile-TestHooksTests: .*'
+  tap_line '# xcode_project_check: Profile/Performance cache blocked: .*'
+  tap_line '# xcode_project_check: cannot persist blocked cache state: .*'
+  not_called '^xcodebuild build-for-testing .* -configuration Profile '
+  not_called '^vm-test-products Profile-'
+  not_called '^vm-xcodebuild .*DriveScriptTests'
+  cmp "$dd/.profile-performance-checked.json" "$BATS_TEST_TMPDIR/before-proof"
+  [ ! -e "$dd/Build/Products/Profile-iphonesimulator/partial-product" ]
+}
+
+@test "changed generated run invalidates checked proof even if its policy still passes" {
+  assert_profile_policy_passes
+  python3 - "$BATS_TEST_TMPDIR/work/DerivedData-tests/Build/Products/Meguri-Profile_Performance_iphonesimulator27.0-arm64.xctestrun" <<'PY'
+from pathlib import Path
+import plistlib
+import sys
+path = Path(sys.argv[1])
+run = plistlib.loads(path.read_bytes())
+run["UnrelatedMetadata"] = "changed"
+path.write_bytes(plistlib.dumps(run))
+PY
+  : >"$STUB_LOG"
+  check_project --phase devices
+  assert_retained_cache_stopped
+  tap_line '# xcode_project_check: Profile/Performance cache blocked: changed or unproven retained .*'
+}
+
+@test "new unproven Profile product directory invalidates checked proof before Mac copy" {
+  assert_profile_policy_passes
+  mkdir -p "$BATS_TEST_TMPDIR/work/DerivedData-tests/Build/Products/Profile-macosx/Partial.app"
+  : >"$STUB_LOG"
+  check_project --phase devices
+  assert_retained_cache_stopped
+  tap_line '# xcode_project_check: Profile/Performance cache blocked: changed or unproven retained .*'
+}
+
+@test "new retained Performance generated run invalidates checked proof before Mac copy" {
+  assert_profile_policy_passes
+  local products="$BATS_TEST_TMPDIR/work/DerivedData-tests/Build/Products"
+  cp "$products/Meguri-Profile_Performance_iphonesimulator27.0-arm64.xctestrun" "$products/Other_Performance_macosx27.0-arm64.xctestrun"
+  : >"$STUB_LOG"
+  check_project --phase devices
+  assert_retained_cache_stopped
+  [ -f "$products/Other_Performance_macosx27.0-arm64.xctestrun" ]
+}
 
 @test "xcode-check leases its simulators from the pool and releases them at exit" {
   check_project
