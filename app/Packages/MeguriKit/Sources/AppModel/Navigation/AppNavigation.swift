@@ -51,6 +51,15 @@ public final class AppNavigation {
     private var restoredDeckPagePending = false
     @ObservationIgnored private var featureStates: [ObjectIdentifier: AnyObject] = [:]
 
+    /// Production deck rows await the collection-owned save before opening a page.
+    @ObservationIgnored public var deckSelectionAction: (@MainActor (DeckID) -> Void)?
+    @ObservationIgnored private(set) var intentRevision: UInt64 = 0
+
+    func beginDeckSelection() -> UInt64 {
+        intentRevision &+= 1
+        return intentRevision
+    }
+
     public init() {}
 
     /// The navigation a relaunch starts with (R12, R13): the last section,
@@ -75,6 +84,8 @@ public final class AppNavigation {
     }
 
     public func setPath(_ path: [Destination], for section: AppSection) {
+        guard path != self.path(section) else { return }
+        intentRevision &+= 1
         paths[section] = path.isEmpty ? nil : path
     }
 
@@ -102,6 +113,11 @@ public final class AppNavigation {
     /// Selects a sidebar row. Another row than the selected one ends an open
     /// review first, without asking (R22).
     public func select(_ item: SidebarItem) {
+        if case .deck(let deck) = item, let deckSelectionAction {
+            deckSelectionAction(deck)
+            return
+        }
+        intentRevision &+= 1
         guard item != sidebarSelection else { return }
         endReview()
         switch item {
@@ -140,6 +156,7 @@ public final class AppNavigation {
 
     /// What a tab's `NavigationStack` writes back: a push or a pop.
     public func setCompactPath(_ newPath: [Destination], for tab: CompactTab) {
+        if newPath != compactPath(tab) { intentRevision &+= 1 }
         switch tab {
         case .decks:
             if case let .deckPage(deck)? = newPath.first {
@@ -172,6 +189,7 @@ public final class AppNavigation {
     /// A tap on a tab. On the selected tab it pops the stack to its root, or,
     /// at the root, scrolls the root to the top (R19).
     public func selectTab(_ tab: CompactTab) {
+        intentRevision &+= 1
         guard tab == compactTab else {
             show(tab == .settings ? settingsTabSection : tab.section)
             return
@@ -187,6 +205,7 @@ public final class AppNavigation {
 
     /// Shows `section` as it was left.
     public func show(_ section: AppSection) {
+        intentRevision &+= 1
         if section.tab == .settings {
             settingsTabSection = section
         }
@@ -196,6 +215,7 @@ public final class AppNavigation {
     /// Opens `deck`'s page in the Home section: the sidebar selects the deck,
     /// the Decks tab pushes its page. An open review ends.
     public func openDeckPage(_ deck: DeckID) {
+        intentRevision &+= 1
         endReview()
         showDeckPage(deck)
         setPath([], for: .home)
@@ -204,6 +224,7 @@ public final class AppNavigation {
 
     /// Home, at its root.
     public func openHome() {
+        intentRevision &+= 1
         endReview()
         closeDeckPage()
         setPath([], for: .home)
@@ -233,6 +254,7 @@ public final class AppNavigation {
     /// sheet until its FFI result confirms that the new host is retained. The
     /// server workflow survives adoption to show its outcome and media decision.
     public func collectionReplaced(keepingEntrySheet: Bool = false) {
+        intentRevision &+= 1
         endReview()
         selectedDeck = nil; showsDeckPage = false; restoredDeckPagePending = false
         paths.removeAll(); scrollPositions.removeAll(); featureStates.removeAll()

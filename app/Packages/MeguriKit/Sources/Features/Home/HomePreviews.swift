@@ -54,3 +54,6 @@ public enum HomeDeckListPreview: PreviewStates {
             counts: child.counts, children: [child])]
     }
 }
+
+#Preview("Native Deck Tree") { HomeDeckListPreview.preview(.typical) }
+#Preview("Native Deck Tree Overflow") { HomeDeckListPreview.preview(.overflow) }

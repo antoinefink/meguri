@@ -93,13 +93,21 @@ public final class ReviewCollection {
         guard !opening, !enabling, state == .ready, case .ready = lifecycle else { return false }
         return true
     }
-    private let deckService = CoreDeckService()
+    @ObservationIgnored var loadDeckTree: @MainActor () async throws -> CountedDeckTree
+    @ObservationIgnored var saveSelectedDeck: @MainActor (Int64) async throws -> UInt64
+    @ObservationIgnored var saveStudyCollapse: @MainActor ([Int64], Bool) async throws -> UInt64
+    private var selectionRevision: UInt64 = 0
+    private var selectionTask: Task<Bool, Never>?
+    private var collapseRevision: UInt64 = 0
+    private var collapseTask: Task<Void, Never>?
+    private var pendingStudyCollapse: [Int64: (revision: UInt64, collapsed: Bool)] = [:]
     private let records: ReviewRecordStore
     private var resolver: MediaPathResolver?
     private var events: Task<Void, Never>?
     private var countsTask: Task<Void, Never>?
     private var countTimer: Timer?
     private var countsRevision: UInt64 = 0
+    private var deckTreeRevision: UInt64 = 0
     private var lifecycleTask: Task<Void, Never>?
     private var openTask: Task<Void, Never>?
     private var opening = false
@@ -108,16 +116,25 @@ public final class ReviewCollection {
     private var policyReadAfterSession = false
     private var pendingDeck: Int64?
     private var closed = false
+    private var closing = false
     private var day: ReviewDayMonitor?
     private var recoveryDrops: [Int64] = []
 
     public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil) {
         loadMediaIndex = { @MainActor in try await CoreMediaService().trackedNames() }
+        loadDeckTree = { @MainActor in try await CoreDeckService().treeWithCounts() }
+        saveSelectedDeck = { @MainActor id in try await CoreDeckService().selectDeck(id: id).generation }
+        saveStudyCollapse = { @MainActor ids, collapsed in
+            try await CoreDeckService().collapseDecks(ids: ids, scope: .study, collapsed: collapsed).generation
+        }
         self.exportService = exportService ?? CoreCollectionExportService()
         self.configuration = configuration; self.navigation = navigation
         self.entryService = entryService ?? CoreCollectionEntryService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone))
         collection = CoreCollectionService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone))
         records = ReviewRecordStore(file: configuration.collectionLocation.directory.appending(path: "meguri-review-session.json"))
+        navigation.deckSelectionAction = { [weak self] deck in
+            self?.openDeckPage(deckID: deck.rawValue)
+        }
     }
 
     public func start() async {
@@ -156,7 +173,7 @@ public final class ReviewCollection {
     private func completeOpenedHost(loadRecord: Bool) async throws {
         lifecycle = try await collection.lifecycle()
         guard case .ready(let value) = lifecycle else { state = .unavailable; return }
-        if generation != value { exportOwner?.generationChanged() }
+        if generation != value { invalidateDeckActions(); exportOwner?.generationChanged() }
         generation = value; state = .ready; error = nil; closed = false; releasedManualHostState = nil
         if loadRecord {
             do { previousRecord = try await records.load() }
@@ -274,21 +291,7 @@ public final class ReviewCollection {
         review?.receive(event)
         switch event.kind {
         case .lifecycle(let value):
-            let wasReady: Bool = { if case .ready = lifecycle { true } else { false } }()
-            lifecycle = value
-            switch value {
-            case .ready(let next):
-                if generation != next { invalidateMedia(); exportOwner?.generationChanged() }
-                generation = next
-                if !opening {
-                    state = .ready
-                    if !wasReady && foreground { Task { await day?.checkNow() } }
-                }
-            case .opening, .upgrading: state = .loading
-            case .exclusiveBusy: state = .unavailable; review?.requestRefresh()
-            case .failed(let reason): state = .failed(Self.explanation(reason))
-            case .noCollection: state = releasedManualHostState ?? .unopened
-            }
+            receiveLifecycle(value)
         case .nextDayAtChanged(let instant): if !opening { day?.event(nextDayAt: instant) }
         case .rolledOver, .timeZoneChanged: refreshCounts()
         case .changes(let changes):
@@ -298,6 +301,7 @@ public final class ReviewCollection {
         case .collectionReplaced(let next):
             guard preparedGeneration != next else { return }
             exportOwner?.generationChanged()
+            invalidateDeckActions()
             generation = next; day?.pause()
             invalidateMedia()
             review?.generationEnded(); review = nil; navigation.endReview()
@@ -321,6 +325,136 @@ public final class ReviewCollection {
         }
     }
 
+    // Also used by focused owner tests; the event consumer is the production caller.
+    func receiveLifecycle(_ value: CollectionLifecycle) {
+        let wasReady: Bool = { if case .ready = lifecycle { true } else { false } }()
+        lifecycle = value
+        switch value {
+        case .ready(let next):
+            if generation != next {
+                invalidateDeckActions(); invalidateMedia(); exportOwner?.generationChanged()
+            }
+            generation = next
+            if !opening {
+                state = .ready
+                if !wasReady && foreground { Task { await day?.checkNow() } }
+            }
+        case .opening, .upgrading: invalidateDeckActions(); state = .loading
+        case .exclusiveBusy: invalidateDeckActions(); state = .unavailable; review?.requestRefresh()
+        case .failed(let reason): invalidateDeckActions(); state = .failed(Self.explanation(reason))
+        case .noCollection: invalidateDeckActions(); state = releasedManualHostState ?? .unopened
+        }
+    }
+
+    private var canSaveDeckState: Bool { state == .ready && !opening && !closed && !closing && !resuming }
+
+    private func invalidateDeckActions() {
+        selectionRevision &+= 1; collapseRevision &+= 1; countsRevision &+= 1; deckTreeRevision &+= 1
+        pendingStudyCollapse.removeAll()
+    }
+
+    /// Admission is synchronous so a later row/section click wins even before a task runs.
+    @discardableResult public func openDeckPage(deckID: Int64) -> Task<Bool, Never> {
+        let intent = navigation.beginDeckSelection()
+        let selection = selectDeck(deckID: deckID, intent: intent)
+        let expected = generation, revision = selectionRevision
+        return Task {
+            guard await selection.value, expected == generation, revision == selectionRevision,
+                  canSaveDeckState, navigation.intentRevision == intent else { return false }
+            if navigation.sidebarSelection != .deck(DeckID(deckID)) {
+                navigation.openDeckPage(DeckID(deckID))
+            }
+            return true
+        }
+    }
+
+    /// Serial writes preserve core selection order; superseded queued requests need no write.
+    private func selectDeck(deckID: Int64, intent: UInt64) -> Task<Bool, Never> {
+        selectionRevision &+= 1
+        let revision = selectionRevision, expected = generation, previous = selectionTask
+        let task = Task {
+            _ = await previous?.value
+            guard revision == selectionRevision, expected == generation, canSaveDeckState,
+                  navigation.intentRevision == intent else { return false }
+            do {
+                let savedGeneration = try await saveSelectedDeck(deckID)
+                guard revision == selectionRevision, expected == generation,
+                      savedGeneration == expected, canSaveDeckState,
+                      navigation.intentRevision == intent else { return false }
+                if error == "Couldn’t select this deck. Try again." { error = nil }
+                return true
+            } catch {
+                if revision == selectionRevision, expected == generation, canSaveDeckState,
+                   navigation.intentRevision == intent {
+                    self.error = "Couldn’t select this deck. Try again."
+                }
+                return false
+            }
+        }
+        selectionTask = task
+        return task
+    }
+
+    public func studyExpanded(deckID: Int64) -> Bool {
+        if let pending = pendingStudyCollapse[deckID] { return !pending.collapsed }
+        return deck(deckID).map { !$0.studyCollapsed } ?? false
+    }
+
+    /// Each native disclosure binds to the same owner in Home and the sidebar.
+    @discardableResult public func setStudyExpanded(deckID: Int64, expanded: Bool,
+                                                   includingDescendants: Bool = false) -> Task<Void, Never> {
+        guard canSaveDeckState, let node = deck(deckID) else { return Task {} }
+        func ids(_ node: CountedDeckNode) -> [Int64] { [node.id] + node.children.flatMap(ids) }
+        let affected = includingDescendants ? ids(node) : [deckID]
+        collapseRevision &+= 1; countsRevision &+= 1; deckTreeRevision &+= 1
+        let revision = collapseRevision, expected = generation, previous = collapseTask
+        for id in affected { pendingStudyCollapse[id] = (revision, !expanded) }
+        let task = Task {
+            await previous?.value
+            guard expected == generation, canSaveDeckState else {
+                clearPendingCollapse(affected, revision: revision)
+                return
+            }
+            let current = affected.filter { pendingStudyCollapse[$0]?.revision == revision }
+            guard !current.isEmpty else { return }
+            do {
+                let savedGeneration = try await saveStudyCollapse(current, !expanded)
+                guard expected == generation, savedGeneration == expected, canSaveDeckState else {
+                    clearPendingCollapse(current, revision: revision)
+                    if expected == generation { deckTreeRevision &+= 1; refreshCounts() }
+                    return
+                }
+                if current.contains(where: { pendingStudyCollapse[$0]?.revision == revision }),
+                   error == "Couldn’t save deck expansion. Try again." { error = nil }
+                // Keep identities/order/counts and browser state intact until the next query.
+                decks = applyingStudyCollapse(Set(current), collapsed: !expanded, to: decks)
+            } catch {
+                if expected == generation, canSaveDeckState,
+                   current.contains(where: { pendingStudyCollapse[$0]?.revision == revision }) {
+                    self.error = "Couldn’t save deck expansion. Try again."
+                }
+            }
+            guard expected == generation else { return }
+            deckTreeRevision &+= 1
+            clearPendingCollapse(current, revision: revision)
+            refreshCounts()
+        }
+        collapseTask = task
+        return task
+    }
+
+    private func clearPendingCollapse(_ ids: [Int64], revision: UInt64) {
+        for id in ids where pendingStudyCollapse[id]?.revision == revision { pendingStudyCollapse[id] = nil }
+    }
+    private func applyingStudyCollapse(_ ids: Set<Int64>, collapsed: Bool, to nodes: [CountedDeckNode]) -> [CountedDeckNode] {
+        nodes.map { node in
+            CountedDeckNode(id: node.id, name: node.name, filtered: node.filtered,
+                studyCollapsed: ids.contains(node.id) ? collapsed : node.studyCollapsed,
+                browserCollapsed: node.browserCollapsed, counts: node.counts,
+                children: applyingStudyCollapse(ids, collapsed: collapsed, to: node.children))
+        }
+    }
+
     public func refreshCounts() {
         countsRevision &+= 1
         guard countsTask == nil, foreground, state == .ready, !opening else { return }
@@ -333,11 +467,11 @@ public final class ReviewCollection {
             countsTask = nil
         }
     }
-    private func loadCounts() async {
-        let expected = generation
+    func loadCounts() async {
+        let expected = generation, revision = deckTreeRevision
         do {
-            let tree = try await deckService.treeWithCounts()
-            guard expected == generation, tree.generation == generation, !closed else { return }
+            let tree = try await loadDeckTree()
+            guard expected == generation, tree.generation == generation, revision == deckTreeRevision, !closed else { return }
             decks = tree.nodes
             countTimer?.invalidate(); countTimer = nil
             if foreground && !configuration.clock.isFixed && Double(tree.nextChangeAt) < Date.distantFuture.timeIntervalSince1970 {
@@ -348,7 +482,7 @@ public final class ReviewCollection {
                 }
                 if let countTimer { RunLoop.main.add(countTimer, forMode: .common) }
             }
-        } catch { if expected == generation, !closed { self.error = String(describing: error) } }
+        } catch { if expected == generation, revision == deckTreeRevision, !closed { self.error = "Couldn’t refresh decks. Try again." } }
     }
     public func deck(_ id: Int64) -> CountedDeckNode? {
         func find(_ nodes: [CountedDeckNode]) -> CountedDeckNode? {
@@ -391,9 +525,12 @@ public final class ReviewCollection {
         starting = true
         defer { starting = false }
         do {
+            let expected = generation, intent = navigation.intentRevision
+            guard await selectDeck(deckID: deckID, intent: intent).value,
+                  expected == generation, intent == navigation.intentRevision else { return }
+            guard let resolver = await mediaResolverForReview(), reviewIsActive, state == .ready,
+                  expected == generation, intent == navigation.intentRevision else { return }
             previousRecord = nil // The visible Home record has now been acknowledged.
-            _ = try await deckService.selectDeck(id: deckID)
-            guard let resolver = await mediaResolverForReview(), reviewIsActive, state == .ready else { return }
             let model = ReviewCoordinator(deckID: deckID, surface: makeReviewSurface(resolver),
                 store: records, clock: configuration.clock)
             model.onPolicyRefusal = { [weak self] in self?.pendingDeck = deckID }
@@ -488,6 +625,11 @@ public final class ReviewCollection {
         Task { await day?.checkNow() }
     }
     @discardableResult public func close() async -> Bool {
+        closing = true
+        defer { closing = false }
+        invalidateDeckActions()
+        _ = await selectionTask?.value
+        await collapseTask?.value
         await manualOwner?.cancelAndDrain()
         await entryOwner?.cancelAndDrain()
         await exportOwner?.cancelAndDrain()

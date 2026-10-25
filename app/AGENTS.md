@@ -53,6 +53,8 @@
 
 ## Test hooks
 
+- `HomeDeckListPreview` renders the production tree with DTO data; it proves appearance only. Full `-MeguriFixture` launches replace the destination collection. A `.dev` id does not isolate current development data; use an isolated test container or the VM for those launches.
+
 - Launch options are `-Meguri<Name> <value>` (table in `TestHooks/LaunchOptions.swift`); UI tests build them with `MeguriUITests/Support/MeguriLaunch.swift`. A bad option replaces the UI with `testhooks.error.message`.
 - The Mac Debug app declares `LSUIElement`, so LaunchServices never shows a launch in the Dock before the app's code runs; `MeguriApp.init` then gives it the regular policy unless it is a test host (`XCTestConfigurationFilePath`) or got `-MeguriBackgroundLaunch YES` (`TestHooks/BackgroundLaunch.swift`, U8d). Those stay accessory: never in the Dock or active, windows still render and capture. Profile starts as a regular app and has no switch (it keeps Release's launch, R1866), so `tools/mg` launches only Debug on the Mac host. App-hosted tests therefore run in an app that is never active.
 - On the Mac, SwiftUI keeps the window frame in the `NSWindow Frame main` default, which `-ApplePersistenceIgnoreState` does not reset. Hook launches therefore always set a size (`default` when `-MeguriWindowSize` is absent); a launch with no hook option keeps the previous run's frame.

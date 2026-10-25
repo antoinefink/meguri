@@ -2,6 +2,9 @@ import AppModel
 import CoreBridge
 import DesignSystem
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 public struct HomeView: View {
     public let collection: ReviewCollection
@@ -11,8 +14,12 @@ public struct HomeView: View {
         Group {
             if showsRootDeckList {
                 HomeDeckTree(nodes: collection.decks, navigation: collection.navigation,
-                    previousAnswerCount: collection.previousRecord?.answers.count, error: collection.error) { id in
-                    collection.navigation.openDeckPage(DeckID(id))
+                    previousAnswerCount: collection.previousRecord?.answers.count, error: collection.error,
+                    isExpanded: { collection.studyExpanded(deckID: $0) },
+                    setExpanded: { id, expanded, descendants in
+                        collection.setStudyExpanded(deckID: id, expanded: expanded, includingDescendants: descendants)
+                    }) { id in
+                    collection.navigation.select(.deck(DeckID(id)))
                 }
             } else {
                 #if os(macOS)
@@ -230,15 +237,20 @@ public struct HomeDeckTree: View {
     private let navigation: AppNavigation?
     private let previousAnswerCount: Int?
     private let error: String?
+    private let isExpanded: ((Int64) -> Bool)?
+    private let setExpanded: ((Int64, Bool, Bool) -> Void)?
     @State private var rowFrames: [Int64: CGRect] = [:]
     @State private var restoring: Int64?
     @State private var tracking = false
 
     public init(nodes: [CountedDeckNode], navigation: AppNavigation? = nil,
                 previousAnswerCount: Int? = nil, error: String? = nil,
+                isExpanded: ((Int64) -> Bool)? = nil,
+                setExpanded: ((Int64, Bool, Bool) -> Void)? = nil,
                 select: @escaping (Int64) -> Void) {
         self.nodes = nodes; self.navigation = navigation
         self.previousAnswerCount = previousAnswerCount; self.error = error; self.select = select
+        self.isExpanded = isExpanded; self.setExpanded = setExpanded
     }
 
     public var body: some View {
@@ -247,7 +259,7 @@ public struct HomeDeckTree: View {
                 List {
                     Section {
                         ForEach(nodes, id: \.id) { node in
-                            HomeDeckBranch(node: node, select: select, frameChanged: recordFrame)
+                            HomeDeckBranch(node: node, select: select, isExpanded: isExpanded, setExpanded: setExpanded, frameChanged: recordFrame)
                         }
                     } header: { Text("Decks", bundle: .module) }
                     if let error {
@@ -274,7 +286,8 @@ public struct HomeDeckTree: View {
                 .onChange(of: rowFrames) { _, frames in
                     let visible = frames.filter { $0.value.maxY > 0 && $0.value.minY < viewport.size.height }
                     if let restoring {
-                        guard visible[restoring] != nil else { return }
+                        // Saved anchors can become hidden by a persisted parent disclosure.
+                        guard visible[restoring] != nil || !contains(restoring, in: nodes) else { return }
                         self.restoring = nil
                         tracking = true
                     }
@@ -313,7 +326,9 @@ public struct HomeDeckTree: View {
     private enum InfoAnchor: Hashable { case previousSession, error }
     private func recordFrame(_ id: Int64, _ frame: CGRect?) { rowFrames[id] = frame }
     private func contains(_ id: Int64, in nodes: [CountedDeckNode]) -> Bool {
-        nodes.contains { $0.id == id || contains(id, in: $0.children) }
+        nodes.contains { node in
+            node.id == id || ((isExpanded?(node.id) ?? !node.studyCollapsed) && contains(id, in: node.children))
+        }
     }
     private func scrollToTop(_ proxy: ScrollViewProxy) {
         if let first = nodes.first {
@@ -329,18 +344,24 @@ public struct HomeDeckTree: View {
 private struct HomeDeckBranch: View {
     let node: CountedDeckNode
     let select: (Int64) -> Void
+    let isExpanded: ((Int64) -> Bool)?
+    let setExpanded: ((Int64, Bool, Bool) -> Void)?
     let frameChanged: (Int64, CGRect?) -> Void
     @Environment(\.locale) private var locale
-    @State private var expanded = true
+
+    private var expanded: Binding<Bool> {
+        Binding(get: { isExpanded?(node.id) ?? !node.studyCollapsed },
+                set: { setExpanded?(node.id, $0, studyDisclosureIncludesDescendants()) })
+    }
 
     var body: some View {
         Group {
             if node.children.isEmpty {
                 row
             } else {
-                DisclosureGroup(isExpanded: $expanded) {
+                DisclosureGroup(isExpanded: expanded) {
                     ForEach(node.children, id: \.id) { child in
-                        AnyView(HomeDeckBranch(node: child, select: select, frameChanged: frameChanged))
+                        AnyView(HomeDeckBranch(node: child, select: select, isExpanded: isExpanded, setExpanded: setExpanded, frameChanged: frameChanged))
                     }
                 } label: { row }
                 .accessibilityIdentifier("home.deck.disclosure.\(node.id)")
@@ -419,52 +440,79 @@ public struct HomeSidebarDecks: View {
                 #endif
                 .accessibilityIdentifier("home.sidebar.guidance")
         } else {
-            ForEach(Self.flatten(collection.decks), id: \.id) { deck in
-                Group {
-                    #if os(macOS)
-                    let dueCount: UInt32 = collection.deck(deck.id)?.counts.review ?? 0
-                    let dueValue: Text = Text("\(Text(dueCount, format: .number)) due", bundle: .module)
-                    // Native compact navigation may truncate visually; help keeps
-                    // the full path, and accessibility keeps the path and due count.
-                    Text(verbatim: deck.path)
-                        .badge(Text(dueCount, format: .number))
-                        .lineLimit(1)
-                        .help(Text(verbatim: deck.path))
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel(Text(verbatim: deck.path))
-                        .accessibilityValue(dueValue)
-                    #else
-                    VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-                        Text(verbatim: deck.path)
-                        if let node = collection.deck(deck.id) { DeckCounts(counts: node.counts) }
-                    }
-                    .foregroundStyle(.token(.textPrimary))
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .listRowBackground(ColorToken.surface.color)
-                    #endif
-                }
-                .accessibilityIdentifier("home.sidebar.deck.\(deck.id)")
-                .tag(SidebarItem.deck(DeckID(deck.id)))
+            ForEach(collection.decks, id: \.id) { node in
+                HomeSidebarBranch(collection: collection, node: node, ancestors: [])
             }
         }
     }
 
     private var emptyGuidance: Text { Text("No decks", bundle: .module) }
+}
 
-    private struct Row {
-        let id: Int64
-        let path: String
+private struct HomeSidebarBranch: View {
+    let collection: ReviewCollection
+    let node: CountedDeckNode
+    let ancestors: [String]
+    private var name: String { node.name.components(separatedBy: "::").last ?? node.name }
+    private var path: String { (ancestors + [name]).joined(separator: "::") }
+    private var expanded: Binding<Bool> {
+        Binding(get: { collection.studyExpanded(deckID: node.id) }, set: {
+            collection.setStudyExpanded(deckID: node.id, expanded: $0,
+                includingDescendants: studyDisclosureIncludesDescendants())
+        })
     }
 
-    private static func flatten(_ nodes: [CountedDeckNode], ancestors: [String] = []) -> [Row] {
-        nodes.flatMap { node in
-            let components = ancestors + [node.name]
-            return [Row(id: node.id, path: components.joined(separator: "::"))]
-                + flatten(node.children, ancestors: components)
+    var body: some View {
+        Group {
+            if node.children.isEmpty {
+                row
+            } else {
+                DisclosureGroup(isExpanded: expanded) {
+                    ForEach(node.children, id: \.id) { child in
+                        AnyView(HomeSidebarBranch(collection: collection, node: child, ancestors: ancestors + [name]))
+                    }
+                } label: { row }
+                .tag(SidebarItem.deck(DeckID(node.id)))
+                .accessibilityIdentifier("home.sidebar.disclosure.\(node.id)")
+            }
         }
+        .id(node.id)
     }
+
+    private var row: some View {
+        Group {
+            #if os(macOS)
+            Text(verbatim: name)
+                .badge(Text(node.counts.review, format: .number))
+                .lineLimit(1)
+                .help(Text(verbatim: path))
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(Text(verbatim: path))
+                .accessibilityValue(Text("\(Text(node.counts.review, format: .number)) due", bundle: .module))
+            #else
+            VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+                Text(verbatim: name)
+                DeckCounts(counts: node.counts)
+            }
+            .foregroundStyle(.token(.textPrimary))
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowBackground(ColorToken.surface.color)
+            .accessibilityLabel(Text(verbatim: path))
+            #endif
+        }
+        .accessibilityIdentifier("home.sidebar.deck.\(node.id)")
+        .tag(SidebarItem.deck(DeckID(node.id)))
+    }
+}
+
+private func studyDisclosureIncludesDescendants() -> Bool {
+    #if os(macOS)
+    NSEvent.modifierFlags.contains(.option)
+    #else
+    false
+    #endif
 }
 
 public struct FsrsAdmissionView: View {
