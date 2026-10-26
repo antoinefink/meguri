@@ -383,6 +383,9 @@ extension TestHooks {
     final class ShellCommands: NSObject {
         enum Command: String, CaseIterable {
             case toggleSizeClass, presentAdd, closeWindow, closeNativeReview, flushNativeReview
+            #if os(macOS)
+            case readNativeReviewPhase
+            #endif
         }
 
         static let shared = ShellCommands()
@@ -394,6 +397,9 @@ extension TestHooks {
         private var navigation: AppNavigation?
         private let nativeClose = NativeReviewCloseRequest()
         private weak var nativeInput: NativeReviewInput?
+        #if os(macOS)
+        private let nativePhase = NativeReviewPhaseRequest()
+        #endif
         private var listening = false
         #if os(iOS)
         private var tokens: [Int32] = []
@@ -403,11 +409,15 @@ extension TestHooks {
             self.navigation = navigation
             nativeClose.bind(collection: nativeCollection)
             nativeInput = nativeCollection?.configuration.nativeReviewInput
+            #if os(macOS)
+            nativePhase.bind(input: nativeClose.enabled ? nativeInput : nil)
+            #endif
             guard !listening else { return }
             listening = true
             for command in Command.allCases {
                 if (command == .closeNativeReview || command == .flushNativeReview) && !nativeClose.enabled { continue }
                 #if os(macOS)
+                if command == .readNativeReviewPhase && !nativePhase.enabled { continue }
                 DistributedNotificationCenter.default().addObserver(
                     self, selector: #selector(received(_:)), name: Notification.Name(Self.name(command)), object: nil,
                     suspensionBehavior: .deliverImmediately
@@ -425,12 +435,28 @@ extension TestHooks {
         #if os(macOS)
         @objc private func received(_ notification: Notification) {
             guard let command = Command.allCases.first(where: { Self.name($0) == notification.name.rawValue }) else { return }
-            perform(command)
+            if command == .readNativeReviewPhase {
+                guard nativeClose.enabled, nativeInput != nil, nativePhase.enabled,
+                      Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true,
+                      notification.userInfo == nil, let object = notification.object as? String,
+                      object.utf8.count <= NativeReviewInput.PhaseTransport.objectLimit else { return }
+                Task { [weak self] in
+                    guard let self else { return }
+                    await nativePhase.request(object) { object in
+                        DistributedNotificationCenter.default().postNotificationName(
+                            Notification.Name("\(Bundle.main.bundleIdentifier ?? "").testhooks.nativeReviewPhase"),
+                            object: object, userInfo: nil, deliverImmediately: true)
+                    }
+                }
+            } else { perform(command) }
         }
         #endif
 
         private func perform(_ command: Command) {
             switch command {
+            #if os(macOS)
+            case .readNativeReviewPhase: break // Object-bearing requests enter received(_:).
+            #endif
             case .toggleSizeClass:
                 #if os(iOS)
                 guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
@@ -451,7 +477,8 @@ extension TestHooks {
                     let status = await nativeInput.evidenceStatus()
                     let name = "\(Bundle.main.bundleIdentifier ?? "").testhooks.nativeReviewStatus"
                     #if os(macOS)
-                    let value = ["status": status, "directory": nativeInput.receiptURL.deletingLastPathComponent().path]
+                    let value = ["status": status, "directory": nativeInput.receiptURL.deletingLastPathComponent().path,
+                        "owner": (try? nativeInput.phaseTransportOwner()) ?? ""]
                     guard let data = try? JSONSerialization.data(withJSONObject: value),
                           let object = String(data: data, encoding: .utf8) else { return }
                     DistributedNotificationCenter.default().postNotificationName(Notification.Name(name),
@@ -517,6 +544,59 @@ extension TestHooks {
         }
         #endif
     }
+
+    #if os(macOS)
+    /// One bounded request at a time; no retained reply callback or retry task.
+    /// Rebinding/cancelling retires an in-flight request before it can reply.
+    @MainActor final class NativeReviewPhaseRequest {
+        private weak var input: NativeReviewInput?
+        private var read: (@MainActor (String) async throws -> String)?
+        private var epoch = UUID()
+        private var running: UUID?
+        private var requests = 0
+        private var requiresCurrentInput = false
+        var enabled: Bool { read != nil }
+
+        func bind(input: NativeReviewInput?) {
+            guard Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true else { cancel(); return }
+            if let input, self.input === input { return }
+            cancel()
+            self.input = input
+            guard let input else { return }
+            requiresCurrentInput = true
+            read = { [weak input] object in
+                guard let input else { throw TestHookError("Retired native input") }
+                return try await input.phaseReply(to: object)
+            }
+        }
+        // Tests suspend the same request boundary without starting an app.
+        init(read: (@MainActor (String) async throws -> String)? = nil) { self.read = read }
+        func cancel() {
+            epoch = UUID(); input = nil; read = nil; running = nil; requests = 0; requiresCurrentInput = false
+        }
+        func request(_ object: String, reply: @MainActor (String) -> Void) async {
+            guard let read, running == nil, requests < 4,
+                  (try? NativeReviewInput.PhaseTransport.decode(object)) != nil else { return }
+            let admitted = epoch, token = UUID()
+            running = token; requests += 1
+            defer { if running == token { running = nil } }
+            do {
+                try Task.checkCancellation()
+                let response = try await read(object)
+                try Task.checkCancellation()
+                guard epoch == admitted, running == token else { return }
+                // The reader must return exactly this request's binding/nonce.
+                let fields = try NativeReviewInput.PhaseTransport.decode(response, reply: true)
+                var binding = fields; binding.removeValue(forKey: "data")
+                guard binding == (try NativeReviewInput.PhaseTransport.decode(object)) else { return }
+                if requiresCurrentInput {
+                    guard let input, try input.phaseTransportOwner() == fields["owner"] else { return }
+                }
+                reply(response)
+            } catch { return }
+        }
+    }
+    #endif
 
     @MainActor final class NativeReviewCloseRequest {
         enum Result: UInt64 { case saved = 1, failed = 2 }

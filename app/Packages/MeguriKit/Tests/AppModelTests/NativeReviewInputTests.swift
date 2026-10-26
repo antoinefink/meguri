@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 @testable import CardRendering
 import Testing
@@ -96,6 +97,363 @@ import Testing
         #expect(description.contains("other(current="))
         #expect(description.contains("bridgeReasons: "))
         #expect(description.hasSuffix("; more"))
+    }
+
+    @Test func phaseTransferReturnsOriginalFileBytesAndConsumesNonceOnce() async throws {
+        let sample = try NativeReviewInputFixture(); defer { sample.remove() }
+        let owner = sample.owner()
+        try await sample.activate(owner)
+        owner.completed(try sample.answer(owner), outcome: "accepted")
+        await owner.flushEvidence()
+        let file = owner.receiptURL.deletingLastPathComponent().appending(path: "accepted.json")
+        let original = try Data(contentsOf: file)
+        let request = try sample.phaseRequest(owner, phase: "accepted")
+        let response = try await owner.phaseReply(to: request)
+        let fields = try NativeReviewInput.PhaseTransport.decode(response, reply: true)
+        let encoded: String = try #require(fields["data"])
+        let bytes: Data = try #require(Data(base64Encoded: encoded))
+        #expect(bytes == original)
+        var binding = fields; binding.removeValue(forKey: "data")
+        #expect(binding == (try NativeReviewInput.PhaseTransport.decode(request)))
+        #expect(try Data(contentsOf: file) == original)
+        await #expect(throws: NativeReviewInput.Refusal.self) { try await owner.phaseReply(to: request) }
+        var repeated = try NativeReviewInput.PhaseTransport.decode(request)
+        repeated["phase"] = "closed" // A different phase cannot reuse the nonce.
+        await #expect(throws: NativeReviewInput.Refusal.self) {
+            try await owner.phaseReply(to: NativeReviewInput.PhaseTransport.encode(repeated))
+        }
+    }
+
+    @Test func earlierLaunchPhasesTransferUnchangedThroughCurrentOwner() async throws {
+        let sample = try NativeReviewInputFixture(); defer { sample.remove() }
+        let first = sample.owner()
+        try await sample.activate(first)
+        first.completed(try sample.answer(first), outcome: "accepted")
+        first.ended(coordinator: sample.coordinator, session: 5)
+        try sample.installClosedFiles(); try await first.closed()
+        let retiredRequest = try sample.phaseRequest(first, phase: "accepted")
+        let directory = first.receiptURL.deletingLastPathComponent()
+        let originals = try ["accepted", "closed"].map { try Data(contentsOf: directory.appending(path: "\($0).json")) }
+        let next = sample.owner(); try await next.prepare()
+        #expect(try await next.reopenSeed() == 44)
+        await #expect(throws: NativeReviewInput.Refusal.self) { try await first.phaseReply(to: retiredRequest) }
+        await #expect(throws: NativeReviewInput.Refusal.self) { try await next.phaseReply(to: retiredRequest) }
+        for (index, phase) in ["accepted", "closed"].enumerated() {
+            let response = try await next.phaseReply(to: sample.phaseRequest(next, phase: phase))
+            let fields = try NativeReviewInput.PhaseTransport.decode(response, reply: true)
+            let encoded: String = try #require(fields["data"])
+            let bytes: Data = try #require(Data(base64Encoded: encoded))
+            #expect(bytes == originals[index])
+            #expect(try Data(contentsOf: directory.appending(path: "\(phase).json")) == originals[index])
+            let historical = try JSONDecoder().decode(NativeReviewInput.Receipt.self, from: bytes)
+            #expect(historical.owner.uuidString != fields["owner"])
+            #expect(historical.admission?.owner == historical.owner)
+        }
+    }
+
+    @Test(arguments: ["case", "platform", "freezeSHA256", "freezeBytes", "inputSHA256", "inputBytes", "owner", "nonce", "phase", "extra", "duplicate", "object-bound"])
+    func phaseRequestRefusesWrongOrMalformedBinding(change: String) async throws {
+        let sample = try NativeReviewInputFixture(); defer { sample.remove() }
+        let owner = sample.owner(); try await sample.activate(owner)
+        owner.completed(try sample.answer(owner), outcome: "accepted"); await owner.flushEvidence()
+        let valid = try sample.phaseRequest(owner, phase: "accepted")
+        var fields = try NativeReviewInput.PhaseTransport.decode(valid)
+        switch change {
+        case "case": fields[change] = "another-case"
+        case "platform": fields[change] = "iphone"
+        case "freezeSHA256", "inputSHA256": fields[change] = String(repeating: "f", count: 64)
+        case "freezeBytes", "inputBytes": fields[change] = "1"
+        case "owner": fields[change] = UUID().uuidString
+        case "nonce": fields[change] = "not-a-UUID"
+        case "phase": fields[change] = "receipt" // Never an arbitrary filename/path.
+        case "extra": fields["path"] = "/tmp/arbitrary.json"
+        default: break
+        }
+        var object = String(decoding: try JSONSerialization.data(withJSONObject: fields,
+            options: [.sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
+        if change == "duplicate" { object = "{\"phase\":\"accepted\"," + object.dropFirst() }
+        if change == "object-bound" { object = String(repeating: " ", count: NativeReviewInput.PhaseTransport.objectLimit + 1) }
+        await #expect(throws: (any Error).self) { try await owner.phaseReply(to: object) }
+        // Refusing a malformed request does not consume the valid request.
+        let response = try await owner.phaseReply(to: valid)
+        #expect(!(try NativeReviewInput.PhaseTransport.decode(response, reply: true)).isEmpty)
+    }
+
+    @Test(arguments: ["missing", "changed", "symlink", "hardlink", "oversize", "directory", "writable", "freeze", "missing-phase"])
+    func phaseTransferRefusesUnsafeOrChangedFiles(change: String) async throws {
+        let sample = try NativeReviewInputFixture(); defer { sample.remove() }
+        let owner = sample.owner(); try await sample.activate(owner)
+        owner.completed(try sample.answer(owner), outcome: "accepted"); await owner.flushEvidence()
+        let request = try sample.phaseRequest(owner, phase: change == "missing-phase" ? "import" : "accepted")
+        let file = owner.receiptURL.deletingLastPathComponent().appending(path: "accepted.json")
+        switch change {
+        case "missing": try FileManager.default.removeItem(at: file)
+        case "changed":
+            var original = try Data(contentsOf: file); original.append(0x20)
+            try original.write(to: file) // Still valid JSON with the same receipt facts.
+        case "symlink":
+            let moved = file.appendingPathExtension("original")
+            try FileManager.default.moveItem(at: file, to: moved)
+            try FileManager.default.createSymbolicLink(at: file, withDestinationURL: moved)
+        case "hardlink": try FileManager.default.linkItem(at: file, to: file.appendingPathExtension("linked"))
+        case "oversize": try Data(repeating: 0x20, count: 128 * 1024 + 1).write(to: file)
+        case "directory":
+            try FileManager.default.removeItem(at: file)
+            try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+        case "writable": try FileManager.default.setAttributes([.posixPermissions: 0o666], ofItemAtPath: file.path)
+        case "freeze": try sample.write("\(sample.base)/freeze.json", Data("{}".utf8))
+        default: break
+        }
+        await #expect(throws: (any Error).self) { try await owner.phaseReply(to: request) }
+    }
+
+    @Test func phaseDigestSurvivesRelaunchAndDetectsHistoricalFileMutation() async throws {
+        let sample = try NativeReviewInputFixture(); defer { sample.remove() }
+        let first = sample.owner(); try await sample.activate(first)
+        first.completed(try sample.answer(first), outcome: "accepted")
+        first.ended(coordinator: sample.coordinator, session: 5)
+        try sample.installClosedFiles(); try await first.closed()
+        let file = first.receiptURL.deletingLastPathComponent().appending(path: "accepted.json")
+        var original = try Data(contentsOf: file); original.append(0x20); try original.write(to: file)
+        let next = sample.owner(); try await next.prepare(); _ = try await next.reopenSeed()
+        await #expect(throws: NativeReviewInput.Refusal.self) {
+            try await next.phaseReply(to: sample.phaseRequest(next, phase: "accepted"))
+        }
+    }
+
+    @Test func cancelledPhaseReadCannotReplyAndUnpreparedOwnerIsInert() async throws {
+        let sample = try NativeReviewInputFixture(); defer { sample.remove() }
+        let owner = sample.owner()
+        #expect(throws: NativeReviewInput.Refusal.self) { try owner.phaseTransportOwner() }
+        try await sample.activate(owner)
+        owner.completed(try sample.answer(owner), outcome: "accepted"); await owner.flushEvidence()
+        let object = try sample.phaseRequest(owner, phase: "accepted")
+        let pending = Task { try await owner.phaseReply(to: object) }
+        pending.cancel()
+        do { _ = try await pending.value; Issue.record("Cancelled phase read replied") }
+        catch { #expect(error is CancellationError) }
+    }
+
+    @Test func noFollowPhaseReadAndNotificationRespectExactByteBounds() throws {
+        let fixture = try NativeReviewInputFixture()
+        defer { fixture.remove() }
+        let ceiling = NativeReviewInput.PhaseTransport.fileLimit
+        let permitted = Data(repeating: 0x35, count: ceiling)
+        let receiptName = "size-ceiling.json"
+        try fixture.write(receiptName, permitted)
+        let diskBytes = try FrozenNativeReviewInput.read(fixture.root, receiptName, limit: ceiling, singleLink: true)
+        #expect(diskBytes == permitted)
+
+        var envelope = try fixture.phaseFields(owner: UUID().uuidString, phase: "accepted")
+        envelope["data"] = permitted.base64EncodedString()
+        let notificationText = try NativeReviewInput.PhaseTransport.encode(envelope, reply: true)
+        #expect(notificationText.utf8.count <= NativeReviewInput.PhaseTransport.objectLimit)
+        let decodedEnvelope = try NativeReviewInput.PhaseTransport.decode(notificationText, reply: true)
+        let encodedPayload: String = try #require(decodedEnvelope["data"])
+        let decodedPayload: Data = try #require(Data(base64Encoded: encodedPayload))
+        #expect(decodedPayload == permitted)
+
+        var beyondCeiling = permitted
+        beyondCeiling.append(0x35)
+        try fixture.write(receiptName, beyondCeiling)
+        #expect(throws: NativeReviewInput.Refusal.self) {
+            try FrozenNativeReviewInput.read(fixture.root, receiptName, limit: ceiling, singleLink: true)
+        }
+        envelope["data"] = beyondCeiling.base64EncodedString()
+        #expect(throws: NativeReviewInput.Refusal.self) {
+            try NativeReviewInput.PhaseTransport.encode(envelope, reply: true)
+        }
+        envelope["data"] = Data().base64EncodedString()
+        #expect(throws: NativeReviewInput.Refusal.self) {
+            try NativeReviewInput.PhaseTransport.encode(envelope, reply: true)
+        }
+    }
+
+    @Test func phaseReadAcceptsVerifiedSystemAliasAndAdmittedPhysicalRoot() throws {
+        let fixture = try NativeReviewInputFixture()
+        defer { fixture.remove() }
+        let parts = fixture.root.pathComponents
+        let physicalSpelling = parts.count > 2 && parts[1] == "private"
+        let aliasIndex = physicalSpelling ? 2 : 1
+        try #require(parts.count > aliasIndex)
+        let alias = parts[aliasIndex]
+        try #require(["var", "tmp", "etc"].contains(alias))
+        let suffix = parts.dropFirst(aliasIndex + 1).joined(separator: "/")
+        let aliasRoot = URL(filePath: "/\(alias)/\(suffix)", directoryHint: .isDirectory)
+        let alternateRoot = URL(filePath: "/private/\(alias)/\(suffix)", directoryHint: .isDirectory)
+        var info = stat()
+        try #require(lstat("/\(alias)", &info) == 0)
+        try #require(info.st_uid == 0 && info.st_mode & S_IFMT == S_IFLNK)
+        let expected = Data("verified OS anchor".utf8)
+        try fixture.write("anchor-positive.json", expected)
+        #expect(try FrozenNativeReviewInput.read(aliasRoot, "anchor-positive.json", singleLink: true) == expected)
+        if alternateRoot.path != alternateRoot.standardizedFileURL.path ||
+            alternateRoot.path != alternateRoot.resolvingSymlinksInPath().path {
+            #expect(throws: NativeReviewInput.Refusal.self) {
+                try FrozenNativeReviewInput.read(alternateRoot, "anchor-positive.json", singleLink: true)
+            }
+        } else {
+            #expect(try FrozenNativeReviewInput.read(alternateRoot, "anchor-positive.json", singleLink: true) == expected)
+        }
+
+        let cache = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
+            appropriateFor: nil, create: false).resolvingSymlinksInPath()
+        let physicalRoot = cache.appending(path: "Meguri-native-input-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try #require(mkdir(physicalRoot.path, 0o700) == 0)
+        defer { _ = rmdir(physicalRoot.path) }
+        let file = physicalRoot.appending(path: "anchor-positive.json")
+        let descriptor = Darwin.open(file.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        try #require(descriptor >= 0)
+        defer { _ = unlink(file.path) }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
+        try handle.write(contentsOf: expected)
+        try handle.close()
+        try #require(lstat(physicalRoot.path, &info) == 0 && info.st_uid == getuid() &&
+            info.st_mode & S_IFMT == S_IFDIR && info.st_mode & 0o777 == 0o700)
+        try #require(lstat(file.path, &info) == 0 && info.st_uid == getuid() &&
+            info.st_mode & S_IFMT == S_IFREG && info.st_nlink == 1 && info.st_mode & 0o022 == 0)
+        try #require(physicalRoot.path == physicalRoot.standardizedFileURL.path)
+        try #require(physicalRoot.path == physicalRoot.resolvingSymlinksInPath().path)
+        try #require(FrozenNativeReviewInput.scoped(physicalRoot, "anchor-positive.json").path == file.path)
+        #expect(try FrozenNativeReviewInput.read(physicalRoot, "anchor-positive.json", singleLink: true) == expected)
+    }
+
+    @Test(arguments: ["var", "tmp", "etc"])
+    func systemAliasPolicyAcceptsOnlyExactCompiledRootTargets(alias: String) {
+        var info = stat()
+        info.st_mode = mode_t(S_IFLNK | 0o755); info.st_uid = 0
+        let target = Array("private/\(alias)".utf8)
+        #expect(FrozenNativeReviewInput.systemAliasTarget(alias, index: 1, ownedRootDepth: 6,
+            info: info, target: target) == ["private", alias])
+        for wrongTarget in [target + [0], target + Array("/suffix".utf8), Array("/private/\(alias)".utf8), Array("private/other".utf8)] {
+            #expect(FrozenNativeReviewInput.systemAliasTarget(alias, index: 1, ownedRootDepth: 6,
+                info: info, target: wrongTarget) == nil)
+        }
+        #expect(FrozenNativeReviewInput.systemAliasTarget(alias, index: 2, ownedRootDepth: 6,
+            info: info, target: target) == nil)
+        #expect(FrozenNativeReviewInput.systemAliasTarget(alias, index: 1, ownedRootDepth: 1,
+            info: info, target: target) == nil)
+        #expect(FrozenNativeReviewInput.systemAliasTarget("unknown", index: 1, ownedRootDepth: 6,
+            info: info, target: target) == nil)
+        #expect(FrozenNativeReviewInput.systemAliasTarget(alias.uppercased(), index: 1, ownedRootDepth: 6,
+            info: info, target: target) == nil)
+        info.st_uid = 501
+        #expect(FrozenNativeReviewInput.systemAliasTarget(alias, index: 1, ownedRootDepth: 6,
+            info: info, target: target) == nil)
+        info.st_uid = 0; info.st_mode = mode_t(S_IFDIR | 0o755)
+        #expect(FrozenNativeReviewInput.systemAliasTarget(alias, index: 1, ownedRootDepth: 6,
+            info: info, target: target) == nil)
+    }
+
+    @Test(arguments: ["device", "inode", "owner", "group", "mode", "links", "size", "mtime", "ctime"])
+    func systemAliasIdentityRefusesSubstitution(field: String) throws {
+        var original = stat()
+        original.st_mode = mode_t(S_IFLNK | 0o755); original.st_uid = 0
+        var changed = original
+        switch field {
+        case "device": changed.st_dev += 1
+        case "inode": changed.st_ino += 1
+        case "owner": changed.st_uid += 1
+        case "group": changed.st_gid += 1
+        case "mode": changed.st_mode ^= 0o020
+        case "links": changed.st_nlink += 1
+        case "size": changed.st_size += 1
+        case "mtime": changed.st_mtimespec.tv_nsec += 1
+        case "ctime": changed.st_ctimespec.tv_nsec += 1
+        default: Issue.record("Unknown substitution control")
+        }
+        try FrozenNativeReviewInput.checkSystemAliasIdentity(original, original)
+        #expect(throws: NativeReviewInput.Refusal.self) {
+            try FrozenNativeReviewInput.checkSystemAliasIdentity(original, changed)
+        }
+    }
+
+    @Test(arguments: ["var", "tmp", "etc", "unknown"])
+    func phaseReadRejectsAliasSpellingInsideOwnedTree(alias: String) throws {
+        let fixture = try NativeReviewInputFixture()
+        defer { fixture.remove() }
+        let expected = Data("same bytes through owned link".utf8)
+        try fixture.write("physical/result.json", expected)
+        try FileManager.default.createSymbolicLink(at: fixture.root.appending(path: alias),
+            withDestinationURL: fixture.root.appending(path: "physical"))
+        #expect(throws: NativeReviewInput.Refusal.self) {
+            try FrozenNativeReviewInput.read(fixture.root, "\(alias)/result.json", singleLink: true)
+        }
+        #expect(try Data(contentsOf: fixture.root.appending(path: "\(alias)/result.json")) == expected)
+    }
+
+    @Test func phaseReadAllowsUnrelatedSharedDirectoryEntryChanges() throws {
+        let fixture = try NativeReviewInputFixture()
+        defer { fixture.remove() }
+        let expected = Data("stable directory identity".utf8)
+        try fixture.write("shared/records/result.json", expected)
+        let actual = try FrozenNativeReviewInput.read(fixture.root, "shared/records/result.json", singleLink: true) {
+            try fixture.write("unrelated/new-entry", Data([1]))
+            try fixture.write("shared/unrelated/new-entry", Data([2]))
+        }
+        #expect(actual == expected)
+    }
+
+    @Test func phaseDirectoryIdentityPinsTargetWithoutSharedEntryMetadata() {
+        var original = stat()
+        original.st_mode = mode_t(S_IFDIR | 0o755); original.st_uid = 0
+        var unrelated = original
+        unrelated.st_size += 1; unrelated.st_nlink += 1
+        unrelated.st_mtimespec.tv_nsec += 1; unrelated.st_ctimespec.tv_nsec += 1
+        #expect(FrozenNativeReviewInput.PhaseDirectoryIdentity(original) == FrozenNativeReviewInput.PhaseDirectoryIdentity(unrelated))
+        var substituted = original
+        substituted.st_ino += 1
+        #expect(FrozenNativeReviewInput.PhaseDirectoryIdentity(original) != FrozenNativeReviewInput.PhaseDirectoryIdentity(substituted))
+        substituted = original; substituted.st_uid += 1
+        #expect(FrozenNativeReviewInput.PhaseDirectoryIdentity(original) != FrozenNativeReviewInput.PhaseDirectoryIdentity(substituted))
+        substituted = original; substituted.st_mode ^= 0o020
+        #expect(FrozenNativeReviewInput.PhaseDirectoryIdentity(original) != FrozenNativeReviewInput.PhaseDirectoryIdentity(substituted))
+    }
+
+    @Test func phaseReadRefusesReplacedAncestorWithSameLeafAndParent() throws {
+        let fixture = try NativeReviewInputFixture()
+        defer { fixture.remove() }
+        let expected = Data("unchanged leaf and parent".utf8)
+        let leaf = "swap-check/records/result.json"
+        try fixture.write(leaf, expected)
+        let named = fixture.root.appending(path: "swap-check")
+        let moved = fixture.root.appending(path: "moved-check")
+        var didRunAfterRead = false
+        #expect(throws: NativeReviewInput.Refusal.self) {
+            try FrozenNativeReviewInput.read(fixture.root, leaf, singleLink: true) {
+                try FileManager.default.moveItem(at: named, to: moved)
+                try FileManager.default.createDirectory(at: named, withIntermediateDirectories: false,
+                    attributes: [.posixPermissions: 0o700])
+                try FileManager.default.moveItem(at: moved.appending(path: "records"), to: named.appending(path: "records"))
+                didRunAfterRead = true
+            }
+        }
+        #expect(didRunAfterRead)
+        #expect(try Data(contentsOf: fixture.root.appending(path: leaf)) == expected)
+    }
+
+    @Test func phaseReadRefusesAncestorLinkSubstitutionDespiteUnchangedBytes() throws {
+        let scenario = try NativeReviewInputFixture()
+        defer { scenario.remove() }
+        let leaf = "swap-check/records/result.json"
+        let expected = Data([0x7b, 0x7d, 0x0a])
+        try scenario.write(leaf, expected)
+        let expectedIdentity = NativeReviewIdentity.of(expected)
+        let namedDirectory = scenario.root.appending(path: "swap-check")
+        let movedDirectory = scenario.root.appending(path: "moved-check")
+        var didRunAfterRead = false
+        #expect(throws: NativeReviewInput.Refusal.self) {
+            try FrozenNativeReviewInput.read(scenario.root, leaf, singleLink: true) {
+                try FileManager.default.moveItem(at: namedDirectory, to: movedDirectory)
+                try FileManager.default.createSymbolicLink(at: namedDirectory, withDestinationURL: movedDirectory)
+                didRunAfterRead = true
+            }
+        }
+        #expect(didRunAfterRead)
+        let reread = try Data(contentsOf: scenario.root.appending(path: leaf))
+        #expect(reread == expected)
+        #expect(NativeReviewIdentity.of(reread) == expectedIdentity)
     }
 
     @Test func frozenRecordBindsEveryRequiredFileAndExactRun() async throws {
@@ -561,6 +919,16 @@ import Testing
     func owner() -> NativeReviewInput {
         let evidence = root.appending(path: "container/test-evidence")
         return NativeReviewInput(request: request, collection: location, admittedRoot: root, evidenceRoot: evidence)
+    }
+    func phaseFields(owner: String, phase: String) throws -> [String: String] {
+        let inputID = NativeReviewIdentity.of(try Data(contentsOf: root.appending(path: "\(base)/input.json")))
+        return ["version": "1", "case": request.caseName, "platform": request.platform,
+            "freezeSHA256": request.freezeSHA256, "freezeBytes": String(request.freezeBytes),
+            "inputSHA256": inputID.sha256, "inputBytes": String(inputID.bytes),
+            "owner": owner, "nonce": UUID().uuidString, "phase": phase]
+    }
+    func phaseRequest(_ owner: NativeReviewInput, phase: String) throws -> String {
+        try NativeReviewInput.PhaseTransport.encode(phaseFields(owner: owner.phaseTransportOwner(), phase: phase))
     }
     func receipt(_ owner: NativeReviewInput) throws -> NativeReviewInput.Receipt {
         try JSONDecoder().decode(NativeReviewInput.Receipt.self, from: Data(contentsOf: owner.receiptURL))

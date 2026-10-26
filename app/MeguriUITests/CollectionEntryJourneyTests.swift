@@ -254,7 +254,7 @@ import notify
         try click(element(app, "onboarding.collectionImport.confirm"), app, bundle)
         let deckQuery = app.buttons.matching(identifier: "home.deck.row.\(deckID)")
         try waitForAdmission(deckQuery, app, bundle)
-        _ = try waitNativeReview("imported", app, bundle)
+        let importedEvidence = try waitNativeReview("imported", app, bundle)
         try click(try XCTUnwrap(waitForHittable(deckQuery)), app, bundle)
         let study = element(app, "home.deck.study")
         try waitForStudyReady(study, app)
@@ -275,18 +275,43 @@ import notify
         app.launchArguments = MeguriLaunch(locale: "en_US", animations: false, extra: native).arguments
         app.launch()
         XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
-        let evidenceDirectory = try waitNativeReview("reopened", app, bundle)
+        let reopenedEvidence = try waitNativeReview("reopened", app, bundle)
         capture(app, "native-review-reopened-one-answer")
         #if os(macOS)
-        // The app reports its own sandbox path; the UI runner's Application
-        // Support is unrelated. Admit only this case/platform's exact suffix.
-        let directory = URL(filePath: try XCTUnwrap(evidenceDirectory))
-        let suffix = "/Library/Application Support/test-evidence/native-review/\(caseName)/mac"
-        XCTAssertTrue(directory.path.hasSuffix(suffix))
-        XCTAssertTrue(directory.path.contains("/Library/Containers/\(bundle)/Data/"))
-        XCTAssertEqual(directory.resolvingSymlinksInPath().path, directory.path)
+        let owner = try XCTUnwrap(reopenedEvidence.owner)
+        XCTAssertNotEqual(importedEvidence.owner, owner, "Reopen must retire the first transport owner")
+        let inputBytes = try Data(contentsOf: run.appending(path: "expected-replay/input.json"))
+        let transfer = NativeReviewPhaseReceiver()
+        let center = DistributedNotificationCenter.default()
+        let observer = center.addObserver(forName: Notification.Name("\(bundle).testhooks.nativeReviewPhase"),
+            object: nil, queue: .main) { [weak transfer] notification in
+                MainActor.assumeIsolated { transfer?.receive(notification) }
+            }
+        defer {
+            XCTAssertNil(transfer.failure, "Late/duplicate native phase reply")
+            transfer.cancel(); center.removeObserver(observer)
+        }
+        let fixed = ["version": "1", "case": caseName, "platform": platform, "freezeSHA256": sha, "freezeBytes": bytes,
+            "inputSHA256": SHA256.hash(data: inputBytes).map { String(format: "%02x", $0) }.joined(),
+            "inputBytes": String(inputBytes.count), "owner": owner]
         for phase in ["import", "accepted", "closed", "reopened"] {
-            let attachment = XCTAttachment(contentsOfFile: directory.appending(path: "\(phase).json"))
+            var request = fixed; request["phase"] = phase; request["nonce"] = UUID().uuidString
+            try transfer.begin(request)
+            let data = try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys, .withoutEscapingSlashes])
+            XCTAssertLessThanOrEqual(data.count, 180 * 1024)
+            center.postNotificationName(Notification.Name("\(bundle).testhooks.readNativeReviewPhase"),
+                object: String(decoding: data, as: UTF8.self), userInfo: nil, deliverImmediately: true)
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                transfer.failure != nil || transfer.bytes[phase] != nil
+            }, object: nil)
+            let result = XCTWaiter().wait(for: [ready], timeout: 30)
+            XCTAssertEqual(result, .completed, "Missing native phase response: \(phase)")
+            XCTAssertNil(transfer.failure)
+            _ = try XCTUnwrap(transfer.bytes[phase], "Missing native phase bytes")
+        }
+        for phase in ["import", "accepted", "closed", "reopened"] {
+            let data = try XCTUnwrap(transfer.bytes[phase])
+            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
             attachment.name = "native-review-\(phase).json"; attachment.lifetime = .keepAlways; add(attachment)
         }
         let folder = FileManager.default.temporaryDirectory.appending(path: "RF3-Review-\(filename.dropFirst(13).prefix(32))")
@@ -294,31 +319,81 @@ import notify
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: folder) }
         #else
-        _ = evidenceDirectory
+        _ = importedEvidence; _ = reopenedEvidence
         let folder: URL? = nil
         #endif
         let saved = try exerciseNativeExport(app, bundle, destinationFolder: folder, destinationFilename: filename)
         #if os(macOS)
         let attachment = XCTAttachment(contentsOfFile: saved)
         attachment.name = filename; attachment.lifetime = .keepAlways; add(attachment)
+        XCTAssertNil(transfer.failure, "Late/duplicate native phase reply")
         #endif
         capture(app, "native-review-export-all-media")
         #endif
     }
 
+    #if os(macOS)
+    /// A four-phase exchange only. Any extra, mismatched or repeated response
+    /// poisons the case, including responses delivered during native export.
+    @MainActor private final class NativeReviewPhaseReceiver {
+        private var expected: [String: String]?
+        private var active = true
+        private var nonces: Set<String> = []
+        private(set) var bytes: [String: Data] = [:]
+        private(set) var failure: String?
+
+        func begin(_ request: [String: String]) throws {
+            guard active, failure == nil, nonces.count < 4,
+                  let phase = request["phase"], ["import", "accepted", "closed", "reopened"].contains(phase),
+                  bytes[phase] == nil, let nonce = request["nonce"], nonces.insert(nonce).inserted,
+                  let owner = request["owner"], UUID(uuidString: owner)?.uuidString == owner,
+                  expected == nil || bytes[expected!["phase"]!] != nil else {
+                throw NSError(domain: "NativeReviewPhase", code: 1)
+            }
+            expected = request
+        }
+        func receive(_ notification: Notification) {
+            guard active, failure == nil else { return }
+            do {
+                guard notification.userInfo == nil, let object = notification.object as? String,
+                      object.utf8.count <= 180 * 1024, let expected,
+                      let fields = try JSONSerialization.jsonObject(with: Data(object.utf8)) as? [String: String],
+                      Set(fields.keys) == Set(expected.keys).union(["data"]),
+                      try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys, .withoutEscapingSlashes]) == Data(object.utf8)
+                else { throw NSError(domain: "NativeReviewPhase", code: 2) }
+                var binding = fields; binding.removeValue(forKey: "data")
+                guard binding == expected, let phase = expected["phase"], bytes[phase] == nil,
+                      let encoded = fields["data"], encoded.utf8.count <= ((128 * 1024 + 2) / 3) * 4,
+                      let data = Data(base64Encoded: encoded), !data.isEmpty, data.count <= 128 * 1024,
+                      data.base64EncodedString() == encoded else { throw NSError(domain: "NativeReviewPhase", code: 3) }
+                // Only syntax is inspected here. Historical owner/admission
+                // validation remains in the unchanged independent package proof.
+                _ = try JSONSerialization.jsonObject(with: data)
+                bytes[phase] = data
+            } catch { failure = "Refused native phase response" }
+        }
+        func cancel() { active = false; expected = nil }
+    }
+    #endif
+
     @MainActor private final class NativeReviewAcknowledgement {
         var phase = ""
         var directory: String?
+        var owner: String?
     }
     /// Flush/query only the requested dev owner. No visible test controls.
-    private func waitNativeReview(_ phase: String, _ app: XCUIApplication, _ bundle: String) throws -> String? {
+    private func waitNativeReview(_ phase: String, _ app: XCUIApplication, _ bundle: String) throws -> NativeReviewAcknowledgement {
         let acknowledgement = NativeReviewAcknowledgement()
         #if os(macOS)
         let center = DistributedNotificationCenter.default()
         let observer = center.addObserver(forName: Notification.Name("\(bundle).testhooks.nativeReviewStatus"), object: nil, queue: .main) { notification in
-            guard let value = notification.object as? String, let data = value.data(using: .utf8),
+            guard notification.userInfo == nil, let value = notification.object as? String, value.utf8.count <= 4096,
+                  let data = value.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
-            MainActor.assumeIsolated { acknowledgement.phase = object["status"] ?? ""; acknowledgement.directory = object["directory"] }
+            MainActor.assumeIsolated {
+                acknowledgement.phase = object["status"] ?? ""; acknowledgement.directory = object["directory"]
+                acknowledgement.owner = object["owner"]
+            }
         }
         defer { center.removeObserver(observer) }
         #else
@@ -349,7 +424,7 @@ import notify
         }
         XCTAssertEqual(result, .completed, "Native evidence did not reach \(phase); \(diagnostics)")
         XCTAssertEqual(acknowledgement.phase, phase, "Native evidence refused the case; \(diagnostics)")
-        return acknowledgement.directory
+        return acknowledgement
     }
     private func closeNativeReview(_ bundle: String) throws {
         #if os(macOS)

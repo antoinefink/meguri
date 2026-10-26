@@ -14,6 +14,55 @@ import Darwin
             self.freezeSHA256 = freezeSHA256; self.freezeBytes = freezeBytes
         }
     }
+    nonisolated public enum EvidencePhase: String, CaseIterable, Hashable, Sendable {
+        case `import`, accepted, closed, reopened
+    }
+    /// Flat, canonical JSON keeps the sandbox notification object bounded and
+    /// refuses duplicate/extra fields on both sides. No paths travel on this wire.
+    nonisolated public enum PhaseTransport {
+        public static let fileLimit = 128 * 1024
+        public static let objectLimit = 180 * 1024
+        public static let keys: Set<String> = ["version", "case", "platform", "freezeSHA256", "freezeBytes",
+            "inputSHA256", "inputBytes", "owner", "nonce", "phase"]
+
+        public static func encode(_ fields: [String: String], reply: Bool = false) throws -> String {
+            let data = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys, .withoutEscapingSlashes])
+            try FrozenNativeReviewInput.check(data.count <= objectLimit, "phase object bound")
+            let object = String(decoding: data, as: UTF8.self)
+            _ = try decode(object, reply: reply)
+            return object
+        }
+        public static func decode(_ object: String, reply: Bool = false) throws -> [String: String] {
+            try FrozenNativeReviewInput.check(object.utf8.count <= objectLimit, "phase object bound")
+            let data = Data(object.utf8)
+            guard let fields = try JSONSerialization.jsonObject(with: data) as? [String: String] else {
+                throw Refusal(reason: "phase object type")
+            }
+            let canonical = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys, .withoutEscapingSlashes])
+            try FrozenNativeReviewInput.check(canonical == data && Set(fields.keys) == (reply ? keys.union(["data"]) : keys),
+                "phase object fields/duplicates")
+            try FrozenNativeReviewInput.check(fields["version"] == "1" && FrozenNativeReviewInput.component(fields["case"] ?? "") &&
+                fields["platform"] == "mac" && EvidencePhase(rawValue: fields["phase"] ?? "") != nil &&
+                FrozenNativeReviewInput.hex(fields["freezeSHA256"] ?? "", 64) &&
+                FrozenNativeReviewInput.hex(fields["inputSHA256"] ?? "", 64), "phase binding shape")
+            for key in ["freezeBytes", "inputBytes"] {
+                guard let text = fields[key], let size = UInt64(text), size > 0, size <= UInt64(fileLimit), String(size) == text else {
+                    throw Refusal(reason: "phase identity length")
+                }
+            }
+            for key in ["owner", "nonce"] {
+                guard let text = fields[key], let id = UUID(uuidString: text), id.uuidString == text else {
+                    throw Refusal(reason: "phase identity UUID")
+                }
+            }
+            if reply {
+                guard let encoded = fields["data"], encoded.utf8.count <= ((fileLimit + 2) / 3) * 4,
+                      let bytes = Data(base64Encoded: encoded), !bytes.isEmpty, bytes.count <= fileLimit,
+                      bytes.base64EncodedString() == encoded else { throw Refusal(reason: "phase bytes bound") }
+            }
+            return fields
+        }
+    }
     nonisolated public struct Refusal: Error, Sendable, CustomStringConvertible {
         public let reason: String
         public var description: String { "Native review input refused: \(reason)" }
@@ -152,6 +201,9 @@ import Darwin
         var audio: AudioEvidence?
         var journal: JournalEvidence?
         var reopenedJournal: JournalEvidence?
+        // Hashes of the original immutable snapshots, carried through relaunch.
+        // A snapshot precedes its own hash; receipt.json includes that hash.
+        var phaseFiles: [String: NativeReviewIdentity]?
     }
     public enum FlushStatus: Equatable, Sendable { case idle, pending, saved, failed(String) }
     public private(set) var flushStatus: FlushStatus = .idle
@@ -172,6 +224,9 @@ import Darwin
     private var mediaPage: ObjectIdentifier?
     private var mediaBinding: RenderBinding?
     private var mediaTerminations: Int?
+    private var phaseReadInProgress = false
+    private var phaseNonces: Set<String> = []
+    private var transferredPhases: Set<String> = []
 
     public convenience init(request: Request, collection: CollectionLocation) {
         var root = URL(filePath: #filePath)
@@ -576,6 +631,55 @@ import Darwin
         return ["accepted", "ended", "reopened"].contains(receipt?.phase ?? "") ? receipt!.phase : "pending"
     }
 
+    public func phaseTransportOwner() throws -> String {
+        try requireCurrent()
+        try FrozenNativeReviewInput.check(loaded != nil && request.platform == "mac", "phase owner not prepared")
+        return identity.uuidString
+    }
+    /// Called only by the guarded development shell. Earlier files retain their
+    /// historical receipt/admission owners; only this request uses today's owner.
+    public func phaseReply(to object: String) async throws -> String {
+        let fields = try PhaseTransport.decode(object)
+        try requireCurrent()
+        guard let loaded, let phase = EvidencePhase(rawValue: fields["phase"] ?? "") else {
+            throw Refusal(reason: "phase input not prepared")
+        }
+        try FrozenNativeReviewInput.check(fields["case"] == request.caseName && fields["platform"] == request.platform &&
+            fields["freezeSHA256"] == request.freezeSHA256 && fields["freezeBytes"] == String(request.freezeBytes) &&
+            fields["inputSHA256"] == loaded.identity.sha256 && fields["inputBytes"] == String(loaded.identity.bytes) &&
+            fields["owner"] == identity.uuidString, "phase request binding")
+        try FrozenNativeReviewInput.check(!phaseReadInProgress && phaseNonces.count < 4 &&
+            !phaseNonces.contains(fields["nonce"]!) && !transferredPhases.contains(phase.rawValue), "phase request reused/busy")
+        phaseReadInProgress = true
+        phaseNonces.insert(fields["nonce"]!); transferredPhases.insert(phase.rawValue)
+        defer { phaseReadInProgress = false }
+        try Task.checkCancellation()
+        try await recheckFrozen()
+        await flushEvidence()
+        try requireCurrent(); try Task.checkCancellation()
+        guard flushStatus == .saved, let expected = receipt?.phaseFiles?[phase.rawValue] else {
+            throw Refusal(reason: "phase snapshot not saved")
+        }
+        let root = receiptURL.deletingLastPathComponent()
+        let bytes = try await Task.detached {
+            try FrozenNativeReviewInput.read(root, "\(phase.rawValue).json", limit: PhaseTransport.fileLimit, singleLink: true)
+        }.value
+        try requireCurrent(); try Task.checkCancellation()
+        try FrozenNativeReviewInput.check(NativeReviewIdentity.of(bytes) == expected, "phase snapshot changed")
+        let saved = try JSONDecoder().decode(Receipt.self, from: bytes)
+        let names: [EvidencePhase: String] = [.import: "activated", .accepted: "accepted", .closed: "closed", .reopened: "reopened"]
+        try FrozenNativeReviewInput.check(saved.version == 1 && saved.run == loaded.input.run && saved.platform == request.platform &&
+            saved.freezeIdentity == NativeReviewIdentity(sha256: request.freezeSHA256, bytes: request.freezeBytes) &&
+            saved.input == loaded.identity && saved.collection == collection.directory.path && saved.phase == names[phase] &&
+            saved.failure == nil, "phase snapshot binding")
+        try await recheckFrozen()
+        await flushEvidence()
+        try requireCurrent(); try Task.checkCancellation()
+        try FrozenNativeReviewInput.check(flushStatus == .saved && receipt?.phaseFiles?[phase.rawValue] == expected, "phase persistence changed")
+        var reply = fields; reply["data"] = bytes.base64EncodedString()
+        return try PhaseTransport.encode(reply, reply: true)
+    }
+
     /// Bounded evidence/flush seam for later native capture; no product chrome.
     public func flushEvidence() async {
         var revision: UInt64
@@ -585,7 +689,24 @@ import Darwin
         } while revision != writeRevision
     }
     private func enqueueReceipt(snapshot: String? = nil) {
-        guard let receipt, persistenceFailure == nil else { return }
+        guard var receipt, persistenceFailure == nil else { return }
+        let data: Data, snapshotData: Data?
+        do {
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            if let snapshot {
+                try FrozenNativeReviewInput.check(EvidencePhase(rawValue: snapshot) != nil && receipt.phaseFiles?[snapshot] == nil, "snapshot name/reuse")
+                let original = try encoder.encode(receipt)
+                try FrozenNativeReviewInput.check(original.count <= PhaseTransport.fileLimit, "receipt bound")
+                snapshotData = original
+                var identities = receipt.phaseFiles ?? [:]
+                identities[snapshot] = .of(original)
+                receipt.phaseFiles = identities; self.receipt?.phaseFiles = identities
+            } else { snapshotData = nil }
+            data = try encoder.encode(receipt)
+            try FrozenNativeReviewInput.check(data.count <= PhaseTransport.fileLimit, "receipt bound")
+        } catch {
+            persistenceFailure = String(describing: error); flushStatus = .failed(String(describing: error)); return
+        }
         writeRevision &+= 1
         let revision = writeRevision, previous = persistence, url = receiptURL
         flushStatus = .pending
@@ -600,12 +721,8 @@ import Darwin
                     let attrs = try files.attributesOfItem(atPath: parent.path)
                     try FrozenNativeReviewInput.check((attrs[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(), "evidence owner")
                     if files.fileExists(atPath: url.path) { _ = try FrozenNativeReviewInput.scoped(parent, url.lastPathComponent) }
-                    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-                    let data = try encoder.encode(receipt)
-                    try FrozenNativeReviewInput.check(data.count <= 128 * 1024, "receipt bound")
-                    if let snapshot {
-                        try FrozenNativeReviewInput.check(["import", "accepted", "closed", "reopened"].contains(snapshot), "snapshot name")
-                        try data.write(to: parent.appending(path: "\(snapshot).json"), options: .withoutOverwriting)
+                    if let snapshot, let snapshotData {
+                        try snapshotData.write(to: parent.appending(path: "\(snapshot).json"), options: .withoutOverwriting)
                     }
                     try data.write(to: url, options: .atomic)
                 }.value

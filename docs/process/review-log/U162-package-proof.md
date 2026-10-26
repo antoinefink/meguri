@@ -506,3 +506,30 @@ stage 0, errno 20, component 1 and root depth 6. No path text is emitted. The
 cause still needs confirmation before changing filesystem admission. Privacy
 wording is now clear as recorded above; actual six-attachment capture remains
 unproven. Do not start another full native case until positive reads pass.
+
+## Receipt handoff — final model and app-hosted checks
+
+The second diagnostic `swift-test/20261026T231507Z-23916` confirms type 3
+(symlink), UID0, at the first component. No path text is emitted. R5
+`20261026T231847Z-26691` admits only exact compiled OS aliases above the owned
+root, checks fixed targets without links, and retains directory authority
+through read and rebound. Stable directory identities allow unrelated shared
+entry changes. Mutable owned suffixes and leaf files keep their prior checks.
+Independent R5 review is clear.
+
+Swift `20261026T232509Z-29088` passes 35 of 36 tests. Its new physical-path
+fixture assumes a spelling that the existing Foundation admission rejects.
+R6 `20261026T232904Z-31916` preserves that refusal and supplies an exclusive
+owned direct-path fixture for the required positive. Production changes only
+by removing a redundant comment. Independent final review is clear.
+
+Final `swift-test/20261026T233247Z-34094` passes all 36 tests, zero skips.
+Privacy `20261026T233246Z-33687` and similarity `20261026T233247Z-33927` pass.
+Failed checks and wording scans remain retained. No guard or limit is relaxed.
+
+VM snapshots `20261026T233430Z-35858` compiles the actual hook and passes 88
+app-hosted tests, including the request validation/cancellation controls and
+native decoder probe. The run still fails its existing image comparison and
+skips 1; no baseline is replaced and the whole snapshot run stays failed.
+Actual notification transfer and six-attachment capture still require the
+fresh complete native workflow. Unit and integration acceptance stay open.
