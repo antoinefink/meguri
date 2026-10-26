@@ -56,7 +56,7 @@ Runs as the swap of `engine/lifecycle#L8` (step 2), after L8 step 1 has set the 
 5. A full sync of the collection directory.
 6. Remove the staging directory (best effort; the leftover sweep removes what a kill leaves, `package/container#P9`).
 
-Complete R6.3 durable activation before opening any writer. Then L8 steps 3 to 5 run as written there: the open through the gate, the undo history cleared, the generation plus one, `CollectionReplaced{generation}` published once, the day clock restarted, readers reopened lazily, and every `GenerationListener` told, so the derived store binds to the new file and rebuilds (R1489, `storage/derived-store`). With no collection open before, R5 has no live file to check, and step 4 creates `collection.anki2`.
+Complete R6.3 durable activation before opening any writer. Local collection-file media input also completes R11 before reopen. Then L8 steps 3 to 5 run as written there: the open through the gate, the undo history cleared, the generation plus one, `CollectionReplaced{generation}` published once, the day clock restarted, readers reopened lazily, and every `GenerationListener` told, so the derived store binds to the new file and rebuilds (R1489, `storage/derived-store`). With no collection open before, R5 has no live file to check, and step 4 creates `collection.anki2`.
 
 That reopen is not an external change (R1453). U32's open compares the file's `mod` and `scm` with the last values it saw (`storage/durability-and-files#F3`), and a replaced file always differs. At L8's reopen the replace itself is the change, and L8 step 4 already handles it. So that reopen reports no external change: no `ChangedExternally` undo clear and no whole-collection change set besides `CollectionReplaced`. The sidecar's last-seen `mod` and `scm` become the new file's, as at any open. At a relaunch after a kill, the ordinary open check applies.
 
@@ -191,3 +191,11 @@ The lifecycle's own errors (`CollectionUnavailable`, `StaleGeneration`, `engine/
 | A staged copy whose change is still in its `-wal`: R4 folds it in, and the swapped-in file holds the change | same file |
 | Stored sanity counts survive a relaunch; U109's success path clears them (U109's test) | same file |
 | The caller is not in the exclusive phase: `NotExclusive`, nothing touched | same file |
+
+## R11. Local collection-file media recovery (Meguri design)
+
+For `package/container` P16, extend this replacement's R6 intent with the owned media actions and recovery files. Publish the validated media and own journal after R5's durable intent and before its database rename. Keep the existing advisory lock, initial/Ready admission, forced backup, executor and generation ownership. This adds no second collection writer or independent replacement lifecycle.
+
+Record old and candidate native file identities from locked files alongside R6's finalized byte identities. When their bytes are identical but media differs, use the native identities or durable activation witness to prove which file became active. Ordinary identical-database imports must remain supported. If the evidence cannot distinguish them, retain it and fail closed rather than choosing a media view from timestamps or hashes alone.
+
+Recover the old or candidate media/journal view under P16 before any collection writer, mutating day check, reader, Ready state or replacement event. An unresolved media state blocks Ready even where R6 alone permits validated local review. P9's unconditional sweep must not remove these owned recovery files. A post-rename failure reports the candidate active or its activation uncertain; it never implies rollback. Keep the backup and recovery facts across delivery failure and relaunch.

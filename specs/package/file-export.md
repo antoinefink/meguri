@@ -229,9 +229,10 @@ through the actual destination flow and validate the resulting bytes. Replace
 all user-file-export “Without Media” copy only with this implementation; keep
 collection-only safety-copy descriptions accurate.
 
-Media installation in local file import is a separate unfinished U124 leg.
-Until it exists, that flow must explicitly refuse nonempty media maps before
-replacement, with a clear unsupported-format message. Do not silently import
-only the collection or advertise a Meguri export/re-import roundtrip with
-media. Container validation and user intake policy are separate decisions;
-adding the export verifier must not accidentally enable an incomplete import.
+Media installation in local file import follows `package/container` P16, a
+separate U122/U124 leg. Until that complete path is implemented and verified,
+explicitly refuse nonempty media maps before replacement with a clear message.
+Do not silently import only the collection or advertise a media roundtrip from
+export proof alone. Container validation and user intake policy remain separate;
+adding the export verifier must not enable an incomplete import. E7.4's
+independent archive/client proof and fixed expected-source rules remain required.

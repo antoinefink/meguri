@@ -1,11 +1,11 @@
 # Package container and collection-only collection packages
 
 Spec: package/container
-Requirements: R1597, R1598, R1599, R1619 (the latest-format, collection-only part of each), R2004 (atomic package output), R2015 (disk preflight), R1635, R1852, R1638 (data side); supports R2005, R2009 (format half)
+Requirements: R1597, R1598, R1599, R1619 (the latest-format, collection-only part of each), R2004 (atomic package output), R2015 (disk preflight), R1635, R1852, R1638 (data side), R1626, R1627, R1628, R2018 (P16 local media import); supports R2005, R2009 (format half)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/package/collection-package/
 
-The zip container that collection packages (`.colpkg`) and deck packages (`.apkg`) share, in its latest format, for packages that hold a collection and no media file. It covers how Meguri reads such a package (bounded, into a staging directory), how it writes one (backups U126, server copies U109, and later U124's export without media), and how it inspects one before a restore (U127). The legacy formats are U120's, media entries U122's, the legacy writer U123's: each extends the sections that name it. P15 defines the narrow RF4 latest-format media writer/verifier used by user collection-file export, without accepting U122/U124 or changing the collection-only writers. Swapping an inspected package into place is `engine/collection-replace`. The scenario vocabulary is `specs/conformance/package-ops.md`.
+The zip container that collection packages (`.colpkg`) and deck packages (`.apkg`) share, in its latest format, for packages that hold a collection and no media file. It covers how Meguri reads such a package (bounded, into a staging directory), how it writes one (backups U126, server copies U109, and later U124's export without media), and how it inspects one before a restore (U127). The legacy formats are U120's, media entries U122's, the legacy writer U123's: each extends the sections that name it. P15 defines the narrow RF4 latest-format media writer/verifier used by user collection-file export, without accepting U122/U124 or changing the collection-only writers. P16 extends local collection-file inspection and activation to media; it is Meguri design, not a claim of new foreign behavior. Swapping an inspected package into place is `engine/collection-replace`. The scenario vocabulary is `specs/conformance/package-ops.md`.
 
 ## P1. Formats
 
@@ -162,7 +162,7 @@ Both kinds of name come from U32's namespace for unpublished work (`storage/dura
 - **Staging directory.** Each operation (inspect, a writer's snapshot, a caller's download) gets its own fresh staging directory from U32's staging-directory primitive, made in the collection directory (U32 names it `.meguri-stage-` and a random suffix). A candidate collection there is always named `collection.anki2`; SQLite and the open gate put their own files next to it (`-wal`, `-shm`, `-journal`, `collection.anki2.pre-upgrade-v<V>`, `storage/schema-upgrade#U2`). A writer's snapshot is `snapshot.anki2`.
 - The staging directory sits in the collection directory so that a staged file and the collection are on one file system and the swap is one rename (`engine/collection-replace#R5`).
 - **Temporary package file.** A package being written is U32's atomic file in the destination's directory (U32 names it `.meguri-tmp-<purpose>-` and a random suffix). The caller names the purpose: `backup` for U126's backups, `export` for U109's server copy and U124's export.
-- The operation removes its staging directory and its temporary file when it ends, whatever the outcome; U32's handles do so when they are dropped. After a kill, U32's launch sweep removes both at the next launch (R1493): it sweeps exactly these names in the collection and backups directories. Nothing ever reads a leftover as data.
+- The operation removes its staging directory and its temporary file when it ends, whatever the outcome; U32's handles do so when they are dropped. After a kill, U32's launch sweep removes both at the next launch (R1493): it sweeps exactly these names in the collection and backups directories. Nothing ever reads a leftover as data. P16 transfers files needed for an admitted media replacement into owned media recovery storage before live publication; those files are not unpublished P9 leftovers and must survive this sweep.
 
 ## P10. Disk preflight (R2015)
 
@@ -296,7 +296,69 @@ an arbitrary staging path. The existing atomic-file verifier/publication,
 cleanup and cancellation rules apply to the complete media-inclusive package.
 
 This verifier may validate nonempty media maps without enabling media install
-in collection import or restore. Those callers retain explicit intake policy;
-an unsupported nonempty map cannot be accepted and then discarded. R1627's
-media merge and legacy package reading remain unfinished unless independently
-implemented and verified. No unit completion follows from this extension.
+in collection import or restore. P16 separately defines latest-format local
+collection-file media input. Until that full path is implemented and verified,
+its callers retain explicit refusal; no map may be accepted and discarded.
+Legacy reading retains its separate contract. No unit completion follows from
+this output extension.
+
+## P16. Local collection-file import with media (Meguri design, U122/U124)
+
+### P16.1 Scope and owned inspection
+
+This extension admits latest-format whole-collection files through the existing local entry flow. It starts no Anki server request. Server work remains frozen. Legacy formats and deck-package merges retain their separate contracts.
+
+Keep the existing coordinated source lifetime, owned source copy and opaque inspection handle. Bind confirmation to the source SHA-256, destination, engine, collection generation and committed operation sequence. The handle also owns the validated media inventory and bytes. A path or client-supplied count never replaces that authority. Check these guards again after participant flush and before activation; stale confirmation requires a new preview. Preserve the selected source.
+
+Inspect all collection and media data before changing live database, media or journal state. Extend P12 with these checks:
+
+- Decode the complete P5 map under P2–P8. Check every name, length, SHA-1 and numbered-member assignment, including entries not referenced by collection rows.
+- Require exactly one payload for every map entry. Reject duplicate map names, missing, repeated or extra numeric members, including noncanonical numeric names. Unknown nonnumeric archive members keep P2's existing treatment.
+- Stream each payload through ZIP CRC and P4's frame/checksum/window checks into fixed operation-owned staging files. Verify its decoded length against the uint32 declaration and its SHA-1 against the map. Stop at the first exceeded limit. Include every decoded payload in P8's 16-GiB total; no file is buffered whole.
+- Refuse names that the shared store or destination volume cannot keep together without changing a supplied name or losing a payload. This includes conflicting incoming case variants under `media/media-files` M2/M6. Never silently drop, lowercase or rename one mapped file, or rewrite imported references to hide a conflict.
+
+Zero-byte, underscore, unreferenced and greater-than-100-MiB files remain local media. Apply the package bounds, not the media-sync size limit. Required payloads are files, never directories or links; never use archive paths, modes or links as filesystem authority. Source, destination, staging and backup roots retain their existing isolation and no-link checks.
+
+Preflight each affected filesystem before writes. Add incoming media, simultaneous staged and recovery copies, journal snapshot and index work, and the forced backup to P10's database budget. Use checked arithmetic and account for shared filesystems once with their combined peak requirement. Insufficient capacity refuses; later exhaustion is a disk-full failure, never successful media exclusion.
+
+### P16.2 Merge and retained old media
+
+Use the existing single entry activation owner, long-operation slot and initial/Ready replacement paths. An active review still refuses replacement. Enter the exclusive phase and drain accepted work. Settle prior media stages against the old collection before closing it. Hold shared media-operation ownership so local media writes and jobs cannot interleave with this merge. Run scans and streams off the collection writer.
+
+Take the real forced old-database backup after the drain (`package/backup-triggers` T6; `package/backups` B4). Keep its receipt through every outcome. No old database means no fabricated backup. Backup failure prevents media publication and database replacement.
+
+Check current destination files before publication. Reuse a file when its SHA-1 equals the incoming hash (R1627). For different bytes, apply the shared store's exact-name and trash operations (M6/M9/M10); do not choose a filename through M3. Write the incoming content under its supplied name. Save each replaced file in trash with its original name and durable identity. Leave other old media, prior trash entries and unused files intact. If the filesystem still reports a name collision, refuse before changing that name. A link or another nonregular entry must not be replaced. No foreign media index enters the imported state.
+
+Before live media writes, checkpoint the store journal and copy it. Keep the copy unchanged and record its identity. For each affected name, save its old bytes, rows and trash IDs. Bind them to the T6/B4 forced-backup receipt and the R6 operation. Keep each old name's trash ID and version for that backup after import succeeds. Delete the journal copy only after durable completion. Cleanup and pruning old backups must not remove saved media files or their mapping. M10 still controls explicit trash deletion. Tell the user that restoring the backup's media needs those saved files.
+
+### P16.3 Publication and recovery
+
+This is a continuation of `engine/collection-replace` R5/R6, not another lifecycle or an atomic database-plus-media rename. The collection advisory lock and replacement owner cover these steps:
+
+1. Validate and synchronize all staged payloads. Run R3/R4 on the staged database. Close live collection connections and finalize the old-file identity through R5. Do not admit ordinary writers during this sequence.
+2. Extend R6's durable intent before publishing media. Bind the old/candidate identities, backup receipt, immutable media inventory, old journal snapshot and each planned exact-name/trash action. Record the native identities of the locked old and final staged database files alongside their byte identities. These distinguish an ordinary identical-database import whose media differs. Retain its recovery files under owned `media.staging` storage outside P9's unconditional sweep namespace. These are R6-owned files, not J4 note-postimage stages; ordinary media-stage recovery waits for their R6 resolution. An intent write failure prevents live media changes.
+3. Merge media before the database swap, as U124 requires. Use the shared store's synchronized temp/rename, trash and journal operations. Record enough durable per-file progress to recover a kill between any two publications. Repeating recovery verifies expected bytes; it never overwrites unrelated content or discards a conflicting version.
+4. Initialize the imported generation's own journal from the complete merged folder before the database swap. Register every locally supported record through the shared store; mark live syncable files pending, retain empty/oversized files for local lookup, clear pending-download state and reset the media USN to 0. Retain every existing media file. The old journal snapshot remains the rollback authority; foreign account/media baselines are not imported or reused. No network work starts.
+5. Only after media and journal durability succeeds, use R5's existing database rename and directory sync. That rename is the database activation boundary. Complete R6's candidate activation and verify the merged files and journal before any new collection writer, mutating day check, reader, `Ready` or `CollectionReplaced` delivery. Emit generation change once through the existing lifecycle; do not add a second collection writer. Do not report candidate media ready before this completes.
+
+On pre-swap failure or cancellation, prove that the old database remains active under R6. Restore the affected media names and the old journal state before returning the old collection to use. Retain newly published bytes in trash when undoing their publication. Report `Cancelled` or an unchanged-collection failure only after this rollback succeeds; keep any published safety backup. With no old database, restore the recorded absence and previous media state.
+
+After the database rename, cancellation cannot report rollback. Finish the recorded activation, or return a typed candidate-active/recovery-required outcome with the backup and retained recovery data. Do not repeat import to repair a committed activation. Recovery retries only the recorded file/journal completion.
+
+At reopen, reconcile R6 and these media actions before the ordinary staging sweep, collection open or media lookup. Proven old database means restore its media/journal view; proven candidate means finish its merge/journal activation. Use the recorded native identities or R6's durable activation witness when old and candidate database bytes are equal; byte hashes alone cannot select the media view. Missing/corrupt recovery data, conflicting identities or unprovable file contents block `Ready` and retain evidence. Never guess from equal timestamps or treat absent metadata as completion. Recovery is idempotent. Clear only completed operation ownership; do not sweep retained backup/media recovery data.
+
+### P16.4 Facts, outcomes and checks
+
+The preview states that the whole collection is replaced and media is merged. Show the validated file count and total decoded bytes, and state that old media is kept. Before commit, obtain and report current counts for reused files, added files and files moved to trash; otherwise return a typed media conflict. Old inventory data cannot justify these counts. A successful result contains the actual generation, any backup receipt and final media counts. Errors identify whether the old state is unchanged or restored, the old state needs recovery, or the candidate is active and needs recovery. Keep this information through FFI tracking errors, cancellation and restart. An unfinished import is not success; a committed replacement is not cancellation.
+
+Until this entire path is implemented and verified, retain the explicit media-input refusal. Removing that refusal alone does not implement P16.
+
+| Check | Minimum evidence |
+|---|---|
+| Package inspection | All map/member/name/hash/size/frame/CRC and total-limit failures; late invalid member; empty/large/static/unused media; bounded memory and disk-full cleanup; source and live state unchanged. |
+| Merge and journal | First import and replacement; equal-hash skip, different-byte collision and retained old version; unrelated old media retained; incoming/volume name conflict; own journal initialization; backup/confirmation/session/generation failures. |
+| Kill and recovery | Stop the process before intent, between each media, trash and journal publication, before and after database rename, directory sync and activation, and inside recovery. Include equal database bytes with different incoming assets. Reopen must establish the old or candidate view from recorded proof and keep all bytes. Repeating recovery has the same result. An unresolved state must not become Ready. |
+| App and bridge | Exercise the existing owner on first import and Ready replacement. Drain cancellation and consume each opaque handle once. Check results on both sides of commit. Preserve those results, their backup receipts and recovery facts across delivery errors and restart. |
+| Native chain | Mac, iPhone and iPad: Files/native import of generated media, rendered image/audio, accepted answer, relaunch without fixture reseed, native export with all media, then independent package comparison of saved reviews, media names and bytes. |
+
+Keep `package/file-export` E7.4 and `fixtures/synthetic-collections` F11.1 independent expected-source rules. Freeze the generated input and any declared pre-launch preparation before the app runs. Derive expected post-import stamps and accepted review facts from their existing contracts and recorded inputs. Never make the app's later state or decoded export its own expected baseline. Existing local focused, kill and native checks remain required; neither this addendum nor export proof closes full U124/U162 or any milestone.
