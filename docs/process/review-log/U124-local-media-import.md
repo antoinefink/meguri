@@ -108,5 +108,6 @@ independent review, privacy `20261026T184614Z-88404` and similarity
 `20261026T184616Z-88652` pass. Replacement tests
 `core-test/20261026T184932Z-92406` pass 25 tests with zero skips.
 `core-format/20261026T184714Z-89479` formats the engine and new FFI test;
-the FFI delta contains only whitespace. Lint `20261026T184611Z-88142` now
+the FFI delta includes formatter line breaks and trailing commas. Lint
+`20261026T184611Z-88142` now
 reports two redundant conversions in package inspection. These remain open.
