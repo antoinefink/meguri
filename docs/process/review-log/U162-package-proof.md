@@ -318,3 +318,12 @@ its order but gives it a fixed refusal reason. No content or path is included.
 Independent review is clear. Focused Swift `20261026T204125Z-96426` passes
 16 tests with zero skips; privacy `20261026T204041Z-95476` and similarity
 `20261026T204057Z-95958` pass. This is diagnosis, not a playback repair.
+
+`ui-test/20261026T204232Z-98073` identifies nonempty renderer diagnostics as
+the failed condition; the earlier binding predicates pass. Filtered refinement
+`20261026T204545Z-2130`, starting at `e3666e4a`, reports fixed category counts
+for current versus earlier updates. It exports no raw diagnostic data and
+still rejects every nonempty diagnostic set. Independent review is clear.
+Swift `20261026T204858Z-3949` passes 20 tests with zero skips, including
+privacy and size-bound cases. Privacy `20261026T204900Z-4576` and similarity
+`20261026T204859Z-4331` pass. The actual category remains to be captured.

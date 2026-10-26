@@ -18,6 +18,43 @@ import Darwin
         public let reason: String
         public var description: String { "Native review input refused: \(reason)" }
     }
+    private enum DiagnosticCategory: String, CaseIterable {
+        case missingMedia, audioSession, audioDecode, presentFailed, updateFailed, appearanceFailed
+        case processTerminated, typedAnswerRead, bridgeOrigin, bridgeRejected, recoveryUnavailable, answerAccessibility
+        case script, mediaError, other
+
+        init(kind: String) {
+            switch kind {
+            case "missingMedia": self = .missingMedia
+            case "audioSession": self = .audioSession
+            case "audioDecode": self = .audioDecode
+            case "presentFailed": self = .presentFailed
+            case "updateFailed": self = .updateFailed
+            case "appearanceFailed": self = .appearanceFailed
+            case "processTerminated": self = .processTerminated
+            case "typedAnswerRead": self = .typedAnswerRead
+            case "bridgeOrigin": self = .bridgeOrigin
+            case "bridgeRejected": self = .bridgeRejected
+            case "recoveryUnavailable": self = .recoveryUnavailable
+            case "answerAccessibility": self = .answerAccessibility
+            default:
+                if kind.hasPrefix("script.") { self = .script }
+                else if kind.hasPrefix("mediaError.") { self = .mediaError }
+                else { self = .other }
+            }
+        }
+    }
+    /// Counts the renderer's at-most-256 retained records, not repeat events.
+    /// Only fixed category labels and counts leave this bounded snapshot.
+    static func diagnosticSummary(_ entries: [CardDiagnostics.Entry], currentUpdate: CardUpdate) -> String {
+        let grouped = Dictionary(grouping: entries) { DiagnosticCategory(kind: $0.kind) }
+        let counts = DiagnosticCategory.allCases.compactMap { category -> String? in
+            guard let records = grouped[category] else { return nil }
+            let current = records.filter { $0.update == currentUpdate }.count
+            return "\(category.rawValue)(current=\(current),earlier/other=\(records.count - current))"
+        }
+        return "media renderer diagnostics present: " + counts.joined(separator: "; ")
+    }
     nonisolated public struct AnswerUse: Codable, Sendable, Equatable {
         public let owner: UUID, coordinator: UUID, session: UInt64, generation: UInt64
         public let deck: Int64, card: Int64, token: [UInt8], rating: String, elapsed: UInt64, wall: Int64, cap: UInt32
@@ -389,7 +426,9 @@ import Darwin
         guard update.card == input.chosen.card_id else { throw Refusal(reason: "media renderer declared card mismatch") }
         guard update.side == .answer else { throw Refusal(reason: "media renderer answer side required") }
         guard pair.current.presented else { throw Refusal(reason: "media renderer current page not presented") }
-        guard pair.diagnostics.entries.isEmpty else { throw Refusal(reason: "media renderer diagnostics present") }
+        guard pair.diagnostics.entries.isEmpty else {
+            throw Refusal(reason: Self.diagnosticSummary(pair.diagnostics.entries, currentUpdate: update))
+        }
         let page = pair.current, terminations = page.terminations
         let documentURL = page.webView.url
         let binding = try mediaVisit(pair: pair, coordinator: coordinator, session: session, generation: generation)

@@ -1,10 +1,66 @@
 import Foundation
-import CardRendering
+@testable import CardRendering
 import Testing
 @testable import AppModel
 
 // These byte fixtures exercise facts and lifecycle, without native media proof.
 @MainActor @Suite(.serialized) struct NativeReviewInputTests {
+    @Test(arguments: ["missingMedia", "audioSession", "audioDecode", "presentFailed", "updateFailed", "appearanceFailed",
+                      "processTerminated", "typedAnswerRead", "bridgeOrigin", "bridgeRejected", "recoveryUnavailable", "answerAccessibility"])
+    func diagnosticSummaryCountsRecordsByFullUpdate(kind: String) {
+        let current = CardUpdate(card: 1, generation: 2, side: .answer)
+        let updates: [CardUpdate?] = [current, current, nil,
+            CardUpdate(card: 1, generation: 1, side: .answer),
+            CardUpdate(card: 1, generation: 2, side: .question),
+            CardUpdate(card: 2, generation: 2, side: .answer)]
+        let entries = updates.map {
+            CardDiagnostics.Entry(update: $0, kind: kind, name: "", index: nil, script: nil, repeats: 1_000_000)
+        }
+        #expect(NativeReviewInput.diagnosticSummary(entries, currentUpdate: current) ==
+            "media renderer diagnostics present: \(kind)(current=2,earlier/other=4)")
+    }
+
+    @Test func diagnosticSummaryDistinguishesCurrentMissingMediaFromEarlierPresentationFailure() {
+        let current = CardUpdate(card: 1, generation: 2, side: .answer)
+        let prior = CardUpdate(card: 1, generation: 1, side: .question)
+        let entries = [
+            CardDiagnostics.Entry(update: prior, kind: "presentFailed", name: "", index: nil, script: nil, repeats: 1),
+            CardDiagnostics.Entry(update: current, kind: "missingMedia", name: "", index: nil, script: nil, repeats: 1),
+            CardDiagnostics.Entry(update: nil, kind: "presentFailed", name: "", index: nil, script: nil, repeats: 1),
+        ]
+        #expect(NativeReviewInput.diagnosticSummary(entries, currentUpdate: current) ==
+            "media renderer diagnostics present: missingMedia(current=1,earlier/other=0); presentFailed(current=0,earlier/other=2)")
+    }
+
+    @Test func diagnosticSummaryExportsOnlyFixedLabelsAndCounts() {
+        let current = CardUpdate(card: 1, generation: 2, side: .answer)
+        let privateText = "synthetic-private-<html>-https://example.invalid/private/template.js"
+        let script = CardDiagnostics.ScriptLocation(errorClass: privateText, line: 98765, column: 87654, source: privateText)
+        let kinds = ["script.\(privateText)", "mediaError.\(privateText)", privateText,
+                     "missingMedia.\(privateText)", "script", "mediaError"]
+        let entries = kinds.map {
+            CardDiagnostics.Entry(update: current, kind: $0, name: privateText, index: 76543, script: script, repeats: 999999)
+        }
+        let summary = NativeReviewInput.diagnosticSummary(entries, currentUpdate: current)
+        #expect(summary == "media renderer diagnostics present: script(current=1,earlier/other=0); mediaError(current=1,earlier/other=0); other(current=4,earlier/other=0)")
+        #expect(!summary.contains(privateText))
+    }
+
+    @Test func diagnosticSummaryRemainsBoundedForFullRetainedStore() {
+        let current = CardUpdate(card: 1, generation: 2, side: .answer)
+        let kinds = ["missingMedia", "audioSession", "audioDecode", "presentFailed", "updateFailed", "appearanceFailed",
+                     "processTerminated", "typedAnswerRead", "bridgeOrigin", "bridgeRejected", "recoveryUnavailable", "answerAccessibility",
+                     "script.synthetic", "mediaError.synthetic", "synthetic-unknown"]
+        let entries = (0..<256).map { index in
+            CardDiagnostics.Entry(update: index.isMultiple(of: 2) ? current : nil, kind: kinds[index % kinds.count],
+                                  name: String(repeating: "synthetic-private", count: 100), index: index, script: nil, repeats: 1_000_000)
+        }
+        let description = NativeReviewInput.Refusal(reason: NativeReviewInput.diagnosticSummary(entries, currentUpdate: current)).description
+        #expect(description.utf8.count < 900)
+        #expect(!description.contains("synthetic"))
+        #expect(description.contains("other(current="))
+    }
+
     @Test func frozenRecordBindsEveryRequiredFileAndExactRun() async throws {
         let fixture = try NativeReviewInputFixture()
         defer { fixture.remove() }
