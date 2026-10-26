@@ -34,7 +34,28 @@ refusal under every slot holder is not resolved or accepted by this clarificatio
 - `static-checks/20261026T042330Z-66928`: PASS.
 - `private/20261026T042331Z-67142`: PASS for the three public documents.
 
-The fixture repair is still pending. It must preserve the production guard and
-all cancellation, two-second deadline, exact Deferred identity, continued-worker
-release, final Suspended and empty-thread assertions. No unit or gate acceptance
-is claimed by this documentation change.
+## Fixture repair and focused checks
+
+Shared focused receipts below cover both fixture repairs in this batch.
+
+Filtered fixer `s-20261025T162405Z-9dc656e4`, export
+`cleanroom/20261026T042639Z-68834`, adds an exact Busy assertion and proves the
+refused normal worker was discarded through its channel. The unrelated ordinary
+worker is now Optimizer, with an entry handshake before suspension. Independent
+R2 review finds no P0–P2. The production guard, both two-second suspend deadlines,
+exact Deferred identity, continued-token state, ordinary cancellation, explicit
+release, final Suspended and empty-thread assertions are retained.
+
+- `goldens-check/20261026T042708Z-69384`: PASS, 703 golden checks, zero changes;
+  1,525 schema files have no errors after the documentation clarification.
+- `core-test/20261026T043001Z-70870`: both original failing methods pass.
+- `core-test/20261026T043120Z-71612`: all 57 suspension/manual-transfer tests
+  pass, with zero skips.
+- `native-durability/20261026T043207Z-72624`: all 25 pass, with zero skips;
+  this closes the native instance of the same suspension failure.
+- `core-lint/20261026T043322Z-73349`: PASS, all four checks.
+- `private/20261026T043143Z-71986` and
+  `similarity/20261026T043145Z-72225`: PASS for both fixture files.
+
+The media fixture has its separate record. The disk-stopped broad gate remains
+incomplete and unaccepted. No unit or milestone acceptance is claimed here.

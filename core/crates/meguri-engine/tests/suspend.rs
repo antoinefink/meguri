@@ -53,15 +53,30 @@ fn a_continued_download_defers_suspension_and_other_jobs_are_cancelled() {
         })
         .unwrap();
     entered_rx.recv().unwrap();
+    let (refused_tx, refused_rx) = mpsc::sync_channel(1);
+    let refused = h.engine.start_job(JobKind::NormalSync, move |_| {
+        refused_tx.send(()).unwrap();
+        Ok(())
+    });
+    assert_eq!(
+        refused.unwrap_err(),
+        EngineError::Busy {
+            running_op: "one-way sync".to_owned()
+        }
+    );
+    assert_eq!(refused_rx.try_recv(), Err(mpsc::TryRecvError::Disconnected));
+    let (other_entered_tx, other_entered_rx) = mpsc::sync_channel(1);
     let other = h
         .engine
-        .start_job(JobKind::NormalSync, |ctx| {
+        .start_job(JobKind::Optimizer, move |ctx| {
+            other_entered_tx.send(()).unwrap();
             while !ctx.cancel.is_cancelled() {
                 std::thread::sleep(Duration::from_millis(1));
             }
             Err(EngineError::Cancelled)
         })
         .unwrap();
+    other_entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     assert_eq!(
         h.engine.suspend(Duration::from_secs(2)).unwrap(),
         SuspendOutcome::Deferred { job_id: job.id }
