@@ -159,3 +159,22 @@ bounded three-platform export gap. Historical failed receipts remain failures.
 It does not establish media-bearing file import/review/relaunch, full U162,
 the original-base integration gate or milestone acceptance. P16 implementation
 is now in progress; the public media-input refusal remains until verification.
+
+## Media-chain input contract
+
+F11.2 adds one small media-bearing native import/review/export case. It freezes
+source, expected states and declared runtime inputs before launch; it validates
+actual card/rating admission and supplies only the declared elapsed test input.
+Real timing clocks and every deadline remain unchanged. Valid PNG and WAV data
+are required; the old recipe's random audio bytes cannot prove playback.
+
+The spec writer's patch and independent clear R1 are retained in the intake
+directory. Expected Rust replay checks delivery/persistence, not independent
+scheduler correctness. Existing backend/parity checks and strict package/client
+comparison remain required. The export-only and collection-only cases remain
+unchanged. Implementation and the complete native media chain are pending.
+
+Privacy findings required a prose-only rewrite of six F11.2 paragraphs. The
+final independent semantic review is clear; all input, media, timing and proof
+requirements remain. Privacy scan `20261026T145803Z-44709` passes. No guard or
+exception changed. These are test contracts, not implementation or acceptance.
