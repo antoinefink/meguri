@@ -240,3 +240,7 @@ Similarity `20261026T184935Z-92670` passes for the replay and native input work.
 Core bridge tests `20261026T185013Z-93287` pass 8 tests; the new seed-provider
 test is in EventTests and passes separately in `20261026T185103Z-94660`.
 Both runs have zero skips. The actual native media case remains pending.
+
+Team-signed Mac Debug app build `20261026T185336Z-98180` passes, including the
+guarded launch/close code. The native media test and its orchestration are in
+progress. This build does not establish imported image/audio behavior.

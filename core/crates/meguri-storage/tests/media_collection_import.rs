@@ -54,9 +54,7 @@ fn media_import_partial_preparation_cleans_reservations_and_preserves_unrelated_
             false,
         );
         meguri_model::faultpoint::disarm("replace.media.prepared");
-        let failure = outcome
-            .err()
-            .expect("invalid or cancelled preparation must not hand off");
+        let failure = outcome.expect_err("invalid or cancelled preparation must not hand off");
         assert_eq!(
             failure.error,
             if cancelled {

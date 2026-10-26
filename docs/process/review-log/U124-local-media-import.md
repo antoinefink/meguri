@@ -118,3 +118,13 @@ Independent review, privacy `20261026T185314Z-97467` and similarity
 `core-test/20261026T185626Z-953` pass all 26 tests with zero skips.
 Lint `20261026T185311Z-97209` reaches four further findings in the FFI and
 test targets. They remain open; no lint failure is suppressed.
+
+Filtered repair `20261026T185735Z-1686` closes those four findings, retaining
+all assertions. Only the Rust inspection failure payload is boxed. Independent
+review is clear. Lint `20261026T185918Z-2807` passes all four checks; privacy
+`20261026T185922Z-3076` and similarity `20261026T185924Z-3328` pass.
+`core-test/20261026T190023Z-4019` passes 10 selected entry/storage/replay tests;
+76 unrelated tests are not selected. Swift mapping/seed checks
+`20261026T190026Z-4273` pass 6 tests with zero skips. Regenerated Swift bindings
+are byte-identical to the pinned pre-change file; verification is in the intake.
+Native media execution and the required integration gate remain pending.

@@ -295,7 +295,7 @@ fn prepare_unit_fixture(root: &Path, run: &str) -> serde_json::Value {
     fs::write(prepared.join("collection.media/meguri-review.wav"), silent_wav()).unwrap();
     fs::write(
         prepared.join("collection.media/_meguri-unused.txt"),
-        &[0x00, 0x71, 0x00, 0x92],
+        [0x00, 0x71, 0x00, 0x92],
     )
     .unwrap();
     fs::write(

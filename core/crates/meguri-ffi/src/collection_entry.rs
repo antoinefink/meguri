@@ -383,7 +383,7 @@ impl<T> Drop for Completion<T> {
 pub enum CollectionInspectOutcome {
     Pending,
     Ready { inspection: Arc<CollectionInspection> },
-    Failed { failure: ImportFailure },
+    Failed { failure: Box<ImportFailure> },
 }
 #[derive(uniffi::Object)]
 pub struct CollectionInspectResult {
@@ -399,7 +399,7 @@ impl CollectionInspectResult {
                 inspection: inspection.clone(),
             },
             Some(Err(failure)) => CollectionInspectOutcome::Failed {
-                failure: failure.clone(),
+                failure: failure.clone().into(),
             },
         })
     }
@@ -662,11 +662,11 @@ mod tests {
             let event = events
                 .recv_timeout(Duration::from_secs(20))
                 .expect("public entry terminal event");
-            if let meguri_engine::EventKind::JobFinished { id: actual, outcome } = &event.kind {
-                if actual.0 == id {
-                    assert_eq!(outcome, &meguri_engine::JobOutcome::Succeeded);
-                    break;
-                }
+            if let meguri_engine::EventKind::JobFinished { id: actual, outcome } = &event.kind
+                && actual.0 == id
+            {
+                assert_eq!(outcome, &meguri_engine::JobOutcome::Succeeded);
+                break;
             }
         };
         let inspection = start_collection_inspection(
