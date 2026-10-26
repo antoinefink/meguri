@@ -103,3 +103,14 @@ import, a new review, retained answers after relaunch, then re-export. Existing
 native review-import tests use a collection-only package; the media-export test
 launches a fixture directly. These separate passes do not establish the combined
 workflow. This gap, iPad export and the original-base gate remain open.
+
+## Bounded iPad naming-state diagnostic
+
+Start `9b265083`. Filtered fixer `cleanroom/20261026T130424Z-38175` adds one
+iPad-only generated-screen attachment before AX queries, followed by incremental
+exact native-root/editor facts. Editor data is limited to two elements, 256
+value characters and 2,000 description characters. Independent R1 is clear;
+privacy `20261026T130829Z-41745` and similarity `20261026T130831Z-42020` pass.
+All guards, interactions, assertions and ten-second limits are unchanged.
+Runtime is pending. Extra observation can affect timing; a passing diagnostic
+run alone must not be described as a repair.

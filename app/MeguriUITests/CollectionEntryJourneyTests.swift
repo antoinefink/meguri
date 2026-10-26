@@ -487,6 +487,35 @@ import notify
                 throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
             }
             try click(newFolder, app, bundle)
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                screenshot.name = "native-ipad-new-folder"
+                screenshot.lifetime = .keepAlways
+                add(screenshot)
+                func attachState(_ label: String, _ fact: String) {
+                    let attachment = XCTAttachment(string: fact)
+                    attachment.name = "native-ipad-new-folder-state-\(label)"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                }
+                let roots = app.descendants(matching: .any).matching(identifier:
+                    "DOC.browsingRoot Source: com.apple.FileProvider.LocalStorage, Title: RF2 Import Tests")
+                attachState("root-count", "Exact local Files root identifier count=\(roots.count)")
+                let editors = app.descendants(matching: .any).matching(identifier: "DOC.inlineRenameField")
+                let editorCount = editors.count
+                attachState("editor-count", "Exact DOC.inlineRenameField count=\(editorCount)")
+                attachState("keyboard", "Software keyboard exists=\(app.keyboards.firstMatch.exists)")
+                for index in 0..<min(editorCount, 2) {
+                    let editor = editors.element(boundBy: index)
+                    attachState("editor-\(index)-attributes",
+                        "role=\(editor.elementType) identifier=\(editor.identifier.debugDescription) value=\(String(describing: editor.value).prefix(256)) frame=\(editor.frame)")
+                    attachState("editor-\(index)-enabled", "isEnabled=\(editor.isEnabled)")
+                    attachState("editor-\(index)-hittable", "isHittable=\(editor.isHittable)")
+                    attachState("editor-\(index)-description", String(editor.debugDescription.prefix(2000)))
+                }
+                attachState("alerts", "Alert count=\(app.alerts.count)")
+                attachState("sheets", "Sheet count=\(app.sheets.count)")
+            }
             let commitName = NSPredicate(format: "label IN %@", ["Create", "Done"])
             func nameDialogs() -> [XCUIElement] {
                 (app.alerts.allElementsBoundByIndex + app.sheets.allElementsBoundByIndex).filter { dialog in
