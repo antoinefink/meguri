@@ -2,6 +2,7 @@
 import DesignSystem
 import Foundation
 import ImageIO
+import SnapshotTesting
 import SwiftUI
 import Testing
 
@@ -73,6 +74,65 @@ import Testing
             Swatch(token: token)
         }
     }
+
+    #if os(macOS)
+    @Test(arguments: Appearance.allCases)
+    func aNativeNavigationFormRetainsItsScreenViewportAndPaintsText(appearance: Appearance) async throws {
+        let cell = MatrixCell(appearance: appearance, device: .macDefault)
+        func screen(textVisible: Bool) -> AnyView {
+            AnyView(
+                NavigationStack {
+                    Form {
+                        Section("Collection") {
+                            Text("Choose a collection to import.").opacity(textVisible ? 1 : 0)
+                            LabeledContent {
+                                Text("Example collection").opacity(textVisible ? 1 : 0)
+                            } label: {
+                                Text("Name").opacity(textVisible ? 1 : 0)
+                            }
+                            Button {} label: {
+                                Text("Choose File").opacity(textVisible ? 1 : 0)
+                            }
+                        }
+                    }
+                    .navigationTitle("Import Collection")
+                }
+            )
+        }
+        func pixels(_ image: PlatformImage) throws -> [UInt8] {
+            #expect(image.size == cell.device.size)
+            let png = PlatformImage.snapshotDiffing.toData(image)
+            let source = try #require(CGImageSourceCreateWithData(png as CFData, nil))
+            let cgImage = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+            // The screen contract is 1180 x 780 pt at 2x, even when the
+            // native content's fitting height is much smaller.
+            #expect(cgImage.width == 2360)
+            #expect(cgImage.height == 1560)
+            var bytes = [UInt8](repeating: 0, count: cgImage.width * cgImage.height * 4)
+            let context = try #require(CGContext(
+                data: &bytes, width: cgImage.width, height: cgImage.height,
+                bitsPerComponent: 8, bytesPerRow: cgImage.width * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+            return bytes
+        }
+        let visible = try pixels(await HostedRenderer.render(screen(textVisible: true), cell: cell, layout: .screen))
+        let hidden = try pixels(await HostedRenderer.render(screen(textVisible: false), cell: cell, layout: .screen))
+        try #require(visible.count == hidden.count)
+        // Hiding only text preserves the native layout and surfaces. A
+        // transparent or background-only capture cannot satisfy this check.
+        var paintedTextPixels = 0
+        for index in stride(from: 0, to: visible.count, by: 4) {
+            if visible[index + 3] == 255, hidden[index + 3] == 255,
+               (0..<3).contains(where: { abs(Int(visible[index + $0]) - Int(hidden[index + $0])) >= 32 }) {
+                paintedTextPixels += 1
+            }
+        }
+        #expect(paintedTextPixels >= 100, "the native Form's text was not painted in the screen capture")
+    }
+    #endif
 
     @Test func aTokenColourChangeFailsWithADiffImageAndRecordingTakesTheNewImage() async throws {
         defer { try? FileManager.default.removeItem(at: directory) }

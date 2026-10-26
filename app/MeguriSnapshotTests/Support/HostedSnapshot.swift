@@ -541,6 +541,7 @@ enum HostedRenderer {
     final class Host {
         private let window: NSWindow
         private let hostingView: NSView
+        private let screenSize: CGSize?
 
         init(_ view: AnyView, cell: MatrixCell, layout: SnapshotLayout) throws {
             var size = cell.device.size
@@ -549,6 +550,7 @@ enum HostedRenderer {
             }
             let controller = NSHostingController(rootView: HostedRenderer.content(view, cell: cell, layout: layout))
             guard size.width > 0, size.height > 0 else { throw RenderError(description: "the view has no size") }
+            screenSize = layout == .screen ? size : nil
             window = NSWindow(
                 contentRect: CGRect(origin: CGPoint(x: -30_000, y: -30_000), size: size),
                 styleMask: [.borderless], backing: .buffered, defer: false
@@ -556,15 +558,47 @@ enum HostedRenderer {
             window.isReleasedWhenClosed = false
             window.appearance = NSAppearance(named: cell.appearance == .dark ? .darkAqua : .aqua)
             window.animationBehavior = .none
-            window.contentViewController = controller
-            window.setContentSize(size)
             hostingView = controller.view
+            if layout == .screen {
+                // A screen owns its viewport. Native Form/NavigationStack
+                // fitting sizes must not resize it during deferred layout.
+                controller.sizingOptions = []
+                let viewport = NSViewController()
+                viewport.view = NSView(frame: CGRect(origin: .zero, size: size))
+                viewport.addChild(controller)
+                hostingView.translatesAutoresizingMaskIntoConstraints = false
+                viewport.view.addSubview(hostingView)
+                NSLayoutConstraint.activate([
+                    hostingView.leadingAnchor.constraint(equalTo: viewport.view.leadingAnchor),
+                    hostingView.trailingAnchor.constraint(equalTo: viewport.view.trailingAnchor),
+                    hostingView.topAnchor.constraint(equalTo: viewport.view.topAnchor),
+                    hostingView.bottomAnchor.constraint(equalTo: viewport.view.bottomAnchor),
+                ])
+                window.contentMinSize = size
+                window.contentMaxSize = size
+                window.contentViewController = viewport
+            } else {
+                window.contentViewController = controller
+            }
+            window.setContentSize(size)
             hostingView.frame = CGRect(origin: .zero, size: size)
+            if screenSize != nil {
+                window.contentView?.layoutSubtreeIfNeeded()
+            }
             hostingView.layoutSubtreeIfNeeded()
         }
 
         func frame() throws -> NSImage {
+            if screenSize != nil {
+                window.contentView?.layoutSubtreeIfNeeded()
+            }
             hostingView.layoutSubtreeIfNeeded()
+            if screenSize != nil {
+                hostingView.displayIfNeeded()
+                window.contentView?.layoutSubtreeIfNeeded()
+                hostingView.layoutSubtreeIfNeeded()
+                try validateScreenGeometry()
+            }
             let bounds = hostingView.bounds
             guard let rep = NSBitmapImageRep(
                 bitmapDataPlanes: nil, pixelsWide: Int(bounds.width * SnapshotTolerance.scale), pixelsHigh: Int(bounds.height * SnapshotTolerance.scale),
@@ -573,9 +607,19 @@ enum HostedRenderer {
             ) else { throw RenderError(description: "could not allocate a bitmap") }
             rep.size = bounds.size
             hostingView.cacheDisplay(in: bounds, to: rep)
+            try validateScreenGeometry()
             let image = NSImage(size: bounds.size)
             image.addRepresentation(rep)
             return image
+        }
+
+        private func validateScreenGeometry() throws {
+            guard let screenSize else { return }
+            let expected = CGRect(origin: .zero, size: screenSize)
+            guard window.contentView?.bounds == expected,
+                  hostingView.frame == expected, hostingView.bounds == expected else {
+                throw RenderError(description: "screen viewport requested \(expected), actual content \(String(describing: window.contentView?.bounds)), hosting frame \(hostingView.frame), bounds \(hostingView.bounds)")
+            }
         }
 
         func tearDown() {

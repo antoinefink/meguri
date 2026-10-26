@@ -74,3 +74,14 @@ Data; independent review confirms that no check or value changed.
 `swift-test/20261026T171710Z-23864` passes 43 Kit model/presentation tests,
 including the real committed-result failure cases. Both report zero skips.
 Built-screen inspection and the complete native media case are still pending.
+
+## Mac capture repair
+
+The declared screen viewport is now pinned independently of native Form fitting
+size. Independent source review is clear; privacy `20261026T182132Z-58574` and
+similarity `20261026T182134Z-58813` pass. Team-signed snapshots
+`20261026T182155Z-59282` compile and pass the protected credential test.
+The new native Form paint assertion fails in both appearances with zero changed
+text pixels. Screen dimensions are fixed, but actual images are still blank.
+The run remains failed, no baselines were recorded, and visual approval remains
+pending. The enabled regression will cover the next capture repair.
