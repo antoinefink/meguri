@@ -14,6 +14,88 @@ extension WebKitSuites {
                   compare: @escaping (TypeAnswerDescriptor, String) async throws -> String = { _, text in "<code>\(text)</code>" }) async throws -> CardPagePair {
             CardPagePair(configuration: configuration ?? CardWebConfiguration(store: .nonPersistent()), resolver: try await fixture.resolved(), compare: compare)
         }
+
+        @Test(arguments: [false, true])
+        func answerPresentationKeepsTokenUntilItsOwnUpdate(earlyReveal: Bool) async throws {
+            let fixture = MediaFixture()
+            let pair = try await make(fixture)
+            let window = SpikeWindow(pair.container)
+            defer { pair.close(); window.close() }
+            try await pair.load()
+            let page = pair.idle
+            // Observe the actual posts before native admission. Keep WebKit's
+            // wrapped handler objects alive, and forward every message unchanged.
+            try await page.run("""
+                window.paintMessages = [];
+                window.paintHandlers = ['meguriCard', 'meguriVisible'].map(function (name) {
+                  const handler = webkit.messageHandlers[name];
+                  const post = handler.postMessage;
+                  handler.postMessage = function (message) {
+                    if (message.signal === 'visible' || message.phase === 'visible') paintMessages.push(message);
+                    return post.call(handler, message);
+                  };
+                  return handler;
+                });
+                """, world: CardPage.world)
+            let question = try await pair.prepare(CardPayload(cardID: 9, question: """
+                <p id=question>question</p><script>
+                onShownHook.push(function () {
+                  return new Promise(function (resolve) { window.releaseQuestion = resolve; });
+                });
+                (function () {
+                  const show = _showAnswer;
+                  window._showAnswer = function (answer, classes) {
+                    window.releaseAnswer = function () { show(answer, classes); };
+                  };
+                })();
+                </script>
+                """, answer: "<p id=answer>answer</p>"))
+            _ = try pair.present(question)
+            // Exercise a reveal as soon as native presentation has begun, while
+            // question shown hooks remain held, and the already-shown path.
+            var revealing: Task<SwapToken, any Error>?
+            if earlyReveal {
+                try await CardBehaviorFixture.until("native question presentation began") { page.presented }
+                revealing = Task { try await pair.showAnswer() }
+            }
+            defer { revealing?.cancel() }
+            try await CardBehaviorFixture.until("question paint and held shown hook") {
+                let held = try await page.webView.callAsyncJavaScript("return typeof releaseQuestion === 'function' && document.getElementById('question') !== null;", contentWorld: .page) as? Bool
+                guard held == true else { return false }
+                return try await page.webView.callAsyncJavaScript("return paintMessages.length === 2;", contentWorld: CardPage.world) as? Bool == true
+            }
+            try await page.run("paintMessages.length = 0;", world: CardPage.world)
+            try await page.run("releaseQuestion();")
+            if !earlyReveal {
+                try await page.waitForShown(question)
+                revealing = Task { try await pair.showAnswer() }
+            }
+            let reveal = try #require(revealing)
+            try await CardBehaviorFixture.until("answer entry queued behind presentation") {
+                try await page.webView.callAsyncJavaScript("return typeof releaseAnswer === 'function';", contentWorld: .page) as? Bool == true
+            }
+            let answer = try #require(page.update)
+            #expect(answer.card == question.card && answer.side == .answer && answer.generation != question.generation)
+            // The runtime still has the shown question. Give any wrongly bound
+            // visibleReady its full two-frame path before releasing the answer.
+            try await page.run("await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));", world: CardPage.world)
+            #expect(try await page.string("return JSON.stringify(paintMessages);", world: CardPage.world) == "[]")
+            try await page.run("releaseAnswer();")
+            let token = try await Spike.deadline("identity-bound answer reveal", timeout: .seconds(3)) { try await reveal.value }
+            try await CardBehaviorFixture.until("answer visible and confirmation posts") {
+                try await page.webView.callAsyncJavaScript("return paintMessages.length === 2;", contentWorld: CardPage.world) as? Bool == true
+            }
+            #expect(try await page.webView.callAsyncJavaScript("""
+                return JSON.stringify(paintMessages) === JSON.stringify([
+                  {signal:'visible', token:token, side:'answer', card:card, generation:generation},
+                  {token:token, card:card, phase:'visible'}
+                ]);
+                """, arguments: ["token": token.sequence, "card": answer.card, "generation": answer.generation], contentWorld: CardPage.world) as? Bool == true)
+            try await CardBehaviorFixture.until("native accepted answer paint identity") { page.acceptsVisibleConfirmation() }
+            #expect(pair.current === page && page.update == answer)
+            #expect(pair.diagnostics.entries.isEmpty)
+        }
+
         #if os(macOS)
         @Test func ownedAccessibilityChildrenFollowSynchronousSwapsAndClearOnClose() async throws {
             let fixture = MediaFixture()

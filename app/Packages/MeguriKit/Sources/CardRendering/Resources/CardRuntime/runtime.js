@@ -24,6 +24,7 @@
   const stringify = JSON.stringify;
   const parseJSON = JSON.parse;
   const StringCtor = String;
+  const isSafeInteger = Number.isSafeInteger;
   const ErrorCtor = Error;
   const URLCtor = URL;
   const CustomEventCtor = CustomEvent;
@@ -260,7 +261,7 @@
   // Media paused while unpresented, to play at presentation (C8.2).
   let held = [];
   // The presentation still owed a visible confirmation (C14).
-  let pendingToken = null;
+  let pendingPresentation = null;
   // Font URLs this page has asked for, for its whole life (C7.1).
   const askedFonts = new SetCtor();
 
@@ -605,7 +606,9 @@
     held[held.length] = target;
   }, true);
 
-  function present(token) {
+  function present(token, target) {
+    if (target !== undefined && (target === null || typeof target !== "object"
+      || !isSafeInteger(target.card) || !isSafeInteger(target.generation) || target.generation < 0)) return;
     presented = true;
     const resume = held;
     held = [];
@@ -619,14 +622,14 @@
         // A refused play() is ignored.
       }
     }
-    pendingToken = token === undefined ? null : token;
+    pendingPresentation = token === undefined || token === null ? null : { token: token, identity: target || null };
     confirmVisibleWhenShown();
     wakeParked("present");
   }
 
   function unpresent() {
     presented = false;
-    pendingToken = null;
+    pendingPresentation = null;
     const media = call(documentQueryAll, doc, "audio, video");
     for (let i = 0; i < media.length; i++) {
       try {
@@ -640,9 +643,11 @@
   // The interaction script confirms with two frames of its own once the
   // page is presented and its latest update has passed step 8 (R1862).
   function confirmVisibleWhenShown() {
-    if (!presented || pendingToken === null || !latest || !latest.shown) return;
-    updateSignal("visibleReady", latest, { token: pendingToken });
-    pendingToken = null;
+    if (!presented || pendingPresentation === null || !latest || !latest.shown) return;
+    const target = pendingPresentation.identity;
+    if (target && (!latest.identity || latest.identity.card !== target.card || latest.identity.generation !== target.generation)) return;
+    updateSignal("visibleReady", latest, { token: pendingPresentation.token });
+    pendingPresentation = null;
   }
 
   // ---------------------------------------------------------------------------
@@ -1297,7 +1302,7 @@
         announced = { card: message.card, generation: message.generation };
         break;
       case "present":
-        present(message.token);
+        present(message.token, message.target);
         break;
       case "resume":
         // Native lifecycle return: discard attempts held during suspension.

@@ -19,6 +19,8 @@
   // The side of the update that started most recently.
   let side = null;
   let identity = null;
+  // Only the current presentation may finish its delayed paint callback.
+  let paintOwner = null;
   const owners = new WeakMap();
   const failed = new Map();
 
@@ -78,6 +80,7 @@
     if (signal === null || typeof signal !== "object" || typeof signal.signal !== "string") return;
     switch (signal.signal) {
       case "started":
+        paintOwner = null;
         side = signal.side;
         identity = isNumber(signal.card) && isNumber(signal.generation)
           ? { card: signal.card, generation: signal.generation, side: side } : null;
@@ -102,8 +105,13 @@
 
   // Two frames after presentation, the content has painted (R1862).
   function confirmVisible(ready) {
+    const owner = {};
+    paintOwner = owner;
     requestAnimationFrame(function () {
+      if (paintOwner !== owner) return;
       requestAnimationFrame(function () {
+        if (paintOwner !== owner) return;
+        paintOwner = null;
         const visible = { signal: "visible", token: ready.token, side: ready.side };
         if (isNumber(ready.card)) {
           visible.card = ready.card;
@@ -225,13 +233,21 @@
       toRuntime({ op: "restoreTypedText", text: String(text) });
     },
     // The page is now the one the user sees; `token` is the swap's (U12).
-    present: function (token) {
-      toRuntime({ op: "present", token: isNumber(token) ? token : null });
+    present: function (token, card, generation) {
+      paintOwner = null;
+      const message = { op: "present", token: isNumber(token) ? token : null };
+      // An answer may be queued while the question's shown hooks drain.
+      // Keep an explicitly supplied target distinct from an untargeted C66 call,
+      // including malformed/partial targets (validated by the runtime).
+      if (arguments.length > 1) message.target = { card: card, generation: generation };
+      toRuntime(message);
     },
     resume: function (token) {
+      paintOwner = null;
       toRuntime({ op: "resume", token: isNumber(token) ? token : null });
     },
     unpresent: function () {
+      paintOwner = null;
       toRuntime({ op: "unpresent" });
     },
     // Loads what `html` needs, without inserting it (C7.5).

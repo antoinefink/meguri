@@ -295,7 +295,8 @@ public final class CardPagePair {
         page.begin(payload, update: update)
         page.visibleToken = token.sequence
         audio.present(payload: payload, update: update)
-        try await page.run("meguriCard.present(token);", arguments: ["token": token.sequence], world: CardPage.world)
+        try await page.run("meguriCard.present(token, card, generation);",
+                           arguments: ["token": token.sequence, "card": update.card, "generation": update.generation], world: CardPage.world)
         try await page.start(html: answer, update: update)
         try await page.waitForShown(update)
         guard current === page, page.update == update, !closed, !suspended, !lifecycleSuspended else { throw CardPage.Failure.superseded }

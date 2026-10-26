@@ -408,3 +408,41 @@ The descriptor controls still fail with -54; the production backend opens the
 same generated WAV, duration 2. Test totals: 84 pass, 1 image comparison fails,
 1 skip. The snapshot run remains failed. Limits, assertions and baselines
 stay unchanged. Full native import, review, reopen and export still need proof.
+
+## Answer presentation binding
+
+Start `bb78b568`. Actual Mac UI run `20261026T220459Z-75711` fails after
+import and reveal: the decoder error is absent, but the strict renderer check
+reports `olderGeneration` and `confirmationValue`, once each. No guard changes.
+
+Independent diagnosis finds P1 `REVEAL-TOKEN-OLD-UPDATE`: showAnswer sends its
+new token before the runtime queues the answer. The still-shown question can
+consume that token and emit the two mismatched receipts. Existing M7/M8 and
+C6.8 require the token to stay bound to the intended update. Repair and native
+verification remain open; the failed UI receipt stays retained.
+
+R1 export `20261026T220940Z-79120` binds answer presentation to its card and
+generation. Independent review closes the original P1 and identifies P2
+`REVEAL-OBSOLETE-PAINT-CALLBACK`: a pending two-frame callback still needs
+invalidation when a new presentation takes ownership. This repair is open.
+
+VM `unit-sim/20261026T221443Z-81661` reports 54 passes and 1 existing skip.
+The new runtime cases and strict bridge suite pass. The parameterized native
+pair test was not selected by the method-name filter; its empty suite is not
+positive evidence. The next run must select the full pair suite. Privacy
+`20261026T221446Z-82161` and similarity `20261026T221448Z-82776` pass.
+
+R2 export `20261026T221736Z-85362` adds a bounded callback owner, invalidated
+on each presentation, resume, unpresent and runtime start. Both animation
+frames check ownership. Independent R2 review is clear. The two new frame
+barrier cases supersede question paint before its second frame and require
+the current answer's exact identity/token after two frames. Native admission,
+diagnostic checks and media proof remain unchanged.
+
+VM `unit-sim/20261026T222124Z-87799` passes 81 tests, zero failures, with 1
+existing skip. The entire pair suite ran, including both new reveal variants
+and its 1,000-card case; both callback cancellation cases, side-update and
+strict bridge suites pass. Privacy `20261026T222123Z-87568` and similarity
+`20261026T222124Z-87761` pass. The actual Mac full workflow still needs a fresh
+run on this repair. Already-posted messages cannot be retracted by JavaScript;
+any separately observed late delivery remains subject to M8.

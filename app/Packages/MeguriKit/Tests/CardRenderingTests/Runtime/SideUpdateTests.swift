@@ -67,6 +67,155 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test func targetedAnswerWaitsWhileQuestionShownHooksDrain() async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                try await page.announce(card: 9, generation: 1)
+                try await page.showQuestion("""
+                    <p>question</p><script>
+                    onShownHook.push(function () {
+                      return new Promise(function (resolve) { window.releaseShown = resolve; });
+                    });
+                    </script>
+                    """)
+                try await harness.signal("settled", from: page)
+                try await page.present(token: 11)
+                try await harness.signal("visible", from: page)
+                try await harness.until("held question shown hook") {
+                    try await page.bool("typeof releaseShown === 'function'")
+                }
+                // Native's answer present precedes its queue entry. The question
+                // has passed step 8, but its asynchronous shown hook still drains.
+                try await page.runIsolated("meguriCard.present(12, 9, 2);")
+                try await page.announce(card: 9, generation: 2)
+                try await page.showAnswer("<p id=answer>answer</p>")
+                try await page.runIsolated("await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));")
+                #expect(harness.signals("shown", from: page).isEmpty)
+                #expect(harness.signals("visible", from: page).count == 1)
+                #expect(!harness.confirmations.contains(.init(token: 12, cardID: 9, phase: .visible)))
+                try await page.run("releaseShown();")
+                let question = try await harness.signal("shown", from: page)
+                let answer = try await harness.signal("shown", count: 2, from: page)
+                #expect(question.card == 9 && question.generation == 1 && question.side == "question")
+                #expect(answer.card == 9 && answer.generation == 2 && answer.side == "answer")
+                let visible = try await harness.signal("visible", count: 2, from: page)
+                #expect(visible.card == 9 && visible.generation == 2 && visible.side == "answer" && visible["token"] as? Int == 12)
+                try await harness.until("matching answer confirmation") {
+                    harness.confirmations.contains(.init(token: 12, cardID: 9, phase: .visible))
+                }
+                #expect(harness.signals("visible", from: page).count == 2)
+            }
+        }
+
+        @Test func targetedAnswerPresentCancelsPendingQuestionPaint() async throws {
+            try await checkPendingQuestionPaint(unpresent: false)
+        }
+
+        @Test func unpresentCancelsPendingQuestionPaint() async throws {
+            try await checkPendingQuestionPaint(unpresent: true)
+        }
+
+        private func checkPendingQuestionPaint(unpresent: Bool) async throws {
+            try await WebTestHarness.withPage(frameClock: true) { harness, page async throws in
+                try await page.announce(card: 9, generation: 1)
+                try await page.showQuestion("<p>question</p>")
+                try await harness.signal("settled", from: page)
+                // Present synchronously queues the question's first frame. This
+                // barrier runs after it queues frame two, before frame two can
+                // post. No native round trip or elapsed-time race owns this gap.
+                let pending = try await page.runIsolated("""
+                    meguriTestFrames.mark('questionPresent');
+                    meguriCard.present(11, 9, 1);
+                    return await new Promise(resolve => requestAnimationFrame(() => {
+                      const pending = !meguriTestFrames.stamps.some(s => s.event.endsWith(':visible'));
+                      meguriTestFrames.mark('superseded');
+                      if (unpresent) meguriCard.unpresent();
+                      else {
+                        meguriTestFrames.mark('answerPresent');
+                        meguriCard.present(12, 9, 2);
+                      }
+                      resolve(pending);
+                    }));
+                    """, ["unpresent": unpresent]) as? Bool
+                try #require(pending == true)
+                let questionPresent = try await page.frame(of: "questionPresent")
+                let superseded = try await page.frame(of: "superseded")
+                #expect(superseded - questionPresent == 1)
+                let obsoleteAbsent = try await page.runIsolated("""
+                    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+                    return !meguriTestFrames.stamps.some(s => s.event.endsWith(':visible'));
+                    """) as? Bool
+                #expect(obsoleteAbsent == true)
+                #expect(harness.signals("visible", from: page).isEmpty)
+                #expect(!harness.confirmations.contains { $0.phase == .visible })
+
+                try await page.announce(card: 9, generation: 2)
+                try await page.showAnswer("<p id=answer>answer</p>")
+                if unpresent {
+                    try await harness.signal("settled", count: 2, from: page)
+                    try await page.runIsolated("meguriTestFrames.mark('answerPresent'); meguriCard.present(12, 9, 2);")
+                }
+                let visible = try await harness.signal("visible", from: page)
+                #expect(visible.card == 9 && visible.generation == 2 && visible.side == "answer" && visible["token"] as? Int == 12)
+                try await harness.until("current answer paint confirmation") {
+                    harness.confirmations.contains(.init(token: 12, cardID: 9, phase: .visible))
+                }
+                #expect(harness.signals("visible", from: page).count == 1)
+                #expect(harness.confirmations.filter { $0.phase == .visible } == [.init(token: 12, cardID: 9, phase: .visible)])
+                let frames = try await page.frameStamps()
+                let answerShown = try #require(frames.last { $0.event == "qaVisible" })
+                let presented = try #require(frames.first { $0.event == "answerPresent" })
+                let signal = try #require(frames.first { $0.event == "\(CardRuntime.signalHandlerName):visible" })
+                let confirmation = try #require(frames.first { $0.event == "\(CardRuntime.confirmationHandlerName):visible" })
+                #expect(signal.frame - max(answerShown.frame, presented.frame) >= 2)
+                #expect(confirmation.frame == signal.frame)
+            }
+        }
+
+        @Test func malformedOtherAndFuturePresentationTargetsCannotConfirmCurrentUpdate() async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                try await page.announce(card: 9, generation: 1)
+                try await page.showQuestion("<p>question</p>")
+                try await harness.signal("settled", from: page)
+                try await page.present(token: 11)
+                try await harness.signal("shown", from: page)
+                try await harness.signal("visible", from: page)
+                try await page.runIsolated("""
+                    const requests = [
+                      () => meguriCard.present(20, 9),
+                      () => meguriCard.present(21, null, 1),
+                      () => meguriCard.present(22, '9', 1),
+                      () => meguriCard.present(23, 9, '1'),
+                      () => meguriCard.present(24, 9, 1.5),
+                      () => meguriCard.present(25, 9, -1),
+                      () => meguriCard.present(26, Infinity, 1),
+                      () => meguriCard.present(27, 9, Number.MAX_SAFE_INTEGER + 1),
+                      () => meguriCard.present(28, 10, 1),
+                      () => meguriCard.present(29, 9, 3)
+                    ];
+                    for (const request of requests) {
+                      request();
+                      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+                    }
+                    """)
+                #expect(harness.signals("visible", from: page).count == 1)
+                #expect(!harness.confirmations.contains { $0.phase == .visible && $0.token != 11 })
+                // A well-formed future target must also stay pending through a
+                // different update reaching step 8; it cannot borrow that update.
+                try await page.announce(card: 9, generation: 2)
+                try await page.showAnswer("<p id=answer>answer</p>")
+                try await harness.signal("shown", count: 2, from: page)
+                try await page.runIsolated("await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));")
+                #expect(harness.signals("visible", from: page).count == 1)
+                #expect(!harness.confirmations.contains(.init(token: 29, cardID: 9, phase: .visible)))
+                try await page.runIsolated("meguriCard.present(30, 9, 2);")
+                let visible = try await harness.signal("visible", count: 2, from: page)
+                #expect(visible.card == 9 && visible.generation == 2 && visible.side == "answer" && visible["token"] as? Int == 30)
+                try await harness.until("matching current confirmation") {
+                    harness.confirmations.contains(.init(token: 30, cardID: 9, phase: .visible))
+                }
+            }
+        }
+
         /// C6.6, C14, R1862, counted by the test's own frame clock: the
         /// each confirmation requires at least two frames after its trigger.
         @Test func confirmationsComeTwoFramesAfterWhatTheyConfirm() async throws {
