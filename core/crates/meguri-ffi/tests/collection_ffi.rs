@@ -457,7 +457,7 @@ fn exported_open_counts_review_close_reopen_upgrade_and_races() {
 
 #[cfg(feature = "test-hooks")]
 fn all_deck_name_projection_regressions(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>) {
-    use meguri_ffi::decks::all_deck_names;
+    use meguri_ffi::decks::{all_deck_names, match_deck_name};
     use meguri_model::{
         ids::DeckId,
         proto::{
@@ -493,6 +493,8 @@ fn all_deck_name_projection_regressions(rx: &mpsc::Receiver<CoreEvent>, events: 
                 (12, "Missing\u{1f}Leaf"),
                 (-9, "Search"),
                 (13, " E\u{301} \u{1f} :猫: "),
+                (14, "Straße"),
+                (15, "é"),
             ] {
                 // Raw typed rows model imported spelling without input repair.
                 let mut deck = meguri_engine::decks::new_deck(name.into());
@@ -576,8 +578,27 @@ fn all_deck_name_projection_regressions(rx: &mpsc::Receiver<CoreEvent>, events: 
             (12, "Missing::Leaf", false),
             (1, "Personal", false),
             (-9, "Search", true),
+            (14, "Straße", false),
+            (15, "é", false),
         ]
     );
+    for (query, id) in [
+        ("  pERSONAL: ", 1),
+        ("ALPHA :: E\u{301}", 7),
+        ("STRASSE", 14),
+        ("e\u{1}\u{301}", 15),
+        (" search ", -9),
+        (" missing :: leaf ", 12),
+    ] {
+        let matched = match_deck_name(query.into()).unwrap();
+        assert_eq!(matched.generation, names.generation);
+        assert_eq!(matched.deck.as_ref(), names.decks.iter().find(|entry| entry.id == id));
+    }
+    for query in ["Default", "absent::child", " E\u{301} :: :猫: "] {
+        let matched = match_deck_name(query.into()).unwrap();
+        assert_eq!(matched.generation, names.generation);
+        assert_eq!(matched.deck, None, "stored spelling is never repaired by the read");
+    }
     assert_eq!(state(&c), before);
     assert_eq!(c.last_seq(), seq);
     assert_eq!(c.peek_undo(meguri_engine::UndoScope::Global).unwrap(), undo);
@@ -591,6 +612,9 @@ fn all_deck_name_projection_regressions(rx: &mpsc::Receiver<CoreEvent>, events: 
         "the read publishes no events before the completion marker"
     );
     events.extend(more);
+    let filtered_result = meguri_ffi::decks::add_deck("SEARCH".into()).unwrap();
+    assert_eq!(filtered_result.id, -9);
+    assert!(filtered_result.summary.changes.decks.is_empty());
     // Search sorts after the valid rows, so a decode failure must discard
     // entries already read rather than return a successful prefix.
     let saved = {
@@ -626,6 +650,14 @@ fn all_deck_name_projection_regressions(rx: &mpsc::Receiver<CoreEvent>, events: 
     events.extend(more);
     let failure_seq = c.last_seq();
     assert!(matches!(all_deck_names(), Err(CoreError::Internal { .. })));
+    assert!(matches!(
+        match_deck_name("absent".into()),
+        Err(CoreError::Internal { .. })
+    ));
+    assert!(matches!(
+        match_deck_name("Personal".into()),
+        Err(CoreError::Internal { .. })
+    ));
     assert_eq!(state(&c), before_failure);
     assert_eq!(c.last_seq(), failure_seq);
     assert_eq!(c.peek_undo(meguri_engine::UndoScope::Global).unwrap(), failure_undo);
@@ -676,7 +708,8 @@ fn all_deck_name_projection_regressions(rx: &mpsc::Receiver<CoreEvent>, events: 
         },
     )
     .unwrap();
-    assert_eq!(all_deck_names().unwrap().decks.len(), 7);
+    assert_eq!(all_deck_names().unwrap().decks.len(), 9);
+    assert_eq!(match_deck_name("Personal".into()).unwrap().deck, None);
     assert!(
         all_deck_names()
             .unwrap()
@@ -686,9 +719,17 @@ fn all_deck_name_projection_regressions(rx: &mpsc::Receiver<CoreEvent>, events: 
     );
     lifecycle::close_collection().unwrap();
     assert!(matches!(all_deck_names(), Err(CoreError::Unavailable { .. })));
+    assert!(matches!(
+        match_deck_name("absent".into()),
+        Err(CoreError::Unavailable { .. })
+    ));
     open(events);
     let current = all_deck_names().unwrap();
     assert_eq!(current.generation, names.generation + 1);
+    assert_eq!(
+        match_deck_name("STRASSE".into()).unwrap().generation,
+        current.generation
+    );
     assert_ne!(
         current.generation, names.generation,
         "completed old results remain old at publication"
@@ -706,6 +747,7 @@ fn all_deck_name_projection_regressions(rx: &mpsc::Receiver<CoreEvent>, events: 
     })
     .unwrap();
     assert!(all_deck_names().unwrap().decks.is_empty());
+    assert_eq!(match_deck_name("Default".into()).unwrap().deck, None);
     lifecycle::close_collection().unwrap();
 }
 

@@ -55,11 +55,20 @@ extension EventTests {
             #expect(names.decks.first == CoreBridge.DeckNameEntry(id: 1, fullName: "Personal", filtered: false))
             #expect(names.decks.last == CoreBridge.DeckNameEntry(id: child.id, fullName: "日本語::子", filtered: false))
             #expect(try await decks.treeWithCounts().nodes.allSatisfy { $0.id != 1 })
+            #expect(try await decks.matchDeckName(name: " PERSONAL: ") == CoreBridge.DeckNameMatch(generation: first, deck: names.decks.first))
+            #expect(try await decks.matchDeckName(name: "日本語 :: 子").deck?.id == child.id)
+            #expect(try await decks.matchDeckName(name: "Default") == CoreBridge.DeckNameMatch(generation: first, deck: nil))
             try await service.close()
             #expect(try await service.lifecycle() == .noCollection)
             do {
                 _ = try await decks.allDeckNames()
                 Issue.record("Closed all-deck query succeeded")
+            } catch {
+                guard case .unavailable = error else { throw error }
+            }
+            do {
+                _ = try await decks.matchDeckName(name: "absent")
+                Issue.record("Closed canonical deck query succeeded")
             } catch {
                 guard case .unavailable = error else { throw error }
             }

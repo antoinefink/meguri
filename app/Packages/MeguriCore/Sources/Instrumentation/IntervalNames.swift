@@ -173,6 +173,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let waitCollectionAvailable = BridgeCall("wait_collection_available")
     public static let deckTreeWithCounts = BridgeCall("deck_tree_with_counts")
     public static let allDeckNames = BridgeCall("all_deck_names")
+    public static let matchDeckName = BridgeCall("match_deck_name")
     public static let deckStudyState = BridgeCall("deck_study_state")
     public static let deckDescriptionHtml = BridgeCall("deck_description_html")
 
@@ -333,7 +334,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         normalizeManualEndpoint, manualTransferSessionNew, manualTransferSessionStartSetup, manualTransferSessionStartLogin, manualTransferSessionStartHistory, manualTransferSessionStartPrepare, manualTransferSessionStartConfirm, manualTransferSessionStartRecoveryPreview, manualTransferSessionStartCancelHistory, manualTransferSessionStartCancelPreview, manualTransferSessionStartSaveCopy, manualTransferResultOutcome, manualTransferResultOperationID, manualTransferPreviewRecord, manualTransferHistoryEntryRecord,
         startCollectionExport, collectionExportResultOutcome, collectionExportArtifactMetadata, collectionExportArtifactAcquire, collectionExportArtifactDiscard, collectionExportLeasePath, collectionExportLeaseFinish, startCollectionExportSave, collectionExportSaveResultOutcome,
         startCollectionInspection, collectionInspectResultOutcome, collectionInspectionFacts, collectionInspectionDiscard, startCollectionActivation, collectionActivationResultOutcome, jobProgressSetListener,
-        startOpen, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, allDeckNames, deckStudyState, deckDescriptionHtml,
+        startOpen, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, allDeckNames, matchDeckName, deckStudyState, deckDescriptionHtml,
         startSession, reviewSessionJobResult, peekFirstCard, sessionHead, refreshSessionCard, renderSessionHead, answerSession, endSession, peekReviewUndo, flushReviewForBackground,
         coreVersion, coreBuildInfo, setEventListener, cancelTokenNew, cancelTokenCancel, cancelTokenIsCancelled, renderCard, compareTypedAnswer, cardExcerpts,
         deckDeletionJobResult, addDeck, startRenameDeck, startMoveDecks, startCollapseDecks,

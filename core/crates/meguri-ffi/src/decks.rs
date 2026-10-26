@@ -20,6 +20,31 @@ pub struct DeckNameSnapshot {
     pub decks: Vec<DeckNameEntry>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DeckNameMatch {
+    pub generation: u64,
+    pub deck: Option<DeckNameEntry>,
+}
+
+/// D18: canonical lookup over actual persisted rows, including hidden decks.
+#[uniffi::export]
+pub fn match_deck_name(name: String) -> Result<DeckNameMatch, CoreError> {
+    callback::enter("match_deck_name");
+    let collection = runtime::host()?.collection()?;
+    let reader = collection.reader(ReaderRole::Query)?;
+    let snapshot = reader.snapshot()?;
+    let rows = snapshot.deck_rows().map_err(meguri_engine::EngineError::from)?;
+    let deck = decks::names::find(&rows, &decks::names::native_name(&name)).map(|deck| DeckNameEntry {
+        id: deck.id.0,
+        full_name: decks::names::human_name(&deck.name),
+        filtered: decks::is_filtered(deck),
+    });
+    Ok(DeckNameMatch {
+        generation: snapshot.generation().0,
+        deck,
+    })
+}
+
 fn name_entries(mut rows: Vec<meguri_model::deck::Deck>) -> Vec<DeckNameEntry> {
     rows.sort_by(|a, b| meguri_text::fold::compare_folded(&a.name, &b.name).then_with(|| a.id.cmp(&b.id)));
     rows.into_iter()

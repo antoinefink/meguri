@@ -55,3 +55,26 @@ remain open. Required full-gate base remains unchanged. No Unit trailer is added
 
 Final `core-lint/20261026T052037Z-4912` passed all four checks.
 `similarity/20261026T052040Z-5168` passed for the repaired query delta.
+
+## Typed-name lookup for D18
+
+Supplemental base: `6433086c`. The filtered implementation
+`cleanroom/20261026T073757Z-31411` adds one Query snapshot result containing its
+actual generation and an optional actual deck entry. It uses existing D1 input
+conversion and D2 comparison across persisted records. It makes no writes.
+The Swift QueryLane wrapper and exact interval registry test are updated.
+Independent D18 implementation R1 and R2 find no issue in this query path.
+
+`core-test/20261026T075226Z-40311` passes both focused FFI tests with test hooks,
+including actual canonical matches, hidden and filtered records, read errors,
+no state or event changes, and closed/reopened generations. Rust formatting
+initially fails in `core-lint/20261026T075424Z-43461`; formatter
+`core-format/20261026T075531Z-44104` changes only test layout.
+`core-lint/20261026T081551Z-57917` passes all four checks.
+
+`swift-test/20261026T081810Z-59601` passes the selected registry and actual bridge
+checks across their test executables. Its final executable reports five tests;
+the registry executable reports seven. Privacy for the six lookup files passes
+separately; similarity `20261026T081244Z-52307` passes for the whole candidate.
+The picker continuation remains a separate UI change. No full U28 or batch
+acceptance is claimed here; the original integration base still applies.

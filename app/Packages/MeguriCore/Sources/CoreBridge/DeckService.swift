@@ -23,6 +23,17 @@ public struct DeckNameSnapshot: Sendable, Hashable {
     }
 }
 
+public struct DeckNameMatch: Sendable, Hashable {
+    public let generation: UInt64
+    public let deck: DeckNameEntry?
+    public init(generation: UInt64, deck: DeckNameEntry?) {
+        self.generation = generation; self.deck = deck
+    }
+    init(_ raw: MeguriCoreBindings.DeckNameMatch) {
+        self.init(generation: raw.generation, deck: raw.deck.map(DeckNameEntry.init))
+    }
+}
+
 public struct CountedDeckNode: Sendable, Hashable {
     public let id: Int64
     public let name: String
@@ -55,6 +66,7 @@ public struct CountedDeckTree: Sendable, Hashable {
 }
 public protocol DeckService: Sendable {
     func allDeckNames() async throws(BridgeError) -> DeckNameSnapshot
+    func matchDeckName(name: String) async throws(BridgeError) -> DeckNameMatch
     func startRenameDeck(id: Int64, name: String) async throws(BridgeError) -> CoreDeckRenameJob
     func startMoveDecks(ids: [Int64], parent: Int64?) async throws(BridgeError) -> CoreDeckMoveJob
     func startCollapseDecks(ids: [Int64], scope: DeckCollapseScope, collapsed: Bool) async throws(BridgeError) -> CoreDeckCollapseJob
@@ -73,6 +85,9 @@ public actor CoreDeckService: DeckService {
     public init() {}
     public func allDeckNames() async throws(BridgeError) -> DeckNameSnapshot {
         try await QueryLane.shared.call(.allDeckNames) { DeckNameSnapshot(try MeguriCoreBindings.allDeckNames()) }
+    }
+    public func matchDeckName(name: String) async throws(BridgeError) -> DeckNameMatch {
+        try await QueryLane.shared.call(.matchDeckName) { DeckNameMatch(try MeguriCoreBindings.matchDeckName(name: name)) }
     }
     public func treeWithCounts() async throws(BridgeError) -> CountedDeckTree {
         try await QueryLane.shared.call(.deckTreeWithCounts) { CountedDeckTree(try deckTreeWithCounts()) }
