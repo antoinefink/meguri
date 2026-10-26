@@ -396,6 +396,125 @@ class NativeClock(Fixture):
         super().setUp()
         self.native_clock()
 
+    def prepare_media_baseline(self):
+        output = self.run / 'native-media-baseline'
+        output.mkdir()
+        interop.prepare_native_media(argparse.Namespace(expected=str(self.expected), output=str(output)))
+        return output
+
+    def test_native_media_preparation_exact_one_blob_row_stamps_and_parent_media_unchanged(self):
+        (self.expected / 'manifest.json').write_text('{"dump_sha256":"parent-only"}')
+        before = {p.relative_to(self.expected).as_posix(): p.read_bytes()
+                  for p in self.expected.rglob('*') if p.is_file()}
+        parent_rows = list(interop.raw_rows(self.db))
+        output = self.prepare_media_baseline()
+        prepared = output / 'fixture'
+        record = json.loads((output / 'preparation.json').read_text())
+        inserted = ('config', 'localOffset', [('text', 'localOffset'), ('integer', -1),
+                    ('integer', 1894676400), ('blob', b'-60')])
+        rows = list(interop.raw_rows(prepared / 'collection.anki2'))
+        self.assertEqual([r for r in rows if r[:2] == ('config', 'localOffset')], [inserted])
+        self.assertEqual([r for r in rows if r[:2] != ('config', 'localOffset')], parent_rows)
+        self.assertEqual(before, {p.relative_to(self.expected).as_posix(): p.read_bytes()
+                                  for p in self.expected.rglob('*') if p.is_file()})
+        for name, data in before.items():
+            self.assertEqual(record['parent_files'][name],
+                             {'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data)})
+            if name != 'collection.anki2':
+                self.assertEqual((prepared / name).read_bytes(), data)
+                self.assertEqual(record['parent_files'][name], record['prepared_files'][name])
+        self.assertEqual(record['clock'], {'now': NATIVE_NOW, 'tz': NATIVE_TZ})
+        self.assertEqual(record['inserted_row'], {'KEY': 'localOffset', 'usn': -1,
+            'mtime_secs': 1894676400, 'val_hex': '2d3630', 'storage_class': 'blob'})
+        self.assertFalse(any(p.name.endswith(('-wal', '-shm', '-journal')) for p in prepared.rglob('*')))
+        self.assertFalse((prepared / 'preparation.json').exists())
+
+    def test_native_media_prepared_expected_keeps_strict_independent_package_comparison(self):
+        (self.expected / 'manifest.json').write_text('{}')
+        prepared = self.prepare_media_baseline() / 'fixture'
+        # The independent expected input is exactly the prepared copy. Synthetic
+        # package construction happens before proof; no expected data comes back
+        # from the decoded package or a client.
+        self.expected = prepared
+        self.media = prepared / 'collection.media'
+        self.db = prepared / 'collection.anki2'
+        self.args.expected = str(prepared)
+        self.pack()
+        work = self.stage()
+        self.decode()
+        interop.compare_databases(self.db, work / 'decoded/collection.anki2')
+        parent = self.root / 'build/generated/frozen/collection.anki2'
+        self.rejects(lambda: interop.compare_databases(self.db, parent), 'pre-client-database-difference')
+        for sql in ("UPDATE config SET val='-60' WHERE KEY='localOffset'",
+                    "UPDATE config SET usn=0 WHERE KEY='localOffset'",
+                    "UPDATE config SET mtime_secs=mtime_secs+1 WHERE KEY='localOffset'"):
+            with self.subTest(sql=sql):
+                decoded = work / 'decoded/collection.anki2'
+                decoded.chmod(0o600)
+                shutil.copyfile(self.db, decoded)
+                conn = sqlite3.connect(decoded)
+                conn.execute(sql)
+                conn.commit()
+                conn.close()
+                self.rejects(lambda: interop.compare_databases(self.db, decoded),
+                             'pre-client-database-difference')
+
+    def test_native_media_preparation_refuses_present_key_and_every_sidecar(self):
+        (self.expected / 'manifest.json').write_text('{}')
+        for suffix in ('-wal', '-shm', '-journal'):
+            with self.subTest(sidecar=suffix):
+                sidecar = Path(str(self.db) + suffix)
+                sidecar.write_bytes(b'pending')
+                self.rejects(self.prepare_media_baseline, 'sqlite-sidecar')
+                self.assertFalse((self.run / 'native-media-baseline/preparation.json').exists())
+                shutil.rmtree(self.run / 'native-media-baseline')
+                sidecar.unlink()
+        for value in (b'-60', '-60', b'0'):
+            with self.subTest(present_value=value):
+                conn = sqlite3.connect(self.db)
+                conn.execute('INSERT INTO config VALUES (?, -1, 1894676400, ?)', ('localOffset', value))
+                conn.commit()
+                conn.close()
+                parent = self.db.read_bytes()
+                self.rejects(self.prepare_media_baseline, 'native-local-offset-present')
+                self.assertEqual(self.db.read_bytes(), parent)
+                self.assertFalse((self.run / 'native-media-baseline/preparation.json').exists())
+                shutil.rmtree(self.run / 'native-media-baseline')
+                conn = sqlite3.connect(self.db)
+                conn.execute('DELETE FROM config WHERE KEY=?', ('localOffset',))
+                conn.commit()
+                conn.close()
+
+    def test_native_media_preparation_refuses_other_cell_class_stamp_or_media_tamper(self):
+        (self.expected / 'manifest.json').write_text('{}')
+        original = interop.raw_rows
+        for change in ('cell', 'class', 'stamp', 'inserted', 'media'):
+            with self.subTest(change=change):
+                calls = 0
+                def tamper(path):
+                    nonlocal calls
+                    if path == self.run / 'native-media-baseline/fixture/collection.anki2':
+                        calls += 1
+                        if calls == 2:
+                            if change == 'media':
+                                (path.parent / 'collection.media/referenced.bin').write_bytes(b'tampered')
+                            else:
+                                conn = sqlite3.connect(path)
+                                sql = {'cell': 'UPDATE cards SET reps=reps+1',
+                                       'class': 'UPDATE notes SET sfld=CAST(sfld AS TEXT)',
+                                       'stamp': 'UPDATE col SET mod=mod+1',
+                                       'inserted': "UPDATE config SET val='-60' WHERE KEY='localOffset'"}[change]
+                                conn.execute(sql)
+                                conn.commit()
+                                conn.close()
+                    return original(path)
+                with mock.patch.object(interop, 'raw_rows', side_effect=tamper):
+                    self.rejects(self.prepare_media_baseline,
+                        'native-preparation-other-file-changed' if change == 'media' else
+                        'native-preparation-row' if change == 'inserted' else 'native-preparation-other-cell-changed')
+                self.assertFalse((self.run / 'native-media-baseline/preparation.json').exists())
+                shutil.rmtree(self.run / 'native-media-baseline')
+
     def test_exact_native_full_proof_and_source_immutability(self):
         source = interop.open_dir(self.expected)
         try:

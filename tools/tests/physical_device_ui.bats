@@ -984,6 +984,15 @@ mg_mac_ui_take() { echo mac-take >>"$STUB_LOG"; }
 mg_sim_take() { MG_SIM_RUNNER="${FX_RUNNER:-vm}"; echo sim-take >>"$STUB_LOG"; }
 mg_app_log_now() { echo synthetic-time; }
 mg_app_mac_input_refused() { return 1; }
+mg_compose() {
+  echo "media-decoder $*" >>"$STUB_LOG"
+  [ "${FX_PREP_FAIL:-0}" = 0 ] || return 1
+  case "$*" in
+    '--progress plain build package-interop-decoder') return 0 ;;
+    'run '*) fake-native-baseline "$MG_ROOT" "$MG_RUN_DIR" "$MG_RUN_ID" "$@" ;;
+    *) return 97 ;;
+  esac
+}
 mg_vm_fixture() {
   echo "media-stage $*" >>"$STUB_LOG"
   if [ "${FX_STAGE_QUEUED:-0}" = 1 ]; then
@@ -997,6 +1006,7 @@ mg_app_xcodebuild_test() {
   echo "media-test $*" >>"$STUB_LOG"
   echo "media-handoff ${TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT:-unset}" >>"$STUB_LOG"
   echo "media-name ${TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME:-unset}" >>"$STUB_LOG"
+  echo "media-fixture-record ${TEST_RUNNER_MEGURI_NATIVE_MEDIA_FIXTURE_RECORD:-unset}" >>"$STUB_LOG"
   mkdir -p "$1.xcresult"
   if [ -n "${TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME:-}" ] && [ "${FX_MISSING:-0}" = 0 ]; then
     local filename="$TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME"
@@ -1024,6 +1034,14 @@ mg_app_xcodebuild_test() {
     fi
   fi
   [ "${FX_SOURCE_CHANGED:-0}" = 0 ] || echo changed >>"$MG_ROOT/build/fixtures/recipes/typical-1/collection.anki2"
+  if [ "${FX_PREPARED_CHANGED:-0}" != 0 ]; then
+    chmod u+w "$MG_RUN_DIR/native-media-baseline/fixture/collection.anki2"
+    echo changed >>"$MG_RUN_DIR/native-media-baseline/fixture/collection.anki2"
+  fi
+  if [ "${FX_RECORD_CHANGED:-0}" != 0 ]; then
+    chmod u+w "$MG_RUN_DIR/expected-source.json"
+    echo '{}' >"$MG_RUN_DIR/expected-source.json"
+  fi
   return "${FX_RESULT:-0}"
 }
 mg_simctl() { echo "media-simctl $*" >>"$STUB_LOG"; printf '%s\n' "$FX_CONTAINER"; }
@@ -1040,6 +1058,40 @@ mg_mac_vm_ssh() {
 mg_sim_fetch() { echo "media-fetch $*" >>"$STUB_LOG"; }
 mg_mac_vm_copy_out() { echo "media-copy-out $*" >>"$STUB_LOG"; }
 EOF
+  # Runner-only stand-in: SQL preparation is exercised with real databases by
+  # NativeClock in package_interop_check_test.py inside the pinned dev image.
+  cat >"$BIN/fake-native-baseline" <<'EOF'
+#!/usr/bin/env python3
+import importlib.util
+import json
+import shutil
+import sys
+from pathlib import Path
+root, run = map(Path, sys.argv[1:3])
+run_id = sys.argv[3]
+args = sys.argv[4:]
+assert args[:6] == ['run', '--rm', '-T', '--no-deps', '--label', 'meguri.mg.run-id=' + run_id]
+service = args.index('package-interop-decoder')
+assert args[service + 1:] == ['python3', '/decoder.py', 'prepare-native-media', '--expected', '/in', '--output', '/out']
+mounts = [args[i + 1] for i, value in enumerate(args[:-1]) if value == '-v']
+assert mounts == [str(root / 'tools/scripts/package-interop-check.py') + ':/decoder.py:ro',
+                  str(run / 'native-media-parent') + ':/in:ro',
+                  str(run / 'native-media-baseline') + ':/out']
+spec = importlib.util.spec_from_file_location('capture', root / 'tools/scripts/native-media-export-capture.py')
+capture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(capture)
+parent = capture.fixture_files(run / 'native-media-parent')
+fixture = run / 'native-media-baseline/fixture'
+assert list(fixture.parent.iterdir()) == []
+shutil.copytree(run / 'native-media-parent', fixture)
+with (fixture / 'collection.anki2').open('ab') as stream:
+    stream.write(b'fake-runner-only-clock-row')
+record = {'parent_files': parent, 'prepared_files': capture.fixture_files(fixture),
+          'clock': capture.CLOCK, 'inserted_row': {'KEY': 'localOffset', 'usn': -1,
+          'mtime_secs': 1894676400, 'val_hex': '2d3630', 'storage_class': 'blob'}}
+(fixture.parent / 'preparation.json').write_text(json.dumps(record))
+EOF
+  chmod +x "$BIN/fake-native-baseline"
   cat >"$BIN/export-native-attachment" <<'EOF'
 #!/usr/bin/env python3
 import json
@@ -1130,7 +1182,7 @@ media_run() {
     mg ui-test --device "$SIM" --suite "$selector"
     [ "$status" -eq 0 ]
     [ "$(field .status)" = pass ]
-    called "^media-stage $SB/build/fixtures/recipes/typical-1$"
+    called "^media-stage $SB/build/mg/ui-test/[^ /]+/native-media-baseline/fixture$"
     called "^media-copy-in $SB/tools/scripts/native-media-export-capture.py $SB/build/mg/ui-test/[^ /]+/native-media-export$"
     stage_line="$(grep -n '^media-stage ' "$STUB_LOG" | cut -d: -f1)"
     test_line="$(grep -n '^media-test ' "$STUB_LOG" | cut -d: -f1)"
@@ -1142,18 +1194,75 @@ media_run() {
     [ "$(field .details.native_media_export.native_destination.bytes)" -gt 0 ]
     [[ "$(field .details.native_media_export.native_destination.sha256)" =~ ^[a-f0-9]{64}$ ]]
     [ -f "$(dirname "$result")/expected-source.json" ]
-    jq -e '.fixture == "build/fixtures/recipes/typical-1" and (.files | has("manifest.json") and has("collection.anki2") and has("collection.media/image.png") and has("collection.media/sound.wav"))' \
+    jq -e '. as $record | (.fixture | test("^build/mg/ui-test/[^/]+/native-media-baseline/fixture$"))
+      and .parent.fixture == "build/fixtures/recipes/typical-1" and .manifest_provenance == "parent"
+      and (.files | has("manifest.json") and has("collection.anki2") and has("collection.media/image.png") and has("collection.media/sound.wav"))
+      and .files["manifest.json"] == .parent.files["manifest.json"]
+      and .files["collection.anki2"] != .parent.files["collection.anki2"]
+      and .files["collection.media/image.png"] == .parent.files["collection.media/image.png"]
+      and .inserted_row == {KEY:"localOffset",usn:-1,mtime_secs:1894676400,val_hex:"2d3630",storage_class:"blob"}' \
       "$(dirname "$result")/expected-source.json"
   done
   for selector in CollectionEntryJourneyTests/testNativeExportCancelSaveReplaceReimportAndDurableReview CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplaceExtra MediaTests; do
     : >"$STUB_LOG"
-    TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT=/untrusted/output TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME=../untrusted.colpkg mg ui-test --device "$SIM" --suite "$selector"
+    TEST_RUNNER_MEGURI_NATIVE_MEDIA_FIXTURE_RECORD=/untrusted/record TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT=/untrusted/output TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME=../untrusted.colpkg mg ui-test --device "$SIM" --suite "$selector"
     [ "$status" -eq 0 ]
     not_called '^media-(stage|copy|simctl|fetch|ssh)'
     called '^media-handoff unset$'
     called '^media-name unset$'
+    called '^media-fixture-record unset$'
     [ "$(field .details.native_media_export)" = null ]
   done
+}
+
+@test "native media baseline binds frozen expected handoff Docker mounts and cancellation label" {
+  native_media_fakes
+  TEST_RUNNER_MEGURI_NATIVE_MEDIA_FIXTURE_RECORD=/untrusted/ambient media_run
+  [ "$status" -eq 0 ]
+  local dir="$(dirname "$result")" expected
+  expected="$SB/$(jq -r .fixture "$dir/expected-source.json")"
+  [ "$expected" = "$dir/native-media-baseline/fixture" ]
+  called "^media-fixture-record $dir/expected-source.json$"
+  called "^media-copy-in $dir/expected-source.json$"
+  called "^media-stage $expected$"
+  called "^media-decoder run --rm -T --no-deps --label meguri.mg.run-id=$(basename "$dir") "
+  jq -e --slurpfile source "$dir/expected-source.json" \
+    '.fixture_identity == ($source[0] | del(.native_filename)) and .fixture == $source[0].fixture' \
+    "$dir/native-media-export.json"
+  run python3 - "$SB/tools/scripts/native-media-export-capture.py" "$dir" <<'PY_FREEZE'
+import importlib.util
+import json
+import sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('capture', sys.argv[1])
+capture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(capture)
+run = Path(sys.argv[2])
+record = json.loads((run / 'expected-source.json').read_text())
+assert record == dict(capture.fixture_identity(run), native_filename=record['native_filename'])
+# The unchanged installer copies file modes into its writable collection.
+assert (run / 'native-media-baseline/fixture/collection.anki2').stat().st_mode & 0o200
+PY_FREEZE
+  [ "$status" -eq 0 ]
+  : >"$STUB_LOG"
+  FX_PREP_FAIL=1 media_run
+  [ "$status" -eq 2 ]
+  not_called '^media-(stage|test|copy-in|simctl|ssh|fetch)'
+  [ ! -e "$(dirname "$result")/expected-source.json" ]
+}
+
+@test "native media baseline rejects prepared fixture or bound record tamper after launch" {
+  native_media_fakes
+  FX_PREPARED_CHANGED=1 media_run
+  [ "$status" -eq 2 ]
+  [ "$(field .details.native_media_capture_failure.phase)" = receipt ]
+  [ "$(field .details.native_media_export)" = null ]
+  [ "$(field '[.artifacts[] | select(.kind | startswith("native-media"))] | length')" = 0 ]
+  FX_RECORD_CHANGED=1 media_run
+  [ "$status" -eq 2 ]
+  [ "$(field .details.native_media_capture_failure.phase)" = receipt ]
+  [ "$(field .details.native_media_export)" = null ]
+  [ "$(field '[.artifacts[] | select(.kind | startswith("native-media"))] | length')" = 0 ]
 }
 
 @test "native media export captures only own run package on Mac and iPad" {
@@ -1164,7 +1273,9 @@ media_run() {
     if [ "$platform" = mac ]; then
       mg ui-test --platform mac --suite CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace
       called '^xcrun xcresulttool export attachments --path .*/mac.xcresult --output-path .*/native-media-attachments --test-id CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace\(\) --filter \*\.colpkg$'
-      not_called '^media-(copy-in|copy-out|simctl|fetch|ssh)'
+      called "^media-copy-in $(dirname "$result")/expected-source.json$"
+      [ "$(grep -c '^media-copy-in ' "$STUB_LOG")" -eq 1 ]
+      not_called '^media-(copy-out|simctl|fetch|ssh)'
     else
       media_run --platform ipad
       called '^media-fetch .*/native-media-export/Meguri-Media-[a-f0-9]{32}\.colpkg$'

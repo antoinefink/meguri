@@ -111,6 +111,27 @@ import notify
             XCTFail("Native media capture requires its own safe per-run filename")
             throw NSError(domain: "CollectionEntryJourneyTests", code: 4)
         }
+        let recordPath = try XCTUnwrap(ProcessInfo.processInfo.environment["MEGURI_NATIVE_MEDIA_FIXTURE_RECORD"],
+            "Native media capture requires the internal prepared fixture record")
+        let recordURL = URL(fileURLWithPath: recordPath)
+        let runURL = recordURL.deletingLastPathComponent()
+        let runsURL = build.repositoryRoot.appending(path: "build/mg/ui-test", directoryHint: .isDirectory)
+        guard recordURL.lastPathComponent == "expected-source.json",
+              recordURL.standardizedFileURL.path == recordPath,
+              recordURL.resolvingSymlinksInPath().path == recordPath,
+              runURL.deletingLastPathComponent().path == runsURL.path,
+              runURL.lastPathComponent.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil else {
+            XCTFail("Native media capture requires its own run's bound fixture")
+            throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
+        }
+        let record = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: recordURL)) as? [String: Any])
+        let fixtureURL = runURL.appending(path: "native-media-baseline/fixture", directoryHint: .isDirectory)
+        let relativeFixture = "build/mg/ui-test/\(runURL.lastPathComponent)/native-media-baseline/fixture"
+        XCTAssertEqual(record["native_filename"] as? String, filename)
+        XCTAssertEqual(record["fixture"] as? String, relativeFixture)
+        XCTAssertEqual(record["clock"] as? [String: String],
+                       ["now": "2030-01-15T10:00:00+01:00", "tz": "Europe/Paris"])
+        XCTAssertEqual(fixtureURL.resolvingSymlinksInPath().path, fixtureURL.path)
         let app = XCUIApplication()
         #if os(iOS)
         // Installs the local Files folder only; this source is never imported.
@@ -119,7 +140,7 @@ import notify
         let importSource: URL? = nil
         #endif
         app.launchArguments = MeguriLaunch(
-            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/typical-1"),
+            fixture: fixtureURL,
             importSource: importSource, now: "2030-01-15T10:00:00+01:00",
             timeZone: "Europe/Paris", locale: "en_US", animations: false).arguments
         app.launch()

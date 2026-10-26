@@ -93,7 +93,7 @@ mg_ui_test__media_command() {
 }
 
 mg_ui_test__media_prepare() {
-  local runner="$1" rc
+  local runner="$1" rc helper="$MG_ROOT/tools/scripts/native-media-export-capture.py"
   if [ "$runner" != vm ]; then
     mg_failure native-media-export "native media destination capture requires the leased test VM"
     mg_status error
@@ -101,15 +101,33 @@ mg_ui_test__media_prepare() {
   fi
   # Source guard and stable per-run output; never honor an ambient handoff.
   case "$MG_RUN_DIR" in "$MG_ROOT/build/mg/ui-test/"*) ;; *) return 1 ;; esac
-  MG_UI_MEDIA_NAME="$(python3 "$MG_ROOT/tools/scripts/native-media-export-capture.py" identity "$MG_RUN_DIR")" || {
-    mg_failure native-media-source "requires the closed, generated typical-1 fixture and an own-run destination"
+  # Copy by retained descriptors before Docker sees anything. The pinned
+  # decoder gets only this run's parent copy and fresh derived output.
+  if ! python3 "$helper" stage "$MG_RUN_DIR" ||
+      ! mg_compose --progress plain build package-interop-decoder >&2 </dev/null ||
+      ! mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" \
+        -u "$(id -u):$(id -g)" \
+        -v "$MG_ROOT/tools/scripts/package-interop-check.py:/decoder.py:ro" \
+        -v "$MG_RUN_DIR/native-media-parent:/in:ro" \
+        -v "$MG_RUN_DIR/native-media-baseline:/out" package-interop-decoder \
+        python3 /decoder.py prepare-native-media --expected /in --output /out </dev/null; then
+    mg_failure native-media-source "closed generated native media baseline preparation failed"
+    mg_status error
+    return 1
+  fi
+  MG_UI_MEDIA_NAME="$(python3 "$helper" identity "$MG_RUN_DIR")" || {
+    mg_failure native-media-source "requires the frozen prepared typical-1 baseline and its generated parent"
     mg_status error
     return 1
   }
   [[ "$MG_UI_MEDIA_NAME" =~ ^Meguri-Media-[a-f0-9]{32}\.colpkg$ ]] || return 1
-  mg_vm_fixture "$MG_ROOT/build/fixtures/recipes/typical-1"
+  mg_vm_fixture "$MG_RUN_DIR/native-media-baseline/fixture"
   rc=$?
   [ "$rc" -eq 0 ] || { [ "$rc" -ne 2 ] || mg_queued_settle; return "$rc"; }
+  mg_mac_vm_copy_in "$MG_RUN_DIR/expected-source.json"
+  rc=$?
+  [ "$rc" -eq 0 ] || { [ "$rc" -ne 2 ] || mg_queued_settle; return "$rc"; }
+  export TEST_RUNNER_MEGURI_NATIVE_MEDIA_FIXTURE_RECORD="$MG_RUN_DIR/expected-source.json"
   if [ "$MG_UI_MEDIA_PLATFORM" != mac ]; then
     mg_mac_vm_copy_in "$MG_ROOT/tools/scripts/native-media-export-capture.py" "$MG_RUN_DIR/native-media-export" || return $?
     export TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT="$MG_RUN_DIR/native-media-export"
@@ -152,7 +170,7 @@ mg_ui_test__media_capture() {
   MG_UI_MEDIA_PHASE=receipt
   python3 "$MG_ROOT/tools/scripts/native-media-export-capture.py" receipt "$MG_RUN_DIR" "$MG_UI_MEDIA_NAME" >/dev/null 2>&1 || return 1
   mg_artifact native-media-export "$MG_RUN_DIR/native-media-export/$MG_UI_MEDIA_NAME" "file received by native destination; content/client proof pending"
-  mg_artifact native-media-source "$MG_RUN_DIR/expected-source.json" "closed original typical-1 file hashes and manifest identity"
+  mg_artifact native-media-source "$MG_RUN_DIR/expected-source.json" "frozen prepared fixture hashes; separate generated parent manifest and dump provenance"
   mg_artifact native-media-receipt "$MG_RUN_DIR/native-media-export.json" "destination SHA256 and size; E7.4 acceptance pending"
   mg_detail native_media_export "$(cat "$MG_RUN_DIR/native-media-export.json")"
 }
@@ -161,8 +179,8 @@ mg_ui_test() {
   local platform=iphone device="" config=Debug suites="" only=() build_args=() s result since udid
   local physical="" inventory="" run_args="" MG_UI_PHYSICAL_DEVICE=""
   local media="" MG_UI_MEDIA_READY="" MG_UI_MEDIA_PLATFORM="" MG_UI_MEDIA_DEVICE="" MG_UI_MEDIA_NAME="" MG_UI_MEDIA_PHASE=""
-  local TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME
-  unset TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME
+  local TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME TEST_RUNNER_MEGURI_NATIVE_MEDIA_FIXTURE_RECORD
+  unset TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME TEST_RUNNER_MEGURI_NATIVE_MEDIA_FIXTURE_RECORD
   while [ "$#" -gt 0 ]; do
     [ "$1" = --list-physical-devices ] || run_args=1
     case "$1" in

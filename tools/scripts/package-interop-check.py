@@ -690,6 +690,131 @@ def raw_rows(path):
             require(signature(path.lstat()) == initial, 'staged-input-changed')
 
 
+def prepare_native_media(args):
+    """F11.1 only. Internal pinned-service operation; never opens a client."""
+    source, output = absolute(args.expected), absolute(args.output)
+    require(not source.is_relative_to(output) and not output.is_relative_to(source), 'source-overlap')
+    src, dest = open_dir(source, source), open_dir(output, output)
+    try:
+        require(not entry_names(dest), 'native-preparation-output-not-empty')
+        initial = scan_tree(src)
+        require('collection.anki2' in initial and 'manifest.json' in initial
+                and 'collection.media' in initial, 'expected-layout')
+        require(not any(name.endswith(('-wal', '-shm', '-journal')) for name in initial),
+                'sqlite-sidecar')
+        parent_files = {}
+        fixture = mkdir(dest, 'fixture')
+        prepared = output / 'fixture'
+        try:
+            def copy_tree(left, right, prefix=''):
+                for name in entry_names(left):
+                    metadata = os.stat(name, dir_fd=left, follow_symlinks=False)
+                    if stat.S_ISDIR(metadata.st_mode):
+                        child = os.open(name, DIR_FLAGS, dir_fd=left)
+                        target = mkdir(right, name)
+                        try:
+                            require(signature(os.fstat(child)) == signature(metadata), 'source-changed')
+                            copy_tree(child, target, prefix + name + '/')
+                            require(signature(os.stat(name, dir_fd=left, follow_symlinks=False))
+                                    == signature(metadata), 'source-changed')
+                        finally:
+                            os.close(child)
+                            os.close(target)
+                    else:
+                        target = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                         0o600, dir_fd=right)
+                        with os.fdopen(target, 'wb') as stream:
+                            media, digest, _ = read_file(left, name, stream)
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                        parent_files[prefix + name] = {'sha256': digest, 'bytes': media['size']}
+            copy_tree(src, fixture)
+            require(scan_tree(src) == initial, 'source-changed')
+            db = prepared / 'collection.anki2'
+            # Scan every raw cell before writing; unexpected localOffset is fatal.
+            crt = None
+            for table, key, values in raw_rows(db):
+                require(not (table == 'config' and key == 'localOffset'), 'native-local-offset-present')
+                if table == 'col':
+                    require(crt is None and key == '1', 'native-col-row')
+                    kind, crt = values[COLUMNS['col'].split().index('crt')]
+                    require(kind == 'integer' and type(crt) is int, 'native-creation-stamp')
+            require(crt is not None, 'native-col-row')
+            reader = sqlite_reader(db)
+            try:
+                schema = reader.execute('SELECT type,name,tbl_name,sql FROM sqlite_schema '
+                                        'NOT INDEXED ORDER BY type COLLATE BINARY,name COLLATE BINARY').fetchall()
+                require(not any(row[0] == 'trigger' for row in schema), 'native-preparation-trigger')
+            finally:
+                reader.close()
+            conn = sqlite3.connect(db.as_uri() + '?mode=rw', uri=True)
+            writer = RawConnection(conn)
+            try:
+                writer.execute('PRAGMA trusted_schema=OFF')
+                # Do not overwrite, update a stamp, or invoke collection/day-clock code.
+                writer.execute('INSERT INTO config (KEY,usn,mtime_secs,val) VALUES (?, ?, ?, ?)',
+                             ('localOffset', -1, crt, sqlite3.Binary(b'-60')))
+                conn.commit()
+                checkpoint = writer.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
+                require(checkpoint[0] == 0, 'native-preparation-checkpoint')
+            finally:
+                writer.close()
+            require(not any(name.endswith(('-wal', '-shm', '-journal')) for name in scan_tree(fixture)),
+                    'sqlite-sidecar')
+            reader = sqlite_reader(db)
+            try:
+                require(reader.execute('SELECT type,name,tbl_name,sql FROM sqlite_schema '
+                                       'NOT INDEXED ORDER BY type COLLATE BINARY,name COLLATE BINARY').fetchall()
+                        == schema, 'native-preparation-schema-changed')
+            finally:
+                reader.close()
+            inserted = [('text', 'localOffset'), ('integer', -1), ('integer', crt), ('blob', b'-60')]
+            parent_rows = raw_rows(source / 'collection.anki2')
+            count = 0
+            try:
+                for table, key, values in raw_rows(db):
+                    if table == 'config' and key == 'localOffset':
+                        require(values == inserted, 'native-preparation-row')
+                        count += 1
+                    else:
+                        parent_row = next(parent_rows, None)
+                        require(parent_row is not None and (table, key) == parent_row[:2]
+                                and len(values) == len(parent_row[2])
+                                and all(ka == kb and exact(va, vb)
+                                        for (ka, va), (kb, vb) in zip(values, parent_row[2])),
+                                'native-preparation-other-cell-changed')
+                require(count == 1 and next(parent_rows, None) is None, 'native-preparation-row-count')
+            finally:
+                parent_rows.close()
+            prepared_files = {}
+            def inventory(fd, prefix=''):
+                for name in entry_names(fd):
+                    if stat.S_ISDIR(os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode):
+                        child = os.open(name, DIR_FLAGS, dir_fd=fd)
+                        try:
+                            inventory(child, prefix + name + '/')
+                        finally:
+                            os.close(child)
+                    else:
+                        media, digest, _ = read_file(fd, name)
+                        prepared_files[prefix + name] = {'sha256': digest, 'bytes': media['size']}
+            inventory(fixture)
+            require(prepared_files.keys() == parent_files.keys()
+                    and all(prepared_files[name] == identity for name, identity in parent_files.items()
+                            if name != 'collection.anki2'), 'native-preparation-other-file-changed')
+            require(scan_tree(src, digest=True) == initial, 'source-changed')
+            write_json(dest, 'preparation.json', {
+                'parent_files': parent_files, 'prepared_files': prepared_files,
+                'clock': {'now': NATIVE_START, 'tz': NATIVE_TZ},
+                'inserted_row': {'KEY': 'localOffset', 'usn': -1, 'mtime_secs': crt,
+                                 'val_hex': b'-60'.hex(), 'storage_class': 'blob'}})
+        finally:
+            os.close(fixture)
+    finally:
+        os.close(src)
+        os.close(dest)
+
+
 def compare_databases(expected, decoded):
     """Require identical raw cells, storage classes, BLOB bytes and stamps."""
     left, right = raw_rows(expected), raw_rows(decoded)
@@ -1469,6 +1594,9 @@ def main():
             p.add_argument('--now', required=True)
             p.add_argument('--tz', required=True)
             p.add_argument('--validate-only', action='store_true')
+    p = sub.add_parser('prepare-native-media', help=argparse.SUPPRESS)
+    p.add_argument('--expected', required=True)
+    p.add_argument('--output', required=True)
     p = sub.add_parser('decode')
     p.add_argument('--package', required=True)
     p.add_argument('--expected', required=True)
@@ -1478,7 +1606,9 @@ def main():
     p.add_argument('--tz', required=True)
     args = parser.parse_args()
     try:
-        if args.command == 'decode':
+        if args.command == 'prepare-native-media':
+            prepare_native_media(args)
+        elif args.command == 'decode':
             decode(args)
         elif args.command == 'stage':
             stage(args)

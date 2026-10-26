@@ -12,7 +12,8 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-FIXTURE = ROOT / 'build/fixtures/recipes/typical-1'
+PARENT = ROOT / 'build/fixtures/recipes/typical-1'
+CLOCK = {'now': '2030-01-15T10:00:00+01:00', 'tz': 'Europe/Paris'}
 METHOD = 'CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace()'
 PHASE = 'export'
 UUID = r'[A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}'
@@ -141,7 +142,7 @@ def copy_package(source, package):
             copy_stream(source_fd, verify_source, verify_source_dir, package)
 
 
-def copy_stream(source_fd, verify_source, verify_source_dir, package, *, rehash_source=False):
+def copy_stream(source_fd, verify_source, verify_source_dir, package, *, rehash_source=False, allow_empty=False):
     """Stream a pinned source; Mac also verifies its retained attachment twice."""
     with retained_directory(package.parent) as (output_dir, verify_output_dir):
         output_fd = os.open(package.name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -160,7 +161,7 @@ def copy_stream(source_fd, verify_source, verify_source_dir, package, *, rehash_
                     remaining = remaining[written:]
             verify_source()
             verify_source_dir()
-            require(size > 0 and size == os.fstat(source_fd).st_size,
+            require((allow_empty or size > 0) and size == os.fstat(source_fd).st_size,
                     'missing package or changed source size')
             os.fsync(output_fd)
             output_before = file_metadata(os.fstat(output_fd))
@@ -273,20 +274,100 @@ def mac_capture(run, filename, bundle):
                                     rehash_source=True)
 
 
-def fixture_identity():
-    canonical(FIXTURE)
-    require((FIXTURE / 'manifest.json').is_file()
-            and (FIXTURE / 'collection.anki2').is_file()
-            and (FIXTURE / 'collection.media').is_dir(), 'generate typical-1 before ui-test')
+def fixture_files(fixture, copy_to=None):
+    """Retain nofollow tree/file authority; copy only closed, owned inputs."""
     files = {}
-    for path in sorted(FIXTURE.rglob('*')):
-        canonical(path)
-        require(not path.name.endswith(('-wal', '-shm', '-journal')),
-                'expected the closed original generated fixture')
-        if not path.is_dir():
-            files[path.relative_to(FIXTURE).as_posix()] = file_identity(path)
-    require(any(name.startswith('collection.media/') for name in files), 'typical-1 must contain media')
-    return {'fixture': 'build/fixtures/recipes/typical-1', 'files': files}
+    with retained_directory(fixture) as (directory, verify_root):
+        def walk(fd, relative, output):
+            require(os.fstat(fd).st_uid == os.getuid(), 'fixture directory is not owned')
+            names = sorted(os.listdir(fd))
+            for name in names:
+                require(not name.endswith(('-wal', '-shm', '-journal')), 'fixture is not closed')
+                child = relative / name
+                metadata = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                require(metadata.st_uid == os.getuid(), 'fixture file is not owned')
+                if stat.S_ISDIR(metadata.st_mode):
+                    with retained_directory(fixture / child) as (nested, verify_nested):
+                        require(directory_identity(os.fstat(nested)) == directory_identity(metadata),
+                                'fixture directory changed')
+                        target = None if output is None else output / name
+                        if target is not None:
+                            with retained_directory(output) as (target_parent, _):
+                                os.mkdir(name, mode=0o700, dir_fd=target_parent)
+                        walk(nested, child, target)
+                        verify_nested()
+                else:
+                    with retained_file(fd, name) as (source, verify_source):
+                        files[child.as_posix()] = hash_fd(source)
+                        if output is not None:
+                            os.lseek(source, 0, os.SEEK_SET)
+                            copy_stream(source, verify_source, verify_root, output / name,
+                                        rehash_source=True, allow_empty=True)
+                        verify_source()
+            require(names == sorted(os.listdir(fd)), 'fixture entries changed')
+        walk(directory, Path(), copy_to)
+        verify_root()
+    require({'manifest.json', 'collection.anki2'} <= files.keys()
+            and any(name.startswith('collection.media/') for name in files),
+            'generate typical-1 before ui-test')
+    return files
+
+
+def read_record(path):
+    with retained_directory(path.parent) as (directory, _):
+        with retained_file(directory, path.name) as (fd, verify):
+            require(os.fstat(fd).st_size <= 16 * 1024 * 1024, 'record too large')
+            with os.fdopen(os.dup(fd)) as source:
+                record = json.load(source)
+            verify()
+    return record
+
+
+def stage_fixture(run):
+    parent = fixture_files(PARENT)
+    staged = run / 'native-media-parent'
+    with retained_directory(run) as (run_fd, verify_run):
+        os.mkdir(staged.name, mode=0o700, dir_fd=run_fd)
+        with retained_directory(staged) as (_, verify_staged):
+            fixture_files(PARENT, copy_to=staged)
+            verify_staged()
+        require(fixture_files(staged) == parent == fixture_files(PARENT), 'generated parent changed')
+        os.mkdir('native-media-baseline', mode=0o700, dir_fd=run_fd)
+        out = os.open('native-media-parent.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                      0o600, dir_fd=run_fd)
+        with os.fdopen(out, 'w') as output:
+            json.dump({'fixture': PARENT.relative_to(ROOT).as_posix(), 'files': parent,
+                       'manifest': read_record(PARENT / 'manifest.json')}, output, sort_keys=True)
+        verify_run()
+
+
+def prepared_fixture(run):
+    return run / 'native-media-baseline/fixture'
+
+
+def fixture_identity(run):
+    parent = read_record(run / 'native-media-parent.json')
+    require(parent == {'fixture': PARENT.relative_to(ROOT).as_posix(),
+                       'files': fixture_files(PARENT),
+                       'manifest': read_record(PARENT / 'manifest.json')}, 'generated parent changed')
+    require(fixture_files(run / 'native-media-parent') == parent['files'], 'staged parent changed')
+    preparation = run / 'native-media-baseline/preparation.json'
+    record = read_record(preparation)
+    fixture = prepared_fixture(run)
+    files = fixture_files(fixture)
+    require(record['parent_files'] == parent['files'] and record['prepared_files'] == files
+            and record['clock'] == CLOCK, 'unbound native media preparation')
+    row = record['inserted_row']
+    require(set(row) == {'KEY', 'usn', 'mtime_secs', 'val_hex', 'storage_class'}
+            and row['KEY'] == 'localOffset' and type(row['usn']) is int and row['usn'] == -1
+            and type(row['mtime_secs']) is int and row['val_hex'] == '2d3630'
+            and row['storage_class'] == 'blob', 'unexpected native clock baseline')
+    require(files.keys() == parent['files'].keys()
+            and all(files[name] == identity for name, identity in parent['files'].items()
+                    if name != 'collection.anki2'), 'non-database fixture bytes changed')
+    return {'fixture': fixture.relative_to(ROOT).as_posix(), 'files': files,
+            'parent': parent, 'manifest_provenance': 'parent', 'clock': CLOCK,
+            'inserted_row': row, 'preparation_identity': file_identity(preparation)}
 
 
 def main():
@@ -295,6 +376,10 @@ def main():
     run = own_run(value)
     expected = run / 'expected-source.json'
     destination = run / 'native-media-export'
+    if action == 'stage':
+        require(not args, 'unexpected staging arguments')
+        stage_fixture(run)
+        return
     if action == 'identity':
         require(not args, 'unexpected identity arguments')
         require(not destination.exists() and not destination.is_symlink(), 'output already exists')
@@ -303,8 +388,14 @@ def main():
     if action == 'identity':
         filename = package_name(f'Meguri-Media-{secrets.token_hex(16)}.colpkg')
         require(not expected.exists() and not expected.is_symlink(), 'source identity already exists')
-        with expected.open('x') as output:
-            output.write(json.dumps(dict(fixture_identity(), native_filename=filename), sort_keys=True, indent=2) + '\n')
+        # Freeze hashes before VM handoff. Keep copyable file modes: the
+        # unchanged installer preserves them in the app's writable collection.
+        frozen = dict(fixture_identity(run), native_filename=filename)
+        with retained_directory(run) as (directory, _):
+            fd = os.open(expected.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o400, dir_fd=directory)
+            with os.fdopen(fd, 'w') as output:
+                output.write(json.dumps(frozen, sort_keys=True, indent=2) + '\n')
         print(filename)
     elif action == 'mac':
         filename, bundle = args
@@ -319,13 +410,15 @@ def main():
         filename, = args
         filename = package_name(filename)
         canonical(expected)
-        require(json.loads(expected.read_text()) == dict(fixture_identity(), native_filename=filename),
-                'original generated fixture or owned filename changed during the native case')
+        require(read_record(expected) == dict(fixture_identity(run), native_filename=filename),
+                'prepared fixture, generated parent or owned filename changed during the native case')
         identity = file_identity(destination / filename)
         require(identity['bytes'] > 0, 'native destination package is empty')
         receipt = {'native_filename': filename, 'native_destination': identity,
                    'expected_source': 'expected-source.json',
                    'expected_source_identity': file_identity(expected),
+                   'fixture': prepared_fixture(run).relative_to(ROOT).as_posix(),
+                   'fixture_identity': fixture_identity(run),
                    'external_content_client_proof': 'pending', 'e7_4_acceptance': 'pending'}
         with (run / 'native-media-export.json').open('x') as output:
             output.write(json.dumps(receipt, sort_keys=True, indent=2) + '\n')
@@ -336,6 +429,6 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (ValueError, OSError, subprocess.SubprocessError):
+    except (ValueError, OSError, KeyError, TypeError, subprocess.SubprocessError):
         # Fixed vocabulary only: never expose subprocess output or source paths.
         sys.exit('FIXED-PHASE:' + PHASE)
