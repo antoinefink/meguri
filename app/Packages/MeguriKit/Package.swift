@@ -78,6 +78,7 @@ let package = Package(
             swiftSettings: settings
         ),
         .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"], swiftSettings: settings),
+        .testTarget(name: "HomeTests", dependencies: ["Home"], swiftSettings: settings),
         .testTarget(
             name: "CardRenderingTests",
             dependencies: [
