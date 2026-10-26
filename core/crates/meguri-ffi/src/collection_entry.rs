@@ -110,6 +110,7 @@ pub enum ImportReplacementFailure {
     NotExclusive,
     Staging { failure: ImportStagingFailure },
     Core { error: CoreError },
+    MediaRecoveryRequired { recovery_reference: String },
 }
 impl From<ReplaceError> for ImportReplacementFailure {
     fn from(error: ReplaceError) -> Self {
@@ -117,6 +118,9 @@ impl From<ReplaceError> for ImportReplacementFailure {
             ReplaceError::NotExclusive => Self::NotExclusive,
             ReplaceError::Lifecycle(error) => Self::Core { error: error.into() },
             ReplaceError::AfterActivation { source, .. } => (*source).into(),
+            ReplaceError::MediaRecoveryRequired { recovery_reference, .. } => {
+                Self::MediaRecoveryRequired { recovery_reference }
+            }
             ReplaceError::Staging(error) => Self::Staging {
                 failure: match error {
                     StagingError::CrossDevice => ImportStagingFailure::CrossDevice,
@@ -161,6 +165,8 @@ pub struct ImportFailure {
     pub candidate_active: bool,
     pub generation: Option<u64>,
     pub backup: Option<ImportBackupReceipt>,
+    pub media_recovery_reference: Option<String>,
+    pub media: Option<CollectionImportMedia>,
 }
 impl ImportFailure {
     fn simple(issue: ImportIssue) -> Self {
@@ -169,6 +175,8 @@ impl ImportFailure {
             candidate_active: false,
             generation: None,
             backup: None,
+            media_recovery_reference: None,
+            media: None,
         }
     }
     fn cancelled() -> Self {
@@ -196,6 +204,21 @@ fn backup_cause(c: ports::BackupFailureCause) -> ImportBackupCause {
 impl From<EntryError> for ImportFailure {
     fn from(e: EntryError) -> Self {
         match e {
+            EntryError::AfterBackup { source, backup } => {
+                let mut f = Self::from(*source);
+                f.backup = Some(backup.into());
+                f
+            }
+            EntryError::MediaOutcome {
+                source,
+                media,
+                retained_reference,
+            } => {
+                let mut f = Self::from(*source);
+                f.media = Some(media.into());
+                f.media_recovery_reference = Some(retained_reference);
+                f
+            }
             EntryError::Cancelled => Self::cancelled(),
             EntryError::CancelledAfterBackup(receipt) => Self {
                 backup: Some(receipt.into()),
@@ -219,6 +242,18 @@ impl From<EntryError> for ImportFailure {
             }
             EntryError::Engine(error) => Self::simple(ImportIssue::Core { error: error.into() }),
             EntryError::Replacement { error, backup } => {
+                fn media_facts(e: &ReplaceError) -> (Option<String>, Option<CollectionImportMedia>) {
+                    match e {
+                        ReplaceError::AfterActivation { source, .. } => media_facts(source),
+                        ReplaceError::MediaRecoveryRequired {
+                            recovery_reference,
+                            counts,
+                            ..
+                        } => (Some(recovery_reference.clone()), Some(counts.clone().into())),
+                        _ => (None, None),
+                    }
+                }
+                let (media_recovery_reference, media) = media_facts(&error);
                 let (active, generation) = match &error {
                     ReplaceError::AfterActivation { generation, .. } => (true, generation.map(|g| g.0)),
                     _ => (false, None),
@@ -228,6 +263,8 @@ impl From<EntryError> for ImportFailure {
                     candidate_active: active,
                     generation,
                     backup: backup.map(|receipt| (*receipt).into()),
+                    media_recovery_reference,
+                    media,
                 }
             }
         }
@@ -244,6 +281,8 @@ fn job_failure(e: &EntryError) -> EngineError {
     // JobFinished still reports cancellation correctly; the result object keeps
     // the full backup cause and publication evidence for the native flow.
     match e {
+        EntryError::AfterBackup { source, .. } => job_failure(source),
+        EntryError::MediaOutcome { source, .. } => job_failure(source),
         EntryError::Cancelled => EngineError::Cancelled,
         EntryError::CancelledAfterBackup(_) => EngineError::Cancelled,
         EntryError::Engine(EngineError::SafetyBackupFailed(f)) if backup_cancelled(&f.cause) => EngineError::Cancelled,
@@ -261,6 +300,8 @@ pub struct CollectionInspectionFacts {
     pub destination: String,
     pub replacing_existing: bool,
     pub source_sha256: Vec<u8>,
+    pub media_count: u64,
+    pub media_decoded_bytes: u64,
 }
 struct OwnedInspection {
     inspection: entry::EntryInspection,
@@ -296,6 +337,8 @@ impl CollectionInspection {
             destination: f.destination.to_string_lossy().into_owned(),
             replacing_existing: f.replacing_existing,
             source_sha256: f.source_sha256.to_vec(),
+            media_count: f.media_count,
+            media_decoded_bytes: f.media_decoded_bytes,
         };
         Arc::new(Self {
             owned: Mutex::new(Some(OwnedInspection { inspection, config })),
@@ -365,12 +408,35 @@ impl CollectionInspectResult {
 pub struct CollectionActivation {
     pub generation: u64,
     pub backup: Option<ImportBackupReceipt>,
+    pub media: CollectionImportMedia,
+    pub media_retention_reference: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct CollectionImportMedia {
+    pub incoming: u64,
+    pub decoded_bytes: u64,
+    pub reused: u64,
+    pub added: u64,
+    pub trashed: u64,
+}
+impl From<meguri_storage::media::ImportMediaCounts> for CollectionImportMedia {
+    fn from(m: meguri_storage::media::ImportMediaCounts) -> Self {
+        Self {
+            incoming: m.incoming,
+            decoded_bytes: m.decoded_bytes,
+            reused: m.reused,
+            added: m.added,
+            trashed: m.trashed,
+        }
+    }
 }
 impl From<entry::Activation> for CollectionActivation {
     fn from(a: entry::Activation) -> Self {
         Self {
             generation: a.generation.0,
             backup: a.backup.map(Into::into),
+            media: a.media.into(),
+            media_retention_reference: a.media_retention_reference,
         }
     }
 }
@@ -444,7 +510,8 @@ pub fn start_collection_inspection(
                 &config.entry_inputs(),
                 job.cancel.clone(),
                 &job.progress,
-            );
+            )
+            .and_then(public_entry_media_guard);
             let status = inspected.as_ref().map(|_| ()).map_err(job_failure);
             completion.finish(
                 inspected
@@ -458,11 +525,24 @@ pub fn start_collection_inspection(
         result,
     })
 }
+// Temporary app-entry boundary only. Root removes this single guard after
+// backend verification and the native confirmation/result mapping are complete.
+// Rust package and host entry paths deliberately exercise the full backend.
+fn public_entry_media_guard(i: entry::EntryInspection) -> Result<entry::EntryInspection, EntryError> {
+    if i.facts().media_count != 0 {
+        return Err(EntryError::Package(PackageError::UnsupportedMedia));
+    }
+    Ok(i)
+}
 #[uniffi::export]
 pub fn start_collection_activation(
     inspection: Arc<CollectionInspection>,
 ) -> Result<CollectionActivationJob, CoreError> {
     callback::enter("start_collection_activation");
+    let relay = crate::progress::CollectionEntryRelay::new()?;
+    let progress = meguri_engine::ProgressSink::new();
+    progress.set_listener(relay.clone());
+    let worker_progress = progress.clone();
     let owned = inspection.consume()?;
     let initial = owned.inspection.is_initial();
     let reservation = if initial { Some(runtime::reserve_open()?) } else { None };
@@ -471,27 +551,30 @@ pub fn start_collection_activation(
         cell: Arc::new(ResultCell(Mutex::new(None))),
     });
     let completion = Completion(result.cell.clone());
+    let worker_relay = relay.clone();
     let job = runtime::engine()?.start_job(JobKind::ColpkgImport, move |job| {
+        let drain = worker_relay.drain_guard();
+        let progress = worker_progress;
         let slot = job.slot().expect("ColpkgImport owns long-operation slot");
         let outcome = match reservation {
             Some(reservation) => {
-                reservation.import_initial(owned.config, owned.inspection, slot, &job.cancel, &job.progress)
+                reservation.import_initial(owned.config, owned.inspection, slot, &job.cancel, &progress)
             }
             None => owned.inspection.activate_ready(
                 slot,
                 host.as_ref().expect("ready host").backup().as_ref(),
                 &job.cancel,
-                &job.progress,
+                &progress,
             ),
         };
         let status = outcome.as_ref().map(|_| ()).map_err(job_failure);
+        drop(drain);
         completion.finish(outcome.map(Into::into).map_err(Into::into));
         status
     })?;
-    Ok(CollectionActivationJob {
-        job: jobs::wrap(job),
-        result,
-    })
+    let mut job = jobs::wrap(job);
+    job.progress = crate::progress::JobProgress::wrap_collection_entry(job.id, progress, relay);
+    Ok(CollectionActivationJob { job, result })
 }
 
 #[cfg(test)]
@@ -621,5 +704,42 @@ mod tests {
         let cell = Arc::new(ResultCell::<CollectionActivation>(Mutex::new(None)));
         drop(Completion(cell.clone()));
         assert_eq!(*cell.0.lock().unwrap(), Some(Err(ImportFailure::cancelled())));
+    }
+    #[test]
+    fn media_recovery_mapping_keeps_counts_reference_and_commit_side() {
+        for committed in [false, true] {
+            let counts = meguri_storage::media::ImportMediaCounts {
+                incoming: 5,
+                decoded_bytes: 123,
+                reused: 2,
+                added: 3,
+                trashed: 1,
+            };
+            let error = ReplaceError::MediaRecoveryRequired {
+                recovery_reference: "r6-synthetic".into(),
+                counts: counts.clone(),
+                source: Box::new(ReplaceError::Lifecycle(EngineError::Media(
+                    meguri_storage::media::MediaError::DiskFull,
+                ))),
+            };
+            let error = if committed {
+                ReplaceError::AfterActivation {
+                    generation: None,
+                    source: Box::new(error),
+                }
+            } else {
+                error
+            };
+            let mapped = ImportFailure::from(EntryError::Replacement { error, backup: None });
+            assert_eq!(mapped.candidate_active, committed);
+            assert_eq!(mapped.media_recovery_reference.as_deref(), Some("r6-synthetic"));
+            assert_eq!(mapped.media, Some(counts.into()));
+            assert!(matches!(
+                mapped.issue,
+                ImportIssue::Replacement {
+                    failure: ImportReplacementFailure::MediaRecoveryRequired { .. }
+                }
+            ));
+        }
     }
 }

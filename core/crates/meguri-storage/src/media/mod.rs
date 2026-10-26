@@ -1,11 +1,16 @@
 //! Meguri's flat media store and independent journal (media/media-journal).
 mod case_fold;
 mod check_report;
+mod collection_import;
 mod folder;
 mod journal_db;
 mod staging;
 mod sync_state;
 mod trash;
+pub use collection_import::{
+    CollectionMediaIntent, ImportMediaBackup, ImportMediaCounts, IncomingMedia, InitialMediaState, MediaImportOwner,
+    MediaPreparationFailure, validate_incoming_name,
+};
 
 pub use check_report::MediaCheckReport;
 pub use journal_db::{MediaEntry, MediaSyncState, PendingChange, TrackedMediaName};
@@ -81,6 +86,7 @@ pub type Result<T> = std::result::Result<T, MediaError>;
 struct Inner {
     db: Mutex<Option<Connection>>,
     journal: PathBuf,
+    journal_native: (u64, u64),
     // Access while holding db: registration and recovery share one boundary.
     active_stages: Mutex<BTreeMap<i64, Weak<()>>>,
     media: PathBuf,
@@ -90,6 +96,7 @@ struct Inner {
     scans: AtomicU64,
     hashes: AtomicU64,
     case_sensitive: bool,
+    importing: std::sync::atomic::AtomicBool,
 }
 /// Clone this handle; do not open competing stores for the same collection.
 #[derive(Clone, Debug)]
@@ -105,7 +112,17 @@ pub struct Diagnostics {
 
 impl MediaStore {
     pub fn open(collection: &Path, clock: Arc<dyn Clock>) -> Result<Self> {
+        Self::open_checked(collection, clock, &|| false, None, None)
+    }
+    fn open_checked(
+        collection: &Path,
+        clock: Arc<dyn Clock>,
+        cancel: &dyn Fn() -> bool,
+        admission: Option<&str>,
+        empty_native: Option<(u64, u64)>,
+    ) -> Result<Self> {
         let root = collection.parent().unwrap_or(Path::new("."));
+        InitialMediaState::check_pending(root, admission)?;
         let media = root.join("collection.media");
         let trash = root.join("media.trash");
         let staging = root.join("media.staging");
@@ -116,8 +133,14 @@ impl MediaStore {
         if std::fs::symlink_metadata(&journal).is_ok_and(|m| m.file_type().is_symlink()) {
             return Err(MediaError::InvalidName);
         }
-        let db = journal_db::open(&journal)?;
+        let db = journal_db::open_initial_owned(&journal, empty_native)?;
         use std::os::unix::fs::MetadataExt;
+        let journal_metadata = std::fs::symlink_metadata(&journal)?;
+        if !journal_metadata.is_file() || journal_metadata.nlink() != 1 {
+            return Err(MediaError::InvalidName);
+        }
+        let journal_native = (journal_metadata.dev(), journal_metadata.ino());
+        meguri_model::faultpoint!("replace.media.after_journal_open")?;
         let device = std::fs::metadata(&media)?.dev();
         for dir in [&trash, &staging] {
             if std::fs::metadata(dir)?.dev() != device {
@@ -129,6 +152,7 @@ impl MediaStore {
             inner: Arc::new(Inner {
                 db: Mutex::new(Some(db)),
                 journal,
+                journal_native,
                 active_stages: Mutex::new(BTreeMap::new()),
                 media,
                 trash,
@@ -137,12 +161,27 @@ impl MediaStore {
                 scans: AtomicU64::new(0),
                 hashes: AtomicU64::new(0),
                 case_sensitive,
+                importing: std::sync::atomic::AtomicBool::new(false),
             }),
         };
-        store.reconcile_trash()?;
+        store.reconcile_trash_checked(cancel)?;
         Ok(store)
     }
     fn db(&self) -> Result<JournalGuard<'_>> {
+        if self.inner.importing.load(Ordering::Acquire) {
+            return Err(MediaError::InvalidManifest(
+                "collection media replacement owns the store".into(),
+            ));
+        }
+        let guard = self.import_db()?;
+        if self.inner.importing.load(Ordering::Acquire) {
+            return Err(MediaError::InvalidManifest(
+                "collection media replacement owns the store".into(),
+            ));
+        }
+        Ok(guard)
+    }
+    fn import_db(&self) -> Result<JournalGuard<'_>> {
         let guard = self
             .inner
             .db
@@ -150,6 +189,13 @@ impl MediaStore {
             .map_err(|_| MediaError::Database("media mutex poisoned".into()))?;
         if guard.is_none() {
             return Err(MediaError::Database("media journal is closed".into()));
+        }
+        use std::os::unix::fs::MetadataExt;
+        let bound = std::fs::symlink_metadata(&self.inner.journal)?;
+        if !bound.is_file() || bound.nlink() != 1 || (bound.dev(), bound.ino()) != self.inner.journal_native {
+            return Err(MediaError::InvalidManifest(
+                "media journal native identity changed".into(),
+            ));
         }
         Ok(JournalGuard(guard))
     }

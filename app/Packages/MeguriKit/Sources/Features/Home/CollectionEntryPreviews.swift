@@ -15,22 +15,27 @@ public enum CollectionEntryPreview: PreviewStates {
         }
     }
 
+    // Synthetic DTO examples show mapping/layout only. Media input remains guarded.
     private static func presentation(_ state: PreviewState) -> CollectionEntryPresentation {
         switch state {
         case .empty:
             .init()
         case .typical:
-            .init(facts: .init(notes: 6, cards: 11, reviews: 6, replacingExisting: false))
+            .init(facts: .init(notes: 6, cards: 11, reviews: 6, replacingExisting: false, mediaCount: 0, mediaDecodedBytes: 0))
         case .overflow:
             // Large counts and the actual, longer replacement/safety explanation.
             // There are no source titles, paths or other unrendered source fields.
-            .init(facts: .init(notes: 12_345_678, cards: 98_765_432, reviews: 1_234_567_890, replacingExisting: true))
+            .init(facts: .init(notes: 12_345_678, cards: 98_765_432, reviews: 1_234_567_890, replacingExisting: true,
+                               mediaCount: 12_345, mediaDecodedBytes: 9_876_543_210))
         case .error:
             .init(message: CollectionEntryCoordinator.explanation(
-                CollectionEntryFailure(issue: .staleConfirmation), fallback: ""
-            ), needsReinspection: true)
+                CollectionEntryFailure(issue: .replacement(.mediaRecoveryRequired(recoveryReference: "r6-preview"))), fallback: ""
+            ), canChoose: false, requiresRecovery: true,
+                  preparedMedia: .init(incoming: 5, decodedBytes: 2048, reused: 2, added: 3, trashed: 1),
+                  mediaReference: "r6-preview")
         case .loading:
-            .init(progress: .init(title: "Copying collection…", completed: 42, total: 100, canCancel: true), canChoose: false)
+            .init(progress: .init(title: "Preparing activation…", completed: 42, total: nil, canCancel: true), canChoose: false,
+                  preparedMedia: .init(incoming: 5, decodedBytes: 2048, reused: 2, added: 3, trashed: 1))
         }
     }
 }
@@ -40,3 +45,11 @@ public enum CollectionEntryPreview: PreviewStates {
 #Preview("Overflow") { CollectionEntryPreview.preview(.overflow) }
 #Preview("Error") { CollectionEntryPreview.preview(.error) }
 #Preview("Loading") { CollectionEntryPreview.preview(.loading) }
+
+// Synthetic completed result; this preview does not enable guarded media input.
+#Preview("Completed import") {
+    CollectionEntryContent(presentation: .init(activated: true,
+        finalMedia: .init(incoming: 5, decodedBytes: 2048, reused: 2, added: 3, trashed: 1),
+        generation: 19, mediaReference: "r6-preview-retained"),
+        actions: .init(confirm: {}, chooseFile: {}, reinspect: {}, continueRecovery: {}, dismiss: {}))
+}

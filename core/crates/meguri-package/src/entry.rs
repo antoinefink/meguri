@@ -6,7 +6,7 @@ use crate::{
 use meguri_engine::{
     CancelToken, Engine, EngineError, Generation, OpenConfig, ProgressPhase, ProgressSink, Seq, SlotGuard,
     ports::{BackupReceipt, BackupService},
-    replace::{ReplaceError, ReplaceReason, ReplacementStage},
+    replace::{ReplaceError, ReplaceReason},
 };
 use meguri_model::{clock::Clock, rng::RandomSource};
 use meguri_storage::{StorageError, paths::CollectionPaths, space::SpaceProvider};
@@ -30,6 +30,15 @@ pub enum EntryError {
     StaleConfirmation,
     Cancelled,
     CancelledAfterBackup(BackupReceipt),
+    AfterBackup {
+        source: Box<EntryError>,
+        backup: BackupReceipt,
+    },
+    MediaOutcome {
+        source: Box<EntryError>,
+        media: meguri_storage::media::ImportMediaCounts,
+        retained_reference: String,
+    },
     Replacement {
         error: ReplaceError,
         backup: Option<Box<BackupReceipt>>,
@@ -49,6 +58,11 @@ impl From<StorageError> for EntryError {
         EngineError::from(e).into()
     }
 }
+impl From<std::io::Error> for EntryError {
+    fn from(e: std::io::Error) -> Self {
+        StorageError::from(e).into()
+    }
+}
 impl From<CollectionPackageInspectError> for EntryError {
     fn from(e: CollectionPackageInspectError) -> Self {
         if e == CollectionPackageInspectError::Cancelled {
@@ -64,6 +78,32 @@ impl std::fmt::Display for EntryError {
     }
 }
 impl std::error::Error for EntryError {}
+impl EntryError {
+    pub fn candidate_active(&self) -> bool {
+        match self {
+            Self::Replacement {
+                error: ReplaceError::AfterActivation { .. },
+                ..
+            } => true,
+            Self::AfterBackup { source, .. } | Self::MediaOutcome { source, .. } => source.candidate_active(),
+            _ => false,
+        }
+    }
+    fn with_media(
+        self,
+        media: &std::sync::Mutex<meguri_storage::media::ImportMediaCounts>,
+        reference: &std::sync::Mutex<Option<String>>,
+    ) -> Self {
+        match reference.lock().unwrap().clone() {
+            Some(retained_reference) => Self::MediaOutcome {
+                source: Box::new(self),
+                media: media.lock().unwrap().clone(),
+                retained_reference,
+            },
+            None => self,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct EntryFacts {
@@ -71,11 +111,15 @@ pub struct EntryFacts {
     pub destination: PathBuf,
     pub replacing_existing: bool,
     pub source_sha256: [u8; 32],
+    pub media_count: u64,
+    pub media_decoded_bytes: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Activation {
     pub generation: Generation,
     pub backup: Option<BackupReceipt>,
+    pub media: meguri_storage::media::ImportMediaCounts,
+    pub media_retention_reference: Option<String>,
 }
 
 /// No public path or candidate accessor. Moving this value consumes its sole
@@ -88,6 +132,7 @@ pub struct EntryInspection {
     _source: tempfile::TempDir,
     source_cancel: Arc<CancelToken>,
     facts: EntryFacts,
+    space: Arc<dyn SpaceProvider>,
 }
 impl EntryInspection {
     pub fn facts(&self) -> &EntryFacts {
@@ -104,17 +149,37 @@ impl EntryInspection {
             return Err(EntryError::StaleConfirmation);
         }
         match (&self.committed, self.engine.collection()) {
-            (Some(seq), Ok(c)) if c.last_seq() == *seq && c.path() == self.facts.destination => Ok(()),
-            (None, Err(_)) => Ok(()),
+            (Some(seq), Ok(c)) if c.last_seq() == *seq && c.path() == self.facts.destination => self.check_source(),
+            (None, Err(_)) => self.check_source(),
             _ => Err(EntryError::StaleConfirmation),
         }
+    }
+    fn check_source(&self) -> Result<(), EntryError> {
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+        let mut file = std::fs::File::open(self._source.path().join("source.colpkg")).map_err(StorageError::from)?;
+        let mut digest = Sha256::new();
+        let mut chunk = [0; 65536];
+        loop {
+            self.source_cancel.check()?;
+            let n = file.read(&mut chunk).map_err(StorageError::from)?;
+            if n == 0 {
+                break;
+            }
+            digest.update(&chunk[..n]);
+        }
+        let actual: [u8; 32] = digest.finalize().into();
+        if actual != self.facts.source_sha256 {
+            return Err(EntryError::StaleConfirmation);
+        }
+        Ok(())
     }
 
     pub fn activate_ready(
         self,
         slot: &SlotGuard,
         backup: &dyn BackupService,
-        cancel: &CancelToken,
+        cancel: &Arc<CancelToken>,
         progress: &ProgressSink,
     ) -> Result<Activation, EntryError> {
         self.check(slot, cancel)?;
@@ -133,13 +198,39 @@ impl EntryInspection {
         if self.source_cancel.is_cancelled() || cancel.is_cancelled() {
             return Err(EntryError::CancelledAfterBackup(receipt));
         }
-        let stage = ReplacementStage::from_staging(self.inspected.into_staged().into_directory())?;
+        self.check(slot, cancel).map_err(|e| EntryError::AfterBackup {
+            source: Box::new(e),
+            backup: receipt.clone(),
+        })?;
+        let mut stage = self.inspected.into_replacement().map_err(|e| EntryError::AfterBackup {
+            source: Box::new(e.into()),
+            backup: receipt.clone(),
+        })?;
+        stage.media_space = Some(self.space.clone());
+        stage.media_backup = Some(meguri_storage::media::ImportMediaBackup {
+            name: receipt.name.clone(),
+            size_bytes: receipt.size_bytes,
+            instant_ms: receipt.instant.0,
+            snapshot_modified_ms: receipt.snapshot_modified.0,
+        });
+        let source_cancel = self.source_cancel.clone();
+        let activation_cancel = cancel.clone();
+        stage.media_cancel = Some(Arc::new(move || {
+            source_cancel.is_cancelled() || activation_cancel.is_cancelled()
+        }));
+        let media = stage.media_counts();
+        let reference = stage.media_reference();
+        let current_media = media.clone();
         exclusive
             .replace_verified_before_commit(
                 stage,
                 ReplaceReason::ColpkgImport,
                 |_| Ok(()),
                 || {
+                    self.source_cancel.check()?;
+                    cancel.check()?;
+                    let counts = current_media.lock().unwrap().clone();
+                    progress.report_collection_media_prepared(&counts);
                     self.source_cancel.check()?;
                     cancel.check()?;
                     progress.set_phase(ProgressPhase::Committing);
@@ -149,6 +240,8 @@ impl EntryInspection {
             .map(|c| Activation {
                 generation: c.generation(),
                 backup: Some(receipt.clone()),
+                media: media.lock().unwrap().clone(),
+                media_retention_reference: reference.lock().unwrap().clone(),
             })
             .map_err(|error| {
                 if error == ReplaceError::Lifecycle(EngineError::Cancelled) {
@@ -160,6 +253,7 @@ impl EntryInspection {
                     }
                 }
             })
+            .map_err(|e| e.with_media(&media, &reference))
     }
 
     /// Host passes its actual composed OpenConfig. This calls the one initial
@@ -168,7 +262,7 @@ impl EntryInspection {
         self,
         slot: &SlotGuard,
         config: OpenConfig,
-        cancel: &CancelToken,
+        cancel: &Arc<CancelToken>,
         progress: &ProgressSink,
     ) -> Result<Activation, EntryError> {
         progress.set_phase(ProgressPhase::Named("activation"));
@@ -176,7 +270,16 @@ impl EntryInspection {
         if !self.is_initial() {
             return Err(EntryError::StaleConfirmation);
         }
-        let stage = ReplacementStage::from_staging(self.inspected.into_staged().into_directory())?;
+        let mut stage = self.inspected.into_replacement()?;
+        stage.media_space = Some(self.space.clone());
+        let source_cancel = self.source_cancel.clone();
+        let activation_cancel = cancel.clone();
+        stage.media_cancel = Some(Arc::new(move || {
+            source_cancel.is_cancelled() || activation_cancel.is_cancelled()
+        }));
+        let media = stage.media_counts();
+        let reference = stage.media_reference();
+        let current_media = media.clone();
         slot.replace_verified_initial_before_commit(
             &self.facts.destination,
             config,
@@ -186,6 +289,10 @@ impl EntryInspection {
             || {
                 self.source_cancel.check()?;
                 cancel.check()?;
+                let counts = current_media.lock().unwrap().clone();
+                progress.report_collection_media_prepared(&counts);
+                self.source_cancel.check()?;
+                cancel.check()?;
                 progress.set_phase(ProgressPhase::Committing);
                 Ok(())
             },
@@ -193,6 +300,8 @@ impl EntryInspection {
         .map(|c| Activation {
             generation: c.generation(),
             backup: None,
+            media: media.lock().unwrap().clone(),
+            media_retention_reference: reference.lock().unwrap().clone(),
         })
         .map_err(|error| {
             if error == ReplaceError::Lifecycle(EngineError::Cancelled) {
@@ -201,6 +310,7 @@ impl EntryInspection {
                 EntryError::Replacement { error, backup: None }
             }
         })
+        .map_err(|e| e.with_media(&media, &reference))
     }
 }
 
@@ -275,7 +385,10 @@ pub fn inspect_entry(
     } else {
         0
     };
-    if backup_budget != 0 {
+    use std::os::unix::fs::MetadataExt;
+    let backup_parent = crate::writer::existing_directory(&paths.backups)?;
+    let shared_volume = std::fs::metadata(&backup_parent)?.dev() == std::fs::metadata(&paths.directory)?.dev();
+    if backup_budget != 0 && !shared_volume {
         // The backup may live on another filesystem. Check it before copy too.
         let directory = crate::writer::existing_directory(&paths.backups)?;
         meguri_storage::space::require_space(inputs.space.as_ref(), &directory, backup_budget).map_err(
@@ -294,18 +407,21 @@ pub fn inspect_entry(
     let context = CollectionPackageInspectContext {
         collection_directory: &paths.directory,
         live_collection_size: live_size,
-        reserved_space_bytes: backup_budget,
+        reserved_space_bytes: if shared_volume { backup_budget } else { 0 },
         clock: inputs.clock.as_ref(),
         random: inputs.random.as_ref(),
         space: inputs.space.as_ref(),
         is_cancelled: &is_cancelled,
     };
-    let (inspected, source_copy, digest) = crate::copy_and_inspect_collection_package(source, &context, progress)?;
+    let (inspected, source_copy, digest) =
+        crate::inspection::copy_and_inspect_local_collection_package(source, &context, progress)?;
     let facts = EntryFacts {
         source: inspected.facts().clone(),
         destination,
         replacing_existing: existing.is_some(),
         source_sha256: digest,
+        media_count: inspected.media_count(),
+        media_decoded_bytes: inspected.media_bytes(),
     };
     Ok(EntryInspection {
         engine: engine.clone(),
@@ -315,5 +431,6 @@ pub fn inspect_entry(
         _source: source_copy,
         source_cancel: cancel,
         facts,
+        space: inputs.space.clone(),
     })
 }

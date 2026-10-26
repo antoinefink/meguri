@@ -233,21 +233,30 @@ impl MediaStore {
         crate::atomic_file::sync_directory(self.trash_dir())?;
         Ok(())
     }
-    pub(super) fn reconcile_trash(&self) -> Result<()> {
+    pub(super) fn reconcile_trash_checked(&self, cancel: &dyn Fn() -> bool) -> Result<()> {
         let db = self.db()?;
         for entry in list(&db)? {
+            if cancel() {
+                return Err(super::MediaError::Cancelled);
+            }
             if folder::regular(&self.trash_dir().join(&entry.path))?.is_none() {
                 db.execute("DELETE FROM trash_entries WHERE id=?1", [entry.id])?;
             }
         }
         let mut files = Vec::new();
         for file in fs::read_dir(self.trash_dir())? {
+            if cancel() {
+                return Err(super::MediaError::Cancelled);
+            }
             let file = file?;
             let Some(name) = file.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
             if file.file_type()?.is_dir() {
                 for child in fs::read_dir(file.path())? {
+                    if cancel() {
+                        return Err(super::MediaError::Cancelled);
+                    }
                     let child = child?;
                     let Some(child_name) = child.file_name().to_str().map(str::to_owned) else {
                         continue;
@@ -286,7 +295,7 @@ impl MediaStore {
                     "INSERT INTO trash_entries(name,sha1,size,trashed_ms,path) VALUES(?1,?2,?3,?4,?5)",
                     params![
                         name,
-                        folder::hash_file(&file)?,
+                        folder::hash_file_cancellable(&file, || !cancel())?,
                         journal_db::sqlite_integer(m.len())?,
                         time,
                         path

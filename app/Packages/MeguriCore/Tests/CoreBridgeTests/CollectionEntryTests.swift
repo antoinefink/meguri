@@ -89,6 +89,34 @@ private final class EntryScopeWitness: SourceSecurityScope {
     }
 }
 
+extension CollectionSourceLifetimeTests {
+    @Test func recoveryEvidenceSurvivesCancelledSourceWaiterUntilTerminal() async throws {
+        let access = RecordingSourceAccess()
+        let owner = CoordinatedSourceOwner(access: access)
+        let gate = EntryGate()
+        let (entered, continuation) = AsyncStream<Void>.makeStream()
+        let failure = CollectionEntryFailure(issue: .replacement(.mediaRecoveryRequired(recoveryReference: "r6-held")),
+            candidateActive: false, mediaRecoveryReference: "r6-held",
+            media: .init(incoming: 5, decodedBytes: 123, reused: 2, added: 3, trashed: 1))
+        let task = Task {
+            try await owner.withReadablePackage(at: URL(filePath: "/selected.colpkg")) { _ -> Int in
+                continuation.yield(())
+                await gate.wait()
+                #expect(access.active.withLock { $0 })
+                throw failure
+            }
+        }
+        for await _ in entered { break }
+        task.cancel()
+        #expect(access.active.withLock { $0 })
+        await gate.release()
+        do { _ = try await task.value; Issue.record("Expected typed recovery failure") }
+        catch { #expect(error as? CollectionEntryFailure == failure) }
+        #expect(access.visits.withLock { $0 } == ["begin", "release"])
+        continuation.finish()
+    }
+}
+
 extension EventTests {
     @Test func trackingFailureCancelsAndDrainsStartedRustJobBeforeReleasingSource() async throws {
         try await CoreEventStream.shared.start()
@@ -145,12 +173,84 @@ extension EventTests {
         let failure = CollectionEntryFailure(MeguriCoreBindings.ImportFailure(
             issue: .safetyBackup(cause: .package(error: .insufficientSpace(needed: 10, available: 3)),
                                  publication: .durable(receipt: receipt)),
-            candidateActive: true, generation: 17, backup: receipt))
+            candidateActive: true, generation: 17, backup: receipt, mediaRecoveryReference: nil, media: nil))
         #expect(failure.candidateActive && failure.generation == 17)
         #expect(failure.backup?.snapshotModifiedMilliseconds == 99)
         #expect(failure.issue == .safetyBackup(cause: .package(.insufficientSpace(needed: 10, available: 3)),
                                              publication: .durable(CoreBridge.ImportBackupReceipt(receipt))))
         #expect(CollectionEntryFailure(MeguriCoreBindings.ImportFailure(issue: .staleConfirmation, candidateActive: false,
-            generation: nil, backup: nil)).issue == .staleConfirmation)
+            generation: nil, backup: nil, mediaRecoveryReference: nil, media: nil)).issue == .staleConfirmation)
     }
+    @Test func inspectionAndActivationMapAllMediaFactsAndSynthesizedFailuresKeepThem() {
+        let media = MeguriCoreBindings.CollectionImportMedia(incoming: 5, decodedBytes: 123, reused: 2, added: 3, trashed: 1)
+        let facts = CoreBridge.CollectionInspectionFacts(MeguriCoreBindings.CollectionInspectionFacts(
+            notes: 6, cards: 11, reviews: 7, sourceSchema: 18, destination: "/private/not-for-presentation",
+            replacingExisting: true, sourceSha256: [1, 2], mediaCount: 5, mediaDecodedBytes: 123))
+        #expect(facts.mediaCount == 5 && facts.mediaDecodedBytes == 123)
+        #expect(facts.notes == 6 && facts.cards == 11 && facts.reviews == 7 && facts.sourceSHA256 == Data([1, 2]))
+        let receipt = MeguriCoreBindings.ImportBackupReceipt(name: "safety.colpkg", sizeBytes: 80, instantMs: 101, snapshotModifiedMs: 99)
+        let activation = CoreBridge.CollectionActivation(MeguriCoreBindings.CollectionActivation(
+            generation: 19, backup: receipt, media: media, mediaRetentionReference: "r6-retained"))
+        #expect(activation.media == CoreBridge.CollectionImportMedia(incoming: 5, decodedBytes: 123, reused: 2, added: 3, trashed: 1))
+        #expect(activation.mediaRetentionReference == "r6-retained")
+        for issue in [CoreBridge.ImportIssue.core(.internal("tracking")), .core(.unavailable(reason: "host setup"))] {
+            let failure = CollectionEntryFailure(after: activation, issue: issue)
+            #expect(failure.issue == issue && failure.candidateActive)
+            #expect(failure.generation == activation.generation && failure.backup == activation.backup)
+            #expect(failure.media == activation.media && failure.mediaRecoveryReference == activation.mediaRetentionReference)
+            #expect(failure.completedActivation == activation)
+            #expect(failure.requiresRecovery && !failure.requiresReopenRecovery)
+        }
+    }
+
+    @Test(arguments: [false, true]) func recoveryRequiredKeepsBothCommitSidesAndUnknownGeneration(active: Bool) {
+        let raw = MeguriCoreBindings.ImportFailure(
+            issue: .replacement(failure: .mediaRecoveryRequired(recoveryReference: "r6-recovery")),
+            candidateActive: active, generation: nil, backup: nil, mediaRecoveryReference: "r6-recovery",
+            media: .init(incoming: 5, decodedBytes: 123, reused: 2, added: 3, trashed: 1))
+        let failure = CollectionEntryFailure(raw)
+        #expect(failure.issue == .replacement(.mediaRecoveryRequired(recoveryReference: "r6-recovery")))
+        #expect(failure.candidateActive == active && failure.generation == nil)
+        #expect(failure.mediaRecoveryReference == "r6-recovery" && failure.media?.trashed == 1)
+        #expect(failure.requiresRecovery && failure.requiresReopenRecovery)
+        #expect(failure.preparedMedia == failure.media && failure.completedActivation == nil)
+    }
+
+    @Test(arguments: [
+        NativeActivationUncertainty.outcomeReadFailed(.internal("read failed")),
+        .outcomePending
+    ])
+    func unavailableOutcomeKeepsOnlyPreparedEvidence(cause: NativeActivationUncertainty) {
+        let facts = CoreBridge.CollectionImportMedia(
+            incoming: 5, decodedBytes: 123, reused: 2, added: 3, trashed: 1)
+        let result = CollectionEntryFailure(
+            issue: .nativeActivationUncertain(cause), preparedMedia: facts)
+
+        #expect(result.activationOutcomeUncertain)
+        #expect(result.requiresRecovery)
+        #expect(result.requiresReopenRecovery)
+        #expect(!result.candidateActive)
+        #expect(result.generation == nil)
+        #expect(result.backup == nil)
+        #expect(result.mediaRecoveryReference == nil)
+        #expect(result.media == nil)
+        #expect(result.completedActivation == nil)
+        #expect(result.preparedMedia == facts)
+    }
+
+    @Test func typedPreparedFactsReachStreamBeforeTerminalDrain() async {
+        let (stream, continuation) = AsyncStream<CoreProgress>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let relay = ProgressRelay(continuation)
+        relay.onProgress(update: .init(jobId: 71, phase: .committing, etaMillis: nil, completed: 0, total: nil,
+            collectionMediaPrepared: .init(incoming: 5, decodedBytes: 123, reused: 2, added: 3, trashed: 1)))
+        let completion = JobCompletion(progress: continuation)
+        completion.resolve(.succeeded)
+        var updates: [CoreProgress] = []
+        for await update in stream { updates.append(update) }
+        #expect(updates.count == 1 && updates.first?.cancellable == false)
+        #expect(updates.first?.collectionMediaPrepared?.added == 3)
+        #expect(updates.first?.collectionMediaPrepared?.decodedBytes == 123)
+        #expect(await completion.wait() == .succeeded)
+    }
+
 }

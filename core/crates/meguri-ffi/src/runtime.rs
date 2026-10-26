@@ -90,7 +90,7 @@ impl OpenReservation {
         config: meguri_host::HostConfig,
         inspection: meguri_package::entry::EntryInspection,
         slot: &meguri_engine::SlotGuard,
-        cancel: &meguri_engine::CancelToken,
+        cancel: &Arc<meguri_engine::CancelToken>,
         progress: &meguri_engine::ProgressSink,
     ) -> Result<meguri_package::entry::Activation, meguri_package::entry::EntryError> {
         let completed = self

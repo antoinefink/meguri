@@ -17,6 +17,7 @@ pub struct CandidateFacts {
     pub scm: i64,
     pub modified: i64,
     pub media_count: u64,
+    pub media_decoded_bytes: u64,
 }
 
 #[derive(Debug)]
@@ -131,6 +132,7 @@ pub fn inspect_candidate(path: &Path, context: &CandidateContext<'_>) -> Result<
             scm: col.schema_modified.0,
             modified: col.modified.0,
             media_count: 0,
+            media_decoded_bytes: 0,
         }
     };
     let closed = opened.close()?;

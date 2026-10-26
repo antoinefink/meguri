@@ -56,6 +56,9 @@ pub struct Progress {
 /// `AsyncStream` (KTD9).
 pub trait ProgressListener: Send + Sync {
     fn on_progress(&self, progress: &Progress);
+    /// Fresh P16 merge facts, delivered before collection activation. Native
+    /// consumers remain behind the public media-entry guard until adapted.
+    fn on_collection_media_prepared(&self, _counts: &meguri_storage::media::ImportMediaCounts) {}
 }
 
 /// The progress channel of one op or job. Clones share it.
@@ -129,6 +132,15 @@ impl ProgressSink {
     /// one. Nothing is delivered until the next report or phase change.
     pub fn set_listener(&self, listener: Arc<dyn ProgressListener>) {
         self.lock().listener = Some(listener);
+    }
+
+    /// Unthrottled operation facts. Clone the listener under the sink lock,
+    /// then deliver on the reporting worker with no sink or core lock held.
+    pub fn report_collection_media_prepared(&self, counts: &meguri_storage::media::ImportMediaCounts) {
+        let listener = self.lock().listener.clone();
+        if let Some(listener) = listener {
+            listener.on_collection_media_prepared(counts);
+        }
     }
 
     pub fn phase(&self) -> ProgressPhase {

@@ -1,5 +1,5 @@
 import AppModel
-import DesignSystem
+import CoreBridge
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -27,6 +27,13 @@ struct CollectionEntryPresentation {
         let cards: UInt64
         let reviews: UInt64
         let replacingExisting: Bool
+        let mediaCount: UInt64
+        let mediaDecodedBytes: UInt64
+        init(notes: UInt64, cards: UInt64, reviews: UInt64, replacingExisting: Bool,
+             mediaCount: UInt64 = 0, mediaDecodedBytes: UInt64 = 0) {
+            self.notes = notes; self.cards = cards; self.reviews = reviews; self.replacingExisting = replacingExisting
+            self.mediaCount = mediaCount; self.mediaDecodedBytes = mediaDecodedBytes
+        }
     }
     struct Progress {
         let title: String
@@ -40,19 +47,60 @@ struct CollectionEntryPresentation {
     let candidateActive: Bool
     let canChoose: Bool
     let needsReinspection: Bool
+    let activated: Bool
+    let requiresRecovery: Bool
+    let canContinueRecovery: Bool
+    let preparedMedia: CollectionImportMedia?
+    let finalMedia: CollectionImportMedia?
+    let generation: UInt64?
+    let backup: ImportBackupReceipt?
+    let backupPublication: ImportBackupPublication?
+    let mediaReference: String?
 
     var busy: Bool { progress != nil }
     var canCancel: Bool { progress?.canCancel == true }
+    struct MediaRow {
+        let label: String
+        let count: UInt64
+    }
+    var mediaCompletionNote: String? {
+        finalMedia == nil && preparedMedia != nil
+            ? "Prepared media plan. Completion and the live media state need verification." : nil
+    }
+    var mediaDetailRows: [MediaRow] {
+        guard let media = finalMedia ?? preparedMedia else { return [] }
+        return Self.mediaRows(media, completed: finalMedia != nil)
+    }
+    static func mediaRows(_ media: CollectionImportMedia, completed: Bool) -> [MediaRow] {
+        [MediaRow(label: "Incoming media files", count: media.incoming),
+         MediaRow(label: "Decoded media bytes", count: media.decodedBytes),
+         MediaRow(label: completed ? "Reused files" : "Planned reused files", count: media.reused),
+         MediaRow(label: completed ? "Added files" : "Planned added files", count: media.added),
+         MediaRow(label: completed ? "Files moved to trash" : "Planned files to move to trash", count: media.trashed)]
+    }
 
     init(facts: Facts? = nil, progress: Progress? = nil, message: String? = nil,
-         candidateActive: Bool = false, canChoose: Bool = true, needsReinspection: Bool = false) {
+         candidateActive: Bool = false, canChoose: Bool = true, needsReinspection: Bool = false,
+         activated: Bool = false, requiresRecovery: Bool = false, canContinueRecovery: Bool = false,
+         preparedMedia: CollectionImportMedia? = nil, finalMedia: CollectionImportMedia? = nil,
+         generation: UInt64? = nil, backup: ImportBackupReceipt? = nil,
+         backupPublication: ImportBackupPublication? = nil, mediaReference: String? = nil,
+         failure: CollectionEntryFailure? = nil) {
         self.facts = facts; self.progress = progress; self.message = message
-        self.candidateActive = candidateActive; self.canChoose = canChoose; self.needsReinspection = needsReinspection
+        self.candidateActive = candidateActive; self.canChoose = canChoose && !requiresRecovery && !candidateActive
+        self.needsReinspection = needsReinspection
+        self.activated = activated
+        self.requiresRecovery = requiresRecovery || candidateActive; self.canContinueRecovery = canContinueRecovery
+        self.preparedMedia = failure?.preparedMedia ?? failure?.media ?? preparedMedia
+        self.finalMedia = failure == nil ? finalMedia : failure?.completedActivation?.media
+        self.generation = generation
+        self.backup = backup; self.backupPublication = backupPublication; self.mediaReference = mediaReference
     }
 
     @MainActor init(coordinator: CollectionEntryCoordinator) {
         facts = coordinator.preview.map { .init(notes: $0.facts.notes, cards: $0.facts.cards,
-            reviews: $0.facts.reviews, replacingExisting: $0.facts.replacingExisting) }
+            reviews: $0.facts.reviews, replacingExisting: $0.facts.replacingExisting,
+            mediaCount: $0.facts.mediaCount, mediaDecodedBytes: $0.facts.mediaDecodedBytes) }
         progress = coordinator.busy ? .init(title: coordinator.progressTitle,
             completed: coordinator.progress?.completed ?? 0, total: coordinator.progress?.total,
             canCancel: coordinator.canCancel) : nil
@@ -60,6 +108,21 @@ struct CollectionEntryPresentation {
         candidateActive = coordinator.failure?.candidateActive == true
         canChoose = coordinator.canChoose
         needsReinspection = coordinator.needsReinspection
+        activated = !coordinator.requiresRecovery && (coordinator.lastActivation != nil || coordinator.failure?.candidateActive == true)
+        requiresRecovery = coordinator.requiresRecovery
+        canContinueRecovery = coordinator.canContinueRecovery
+        let mediaPresentation = Self(preparedMedia: coordinator.preparedMedia,
+            finalMedia: coordinator.lastActivation?.media, failure: coordinator.failure)
+        preparedMedia = mediaPresentation.preparedMedia
+        finalMedia = mediaPresentation.finalMedia
+        generation = coordinator.failure?.generation ?? coordinator.lastActivation?.generation
+        let receipt = coordinator.failure?.backup ?? coordinator.lastActivation?.backup
+        if case .safetyBackup(_, let publication)? = coordinator.failure?.issue {
+            backupPublication = publication
+            if case .durable(let durable) = publication { backup = receipt ?? durable }
+            else { backup = receipt }
+        } else { backupPublication = nil; backup = receipt }
+        mediaReference = coordinator.failure?.mediaRecoveryReference ?? coordinator.lastActivation?.mediaRetentionReference
     }
 }
 
@@ -78,123 +141,130 @@ struct CollectionEntryContent: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.large) {
+            Form {
+                Section {
                     Text("Import a latest-format, collection-only .colpkg file. Packages containing media and older formats are not supported yet. No account or network connection is needed.")
-                        .foregroundStyle(.token(.textPrimary))
                         .accessibilityIdentifier("onboarding.collectionImport.explanation")
-                    if let facts = presentation.facts {
-                        VStack(alignment: .leading, spacing: Spacing.small) {
-                            Text("Collection Preview").font(.headline)
-                                .accessibilityIdentifier("onboarding.collectionImport.preview.heading")
-                            Text("\(facts.notes) notes · \(facts.cards) cards · \(facts.reviews) reviews")
-                                .accessibilityIdentifier("onboarding.collectionImport.preview.counts")
-                            Text("Destination: this device")
-                                .accessibilityIdentifier("onboarding.collectionImport.preview.destination")
-                            Text(facts.replacingExisting
-                                ? "This will replace the local collection on this device. Meguri must finish a safety backup of your current collection, including saved answers, before replacing it. If that backup fails, import stops."
-                                : "There is no local collection file to replace. A pre-import safety backup is not needed.")
-                                .accessibilityIdentifier("onboarding.collectionImport.preview.safety")
-                            Button(action: actions.confirm) {
-                                Text(facts.replacingExisting ? "Replace Collection" : "Import Collection")
-                                    .font(.headline)
-                                    .frame(minWidth: 44, minHeight: 44)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(ColorToken.textPrimary.color)
+                }
+                if let facts = presentation.facts {
+                    Section {
+                        Text("\(facts.notes) notes · \(facts.cards) cards · \(facts.reviews) reviews")
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.counts")
+                        LabeledContent("Destination", value: "this device")
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.destination")
+                        LabeledContent("Validated media files", value: facts.mediaCount.formatted())
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.media.files")
+                        LabeledContent("Decoded media bytes", value: facts.mediaDecodedBytes.formatted())
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.media.bytes")
+                        Text(facts.replacingExisting
+                            ? "This will replace the local collection on this device. Meguri must finish a safety backup of your current collection, including saved answers, before replacing it. If that backup fails, import stops."
+                            : "There is no local collection file to replace. A pre-import safety backup is not needed.")
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.safety")
+                        Text("Existing media is kept. Supplied media is merged by name and content; replaced versions are saved in trash. Restoring a safety backup’s media needs those saved files.")
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.media.retention")
+                        Button(facts.replacingExisting ? "Replace Collection" : "Import Collection", action: actions.confirm)
                             .keyboardShortcut(.defaultAction)
                             .accessibilityIdentifier("onboarding.collectionImport.confirm")
-                        }
-                        .foregroundStyle(.token(.textPrimary))
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("onboarding.collectionImport.preview")
+                    } header: {
+                        Text("Collection Preview")
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.heading")
                     }
-                    if let progress = presentation.progress {
-                        VStack(alignment: .leading, spacing: Spacing.small) {
-                            Text(verbatim: progress.title)
-                                .foregroundStyle(.token(.textPrimary))
-                                .accessibilityIdentifier("onboarding.collectionImport.progress.stage")
-                            Group {
-                                if let total = progress.total {
-                                    ProgressView(value: Double(progress.completed), total: Double(max(1, total)))
-                                } else { ProgressView() }
-                            }
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(.accessibility, Rectangle())
-                            .accessibilityLabel(progress.title)
-                            .accessibilityValue(Text(progress.total.map { "\(progress.completed) of \($0)" } ?? "In progress"))
-                            .accessibilityIdentifier("onboarding.collectionImport.progress.value")
-                            if !presentation.canCancel {
-                                Text("Finishing activation. The new collection will remain active.")
-                                    .foregroundStyle(.token(.textPrimary))
-                            }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("onboarding.collectionImport.preview")
+                }
+                if let progress = presentation.progress {
+                    Section {
+                        Text(verbatim: progress.title)
+                            .accessibilityIdentifier("onboarding.collectionImport.progress.stage")
+                        Group {
+                            if let total = progress.total {
+                                ProgressView(value: Double(progress.completed), total: Double(max(1, total)))
+                            } else { ProgressView() }
                         }
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("onboarding.collectionImport.progress")
+                        .accessibilityLabel(progress.title)
+                        .accessibilityValue(Text(progress.total.map { "\(progress.completed) of \($0)" } ?? "In progress"))
+                        .accessibilityIdentifier("onboarding.collectionImport.progress.value")
+                        if let media = presentation.preparedMedia {
+                            Text("Prepared media plan")
+                            mediaRows(CollectionEntryPresentation.mediaRows(media, completed: false))
+                                .accessibilityIdentifier("onboarding.collectionImport.progress.media")
+                        }
+                        if !presentation.canCancel {
+                            Text("Finishing activation. Cancellation is no longer available.")
+                        }
                     }
-                    if let message = presentation.message {
-                        Text(verbatim: message).foregroundStyle(.token(.statusError))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("onboarding.collectionImport.progress")
+                }
+                if let message = presentation.message {
+                    Section {
+                        Text(verbatim: message)
                             .accessibilityIdentifier("onboarding.collectionImport.error")
-                    }
-                    if presentation.candidateActive {
-                        Button(action: actions.continueRecovery) {
-                            Text("Continue Recovery")
-                                .frame(minWidth: 44, minHeight: 44)
-                                .contentShape(Rectangle())
+                        if presentation.canContinueRecovery {
+                            Button("Continue Recovery", action: actions.continueRecovery)
+                                .accessibilityIdentifier("onboarding.collectionImport.recover")
                         }
-                        .buttonStyle(.bordered)
-                        .tint(ColorToken.textPrimary.color)
-                        .accessibilityIdentifier("onboarding.collectionImport.recover")
-                    } else if presentation.canChoose {
-                        if presentation.needsReinspection {
-                            Button(action: actions.reinspect) {
-                                Text("Inspect Again")
-                                    .frame(minWidth: 44, minHeight: 44)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(ColorToken.textPrimary.color)
-                            .accessibilityIdentifier("onboarding.collectionImport.reinspect")
-                        }
-                        Button(action: actions.chooseFile) {
-                            Text("Choose File")
-                                .foregroundStyle(.token(.textPrimary))
-                                .frame(minWidth: 44, minHeight: 44)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(ColorToken.textPrimary.color)
-                        .accessibilityIdentifier("onboarding.collectionImport.choose")
                     }
                 }
-                .padding(Spacing.large)
-                .frame(maxWidth: ContentWidth.readable, alignment: .leading)
-                .frame(maxWidth: .infinity)
+                if presentation.finalMedia != nil || (!presentation.busy && presentation.preparedMedia != nil) || presentation.generation != nil || presentation.backup != nil || presentation.backupPublication != nil || presentation.mediaReference != nil {
+                    Section("Import Details") {
+                        if presentation.activated {
+                            Text("Collection imported.")
+                                .accessibilityIdentifier("onboarding.collectionImport.result.complete")
+                        }
+                        if let generation = presentation.generation {
+                            LabeledContent("Collection generation", value: generation.formatted())
+                                .accessibilityIdentifier("onboarding.collectionImport.result.generation")
+                        }
+                        if !presentation.busy && !presentation.mediaDetailRows.isEmpty {
+                            if let note = presentation.mediaCompletionNote {
+                                Text(verbatim: note)
+                            }
+                            mediaRows(presentation.mediaDetailRows)
+                                .accessibilityIdentifier("onboarding.collectionImport.result.media")
+                        }
+                        if let backup = presentation.backup {
+                            LabeledContent("Safety backup", value: backup.name)
+                            LabeledContent("Backup bytes", value: backup.sizeBytes.formatted())
+                                .accessibilityIdentifier("onboarding.collectionImport.result.backup")
+                        }
+                        if case .uncertain? = presentation.backupPublication {
+                            Text("A safety backup may have been saved. Its publication needs verification.")
+                        }
+                        if let reference = presentation.mediaReference {
+                            LabeledContent("Retained media reference", value: reference)
+                                .accessibilityIdentifier("onboarding.collectionImport.result.media.reference")
+                            Text("Keep the saved media files with the safety backup. They are needed to restore its media.")
+                        }
+                    }
+                }
+                Section {
+                    if presentation.canChoose {
+                        if presentation.needsReinspection {
+                            Button("Inspect Again", action: actions.reinspect)
+                                .accessibilityIdentifier("onboarding.collectionImport.reinspect")
+                        }
+                        Button("Choose File", action: actions.chooseFile)
+                            .accessibilityIdentifier("onboarding.collectionImport.choose")
+                    }
+                    Button(presentation.busy ? "Cancel Import" : "Cancel", action: actions.dismiss)
+                        .keyboardShortcut(.cancelAction)
+                        .disabled((presentation.busy && !presentation.canCancel) || presentation.requiresRecovery)
+                        .accessibilityIdentifier("onboarding.collectionImport.cancel")
+                }
             }
             .accessibilityIdentifier("onboarding.collectionImport.content")
-            .background(.token(.backgroundPrimary))
-            .safeAreaInset(edge: .bottom) {
-                Button(action: actions.dismiss) {
-                    Text(presentation.busy ? "Cancel Import" : "Cancel")
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.bordered)
-                .tint(ColorToken.textPrimary.color)
-                .keyboardShortcut(.cancelAction)
-                .disabled((presentation.busy && !presentation.canCancel) || presentation.candidateActive)
-                .accessibilityIdentifier("onboarding.collectionImport.cancel")
-                .padding(Spacing.large)
-                .frame(maxWidth: ContentWidth.readable, alignment: .leading)
-                .frame(maxWidth: .infinity)
-                .background(.token(.backgroundPrimary))
-            }
             .navigationTitle("Import Collection")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
         }
-        .interactiveDismissDisabled(presentation.busy || presentation.candidateActive)
+        .interactiveDismissDisabled(presentation.busy || presentation.requiresRecovery)
+    }
+
+    @ViewBuilder private func mediaRows(_ rows: [CollectionEntryPresentation.MediaRow]) -> some View {
+        ForEach(rows, id: \.label) { row in
+            LabeledContent { Text(row.count.formatted()) } label: { Text(verbatim: row.label) }
+        }
     }
 }

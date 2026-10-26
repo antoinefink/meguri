@@ -52,7 +52,7 @@ pub(super) fn hash_bytes(bytes: &[u8]) -> String {
 pub(super) fn hash_file(path: &Path) -> Result<String> {
     hash_file_cancellable(path, || true)
 }
-fn hash_file_cancellable(path: &Path, mut keep_going: impl FnMut() -> bool) -> Result<String> {
+pub(super) fn hash_file_cancellable(path: &Path, mut keep_going: impl FnMut() -> bool) -> Result<String> {
     let mut file = open_regular(path)?;
     let mut hash = Sha1::new();
     let mut bytes = [0_u8; 65_536];
@@ -447,6 +447,8 @@ impl MediaStore {
         Ok(())
     }
     pub fn lookup(&self, name: &str) -> Result<Option<String>> {
+        // Direct store clones cannot read a partially merged R6 view either.
+        drop(self.db()?);
         let name = meguri_text::normalize::nfc(name);
         if !safe_component(&name) || ignored(&name) {
             return Ok(None);

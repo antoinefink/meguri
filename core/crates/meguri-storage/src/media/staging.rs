@@ -311,7 +311,14 @@ impl MediaStore {
         Ok(records.len())
     }
     /// The caller checks each witness against rows in the open collection.
-    pub fn recover(&self, mut matches: impl FnMut(&NoteReference) -> Result<bool>) -> Result<RecoveryReport> {
+    pub fn recover(&self, matches: impl FnMut(&NoteReference) -> Result<bool>) -> Result<RecoveryReport> {
+        self.recover_checked(matches, &|| false)
+    }
+    pub fn recover_checked(
+        &self,
+        mut matches: impl FnMut(&NoteReference) -> Result<bool>,
+        cancel: &dyn Fn() -> bool,
+    ) -> Result<RecoveryReport> {
         meguri_model::faultpoint!("media.recover.before_candidates")?;
         let operations = {
             let db = self.db()?;
@@ -330,6 +337,9 @@ impl MediaStore {
         };
         let mut report = RecoveryReport::default();
         for (id, refs) in operations {
+            if cancel() {
+                return Err(MediaError::Cancelled);
+            }
             let refs: Vec<NoteReference> =
                 serde_json::from_str(&refs).map_err(|e| MediaError::InvalidManifest(e.to_string()))?;
             let mut committed = !refs.is_empty();
@@ -349,7 +359,7 @@ impl MediaStore {
                         self.move_to_trash_locked(
                             &mut db,
                             &file.name,
-                            &folder::hash_file(&source)?,
+                            &folder::hash_file_cancellable(&source, || !cancel())?,
                             m.len(),
                             &source,
                             false,
@@ -357,6 +367,7 @@ impl MediaStore {
                         report.trashed += 1;
                     }
                 }
+                meguri_model::faultpoint!("replace.media.initial_during_recovery")?;
                 delete_manifest(&db, id)?;
             }
         }
@@ -366,6 +377,9 @@ impl MediaStore {
             .query_map([], |r| r.get(0))?
             .collect::<std::result::Result<_, _>>()?;
         for entry in fs::read_dir(self.staging_dir())? {
+            if cancel() {
+                return Err(MediaError::Cancelled);
+            }
             let entry = entry?;
             let Some(path) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
@@ -383,12 +397,13 @@ impl MediaStore {
             self.move_to_trash_locked(
                 &mut db,
                 name,
-                &folder::hash_file(&entry.path())?,
+                &folder::hash_file_cancellable(&entry.path(), || !cancel())?,
                 m.len(),
                 &entry.path(),
                 false,
             )?;
             report.trashed += 1;
+            meguri_model::faultpoint!("replace.media.initial_during_recovery")?;
         }
         Ok(report)
     }

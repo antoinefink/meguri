@@ -330,6 +330,271 @@ fn map_entry(name: &[u8], sha_len: u8) -> Vec<u8> {
     map.extend(entry);
     map
 }
+fn local_media_map(items: &[(&str, &[u8])]) -> Vec<u8> {
+    use sha1::{Digest, Sha1};
+    fn integer(mut n: u64, out: &mut Vec<u8>) {
+        while n >= 128 {
+            out.push(n as u8 | 128);
+            n >>= 7;
+        }
+        out.push(n as u8);
+    }
+    let mut map = Vec::new();
+    for (name, bytes) in items {
+        let mut record = vec![10];
+        integer(name.len() as u64, &mut record);
+        record.extend_from_slice(name.as_bytes());
+        record.push(16);
+        integer(bytes.len() as u64, &mut record);
+        record.extend_from_slice(&[26, 20]);
+        record.extend_from_slice(&Sha1::digest(bytes));
+        map.push(10);
+        integer(record.len() as u64, &mut map);
+        map.extend(record);
+    }
+    map
+}
+#[test]
+fn local_entry_validates_every_payload_and_keeps_collection_only_policy_explicit() {
+    use meguri_engine::{CancelToken, Engine, EngineConfig, ProgressSink};
+    use meguri_package::entry::{EntryInputs, inspect_entry};
+    use std::sync::Arc;
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("destination");
+    fs::create_dir(&directory).unwrap();
+    let source = root.path().join("selected.colpkg");
+    let inputs = EntryInputs {
+        collection_directory: directory.clone(),
+        backups_directory: root.path().join("backups"),
+        clock: Arc::new(FixedClock::new(1_894_701_600_000, UtcOffset::UTC)),
+        random: Arc::new(SeededRandom::new(42)),
+        space: Arc::new(StatvfsSpace),
+    };
+    let process = Engine::new(EngineConfig::default()).unwrap();
+    let mut e = entries();
+    e[2].1 = frame(&local_media_map(&[
+        ("unused.png", b"independent image"),
+        ("_static.dat", b""),
+        ("audio.mp3", b"independent audio"),
+    ]));
+    e.extend([
+        ("0", frame(b"independent image")),
+        ("1", frame(b"")),
+        ("2", frame(b"independent audio")),
+    ]);
+    fs::write(&source, archive(&e, CompressionMethod::Stored)).unwrap();
+    let original = fs::read(&source).unwrap();
+    let inspect_local = || inspect_entry(&process, &source, &inputs, CancelToken::new(), &ProgressSink::new());
+    let candidate = inspect_local().unwrap();
+    assert_eq!(
+        (candidate.facts().media_count, candidate.facts().media_decoded_bytes),
+        (3, 34)
+    );
+    assert_eq!(candidate.facts().source.media_count, 3);
+    assert_eq!(candidate.facts().source.media_decoded_bytes, 34);
+    assert!(!directory.join("collection.anki2").exists());
+    assert!(!directory.join("collection.media").exists());
+    drop(candidate);
+    assert_eq!(fs::read_dir(&directory).unwrap().count(), 0);
+    assert!(matches!(
+        inspect(&source, &directory, &StatvfsSpace, &|| false, 0, 0),
+        Err(Error::UnsupportedMedia)
+    ));
+    assert_eq!(fs::read(&source).unwrap(), original);
+    // A late body, missing/extra/noncanonical member and conflicting supplied
+    // names must all refuse before media, journal or DB publication.
+    let mut cases = Vec::new();
+    let mut corrupt_late = e.clone();
+    corrupt_late[5].1 = frame(b"different audio");
+    cases.push(corrupt_late);
+    let mut missing = e.clone();
+    missing.pop();
+    cases.push(missing);
+    let mut extra = e.clone();
+    extra.push(("3", frame(b"extra")));
+    cases.push(extra);
+    let mut numeric = e.clone();
+    numeric[5].0 = "02";
+    cases.push(numeric);
+    let mut frame_error = e.clone();
+    frame_error[5].1.push(1);
+    cases.push(frame_error);
+    let mut conflicting = e.clone();
+    conflicting[2].1 = frame(&local_media_map(&[("Photo.png", b"a"), ("photo.png", b"b")]));
+    cases.push(conflicting);
+    for entries in cases {
+        let bytes = archive(&entries, CompressionMethod::Stored);
+        fs::write(&source, &bytes).unwrap();
+        assert!(inspect_local().is_err());
+        assert_eq!(fs::read(&source).unwrap(), bytes);
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 0);
+    }
+    fs::write(&source, &original).unwrap();
+    meguri_model::faultpoint::arm(
+        "package.inspect.media_write",
+        meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::StorageFull),
+    );
+    assert!(matches!(
+        inspect_local(),
+        Err(meguri_package::entry::EntryError::Package(Error::DiskFull))
+    ));
+    meguri_model::faultpoint::disarm("package.inspect.media_write");
+    assert_eq!(fs::read(&source).unwrap(), original);
+    assert_eq!(fs::read_dir(&directory).unwrap().count(), 0);
+}
+#[test]
+fn local_entry_media_preflight_preserves_invalid_destinations_and_skips_collection_only_sources() {
+    use meguri_engine::{CancelToken, Engine, EngineConfig, ProgressSink};
+    use meguri_package::entry::{EntryError, EntryInputs, inspect_entry};
+    use std::sync::Arc;
+    let tmp = tempfile::tempdir().unwrap();
+    let plain = tmp.path().join("a.colpkg");
+    let plain_zip = archive(&entries(), CompressionMethod::Stored);
+    fs::write(&plain, &plain_zip).unwrap();
+    let full = tmp.path().join("b.colpkg");
+    let data = b"\x01\x80\x00\xff";
+    let mut items = entries();
+    items[2].1 = frame(&local_media_map(&[("a.png", data)]));
+    items.push(("0", frame(data)));
+    let full_zip = archive(&items, CompressionMethod::Stored);
+    fs::write(&full, &full_zip).unwrap();
+    let outside = tmp.path().join("c.bin");
+    let bytes = b"\x03\xa0\x00\xfd";
+    fs::write(&outside, bytes).unwrap();
+    let engine = Engine::new(EngineConfig::default()).unwrap();
+    for leaf in [
+        "collection.media",
+        "media.trash",
+        "media.staging",
+        "meguri-media.db",
+        "meguri-media.db-wal",
+        "meguri-media.db-journal",
+    ] {
+        let dest = tmp.path().join(leaf);
+        fs::create_dir(&dest).unwrap();
+        let block = dest.join(leaf);
+        let mark = if leaf.starts_with("meguri-media.db") {
+            fs::create_dir(&block).unwrap();
+            block.join("d.bin")
+        } else {
+            block
+        };
+        let live = b"\x02\x90\x00\xfe";
+        fs::write(&mark, live).unwrap();
+        let saved = listing(&dest);
+        let args = EntryInputs {
+            collection_directory: dest.clone(),
+            backups_directory: tmp.path().join("bak"),
+            clock: Arc::new(FixedClock::new(1_894_701_600_000, UtcOffset::UTC)),
+            random: Arc::new(SeededRandom::new(42)),
+            space: Arc::new(StatvfsSpace),
+        };
+        let read = |path: &Path| inspect_entry(&engine, path, &args, CancelToken::new(), &ProgressSink::new());
+        assert_eq!(fs::read(&plain).unwrap(), plain_zip);
+        assert_eq!(fs::read(&full).unwrap(), full_zip);
+        assert_eq!(fs::read(&mark).unwrap(), live);
+        assert_eq!(fs::read(&outside).unwrap(), bytes);
+        let token = read(&plain).unwrap();
+        assert_eq!(token.facts().media_count, 0);
+        drop(token);
+        assert_eq!(listing(&dest), saved);
+        assert_eq!(fs::read(&plain).unwrap(), plain_zip);
+        assert_eq!(fs::read(&full).unwrap(), full_zip);
+        assert_eq!(fs::read(&mark).unwrap(), live);
+        assert_eq!(fs::read(&outside).unwrap(), bytes);
+        assert!(matches!(read(&full), Err(EntryError::Package(Error::Corrupt { .. }))));
+        assert_eq!(listing(&dest), saved);
+        assert_eq!(fs::read(&plain).unwrap(), plain_zip);
+        assert_eq!(fs::read(&full).unwrap(), full_zip);
+        assert_eq!(fs::read(&mark).unwrap(), live);
+        assert_eq!(fs::read(&outside).unwrap(), bytes);
+        assert!(!dest.join("collection.anki2").exists());
+    }
+    assert_eq!(fs::read(plain).unwrap(), plain_zip);
+    assert_eq!(fs::read(full).unwrap(), full_zip);
+}
+#[test]
+fn local_entry_streams_oversize_local_media_without_applying_sync_limit() {
+    use sha1::{Digest, Sha1};
+    use std::sync::Arc;
+    let root = tempfile::tempdir().unwrap();
+    let destination = root.path().join("destination");
+    fs::create_dir(&destination).unwrap();
+    let source = root.path().join("large.colpkg");
+    let mut zip = ZipWriter::new(fs::File::create(&source).unwrap());
+    for (name, data) in entries().into_iter().take(2) {
+        zip.start_file(
+            name,
+            SimpleFileOptions::default().compression_method(CompressionMethod::Stored),
+        )
+        .unwrap();
+        zip.write_all(&data).unwrap();
+    }
+    zip.start_file(
+        "0",
+        SimpleFileOptions::default().compression_method(CompressionMethod::Stored),
+    )
+    .unwrap();
+    let chunk = [0x5au8; 65536];
+    let chunks = 1601u64;
+    let length = chunks * chunk.len() as u64;
+    let mut digest = Sha1::new();
+    let mut encoder = zstd::stream::write::Encoder::new(&mut zip, 3).unwrap();
+    encoder.include_checksum(true).unwrap();
+    encoder.set_pledged_src_size(Some(length)).unwrap();
+    for _ in 0..chunks {
+        encoder.write_all(&chunk).unwrap();
+        digest.update(chunk);
+    }
+    encoder.finish().unwrap();
+    fn integer(mut n: u64, out: &mut Vec<u8>) {
+        while n >= 128 {
+            out.push(n as u8 | 128);
+            n >>= 7;
+        }
+        out.push(n as u8);
+    }
+    let mut record = vec![10, 9];
+    record.extend_from_slice(b"large.bin");
+    record.push(16);
+    integer(length, &mut record);
+    record.extend_from_slice(&[26, 20]);
+    record.extend_from_slice(&digest.finalize());
+    let mut map = vec![10];
+    integer(record.len() as u64, &mut map);
+    map.extend(record);
+    zip.start_file(
+        "media",
+        SimpleFileOptions::default().compression_method(CompressionMethod::Stored),
+    )
+    .unwrap();
+    zip.write_all(&frame(&map)).unwrap();
+    zip.finish().unwrap();
+    let inputs = meguri_package::entry::EntryInputs {
+        collection_directory: destination.clone(),
+        backups_directory: root.path().join("backups"),
+        clock: Arc::new(FixedClock::new(1_894_701_600_000, UtcOffset::UTC)),
+        random: Arc::new(SeededRandom::new(42)),
+        space: Arc::new(StatvfsSpace),
+    };
+    let engine = meguri_engine::Engine::new(meguri_engine::EngineConfig::default()).unwrap();
+    let candidate = meguri_package::entry::inspect_entry(
+        &engine,
+        &source,
+        &inputs,
+        meguri_engine::CancelToken::new(),
+        &meguri_engine::ProgressSink::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        (candidate.facts().media_count, candidate.facts().media_decoded_bytes),
+        (1, length)
+    );
+    assert!(length > 104_857_600);
+    drop(candidate);
+    assert_eq!(fs::read_dir(destination).unwrap().count(), 0);
+    assert!(source.is_file());
+}
 #[test]
 fn validates_whole_media_message_before_explicit_unsupported_refusal() {
     for name in [

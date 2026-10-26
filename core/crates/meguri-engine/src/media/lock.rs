@@ -5,12 +5,14 @@ use std::sync::{Arc, Mutex};
 pub enum MediaJobKind {
     Sync,
     CheckMedia,
+    CollectionImport,
 }
 impl MediaJobKind {
     fn name(self) -> &'static str {
         match self {
             Self::Sync => "media sync",
             Self::CheckMedia => "Check Media",
+            Self::CollectionImport => "collection media import",
         }
     }
 }

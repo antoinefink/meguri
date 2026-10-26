@@ -124,7 +124,7 @@ impl ProcessCore {
         config: HostConfig,
         inspection: meguri_package::entry::EntryInspection,
         slot: &meguri_engine::SlotGuard,
-        cancel: &meguri_engine::CancelToken,
+        cancel: &Arc<meguri_engine::CancelToken>,
         progress: &meguri_engine::ProgressSink,
     ) -> Result<InitialImportCompletion, meguri_package::entry::EntryError> {
         use meguri_package::entry::EntryError;
@@ -160,14 +160,7 @@ impl ProcessCore {
         }
         let (host, _, options) = CoreHost::compose_on(self, config)?;
         let outcome = inspection.activate_initial(slot, options, cancel, progress);
-        let activated = outcome.is_ok()
-            || matches!(
-                &outcome,
-                Err(EntryError::Replacement {
-                    error: meguri_engine::replace::ReplaceError::AfterActivation { .. },
-                    ..
-                })
-            );
+        let activated = outcome.is_ok() || outcome.as_ref().is_err_and(|e| e.candidate_active());
         if !activated {
             // Prepared host cleanup never closes/waits for its own import job.
             host.close()?;

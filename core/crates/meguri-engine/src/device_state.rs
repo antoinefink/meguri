@@ -6,7 +6,6 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    fs::File,
     io::Read,
     path::{Path, PathBuf},
 };
@@ -80,26 +79,72 @@ pub struct FileIdentity {
     pub sha256: [u8; 32],
 }
 pub(crate) fn fingerprint(path: &Path) -> Result<Option<FileIdentity>, StorageError> {
-    let mut file = match File::open(path) {
+    fingerprint_native(path).map(|identity| identity.map(|(bytes, _)| bytes))
+}
+fn fingerprint_native(path: &Path) -> Result<Option<(FileIdentity, NativeIdentity)>, StorageError> {
+    fingerprint_native_checked(path, &|| false, false)
+}
+fn fingerprint_native_checked(
+    path: &Path,
+    cancel: &dyn Fn() -> bool,
+    final_pass: bool,
+) -> Result<Option<(FileIdentity, NativeIdentity)>, StorageError> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let mut file = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+    {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e.into()),
     };
+    let before = file.metadata()?;
+    if !before.is_file() || before.nlink() != 1 {
+        return Err(failure("database identity is not an independent regular file"));
+    }
     let mut digest = Sha256::new();
-    let mut length = 0;
+    let mut length = 0u64;
     let mut buffer = [0u8; 64 * 1024];
     loop {
+        if final_pass {
+            meguri_model::faultpoint!("replace.media.final_database_hash")?;
+        }
+        if cancel() {
+            return Err(failure("database identity scan cancelled"));
+        }
         let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
         }
-        length += read as u64;
+        length = length
+            .checked_add(read as u64)
+            .ok_or_else(|| failure("database identity length overflow"))?;
         digest.update(&buffer[..read]);
     }
-    Ok(Some(FileIdentity {
-        length,
-        sha256: digest.finalize().into(),
-    }))
+    let after = file.metadata()?;
+    let bound = std::fs::symlink_metadata(path)?;
+    if before.dev() != bound.dev()
+        || before.ino() != bound.ino()
+        || before.len() != length
+        || before.len() != after.len()
+        || before.mtime() != after.mtime()
+        || before.mtime_nsec() != after.mtime_nsec()
+        || before.ctime() != after.ctime()
+        || before.ctime_nsec() != after.ctime_nsec()
+    {
+        return Err(failure("database identity changed while reading"));
+    }
+    Ok(Some((
+        FileIdentity {
+            length,
+            sha256: digest.finalize().into(),
+        },
+        NativeIdentity {
+            device: before.dev(),
+            inode: before.ino(),
+        },
+    )))
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum Phase {
@@ -115,6 +160,37 @@ struct Intent {
     old_file: Option<FileIdentity>,
     candidate_file: FileIdentity,
     phase: Phase,
+    #[serde(default)]
+    old_native: Option<NativeIdentity>,
+    #[serde(default)]
+    candidate_native: Option<NativeIdentity>,
+    #[serde(default)]
+    media: Option<meguri_storage::media::CollectionMediaIntent>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct NativeIdentity {
+    device: u64,
+    inode: u64,
+}
+fn native(path: &Path) -> Result<Option<NativeIdentity>, StorageError> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let file = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    let m = file.metadata()?;
+    if !m.is_file() || m.nlink() != 1 {
+        return Err(failure("nonregular or linked database identity"));
+    }
+    Ok(Some(NativeIdentity {
+        device: m.dev(),
+        inode: m.ino(),
+    }))
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct State {
@@ -133,7 +209,7 @@ fn failure(message: impl ToString) -> StorageError {
 }
 fn decode(doc: Option<&Map<String, Value>>) -> Result<Option<State>, StorageError> {
     doc.and_then(|doc| doc.get("deviceState"))
-        .map(|value| serde_json::from_value(value.clone()).map_err(failure))
+        .map(|value| serde_json::from_value(value.clone()).map_err(|_| failure("unreadable device state")))
         .transpose()
 }
 fn put(doc: &mut Map<String, Value>, state: &State) -> Result<(), StorageError> {
@@ -355,7 +431,19 @@ pub(crate) fn ensure(live: &Path, binding: &AccountBinding, random: &dyn RandomS
 
 /// Called under the collection lock, before sweep/open/day writes. Activated
 /// records deliberately do not compare hashes: local review may have committed.
-pub(crate) fn reconcile(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
+pub(crate) fn reconcile(
+    live: &Path,
+    binding: &AccountBinding,
+    clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+) -> Result<(), StorageError> {
+    reconcile_with_media(live, binding, clock, None)
+}
+pub(crate) fn reconcile_with_media(
+    live: &Path,
+    binding: &AccountBinding,
+    clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+    shared: Option<&meguri_storage::media::MediaStore>,
+) -> Result<(), StorageError> {
     let path = sidecar_path(live);
     let state = sidecar::read_document(&path, decode)?;
     let Some(state) = state else {
@@ -366,9 +454,10 @@ pub(crate) fn reconcile(live: &Path, binding: &AccountBinding) -> Result<(), Sto
         };
     };
     bound(&state, binding)?;
-    let Some(intent) = state.intent else {
-        return Ok(());
-    };
+    if state.intent.is_none() {
+        return cleanup_completed_media(live, binding);
+    }
+    let intent = state.intent.unwrap();
     let decision = match intent.phase {
         Phase::Activated => {
             let expected = if intent.reason.requires_publication_decision() {
@@ -395,15 +484,18 @@ pub(crate) fn reconcile(live: &Path, binding: &AccountBinding) -> Result<(), Sto
                 }
             }
             let file = fingerprint(live)?;
-            let old = file == intent.old_file;
-            let candidate = file.as_ref() == Some(&intent.candidate_file);
+            let current_native = native(live)?;
+            let old = file == intent.old_file && (intent.old_native.is_none() || current_native == intent.old_native);
+            let candidate = file.as_ref() == Some(&intent.candidate_file)
+                && (intent.candidate_native.is_none() || current_native == intent.candidate_native);
             match (old, candidate) {
                 (true, false) => intent.prior.clone(),
                 (false, true) => {
                     // A crash after rename may have preceded directory sync.
                     meguri_storage::atomic_file::sync_directory(live.parent().unwrap_or(Path::new(".")))?;
+                    finish_media(live, &intent, true, clock.clone(), shared)?;
                     activate(live, binding)?;
-                    return Ok(());
+                    return cleanup_completed_media(live, binding);
                 }
                 _ => {
                     return Err(failure(
@@ -413,6 +505,13 @@ pub(crate) fn reconcile(live: &Path, binding: &AccountBinding) -> Result<(), Sto
             }
         }
     };
+    finish_media(
+        live,
+        &intent,
+        decision.identity == intent.candidate.identity,
+        clock,
+        shared,
+    )?;
     // Keep decision and intent together in the first durable write. Clearing
     // the journal is a second write, never the source of the decision.
     sidecar::update_document(&path, |doc| {
@@ -421,7 +520,8 @@ pub(crate) fn reconcile(live: &Path, binding: &AccountBinding) -> Result<(), Sto
         current.active = decision;
         put(doc, &current)
     })?;
-    complete(live, binding)
+    complete(live, binding)?;
+    cleanup_completed_media(live, binding)
 }
 
 pub(crate) fn begin(
@@ -430,10 +530,20 @@ pub(crate) fn begin(
     reason: crate::replace::ReplaceReason,
     binding: &AccountBinding,
     random: &dyn RandomSource,
+    media: Option<meguri_storage::media::CollectionMediaIntent>,
+    cancel: &dyn Fn() -> bool,
+    before_record: impl FnOnce(),
 ) -> Result<(), StorageError> {
     ensure(live, binding, random)?;
-    let old_file = fingerprint(live)?;
-    let candidate_file = fingerprint(candidate)?.ok_or_else(|| failure("candidate absent"))?;
+    let old_identity = fingerprint_native_checked(live, cancel, false)?;
+    let (candidate_file, candidate_native) =
+        fingerprint_native_checked(candidate, cancel, false)?.ok_or_else(|| failure("candidate absent"))?;
+    let (old_file, old_native) = match old_identity {
+        Some((b, n)) => (Some(b), Some(n)),
+        None => (None, None),
+    };
+    let candidate_native = Some(candidate_native);
+    before_record();
     sidecar::update_document(&sidecar_path(live), |doc| {
         let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing identity"))?;
         bound(&state, binding)?;
@@ -460,9 +570,197 @@ pub(crate) fn begin(
             old_file,
             candidate_file,
             phase: Phase::Intent,
+            old_native,
+            candidate_native,
+            media,
         });
         put(doc, &state)
     })
+}
+fn record_media(live: &Path, media: &meguri_storage::media::CollectionMediaIntent) -> Result<(), StorageError> {
+    sidecar::update_document(&sidecar_path(live), |doc| {
+        let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing media intent"))?;
+        let intent = state.intent.as_mut().ok_or_else(|| failure("missing media intent"))?;
+        if intent.media.as_ref().map(|m| m.recovery_reference()) != Some(media.recovery_reference()) {
+            return Err(failure("media operation changed"));
+        }
+        intent.media = Some(media.clone());
+        put(doc, &state)
+    })
+}
+pub(crate) fn verify_swap_files(live: &Path, candidate: &Path, cancel: &dyn Fn() -> bool) -> Result<(), StorageError> {
+    let state =
+        sidecar::read_document(&sidecar_path(live), decode)?.ok_or_else(|| failure("missing final swap evidence"))?;
+    let intent = state.intent.ok_or_else(|| failure("missing final swap intent"))?;
+    let old = fingerprint_native_checked(live, cancel, true)?;
+    let incoming =
+        fingerprint_native_checked(candidate, cancel, true)?.ok_or_else(|| failure("final candidate missing"))?;
+    if old.as_ref().map(|(b, _)| b) != intent.old_file.as_ref()
+        || old.as_ref().map(|(_, n)| n) != intent.old_native.as_ref()
+        || incoming.0 != intent.candidate_file
+        || Some(&incoming.1) != intent.candidate_native.as_ref()
+    {
+        return Err(failure("closed swap file identities changed"));
+    }
+    Ok(())
+}
+pub(crate) fn owns_media_intent(live: &Path, reference: &str) -> Result<bool, StorageError> {
+    sidecar::read_document(&sidecar_path(live), |doc| {
+        Ok(decode(doc)?
+            .and_then(|state| state.intent)
+            .and_then(|intent| intent.media)
+            .is_some_and(|media| media.recovery_reference() == reference))
+    })
+}
+pub(crate) fn media_activation(live: &Path, reference: &str) -> Result<Option<bool>, StorageError> {
+    sidecar::read_document(&sidecar_path(live), |doc| {
+        let Some(state) = decode(doc)? else { return Ok(None) };
+        let Some(list) = state.extra.get("collectionMediaReplacements").and_then(Value::as_array) else {
+            return Ok(None);
+        };
+        list.iter()
+            .rev()
+            .find(|v| v.get("root").and_then(Value::as_str) == Some(reference))
+            .map(|v| {
+                v.get("candidateActive")
+                    .and_then(Value::as_bool)
+                    .ok_or_else(|| failure("invalid completed media evidence"))
+            })
+            .transpose()
+    })
+}
+pub(crate) fn publish_media(
+    live: &Path,
+    media: &mut meguri_storage::media::CollectionMediaIntent,
+    store: &meguri_storage::media::MediaStore,
+    cancel: &dyn Fn() -> bool,
+) -> Result<(), meguri_storage::media::MediaError> {
+    media.publish(
+        store,
+        |m| {
+            record_media(live, m).map_err(|_| {
+                meguri_storage::media::MediaError::InvalidManifest("media progress could not be recorded".into())
+            })
+        },
+        cancel,
+    )
+}
+fn finish_media(
+    live: &Path,
+    intent: &Intent,
+    candidate: bool,
+    clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+    shared: Option<&meguri_storage::media::MediaStore>,
+) -> Result<(), StorageError> {
+    let Some(mut media) = intent.media.clone() else {
+        return Ok(());
+    };
+    media
+        .validate_initial_admission(live)
+        .map_err(|e| failure(e.to_string()))?;
+    let opened;
+    let store = match shared {
+        Some(store) => store,
+        None => {
+            opened = media
+                .open_recovery_store(live, clock)
+                .map_err(|e| failure(e.to_string()))?;
+            &opened
+        }
+    };
+    if candidate {
+        publish_media(live, &mut media, store, &|| false).map_err(|e| failure(e.to_string()))?;
+    } else {
+        media.rollback(store).map_err(|e| failure(e.to_string()))?;
+    }
+    // Evidence survives delivery failure and future replacements. In particular
+    // a backup's old-name/trash mapping is independent of backup retention.
+    sidecar::update_document(&sidecar_path(live), |doc| {
+        let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing media evidence"))?;
+        let key = "collectionMediaReplacements";
+        let mut value = serde_json::to_value(&media).map_err(failure)?;
+        let record = value.as_object_mut().ok_or_else(|| failure("invalid media evidence"))?;
+        record.insert(
+            "operation".into(),
+            serde_json::to_value(intent.operation).map_err(failure)?,
+        );
+        record.insert("candidateActive".into(), candidate.into());
+        record.insert(
+            "priorPublication".into(),
+            serde_json::to_value(&intent.prior).map_err(failure)?,
+        );
+        record.insert(
+            "candidatePublication".into(),
+            serde_json::to_value(&intent.candidate).map_err(failure)?,
+        );
+        let list = state
+            .extra
+            .entry(key.into())
+            .or_insert_with(|| Value::Array(Vec::new()))
+            .as_array_mut()
+            .ok_or_else(|| failure("invalid media evidence list"))?;
+        if let Some(prior) = list.iter_mut().find(|v| v.get("operation") == value.get("operation")) {
+            *prior = value;
+        } else {
+            list.push(value);
+        }
+        put(doc, &state)
+    })
+}
+fn cleanup_completed_media(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
+    let state = sidecar::read_document(&sidecar_path(live), decode)?
+        .ok_or_else(|| failure("missing media completion state"))?;
+    bound(&state, binding)?;
+    if state.intent.is_some() {
+        return Err(failure("media cleanup still has an active replacement"));
+    }
+    let Some(records) = state.extra.get("collectionMediaReplacements") else {
+        return Ok(());
+    };
+    for record in records
+        .as_array()
+        .ok_or_else(|| failure("invalid media evidence list"))?
+    {
+        if record.get("completed").and_then(Value::as_bool) != Some(true) {
+            continue;
+        }
+        let operation: PublicationId = serde_json::from_value(
+            record
+                .get("operation")
+                .cloned()
+                .ok_or_else(|| failure("missing media operation"))?,
+        )
+        .map_err(failure)?;
+        let prior: Publication = serde_json::from_value(
+            record
+                .get("priorPublication")
+                .cloned()
+                .ok_or_else(|| failure("missing prior media publication"))?,
+        )
+        .map_err(failure)?;
+        let candidate: Publication = serde_json::from_value(
+            record
+                .get("candidatePublication")
+                .cloned()
+                .ok_or_else(|| failure("missing candidate media publication"))?,
+        )
+        .map_err(failure)?;
+        if !prior.binding.certain()
+            || prior.binding != candidate.binding
+            || prior.identity == candidate.identity
+            || operation == prior.identity
+            || operation == candidate.identity
+            || record.get("candidateActive").and_then(Value::as_bool).is_none()
+        {
+            return Err(failure("invalid media completion witness"));
+        }
+        let media: meguri_storage::media::CollectionMediaIntent =
+            serde_json::from_value(record.clone()).map_err(failure)?;
+        media
+            .cleanup_initial_admission(live)
+            .map_err(|e| failure(e.to_string()))?;
+    }
+    Ok(())
 }
 fn retained_replacements(state: &State) -> Result<Vec<ReplacementEvidence>, StorageError> {
     if !state.replacements.is_empty() {
@@ -510,10 +808,44 @@ pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), Stor
     complete(live, binding)
 }
 fn complete(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
+    meguri_model::faultpoint!("replace.media.before_completion")?;
     sidecar::update_document(&sidecar_path(live), |doc| {
         let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing completed journal"))?;
         bound(&state, binding)?;
-        state.intent = None;
+        if let Some(intent) = state.intent.take() {
+            if let Some(media) = intent.media {
+                let operation = serde_json::to_value(intent.operation).map_err(failure)?;
+                let record = state
+                    .extra
+                    .get_mut("collectionMediaReplacements")
+                    .and_then(Value::as_array_mut)
+                    .and_then(|records| {
+                        records
+                            .iter_mut()
+                            .find(|record| record.get("operation") == Some(&operation))
+                    })
+                    .ok_or_else(|| failure("missing media completion evidence"))?;
+                let candidate = record
+                    .get("candidateActive")
+                    .and_then(Value::as_bool)
+                    .ok_or_else(|| failure("missing media completion decision"))?;
+                let expected = if candidate { &intent.candidate } else { &intent.prior };
+                if &state.active != expected
+                    || record.get("root").and_then(Value::as_str) != Some(media.recovery_reference())
+                    || record.get("priorPublication") != Some(&serde_json::to_value(&intent.prior).map_err(failure)?)
+                    || record.get("candidatePublication")
+                        != Some(&serde_json::to_value(&intent.candidate).map_err(failure)?)
+                {
+                    return Err(failure("media completion publication differs"));
+                }
+                record
+                    .as_object_mut()
+                    .ok_or_else(|| failure("invalid media completion record"))?
+                    .insert("completed".into(), true.into());
+            }
+        }
         put(doc, &state)
-    })
+    })?;
+    meguri_model::faultpoint!("replace.media.after_completion")?;
+    Ok(())
 }

@@ -736,6 +736,7 @@ pub(crate) struct Swap {
     /// Verified replacement knows exactly whether its rename succeeded. The
     /// legacy closure keeps L8's file-change detection for arbitrary restores.
     pub activated: Option<Arc<std::sync::atomic::AtomicBool>>,
+    pub media_recovered: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 /// Closes the collection, swaps the file, reopens it through the open gate
@@ -784,7 +785,11 @@ impl TaskBody for ReplaceTask {
         // Never replace a file whose final commit/checkpoint could not be
         // made durable. Reopen the original through the same recovery path
         // as a swap that failed before touching it.
-        let Swap { run: swap, activated } = swap;
+        let Swap {
+            run: swap,
+            activated,
+            media_recovered,
+        } = swap;
         let swapped = match closed {
             Ok(outcome) if outcome.succeeded() => {
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| swap(&shared.path)))
@@ -811,7 +816,14 @@ impl TaskBody for ReplaceTask {
             .managed();
         // A swap Err may follow rename or an atomic-sidecar directory-sync
         // failure. Prove/finish R6 before a managed writer can mutate evidence.
-        if let Err(error) = crate::device_state::reconcile(&shared.path, &reopen.binding) {
+        let recovered = if media_recovered.as_ref().is_some_and(|r| !r.load(Ordering::Acquire)) {
+            Err(meguri_storage::StorageError::Io {
+                detail: "collection media recovery must complete before reopen".into(),
+            })
+        } else {
+            crate::device_state::reconcile(&shared.path, &reopen.binding, reopen.clock.clone())
+        };
+        if let Err(error) = recovered {
             let _ = reply.send(Replaced {
                 reopened: false,
                 error: Some(error.into()),

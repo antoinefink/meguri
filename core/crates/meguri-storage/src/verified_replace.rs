@@ -39,11 +39,25 @@ impl std::error::Error for ReplaceError {}
 /// hand over its existing TempDir, without reopening an arbitrary source path.
 pub struct ReplacementStage {
     directory: tempfile::TempDir,
+    pub(crate) media: Option<Vec<crate::media::IncomingMedia>>,
+    pub media_backup: Option<crate::media::ImportMediaBackup>,
+    media_counts: std::sync::Arc<std::sync::Mutex<crate::media::ImportMediaCounts>>,
+    pub media_cancel: Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
+    pub media_space: Option<std::sync::Arc<dyn crate::space::SpaceProvider>>,
+    media_reference: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    pub media_previous_journal_absent: bool,
 }
 impl ReplacementStage {
     pub fn new(directory: &Path) -> Result<Self, StorageError> {
         Ok(Self {
             directory: crate::leftovers::staging_directory(directory)?,
+            media: None,
+            media_backup: None,
+            media_counts: Default::default(),
+            media_cancel: None,
+            media_space: None,
+            media_reference: Default::default(),
+            media_previous_journal_absent: false,
         })
     }
     pub fn from_staging(directory: tempfile::TempDir) -> Result<Self, StorageError> {
@@ -57,13 +71,36 @@ impl ReplacementStage {
                 detail: "replacement requires an owned reserved staging directory".into(),
             });
         }
-        Ok(Self { directory })
+        Ok(Self {
+            directory,
+            media: None,
+            media_backup: None,
+            media_counts: Default::default(),
+            media_cancel: None,
+            media_space: None,
+            media_reference: Default::default(),
+            media_previous_journal_absent: false,
+        })
     }
     pub fn path(&self) -> std::path::PathBuf {
         self.directory.path().join("collection.anki2")
     }
     pub fn directory(&self) -> &Path {
         self.directory.path()
+    }
+    /// Only local collection-file entry supplies this validated inventory.
+    /// Other replacement consumers keep their explicit collection-only policy.
+    pub fn set_local_media(&mut self, media: Vec<crate::media::IncomingMedia>) {
+        self.media = Some(media);
+    }
+    pub fn take_local_media(&mut self) -> Option<Vec<crate::media::IncomingMedia>> {
+        self.media.take()
+    }
+    pub fn media_counts(&self) -> std::sync::Arc<std::sync::Mutex<crate::media::ImportMediaCounts>> {
+        self.media_counts.clone()
+    }
+    pub fn media_reference(&self) -> std::sync::Arc<std::sync::Mutex<Option<String>>> {
+        self.media_reference.clone()
     }
 }
 

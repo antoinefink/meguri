@@ -16,6 +16,8 @@ public struct CoreProgress: Sendable, Hashable {
     /// `nil` while the amount of work is unknown.
     public let total: UInt64?
 
+    public let collectionMediaPrepared: CollectionImportMedia?
+
     init(_ update: MeguriCoreBindings.ProgressUpdate) {
         switch update.phase {
         case .planning: phase = .planning
@@ -26,6 +28,7 @@ public struct CoreProgress: Sendable, Hashable {
         job = JobID(rawValue: update.jobId)
         completed = update.completed
         total = update.total
+        collectionMediaPrepared = update.collectionMediaPrepared.map(CollectionImportMedia.init)
     }
 }
 

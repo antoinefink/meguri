@@ -844,20 +844,36 @@ fn obsolete_clear_download_journals_fail_closed_in_both_phases() {
 }
 
 #[test]
-fn identical_closed_bytes_are_ambiguous_and_activated_phase_ignores_later_hash_changes() {
+fn identical_closed_bytes_use_native_identity_and_activated_phase_ignores_later_hash_changes() {
     for reason in FENCED_REASONS {
         let (dir, live) = common::copy_fixture("schema-18.anki2");
         crash(&live, "replace.after_pause_recorded", "identical", reason);
         let sidecar = dir.path().join("meguri-sidecar.json");
-        let evidence = fs::read(&sidecar).unwrap();
+        let mut evidence: serde_json::Value = serde_json::from_slice(&fs::read(&sidecar).unwrap()).unwrap();
+        assert_ne!(
+            evidence["deviceState"]["intent"]["old_native"],
+            evidence["deviceState"]["intent"]["candidate_native"]
+        );
+        // Legacy records lacking native identities still cannot guess when
+        // both byte identities match. Preserve that refusal and its evidence.
+        let legacy_path = dir.path().join("legacy-sidecar.json");
+        evidence["deviceState"]["intent"]
+            .as_object_mut()
+            .unwrap()
+            .remove("old_native");
+        evidence["deviceState"]["intent"]
+            .as_object_mut()
+            .unwrap()
+            .remove("candidate_native");
+        fs::write(&legacy_path, serde_json::to_vec(&evidence).unwrap()).unwrap();
+        let native = fs::read(&sidecar).unwrap();
+        fs::copy(&legacy_path, &sidecar).unwrap();
         let engine = Engine::new(EngineConfig::default()).unwrap();
         assert!(engine.open_raw(&live, config(binding(), 55)).is_err());
-        assert_eq!(fs::read(&sidecar).unwrap(), evidence);
-        assert!(
-            DeviceState::for_collection(&live)
-                .publication_token(&binding())
-                .is_err()
-        );
+        assert_eq!(fs::read(&sidecar).unwrap(), fs::read(&legacy_path).unwrap());
+        drop(engine);
+        fs::write(&sidecar, native).unwrap();
+        assert_eq!(recover_twice(&live, false, 722).decision, PublicationDecision::Clear);
 
         let (_dir, live) = common::copy_fixture("schema-18.anki2");
         settled_old(&live);

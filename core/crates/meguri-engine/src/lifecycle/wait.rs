@@ -82,12 +82,13 @@ impl SlotGuard {
 
     /// Initial-entry counterpart of `Exclusive::replace_verified_before_commit`.
     /// The hook runs without core locks or reader leases, before swap ownership
-    /// is retained; success starts the noncancellable swap/recovery phase.
+    /// is retained. Media entry remains cancellable until rename; recovery
+    /// itself always runs to completion.
     pub fn replace_verified_initial_before_commit(
         &self,
         live: &std::path::Path,
         config: crate::OpenConfig,
-        stage: crate::replace::ReplacementStage,
+        mut stage: crate::replace::ReplacementStage,
         reason: crate::replace::ReplaceReason,
         change: impl FnOnce(&mut meguri_storage::WriteScope<'_>) -> Result<(), meguri_storage::StorageError>,
         before_commit: impl FnOnce() -> Result<(), EngineError>,
@@ -116,7 +117,7 @@ impl SlotGuard {
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(std::path::Path::new("."));
-        let activated = std::sync::atomic::AtomicBool::new(false);
+        let activated = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             meguri_model::faultpoint!("replace.initial.before_ownership")
                 .map_err(meguri_storage::StorageError::from)
@@ -138,7 +139,8 @@ impl SlotGuard {
                     Err(e) => return Err(EngineError::from(meguri_storage::StorageError::from(e)).into()),
                 }
             }
-            crate::device_state::reconcile(live, &config.publication_binding).map_err(EngineError::from)?;
+            crate::device_state::reconcile(live, &config.publication_binding, config.clock.clone())
+                .map_err(EngineError::from)?;
             let mut initializers = config.initializers.clone();
             initializers.register(meguri_search::sqlfns::register);
             initializers.register(meguri_sched::sqlfns::register);
@@ -152,23 +154,65 @@ impl SlotGuard {
                 reason.package(),
                 change,
             )?;
-            before_commit()?;
+            let media = if let Some(incoming) = stage.take_local_media() {
+                if reason != crate::replace::ReplaceReason::ColpkgImport {
+                    return Err(ReplaceError::NotExclusive);
+                }
+                // Retain collection admission before any media constructor can
+                // publish a journal or durable recovery evidence.
+                self.engine.lock_state().recovery_ownership = Some(ownership.clone());
+                Some(crate::replace::PreparedMedia::new_initial(
+                    live,
+                    config.clock.clone(),
+                    &mut stage,
+                    incoming,
+                )?)
+            } else {
+                None
+            };
+            if let Err(error) = before_commit() {
+                return Err(match media {
+                    Some(media) => media.abort(error.into()),
+                    None => error.into(),
+                });
+            }
+            let media_recovered = media.as_ref().map(|m| m.recovered.clone());
             // Retain the existing identity before beginning the first intent.
-            crate::device_state::ensure(live, &config.publication_binding, config.random.as_ref())
-                .map_err(EngineError::from)?;
+            let ensured = meguri_model::faultpoint!("replace.media.initial_before_ensure")
+                .map_err(meguri_storage::StorageError::from)
+                .and_then(|()| crate::device_state::ensure(live, &config.publication_binding, config.random.as_ref()));
+            if let Err(error) = ensured {
+                let error = EngineError::from(error).into();
+                return Err(match media {
+                    Some(media) => media.abort(error),
+                    None => error,
+                });
+            }
             self.engine.lock_state().recovery_ownership = Some(ownership.clone());
-            let swapped = crate::replace::swap(
+            let swapped = crate::replace::run_swap(
                 live,
                 stage,
                 reason,
-                &config.publication_binding,
-                config.random.as_ref(),
-                &activated,
+                config.publication_binding.clone(),
+                config.random.clone(),
+                config.clock.clone(),
+                activated.clone(),
+                media,
+                self.engine.threads().clone(),
             );
             let changed = activated.load(std::sync::atomic::Ordering::Acquire);
-            crate::device_state::reconcile(live, &config.publication_binding).map_err(EngineError::from)?;
+            if media_recovered
+                .as_ref()
+                .is_some_and(|r| !r.load(std::sync::atomic::Ordering::Acquire))
+            {
+                return Err(swapped
+                    .err()
+                    .unwrap_or_else(|| EngineError::internal("media recovery incomplete").into()));
+            }
+            crate::device_state::reconcile(live, &config.publication_binding, config.clock.clone())
+                .map_err(EngineError::from)?;
             match swapped {
-                Err(error) if !changed => Err(ReplaceError::Staging(error)),
+                Err(error) if !changed => Err(error),
                 outcome => Ok::<_, ReplaceError>((ownership, outcome.err())),
             }
         }))
@@ -177,7 +221,8 @@ impl SlotGuard {
             Ok(prepared) => prepared,
             Err(error) => {
                 let changed = activated.load(std::sync::atomic::Ordering::Acquire);
-                if changed {
+                let recovery_required = matches!(&error, ReplaceError::MediaRecoveryRequired { .. });
+                if changed || recovery_required {
                     self.engine.set_state(LifecycleState::Failed {
                         reason: FailedReason::Replace {
                             detail: error.to_string(),
@@ -240,7 +285,7 @@ impl SlotGuard {
         match swap_error {
             Some(error) => Err(ReplaceError::AfterActivation {
                 generation: Some(opened.generation()),
-                source: Box::new(ReplaceError::Staging(error)),
+                source: Box::new(error),
             }),
             None => Ok(opened),
         }

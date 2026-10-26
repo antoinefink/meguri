@@ -337,7 +337,7 @@ impl Engine {
                 Some(ownership) => ownership,
                 None => Arc::new(meguri_storage::lockfile::CollectionLock::acquire(directory)?),
             };
-            crate::device_state::reconcile(path, &config.publication_binding)?;
+            crate::device_state::reconcile(path, &config.publication_binding, config.clock.clone())?;
             crate::device_state::ensure(path, &config.publication_binding, config.random.as_ref())?;
             if !initial_replacement {
                 meguri_storage::leftovers::cleanup(directory)?;
@@ -679,6 +679,9 @@ impl fmt::Debug for Exclusive<'_> {
 }
 
 impl<'s> Exclusive<'s> {
+    pub(crate) fn replacement_threads(&self) -> ThreadRegistry {
+        self.slot.engine.threads().clone()
+    }
     /// The open collection `slot` may take over now: its core, ports and
     /// state.
     fn entry(slot: &SlotGuard, state: &LcState) -> Result<(Arc<CollectionCore>, Ports, LifecycleState), EngineError> {
@@ -820,6 +823,7 @@ impl<'s> Exclusive<'s> {
         self.replace_inner(crate::executor::writer::Swap {
             run: Box::new(swap),
             activated: None,
+            media_recovered: None,
         })
     }
 
@@ -827,10 +831,12 @@ impl<'s> Exclusive<'s> {
         &mut self,
         swap: impl FnOnce(&Path) -> Result<(), EngineError> + Send + 'static,
         activated: Arc<std::sync::atomic::AtomicBool>,
+        media_recovered: Option<Arc<std::sync::atomic::AtomicBool>>,
     ) -> Result<Collection, EngineError> {
         self.replace_inner(crate::executor::writer::Swap {
             run: Box::new(swap),
             activated: Some(activated),
+            media_recovered,
         })
     }
 

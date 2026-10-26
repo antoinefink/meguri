@@ -29,8 +29,25 @@ pub struct CollectionPackageInspectContext<'a> {
 pub struct InspectedCollection {
     staging: StagedCollection,
     facts: CollectionPackageFacts,
+    media: Vec<meguri_storage::media::IncomingMedia>,
 }
 impl InspectedCollection {
+    pub fn media_count(&self) -> u64 {
+        self.media.len() as u64
+    }
+    pub fn media_bytes(&self) -> u64 {
+        self.media.iter().map(|m| m.length).sum()
+    }
+    pub(crate) fn into_replacement(
+        self,
+    ) -> std::result::Result<meguri_storage::verified_replace::ReplacementStage, StorageError> {
+        let mut stage =
+            meguri_storage::verified_replace::ReplacementStage::from_staging(self.staging.into_directory())?;
+        if !self.media.is_empty() {
+            stage.set_local_media(self.media);
+        }
+        Ok(stage)
+    }
     pub fn facts(&self) -> &CollectionPackageFacts {
         &self.facts
     }
@@ -96,6 +113,13 @@ pub fn inspect_collection_package(
     source: &Path,
     context: &CollectionPackageInspectContext<'_>,
 ) -> Result<InspectedCollection> {
+    inspect(source, context, false)
+}
+fn inspect(
+    source: &Path,
+    context: &CollectionPackageInspectContext<'_>,
+    local_media: bool,
+) -> Result<InspectedCollection> {
     cancelled(context.is_cancelled)?;
     let (mut input, header, n, mut total, limit, estimate) = prepare(File::open(source)?, context)?;
     let index = input.collection.ok_or_else(|| corrupt("missing collection.anki21b"))?;
@@ -126,7 +150,7 @@ pub fn inspect_collection_package(
     output.flush()?;
     drop(output);
     cancelled(context.is_cancelled)?;
-    let facts = package_inspection::inspect_candidate(
+    let mut facts = package_inspection::inspect_candidate(
         &path,
         &CandidateContext {
             clock: context.clock,
@@ -136,6 +160,7 @@ pub fn inspect_collection_package(
         },
     )
     .map_err(candidate_error)?;
+    let mut media = Vec::new();
     if let Some(index) = input.media {
         let entry = input.archive.by_index(index)?;
         let limit = reader::decoded_limit(entry.compressed_size(), 64 * 1024 * 1024);
@@ -143,20 +168,91 @@ pub fn inspect_collection_package(
         reader::zstd_read(entry, limit, &mut total, context.is_cancelled, |chunk| {
             bytes.extend_from_slice(chunk)
         })?;
-        let count = media_map::validate(&bytes, context.is_cancelled)?;
-        if count != 0 {
+        media = inventory(&bytes, context.is_cancelled)?;
+        if !local_media && !media.is_empty() {
             return Err(Error::UnsupportedMedia);
         }
     }
-    if input.carried_media {
+    if !local_media && !input.payloads.is_empty() {
         return Err(Error::UnsupportedMedia);
+    }
+    if input.payloads.len() != media.len() {
+        return Err(corrupt("media payload set differs from map"));
+    }
+    if !media.is_empty() {
+        // Exercise the destination volume's actual name equivalence before a
+        // live merge. Map names are validated components, never ZIP paths.
+        let probe = tempfile::Builder::new().prefix("names-").tempdir_in(directory.path())?;
+        for record in &media {
+            cancelled(context.is_cancelled)?;
+            File::options()
+                .write(true)
+                .create_new(true)
+                .open(probe.path().join(&record.name))
+                .map_err(|_| corrupt("incoming media names conflict on destination volume"))?;
+        }
+    }
+    // All map records and the exact member set are checked before decoding a
+    // payload. Every body is streamed through EOF, including unused media.
+    use sha1::{Digest, Sha1};
+    for (number, record) in media.iter().enumerate() {
+        cancelled(context.is_cancelled)?;
+        let index = *input
+            .payloads
+            .get(&(number as u32))
+            .ok_or_else(|| corrupt("missing media payload"))?;
+        let mut file = File::options()
+            .write(true)
+            .create_new(true)
+            .open(directory.path().join(format!("media-{number}")))?;
+        let mut digest = Sha1::new();
+        let length = reader::zstd_read_fallible(
+            input.archive.by_index(index)?,
+            record.length,
+            &mut total,
+            context.is_cancelled,
+            |chunk| {
+                meguri_model::faultpoint!("package.inspect.media_write")?;
+                file.write_all(chunk)?;
+                digest.update(chunk);
+                Ok(())
+            },
+        )?;
+        if length != record.length || format!("{:x}", digest.finalize()) != record.sha1 {
+            return Err(corrupt("media length or SHA-1 mismatch"));
+        }
+        meguri_storage::atomic_file::full_sync(&file)?;
     }
     drop(input);
     cancelled(context.is_cancelled)?;
+    facts.media_count = media.len() as u64;
+    facts.media_decoded_bytes = media.iter().map(|m| m.length).sum();
     Ok(InspectedCollection {
         staging: StagedCollection { directory },
         facts,
+        media,
     })
+}
+
+fn inventory(bytes: &[u8], check: &(dyn Fn() -> bool + Sync)) -> Result<Vec<meguri_storage::media::IncomingMedia>> {
+    let mut result = Vec::new();
+    let mut names = std::collections::BTreeSet::new();
+    media_map::records(bytes, check, |m| {
+        meguri_storage::media::validate_incoming_name(m.name).map_err(|_| corrupt("unrepresentable media name"))?;
+        if !names.insert(m.name.to_lowercase()) {
+            return Err(corrupt("duplicate or conflicting media names"));
+        }
+        if result.len() >= 400_000 {
+            return Err(corrupt("media map entry bound"));
+        }
+        result.push(meguri_storage::media::IncomingMedia {
+            name: m.name.to_owned(),
+            length: u64::from(m.length),
+            sha1: m.sha1.iter().map(|b| format!("{b:02x}")).collect(),
+        });
+        Ok(())
+    })?;
+    Ok(result)
 }
 
 // Shared bounded ZIP/meta/first-frame preparation. RF2 calls this before the
@@ -209,7 +305,7 @@ fn prepare(
     if declared.is_some_and(|size| size > limit) {
         return Err(corrupt("declared collection byte limit"));
     }
-    let estimate = match declared {
+    let mut estimate = match declared {
         Some(size) => size,
         None => compressed_size
             .checked_mul(4)
@@ -217,7 +313,71 @@ fn prepare(
             .max(context.live_collection_size),
     };
     drop(entry);
+    // Read the bounded map before the first owned write, so preflight includes
+    // every decoded payload rather than trusting compressed archive sizes.
+    if let Some(index) = input.media {
+        let entry = input.archive.by_index(index)?;
+        let limit = reader::decoded_limit(entry.compressed_size(), 64 * 1024 * 1024);
+        let mut bytes = Vec::new();
+        let mut map_total = 0;
+        reader::zstd_read(entry, limit, &mut map_total, context.is_cancelled, |chunk| {
+            bytes.extend_from_slice(chunk)
+        })?;
+        for m in inventory(&bytes, context.is_cancelled)? {
+            estimate = estimate
+                .checked_add(m.length)
+                .and_then(|n| n.checked_add(4096))
+                .ok_or_else(|| corrupt("media preflight overflow"))?;
+        }
+    }
     Ok((input, header, n, total, limit, estimate))
+}
+
+fn local_media_reserve(context: &CollectionPackageInspectContext<'_>) -> Result<u64> {
+    // Reserve space for incoming files, retained old files, journal copies,
+    // and temporary database writes while the import can still roll back.
+    // Estimate existing file sizes without opening a media store.
+    let mut media_reserve = 0u64;
+    for name in ["collection.media", "media.trash", "media.staging"] {
+        let root = context.collection_directory.join(name);
+        match root.symlink_metadata() {
+            Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {
+                if name == "collection.media" {
+                    for entry in std::fs::read_dir(root)? {
+                        cancelled(context.is_cancelled)?;
+                        let entry = entry?;
+                        let m = entry.path().symlink_metadata()?;
+                        if m.is_file() {
+                            media_reserve = media_reserve
+                                .checked_add(m.len())
+                                .and_then(|n| n.checked_add(4096))
+                                .ok_or_else(|| corrupt("media preflight overflow"))?;
+                        }
+                    }
+                }
+            }
+            Ok(_) => return Err(corrupt("media root is not an owned directory")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(StorageError::from(e).into()),
+        }
+    }
+    for name in ["meguri-media.db", "meguri-media.db-wal", "meguri-media.db-journal"] {
+        match context.collection_directory.join(name).symlink_metadata() {
+            Ok(m) if m.is_file() && !m.file_type().is_symlink() => {
+                media_reserve = media_reserve
+                    .checked_add(
+                        m.len()
+                            .checked_mul(3)
+                            .ok_or_else(|| corrupt("journal preflight overflow"))?,
+                    )
+                    .ok_or_else(|| corrupt("journal preflight overflow"))?;
+            }
+            Ok(_) => return Err(corrupt("media journal is not regular")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(StorageError::from(e).into()),
+        }
+    }
+    Ok(media_reserve)
 }
 
 /// Caller must retain security scope and the synchronous NSFileCoordinator
@@ -229,6 +389,21 @@ pub fn copy_and_inspect_collection_package(
     context: &CollectionPackageInspectContext<'_>,
     progress: &meguri_engine::ProgressSink,
 ) -> Result<(InspectedCollection, tempfile::TempDir, [u8; 32])> {
+    copy_and_inspect(source, context, progress, false)
+}
+pub(crate) fn copy_and_inspect_local_collection_package(
+    source: &Path,
+    context: &CollectionPackageInspectContext<'_>,
+    progress: &meguri_engine::ProgressSink,
+) -> Result<(InspectedCollection, tempfile::TempDir, [u8; 32])> {
+    copy_and_inspect(source, context, progress, true)
+}
+fn copy_and_inspect(
+    source: &Path,
+    context: &CollectionPackageInspectContext<'_>,
+    progress: &meguri_engine::ProgressSink,
+    local_media: bool,
+) -> Result<(InspectedCollection, tempfile::TempDir, [u8; 32])> {
     use sha2::{Digest, Sha256};
     use std::io::{Seek, SeekFrom};
     cancelled(context.is_cancelled)?;
@@ -237,11 +412,25 @@ pub fn copy_and_inspect_collection_package(
     }
     let mut file = File::open(source)?;
     let size = file.metadata()?.len();
-    let (_, _, _, _, _, estimate) = prepare(file.try_clone()?, context)?;
+    let (prepared, _, _, _, _, estimate) = prepare(file.try_clone()?, context)?;
+    let media_reserve = if local_media && !prepared.payloads.is_empty() {
+        local_media_reserve(context)?
+    } else {
+        0
+    };
+    let simultaneous = if prepared.payloads.is_empty() { 2 } else { 3 };
+    drop(prepared);
+    let context = &CollectionPackageInspectContext {
+        reserved_space_bytes: context
+            .reserved_space_bytes
+            .checked_add(media_reserve)
+            .ok_or_else(|| corrupt("combined preflight overflow"))?,
+        ..*context
+    };
     // Reserve the entire source copy, extraction, worst-case upgrade copy,
     // safety snapshot/package and overhead together, before making staging.
     let needed = estimate
-        .checked_mul(2)
+        .checked_mul(simultaneous)
         .and_then(|n| n.checked_add(size))
         .and_then(|n| n.checked_add(context.reserved_space_bytes))
         .and_then(|n| n.checked_add(4 * 1024 * 1024))
@@ -279,6 +468,6 @@ pub fn copy_and_inspect_collection_package(
     drop(output);
     drop(file);
     progress.set_phase(meguri_engine::ProgressPhase::Named("inspect"));
-    let inspected = inspect_collection_package(&copy, context)?;
+    let inspected = inspect(&copy, context, local_media)?;
     Ok((inspected, directory, digest.finalize().into()))
 }

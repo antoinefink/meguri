@@ -38,10 +38,23 @@ pub struct PendingChange {
     pub change_counter: u64,
 }
 pub(super) fn open(path: &Path) -> Result<Connection> {
+    open_initial_owned(path, None)
+}
+pub(super) fn open_initial_owned(path: &Path, empty_native: Option<(u64, u64)>) -> Result<Connection> {
+    use std::os::unix::fs::MetadataExt;
+    let owned_empty = if let Some(expected) = empty_native {
+        let m = std::fs::symlink_metadata(path)?;
+        if !m.is_file() || m.nlink() != 1 || m.len() != 0 || (m.dev(), m.ino()) != expected {
+            return Err(super::MediaError::InvalidName);
+        }
+        true
+    } else {
+        false
+    };
     const APPLICATION_ID: i64 = 0x4d47524d;
     const VERSION: i64 = 2;
     let mut old_version = 0;
-    if path.try_exists()? {
+    if !owned_empty && path.try_exists()? {
         // Probe a copy when SQLite might need sidecar recovery. Even a refused
         // foreign WAL database must not acquire new sidecars in its directory.
         let temporary = tempfile::tempdir()?;
@@ -116,7 +129,7 @@ pub(super) fn open(path: &Path) -> Result<Connection> {
     tx.commit()?;
     Ok(db)
 }
-fn row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MediaEntry> {
+pub(super) fn row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MediaEntry> {
     Ok(MediaEntry {
         name: row.get(0)?,
         sha1: row.get(1)?,

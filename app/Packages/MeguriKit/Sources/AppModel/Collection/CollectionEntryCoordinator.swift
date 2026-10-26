@@ -12,6 +12,10 @@ public final class CollectionEntryCoordinator {
     public var pickerPresented = false
     public private(set) var preview: InspectedCollection?
     public private(set) var lastActivation: CollectionActivation?
+    public private(set) var preparedMedia: CollectionImportMedia?
+    private var recoveryFinished = false
+    public var requiresRecovery: Bool { failure?.requiresRecovery == true && !recoveryFinished }
+    public var canContinueRecovery: Bool { requiresRecovery && failure?.candidateActive == true && failure?.requiresReopenRecovery == false }
     public private(set) var progress: CoreProgress?
     public private(set) var failure: CollectionEntryFailure?
     public private(set) var message: String?
@@ -19,10 +23,10 @@ public final class CollectionEntryCoordinator {
     public var busy: Bool { stage == .readingPackage || stage == .applyingPackage }
     public var canCancel: Bool {
         if stage == .applyingPackage, let lifecycle = owner?.lifecycle, case .exclusiveBusy(_, _, let cancellable) = lifecycle, !cancellable { return false }
-        return busy && progress?.cancellable != false && failure?.candidateActive != true
+        return busy && progress?.cancellable != false && !requiresRecovery
     }
-    public var canChoose: Bool { !busy && failure?.candidateActive != true }
-    public var canPresent: Bool { owner?.entryAllowed == true && !busy }
+    public var canChoose: Bool { !busy && !requiresRecovery }
+    public var canPresent: Bool { !busy && (requiresRecovery || owner?.entryAllowed == true) }
     private weak var owner: ReviewCollection?
     private let service: any CollectionEntryService
     private var operation: CollectionEntryOperation?
@@ -33,7 +37,7 @@ public final class CollectionEntryCoordinator {
     init(owner: ReviewCollection, service: any CollectionEntryService) { self.owner = owner; self.service = service }
     public func present() {
         guard canPresent else { return }
-        message = nil; failure = nil
+        if !requiresRecovery { message = nil; failure = nil }
         owner?.navigation.present(.collectionEntry)
     }
     public func chooseFile() { guard canChoose else { return }; pickerPresented = true }
@@ -44,14 +48,15 @@ public final class CollectionEntryCoordinator {
             guard urls.count == 1, let url = urls.first else { return }
             inspect(url)
         case .failure(let error):
+            guard !requiresRecovery else { return }
             if (error as NSError).code != NSUserCancelledError { report(error) }
         }
     }
-    public func reinspect() { if let selectedSource, !busy { inspect(selectedSource) } }
+    public func reinspect() { if let selectedSource, canChoose { inspect(selectedSource) } }
     public func inspect(_ source: URL) {
-        guard !busy, let owner, owner.entryAllowed else { return }
+        guard canChoose, let owner, owner.entryAllowed else { return }
         selectedSource = source
-        lastActivation = nil
+        lastActivation = nil; preparedMedia = nil; recoveryFinished = false
         revision &+= 1
         let expected = revision
         let old = preview; preview = nil
@@ -75,7 +80,7 @@ public final class CollectionEntryCoordinator {
         catch { self.preview = nil; Task { try? await preview.discard() }; report(error); return }
         revision &+= 1
         let expected = revision
-        stage = .applyingPackage; message = nil; failure = nil; progress = nil
+        stage = .applyingPackage; message = nil; failure = nil; progress = nil; preparedMedia = nil; recoveryFinished = false
         self.preview = nil
         let operation = CollectionEntryOperation(); self.operation = operation
         task = Task {
@@ -83,18 +88,26 @@ public final class CollectionEntryCoordinator {
                 let activated = try await service.activate(preview, operation: operation, progress: progressReceiver(expected))
                 lastActivation = activated
                 guard await owner.finishEntryActivation(candidateActive: true) else {
-                    throw CollectionEntryFailure(issue: .core(.unavailable(reason: "Native host setup could not finish")),
-                        candidateActive: true, generation: activated.generation, backup: activated.backup)
+                    throw CollectionEntryFailure(after: activated, issue: .core(.unavailable(reason: "Native host setup could not finish")))
                 }
                 if expected == revision { stage = .awaitingFile; selectedSource = nil }
             } catch {
-                let candidateStayedOpen = (error as? CollectionEntryFailure)?.candidateActive == true
-                await owner.finishEntryActivation(candidateActive: false)
+                let entryFailure = error as? CollectionEntryFailure
+                // Keep the existing activation admission closed when recovery
+                // is required. Host setup is not a media-recovery operation.
+                if entryFailure?.requiresRecovery != true {
+                    await owner.finishEntryActivation(candidateActive: false)
+                }
                 // Keep the recovery explanation visible even when the backend
                 // emitted Ready/CollectionReplaced before reporting failure.
-                if expected == revision {
+                if expected == revision || entryFailure?.requiresRecovery == true {
                     report(error)
-                    if candidateStayedOpen { owner.navigation.present(.collectionEntry) }
+                    if requiresRecovery {
+                        // Native host setup may have released admission on its
+                        // failed finish. Reassert the same owner's fence.
+                        try? owner.beginEntryActivation()
+                        owner.navigation.present(.collectionEntry)
+                    }
                 }
             }
             try? await preview.discard()
@@ -106,25 +119,28 @@ public final class CollectionEntryCoordinator {
         if canCancel { await operation?.cancel() }
         // After commit, finish the same job and preserve its retained host.
         await task?.value
-        if failure?.candidateActive != true { await discardPreview() }
+        if !requiresRecovery { await discardPreview() }
     }
     public func dismiss() async {
         await cancelAndDrain()
-        guard failure?.candidateActive != true else { return }
+        guard !requiresRecovery else { return }
         owner?.navigation.dismissSheet()
         stage = .awaitingFile; message = nil; failure = nil; selectedSource = nil
     }
     public func continueAfterActivation() async {
-        guard failure?.candidateActive == true, let owner else { return }
+        guard canContinueRecovery, let owner else { return }
         let recoveryFinished = await owner.finishEntryActivation(candidateActive: true)
         if recoveryFinished {
-            failure = nil; message = nil; stage = .awaitingFile; selectedSource = nil
+            self.recoveryFinished = true; message = "The new collection is available. Retained import details are shown below."
+            stage = .awaitingFile; selectedSource = nil
         } else {
+            try? owner.beginEntryActivation()
             owner.navigation.present(.collectionEntry)
             message = "The new collection remains active. Quit and reopen Meguri to finish recovery. Any pre-import safety backup remains available."
         }
     }
     func destinationChanged() {
+        guard !requiresRecovery else { owner?.navigation.present(.collectionEntry); return }
         revision &+= 1
         let expected = revision
         let old = preview; preview = nil
@@ -154,6 +170,7 @@ public final class CollectionEntryCoordinator {
                 guard let self, self.revision == expected, self.busy else { return }
                 // Once the commit boundary is observed, coalescing must never
                 // make the UI offer cancellation again.
+                if let media = value.collectionMediaPrepared { self.preparedMedia = media }
                 if self.progress?.cancellable == false && value.cancellable { return }
                 self.progress = value
             }
@@ -161,7 +178,10 @@ public final class CollectionEntryCoordinator {
     }
     private func report(_ error: any Error) {
         stage = .refused; preview = nil
-        if let entry = error as? CollectionEntryFailure { failure = entry }
+        if let entry = error as? CollectionEntryFailure {
+            failure = entry
+            if let media = entry.preparedMedia { preparedMedia = media }
+        }
         else if let bridge = error as? BridgeError { failure = CollectionEntryFailure(issue: .core(bridge)) }
         else { failure = nil }
         needsReinspection = failure?.issue == .staleConfirmation || failure?.issue == .consumed
@@ -169,6 +189,14 @@ public final class CollectionEntryCoordinator {
     }
     public static func explanation(_ failure: CollectionEntryFailure?, fallback: String) -> String {
         guard let failure else { return fallback }
+        if failure.activationOutcomeUncertain {
+            return "Meguri couldn’t verify the import outcome. The active collection and media state need authoritative recovery verification before study. Quit and reopen Meguri; do not import the file again. Keep any saved safety backup and recovery files."
+        }
+        if failure.requiresReopenRecovery {
+            return failure.candidateActive
+                ? "The new collection remains active or its activation needs verification. Media recovery must finish before study. Quit and reopen Meguri; do not import the file again. The safety backup and recovery files are retained."
+                : "The previous collection needs media recovery before it can be used. Quit and reopen Meguri to finish recovery. The safety backup and recovery files are retained. Do not import the file again."
+        }
         if failure.candidateActive {
             return "The new collection remains active, but setup could not finish. Continue to retry recovery, or quit and reopen Meguri. Any pre-import safety backup is retained."
         }

@@ -1,5 +1,5 @@
 //! Pre-index ZIP bounds, with byte-exact names and no archive-derived paths.
-//! Keep only three needed central records. A read-only virtual suffix gives
+//! Keep only needed central records. A read-only virtual suffix gives
 //! zip its normal entry/CRC/deflate decoder without indexing unknown metadata.
 use crate::{Result, cancelled, corrupt, reader::decode_error};
 use sha2::{Digest, Sha256};
@@ -153,7 +153,7 @@ pub(crate) struct NeededArchive {
     pub meta: Option<usize>,
     pub collection: Option<usize>,
     pub media: Option<usize>,
-    pub carried_media: bool,
+    pub payloads: BTreeMap<u32, usize>,
 }
 
 pub(crate) fn open(mut file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<NeededArchive> {
@@ -166,8 +166,8 @@ pub(crate) fn open(mut file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<
     let mut names = BTreeMap::<[u8; 32], (u64, u16)>::new();
     let mut suffix = Vec::new();
     let (mut meta, mut collection, mut media) = (None, None, None);
-    let mut carried_media = false;
-    let mut needed = 0_u16;
+    let mut payloads = BTreeMap::new();
+    let mut needed = 0_u64;
     while position < dir.end {
         cancelled(check)?;
         actual += 1;
@@ -200,13 +200,42 @@ pub(crate) fn open(mut file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<
                 "ambiguous ZIP name fingerprint"
             }));
         }
+        let numeric = !name.is_empty() && name.iter().all(u8::is_ascii_digit);
+        if !numeric {
+            let trimmed = name.strip_suffix(b"/").unwrap_or(&name);
+            let trimmed = trimmed
+                .strip_prefix(b"+")
+                .or_else(|| trimmed.strip_prefix(b"-"))
+                .unwrap_or(trimmed);
+            if !trimmed.is_empty() && trimmed.iter().all(u8::is_ascii_digit) {
+                return Err(corrupt("noncanonical numeric ZIP name"));
+            }
+        }
+        let number = if numeric {
+            let text = std::str::from_utf8(&name).map_err(|_| corrupt("numeric ZIP name"))?;
+            let number: u32 = text.parse().map_err(|_| corrupt("numeric ZIP name bound"))?;
+            if number.to_string() != text {
+                return Err(corrupt("noncanonical numeric ZIP name"));
+            }
+            Some(number)
+        } else {
+            None
+        };
+        let mut payload_slot = None;
         let slot = match name.as_slice() {
             b"meta" => Some(&mut meta),
             b"collection.anki21b" => Some(&mut collection),
             b"media" => Some(&mut media),
+            _ if numeric => Some(&mut payload_slot),
             _ => None,
         };
         if let Some(slot) = slot {
+            // Required payloads are ordinary files; archive modes never grant
+            // authority to create a link or directory in owned staging.
+            let mode = u32_at(&record, 38) >> 16;
+            if record[5] == 3 && !matches!(mode & 0o170000, 0 | 0o100000) {
+                return Err(corrupt("nonregular needed ZIP entry"));
+            }
             if u16_at(&record, 8) & 1 != 0 || !matches!(u16_at(&record, 10), 0 | 8) {
                 return Err(corrupt("encrypted or unsupported needed ZIP entry"));
             }
@@ -242,7 +271,10 @@ pub(crate) fn open(mut file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<
             if local_name != name {
                 return Err(corrupt("ZIP local/central name mismatch"));
             }
-            *slot = Some(usize::from(needed));
+            *slot = Some(needed as usize);
+            if let Some(number) = number {
+                payloads.insert(number, needed as usize);
+            }
             needed += 1;
             // Canonical bounded central metadata, with absolute local offset.
             // Preserve CRC, flags, method and decoded sizes for zip's checks.
@@ -258,8 +290,6 @@ pub(crate) fn open(mut file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<
             suffix.extend_from_slice(&decoded.to_le_bytes());
             suffix.extend_from_slice(&compressed.to_le_bytes());
             suffix.extend_from_slice(&local.to_le_bytes());
-        } else if !name.is_empty() && name.iter().all(u8::is_ascii_digit) {
-            carried_media = true;
         }
         position = next;
     }
@@ -294,7 +324,7 @@ pub(crate) fn open(mut file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<
         suffix,
         position: 0,
     })?;
-    if archive.len() != usize::from(needed) {
+    if archive.len() != needed as usize {
         return Err(corrupt("filtered ZIP directory"));
     }
     Ok(NeededArchive {
@@ -302,7 +332,7 @@ pub(crate) fn open(mut file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<
         meta,
         collection,
         media,
-        carried_media,
+        payloads,
     })
 }
 fn entry_sizes(record: &[u8], mut extra: &[u8]) -> Result<(u64, u64, u64)> {

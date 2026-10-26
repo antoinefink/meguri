@@ -303,7 +303,7 @@ pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<Contro
             *env.external_version = None;
         }
         Control::Resume => {
-            crate::device_state::reconcile(&env.shared.path, &env.reopen.binding)?;
+            crate::device_state::reconcile(&env.shared.path, &env.reopen.binding, env.reopen.clock.clone())?;
             let changed_file = env
                 .suspended_file
                 .as_mut()

@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 internal import MeguriCoreBindings
 
 public protocol CollectionEntryService: Sendable {
@@ -9,12 +10,26 @@ public protocol CollectionEntryService: Sendable {
 }
 
 public final class CoreCollectionEntryService: CollectionEntryService, Sendable {
+    enum ActivationOutcome: Sendable {
+        case activated(CollectionActivation), failed(CollectionEntryFailure), pending
+    }
+    // The reader runs on the maintenance lane after terminal draining. Tests
+    // can retain the real receipt before simulating unavailable delivery.
+    typealias ActivationOutcomeReader = @Sendable (@Sendable () throws -> ActivationOutcome) throws -> ActivationOutcome
+    private let activationOutcomeReader: ActivationOutcomeReader
     private let clock: CollectionClockRelay
     private let diskSpace: DiskSpaceRelay
     private let source: CoordinatedSourceOwner
     public init(clock: any CollectionClock = SystemCollectionClock(), diskSpace: any DiskSpaceProviding = DiskSpaceProvider(),
                 source: CoordinatedSourceOwner = CoordinatedSourceOwner()) {
         self.clock = CollectionClockRelay(clock); self.diskSpace = DiskSpaceRelay(diskSpace); self.source = source
+        activationOutcomeReader = { try $0() }
+    }
+    init(clock: any CollectionClock = SystemCollectionClock(), diskSpace: any DiskSpaceProviding = DiskSpaceProvider(),
+         source: CoordinatedSourceOwner = CoordinatedSourceOwner(),
+         activationOutcomeReader: @escaping ActivationOutcomeReader) {
+        self.clock = CollectionClockRelay(clock); self.diskSpace = DiskSpaceRelay(diskSpace); self.source = source
+        self.activationOutcomeReader = activationOutcomeReader
     }
     public func inspect(source url: URL, location: CollectionLocation, operation: CollectionEntryOperation,
                         progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> InspectedCollection {
@@ -64,25 +79,46 @@ public final class CoreCollectionEntryService: CollectionEntryService, Sendable 
             let started = try await MaintenanceLane.shared.call(.startCollectionActivation) {
                 try startCollectionActivation(inspection: inspection.raw)
             }
+            let preparedMedia = Mutex<CollectionImportMedia?>(nil)
             var trackingFailure: BridgeError?
             do throws(BridgeError) {
                 let job = try await Jobs.trackDraining(started.job)
                 await operation.attach(job)
-                let updates = Task { for await update in job.progress { operation.update(update); progress(update) } }
+                let updates = Task {
+                    for await update in job.progress {
+                        if let media = update.collectionMediaPrepared { preparedMedia.withLock { $0 = media } }
+                        operation.update(update); progress(update)
+                    }
+                }
                 _ = await job.outcome()
                 await updates.value
             } catch { trackingFailure = error }
-            let outcome = try await MaintenanceLane.shared.call(.collectionActivationResultOutcome) { try started.result.outcome() }
+            let outcome: ActivationOutcome
+            do throws(BridgeError) {
+                outcome = try await MaintenanceLane.shared.call(.collectionActivationResultOutcome) {
+                    try self.activationOutcomeReader {
+                        switch try started.result.outcome() {
+                        case .activated(let raw): return .activated(CollectionActivation(raw))
+                        case .failed(let raw): return .failed(CollectionEntryFailure(raw))
+                        case .pending: return .pending
+                        }
+                    }
+                }
+            } catch {
+                throw CollectionEntryFailure(issue: .nativeActivationUncertain(.outcomeReadFailed(error)),
+                    preparedMedia: preparedMedia.withLock { $0 })
+            }
             switch outcome {
             case .activated(let result):
-                let activation = CollectionActivation(result)
+                let activation = result
                 if let trackingFailure {
-                    throw CollectionEntryFailure(issue: .core(trackingFailure), candidateActive: true,
-                        generation: activation.generation, backup: activation.backup)
+                    throw CollectionEntryFailure(after: activation, issue: .core(trackingFailure))
                 }
                 return activation
-            case .failed(let failure): throw CollectionEntryFailure(failure)
-            case .pending: throw BridgeError.internal("Activation result pending after terminal event")
+            case .failed(let failure): throw failure
+            case .pending:
+                throw CollectionEntryFailure(issue: .nativeActivationUncertain(.outcomePending),
+                    preparedMedia: preparedMedia.withLock { $0 })
             }
         } onCancel: { Task { await operation.cancel() } }
     }

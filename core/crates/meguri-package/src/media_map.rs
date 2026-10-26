@@ -1,22 +1,6 @@
-//! Validation only: RF2 refuses valid media-bearing maps after validating all
-//! entries. Unknown-only messages are still empty maps, never media files.
+//! Bounded protobuf media inventory. Unknown-only messages are empty maps.
 use crate::{Result, cancelled, corrupt};
 
-pub(crate) fn validate(mut bytes: &[u8], check: &(dyn Fn() -> bool + Sync)) -> Result<u64> {
-    let mut count = 0;
-    while !bytes.is_empty() {
-        cancelled(check)?;
-        let (field, wire) = key(&mut bytes)?;
-        if field == 1 {
-            require(wire, 2)?;
-            entry(payload(&mut bytes)?)?;
-            count += 1;
-        } else {
-            skip(&mut bytes, field, wire, 0)?;
-        }
-    }
-    Ok(count)
-}
 pub(crate) struct MediaRecord<'a> {
     pub name: &'a str,
     pub length: u32,
@@ -35,7 +19,7 @@ fn entry(mut bytes: &[u8]) -> Result<MediaRecord<'_>> {
             }
             2 => {
                 require(wire, 0)?;
-                length = varint(&mut bytes)? as u32;
+                length = u32::try_from(varint(&mut bytes)?).map_err(|_| corrupt("media uint32 length"))?;
             }
             255 => {
                 require(wire, 0)?;
