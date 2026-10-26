@@ -183,7 +183,7 @@ runs:
   - id: conformance-route-transport
     job: conformance-route-test
     tier: T0
-    placement: host
+    placement: [host, docker:oracle]
     class: conformance
     needs: [oracle]
     oracle_files: true
