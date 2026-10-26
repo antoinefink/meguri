@@ -69,3 +69,40 @@ privacy/similarity, native app compilation, rendered Mac checks, keyboard/focus,
 compact native layout proof and the original-base full integration gate remain
 required. This is a WIP checkpoint with known test failures, explicitly permitted
 by Antoine; no Unit trailer or completed-unit acceptance is claimed.
+
+## Real owner and native presentation follow-up
+
+Filtered fixture repair `cleanroom/20261026T062042Z-53410` replaces only the two
+incorrect eligible-id assumptions with actual D17 entries checked by studyState.
+The hidden-Default case retains id 1. Independent R5 is clear for that repair.
+`swift-test/20261026T063608Z-69823` passes 22 tests, including all three real
+owner continuations. `swift-test/20261026T065148Z-87349` passes all 65 affected
+package tests, no skips. The earlier two failures remain retained.
+
+VM drive `20261026T062203Z-56252` executes all 19 steps but fails 30 identifier
+checks. Its actual images expose a real P1: the results List is only 2.5 points
+high, leaving deck names invisible. Independent R5 confirms the issue. Filtered
+repair `cleanroom/20261026T063438Z-68636` uses macOS system presentationSizing
+page sizing; it adds no numeric dimensions or custom control style. The prepared
+UI checks compare each name value and require the row rectangle inside the List.
+
+`build-app/20261026T063723Z-71512` passes for the signed standalone Mac preview.
+Drive `20261026T063933Z-73510` again executes all 19 steps. Independent R6 inspects
+four actual light/dark/default/minimum images and closes the layout defect:
+readable results, selection and actions, with no new P0–P2 finding. The overall
+drive still fails 30 missing identifiers on implicit search controls; it is not
+a passing receipt. Privacy `20261026T063937Z-74320` and similarity
+`20261026T063942Z-74676` pass for the three follow-up code files.
+
+Native keyboard run `ui-test/20261026T064421Z-80116` compiles and fails at the
+new test's first picker wait: its NavigationStack container identifier does not
+materialize in the actual native AX tree. The list and native sheet do exist in
+the drive evidence. Correcting the test target and assigning an actual query
+control identifier remain required; no keyboard pass is claimed.
+
+The latest standalone preview is opened normally on Antoine's desktop after
+closing one older development copy. Process inspection confirms one development
+copy at the exact StandaloneDerivedData path. No host UI is driven, no fixture is
+imported there, and no connection values are inspected. The independent native
+journeys run in the dedicated VM. Full U156, mobile/native layout evidence and
+the original-base integration gate remain open.

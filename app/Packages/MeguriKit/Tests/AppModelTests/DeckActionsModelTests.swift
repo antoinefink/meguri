@@ -166,7 +166,7 @@ extension ReviewCollectionStartupTests {
             await owner.loadCounts()
             try #require(await owner.openDeckPage(deckID: previous.id).value)
             let snapshot = try await service.allDeckNames()
-            let entry = try #require(snapshot.decks.first { $0.id == 1 && !$0.filtered })
+            let entry = try #require(try await eligibleRegularDeck(in: snapshot, service: service), "Review fixture has no eligible regular deck")
             let state = try await service.studyState(deckID: entry.id)
             try #require(!state.empty && state.queueCounts.new + state.queueCounts.learning + state.queueCounts.review > 0)
             let treeBefore = owner.decks, surface = ReviewCoordinatorTests.Surface()
@@ -244,7 +244,7 @@ extension ReviewCollectionStartupTests {
         try await withDeckNameOwner { owner in
             let service = CoreDeckService(), control = CoreCollectionService()
             let snapshot = try await service.allDeckNames()
-            let entry = try #require(snapshot.decks.first { $0.id == 1 && !$0.filtered })
+            let entry = try #require(try await eligibleRegularDeck(in: snapshot, service: service), "Review fixture has no eligible regular deck")
             let state = try await service.studyState(deckID: entry.id)
             try #require(!state.empty && state.queueCounts.new + state.queueCounts.learning + state.queueCounts.review > 0)
             let surface = ReviewCoordinatorTests.Surface()
@@ -518,6 +518,16 @@ extension ReviewCollectionStartupTests {
             }
             #expect(owner.fullDeckName(id) == "Drain After")
         }
+    }
+
+    private func eligibleRegularDeck(in snapshot: DeckNameSnapshot, service: CoreDeckService) async throws -> DeckNameEntry? {
+        for entry in snapshot.decks where !entry.filtered {
+            let state = try await service.studyState(deckID: entry.id)
+            if !state.empty && state.queueCounts.new + state.queueCounts.learning + state.queueCounts.review > 0 {
+                return entry
+            }
+        }
+        return nil
     }
 
     private func withHiddenDefaultOwner(_ body: (ReviewCollection) async throws -> Void) async throws {
