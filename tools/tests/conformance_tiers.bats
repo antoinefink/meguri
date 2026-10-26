@@ -145,8 +145,25 @@ runs = {r['id']: r for r in yaml.safe_load(open(sys.argv[1]))['runs']}
 t0, t1 = runs['conformance'], runs['live-oracle']
 assert set(t0['triggers']) <= set(runs['core-test']['triggers']), 'core-test must cover every conformance trigger'
 assert t0['args'] == ['--lane', 'all']
-assert t1['args'] == ['--live-only', '--lane', 'native']
-assert all(any(path.startswith(trigger) for trigger in t0['triggers']) for path in t1['filters'])
+assert t1['args'][:3] == ['--live-only', '--lane', 'native']
+assert all(any(path.startswith(trigger) for trigger in t0['triggers']) for path in t1['triggers'])
+assert 'sync-server' not in t1['needs']
+# The positive selectors cover every active scenario, and no frozen one.
+from pathlib import Path
+root = Path(sys.argv[1]).resolve().parents[2] / 'conformance/scenarios'
+filters = t1['args'][3:]
+assert filters and '*' not in filters
+for path in root.rglob('*.yaml'):
+    if path.name == 'area.yaml':
+        continue
+    name = path.relative_to(root).with_suffix('').as_posix()
+    frozen = (name.startswith(('sync/conflicts/', 'sync/holdback/', 'sync/media/',
+                               'sync/meta/', 'sync/normal/', 'sync/transport/', 'sync/wire/',
+                               'smoke/sync/', 'preservation/sync/'))
+              or name == 'sched/compat/keys-survive-sync')
+    selected = any(name == f or name.startswith(f + '/') for f in filters)
+    assert selected != frozen, name
+assert runs['conformance-route-transport']['disabled']
 PY
   [ "$status" -eq 0 ]
 }

@@ -1,5 +1,9 @@
 # Persistent local sync service
 
+> **2026-10-26: Anki server work is frozen indefinitely.** Earlier next steps
+> and acceptance requirements below are retained history. Do not resume them
+> without Antoine's explicit request. See [the delivery scope](review-first-delivery.md#anki-server-freeze--2026-10-26).
+
 This user-owned Docker service is separate from the automated sync rig. Docker
 (including OrbStack) must be running, with the pinned production runtime image
 already installed. The utility never pulls or updates images.

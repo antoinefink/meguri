@@ -1,5 +1,9 @@
 # Persistent local sync utility
 
+> **2026-10-26: Anki server work is frozen indefinitely.** Earlier next steps
+> and acceptance requirements below are retained history. Do not resume them
+> without Antoine's explicit request. See [the delivery scope](../review-first-delivery.md#anki-server-freeze--2026-10-26).
+
 Start: `63d496525bf83d3b3afbb747c36971fb8d161f61`.
 Implementation session: `s-20261024T173251Z-cb356af3`.
 Fixer session: `s-20261024T174115Z-511e3ad6`.

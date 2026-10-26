@@ -1863,7 +1863,7 @@ PY
   printf 'core/crates/meguri-sched/src/answer.rs\0' >"$BATS_TEST_TMPDIR/changed"
   python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
     --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
-  jq -e '.runs[] | select(.id == "live-oracle" and .action == "run" and (.args | index("sched")) and (.args | index("fp-probe")))' \
+  jq -e '.runs[] | select(.id == "live-oracle" and .action == "run" and (.args | any(startswith("sched/"))) and (.args | index("fp-probe")))' \
     "$BATS_TEST_TMPDIR/plan.json" >/dev/null
   jq -e '.runs[] | select(.id == "similarity" and .action == "run")' "$BATS_TEST_TMPDIR/plan.json" >/dev/null
   for id in swift-test-core swift-test-core-profile; do

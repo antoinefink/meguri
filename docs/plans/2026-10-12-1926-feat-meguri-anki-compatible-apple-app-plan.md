@@ -30,6 +30,27 @@ deepened: 2026-10-12
 
 ---
 
+### Anki server work: frozen indefinitely (2026-10-26)
+
+Antoine stopped Anki server work on 2026-10-26. Resume only when he explicitly requests it.
+This overrides earlier requirements to complete every unit, support server transfers in the first usable version, or resume parked sync work.
+
+- Preserve existing code, specs, scenarios, dependencies, failed checks and review records. Unfinished work remains unfinished.
+- Do not build or fix server code, add server tests, start servers, or seek acceptance for this scope.
+- U13, U105, U106, U107, U109, U110, U111 and U116 are not required. The original unit content remains below.
+- Freeze the Anki-server portions of mixed units, including U113/U114/U117/U118, U151/U160/U161, U242/U246–U251 and U255–U257; retain their other requirements.
+- RF4 server transfers and the persistent local-server utility are frozen. RF4 file import/export remains active.
+- Server work is excluded from delivery, milestone and release acceptance. Existing dependencies cannot start server work or block active work.
+- Shared tests run as before. A failed result remains failed. No server fix is required.
+- If a shared validator cannot separate frozen server evidence, report that limitation and continue active app work. Never claim a failing check passed.
+- File import/export, local Anki collection compatibility, shared media storage, CloudKit, and local Migaku/AnkiConnect integrations remain in scope.
+- Resuming this work requires a new scope decision and verification. Historical evidence does not establish current acceptance.
+
+The active Unit Index and milestone table exclude the frozen units. The Frozen Unit Index retains their original entries and dependencies.
+Throughout this plan, sync acceptance means CloudKit; retained Anki protocol clauses are reference material under this freeze.
+Manual-server round trips, server-only budgets, AnkiWeb permission work and server fault/soak cases are excluded from acceptance.
+File round trips, offline durability, privacy and all active safety checks remain required.
+
 ## Product Contract
 
 ### Summary
@@ -3833,17 +3854,17 @@ app/
 
 ### Delivery Milestones
 
-Each unit belongs to the earliest milestone that needs it, so every milestone is closed under its dependencies. M1R "Reviews first" sits between M0 and M1; Antoine chose it on 2026-10-16. It holds what a daily review session on his real collection needs: the collection engine, exact scheduling, card rendering, private CloudKit record/media sync plus manual Anki migration, backups and integrity protection, the deck list and deck page, the review screen, first launch and login, and the safety suites that protect the real collection. M1R studies an initially imported collection across Meguri devices; M1 adds card creation. Moving new content from Anki before that is an explicit manual transfer, never a continuing sync relationship. To keep M1R closed, entry points into deferred features (the editor and Add, the Browser, Card Info, Stats, the deck options screen, import and export, Check Database, note type changes, the automatic optimizer) were cut with U152's attach pattern: the M1R unit ships without the entry point, and the deferred unit attaches it when it lands. Until the deferred unit lands, every control, tab or section that would reach it stays hidden (U152's attach registry), so M1R ships no control that does nothing. Where an M1R unit needed only part of a deferred unit, that part was split out as its own unit (U82a, U85a, U124a, U133a, U163a, U228a). The cross-cutting suite units (U241–U257) and the gate wiring (U19) grow with each milestone; their listed milestone is where they first run. Execution order within a milestone follows the Dependencies fields. For U19 and the suite units, a dependency that sits in a later milestone (marked "wires in when landed" in U19) does not block scheduling: the unit starts on its other dependencies and adds that leg when the unit it names lands.
+Each active unit belongs to the earliest milestone that needs it. Frozen server dependencies remain references and do not block active units. M1R "Reviews first" sits between M0 and M1; Antoine chose it on 2026-10-16. It holds what a daily review session on his real collection needs: the collection engine, exact scheduling, card rendering, private CloudKit record/media sync plus file-based Anki migration, backups and integrity protection, the deck list and deck page, the review screen, first launch and login, and the safety suites that protect the real collection. M1R studies an initially imported collection across Meguri devices; M1 adds card creation. Moving new content from Anki uses file import; server transfers remain frozen. To keep M1R closed, entry points into deferred features (the editor and Add, the Browser, Card Info, Stats, the deck options screen, import and export, Check Database, note type changes, the automatic optimizer) were cut with U152's attach pattern: the M1R unit ships without the entry point, and the deferred unit attaches it when it lands. Until the deferred unit lands, every control, tab or section that would reach it stays hidden (U152's attach registry), so M1R ships no control that does nothing. Where an M1R unit needed only part of a deferred unit, that part was split out as its own unit (U82a, U85a, U124a, U133a, U163a, U228a). The cross-cutting suite units (U241–U257) and the gate wiring (U19) grow with each milestone; their listed milestone is where they first run. Execution order within a milestone follows the Dependencies fields. For U19 and the suite units, a dependency that sits in a later milestone (marked "wires in when landed" in U19) does not block scheduling: the unit starts on its other dependencies and adds that leg when the unit it names lands.
 
 | Milestone | Units | Closing gate (all suites on one commit) | User steps |
 |---|---|---|---|
-| **M0 Foundations** | U1, U2, U3, U4, U5, U6, U7, U8, U8b, U8c, U9, U10, U11, U12, U13, U19, U20, U21, U22, U23, U240, U241 | The oracle image builds and records the first goldens: the 10k fuzz table, id allocation and a rollover×TZ subset (U3, U4). T0 runs them, with id allocation passing (U23) and the fuzz-table and rollover scenarios reported pending until U45 and U40 land in M1R. The similarity scan and provenance-trailer check are enforced (U2). The XCFramework builds, and the app launches on iPhone and iPad simulators and on the Mac with a fixture, giving a screenshot and hierarchy (U6–U8). The `lint-ui` gate is active (U9). A stub screen emits a named interval that U241 evaluates (U12). A two-client full upload and download runs under a frozen clock (U13). | Xcode license, simulator runtime and Xcode agent access (R1969) |
-| **M1R Reviews first** | U8d, U19b, U240r, U14, U15, U24, U25, U26, U27, U28, U29, U30, U31, U32, U36, U37, U38, U40, U41, U42, U43, U44, U45, U46, U48, U49, U50, U51, U60, U61, U62, U63, U64, U65, U66, U67, U68, U70, U80, U82a, U85a, U105, U106, U107, U109, U110, U111, U113, U114, U117, U118, U124a, U126, U127, U132, U133a, U150, U151, U152, U153, U154, U155, U157, U158, U160, U161, U163a, U166, U175, U176, U177, U178, U179, U180, U181, U182, U185, U186, U187, U188, U228a, U243, U246, U248, U249, U250, U251, U256 | U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on the Mac host and simulators, gated by U241 against the review-loop budgets (R1807–R1817). U248 CloudKit convergence soak with signed development-container evidence (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210). U36 preservation suite (R2017). U250 fault classes: review, sync, full download, backup (AE86). U251's M1R legs: kill during review, during a sync and during the first full download (AE86), background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names. U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check), and U176's snapshot-swap fallback exists behind its flag. | Final hands-on batch: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure). U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks). The first real sync with CloudKit, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, U248 CloudKit lane, U250 cloud sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, existing imported cards) |
-| **M1 Daily review driver** | U18, U33, U34, U35, U47, U81, U82, U83, U84, U85, U88, U92, U95, U96, U97, U98, U99, U100, U101, U103, U120, U121, U122, U123, U124, U128, U129, U130, U131, U133, U156, U159, U162, U163, U183, U184, U190, U191, U192, U193, U195, U210, U222, U225, U227, U228, U229, U232, U242, U244, U245, U252, U253, U254 | Cumulative over M1R: the full daily-driver gate. U246: areas storage, sched (R1890–R1903, R1906), the optimizer (R1904, R1905; U47 ships here), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on the Mac host and simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U244 launch and Home group (R1818–R1822). U245 review and memory subset. U248 CloudKit convergence soak with signed development-container evidence, with its two-device optimizer race. U36 preservation suite (R2017). U250 fault classes: review, sync, full download, backup, optimizer write (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review, including U253's sweep of those screens. U38's `wiring/pending.rs` is empty, and U176's snapshot-swap fallback exists behind its flag. | U256 device run on iPhone, iPad and Mac (AE81). Variant picks for Home, deck page and review (U254). A 7-day trial: all reviews and new cards in Meguri, no data incident, logged |
+| **M0 Foundations** | U1, U2, U3, U4, U5, U6, U7, U8, U8b, U8c, U9, U10, U11, U12, U19, U20, U21, U22, U23, U240, U241 | The oracle image builds and records the first goldens: the 10k fuzz table, id allocation and a rollover×TZ subset (U3, U4). T0 runs them, with id allocation passing (U23) and the fuzz-table and rollover scenarios reported pending until U45 and U40 land in M1R. The similarity scan and provenance-trailer check are enforced (U2). The XCFramework builds, and the app launches on iPhone and iPad simulators and on the Mac with a fixture, giving a screenshot and hierarchy (U6–U8). The `lint-ui` gate is active (U9). A stub screen emits a named interval that U241 evaluates (U12). | Xcode license, simulator runtime and Xcode agent access (R1969) |
+| **M1R Reviews first** | U8d, U19b, U240r, U14, U15, U24, U25, U26, U27, U28, U29, U30, U31, U32, U36, U37, U38, U40, U41, U42, U43, U44, U45, U46, U48, U49, U50, U51, U60, U61, U62, U63, U64, U65, U66, U67, U68, U70, U80, U82a, U85a, U113, U114, U117, U118, U124a, U126, U127, U132, U133a, U150, U151, U152, U153, U154, U155, U157, U158, U160, U161, U163a, U166, U175, U176, U177, U178, U179, U180, U181, U182, U185, U186, U187, U188, U228a, U243, U246, U248, U249, U250, U251, U256 | U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all. U243 on the Mac host and simulators, gated by U241 against the review-loop budgets (R1807–R1817). U248 CloudKit convergence soak with signed development-container evidence (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210). U36 preservation suite (R2017). U250 fault classes: review, sync, backup (AE86). U251's M1R legs: kill during review and during a CloudKit exchange, background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names. U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check), and U176's snapshot-swap fallback exists behind its flag. | Final hands-on batch: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure). U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks). The first real sync with CloudKit, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, U248 CloudKit lane, U250 cloud sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, existing imported cards) |
+| **M1 Daily review driver** | U18, U33, U34, U35, U47, U81, U82, U83, U84, U85, U88, U92, U95, U96, U97, U98, U99, U100, U101, U103, U120, U121, U122, U123, U124, U128, U129, U130, U131, U133, U156, U159, U162, U163, U183, U184, U190, U191, U192, U193, U195, U210, U222, U225, U227, U228, U229, U232, U242, U244, U245, U252, U253, U254 | Cumulative over M1R: the full daily-driver gate. U246: areas storage, sched (R1890–R1903, R1906), the optimizer (R1904, R1905; U47 ships here), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all. U243 on the Mac host and simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U244 launch and Home group (R1818–R1822). U245 review and memory subset. U248 CloudKit convergence soak with signed development-container evidence, with its two-device optimizer race. U36 preservation suite (R2017). U250 fault classes: review, sync, backup, optimizer write (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review, including U253's sweep of those screens. U38's `wiring/pending.rs` is empty, and U176's snapshot-swap fallback exists behind its flag. | U256 device run on iPhone, iPad and Mac (AE81). Variant picks for Home, deck page and review (U254). A 7-day trial: all reviews and new cards in Meguri, no data incident, logged |
 | **M2 Creation and maintenance** | U69, U71, U86, U87, U90, U91, U194, U196, U197, U200, U201, U202, U203, U205, U206, U207, U211, U212, U213, U214, U215, U216, U217, U218, U219, U220, U221, U223, U247 | U246: areas search (R1916–R1920), packages and maintenance (R1922–R1925), notes and rendering of editor previews. U249 adds saved searches, browser sorts and apkg/colpkg round trips. U244 browser, search and editor groups (R1824–R1836). U242 bulk, import, backup and Check DB (R1831, R1832, R1846–R1848). U250 classes: edit, bulk, import, export, Check DB. U251 disk-full and kill during import. U252–U254 for browser, editor, note types and IO editor. | Variant picks for browser and editor. Device run (browser and editor budgets). One-time capture of the Word, Google Docs, Safari, Chrome and Yomitan clipboard payloads for U197's paste corpus (Google Docs needs Antoine's account, a stop condition for agents) |
 | **M3 Stats graphs, widget, deck options** | U104, U165, U226, U230, U231, U233, U234, U236, U237 | U246: stats (R1921); the optimizer area (R1904, R1905) already gates M1. U249 adds stats per deck. U244 stats group (R1837–R1839, R1841). U242 memory states and optimizer (R1849, R1850). U245 widget memory (R1840). U252–U254 for stats, deck options and widget. | Variant picks for stats and deck options. Device run |
 | **M4 Mac integration servers** | U135, U136, U137, U138, U139, U140, U141, U142, U143, U144, U145, U146, U147, U164, U255 | U246: server contract suites (R1944–R1946, R1948, R1949) from the Mac-servers area. U249 Migaku routing replay (AE87). U250 class for server writes during edit and review. U255 Mac entitlement and loopback checks. | The firewall check on a clean user account (spike in the servers area). Device run (U256) on iPhone, iPad and Mac |
-| **M5 Hardening and design sign-off** | U16, U17, U116, U167, U168, U257 | U246 full: every in-scope and preservation-only harvested scenario passes (R1880), and no undocumented deviation remains (R1889). The full snapshot matrix (U252). Every screen is "verified" (U254). U255 release configs. U256 device run on every budget. U257 release readiness. | Signature-screen sign-off (all), the monthly device session, the 30-day daily-driver run (U257) |
+| **M5 Hardening and design sign-off** | U16, U17, U167, U168, U257 | U246 full: every in-scope and preservation-only harvested scenario passes (R1880), and no undocumented deviation remains (R1889). The full snapshot matrix (U252). Every screen is "verified" (U254). U255 release configs. U256 device run on every budget. U257 release readiness. | Signature-screen sign-off (all), the monthly device session, the 30-day daily-driver run (U257) |
 
 ### Alternative Approaches Considered
 
@@ -3965,7 +3986,6 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U10 | Snapshot matrix, accessibility harness, critic and review gallery tooling | `app/Packages/MeguriKit/Sources/DesignSystem/Previews/PreviewStates.swift`<br>`tools/mg.d/snapshots.sh`<br>`tools/mg.d/a11y.sh` | U8, U9 |
 | U11 | Synthetic collection generator and fixture recipes | `core/crates/meguri-testkit/src/generate/`<br>`core/crates/meguri-testkit/profiles/user-shape.json`<br>`core/crates/meguri-testkit/profiles/worst-cases/` | U3, U4, U21, U22, U23 |
 | U12 | Performance instrumentation and benchmark harness | `app/Packages/MeguriCore/Sources/CoreBridge/Instrumentation/IntervalNames.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Diagnostics/FieldDiagnosticsStore.swift`<br>`tools/scripts/perf-compare/` | U6, U7, U11 |
-| U13 | Local sync server rig and multi-client harness | `oracle/driver/ops/`<br>`oracle/driver/observe/db_dump.py`<br>`core/crates/meguri-testkit/src/exec/` | U3, U4 |
 | U14 | Floating-point determinism probe and macOS-native oracle lane | `oracle/macos/requirements-macos.lock`<br>`oracle/macos/README.md`<br>`oracle/macos/run-native.sh` | U3, U4, U5 |
 | U15 | Private collection vault and anonymized clone | `tools/mg.d/private.sh`<br>`core/crates/meguri-testkit/src/private/`<br>`core/crates/meguri-testkit/src/anonymize/` | U3, U4, U11, U21, U22, U23 |
 | U16 | Third-party notices, acknowledgements data and Swift dependency license gate | `core/about.toml`<br>`core/about.hbs`<br>`tools/notices/` | U5, U6, U7 |
@@ -4039,15 +4059,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U101 | Card-based graphs: Future Due, Card Counts, Intervals, Stability, Difficulty, Retrievability, Added | `core/crates/meguri-stats/src/graphs/future_due.rs`<br>`core/crates/meguri-stats/tests/graphs_cards.rs`<br>`specs/stats/graphs-cards.md` | U45, U46, U47, U82, U82a, U98 |
 | U103 | Stats FFI surface and live-refresh events | `core/crates/meguri-ffi/src/stats.rs`<br>`core/crates/meguri-stats/src/events.rs`<br>`app/Packages/MeguriCore/Sources/CoreBridge/StatsBridge.swift` | U6, U24, U92, U95, U96, U97, U98, U99, U100, U101 |
 | U104 | Stats conformance matrix and performance gates | `core/tools/meguri-cli/src/commands/stats_private.rs`<br>`core/crates/meguri-stats/benches/stats_bench.rs`<br>`core/crates/meguri-stats/tests/fuzz_aggregates.rs` | U4, U11, U12, U95, U96, U97, U98, U99, U100, U101, U103 |
-| U105 | Sync transport, login and endpoints | `core/crates/meguri-sync/`<br>`core/crates/meguri-testkit/src/sync_stub.rs`<br>`specs/sync/transport.md` | U4, U5, U13, U24 |
-| U106 | Sync messages, `meta` status check and error taxonomy | `core/crates/meguri-sync/src/wire/`<br>`core/fuzz/fuzz_targets/sync_json.rs`<br>`specs/sync/wire-format.md` | U3, U4, U21, U23, U105 |
-| U107 | Normal sync with hold-back | `core/crates/meguri-sync/src/normal/`<br>`core/crates/meguri-sync/tests/normal_sync.rs`<br>`specs/sync/normal-sync.md` | U23, U24, U25, U26, U29, U32, U40, U43, U105, U106 |
-| U109 | One-way sync (full upload and download) | `core/crates/meguri-sync/src/oneway/`<br>`core/crates/meguri-sync/tests/one_way.rs`<br>`specs/sync/one-way.md` | U22, U24, U26, U29, U32, U43, U105, U106, U107, U111, U124a, U126, U127 |
-| U110 | Media sync state and change tracking | `core/crates/meguri-sync/src/media/`<br>`core/crates/meguri-sync/tests/media_tracker.rs`<br>`specs/sync/media-tracking.md` | U22, U31 |
-| U111 | Media sync | `core/crates/meguri-sync/src/media/syncer.rs`<br>`core/fuzz/fuzz_targets/media_zip.rs`<br>`core/crates/meguri-sync/tests/media_sync.rs` | U24, U31, U105, U106, U110 |
 | U113 | CloudKit eligibility policy and manual-transfer isolation | `core/crates/meguri-sync/src/policy/`<br>`core/crates/meguri-sync/tests/policy.rs`<br>`specs/sync/policy.md` | U24, U38, U43, U106, U107, U109, U111 |
 | U114 | CloudKit bridge, Swift adapter and manual-transfer service | `core/crates/meguri-ffi/src/sync.rs`<br>`app/Packages/MeguriCore/Sources/CoreBridge/Sync/`<br>`tools/scripts/sync-e2e-swift.sh` | U6, U12, U24, U105, U106, U107, U109, U110, U111, U113 |
-| U116 | AnkiWeb build switch and identity checks | `app/Config/Release.xcconfig`<br>`app/Config/AppStore.xcconfig`<br>`app/Meguri/AnkiWeb.xcstrings` | U6, U7, U105, U114, U150, U160 |
 | U117 | Sync conformance suites (two-client and oracle) | `core/crates/meguri-testkit/src/sync/`<br>`core/tools/meguri-cli/src/commands/sync.rs`<br>`conformance/scenarios/sync/normal/` | U3, U4, U11, U13, U31, U38, U43, U107, U109, U111 |
 | U118 | Sync robustness, property tests and budgets | `core/crates/meguri-testkit/src/sync/`<br>`core/crates/meguri-sync/tests/holdback_property.rs`<br>`core/crates/meguri-sync/benches/sync_day.rs` | U11, U12, U13, U107, U109, U111, U113, U117, U250 |
 | U120 | Package reader and `.apkg` import | `core/crates/meguri-package/src/`<br>`core/fuzz/fuzz_targets/package_reader.rs` | U3, U4, U5, U11, U12, U20, U21, U22, U23, U24, U25, U27, U28, U29, U30, U31, U32, U40, U124a |
@@ -4173,6 +4186,21 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U255 | Release configuration validation | `tools/scripts/release-check/`<br>`tools/mg` | U5, U6, U7, U16, U105, U135, U160, U165 |
 | U256 | Milestone device runs (user-performed) | `tools/scripts/device-run`<br>`tools/perf/baselines/devices/`<br>`docs/process/device-runs.md` | U7, U240, U241, U243, U244, U245, U249, U253, U254 |
 | U257 | Release readiness and 30-day daily-driver gate | `tools/scripts/gates/release_gate`<br>`tools/mg`<br>`docs/process/daily-driver-log.jsonl` | U240, U241, U242, U243, U244, U245, U246, U247, U248, U249, U250, U251, U252, U253, U254, U255, U256 |
+
+### Frozen Unit Index
+
+Retained for possible reactivation; excluded from active milestones and acceptance. See the Anki server freeze above.
+
+| U-ID | Title | Key files | Depends on |
+|---|---|---|---|
+| U13 | Local sync server rig and multi-client harness | `oracle/driver/ops/`<br>`oracle/driver/observe/db_dump.py`<br>`core/crates/meguri-testkit/src/exec/` | U3, U4 |
+| U105 | Sync transport, login and endpoints | `core/crates/meguri-sync/`<br>`core/crates/meguri-testkit/src/sync_stub.rs`<br>`specs/sync/transport.md` | U4, U5, U13, U24 |
+| U106 | Sync messages, `meta` status check and error taxonomy | `core/crates/meguri-sync/src/wire/`<br>`core/fuzz/fuzz_targets/sync_json.rs`<br>`specs/sync/wire-format.md` | U3, U4, U21, U23, U105 |
+| U107 | Normal sync with hold-back | `core/crates/meguri-sync/src/normal/`<br>`core/crates/meguri-sync/tests/normal_sync.rs`<br>`specs/sync/normal-sync.md` | U23, U24, U25, U26, U29, U32, U40, U43, U105, U106 |
+| U109 | One-way sync (full upload and download) | `core/crates/meguri-sync/src/oneway/`<br>`core/crates/meguri-sync/tests/one_way.rs`<br>`specs/sync/one-way.md` | U22, U24, U26, U29, U32, U43, U105, U106, U107, U111, U124a, U126, U127 |
+| U110 | Media sync state and change tracking | `core/crates/meguri-sync/src/media/`<br>`core/crates/meguri-sync/tests/media_tracker.rs`<br>`specs/sync/media-tracking.md` | U22, U31 |
+| U111 | Media sync | `core/crates/meguri-sync/src/media/syncer.rs`<br>`core/fuzz/fuzz_targets/media_zip.rs`<br>`core/crates/meguri-sync/tests/media_sync.rs` | U24, U31, U105, U106, U110 |
+| U116 | AnkiWeb build switch and identity checks | `app/Config/Release.xcconfig`<br>`app/Config/AppStore.xcconfig`<br>`app/Meguri/AnkiWeb.xcstrings` | U6, U7, U105, U114, U150, U160 |
 
 **Foundations and process (U1–U19)**
 
@@ -4758,7 +4786,11 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Verification:** One end-to-end perf smoke test runs on the iPhone 17 Pro simulator in Profile with registered intervals and feeds U241's gate; both bench forms run; interval names match between Instruments traces and test output.
 
-### U13. Local sync server rig and multi-client harness
+### Frozen server work: U13
+
+#### U13. Local sync server rig and multi-client harness
+
+**Status:** Frozen indefinitely by Antoine on 2026-10-26; retained reference only. No implementation or acceptance work is authorized.
 
 **Goal:** Provide sync servers built from the pinned Anki release, sharing the scenario clock, with oracle clients acting as other devices, network fault injection and exchange recording, so sync suites never touch AnkiWeb.
 
@@ -8452,7 +8484,11 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 
 **Sync (U105–U118)**
 
-### U105. Sync transport, login and endpoints
+### Frozen server work: U105
+
+#### U105. Sync transport, login and endpoints
+
+**Status:** Frozen indefinitely by Antoine on 2026-10-26; retained reference only. No implementation or acceptance work is authorized.
 
 **Scope:** Retained Anki protocol compatibility for explicit Settings import/export only (KTD26). Routine CloudKit sync uses U113/U114 and KTD25; timers and lifecycle events never invoke this unit's transport. Any Anki hold-back/USN rules below describe protocol reconciliation, not CloudKit state.
 
@@ -8518,7 +8554,11 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 
 **Verification:** The transport scenarios pass in Docker against the stub and the U13 server; a test asserts that no redirect is ever followed automatically; clippy, deny and fmt are clean.
 
-### U106. Sync messages, `meta` status check and error taxonomy
+### Frozen server work: U106
+
+#### U106. Sync messages, `meta` status check and error taxonomy
+
+**Status:** Frozen indefinitely by Antoine on 2026-10-26; retained reference only. No implementation or acceptance work is authorized.
 
 **Scope:** Retained Anki protocol compatibility for explicit Settings import/export only (KTD26). Routine CloudKit sync uses U113/U114 and KTD25; timers and lifecycle events never invoke this unit's transport. Any Anki hold-back/USN rules below describe protocol reconciliation, not CloudKit state.
 
@@ -8562,7 +8602,11 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 
 Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). This line first asked for the meta scenarios to pass against U13. They are actor scenarios: a Meguri actor uploads, downloads and runs normal syncs in them, and Meguri's executor gets the `sync` op only with U117 (after U107 and U109), so T0 reports them `pending` (`specs/conformance/sync-ops.md` S10.2). U106 checks its own calls on the rig's official server instead. `tools/mg sync-rig up` refuses a unit branch whose `oracle/` differs from the main worktree's, so those tests run at the integrated head.
 
-### U107. Normal sync with hold-back
+### Frozen server work: U107
+
+#### U107. Normal sync with hold-back
+
+**Status:** Frozen indefinitely by Antoine on 2026-10-26; retained reference only. No implementation or acceptance work is authorized.
 
 **Scope:** Retained Anki protocol compatibility for explicit Settings import/export only (KTD26). Routine CloudKit sync uses U113/U114 and KTD25; timers and lifecycle events never invoke this unit's transport. Any Anki hold-back/USN rules below describe protocol reconciliation, not CloudKit state.
 
@@ -8649,7 +8693,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Verification:** `sync/normal`, `sync/conflicts` and `sync/holdback` scenarios pass in T1 against U13 with oracle clients; the U118 hold-back property test never sees `sanityCheck2` fail.
 
-### U109. One-way sync (full upload and download)
+### Frozen server work: U109
+
+#### U109. One-way sync (full upload and download)
+
+**Status:** Frozen indefinitely by Antoine on 2026-10-26; retained reference only. No implementation or acceptance work is authorized.
 
 **Scope:** Retained Anki protocol compatibility for explicit Settings import/export only (KTD26). Routine CloudKit sync uses U113/U114 and KTD25; timers and lifecycle events never invoke this unit's transport. Any Anki hold-back/USN rules below describe protocol reconciliation, not CloudKit state.
 
@@ -8722,7 +8770,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Verification:** `sync/oneway` scenarios pass in T1; the U118 kill matrix for one-way phases is green.
 
-### U110. Media sync state and change tracking
+### Frozen server work: U110
+
+#### U110. Media sync state and change tracking
+
+**Status:** Frozen indefinitely by Antoine on 2026-10-26; retained reference only. No implementation or acceptance work is authorized.
 
 **Scope:** Retained Anki protocol compatibility for explicit Settings import/export only (KTD26). Routine CloudKit sync uses U113/U114 and KTD25; timers and lifecycle events never invoke this unit's transport. Any Anki hold-back/USN rules below describe protocol reconciliation, not CloudKit state.
 
@@ -8761,7 +8813,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Verification:** Tracking scenarios pass; the no-change benchmark is recorded in the perf report (iPhone figures from U245 on the simulator and U256 on device).
 
-### U111. Media sync
+### Frozen server work: U111
+
+#### U111. Media sync
+
+**Status:** Frozen indefinitely by Antoine on 2026-10-26; retained reference only. No implementation or acceptance work is authorized.
 
 **Scope:** Retained Anki protocol compatibility for explicit Settings import/export only (KTD26). Routine CloudKit sync uses U113/U114 and KTD25; timers and lifecycle events never invoke this unit's transport. Any Anki hold-back/USN rules below describe protocol reconciliation, not CloudKit state.
 
@@ -8873,7 +8929,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Verification:** tools/mg core and Swift bridge suites, then signed development-container multi-device evidence. Fake/local-server passes alone do not close the real CloudKit lane.
 
-### U116. AnkiWeb build switch and identity checks
+### Frozen server work: U116
+
+#### U116. AnkiWeb build switch and identity checks
+
+**Status:** Frozen indefinitely by Antoine on 2026-10-26; retained reference only. No implementation or acceptance work is authorized.
 
 **Goal:** Make R2031/R2032 enforceable end to end: the App Store configuration contains no AnkiWeb option, wording, host or endpoint, and personal builds do.
 

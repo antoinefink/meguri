@@ -722,8 +722,8 @@ h1b8a7b774a45,python,tag,sched,in-scope,"U41/U43/U44/U246: adding a new card mus
 h1f57b66e6c57,python,tag,sched,in-scope,"Bury by hand gives queue -3, the scheduler's bury -2, and each unbury mode restores only its kind",sched/ops/bury/cards-and-notes sched/ops/bury/unbury-deck,done
 h2112a6880d74,python,tag,sched,in-scope,"Set Due Date turns a new card into a review card due today or tomorrow; Meguri runs it with FSRS on, where the interval stays 0",sched/ops/set-due/parse sched/ops/set-due/card-kinds,done
 h25bc326d314f,python,tag,sched,in-scope,"Suspend and unsuspend restore the queue from the type, and a card in a filtered deck stays there when suspended",sched/ops/suspend/cards-and-notes,done
-h381d4b819a8e,python,tag,sched,preservation-only,Learning state inside a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
-h3ec3f77f5c5c,python,tag,sched,preservation-only,Previewing in a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
+h381d4b819a8e,python,tag,sched,out-of-scope,Frozen by Antoine 2026-10-26; previous classification preservation-only. Learning state inside a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
+h3ec3f77f5c5c,python,tag,sched,out-of-scope,Frozen by Antoine 2026-10-26; previous classification preservation-only. Previewing in a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
 h5566e8764422,python,tag,sched,in-scope,U44/U246: an Again answer with no relearning steps must return directly to review instead of leaving the card in a nonexistent step.,,deferred
 h55746f87d38f,python,tag,sched,in-scope,"Reset makes a review card new again, at the end of the new queue",sched/ops/reset/end-of-queue sched/ops/reset/restore-position,done
 h56c0cea0f0c6,python,tag,sched,in-scope,U41/U246: parent and child new limits must cap the gathered total and preserve the correct first deck's cards.,,deferred
@@ -746,7 +746,7 @@ hdf5598f4cd0f,python,tag,sched,in-scope,U41/U43/U44/U246: parent-deck study must
 he3a4a3e5014c,python,tag,sched,in-scope,U41/U43/U44/U246: child answers decrement local and ancestor daily counters; tree and session totals must agree.,,deferred
 head34b2562fb,python,tag,sched,in-scope,U41/U246: the deck-count tree must contain each ancestor once even when several nested decks share it.,,deferred
 hee69ed088c05,python,tag,sched,in-scope,U49/U44/U246: a pending learning card accepts another Hard answer after its configured step list shrinks.,,deferred
-hf03d0a912671,python,tag,sched,preservation-only,Reviewing early in a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
+hf03d0a912671,python,tag,sched,out-of-scope,Frozen by Antoine 2026-10-26; previous classification preservation-only. Reviewing early in a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
 hf248f368b2b9,python,tag,sched,not-applicable,"Rejecting execution of an unfrozen test near midnight is a test-harness guard, not a product rollover behavior (R1879).",,done
 hf44d25b35e71,python,tag,sched,in-scope,"U44/U246: verify answer counters, due/interval consistency, leech handling and required Hard/Good/Easy factor writes (R587); only SM-2 interval multipliers are excluded (R752).",,deferred
 hf76a58bb5a76,python,tag,sched,in-scope,U49/U44/U246: removing lapse steps during relearning must allow the next Again answer to complete safely.,,deferred
@@ -815,7 +815,7 @@ h72885e1b6734,rust,tag,sched,in-scope,Fuzz bounds when the minimum is above the 
 h72fe93fb7887,rust,supplementary,sched,out-of-scope,"Review-priority callbacks already feed the pinned FSRS simulator, but simulator execution is excluded by R752.",,done
 h74c71d98d02e,rust,tag,sched,in-scope,The review screen's Reset choices are stored apart from the browser's,sched/ops/reset/end-of-queue,done
 h77ff41ec7a24,rust,tag,sched,in-scope,All four answer choices expose a nonempty interval label through the real next-state label provider (R656).,sched/labels/units,done
-h78e12bdba938,rust,tag,sched,preservation-only,Building filtered decks is out of scope; existing ones and their cards are only preserved,preservation/sync/filtered-deck,done
+h78e12bdba938,rust,tag,sched,out-of-scope,Frozen by Antoine 2026-10-26; previous classification preservation-only. Building filtered decks is out of scope; existing ones and their cards are only preserved,preservation/sync/filtered-deck,done
 h78eed3fe65c6,rust,tag,sched,in-scope,"Elapsed seconds of a learning card's current state, intraday and interday",sched/steps/learning-fuzz sched/steps/interday,done
 h7ae0194021c8,rust,tag,sched,in-scope,Set Due Date remembers the typed text per context,sched/ops/set-due/context,done
 h7b1a4d17232a,rust,tag,sched,in-scope,Hard without relearning steps leaves relearning (FSRS form),sched/steps/relearning,done
@@ -847,7 +847,7 @@ hb7be1ced7f3a,rust,tag,sched,in-scope,"U41/U246: queue mixing must distribute sh
 hb8dcf303d0e0,rust,tag,sched,in-scope,"U44/U246: first-step Hard and Again both enter learning, but Hard must use the longer averaged delay when two steps exist.",,deferred
 hbafc4dc77cce,rust,tag,sched,in-scope,A single learning row gives a memory item but no training item; the training form is checked with the optimizer (U47),sched/memory/on-the-fly sched/memory/ignore-before,done
 hbc3d71afcb34,rust,tag,sched,in-scope,A card without a usable history gets its memory state from its own interval and ease,sched/memory/no-history sched/memory/sm2-history,done
-hc05411e145f1,rust,tag,sched,preservation-only,Preview states in a filtered deck are out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
+hc05411e145f1,rust,tag,sched,out-of-scope,Frozen by Antoine 2026-10-26; previous classification preservation-only. Preview states in a filtered deck are out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
 hc3bd9890e06a,rust,tag,sched,out-of-scope,"Repositioning all new cards in a deck is explicitly excluded, even when no randomization is requested.",,done
 hc67d7d3b1875,rust,tag,sched,in-scope,Easy leaving relearning uses the FSRS interval above the fuzzed Good interval,sched/steps/relearning,done
 hc96dda7dd94f,rust,tag,sched,in-scope,Again in learning returns to the first step,sched/steps/learning-progress,done
@@ -1009,44 +1009,44 @@ hfb0061ec0b9b,rust,supplementary,storage,out-of-scope,The pinned filtered-deck r
 h39fa0055ea4c,python,tag,sync,not-applicable,the desktop app's Python HTTP helper and its certificate store; Meguri has no such helper and verifies TLS with the platform,,done
 h51a52fc54a83,python,tag,sync,not-applicable,the desktop app's Python HTTP helper and its certificate store; Meguri has no such helper and verifies TLS with the platform,,done
 ha70ddf9862eb,python,tag,sync,not-applicable,the desktop app's Python HTTP helper and its switch to skip TLS verification; Meguri has no such switch,,done
-h054820efe6cf,rust,supplementary,sync,in-scope,U109/U117: the pinned full-upload guard rejects a collection exactly at the size ceiling; verify boundary refusal before transfer.,,deferred
-h08e20ff5f483,rust,supplementary,sync,in-scope,U109/U117: a pinned full-upload rejection body becomes a typed server-message error instead of a success or generic transport failure.,,deferred
-h15bc3d0e4efd,rust,supplementary,sync,in-scope,a login refused by the server is an authentication failure,sync/transport/login-wrong-password,done
-h1774219ddefc,rust,tag,sync,in-scope,"the stall timeout fires even before any byte moves; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
+h054820efe6cf,rust,supplementary,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. U109/U117: the pinned full-upload guard rejects a collection exactly at the size ceiling; verify boundary refusal before transfer.,,deferred
+h08e20ff5f483,rust,supplementary,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. U109/U117: a pinned full-upload rejection body becomes a typed server-message error instead of a success or generic transport failure.,,deferred
+h15bc3d0e4efd,rust,supplementary,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. a login refused by the server is an authentication failure,sync/transport/login-wrong-password,done
+h1774219ddefc,rust,tag,sync,out-of-scope,"Frozen by Antoine 2026-10-26; previous classification in-scope. the stall timeout fires even before any byte moves; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
 h18ff6947756c,rust,tag,sync,not-applicable,the sync server accepts graves in an old client format; Meguri is a client and sends its graves separately,,done
-h2129dd2678c2,rust,tag,sync,in-scope,U111/U117/U118: duplicate concurrent media additions/deletions must be idempotent and conflicting content must converge to the server winner.,,deferred
-h241c4726e626,rust,supplementary,sync,in-scope,U109/U117: the pinned upload-size error reports actual and allowed sizes in MiB when the collection exceeds the ceiling.,,deferred
-h291349aa0c71,rust,tag,sync,in-scope,login returns the host key and a wrong password is refused as an authentication failure,sync/transport/login sync/transport/login-wrong-password,done
-h32c2b927938a,rust,tag,sync,in-scope,a successful answer carries its decompressed size and decodes,sync/transport/login,done
+h2129dd2678c2,rust,tag,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. U111/U117/U118: duplicate concurrent media additions/deletions must be idempotent and conflicting content must converge to the server winner.,,deferred
+h241c4726e626,rust,supplementary,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. U109/U117: the pinned upload-size error reports actual and allowed sizes in MiB when the collection exceeds the ceiling.,,deferred
+h291349aa0c71,rust,tag,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. login returns the host key and a wrong password is refused as an authentication failure,sync/transport/login sync/transport/login-wrong-password,done
+h32c2b927938a,rust,tag,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. a successful answer carries its decompressed size and decodes,sync/transport/login,done
 h389b8fd94c14,rust,tag,sync,not-applicable,Accepting an obsolete media-session form key is server compatibility behavior; Meguri is a sync client and does not ship that server (R1879).,,done
-h3f6a9ed898b8,rust,supplementary,sync,in-scope,a login whose connection is closed before the answer is a network error,sync/transport/login-reset,done
-h400e0628f27d,rust,supplementary,sync,in-scope,U106/U109/U117: the pin uses a plain success body and plain rejection text for full upload; the client must interpret both legacy responses correctly.,,deferred
+h3f6a9ed898b8,rust,supplementary,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. a login whose connection is closed before the answer is a network error,sync/transport/login-reset,done
+h400e0628f27d,rust,supplementary,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. U106/U109/U117: the pin uses a plain success body and plain rejection text for full upload; the client must interpret both legacy responses correctly.,,deferred
 h46c1ebf32143,rust,supplementary,sync,not-applicable,"Receiving an upload while the server collection is closed is a server lifecycle check, not a shipped Meguri sync-client operation (R1879).",,done
-h54c23550e27f,rust,tag,sync,in-scope,"a sync the server cannot apply (a note whose note type it lacks) fails with the database-check kind and leaves both sides able to sync again; the scenario needs a driver kind that tells this failure from a failed sanity check (U107), meguri-sync stub tests cover the status mapping meanwhile",,deferred
-h55c7436ac179,rust,tag,sync,in-scope,U111/U117: a media sanity-count mismatch must be distinguished from a matching count and trigger the defined recovery path.,,deferred
-h59143f82a4f9,rust,tag,sync,in-scope,"a transfer that stops moving fails after the stall timeout while a steady one never times out; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
-h5c5b47431921,rust,tag,sync,in-scope,"registering outside additions, rewrites and removals in the media folder, and the folder-time shortcut",media/register/outside-changes sync/media/tracking/quick-check sync/media/tracking/skip-transitions,done
+h54c23550e27f,rust,tag,sync,out-of-scope,"Frozen by Antoine 2026-10-26; previous classification in-scope. a sync the server cannot apply (a note whose note type it lacks) fails with the database-check kind and leaves both sides able to sync again; the scenario needs a driver kind that tells this failure from a failed sanity check (U107), meguri-sync stub tests cover the status mapping meanwhile",,deferred
+h55c7436ac179,rust,tag,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. U111/U117: a media sanity-count mismatch must be distinguished from a matching count and trigger the defined recovery path.,,deferred
+h59143f82a4f9,rust,tag,sync,out-of-scope,"Frozen by Antoine 2026-10-26; previous classification in-scope. a transfer that stops moving fails after the stall timeout while a steady one never times out; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
+h5c5b47431921,rust,tag,sync,in-scope,"registering outside additions, rewrites and removals in the media folder, and the folder-time shortcut Server cases remain frozen by Antoine 2026-10-26: sync/media/tracking/quick-check sync/media/tracking/skip-transitions.",media/register/outside-changes,done
 h62b3f29862b5,rust,tag,sync,not-applicable,Accepting a media-session start through an alternate HTTP method tests server routing; Meguri does not expose that server endpoint (R1879).,,done
-h65243b54e871,rust,tag,sync,in-scope,"U111/U117: externally added media, edited content and deletions must propagate in both directions and leave both clients with matching live files.",,deferred
-h6b1ce6691f8e,rust,tag,sync,in-scope,"a never-synced new collection against a new account finds no changes online, and a sync then writes nothing",sync/meta/status,done
-h7298208250f2,rust,supplementary,sync,in-scope,the login body carries the user name and password under their short member names,sync/transport/login,done
+h65243b54e871,rust,tag,sync,out-of-scope,"Frozen by Antoine 2026-10-26; previous classification in-scope. U111/U117: externally added media, edited content and deletions must propagate in both directions and leave both clients with matching live files.",,deferred
+h6b1ce6691f8e,rust,tag,sync,out-of-scope,"Frozen by Antoine 2026-10-26; previous classification in-scope. a never-synced new collection against a new account finds no changes online, and a sync then writes nothing",sync/meta/status,done
+h7298208250f2,rust,supplementary,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. the login body carries the user name and password under their short member names,sync/transport/login,done
 h7709a37ac92a,rust,tag,sync,not-applicable,Anki's private media database API; Meguri keeps its own media journal and never opens that file,,done
 h7ffe4ba74f1f,rust,tag,sync,not-applicable,"the sync server ends an older sync session when another starts; Meguri is a client with one session key per job, and the resulting conflict answer is a sync error kind",,done
-h850281d2190d,rust,supplementary,sync,in-scope,U109/U117: the pinned full-upload size guard must allow a collection strictly below its ceiling.,,deferred
-h862454dde0dd,rust,tag,sync,in-scope,"a request to an address that never answers fails within the timeouts; scenarios need U118's faults, meguri-sync's stub tests cover it meanwhile",,deferred
-h8f638568ddc0,rust,supplementary,sync,in-scope,a successful login returns the host key,sync/transport/login,done
+h850281d2190d,rust,supplementary,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. U109/U117: the pinned full-upload size guard must allow a collection strictly below its ceiling.,,deferred
+h862454dde0dd,rust,tag,sync,out-of-scope,"Frozen by Antoine 2026-10-26; previous classification in-scope. a request to an address that never answers fails within the timeouts; scenarios need U118's faults, meguri-sync's stub tests cover it meanwhile",,deferred
+h8f638568ddc0,rust,supplementary,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. a successful login returns the host key,sync/transport/login,done
 ha29e26f021f6,rust,tag,sync,not-applicable,Server acceptance of media protocol version fields in multipart input is not a shipped Meguri server interface (R1879).,,done
 haac4685e7e73,rust,tag,sync,not-applicable,"the sync server refuses a status check with an unsupported protocol version; Meguri is a client that always sends version 11, and its handling of that refusal is a sync error kind covered by meguri-sync stub tests",,done
-hacd6334f675a,rust,tag,sync,in-scope,U109/U117: a malformed full-upload payload must receive a corruption refusal that the client surfaces without claiming a successful transfer.,,deferred
-hacfb5a333b1c,rust,tag,sync,in-scope,"U107/U117/U118: abort must be safe when no round is active, ignore a mismatched session and terminate the matching active round.",,deferred
-hadd60d2540c9,rust,tag,sync,in-scope,"the status check follows a permanent redirect once and reports the new endpoint; the scenario's server never redirects, so meguri-sync's stub tests cover it until a fault can inject redirects (U118)",,deferred
+hacd6334f675a,rust,tag,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. U109/U117: a malformed full-upload payload must receive a corruption refusal that the client surfaces without claiming a successful transfer.,,deferred
+hacfb5a333b1c,rust,tag,sync,out-of-scope,"Frozen by Antoine 2026-10-26; previous classification in-scope. U107/U117/U118: abort must be safe when no round is active, ignore a mismatched session and terminate the matching active round.",,deferred
+hadd60d2540c9,rust,tag,sync,out-of-scope,"Frozen by Antoine 2026-10-26; previous classification in-scope. the status check follows a permanent redirect once and reports the new endpoint; the scenario's server never redirects, so meguri-sync's stub tests cover it until a fault can inject redirects (U118)",,deferred
 hae529870cada,rust,supplementary,sync,not-applicable,Validating bytes received by the sync server before accepting an upload is not a shipped Meguri server implementation (R1879).,,done
-hbe80a0966cc8,rust,supplementary,sync,in-scope,a server error answering a login is reported as a server error; specified with the sync error kinds (U106),,deferred
-hd79863d619d2,rust,tag,sync,in-scope,U107/U117/U118: a sanity failure must roll back the server round and require a one-way reconciliation on the client.,,deferred
-hdaef1892f535,rust,tag,sync,in-scope,"U111/U117: cover the media conflict table across absent, matching, changed and deleted remote files and clean versus pending local state.",,deferred
+hbe80a0966cc8,rust,supplementary,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. a server error answering a login is reported as a server error; specified with the sync error kinds (U106),,deferred
+hd79863d619d2,rust,tag,sync,out-of-scope,Frozen by Antoine 2026-10-26; previous classification in-scope. U107/U117/U118: a sanity failure must roll back the server round and require a one-way reconciliation on the client.,,deferred
+hdaef1892f535,rust,tag,sync,out-of-scope,"Frozen by Antoine 2026-10-26; previous classification in-scope. U111/U117: cover the media conflict table across absent, matching, changed and deleted remote files and clean versus pending local state.",,deferred
 he0cb4f886c79,rust,supplementary,sync,not-applicable,"Replacing the server's collection after a validated incoming upload is server storage behavior, not Meguri's client-side full-download operation (R1879).",,done
-hf0311a8adc67,rust,tag,sync,in-scope,"a server that stays silent past the stall timeout fails the request; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
-hfa9987445e9e,rust,tag,sync,in-scope,"U107/U109/U117: cover initial one-way bootstrap then bidirectional normal sync of all record classes, deletions and schema-change escalation.",,deferred
+hf0311a8adc67,rust,tag,sync,out-of-scope,"Frozen by Antoine 2026-10-26; previous classification in-scope. a server that stays silent past the stall timeout fails the request; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
+hfa9987445e9e,rust,tag,sync,out-of-scope,"Frozen by Antoine 2026-10-26; previous classification in-scope. U107/U109/U117: cover initial one-way bootstrap then bidirectional normal sync of all record classes, deletions and schema-change escalation.",,deferred
 h12a8b8c90d0b,python,tag,tags,in-scope,unused registry rows removed,tags/clear-unused/parents,done
 h15bbd0ab00e1,python,tag,tags,not-applicable,legacy Python wrappers that forward to the bulk add and remove operations,,done
 h16d1d167d5e7,python,tag,tags,in-scope,every tag a note uses is registered and listed,tags/canon/spelling,done

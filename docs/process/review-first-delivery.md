@@ -2,8 +2,9 @@
 
 Antoine changed the execution priority on 2026-10-22: reach a usable review
 app before completing the remaining feature areas. This overrides the earlier
-instruction to execute all units in manifest order. The full plan remains the
-final goal. Milestone membership, safety requirements and acceptance gates stay.
+instruction to execute all units in manifest order. The active plan remains the
+final goal, subject to the Anki server freeze below. Active safety requirements
+and acceptance gates stay.
 
 ## Next delivery
 
@@ -21,35 +22,37 @@ Build one local review path over the existing production core and renderer:
 6. Provide a supported way to bring a local collection into the app. Keep the
    source intact and verify the copied/imported collection before use.
 
-Local review is the first intermediate checkpoint. Antoine expanded the first
-usable build on 2026-10-22 to include file import/export and explicit manual
-Import from Anki / Export to Anki through an Anki-compatible server. Prioritize
-those transfers immediately after safe local entry and reviews, before the
-remaining editing, statistics and advanced review features. Reuse prepared work.
+Local review is the first intermediate checkpoint. File import/export remains
+required for the first usable version. Routine Meguri sync remains CloudKit.
 
-The existing sync design remains: routine Meguri sync uses CloudKit; Anki server
-access is an explicit Settings transfer with preview, confirmation and safety backup.
-Antoine exempted custom servers entered by URL from the 60-minute wait on 2026-10-24,
-including retained earlier deadlines. After completion, an explicit transfer may
-follow immediately; active/uncertain-operation guards and confirmations remain.
-Antoine chose a self-hosted Anki-compatible server
-for the first usable version on 2026-10-22. Provide endpoint configuration and
-explicit import/export in every build; test with the local official server rig.
-No automated AnkiWeb contact is permitted. The routine-sync design is unchanged.
-CloudKit requirements and all milestone gates remain.
+## Anki server freeze — 2026-10-26
 
-No sync or Apple-account setup is needed to prove the local-review checkpoint.
-The expanded first-version scope requires its transfer checks before acceptance.
-Unavailable features remain absent from the user flow.
+Anki server work stops here. Resume only when Antoine explicitly requests it. This replaces the October 22 server-delivery requirement and
+the October 25 instruction to resume parked sync checks before acceptance.
+
+Preserve the code, plan items, dependencies and verification evidence. Do not
+build or fix server code, add server tests, start servers, or seek
+acceptance for this scope. U13/U105/U106/U107/U109/U110/U111/U116 and the server
+portions of mixed units and RF4 are retained reference work, outside current
+delivery, milestone and release requirements. The plan's Frozen Unit Index
+retains the original entries. Unfinished work is not marked complete or passing.
+
+Dependencies, shared gate failures and general instructions to finish the plan
+cannot start server work. If a validator cannot separate frozen server
+work, record that limitation and continue active app work; never claim a pass.
+Existing shared regression tests may run, but server-only failures do not
+create a repair task under this scope. Do not disable shared safety checks.
+
+File import/export, local Anki collection compatibility, shared media storage,
+CloudKit and local Migaku/AnkiConnect integrations remain required. No sync or
+Apple-account setup is needed to prove the local-review checkpoint.
 
 ## Execution
 
-Antoine asked on 2026-10-25 to stop extended Anki sync harness work and return
-to app delivery. Park U107/U110/U111 with their gaps recorded. Continue the
-shared app and review workflow using RF1. This changes work priority only:
-the sync batch, technical failures and required gates remain open. Keep
-`1416a520542a8c5daa38a23bfe398da704c3d6c9` as the base covering pending master
-changes; resolve the open checks before their acceptance.
+Continue the shared app and review workflow using RF1. The unfinished sync
+batch and its failed receipts remain retained under the freeze above. Keep
+`1416a520542a8c5daa38a23bfe398da704c3d6c9` as the integration base for pending
+master changes. Resolve active-scope failures before acceptance.
 
 For the current fast macOS pass, Antoine authorized local Xcode MCP build, run,
 debug and UI feedback on 2026-10-25. Defer VM and mobile iteration checks during
@@ -79,4 +82,5 @@ plan conformance, clean-room boundaries and rendered UI quality. VM checks that
 cannot run stay queued and must pass before final acceptance.
 
 Use `Unit:` only when the unit is complete. Keep a record of unfinished
-requirements. Complete every unit and retain every milestone gate.
+requirements. Complete every active unit and retain every active milestone gate.
+Frozen server requirements do not block delivery.

@@ -1,5 +1,9 @@
 # U110 media tracking — in progress
 
+> **2026-10-26: Anki server work is frozen indefinitely.** Earlier next steps
+> and acceptance requirements below are retained history. Do not resume them
+> without Antoine's explicit request. See [the delivery scope](../review-first-delivery.md#anki-server-freeze--2026-10-26).
+
 Starting commit: `c7f3d340a975886f41578ae70aaa857350ad0325`.
 Recorded before the audit in `build/unit-starts/U110-20261025.json`.
 Batch base: `1416a520542a8c5daa38a23bfe398da704c3d6c9` (U107/U110/U111).

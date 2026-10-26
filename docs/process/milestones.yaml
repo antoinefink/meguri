@@ -2,7 +2,7 @@
 #
 # Membership, closing gates and user steps are defined once, in the plan's
 # Delivery Milestones table. This file mirrors it: `units` and the `plan`
-# texts must equal the table's cells, and every unit of the plan's Unit Index
+# texts must equal the table's cells. Every unit of the active Unit Index
 # is in exactly one milestone (`tools/mg milestone-gate --check`, a T0 run).
 # The definitions that run are bound to that text by their `plan` excerpts
 # (below): every part of a milestone's closing gate and user steps texts must
@@ -173,6 +173,11 @@
 #   pending     a condition whose check lands with that unit: it fails the
 #               gate until then
 
+# Anki server work is frozen indefinitely by Antoine (2026-10-26).
+# See the plan scope override and docs/process/review-first-delivery.md.
+# Frozen unit entries remain in the plan Frozen Unit Index, outside these
+# active memberships. Mixed suites retain only their CloudKit/file/safety
+# scope; server evidence cannot satisfy them or reactivate server work.
 version: 1
 plan: docs/plans/2026-10-12-1926-feat-meguri-anki-compatible-apple-app-plan.md
 
@@ -209,9 +214,9 @@ milestones:
   - id: M0
     name: Foundations
     plan:
-      gate: "The oracle image builds and records the first goldens: the 10k fuzz table, id allocation and a rollover×TZ subset (U3, U4). T0 runs them, with id allocation passing (U23) and the fuzz-table and rollover scenarios reported pending until U45 and U40 land in M1R. The similarity scan and provenance-trailer check are enforced (U2). The XCFramework builds, and the app launches on iPhone and iPad simulators and on the Mac with a fixture, giving a screenshot and hierarchy (U6–U8). The `lint-ui` gate is active (U9). A stub screen emits a named interval that U241 evaluates (U12). A two-client full upload and download runs under a frozen clock (U13)."
+      gate: "The oracle image builds and records the first goldens: the 10k fuzz table, id allocation and a rollover×TZ subset (U3, U4). T0 runs them, with id allocation passing (U23) and the fuzz-table and rollover scenarios reported pending until U45 and U40 land in M1R. The similarity scan and provenance-trailer check are enforced (U2). The XCFramework builds, and the app launches on iPhone and iPad simulators and on the Mac with a fixture, giving a screenshot and hierarchy (U6–U8). The `lint-ui` gate is active (U9). A stub screen emits a named interval that U241 evaluates (U12)."
       user_steps: "Xcode license, simulator runtime and Xcode agent access (R1969)"
-    units: [U1, U2, U3, U4, U5, U6, U7, U8, U8b, U8c, U9, U10, U11, U12, U13, U19, U20, U21, U22, U23, U240, U241]
+    units: [U1, U2, U3, U4, U5, U6, U7, U8, U8b, U8c, U9, U10, U11, U12, U19, U20, U21, U22, U23, U240, U241]
     suites:
       - {id: static, run: static, plan: [provenance-trailer check, are enforced (U2)], why: "provenance trailers and the static checks (U2, U19)"}
       - {id: static-tree, run: static-tree, why: "the static checks over the whole tree (U19)"}
@@ -230,7 +235,6 @@ milestones:
         why: goldens recorded by the pinned oracle (U4)
       - {id: harvest-report, run: harvest-report, why: "the harvest catalog (U4)"}
       - {id: harvest-coverage, run: harvest-coverage, why: "no unclassified harvest row at any milestone (R1880)"}
-      - {id: live-oracle, run: live-oracle, plan: ["A two-client full upload and download runs under a frozen clock (U13)"], why: "a two-client full upload and download under a frozen clock (U13)"}
       - {id: fixtures-check, run: fixtures-check, why: "the generator's collections check against the oracle (U11)"}
       - {id: core-lint, run: core-lint, why: "the lint gate (U5)"}
       - {id: core-deny, run: core-deny, why: "the dependency and license gate (U5)"}
@@ -278,11 +282,11 @@ milestones:
   - id: M1R
     name: Reviews first
     plan:
-      gate: "U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on the Mac host and simulators, gated by U241 against the review-loop budgets (R1807–R1817). U248 CloudKit convergence soak with signed development-container evidence (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210). U36 preservation suite (R2017). U250 fault classes: review, sync, full download, backup (AE86). U251's M1R legs: kill during review, during a sync and during the first full download (AE86), background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names. U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check), and U176's snapshot-swap fallback exists behind its flag."
+      gate: "U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all. U243 on the Mac host and simulators, gated by U241 against the review-loop budgets (R1807–R1817). U248 CloudKit convergence soak with signed development-container evidence (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210). U36 preservation suite (R2017). U250 fault classes: review, sync, backup (AE86). U251's M1R legs: kill during review and during a CloudKit exchange, background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names. U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check), and U176's snapshot-swap fallback exists behind its flag."
       user_steps: "Final hands-on batch: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure). U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks). The first real sync with CloudKit, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, U248 CloudKit lane, U250 cloud sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, existing imported cards)"
     units: [U8d, U19b, U240r, U14, U15, U24, U25, U26, U27, U28, U29, U30, U31, U32, U36, U37, U38, U40, U41,
       U42, U43, U44, U45, U46, U48, U49, U50, U51, U60, U61, U62, U63, U64, U65, U66, U67, U68, U70, U80,
-      U82a, U85a, U105, U106, U107, U109, U110, U111, U113, U114, U117, U118, U124a, U126, U127, U132,
+      U82a, U85a, U113, U114, U117, U118, U124a, U126, U127, U132,
       U133a, U150, U151, U152, U153, U154, U155, U157, U158, U160, U161, U163a, U166, U175, U176, U177,
       U178, U179, U180, U181, U182, U185, U186, U187, U188, U228a, U243, U246, U248, U249, U250, U251,
       U256]
@@ -298,9 +302,9 @@ milestones:
       - id: private-suite
         run: private-suite
         pending: U249
-        scope: {detail: checks, items: [next-states, queues, memory-states, revlog-replay, render-all, full-sync-up, full-sync-down]}
+        scope: {detail: checks, items: [next-states, queues, memory-states, revlog-replay, render-all]}
         plan:
-          - {text: "U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down", items: [next-states, queues, memory-states, revlog-replay, render-all, full-sync-up, full-sync-down]}
+          - {text: "U249 subset: next states, queues, memory states, revlog replay, render-all", items: [next-states, queues, memory-states, revlog-replay, render-all]}
         why: U249 subset on the private collection (R1938-R1943)
       - {id: private-selftest, run: private-selftest, why: "the private vault's mount and scan (U15)"}
       - {id: anonymize-check, run: anonymize-check, why: "the anonymized clone (U15)"}
@@ -322,16 +326,16 @@ milestones:
       - id: u250-fault
         run: u250-fault
         pending: U250
-        scope: {detail: classes, items: [review, sync, full-download, backup]}
-        plan: [{text: "U250 fault classes: review, sync, full download, backup (AE86)", items: [review, sync, full-download, backup]}]
+        scope: {detail: classes, items: [review, sync, backup]}
+        plan: [{text: "U250 fault classes: review, sync, backup (AE86)", items: [review, sync, backup]}]
         why: U250 fault classes (AE86)
       - id: u251-safety-app
         run: u251-safety-app
         pending: U251
-        scope: {detail: cases, items: [kill-review, kill-sync, kill-first-full-download, background-suspend, corrupt-collection, restore]}
+        scope: {detail: cases, items: [kill-review, kill-sync, background-suspend, corrupt-collection, restore]}
         plan:
-          - text: "U251's M1R legs: kill during review, during a sync and during the first full download (AE86), background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names"
-            items: [kill-review, kill-sync, kill-first-full-download, background-suspend, corrupt-collection, restore]
+          - text: "U251's M1R legs: kill during review and during a CloudKit exchange, background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names"
+            items: [kill-review, kill-sync, background-suspend, corrupt-collection, restore]
         why: U251's M1R legs (AE86), restore through Settings (U163a)
       - {id: u38-wiring, run: u38-wiring, plan: ["U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check)"], why: "pending providers must belong to later milestones"}
       - {id: u176-fallback, run: u176-fallback, pending: U176, plan: ["U176's snapshot-swap fallback exists behind its flag"], why: "U176's snapshot-swap fallback exists behind its flag"}
@@ -372,7 +376,7 @@ milestones:
   - id: M1
     name: Daily review driver
     plan:
-      gate: "Cumulative over M1R: the full daily-driver gate. U246: areas storage, sched (R1890–R1903, R1906), the optimizer (R1904, R1905; U47 ships here), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on the Mac host and simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U244 launch and Home group (R1818–R1822). U245 review and memory subset. U248 CloudKit convergence soak with signed development-container evidence, with its two-device optimizer race. U36 preservation suite (R2017). U250 fault classes: review, sync, full download, backup, optimizer write (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review, including U253's sweep of those screens. U38's `wiring/pending.rs` is empty, and U176's snapshot-swap fallback exists behind its flag."
+      gate: "Cumulative over M1R: the full daily-driver gate. U246: areas storage, sched (R1890–R1903, R1906), the optimizer (R1904, R1905; U47 ships here), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all. U243 on the Mac host and simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U244 launch and Home group (R1818–R1822). U245 review and memory subset. U248 CloudKit convergence soak with signed development-container evidence, with its two-device optimizer race. U36 preservation suite (R2017). U250 fault classes: review, sync, backup, optimizer write (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review, including U253's sweep of those screens. U38's `wiring/pending.rs` is empty, and U176's snapshot-swap fallback exists behind its flag."
       user_steps: "U256 device run on iPhone, iPad and Mac (AE81). Variant picks for Home, deck page and review (U254). A 7-day trial: all reviews and new cards in Meguri, no data incident, logged"
     units: [U18, U33, U34, U35, U47, U81, U82, U83, U84, U85, U88, U92, U95, U96, U97, U98, U99, U100, U101,
       U103, U120, U121, U122, U123, U124, U128, U129, U130, U131, U133, U156, U159, U162, U163, U183, U184,
@@ -391,9 +395,9 @@ milestones:
       - id: private-suite
         run: private-suite
         pending: U249
-        scope: {detail: checks, items: [next-states, queues, memory-states, revlog-replay, render-all, full-sync-up, full-sync-down]}
+        scope: {detail: checks, items: [next-states, queues, memory-states, revlog-replay, render-all]}
         plan:
-          - {text: "U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down", items: [next-states, queues, memory-states, revlog-replay, render-all, full-sync-up, full-sync-down]}
+          - {text: "U249 subset: next states, queues, memory states, revlog replay, render-all", items: [next-states, queues, memory-states, revlog-replay, render-all]}
         why: U249 subset on the private collection (R1938-R1943)
       - {id: u243-review-loop, run: u243-review-loop, pending: U243, plan: [U243 on the Mac host and simulators], why: "review-loop frame budgets on the Mac host and simulators (R1807-R1817)"}
       - id: perf-gate
@@ -427,9 +431,9 @@ milestones:
       - id: u250-fault
         run: u250-fault
         pending: U250
-        scope: {detail: classes, items: [review, sync, full-download, backup, optimizer-write]}
+        scope: {detail: classes, items: [review, sync, backup, optimizer-write]}
         plan:
-          - {text: "U250 fault classes: review, sync, full download, backup, optimizer write (AE86)", items: [review, sync, full-download, backup, optimizer-write]}
+          - {text: "U250 fault classes: review, sync, backup, optimizer write (AE86)", items: [review, sync, backup, optimizer-write]}
         why: U250 fault classes, with the optimizer write (AE86)
       - id: u251-safety-app
         run: u251-safety-app
@@ -735,7 +739,7 @@ milestones:
     plan:
       gate: "U246 full: every in-scope and preservation-only harvested scenario passes (R1880), and no undocumented deviation remains (R1889). The full snapshot matrix (U252). Every screen is \"verified\" (U254). U255 release configs. U256 device run on every budget. U257 release readiness."
       user_steps: "Signature-screen sign-off (all), the monthly device session, the 30-day daily-driver run (U257)"
-    units: [U16, U17, U116, U167, U168, U257]
+    units: [U16, U17, U167, U168, U257]
     suites:
       - id: harvest-coverage
         run: harvest-coverage

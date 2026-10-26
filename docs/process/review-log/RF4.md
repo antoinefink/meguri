@@ -1,5 +1,9 @@
 # RF4 — explicit self-hosted server transfers
 
+> **2026-10-26: Anki server work is frozen indefinitely.** Earlier next steps
+> and acceptance requirements below are retained history. Do not resume them
+> without Antoine's explicit request. See [the delivery scope](../review-first-delivery.md#anki-server-freeze--2026-10-26). File import/export work in RF4 remains active.
+
 Starting commit: `480fc88681143a143a2ee146378fe260512dc961`.
 
 Delivery: manual Import from Anki / Export to Anki, with preview, confirmation,

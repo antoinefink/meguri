@@ -181,6 +181,7 @@ runs:
     triggers: [tools/, docker/, .claude/, .gitattributes, .gitignore]
     budget_s: 2400
   - id: conformance-route-transport
+    disabled: "Anki server harness frozen by Antoine on 2026-10-26; explicit request required"
     job: conformance-route-test
     tier: T0
     placement: [host, docker:oracle]
@@ -460,39 +461,33 @@ runs:
   # --- T1: live oracle ----------------------------------------------------------
   - id: live-oracle
     job: conformance
-    # T0 already ran on both lanes; this job executes fresh T1 workers only.
-    args: [--live-only, --lane, native]
+    # Antoine stopped Anki server work on 2026-10-26. Keep other T1
+    # coverage explicit for ordinary, milestone and release runs alike.
+    # The conformance tier self-test checks the selected scenario boundary.
+    args: [--live-only, --lane, native,
+      browser, cardgen, decks, fp-probe,
+      maintenance, media, model, notes,
+      notetypes, package, preservation/churn, preservation/edit,
+      preservation/fixture, preservation/notetype, preservation/recipe, preservation/render,
+      preservation/review, render, sched/answer, sched/bury,
+      sched/compat/custom-scheduling-ignored, sched/compat/enable-fsrs-live, sched/compat/enable-fsrs, sched/compat/re-enable,
+      sched/compat/unsupported-preset-kept, sched/compat/v3-switch, sched/counts, sched/data,
+      sched/day, sched/fsrs, sched/fuzz, sched/labels,
+      sched/leech, sched/loadbalancer, sched/memory, sched/ops,
+      sched/options, sched/queue, sched/revlog, sched/session,
+      sched/steps, sched/unbury-on-rollover, search, smoke/fsrs-new-card,
+      smoke/fuzz-table-small, smoke/handoff-round-trip, smoke/ids-frozen-collision, smoke/runner-empty,
+      smoke/sm2-new-card, smoke/timing-advance, smoke/timing-tz-asia-kathmandu, smoke/timing-tz-utc,
+      storage, tags, text, undo
+    ]
     tier: T1
     placement: [host, docker:oracle]
-    needs: [oracle, sync-server]
+    needs: [oracle]
     class: conformance
     oracle: true
     local: false
     budget_s: 1200
-    filters:
-      core/: [smoke/sync]
-      core/crates/meguri-text/: [text]
-      core/crates/meguri-model/: [model]
-      core/crates/meguri-storage/: [storage, maintenance]
-      core/crates/meguri-engine/: [undo, maintenance]
-      core/crates/meguri-sched/: [sched, fp-probe]
-      core/crates/meguri-template/: [render]
-      core/crates/meguri-search/: [search]
-      core/crates/meguri-sync/: [sync]
-      core/crates/meguri-package/: [maintenance]
-      core/crates/meguri-host/: ["*"]
-      core/crates/meguri-testkit/: ["*"]
-      core/tools/meguri-cli/: ["*"]
-      core/Cargo.lock: ["*"]
-      core/Cargo.toml: ["*"]
-      core/pins.toml: ["*"]
-      conformance/scenarios/: ["*"]
-      conformance/goldens/: ["*"]
-      conformance/deviations.yaml: ["*"]
-      conformance/oracle.json: ["*"]
-      conformance/fixtures/: ["*"]
-      tools/mg.d/conformance.sh: ["*"]
-      tools/mg.d/oracle.sh: ["*"]
+    triggers: [core/, core/crates/meguri-text/, core/crates/meguri-model/, core/crates/meguri-storage/, core/crates/meguri-engine/, core/crates/meguri-sched/, core/crates/meguri-template/, core/crates/meguri-search/, core/crates/meguri-sync/, core/crates/meguri-package/, core/crates/meguri-host/, core/crates/meguri-testkit/, core/tools/meguri-cli/, core/Cargo.lock, core/Cargo.toml, core/pins.toml, conformance/scenarios/, conformance/goldens/, conformance/deviations.yaml, conformance/oracle.json, conformance/fixtures/, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh]
   - id: oracle-test
     job: oracle
     args: [test]
