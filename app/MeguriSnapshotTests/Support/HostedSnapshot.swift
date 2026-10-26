@@ -609,8 +609,37 @@ enum HostedRenderer {
             hostingView.cacheDisplay(in: bounds, to: rep)
             try validateScreenGeometry()
             let image = NSImage(size: bounds.size)
-            image.addRepresentation(rep)
+            image.addRepresentation(screenSize != nil ? try opaqueScreenBitmap(rep) : rep)
             return image
+        }
+
+        private func opaqueScreenBitmap(_ rep: NSBitmapImageRep) throws -> NSBitmapImageRep {
+            // cacheDisplay captures the view's pixels, including clear native
+            // Form surfaces, but not the NSWindow backdrop behind them.
+            var background: CGColor?
+            window.effectiveAppearance.performAsCurrentDrawingAppearance {
+                background = window.backgroundColor.usingColorSpace(.sRGB)?.cgColor
+            }
+            guard let background, let captured = rep.cgImage,
+                  let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let context = CGContext(
+                    data: nil, width: captured.width, height: captured.height,
+                    bitsPerComponent: 8, bytesPerRow: captured.width * 4, space: space,
+                    bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.noneSkipLast.rawValue
+                  ) else { throw RenderError(description: "could not allocate the opaque screen bitmap or resolve the window background") }
+            let pixels = CGRect(x: 0, y: 0, width: captured.width, height: captured.height)
+            context.setFillColor(background)
+            context.fill(pixels)
+            // Both CGImages use pixel coordinates: no flip or point-scale
+            // transform. Every captured 2x pixel keeps its row and column.
+            context.interpolationQuality = .none
+            context.draw(captured, in: pixels)
+            guard let composited = context.makeImage() else {
+                throw RenderError(description: "could not create the opaque screen image")
+            }
+            let opaque = NSBitmapImageRep(cgImage: composited)
+            opaque.size = rep.size
+            return opaque
         }
 
         private func validateScreenGeometry() throws {

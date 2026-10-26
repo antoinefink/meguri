@@ -128,3 +128,12 @@ review is clear. Lint `20261026T185918Z-2807` passes all four checks; privacy
 `20261026T190026Z-4273` pass 6 tests with zero skips. Regenerated Swift bindings
 are byte-identical to the pinned pre-change file; verification is in the intake.
 Native media execution and the required integration gate remain pending.
+
+## Capture diagnosis correction
+
+The dark image from `182155Z-59282` shows text and controls. The earlier blank
+image diagnosis was incorrect: the capture omits the native window background.
+The opaque-text test therefore fails even though the view paints.
+Filtered repair `20261026T192318Z-16159` composites the captured view over its
+actual window background in the same appearance. Independent review is clear;
+the existing paint, size and timing checks remain. Runtime verification is pending.
