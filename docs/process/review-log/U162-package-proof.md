@@ -347,3 +347,12 @@ No playback occurs. The failing regression stays enabled and recorded.
 The source diagnosis reports one broad search that returned the bundled public
 jQuery file. It was unused; further reads were restricted to own source files.
 No excluded Anki or private tree was read. The report is retained in the intake.
+
+## Native audio handoff contract
+
+Start `d66c3763`; spec-writer session `s-20261026T041939Z-a8f043ce`.
+M11 adds the file handoff required by the reproduced -54 failure. Independent
+review found P2 `M11-LOCK-PUBLICATION`; R2 resolves it, and final wording review
+is clear. Privacy `20261026T212244Z-26603` passes after complete prose rewrites;
+the four failed scan results remain retained. No scan exception was added.
+Implementation, native playback, integration and timing evidence remain open.

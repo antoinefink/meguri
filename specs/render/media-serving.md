@@ -203,3 +203,78 @@ The current S1 record reports passing VM function/paint/focus checks, but no120H
 S2 records Range/CSP/storage/module/font successes and video seek function in the VM. The iOS27 **physical-device audio and video seek checks both remain open**. Keep the selected custom-scheme configuration conditional. If either real-device check fails, stop/escalate the media configuration and evaluate the specified file-URL fallback with fresh storage/module/CSP checks; do not silently substitute it or label VM evidence as device evidence. Immediate-kill durability of a last-moment website storage write is also not established by S2's relaunch test.
 
 R1913's hand-captured reference screenshots remain an explicit human step in the milestone manifest. Antoine approved deferring nonblocking hands-on checks to the final batch during WIP (2026-10-20), including these references. The missing index stays pending evidence; final comparison and resulting fixes remain mandatory. No agent may take over Antoine's screen to obtain it. Device confirmation owners and evidence belong in the existing U256/milestone procedure, not fabricated metadata here.
+
+## M11. Private native-audio playback copy
+
+These rules define Meguri's Apple audio handoff; they add no Anki behavior.
+During asynchronous preparation, read the file already opened under M2 into a private copy.
+Give the existing player that copy's local URL, as supported by Apple's [audio-file initializer](https://developer.apple.com/documentation/avfaudio/avaudioplayer/init(contentsof:)).
+Do not open the collection path again or give AVFoundation a descriptor pseudo-path.
+
+Creation and copying follow this order:
+
+1. Within storage reserved for this app's temporary files, create a directory under a newly generated, unguessable name.
+   Require exclusive creation, mode `0700`, verified ownership and verified identity; refuse links.
+   Acquire the directory's exclusive lifetime lock before creating output bytes or a publication marker.
+   Create a new regular file exclusively, without following links, with mode `0600`.
+   Generate its basename in the app; choose its lower-case suffix from the existing native-audio allowlist.
+   No part of that output path may come from card text.
+2. Perform the copy away from the main actor, using the existing bounded file reader.
+   Limit each read to 64 KiB and limit pending read/write work.
+   Check length arithmetic and finish short writes correctly.
+   Copy exactly the length recorded at open.
+   Before and after copying, compare the descriptor's identity, regular-file type, length, modification time and change time with the opening record.
+   Reject changed metadata, early EOF and I/O failures.
+   An atomic replacement of the pathname may leave the old opened bytes usable or cause rejection; it must never select replacement bytes through another path lookup.
+   Allocate a fixed amount of memory for the transfer, regardless of input size.
+   Do not map the input, place all its bytes in a `Data` value, or collect chunks for later.
+3. Check the completed output's exact length and all required input metadata.
+   Close every handle that can write the output and set its mode to `0400`.
+   Only then create the completed-publication marker exclusively, with the lifetime lock still held.
+   Release the URL for native use only after these steps.
+   Never edit, replace or reuse a released copy.
+   Keep its directory private from card content and keep its identity until removal.
+   Initialize and prepare the player away from the main actor; copying alone proves no decoding result.
+
+For every prepared or active native clip, ownership includes exactly one copied file and the original descriptor.
+Keep the established question/answer preparation and lookahead limits, without adding a limit, replay storage or advance copies for a whole queue.
+Both files remain owned when playback pauses or seeks.
+End playback and revoke callback delivery first; only afterward close the descriptor and delete its copy.
+The directory lock remains exclusively owned from the copy operation until removal finishes, including publication and player shutdown.
+Retire the work if preparation is cancelled, preparation or decoding fails, a replacement arrives, the owner closes or the clip is released.
+Every resource created for that work must be relinquished once, whether its output is complete or partial.
+Observe cancellation after each bounded operation and once more before returning a prepared player.
+No obsolete or cancelled preparation may deliver a playable object, start playback or enable an audio session.
+Do not alter collection media or request additional entitlements.
+Do not reveal the private file URL to a page, an exported interface or a diagnostic.
+
+Recovery after a crash may inspect only the app's own copy area.
+Without following links, verify ownership, directory/file identities, generated names and the completed-publication marker.
+Try the exclusive lock without waiting, then check those conditions again before deleting anything.
+Skip live entries and every uncertain state, including incomplete creation, a lock alone or a missing publication marker, even if locking succeeds.
+Delete only the expected copy, lock and marker files.
+Never traverse unrecognized children.
+Exclude every shared cache or temporary folder from this operation.
+If removal fails, retain the unused files for a later safe attempt and emit only a bounded diagnostic with no path.
+That failure grants no right to reuse or play those files.
+
+Keep `render/audio-playback#A2`–A7 unchanged: controller transitions, completion epochs, seek, preload and session rules still apply.
+Use A5 for missing/failed items and their diagnostics.
+Neither copying nor preparation may hold up page presentation or activate ducking.
+R554 remains ≤50 ms from presentation to play and ≤100 ms between clips, including a missing middle item.
+Measure copy/preparation time, memory at increasing file sizes and native playback independently.
+No performance result follows from this design alone.
+The existing timing exception excludes decoder initialization failure.
+U69 codecs, real-device checks and final acceptance retain their existing owners and pending status.
+
+Required evidence has three parts:
+
+- Synthetic file tests cover refused links, mutation, atomic replacement, exact bytes, bounded reads/memory, short writes, I/O failure and write/decode/cancel/close races.
+  Deterministically pause creation and run recovery before lock acquisition, during copying, after publication and during removal.
+  Show that live/incomplete states survive recovery, while only a fully published abandoned copy with acquired exclusive authority can be removed.
+- Generated supported clips exercise the actual backend: expected finite duration, real play, one completion, pause/seek and native stop before both resources are released.
+  Show that an old generation cannot restart playback.
+- For integration proof, run the strict review flow after media import using the production owner.
+  Initializing a decoder on an unrelated regular file proves neither successful backend playback nor completion of this flow.
+
+Report VM file/decoder results separately from platform and hardware timing/session proof.
