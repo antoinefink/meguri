@@ -64,3 +64,13 @@ next. The Mac, iPhone and iPad import/media/review/reopen/export case still
 needs to pass, followed by the full original-base gate. Keep the replay helper
 apart until its compile and privacy fixes pass. No Unit or milestone is accepted.
 Similarity `20261026T170708Z-14266` passes for this draft.
+
+## Swift checks
+
+The first Core test build stops at a new array literal where the generated API
+requires Data. Filtered fix `20261026T171707Z-23587` wraps the same two bytes in
+Data; independent review confirms that no check or value changed.
+`swift-test/20261026T172715Z-28591` passes 8 Core mapping/source-lifetime tests.
+`swift-test/20261026T171710Z-23864` passes 43 Kit model/presentation tests,
+including the real committed-result failure cases. Both report zero skips.
+Built-screen inspection and the complete native media case are still pending.

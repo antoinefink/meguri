@@ -185,7 +185,7 @@ extension EventTests {
         let media = MeguriCoreBindings.CollectionImportMedia(incoming: 5, decodedBytes: 123, reused: 2, added: 3, trashed: 1)
         let facts = CoreBridge.CollectionInspectionFacts(MeguriCoreBindings.CollectionInspectionFacts(
             notes: 6, cards: 11, reviews: 7, sourceSchema: 18, destination: "/private/not-for-presentation",
-            replacingExisting: true, sourceSha256: [1, 2], mediaCount: 5, mediaDecodedBytes: 123))
+            replacingExisting: true, sourceSha256: Data([1, 2]), mediaCount: 5, mediaDecodedBytes: 123))
         #expect(facts.mediaCount == 5 && facts.mediaDecodedBytes == 123)
         #expect(facts.notes == 6 && facts.cards == 11 && facts.reviews == 7 && facts.sourceSHA256 == Data([1, 2]))
         let receipt = MeguriCoreBindings.ImportBackupReceipt(name: "safety.colpkg", sizeBytes: 80, instantMs: 101, snapshotModifiedMs: 99)
