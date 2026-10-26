@@ -382,7 +382,7 @@ extension TestHooks {
     ///   or failed (object / state 2). Other launches do not listen for it.
     final class ShellCommands: NSObject {
         enum Command: String, CaseIterable {
-            case toggleSizeClass, presentAdd, closeWindow, closeNativeReview
+            case toggleSizeClass, presentAdd, closeWindow, closeNativeReview, flushNativeReview
         }
 
         static let shared = ShellCommands()
@@ -393,6 +393,7 @@ extension TestHooks {
 
         private var navigation: AppNavigation?
         private let nativeClose = NativeReviewCloseRequest()
+        private weak var nativeInput: NativeReviewInput?
         private var listening = false
         #if os(iOS)
         private var tokens: [Int32] = []
@@ -401,10 +402,11 @@ extension TestHooks {
         func listen(navigation: AppNavigation, sizeClass: LaunchOptions.SizeClass?, nativeCollection: ReviewCollection? = nil) {
             self.navigation = navigation
             nativeClose.bind(collection: nativeCollection)
+            nativeInput = nativeCollection?.configuration.nativeReviewInput
             guard !listening else { return }
             listening = true
             for command in Command.allCases {
-                if command == .closeNativeReview && !nativeClose.enabled { continue }
+                if (command == .closeNativeReview || command == .flushNativeReview) && !nativeClose.enabled { continue }
                 #if os(macOS)
                 DistributedNotificationCenter.default().addObserver(
                     self, selector: #selector(received(_:)), name: Notification.Name(Self.name(command)), object: nil,
@@ -443,6 +445,26 @@ extension TestHooks {
                 #endif
             case .closeNativeReview:
                 Task { await nativeClose.request { Self.acknowledgeNativeClose($0) } }
+            case .flushNativeReview:
+                guard let nativeInput, Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true else { return }
+                Task {
+                    let status = await nativeInput.evidenceStatus()
+                    let name = "\(Bundle.main.bundleIdentifier ?? "").testhooks.nativeReviewStatus"
+                    #if os(macOS)
+                    let value = ["status": status, "directory": nativeInput.receiptURL.deletingLastPathComponent().path]
+                    guard let data = try? JSONSerialization.data(withJSONObject: value),
+                          let object = String(data: data, encoding: .utf8) else { return }
+                    DistributedNotificationCenter.default().postNotificationName(Notification.Name(name),
+                        object: object, userInfo: nil, deliverImmediately: true)
+                    #else
+                    let states: [String: UInt64] = ["imported": 1, "media-ready": 2, "accepted": 3, "ended": 4, "reopened": 5, "failed": 9]
+                    var token = NOTIFY_TOKEN_INVALID
+                    guard notify_register_check(name, &token) == NOTIFY_STATUS_OK else { return }
+                    defer { notify_cancel(token) }
+                    guard notify_set_state(token, states[status] ?? 0) == NOTIFY_STATUS_OK else { return }
+                    notify_post(name)
+                    #endif
+                }
             }
         }
 

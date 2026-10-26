@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import XCTest
 #if os(macOS)
 import AppKit
@@ -168,6 +169,203 @@ import notify
         _ = saved
         #endif
         capture(app, "media-export-native-destination-received")
+        #endif
+    }
+
+    /// F11.2: one frozen input, real picker/review, finalized close, and an
+    /// ordinary no-reset relaunch. F11.1 remains its separate export-only case.
+    func testNativeMediaImportReviewReopenAndExport() throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current(), app = XCUIApplication()
+        let bundle = try build.bundleIdentifier
+        guard build.hasHooks, bundle.hasSuffix(".dev") else { throw XCTSkip("Requires development hooks") }
+        #if os(iOS) && !targetEnvironment(simulator)
+        throw XCTSkip("F11.2 capture requires the leased test VM")
+        #else
+        let env = ProcessInfo.processInfo.environment
+        let caseName = try XCTUnwrap(env["MEGURI_NATIVE_REVIEW_CASE"])
+        XCTAssertNotNil(caseName.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$"#, options: .regularExpression))
+        let platform = try XCTUnwrap(env["MEGURI_NATIVE_REVIEW_PLATFORM"])
+        #if os(macOS)
+        XCTAssertEqual(platform, "mac")
+        #else
+        XCTAssertEqual(platform, UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone")
+        #endif
+        let sha = try XCTUnwrap(env["MEGURI_NATIVE_REVIEW_FREEZE_SHA256"])
+        let bytes = try XCTUnwrap(env["MEGURI_NATIVE_REVIEW_FREEZE_BYTES"])
+        XCTAssertNotNil(sha.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression))
+        XCTAssertGreaterThan(try XCTUnwrap(UInt64(bytes)), 0)
+        let run = build.repositoryRoot.appending(path: "build/mg/ui-test/\(caseName)")
+        func object(_ url: URL) throws -> [String: Any] {
+            XCTAssertEqual(url.resolvingSymlinksInPath().path, url.path)
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        }
+        let binding = try object(run.appending(path: "native-review-binding.json"))
+        XCTAssertEqual(binding["case"] as? String, caseName)
+        XCTAssertEqual(binding["platform"] as? String, platform)
+        XCTAssertEqual(binding["configuration"] as? String, build.configuration.rawValue)
+        let freeze = try XCTUnwrap(binding["freeze"] as? [String: Any])
+        XCTAssertEqual(freeze["sha256"] as? String, sha)
+        XCTAssertEqual((freeze["bytes"] as? NSNumber)?.stringValue, bytes)
+        let input = try object(run.appending(path: "expected-replay/input.json"))
+        let chosen = try XCTUnwrap(input["chosen"] as? [String: Any])
+        let deckID = try XCTUnwrap(chosen["deck_id"] as? Int64)
+        _ = try XCTUnwrap(chosen["card_id"] as? Int64)
+        let preparation = try object(run.appending(path: "source-preparation/preparation.json"))
+        let facts = try XCTUnwrap(preparation["source_facts"] as? [String: Any])
+        let counts = try XCTUnwrap(facts["row_counts"] as? [String: Int])
+        let reviews = try XCTUnwrap(counts["revlog"])
+        let filename = try XCTUnwrap(binding["native_filename"] as? String)
+        XCTAssertNotNil(filename.range(of: #"^Meguri-Media-[a-f0-9]{32}\.colpkg$"#, options: .regularExpression))
+        var loadedCode: [String: [String: Any]] = [:]
+        for executableURL in try build.machOFiles {
+            let bytesOnDisk = try Data(contentsOf: executableURL)
+            loadedCode[executableURL.lastPathComponent] = [
+                "sha256": SHA256.hash(data: bytesOnDisk).map { String(format: "%02x", $0) }.joined(),
+                "bytes": bytesOnDisk.count]
+        }
+        XCTAssertTrue(NSDictionary(dictionary: loadedCode).isEqual(to: try XCTUnwrap(binding["mach_o"] as? [String: Any])))
+        let codeRecord = XCTAttachment(data: try JSONSerialization.data(withJSONObject: binding, options: [.sortedKeys]),
+            uniformTypeIdentifier: "public.json")
+        codeRecord.name = "native-review-app.json"
+        codeRecord.lifetime = .keepAlways
+        add(codeRecord)
+        let native = ["-MeguriNativeReviewRoot", build.repositoryRoot.path, "-MeguriNativeReviewCase", caseName,
+            "-MeguriNativeReviewPlatform", platform, "-MeguriNativeReviewFreezeSHA256", sha, "-MeguriNativeReviewFreezeBytes", bytes]
+        let source = run.appending(path: "expected-replay/input.colpkg")
+        #if os(iOS)
+        let importSource: URL? = source
+        #else
+        let importSource: URL? = nil
+        #endif
+        app.launchArguments = MeguriLaunch(fixture: build.repositoryRoot.appending(path: "app/Fixtures/CollectionEntry/EmptyCollection"),
+            importSource: importSource, locale: "en_US", animations: false, extra: native).arguments
+        app.launch()
+        addTeardownBlock { @MainActor in app.terminate() }
+        try click(element(app, "home.collection.import"), app, bundle)
+        try click(element(app, "onboarding.collectionImport.choose"), app, bundle)
+        try pick(source, app, bundle)
+        XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.counts"), "1 notes · 1 cards · \(reviews) reviews"))
+        capture(app, "native-review-import-preview")
+        try click(element(app, "onboarding.collectionImport.confirm"), app, bundle)
+        let deckQuery = app.buttons.matching(identifier: "home.deck.row.\(deckID)")
+        try waitForAdmission(deckQuery, app, bundle)
+        _ = try waitNativeReview("imported", app, bundle)
+        try click(try XCTUnwrap(waitForHittable(deckQuery)), app, bundle)
+        let study = element(app, "home.deck.study")
+        try waitForStudyReady(study, app)
+        try click(study, app, bundle)
+        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
+        try click(element(app, "review.session.reveal"), app, bundle)
+        _ = try waitNativeReview("media-ready", app, bundle)
+        capture(app, "native-review-actual-image-and-finished-audio")
+        try click(element(app, "review.session.rate.easy"), app, bundle)
+        _ = try waitNativeReview("accepted", app, bundle)
+        try click(element(app, "review.session.close"), app, bundle)
+        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
+        _ = try waitNativeReview("ended", app, bundle)
+        capture(app, "native-review-one-answer-recorded")
+        try closeNativeReview(bundle)
+        app.terminate()
+        // Same five bound inputs; no fixture, import source, route or clock.
+        app.launchArguments = MeguriLaunch(locale: "en_US", animations: false, extra: native).arguments
+        app.launch()
+        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
+        let evidenceDirectory = try waitNativeReview("reopened", app, bundle)
+        capture(app, "native-review-reopened-one-answer")
+        #if os(macOS)
+        // The app reports its own sandbox path; the UI runner's Application
+        // Support is unrelated. Admit only this case/platform's exact suffix.
+        let directory = URL(filePath: try XCTUnwrap(evidenceDirectory))
+        let suffix = "/Library/Application Support/test-evidence/native-review/\(caseName)/mac"
+        XCTAssertTrue(directory.path.hasSuffix(suffix))
+        XCTAssertTrue(directory.path.contains("/Library/Containers/\(bundle)/Data/"))
+        XCTAssertEqual(directory.resolvingSymlinksInPath().path, directory.path)
+        for phase in ["import", "accepted", "closed", "reopened"] {
+            let attachment = XCTAttachment(contentsOfFile: directory.appending(path: "\(phase).json"))
+            attachment.name = "native-review-\(phase).json"; attachment.lifetime = .keepAlways; add(attachment)
+        }
+        let folder = FileManager.default.temporaryDirectory.appending(path: "RF3-Review-\(filename.dropFirst(13).prefix(32))")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        #else
+        _ = evidenceDirectory
+        let folder: URL? = nil
+        #endif
+        let saved = try exerciseNativeExport(app, bundle, destinationFolder: folder, destinationFilename: filename)
+        #if os(macOS)
+        let attachment = XCTAttachment(contentsOfFile: saved)
+        attachment.name = filename; attachment.lifetime = .keepAlways; add(attachment)
+        #endif
+        capture(app, "native-review-export-all-media")
+        #endif
+    }
+
+    @MainActor private final class NativeReviewAcknowledgement {
+        var phase = ""
+        var directory: String?
+    }
+    /// Flush/query only the requested dev owner. No visible test controls.
+    private func waitNativeReview(_ phase: String, _ app: XCUIApplication, _ bundle: String) throws -> String? {
+        let acknowledgement = NativeReviewAcknowledgement()
+        #if os(macOS)
+        let center = DistributedNotificationCenter.default()
+        let observer = center.addObserver(forName: Notification.Name("\(bundle).testhooks.nativeReviewStatus"), object: nil, queue: .main) { notification in
+            guard let value = notification.object as? String, let data = value.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
+            MainActor.assumeIsolated { acknowledgement.phase = object["status"] ?? ""; acknowledgement.directory = object["directory"] }
+        }
+        defer { center.removeObserver(observer) }
+        #else
+        let states = ["imported": UInt64(1), "media-ready": 2, "accepted": 3, "ended": 4, "reopened": 5]
+        var token = NOTIFY_TOKEN_INVALID
+        XCTAssertEqual(notify_register_check("\(bundle).testhooks.nativeReviewStatus", &token), UInt32(NOTIFY_STATUS_OK))
+        defer { notify_cancel(token) }
+        var initial: Int32 = 0; notify_check(token, &initial)
+        #endif
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            #if os(macOS)
+            center.postNotificationName(Notification.Name("\(bundle).testhooks.flushNativeReview"), object: nil, userInfo: nil, deliverImmediately: true)
+            #else
+            notify_post("\(bundle).testhooks.flushNativeReview")
+            var changed: Int32 = 0, state: UInt64 = 0
+            if notify_check(token, &changed) == NOTIFY_STATUS_OK, changed != 0, notify_get_state(token, &state) == NOTIFY_STATUS_OK {
+                acknowledgement.phase = state == 9 ? "failed" : states.first(where: { $0.value == state })?.key ?? "pending"
+            }
+            #endif
+            return acknowledgement.phase == phase || acknowledgement.phase == "failed"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 30), .completed, "Native evidence did not reach \(phase)")
+        XCTAssertEqual(acknowledgement.phase, phase, "Native evidence refused the case")
+        return acknowledgement.directory
+    }
+    private func closeNativeReview(_ bundle: String) throws {
+        #if os(macOS)
+        let center = DistributedNotificationCenter.default()
+        let acknowledgement = NativeReviewAcknowledgement()
+        let observer = center.addObserver(forName: Notification.Name("\(bundle).testhooks.nativeReviewClosed"), object: nil, queue: .main) { notification in
+            let result = notification.object as? String
+            MainActor.assumeIsolated { acknowledgement.phase = result ?? "failed" }
+        }
+        defer { center.removeObserver(observer) }
+        center.postNotificationName(Notification.Name("\(bundle).testhooks.closeNativeReview"), object: nil, userInfo: nil, deliverImmediately: true)
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !acknowledgement.phase.isEmpty }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 30), .completed)
+        XCTAssertEqual(acknowledgement.phase, "saved")
+        #else
+        var token = NOTIFY_TOKEN_INVALID, changed: Int32 = 0
+        XCTAssertEqual(notify_register_check("\(bundle).testhooks.nativeReviewClosed", &token), UInt32(NOTIFY_STATUS_OK))
+        defer { notify_cancel(token) }
+        notify_check(token, &changed)
+        var state: UInt64 = 0
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            var changed: Int32 = 0
+            return notify_check(token, &changed) == NOTIFY_STATUS_OK && changed != 0 && notify_get_state(token, &state) == NOTIFY_STATUS_OK
+        }, object: nil)
+        XCTAssertEqual(notify_post("\(bundle).testhooks.closeNativeReview"), UInt32(NOTIFY_STATUS_OK))
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 30), .completed)
+        XCTAssertEqual(state, 1, "Actual collection close and saved receipt required before termination")
         #endif
     }
 

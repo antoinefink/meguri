@@ -13,9 +13,23 @@ public protocol ReviewCardSurface: AnyObject {
     func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws
     func preload(item: ReviewHeadItem) async throws
     func reveal(inputTime: TimeInterval) async throws
+    func admitNativeInput(_ input: NativeReviewInput, coordinator: UUID, session: UInt64, generation: UInt64,
+                          deck: Int64, item: ReviewHeadItem, rating: ReviewRating, instant: Int64,
+                          eligible: Bool) throws -> NativeReviewInput.AnswerUse
     func suspend() async
     func resume() async
     func close()
+}
+
+extension ReviewCardSurface {
+    public func admitNativeInput(_ input: NativeReviewInput, coordinator: UUID, session: UInt64, generation: UInt64,
+                                 deck: Int64, item: ReviewHeadItem, rating: ReviewRating, instant: Int64,
+                                 eligible: Bool) throws -> NativeReviewInput.AnswerUse {
+        guard let pair else { throw NativeReviewInput.Refusal(reason: "missing native renderer") }
+        try input.validateMediaCurrent(pair: pair, coordinator: coordinator, session: session, generation: generation)
+        return try input.admitFacts(coordinator: coordinator, session: session, generation: generation,
+            deck: deck, item: item, rating: rating, instant: instant, eligible: eligible)
+    }
 }
 
 /// Coalesced filenames, bounded even when a review stays paused during sync.

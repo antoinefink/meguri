@@ -175,9 +175,103 @@ mg_ui_test__media_capture() {
   mg_detail native_media_export "$(cat "$MG_RUN_DIR/native-media-export.json")"
 }
 
+# F11.2 owns one exact native method, separate from F11.1's baseline/capture.
+mg_ui_test__review_selected() {
+  local selector
+  for selector in $1; do
+    case "$selector" in
+      CollectionEntryJourneyTests|CollectionEntryJourneyTests/testNativeMediaImportReviewReopenAndExport) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+mg_ui_test__review_prepare() {
+  local runner="$1" app_platform="$2" helper="$MG_ROOT/tools/scripts/native-media-review-capture.py"
+  local decoder="$MG_ROOT/tools/scripts/package-interop-check.py" path paths rc revision case_name container_run
+  [ "$runner" = vm ] || return 1
+  revision="$(git -C "$MG_ROOT" rev-parse HEAD)" || return 1
+  [[ "$revision" =~ ^[a-f0-9]{40}$ ]] || return 1
+  case_name="${MG_RUN_DIR##*/}"
+  [[ "$case_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$ ]] || return 1
+  [ "$MG_RUN_DIR" = "$MG_ROOT/build/mg/ui-test/$case_name" ] || return 1
+  container_run="/work/build/mg/ui-test/$case_name"
+  # Generate only the unchanged own parent if absent. No host SQLite/cargo.
+  if [ ! -d "$MG_ROOT/build/fixtures/recipes/local-review-1" ]; then
+    "$MG_TOOLS/mg" fixtures local-review --seed 1 --media files || return 1
+  fi
+  mg_compose --progress plain build package-interop-decoder >&2 </dev/null || return 1
+  mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" \
+    -u "$(id -u):$(id -g)" \
+    -v "$decoder:/decoder.py:ro" \
+    -v "$MG_ROOT/build/fixtures/recipes/local-review-1:/work/build/fixtures/recipes/local-review-1:ro" \
+    -v "$MG_RUN_DIR/source-preparation:$container_run/source-preparation" package-interop-decoder \
+    python3 /decoder.py prepare-native-review --root /work --run "$container_run" \
+    --expected /work/build/fixtures/recipes/local-review-1 --output "$container_run/source-preparation" \
+    --platform "$MG_UI_REVIEW_PLATFORM" </dev/null || return 1
+  # One trusted existing Rust derivation, completed before the native launch.
+  # Explicit dev profile; source_open/package_write remain replay provenance.
+  mg_conf__dev -- "cd core && cargo run -q -p meguri-cli -- internal-native-review /work '$case_name' '$MG_UI_REVIEW_PLATFORM' '$revision' 101 102 103 104 && python3 /work/tools/scripts/native-media-review-capture.py rust-code '$container_run'" || return 1
+  python3 "$helper" bind "$MG_RUN_DIR" "$(mg_app_products "$app_platform" Debug)/Meguri.app" Debug || return 1
+  paths="$(python3 "$helper" stage-paths "$MG_RUN_DIR")" || return 1
+  while IFS= read -r path; do
+    [ -n "$path" ] || return 1
+    mg_vm_fixture "$path"
+    rc=$?
+    [ "$rc" -eq 0 ] || return "$rc"
+  done <<<"$paths"
+  # Sibling helper import and fresh output are needed for guarded VM capture.
+  mg_mac_vm_copy_in "$helper" "$MG_ROOT/tools/scripts/native-media-export-capture.py" "$MG_RUN_DIR/native-review-export" || return $?
+  export TEST_RUNNER_MEGURI_NATIVE_REVIEW_CASE="$case_name"
+  export TEST_RUNNER_MEGURI_NATIVE_REVIEW_PLATFORM="$MG_UI_REVIEW_PLATFORM"
+  export TEST_RUNNER_MEGURI_NATIVE_REVIEW_FREEZE_SHA256="$(jq -er .freeze.sha256 "$MG_RUN_DIR/native-review-binding.json")"
+  export TEST_RUNNER_MEGURI_NATIVE_REVIEW_FREEZE_BYTES="$(jq -er .freeze.bytes "$MG_RUN_DIR/native-review-binding.json")"
+  MG_UI_REVIEW_READY=1
+}
+
+mg_ui_test__review_capture() {
+  local prefix="$1" platform="$2" device="$3" tree container proof result_path phase
+  local helper="$MG_ROOT/tools/scripts/native-media-review-capture.py" filename
+  tree="$(xcrun xcresulttool get test-results tests --path "$prefix.xcresult" 2>/dev/null)" || return 1
+  jq -e '[.. | objects | select(.nodeType? == "Test Case")
+      | select(.nodeIdentifier? | strings | test("^(MeguriUITests/)?CollectionEntryJourneyTests/testNativeMediaImportReviewReopenAndExport(\\(\\))?$"))] as $cases
+      | ($cases | length) == 1 and $cases[0].result == "Passed"' <<<"$tree" >/dev/null 2>&1 || return 1
+  filename="$(jq -er .native_filename "$MG_RUN_DIR/native-review-binding.json")" || return 1
+  if [ "$platform" = mac ]; then
+    python3 "$helper" mac "$MG_RUN_DIR" "$prefix.xcresult" || return 1
+  else
+    mg_ui_test__media_command mg_simctl get_app_container "$device" com.antoinefink.meguri.dev data || return 1
+    container="$MG_UI_MEDIA_COMMAND_OUTPUT"
+    [[ "$device" =~ ^[A-Fa-f0-9]{8}(-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}$ ]] || return 1
+    [[ "$container" =~ ^/Users/[A-Za-z0-9._-]+/Library/Developer/CoreSimulator/Devices/[A-Fa-f0-9-]+/data/Containers/Data/Application/[A-Fa-f0-9]{8}(-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}$ ]] || return 1
+    case "$container" in */Devices/"$device"/data/Containers/Data/Application/*) ;; *) return 1 ;; esac
+    mg_ui_test__media_command mg_mac_vm_ssh "python3 $(mvl_q "$helper" simulator "$MG_RUN_DIR" "$container" "$device")" || return 1
+    mg_sim_fetch "$MG_RUN_DIR/native-review-export/$filename" || return 1
+    for phase in import accepted closed reopened; do
+      mg_sim_fetch "$MG_RUN_DIR/native-review-export/native-review-$phase.json" || return 1
+    done
+    python3 "$helper" attestation "$MG_RUN_DIR" "$prefix.xcresult" || return 1
+  fi
+  python3 "$helper" receipts "$MG_RUN_DIR" || return 1
+  filename="$(jq -er .native_filename "$MG_RUN_DIR/native-review-binding.json")" || return 1
+  # Keep the full existing strict decoder and compatible-client check intact.
+  proof="$("$MG_TOOLS/mg" package-interop-check --package "$MG_RUN_DIR/native-review-export/$filename" \
+    --expected "$MG_RUN_DIR/expected-replay/review" --now 2030-01-15T10:00:00+01:00 --tz Europe/Paris)" || return 1
+  result_path="${proof##*$'\n'}"
+  python3 "$helper" proof "$MG_RUN_DIR" "$result_path" || return 1
+  mg_artifact native-review-package "$MG_RUN_DIR/native-review-export/$filename" "actual native all-media destination"
+  mg_artifact native-review-proof "$MG_RUN_DIR/native-review-proof.json" "frozen native chain and strict independent package/client proof; milestone acceptance remains separate"
+  mg_detail native_review "$(cat "$MG_RUN_DIR/native-review-proof.json")"
+}
+
 mg_ui_test() {
   local platform=iphone device="" config=Debug suites="" only=() build_args=() s result since udid
   local physical="" inventory="" run_args="" MG_UI_PHYSICAL_DEVICE=""
+  local review="" MG_UI_REVIEW_READY="" MG_UI_REVIEW_PLATFORM=""
+  local TEST_RUNNER_MEGURI_NATIVE_REVIEW_CASE TEST_RUNNER_MEGURI_NATIVE_REVIEW_PLATFORM
+  local TEST_RUNNER_MEGURI_NATIVE_REVIEW_FREEZE_SHA256 TEST_RUNNER_MEGURI_NATIVE_REVIEW_FREEZE_BYTES
+  unset TEST_RUNNER_MEGURI_NATIVE_REVIEW_CASE TEST_RUNNER_MEGURI_NATIVE_REVIEW_PLATFORM
+  unset TEST_RUNNER_MEGURI_NATIVE_REVIEW_FREEZE_SHA256 TEST_RUNNER_MEGURI_NATIVE_REVIEW_FREEZE_BYTES
   local media="" MG_UI_MEDIA_READY="" MG_UI_MEDIA_PLATFORM="" MG_UI_MEDIA_DEVICE="" MG_UI_MEDIA_NAME="" MG_UI_MEDIA_PHASE=""
   local TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME TEST_RUNNER_MEGURI_NATIVE_MEDIA_FIXTURE_RECORD
   unset TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME TEST_RUNNER_MEGURI_NATIVE_MEDIA_FIXTURE_RECORD
@@ -228,6 +322,14 @@ mg_ui_test() {
     media=1
     [ -z "$physical" ] || { mg_ui_test__usage "native media export capture is unsupported on physical devices; use the leased VM"; return 0; }
   fi
+  if mg_ui_test__review_selected "$suites"; then
+    review=1
+    [ -z "$physical" ] && [ "$config" = Debug ] || { mg_ui_test__usage "native media review requires Debug and the leased VM"; return 0; }
+    python3 "$MG_ROOT/tools/scripts/native-media-review-capture.py" start "$MG_RUN_DIR" "$platform" || {
+      mg_failure native-review "fresh bounded source capture refused"; mg_status error; return 0;
+    }
+  fi
+  MG_UI_REVIEW_PLATFORM="$platform"
   MG_UI_MEDIA_PLATFORM="$platform"
   for s in $suites; do only[${#only[@]}]="-only-testing:MeguriUITests/$s"; done
   mg_detail suites "$(printf '%s\n' $suites | jq -R . | jq -sc .)"
@@ -278,6 +380,14 @@ mg_ui_test() {
         return 0
       fi
     fi
+    if [ -n "$review" ]; then
+      mg_ui_test__review_prepare "$MG_MAC_RUNNER" mac
+      result=$?
+      if [ "$result" -ne 0 ]; then
+        mg_failure native-review "prelaunch frozen review preparation/staging failed; artifacts retained"
+        mg_status error; return 0
+      fi
+    fi
     since="$(mg_app_log_now)"
     mg_app_xcodebuild_test "$MG_RUN_DIR/mac" mac "platform=macOS,arch=arm64" "$config" "${only[@]}"
     result=$?
@@ -311,6 +421,14 @@ mg_ui_test() {
       return 0
     fi
   fi
+  if [ -n "$review" ]; then
+    mg_ui_test__review_prepare "$MG_SIM_RUNNER" ios-sim
+    result=$?
+    if [ "$result" -ne 0 ]; then
+      mg_failure native-review "prelaunch frozen review preparation/staging failed; artifacts retained"
+      mg_status error; return 0
+    fi
+  fi
   mg_sim_prepare "$udid" || return 0
   mg_app_xcodebuild_test "$MG_RUN_DIR/$platform" "$platform" "id=$udid" "$config" "${only[@]}"
   result=$?
@@ -323,6 +441,12 @@ mg_ui_test() {
 # could not be reached (queued, mac-vm).
 mg_ui_test__report() {
   local prefix="$1" result="$2" summary f cases capture_result
+  if { [ "$result" -eq 3 ] || [ "$result" -eq 4 ]; } && [ -n "${MG_UI_REVIEW_READY:-}" ]; then
+    mg_failure native-review "native review did not execute; no proof captured"
+    [ ! -d "$prefix.xcresult" ] || mg_artifact xcresult "$prefix.xcresult" "unexecuted native review result bundle"
+    mg_status error
+    return 0
+  fi
   if [ "$result" -eq 4 ] && [ "${3:-}" != physical ]; then
     mg_status pass
     mg_queued_settle
@@ -390,9 +514,14 @@ mg_ui_test__report() {
       mg_ui_test__media_capture "$prefix" "$MG_UI_MEDIA_PLATFORM" "$MG_UI_MEDIA_DEVICE"
       capture_result=$?
       if [ "$capture_result" -eq 2 ]; then
-        mg_status pass
-        mg_queued_settle
-        return 0
+        if [ -n "${MG_UI_REVIEW_READY:-}" ]; then
+          mg_failure native-review "native review capture did not finish; no proof captured"
+          result=2
+        else
+          mg_status pass
+          mg_queued_settle
+          return 0
+        fi
       elif [ "$capture_result" -ne 0 ]; then
         mg_detail native_media_capture_failure "$(jq -nc --arg phase "$MG_UI_MEDIA_PHASE" '{phase: $phase}')"
         case "$MG_UI_MEDIA_PHASE" in
@@ -404,6 +533,13 @@ mg_ui_test__report() {
         esac
         result=2
       fi
+    fi
+  fi
+  if [ "$result" -eq 0 ] && [ -n "${MG_UI_REVIEW_READY:-}" ]; then
+    if ! jq -e '.skipped == 0' <<<"$summary" >/dev/null ||
+        ! mg_ui_test__review_capture "$prefix" "$MG_UI_REVIEW_PLATFORM" "$MG_UI_MEDIA_DEVICE"; then
+      mg_failure native-review "exact native review/capture/frozen-input/strict package proof refused; artifacts retained"
+      result=2
     fi
   fi
   if [ -n "$summary" ]; then

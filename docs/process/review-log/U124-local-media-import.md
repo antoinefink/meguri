@@ -137,3 +137,9 @@ The opaque-text test therefore fails even though the view paints.
 Filtered repair `20261026T192318Z-16159` composites the captured view over its
 actual window background in the same appearance. Independent review is clear;
 the existing paint, size and timing checks remain. Runtime verification is pending.
+
+`snapshots/20261026T193020Z-21209` passes both native Form paint cases and the
+launch, close-request and protected credential tests. The image has the requested
+dimensions and native background. The overall run still fails 30 comparisons
+against old images, with 195 cells deferred. No baselines or approvals changed.
+The rendered import form also needs a better native layout before visual acceptance.

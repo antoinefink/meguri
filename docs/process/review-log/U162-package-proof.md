@@ -244,3 +244,26 @@ Both runs have zero skips. The actual native media case remains pending.
 Team-signed Mac Debug app build `20261026T185336Z-98180` passes, including the
 guarded launch/close code. The native media test and its orchestration are in
 progress. This build does not establish imported image/audio behavior.
+
+## Native media case
+
+Start `4bbe5060`. The filtered implementation adds the exact native media
+import/review/reopen/export case and reuses the existing picker, destination and
+strict package proof. R1 found the retained Rust work directory was rejected,
+and old model fixtures lacked the new media conditions. R2 closes both: the
+work directory is checked separately, and production surface admission requires
+the actual renderer and media proof. Unit stand-ins retain the dispatch, token,
+elapsed, failure and uptime checks and cannot provide native media proof.
+
+`selftest/20261026T192616Z-17940` passes 5 orchestration/helper tests.
+`swift-test/20261026T193535Z-25962` passes 62 tests with zero skips. Final wording
+closure is independently clear; privacy `20261026T193529Z-25426` and similarity
+`20261026T193532Z-25687` pass. Earlier failed scans remain recorded.
+
+The first runner reported a renderer search that printed the existing public
+jQuery file. Its hash matches the pinned public artifact. No excluded tree was
+present and no copied material is reported. The source-access review is retained
+in the intake. Future searches must exclude the vendor directory.
+
+Actual prelaunch preparation and native execution remain pending. No Unit or
+milestone acceptance is claimed.

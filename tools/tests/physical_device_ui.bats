@@ -978,6 +978,8 @@ native_media_fakes() {
   echo stale-old-package >"$FX_NATIVE_DOCS/Meguri-Collection.colpkg"
   export FX_CONTAINER="/Users/meguri/Library/Developer/CoreSimulator/Devices/$SIM/data/Containers/Data/Application/00000000-0000-4000-8000-000000000004"
   cat >>"$SB/tools/mg.d/zz-physical-fakes.sh" <<'EOF'
+# These existing fakes model F11.1 only; F11.2 dispatch has its own fakes below.
+mg_ui_test__review_selected() { return 1; }
 mg_app_build() { echo "media-build $*" >>"$STUB_LOG"; }
 mg_mac_ui_begin() { MG_MAC_RUNNER="${FX_RUNNER:-vm}"; }
 mg_mac_ui_take() { echo mac-take >>"$STUB_LOG"; }
@@ -1851,6 +1853,244 @@ with patch.object(capture, 'ROOT', base), \
                 pass
             else:
                 raise AssertionError('foreign run accepted')
+PY
+  [ "$status" -eq 0 ]
+}
+
+native_review_dispatch_stubs() {
+  mkdir -p "$SB/build/fixtures/recipes/local-review-1/collection.media"
+  printf '%s\n' '{"passedTests":1,"failedTests":0,"skippedTests":0,"result":"Passed"}' >"$FX_SUMMARY"
+  test_tree '[{nodeType:"Test Case",nodeIdentifier:"CollectionEntryJourneyTests/testNativeMediaImportReviewReopenAndExport()",result:"Passed"}]'
+  local app_home="/Users/meguri/Library/Developer/CoreSimulator/Devices/$SIM/data/Containers/Data/Application"
+  export FX_CONTAINER="$app_home/00000000-0000-4000-8000-000000000004"
+  FX_REAL_PYTHON="$(command -v python3)"
+  export FX_REAL_PYTHON
+  cat >"$BIN/python3" <<'EOF'
+#!/bin/bash
+case "$1" in
+  */tools/scripts/native-media-review-capture.py)
+    action="$2"; dir="$3"
+    echo "review-helper $action $dir" >>"$STUB_LOG"
+    case "$action" in
+      start) mkdir "$dir/source-preparation" "$dir/native-review-export" ;;
+      bind)
+        printf '{"freeze":{"sha256":"%064d","bytes":100},"native_filename":"Meguri-Media-00000000000000000000000000000001.colpkg"}\n' 0 >"$dir/native-review-binding.json" ;;
+      stage-paths)
+        printf '%s\n' "$dir/expected-replay" "$dir/source-preparation" "$dir/native-review-binding.json" "${dir%/build/mg/ui-test/*}/build/fixtures/recipes/local-review-1" ;;
+      receipts) [ "${FX_REVIEW_RECEIPT_REFUSED:-0}" = 0 ] ;;
+      proof) echo '{"external_content_client_proof":"passed"}' >"$dir/native-review-proof.json" ;;
+      simulator|attestation|mac) [ "${FX_REVIEW_CAPTURE_REFUSED:-0}" = 0 ] ;;
+      *) exit 97 ;;
+    esac
+    exit $? ;;
+  *) exec "$FX_REAL_PYTHON" "$@" ;;
+esac
+EOF
+  chmod +x "$BIN/python3"
+  cat >>"$SB/tools/mg.d/zz-physical-fakes.sh" <<'EOF'
+mg_app_build() { echo "review-build $*" >>"$STUB_LOG"; }
+mg_mac_ui_begin() { MG_MAC_RUNNER=vm; }
+mg_mac_ui_take() { :; }
+mg_app_log_now() { echo synthetic-time; }
+mg_app_mac_input_refused() { return 1; }
+mg_compose() { echo "review-decoder $*" >>"$STUB_LOG"; }
+mg_conf__dev() { echo "review-rust $*" >>"$STUB_LOG"; }
+mg_vm_fixture() { echo "review-stage $*" >>"$STUB_LOG"; }
+mg_mac_vm_copy_in() { echo "review-copy-in $*" >>"$STUB_LOG"; }
+mg_simctl() { echo "review-container $*" >>"$STUB_LOG"; echo "$FX_CONTAINER"; }
+mg_mac_vm_ssh() { echo "review-capture $*" >>"$STUB_LOG"; }
+mg_sim_fetch() { echo "review-fetch $*" >>"$STUB_LOG"; }
+mg_app_xcodebuild_test() {
+  echo "review-test $*" >>"$STUB_LOG"
+  echo "review-input ${TEST_RUNNER_MEGURI_NATIVE_REVIEW_CASE:-unset} ${TEST_RUNNER_MEGURI_NATIVE_REVIEW_PLATFORM:-unset} ${TEST_RUNNER_MEGURI_NATIVE_REVIEW_FREEZE_SHA256:-unset} ${TEST_RUNNER_MEGURI_NATIVE_REVIEW_FREEZE_BYTES:-unset}" >>"$STUB_LOG"
+  mkdir -p "$1.xcresult"
+  return "${FX_RESULT:-0}"
+}
+mg_package_interop_check() { echo "review-package-proof $*" >>"$STUB_LOG"; mg_status pass; }
+EOF
+}
+
+review_run() {
+  mg ui-test --device "$SIM" --suite CollectionEntryJourneyTests/testNativeMediaImportReviewReopenAndExport "$@"
+}
+
+@test "native review exact dispatch stages frozen states preparation and actual parent before launch" {
+  native_review_dispatch_stubs
+  review_run
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  local dir="$(dirname "$result")" stage_line test_line
+  called "^review-stage $dir/expected-replay$"
+  called "^review-stage $dir/source-preparation$"
+  called "^review-stage $SB/build/fixtures/recipes/local-review-1$"
+  called "^review-stage $dir/native-review-binding.json$"
+  called "review-decoder .*prepare-native-review --root /work --run /work/build/mg/ui-test/$(basename "$dir") .*--platform iphone"
+  called "review-rust .*internal-native-review /work '$(basename "$dir")' 'iphone' '[a-f0-9]{40}' 101 102 103 104"
+  stage_line="$(grep -n '^review-stage ' "$STUB_LOG" | tail -1 | cut -d: -f1)"
+  test_line="$(grep -n '^review-test ' "$STUB_LOG" | cut -d: -f1)"
+  [ "$stage_line" -lt "$test_line" ]
+  called '^review-input [^ ]+ iphone [a-f0-9]{64} 100$'
+  called "^review-package-proof --package $dir/native-review-export/Meguri-Media-[a-f0-9]{32}.colpkg --expected $dir/expected-replay/review --now 2030-01-15T10:00:00\+01:00 --tz Europe/Paris$"
+  not_called '^media-'
+  : >"$STUB_LOG"
+  TEST_RUNNER_MEGURI_NATIVE_REVIEW_CASE=ambient mg ui-test --device "$SIM" --suite CollectionEntryJourneyTests/testNativeMediaImportReviewReopenAndExportExtra
+  [ "$status" -eq 0 ]
+  not_called '^review-(helper|stage|decoder|rust|capture|package-proof)'
+  called '^review-input unset unset unset unset$'
+}
+
+@test "native review refuses failed skipped missing or duplicate methods before capture and package proof" {
+  native_review_dispatch_stubs
+  FX_RESULT=1 review_run
+  [ "$status" -ne 0 ]
+  not_called '^review-(container|capture|package-proof)'
+  : >"$STUB_LOG"
+  echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":1}' >"$FX_SUMMARY"
+  review_run
+  [ "$status" -ne 0 ]
+  not_called '^review-(container|capture|package-proof)'
+  echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' >"$FX_SUMMARY"
+  for nodes in '[]' '[{nodeType:"Test Case",nodeIdentifier:"CollectionEntryJourneyTests/testNativeMediaImportReviewReopenAndExport()",result:"Passed"},{nodeType:"Test Case",nodeIdentifier:"CollectionEntryJourneyTests/testNativeMediaImportReviewReopenAndExport()",result:"Passed"}]'; do
+    : >"$STUB_LOG"
+    test_tree "$nodes"
+    review_run
+    [ "$status" -ne 0 ]
+    not_called '^review-(container|capture|package-proof)'
+  done
+}
+
+@test "native review container path and receipt refusal prevent proof" {
+  native_review_dispatch_stubs
+  FX_CONTAINER=/tmp/unowned review_run
+  [ "$status" -ne 0 ]
+  not_called '^review-(capture|package-proof)'
+  : >"$STUB_LOG"
+  FX_REVIEW_RECEIPT_REFUSED=1 review_run
+  [ "$status" -ne 0 ]
+  called '^review-helper receipts '
+  not_called '^review-package-proof '
+  : >"$STUB_LOG"
+  review_run --config Profile
+  [ "$status" -ne 0 ]
+  not_called '^review-(helper|test|decoder|rust|capture|package-proof)'
+}
+
+@test "native review helper refuses an escaped run before source capture" {
+  mkdir -p "$SB/build/mg/ui-test" "$SB/build/mg/escaped"
+  run python3 "$SB/tools/scripts/native-media-review-capture.py" start "$SB/build/mg/ui-test/../escaped" mac
+  [ "$status" -ne 0 ]
+  [ ! -e "$SB/build/mg/escaped/native-review-source.json" ]
+}
+
+@test "native review frozen helper accepts retained Rust work but keeps expected inputs exact" {
+  run python3 - "$SB" <<'PY'
+import importlib.util
+import json
+import os
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+root = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location('review_capture', root / 'tools/scripts/native-media-review-capture.py')
+capture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(capture)
+run = root / 'build/mg/ui-test/layout-case'
+expected = run / 'expected-replay'
+prepared = run / 'source-preparation/fixture'
+parent = root / 'build/fixtures/recipes/local-review-1'
+revision = 'a' * 40
+
+def put(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+def record(path, value):
+    put(path, json.dumps(value, sort_keys=True).encode())
+
+def source(directory, media):
+    (directory / 'collection.media').mkdir(parents=True)
+    names = ['collection.anki2', 'manifest.json'] + ['collection.media/' + name for name in media]
+    for name in names:
+        put(directory / name, ('layout fixture ' + name).encode())
+    return {name: capture.identity(directory / name) for name in names}
+
+parent_ids = source(parent, [])
+prepared_ids = source(prepared, capture.MEDIA)
+put(root / 'app/Fixtures/CollectionEntry/EmptyCollection/.gitkeep', b'')
+rust_source = root / 'core/crates/meguri-testkit/src/native_review.rs'
+put(rust_source, b'own source identity fixture')
+preparation = run / 'source-preparation/preparation.json'
+record(preparation, {'layout': 'before-launch'})
+put(expected / 'input.colpkg', b'package identity fixture')
+put(expected / 'replay.json', b'replay identity fixture')
+for stage in ('source', 'import', 'review'):
+    source(expected / stage, capture.MEDIA)
+relative = run.relative_to(root).as_posix()
+value = {
+    'run': relative, 'platform': 'mac',
+    'code': {'build_profile': 'dev', 'revision': revision, 'replay_source': capture.identity(rust_source)},
+    'preparation': {'path': relative + '/source-preparation/preparation.json', 'identity': capture.identity(preparation)},
+    'parent_source': 'build/fixtures/recipes/local-review-1', 'parent_files': parent_ids,
+    'prepared_source': relative + '/source-preparation/fixture', 'prepared_files': prepared_ids,
+    'package': {'path': relative + '/expected-replay/input.colpkg'},
+    'seeds': {'source_open': 101, 'package_write': 102, 'inspection_and_initial_activation': 103, 'reopen': 104},
+    'answer': {'rating': 'easy', 'elapsed_ms': 1000, 'count': 1, 'preset_cap_answer_time_secs': 60},
+    'no_old_database': True,
+}
+record(expected / 'input.json', value)
+names = ['input.json', 'input.colpkg', 'replay.json']
+for stage in ('source', 'import', 'review'):
+    names += [stage + '/collection.anki2', stage + '/manifest.json']
+    names += [stage + '/collection.media/' + name for name in capture.MEDIA]
+frozen_ids = {name: capture.identity(expected / name) for name in names}
+record(expected / 'freeze.json', {'schema_version': 1, 'run': relative, 'platform': 'mac',
+                                'stage': 'expected-states-before-app', 'files': frozen_ids})
+
+def refuses():
+    try:
+        capture.frozen(run)
+    except (ValueError, OSError):
+        return
+    raise AssertionError('invalid layout admitted')
+
+with patch.object(capture, 'ROOT', root), patch.object(capture, 'revision', return_value=revision):
+    initial_value, initial_files = capture.frozen(run)
+    assert initial_value == value and len(frozen_ids) == 18
+    work = expected / 'work'
+    work.mkdir(mode=0o700)
+    put(work / 'collection.anki2', b'producer scratch, outside expected input')
+    (work / 'unread').symlink_to(root / 'absent-scratch-target')
+    assert capture.frozen(run) == (initial_value, initial_files)
+    assert not any('/work/' in path for path in initial_files)
+    put(work / 'collection.anki2', b'changed scratch')
+    assert capture.frozen(run) == (initial_value, initial_files)
+
+    with patch.object(capture.os, 'getuid', return_value=os.getuid() + 1):
+        refuses()
+    work.chmod(0o722)
+    refuses()
+    work.chmod(0o700)
+    retained = run / 'retained-work'
+    work.rename(retained)
+    work.symlink_to(retained, target_is_directory=True)
+    refuses()
+    work.unlink()
+    put(work, b'not a directory')
+    refuses()
+    work.unlink()
+    retained.rename(work)
+
+    for extra in (expected / 'other-work', expected / 'review/collection.media/extra'):
+        put(extra, b'unexpected')
+        refuses()
+        extra.unlink()
+    put(expected / 'review/collection.anki2', b'changed frozen bytes')
+    refuses()
+    put(expected / 'review/collection.anki2', b'layout fixture collection.anki2')
+    assert capture.frozen(run) == (initial_value, initial_files)
+    put(parent / 'collection.anki2', b'changed parent bytes')
+    refuses()
 PY
   [ "$status" -eq 0 ]
 }

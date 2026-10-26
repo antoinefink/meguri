@@ -1,8 +1,9 @@
 import Foundation
+import CardRendering
 import Testing
 @testable import AppModel
 
-/// Small byte records check input ownership and saved evidence.
+// These byte fixtures exercise facts and lifecycle, without native media proof.
 @MainActor @Suite(.serialized) struct NativeReviewInputTests {
     @Test func frozenRecordBindsEveryRequiredFileAndExactRun() async throws {
         let fixture = try NativeReviewInputFixture()
@@ -149,6 +150,8 @@ import Testing
         await owner.flushEvidence()
         #expect(try fixture.receipt(owner).admission == use)
         #expect(try fixture.receipt(owner).completion == nil)
+        let factsOnly = try fixture.receipt(owner)
+        #expect(factsOnly.image == nil && factsOnly.audio == nil && factsOnly.journal == nil)
         #expect(throws: NativeReviewInput.Refusal.self) { try fixture.answer(owner) }
         owner.completed(use, outcome: "stale")
         owner.completed(use, outcome: "accepted") // Late/duplicate completion cannot upgrade failure.
@@ -167,6 +170,27 @@ import Testing
         try owner.willActivate(identity: ObjectIdentifier(fixture))
         #expect(throws: NativeReviewInput.Refusal.self) { try owner.willActivate(identity: ObjectIdentifier(fixture)) }
         await owner.flushEvidence()
+    }
+
+    @Test func nativePagesWithoutDecodedMediaAndJournalRefuseAdmission() async throws {
+        let fixture = try NativeReviewInputFixture()
+        defer { fixture.remove() }
+        let owner = fixture.owner()
+        try await fixture.activate(owner)
+        let mediaRoot = fixture.root.appending(path: "\(fixture.run)/source-preparation/fixture/collection.media")
+        let resolver = try await MediaPathResolver.open(root: mediaRoot, trackedNames: [])
+        let pages = ReviewPages(resolver: resolver)
+        defer { pages.close() }
+        let item = try #require(ReviewCoordinatorTests.head(1).items.first)
+        #expect(throws: NativeReviewInput.Refusal.self) {
+            try pages.admitNativeInput(owner, coordinator: fixture.coordinator, session: 5, generation: 1,
+                deck: 1, item: item, rating: .easy, instant: FrozenNativeReviewInput.now, eligible: true)
+        }
+        await owner.flushEvidence()
+        let refused = try fixture.receipt(owner)
+        #expect(refused.admission == nil && refused.completion == nil)
+        #expect(refused.image == nil && refused.audio == nil && refused.journal == nil)
+        await resolver.close()
     }
 
     @Test func exactEmptyFixtureAllowsInitialResetAndMarkerBootstrap() async throws {
@@ -412,7 +436,7 @@ import Testing
     }
     @discardableResult func answer(_ owner: NativeReviewInput) throws -> NativeReviewInput.AnswerUse {
         let item = try #require(ReviewCoordinatorTests.head(1).items.first)
-        return try owner.admit(coordinator: coordinator, session: 5, generation: 1, deck: 1, item: item,
+        return try owner.admitFacts(coordinator: coordinator, session: 5, generation: 1, deck: 1, item: item,
             rating: .easy, instant: FrozenNativeReviewInput.now, eligible: true)
     }
     func installClosedFiles() throws {

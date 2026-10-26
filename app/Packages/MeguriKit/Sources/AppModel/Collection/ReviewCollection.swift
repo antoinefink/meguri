@@ -540,15 +540,15 @@ public final class ReviewCollection {
         case .openInAnotherProgram:
             return "This collection is open in another app. Close it there, then try again."
         case .tooOld:
-            return "This collection uses an older format that Meguri can’t open. Update it in a compatible app, then import a latest-format collection-only .colpkg in Settings."
+            return "This collection uses an older format that Meguri can’t open. Update it in a compatible app, then import a latest-format .colpkg in Settings."
         case .tooNew:
             return "This collection uses a newer format than Meguri supports. Check for a Meguri update."
         case .v1Scheduler:
             return "This collection uses an unsupported older scheduler. Update its scheduler in a compatible app before opening it in Meguri."
         case .notACollection:
-            return "This file isn’t a supported collection. Import a latest-format collection-only .colpkg in Settings."
+            return "This file isn’t a supported collection. Import a latest-format .colpkg in Settings."
         case .corrupt:
-            return "This collection appears to be damaged or incomplete. Import a known-good collection-only .colpkg in Settings."
+            return "This collection appears to be damaged or incomplete. Import a known-good .colpkg in Settings."
         case .upgradeFailed:
             return "Meguri couldn’t finish updating this collection’s format. Check free space and file access, then try again."
         case .connectionInit:

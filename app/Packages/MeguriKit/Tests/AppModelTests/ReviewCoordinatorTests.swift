@@ -281,7 +281,7 @@ import Testing
         defer { input.remove() }
         let owner = input.owner()
         try await input.activate(owner, bindSession: false)
-        let fixture = Fixture(nativeInput: owner)
+        let fixture = Fixture(nativeInput: owner, surface: FactSurface())
         fixture.now = 10
         await fixture.model.start()
         let realItem = try #require(fixture.model.item)
@@ -299,6 +299,7 @@ import Testing
         await owner.flushEvidence()
         let receipt = try input.receipt(owner)
         #expect(receipt.admission?.token == realItem.stateToken.bytes && receipt.completion == "accepted")
+        #expect(receipt.image == nil && receipt.audio == nil && receipt.journal == nil)
         fixture.now = 23
         try await fixture.model.pause()
         #expect(fixture.model.record.activeMilliseconds == 13_000, "The hook never changes uptime/active duration")
@@ -312,7 +313,7 @@ import Testing
         defer { input.remove() }
         let owner = input.owner()
         try await input.activate(owner, bindSession: false)
-        let fixture = Fixture(nativeInput: owner)
+        let fixture = Fixture(nativeInput: owner, surface: FactSurface())
         if kind == "card" { fixture.client.currentHead = Self.head(2) }
         await fixture.model.start(); fixture.model.reveal(); await fixture.model.settled()
         if kind == "eligibility" { fixture.model.nativeInputEligibility = { false } }
@@ -332,14 +333,33 @@ import Testing
         _ = await fixture.model.end(); await owner.flushEvidence()
     }
 
+    @Test func nativeTapWithoutRendererRefusesBeforeAnswerDispatch() async throws {
+        let input = try NativeReviewInputFixture()
+        defer { input.remove() }
+        let owner = input.owner()
+        try await input.activate(owner, bindSession: false)
+        let fixture = Fixture(nativeInput: owner)
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.model.rate(.easy); await fixture.model.settled()
+        #expect(fixture.client.answers == 0 && fixture.client.elapsed.isEmpty)
+        #expect(fixture.model.phase == .error && fixture.model.record.answers.isEmpty)
+        #expect(fixture.model.notice?.contains("missing native renderer") == true)
+        await owner.flushEvidence()
+        #expect(try input.receipt(owner).admission == nil)
+        #expect(try input.receipt(owner).completion == nil)
+        _ = await fixture.model.end()
+    }
+
     final class Fixture {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let client = Client()
-        let surface = Surface()
+        let surface: Surface
         let store: ReviewRecordStore
         var model: ReviewCoordinator!
         var now: TimeInterval = 0
-        init(nativeInput: NativeReviewInput? = nil) {
+        init(nativeInput: NativeReviewInput? = nil, surface: Surface = Surface()) {
+            self.surface = surface
             store = ReviewRecordStore(file: directory.appending(path: "session.json"))
             model = ReviewCoordinator(deckID: 1, surface: surface, store: store,
                 clock: .fixed(Date(timeIntervalSince1970: nativeInput == nil ? 1_800_000_000 : 1_894_698_000)), client: client,
@@ -348,7 +368,7 @@ import Testing
         }
         isolated deinit { try? FileManager.default.removeItem(at: directory) }
     }
-    final class Surface: ReviewCardSurface {
+    class Surface: ReviewCardSurface {
         var pair: CardPagePair? { nil }
         var onAction: ((CardBridgeAction) -> Void)?
         var onRecovery: (() -> Void)?
@@ -364,9 +384,36 @@ import Testing
         func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws { presented.append(item.cardId); calls.append("present") }
         func preload(item: ReviewHeadItem) async throws {}
         func reveal(inputTime: TimeInterval) async throws { reveals += 1 }
+        func admitNativeInput(_ input: NativeReviewInput, coordinator: UUID, session: UInt64, generation: UInt64,
+                              deck: Int64, item: ReviewHeadItem, rating: ReviewRating, instant: Int64,
+                              eligible: Bool) throws -> NativeReviewInput.AnswerUse {
+            guard let pair else { throw NativeReviewInput.Refusal(reason: "missing native renderer") }
+            try input.validateMediaCurrent(pair: pair, coordinator: coordinator, session: session, generation: generation)
+            return try input.admitFacts(coordinator: coordinator, session: session, generation: generation,
+                deck: deck, item: item, rating: rating, instant: instant, eligible: eligible)
+        }
         func suspend() async { calls.append("suspend") }
         func resume() async { calls.append("resume"); onResume?() }
         func close() { calls.append("close") }
+    }
+    // Test double for facts only; it has no renderer or media evidence.
+    final class FactSurface: Surface {
+        override func admitNativeInput(
+            _ request: NativeReviewInput,
+            coordinator owner: UUID,
+            session sessionID: UInt64,
+            generation generationID: UInt64,
+            deck deckID: Int64,
+            item head: ReviewHeadItem,
+            rating choice: ReviewRating,
+            instant time: Int64,
+            eligible allowed: Bool
+        ) throws -> NativeReviewInput.AnswerUse {
+            return try request.admitFacts(
+                coordinator: owner, session: sessionID, generation: generationID,
+                deck: deckID, item: head, rating: choice, instant: time, eligible: allowed
+            )
+        }
     }
     final class SummaryGate {
         let state: ReviewDeckStudyState

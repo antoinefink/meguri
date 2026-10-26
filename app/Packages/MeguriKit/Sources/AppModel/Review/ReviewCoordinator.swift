@@ -72,6 +72,15 @@ public final class ReviewCoordinator {
         }
         surface.onRecovery = { [weak self] in self?.requestRefresh(question: true) }
         (surface as? ReviewPages)?.onMediaReady = { [weak self] in self?.mediaPresentationReady() }
+        if nativeInput != nil, let pair = surface.pair {
+            let previous = pair.onPlaybackObservation
+            pair.onPlaybackObservation = { [weak self, weak pair] entry, observation in
+                previous?(entry, observation)
+                guard let self, let pair, let session = self.sessionID else { return }
+                self.nativeInput?.observePlayback(pair: pair, entry: entry, observation: observation,
+                    coordinator: self.nativeCoordinator, session: session, generation: self.nativeGeneration)
+            }
+        }
     }
     public var pair: CardPagePair? { surface.pair }
     public var canFinish: Bool { !busy && phase != .ended }
@@ -123,6 +132,10 @@ public final class ReviewCoordinator {
         operation = Task {
             do {
                 try await surface.reveal(inputTime: inputTime)
+                if let nativeInput, let pair = surface.pair, let sessionID {
+                    try await nativeInput.captureImage(pair: pair, coordinator: nativeCoordinator,
+                        session: sessionID, generation: nativeGeneration)
+                }
                 sideIsAnswer = true
                 if item?.homePreset.stopTimerOnAnswer == true {
                     frozenDisplaySeconds = timer.milliseconds(at: uptime(), capSeconds: item?.homePreset.maximumAnswerSeconds ?? 60) / 1_000
@@ -141,10 +154,13 @@ public final class ReviewCoordinator {
         let instant = clock.now()
         let use: NativeReviewInput.AnswerUse?
         do {
-            use = try nativeInput?.admit(coordinator: nativeCoordinator, session: sessionID, generation: nativeGeneration,
-                deck: record.deckID, item: item, rating: rating, instant: Int64(instant.timeIntervalSince1970 * 1000),
-                eligible: nativeInputEligibility() && terminalState == .active && sideIsAnswer && !refreshPending &&
-                    presentedKey == item.renderKey)
+            if let nativeInput {
+                use = try surface.admitNativeInput(nativeInput, coordinator: nativeCoordinator, session: sessionID,
+                    generation: nativeGeneration, deck: record.deckID, item: item, rating: rating,
+                    instant: Int64(instant.timeIntervalSince1970 * 1000),
+                    eligible: nativeInputEligibility() && terminalState == .active && sideIsAnswer && !refreshPending &&
+                        presentedKey == item.renderKey)
+            } else { use = nil }
         } catch { busy = false; nativeInput?.failed(error); fail(error); return }
         timer.pause(at: inputTime)
         let elapsed = use?.elapsed ?? timer.milliseconds(at: inputTime, capSeconds: item.homePreset.maximumAnswerSeconds)
