@@ -141,7 +141,7 @@ public final class ReviewCoordinator {
                     frozenDisplaySeconds = timer.milliseconds(at: uptime(), capSeconds: item?.homePreset.maximumAnswerSeconds ?? 60) / 1_000
                 }
                 phase = .answer
-            } catch { fail(error) }
+            } catch { nativeInput?.failed(error); fail(error) }
             completeOperation()
         }
     }

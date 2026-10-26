@@ -298,3 +298,15 @@ Swift execution and a fresh native workflow are still pending.
 skips, including both URL representations and all retained refusal cases.
 Privacy `20261026T202020Z-65904` and similarity `20261026T202019Z-65553` pass.
 The fresh native case remains required.
+
+`ui-test/20261026T202419Z-74303` imports the actual package, verifies the media
+journal, selects the deck and reveals the answer. It then fails waiting for
+media-ready evidence. No image/audio or complete workflow pass is claimed.
+
+Filtered repair `20261026T202854Z-79540`, starting at `a91af770`, propagates
+reveal errors into native evidence and reports the existing review notice at
+the same bounded wait. Independent review is clear. Focused coordinator run
+`swift-test/20261026T203249Z-85975` passes 17 tests with zero skips; privacy
+`20261026T203250Z-86382` and similarity `20261026T203251Z-86539` pass.
+Renderer and playback behavior are unchanged; the next native case must expose
+the precise failure before further repair.

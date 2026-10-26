@@ -333,6 +333,40 @@ import Testing
         _ = await fixture.model.end(); await owner.flushEvidence()
     }
 
+    @Test(arguments: [true, false])
+    func revealSurfaceFailurePreservesNoticeAndFailsNativeEvidence(nativeOwned: Bool) async throws {
+        let input = try NativeReviewInputFixture()
+        defer { input.remove() }
+        let owner = nativeOwned ? input.owner() : nil
+        if let owner { try await input.activate(owner, bindSession: false) }
+        let fixture = Fixture(nativeInput: owner)
+        await fixture.model.start()
+        #expect(fixture.model.phase == .question)
+        if let owner {
+            await owner.flushEvidence()
+            #expect(try input.receipt(owner).failure == nil)
+        }
+        let failure = CardPage.Failure.notPrepared
+        fixture.surface.onReveal = { throw failure }
+        fixture.model.reveal(); await fixture.model.settled()
+        #expect(fixture.surface.reveals == 1)
+        #expect(fixture.model.phase == .error)
+        #expect(fixture.model.notice == String(describing: failure))
+        #expect(!fixture.model.canReveal && !fixture.model.canRate)
+        fixture.model.rate(.easy); await fixture.model.settled()
+        #expect(fixture.client.answers == 0 && fixture.client.elapsed.isEmpty && fixture.client.used.isEmpty)
+        #expect(fixture.model.record.answers.isEmpty)
+        if let owner {
+            await owner.flushEvidence()
+            let receipt = try input.receipt(owner)
+            #expect(owner.flushStatus == .saved)
+            #expect(receipt.failure == String(describing: failure))
+            #expect(receipt.admission == nil && receipt.completion == nil)
+            #expect(receipt.image == nil && receipt.audio == nil && receipt.journal == nil)
+        }
+        _ = await fixture.model.end()
+    }
+
     @Test func nativeTapWithoutRendererRefusesBeforeAnswerDispatch() async throws {
         let input = try NativeReviewInputFixture()
         defer { input.remove() }
@@ -377,13 +411,14 @@ import Testing
         var presented: [Int64] = []
         var calls: [String] = []
         var onLoad: (() async throws -> Void)?
+        var onReveal: (() async throws -> Void)?
         var onResume: (() -> Void)?
         var arrivals: [[String]] = []
         func load() async throws { calls.append("load"); try await onLoad?() }
         func render(sessionID: UInt64, items: [ReviewHeadItem]) async throws { calls.append("render") }
         func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws { presented.append(item.cardId); calls.append("present") }
         func preload(item: ReviewHeadItem) async throws {}
-        func reveal(inputTime: TimeInterval) async throws { reveals += 1 }
+        func reveal(inputTime: TimeInterval) async throws { reveals += 1; try await onReveal?() }
         func admitNativeInput(_ input: NativeReviewInput, coordinator: UUID, session: UInt64, generation: UInt64,
                               deck: Int64, item: ReviewHeadItem, rating: ReviewRating, instant: Int64,
                               eligible: Bool) throws -> NativeReviewInput.AnswerUse {

@@ -340,8 +340,15 @@ import notify
             #endif
             return acknowledgement.phase == phase || acknowledgement.phase == "failed"
         }, object: nil)
-        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 30), .completed, "Native evidence did not reach \(phase)")
-        XCTAssertEqual(acknowledgement.phase, phase, "Native evidence refused the case")
+        let result = XCTWaiter().wait(for: [ready], timeout: 30)
+        var diagnostics = ""
+        if result != .completed || acknowledgement.phase != phase {
+            let notice = element(app, "review.session.notice")
+            diagnostics = "last native phase=\(acknowledgement.phase.debugDescription); review.session.notice=\(notice.exists ? text(notice).debugDescription : "<absent>")"
+            if !notice.exists { diagnostics += "\n\(app.debugDescription)" }
+        }
+        XCTAssertEqual(result, .completed, "Native evidence did not reach \(phase); \(diagnostics)")
+        XCTAssertEqual(acknowledgement.phase, phase, "Native evidence refused the case; \(diagnostics)")
         return acknowledgement.directory
     }
     private func closeNativeReview(_ bundle: String) throws {
