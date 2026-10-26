@@ -15,6 +15,18 @@ public final class CardDiagnostics {
         public let index: Int?
         public let script: ScriptLocation?
         public var repeats: Int
+        public let bridgeRejectionReason: CardBridge.RejectionReason?
+
+        init(update: CardUpdate?, kind: String, name: String, index: Int?, script: ScriptLocation?, repeats: Int,
+             bridgeRejectionReason: CardBridge.RejectionReason? = nil) {
+            self.update = update
+            self.kind = kind
+            self.name = name
+            self.index = index
+            self.script = script
+            self.repeats = repeats
+            self.bridgeRejectionReason = bridgeRejectionReason
+        }
     }
 
     /// Private user content, in memory only. Deliberately not Codable and
@@ -43,7 +55,8 @@ public final class CardDiagnostics {
     public private(set) var entries: [Entry] = []
     public init() {}
 
-    public func record(_ kind: String, update: CardUpdate? = nil, name: String = "", index: Int? = nil, script: ScriptLocation? = nil) {
+    public func record(_ kind: String, update: CardUpdate? = nil, name: String = "", index: Int? = nil, script: ScriptLocation? = nil,
+                       bridgeRejectionReason: CardBridge.RejectionReason? = nil) {
         // Page error text can contain private fields. Keep its technical class,
         // not arbitrary exception messages/source excerpts or URL credentials.
         let safeName: String
@@ -53,12 +66,13 @@ public final class CardDiagnostics {
             safeName = name.split(separator: "/").last.map(String.init) ?? ""
         }
         let bounded = String(safeName.prefix(240))
-        if let i = entries.firstIndex(where: { $0.kind == kind && $0.update == update && $0.name == bounded && $0.index == index && $0.script == script }) {
+        if let i = entries.firstIndex(where: { $0.kind == kind && $0.update == update && $0.name == bounded && $0.index == index && $0.script == script && $0.bridgeRejectionReason == bridgeRejectionReason }) {
             entries[i].repeats = min(entries[i].repeats + 1, 1_000_000)
             return
         }
         if entries.count == 256 { entries.removeFirst() }
-        entries.append(Entry(update: update, kind: String(kind.prefix(64)), name: bounded, index: index, script: script, repeats: 1))
+        entries.append(Entry(update: update, kind: String(kind.prefix(64)), name: bounded, index: index, script: script, repeats: 1,
+                             bridgeRejectionReason: bridgeRejectionReason))
     }
 
     func scriptLocation(message: String, line: Int?, column: Int?, source: String?) -> ScriptLocation {

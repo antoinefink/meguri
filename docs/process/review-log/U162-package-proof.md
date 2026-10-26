@@ -356,3 +356,18 @@ review found P2 `M11-LOCK-PUBLICATION`; R2 resolves it, and final wording review
 is clear. Privacy `20261026T212244Z-26603` passes after complete prose rewrites;
 the four failed scan results remain retained. No scan exception was added.
 Implementation, native playback, integration and timing evidence remain open.
+
+## Bridge rejection details
+
+Start `fb4d09cb`. Filtered work `20261026T212009Z-25220` adds fixed rejection
+reasons while retaining all bridge checks and strict media refusal. The first
+VM run `unit-sim/20261026T212753Z-46727` passes 7 and fails 1: existing privacy
+coverage requires diagnostic names to remain empty. That assertion is unchanged.
+
+Seeded fix `20261026T213039Z-49743` stores the reason in an optional typed field,
+with nil defaults and separate deduplication. Names, indexes and script fields
+keep their earlier shape. Independent R2 review is clear. Swift
+`20261026T213455Z-51622` passes 21 tests; exact VM suite
+`20261026T213557Z-53572` passes 9 tests. Both have zero skips. Privacy
+`20261026T213458Z-52047` and similarity `20261026T213458Z-52244` pass.
+The actual native rejection reason still requires the integrated media run.

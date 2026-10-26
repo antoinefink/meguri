@@ -46,19 +46,56 @@ import Testing
         #expect(!summary.contains(privateText))
     }
 
+    @Test func diagnosticSummaryCountsOnlyTypedBridgeReasons() {
+        let current = CardUpdate(card: 1, generation: 2, side: .answer)
+        let prior = CardUpdate(card: 1, generation: 1, side: .question)
+        let privateText = "synthetic-private-https://example.invalid/template.js"
+        let values: [(CardUpdate?, CardBridge.RejectionReason?)] = [
+            (current, .world), (current, .world), (prior, .olderGeneration), (nil, .world),
+            (current, nil), (current, nil), (current, nil),
+        ]
+        let entries = values.map { update, reason in
+            CardDiagnostics.Entry(update: update, kind: "bridgeRejected", name: "", index: nil, script: nil, repeats: 1_000_000,
+                                  bridgeRejectionReason: reason)
+        }
+        #expect(entries.allSatisfy { $0.name.isEmpty })
+        let summary = NativeReviewInput.diagnosticSummary(entries, currentUpdate: current)
+        #expect(summary == "media renderer diagnostics present: bridgeRejected(current=5,earlier/other=2); bridgeReasons: world(current=2,earlier/other=1); olderGeneration(current=0,earlier/other=1)")
+        #expect(!summary.contains(privateText))
+        // Neither known nor unknown names on old records become reason detail.
+        let names = ["world", "olderGeneration", privateText, "", "world/" + privateText]
+        let old = names.map {
+            CardDiagnostics.Entry(update: current, kind: "bridgeRejected", name: $0, index: nil, script: nil, repeats: 1)
+        }
+        #expect(old.allSatisfy { $0.bridgeRejectionReason == nil })
+        #expect(NativeReviewInput.diagnosticSummary(old, currentUpdate: current) ==
+            "media renderer diagnostics present: bridgeRejected(current=5,earlier/other=0)")
+        // A typed reason in any other category is not a bridge reason.
+        let other = [CardDiagnostics.Entry(update: current, kind: "audioDecode", name: "", index: nil, script: nil, repeats: 1,
+                                           bridgeRejectionReason: .world)]
+        #expect(NativeReviewInput.diagnosticSummary(other, currentUpdate: current) ==
+            "media renderer diagnostics present: audioDecode(current=1,earlier/other=0)")
+    }
+
     @Test func diagnosticSummaryRemainsBoundedForFullRetainedStore() {
         let current = CardUpdate(card: 1, generation: 2, side: .answer)
         let kinds = ["missingMedia", "audioSession", "audioDecode", "presentFailed", "updateFailed", "appearanceFailed",
                      "processTerminated", "typedAnswerRead", "bridgeOrigin", "bridgeRejected", "recoveryUnavailable", "answerAccessibility",
                      "script.synthetic", "mediaError.synthetic", "synthetic-unknown"]
+        let reasons = CardBridge.RejectionReason.allCases
         let entries = (0..<256).map { index in
-            CardDiagnostics.Entry(update: index.isMultiple(of: 2) ? current : nil, kind: kinds[index % kinds.count],
-                                  name: String(repeating: "synthetic-private", count: 100), index: index, script: nil, repeats: 1_000_000)
+            let kind = index < kinds.count ? kinds[index] : "bridgeRejected"
+            let name = kind == "bridgeRejected" ? "" : String(repeating: "synthetic-private", count: 100)
+            return CardDiagnostics.Entry(update: index.isMultiple(of: 2) ? current : nil, kind: kind,
+                                         name: name, index: index, script: nil, repeats: 1_000_000,
+                                         bridgeRejectionReason: kind == "bridgeRejected" ? reasons[index % reasons.count] : nil)
         }
         let description = NativeReviewInput.Refusal(reason: NativeReviewInput.diagnosticSummary(entries, currentUpdate: current)).description
         #expect(description.utf8.count < 900)
         #expect(!description.contains("synthetic"))
         #expect(description.contains("other(current="))
+        #expect(description.contains("bridgeReasons: "))
+        #expect(description.hasSuffix("; more"))
     }
 
     @Test func frozenRecordBindsEveryRequiredFileAndExactRun() async throws {

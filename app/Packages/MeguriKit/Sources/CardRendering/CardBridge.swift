@@ -13,6 +13,14 @@ public nonisolated enum CardBridgeAction: Equatable, Sendable {
 /// The only route from WebKit messages to a page. The controller retains this
 /// router keeps weak page references.
 public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
+    /// Fixed technical labels only; never derive a reason from message content.
+    public nonisolated enum RejectionReason: String, CaseIterable, Sendable {
+        case legacyPlatform, world, body, bodySize, legacyValue, card
+        case confirmationToken, confirmationShape, confirmationValue
+        case signalChannel, generation, olderGeneration, futureGeneration, side, signalType
+        case signalFields, signalValue, unknownSignal
+    }
+
     private struct WeakPage { weak var value: CardPage? }
     private var pages: [ObjectIdentifier: WeakPage] = [:]
     func register(_ page: CardPage) { pages[ObjectIdentifier(page.webView)] = WeakPage(value: page) }
@@ -35,9 +43,12 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// tests with ordinary values instead of WKFrameInfo objects.
     func receive(name: String, world: String?, body: Any, page: CardPage) {
         guard let update = page.update, let payload = page.payload, !page.closed else { return }
-        func reject() { page.diagnostics.record("bridgeRejected", update: update) }
+        func reject(_ reason: RejectionReason) { page.diagnostics.record("bridgeRejected", update: update, bridgeRejectionReason: reason) }
         if name == "cb" || name == "meguri" {
-            guard page.platform != .mac, world == WKContentWorld.page.name, let text = body as? String, text.utf8.count <= 512 else { reject(); return }
+            guard page.platform != .mac else { reject(.legacyPlatform); return }
+            guard world == WKContentWorld.page.name else { reject(.world); return }
+            guard let text = body as? String else { reject(.body); return }
+            guard text.utf8.count <= 512 else { reject(.bodySize); return }
             if name == "meguri", let action = Self.command(text, payload: payload) { page.admit(action); return }
             if name == "cb", let data = text.data(using: .utf8),
                let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: String],
@@ -47,21 +58,28 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 else if zone.hasSuffix("Right") { page.admit(.good) }
                 return
             }
-            reject(); return
+            reject(.legacyValue); return
         }
-        guard world == CardRuntime.interactionWorldName, let dictionary = body as? [String: Any], dictionary.count <= 16,
-              let card = Self.integer(dictionary["card"]), card == update.card else { reject(); return }
+        guard world == CardRuntime.interactionWorldName else { reject(.world); return }
+        guard let dictionary = body as? [String: Any] else { reject(.body); return }
+        guard dictionary.count <= 16 else { reject(.bodySize); return }
+        guard let card = Self.integer(dictionary["card"]), card == update.card else { reject(.card); return }
         if name == CardRuntime.confirmationHandlerName {
-            guard let token = Self.integer(dictionary["token"]), token >= 0, let phase = dictionary["phase"] as? String,
-                  Set(dictionary.keys) == ["card", "token", "phase"],
-                  (phase == "settled" && UInt64(token) == update.generation || phase == "visible" && UInt64(token) == page.visibleToken && page.acceptsVisibleConfirmation())
-            else { reject(); return }
+            guard let token = Self.integer(dictionary["token"]), token >= 0 else { reject(.confirmationToken); return }
+            guard let phase = dictionary["phase"] as? String,
+                  Set(dictionary.keys) == ["card", "token", "phase"] else { reject(.confirmationShape); return }
+            guard (phase == "settled" && UInt64(token) == update.generation || phase == "visible" && UInt64(token) == page.visibleToken && page.acceptsVisibleConfirmation())
+            else { reject(.confirmationValue); return }
             page.confirm(dictionary)
             return
         }
-        guard name == CardRuntime.signalHandlerName, let generation = Self.integer(dictionary["generation"]), generation >= 0,
-              UInt64(generation) == update.generation, dictionary["side"] as? String == update.sideName,
-              let signal = dictionary["signal"] as? String else { reject(); return }
+        guard name == CardRuntime.signalHandlerName else { reject(.signalChannel); return }
+        guard let generation = Self.integer(dictionary["generation"]), generation >= 0 else { reject(.generation); return }
+        guard UInt64(generation) == update.generation else {
+            reject(UInt64(generation) < update.generation ? .olderGeneration : .futureGeneration); return
+        }
+        guard dictionary["side"] as? String == update.sideName else { reject(.side); return }
+        guard let signal = dictionary["signal"] as? String else { reject(.signalType); return }
         let base: Set<String> = ["signal", "card", "generation", "side"]
         func keys(_ extra: Set<String>) -> Bool { Set(dictionary.keys).isSubset(of: base.union(extra)) }
         func string(_ key: String, max: Int) -> String? {
@@ -71,31 +89,33 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
         func boolean(_ key: String) -> Bool { Self.bool(dictionary[key]) != nil }
         switch signal {
         case "settled", "shown":
-            guard keys([]) else { reject(); return }
+            guard keys([]) else { reject(.signalFields); return }
             page.signal(signal, body: dictionary)
         case "visible":
-            guard keys(["token"]), let token = Self.integer(dictionary["token"]), token >= 0, UInt64(token) == page.visibleToken else { reject(); return }
+            guard keys(["token"]) else { reject(.signalFields); return }
+            guard let token = Self.integer(dictionary["token"]), token >= 0, UInt64(token) == page.visibleToken else { reject(.signalValue); return }
             page.signal(signal, body: dictionary)
         case "updateFailed":
-            guard keys(["error"]), string("error", max: 8_000) != nil else { reject(); return }
+            guard keys(["error"]) else { reject(.signalFields); return }
+            guard string("error", max: 8_000) != nil else { reject(.signalValue); return }
             page.signal(signal, body: dictionary)
         case "command":
-            guard keys(["command", "reveal"]) else { reject(); return }
+            guard keys(["command", "reveal"]) else { reject(.signalFields); return }
             if Self.bool(dictionary["reveal"]) == true, update.side == .question, dictionary["command"] == nil { page.admit(.reveal) }
             else if page.platform == .mac, let command = string("command", max: 128), dictionary["reveal"] == nil {
                 if command == "ans", update.side == .question { page.admit(.reveal) }
                 else if let action = Self.command(command, payload: payload) { page.admit(action) }
-                else { reject() }
-            } else { reject() }
+                else { reject(.signalValue) }
+            } else { reject(.signalValue) }
         case "error":
-            guard keys(["kind", "message", "line", "column", "source", "phase", "index"]),
-                  let kind = string("kind", max: 16), ["exception", "rejection", "hook"].contains(kind),
+            guard keys(["kind", "message", "line", "column", "source", "phase", "index"]) else { reject(.signalFields); return }
+            guard let kind = string("kind", max: 16), ["exception", "rejection", "hook"].contains(kind),
                   string("message", max: 8_000) != nil, let phase = string("phase", max: 16),
                   ["script", "later", "shown-hook", "update-hook"].contains(phase),
                   dictionary["source"] == nil || string("source", max: 4096) != nil,
                   ["line", "column"].allSatisfy({ dictionary[$0] == nil || dictionary[$0] is NSNull || (Self.integer(dictionary[$0]) ?? -1) >= 0 }),
                   (phase == "script" ? (Self.integer(dictionary["index"]) ?? 0) > 0 : dictionary["index"] == nil || dictionary["index"] is NSNull)
-            else { reject(); return }
+            else { reject(.signalValue); return }
             page.diagnostics.captureTemplateError(update: update, payload: payload, kind: kind, phase: phase,
                                                   message: dictionary["message"] as? String ?? "",
                                                   line: Self.integer(dictionary["line"]).map(Int.init),
@@ -105,24 +125,35 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
                                                            column: Self.integer(dictionary["column"]).map(Int.init), source: dictionary["source"] as? String)
             page.diagnostics.record("script.\(kind).\(phase)", update: update, index: Self.integer(dictionary["index"]).map(Int.init), script: location)
         case "mediaError":
-            guard keys(["tag", "url", "family"]), let tag = string("tag", max: 16),
+            guard keys(["tag", "url", "family"]) else { reject(.signalFields); return }
+            guard let tag = string("tag", max: 16),
                   ["img", "audio", "video", "source", "link", "object", "embed", "script", "font"].contains(tag),
                   let url = string("url", max: 4096), dictionary["family"] == nil || string("family", max: 512) != nil
-            else { reject(); return }
+            else { reject(.signalValue); return }
             page.diagnostics.record("mediaError.\(tag)", update: update, name: url)
         case "selection", "composition", "focus", "typedText", "listeners", "mediaPlayback":
+            let fields: Set<String>
             let valid: Bool
             switch signal {
-            case "selection": valid = keys(["selected"]) && boolean("selected")
-            case "composition": valid = keys(["active"]) && boolean("active")
-            case "focus": valid = keys(["editable", "typeans"]) && boolean("editable") && boolean("typeans")
-            case "typedText": valid = keys(["text"]) && string("text", max: 65_536) != nil
-            case "mediaPlayback": valid = keys(["playing"]) && boolean("playing")
-            default: valid = keys(["tap", "key"]) && boolean("tap") && boolean("key")
+            case "selection": fields = ["selected"]
+            case "composition": fields = ["active"]
+            case "focus": fields = ["editable", "typeans"]
+            case "typedText": fields = ["text"]
+            case "mediaPlayback": fields = ["playing"]
+            default: fields = ["tap", "key"]
             }
-            guard valid else { reject(); return }
+            guard keys(fields) else { reject(.signalFields); return }
+            switch signal {
+            case "selection": valid = boolean("selected")
+            case "composition": valid = boolean("active")
+            case "focus": valid = boolean("editable") && boolean("typeans")
+            case "typedText": valid = string("text", max: 65_536) != nil
+            case "mediaPlayback": valid = boolean("playing")
+            default: valid = boolean("tap") && boolean("key")
+            }
+            guard valid else { reject(.signalValue); return }
             if page.presented { page.signal(signal, body: dictionary) }
-        default: reject()
+        default: reject(.unknownSignal)
         }
     }
 

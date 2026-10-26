@@ -45,7 +45,7 @@ import Darwin
         }
     }
     /// Counts the renderer's at-most-256 retained records, not repeat events.
-    /// Only fixed category labels and counts leave this bounded snapshot.
+    /// Only fixed category/reason labels and counts leave this bounded snapshot.
     static func diagnosticSummary(_ entries: [CardDiagnostics.Entry], currentUpdate: CardUpdate) -> String {
         let grouped = Dictionary(grouping: entries) { DiagnosticCategory(kind: $0.kind) }
         let counts = DiagnosticCategory.allCases.compactMap { category -> String? in
@@ -53,7 +53,27 @@ import Darwin
             let current = records.filter { $0.update == currentUpdate }.count
             return "\(category.rawValue)(current=\(current),earlier/other=\(records.count - current))"
         }
-        return "media renderer diagnostics present: " + counts.joined(separator: "; ")
+        var summary = "media renderer diagnostics present: " + counts.joined(separator: "; ")
+        // Old records have no typed reason and retain only the category count.
+        let reasons = Dictionary(grouping: grouped[.bridgeRejected] ?? []) {
+            $0.bridgeRejectionReason
+        }
+        var details: [String] = []
+        let heading = "; bridgeReasons: "
+        let omitted = "; more"
+        for reason in CardBridge.RejectionReason.allCases {
+            guard let records = reasons[reason] else { continue }
+            let current = records.filter { $0.update == currentUpdate }.count
+            let detail = "\(reason.rawValue)(current=\(current),earlier/other=\(records.count - current))"
+            let candidate = summary + heading + (details + [detail]).joined(separator: "; ")
+            // Leave room for the refusal prefix and a fixed truncation marker.
+            guard candidate.utf8.count + omitted.utf8.count <= 860 else {
+                return summary + (details.isEmpty ? "" : heading + details.joined(separator: "; ")) + omitted
+            }
+            details.append(detail)
+        }
+        if !details.isEmpty { summary += heading + details.joined(separator: "; ") }
+        return summary
     }
     nonisolated public struct AnswerUse: Codable, Sendable, Equatable {
         public let owner: UUID, coordinator: UUID, session: UInt64, generation: UInt64
