@@ -25,3 +25,14 @@ Evidence and reports are retained in `build/unit-intake/U162-package-proof/`.
 On clean `0bc98afa`, static checks `20261026T102714Z-96936` pass all three
 checks. This confirms source rules and trailers, not runtime durability.
 The full-runner workload still needs a completed focused run.
+
+## Completed focused run after storage recovery
+
+The snapshot was absent at resume; the agent did not remove it. Doctor
+`20261026T123147Z-6094` reports Docker and VM ready with 45 GiB free.
+On clean `d5a0db5a`, `core-test/20261026T123255Z-7105` passes both prediction
+tests with zero skips. C8 completes its full 10,000 sessions in 312.860 seconds.
+The retained nextest stream confirms peak one live test and no test starting
+alongside C8. See `c8-isolated-pass-evidence.json` in the intake directory.
+Workload and production limits remain unchanged. This closes focused runtime
+verification; the original-base full integration gate is still required.

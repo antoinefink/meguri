@@ -84,3 +84,22 @@ No mobile pass, Unit acceptance or gate acceptance is claimed.
 On clean `0bc98afa`, UI lint `20261026T102715Z-96947` passes 128 checks with
 zero findings; static checks `20261026T102714Z-96936` pass all three checks.
 These source checks do not supply native mobile execution evidence.
+
+## Fresh mobile results
+
+On clean `d5a0db5a`, iPhone native Cancel/Save/Replace
+`ui-test/20261026T123937Z-10988` passes one test, zero skips. Independent
+`package-interop-check/20261026T124442Z-16972` passes against that run's frozen
+prepared source: 12 tables, 2,425 rows, 270 media files, zero stamp edits and zero
+client-open edits. Timing matches. The actual destination file is retained.
+
+iPad `ui-test/20261026T124445Z-17228` fails one test, zero skips. New Folder was
+tapped; the following naming-state query failed with an AX waiter interruption.
+No native destination or package pass is claimed. Its earlier picker attachment
+does not show the failed naming state. Diagnose that state before repair.
+
+The checkpoint audit also identifies an unproved chain: media-bearing file
+import, a new review, retained answers after relaunch, then re-export. Existing
+native review-import tests use a collection-only package; the media-export test
+launches a fixture directly. These separate passes do not establish the combined
+workflow. This gap, iPad export and the original-base gate remain open.
