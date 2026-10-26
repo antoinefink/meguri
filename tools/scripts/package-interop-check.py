@@ -694,15 +694,30 @@ def compare_databases(expected, decoded):
     """Require identical raw cells, storage classes, BLOB bytes and stamps."""
     left, right = raw_rows(expected), raw_rows(decoded)
     sentinel = object()
+    table_ordinals = {table: i for i, table in enumerate(COLUMNS)}
+    row_ordinals = [0] * len(COLUMNS)
     try:
         while True:
             a, b = next(left, sentinel), next(right, sentinel)
-            require((a is sentinel) == (b is sentinel), 'pre-client-database-difference')
-            if a is sentinel:
+            if a is sentinel and b is sentinel:
                 break
-            require(exact(a[0], b[0]) and exact(a[1], b[1]) and
-                    len(a[2]) == len(b[2]) and all(ka == kb and exact(va, vb)
-                    for (ka, va), (kb, vb) in zip(a[2], b[2])), 'pre-client-database-difference')
+            # Zero-based fixed schema ordinals; rows follow each table's raw
+            # BINARY key order. Never interpolate input names, keys or cells.
+            table_ordinal = min(table_ordinals[row[0]] for row in (a, b) if row is not sentinel)
+            diagnostic = ('pre-client-database-difference table ' + str(table_ordinal) +
+                          ' row ' + str(row_ordinals[table_ordinal]))
+            require(a is not sentinel and b is not sentinel and exact(a[0], b[0]) and
+                    len(a[2]) == len(b[2]), diagnostic + ' shape')
+            if not exact(a[1], b[1]):
+                raise Refusal(diagnostic + ' key expected-key-sha256 ' +
+                              hashlib.sha256(a[1].encode('utf-8')).hexdigest() +
+                              ' decoded-key-sha256 ' +
+                              hashlib.sha256(b[1].encode('utf-8')).hexdigest())
+            for column_ordinal, ((ka, va), (kb, vb)) in enumerate(zip(a[2], b[2])):
+                cell_diagnostic = diagnostic + ' column ' + str(column_ordinal)
+                require(ka == kb, cell_diagnostic + ' storage-kind')
+                require(exact(va, vb), cell_diagnostic + ' value')
+            row_ordinals[table_ordinal] += 1
     finally:
         left.close()
         right.close()

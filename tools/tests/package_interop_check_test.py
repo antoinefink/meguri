@@ -958,6 +958,45 @@ class PreClient(Fixture):
         conn.close()
         self.pack(data=variant_db.read_bytes())
 
+    def test_neutral_raw_difference_coordinates_and_secret_redaction(self):
+        secret_key = 'sk-synthetic-secret-key-\u00e9'
+        secret_value = b'sk-synthetic-secret-value'
+        changed_key = 'sk-synthetic-secret-key-e\u0301'
+        changed_value = b'sk-synthetic-secret-value-changed'
+        conn = sqlite3.connect(self.db)
+        conn.execute('INSERT INTO config VALUES (?,0,0,?)', (secret_key, secret_value))
+        conn.commit()
+        conn.close()
+        self.pack()
+        work = self.stage()
+        self.assertTrue(json.loads((work / 'decoded/proof.json').read_text())['pre_client_database_equal'])
+        shutil.rmtree(work)
+
+        cases = [
+            ('UPDATE config SET val=? WHERE KEY=?', (changed_value, secret_key),
+             'table 11 row 3 column 3 value'),
+            ('UPDATE config SET val=? WHERE KEY=?', (secret_value.decode(), secret_key),
+             'table 11 row 3 column 3 storage-kind'),
+            ('UPDATE config SET KEY=? WHERE KEY=?', (changed_key, secret_key),
+             'table 11 row 3 key expected-key-sha256 ' +
+             hashlib.sha256(secret_key.encode('utf-8')).hexdigest() +
+             ' decoded-key-sha256 ' + hashlib.sha256(changed_key.encode('utf-8')).hexdigest()),
+            ('DELETE FROM config WHERE KEY=?', (secret_key,), 'table 11 row 3 shape'),
+            ('DELETE FROM tags', (), 'table 10 row 0 shape'),
+            ('UPDATE col SET mod=124', (), 'table 0 row 0 column 2 value'),
+        ]
+        for sql, params, coordinates in cases:
+            with self.subTest(coordinates=coordinates):
+                self.pack_db_variant(sql, params)
+                with self.assertRaises(interop.Refusal) as error:
+                    self.stage()
+                diagnostic = str(error.exception)
+                self.assertEqual(diagnostic, 'pre-client-database-difference ' + coordinates)
+                for secret in (secret_key, changed_key, secret_value.decode(), changed_value.decode()):
+                    self.assertNotIn(secret, diagnostic)
+                self.assertFalse((work / 'decoded/proof.json').exists())
+                shutil.rmtree(work)
+
     def test_timing_repair_cannot_hide_package_changes(self):
         for sql, params in [
             ('UPDATE cards SET queue=-2', ()),
