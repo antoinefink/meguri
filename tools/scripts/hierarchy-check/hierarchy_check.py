@@ -29,7 +29,9 @@ identifiers the system sets (a leading '_', BackButton, Toolbar,
 PopoverDismissRegion, the Mac back button's chevron.backward in a toolbar, a
 window's SwiftUI scene id, a navigation bar named after its title, an SF
 Symbol's name on its image, and on the Mac a SwiftUI List's ListColumn and a
-NavigationSplitView's '<scene id>, SidebarNavigationSplitView'), elements
+NavigationSplitView's '<scene id>, SidebarNavigationSplitView', and AppKit's
+exact NSOutlineViewDisclosureButtonKey on a disclosure triangle directly in
+a cell under an outline row in an outline), elements
 with an empty frame, and transient elements (activity and progress
 indicators) with everything inside them. Wrong colors, broken alignment and
 unreadable text are judgments for the critic (U10), not checks here.
@@ -170,6 +172,12 @@ def is_system_identifier(e):
         return e.type == "button" and any(a.type in ("sheet", "alert") for a in e.ancestors)
     if ident == "chevron.backward":
         return e.type == "button" and e.parent is not None and e.parent.type == "toolbar"
+    if ident == "NSOutlineViewDisclosureButtonKey":
+        # Observed AppKit outline disclosure, not an app identifier. Require
+        # the native role and ordered container context, not a name prefix.
+        return (e.type == "disclosureTriangle" and e.parent is not None and e.parent.type == "cell"
+                and any(a.type == "outlineRow" and any(p.type == "outline" for p in a.ancestors)
+                        for a in e.parent.ancestors))
     if e.type == "navigationBar":
         # UIKit names a navigation bar after its title.
         return any(c.type == "staticText" and c.label == ident for c in e.children)

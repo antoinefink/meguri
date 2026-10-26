@@ -271,6 +271,74 @@ class IdentifierFormat(unittest.TestCase):
         self.assertEqual(kinds(hierarchy_check.check(tree)), ["bad-identifier", "bad-identifier"])
 
 
+class NativeOutlineIdentifiers(unittest.TestCase):
+    marker = "NSOutlineViewDisclosureButtonKey"
+
+    def tree(self, *rows):
+        tree = doc(el("outline", f=(0, 0, 400, 400), children=rows))
+        tree["platform"] = "mac"
+        return tree
+
+    def row(self, y, own_id, marker=None, type_="disclosureTriangle", extra=()):
+        return el("outlineRow", f=(0, y, 400, 30), children=[
+            el("cell", f=(0, y, 400, 30), children=[
+                el(type_, self.marker if marker is None else marker, f=(0, y, 14, 14)),
+                el("button", own_id, "Deck", f=(20, y, 200, 30)), *extra,
+            ]),
+        ])
+
+    def test_repeated_exact_marker_in_native_outline_cells_is_system_owned(self):
+        tree = self.tree(self.row(0, "home.deck.row.1"), self.row(40, "home.deck.row.2"))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_exact_marker_on_other_roles_still_fails(self):
+        for type_ in ["button", "staticText", "group", "cell"]:
+            with self.subTest(type=type_):
+                issues = hierarchy_check.check(self.tree(self.row(0, "home.deck.row.1", type_=type_)))
+                self.assertEqual([(i["kind"], i["identifier"]) for i in issues],
+                                 [("bad-identifier", self.marker)])
+
+    def test_native_role_requires_cell_and_ordered_outline_row_outline_context(self):
+        for containers in [(), ("cell",), ("outlineRow", "cell"), ("outline", "cell"),
+                           ("outline", "outlineRow"), ("table", "tableRow", "cell"),
+                           ("outlineRow", "outline", "cell"), ("outline", "outlineRow", "cell", "group")]:
+            with self.subTest(containers=containers):
+                children = [el("disclosureTriangle", self.marker), el("button", "home.deck.row.1", "Deck")]
+                for type_ in reversed(containers):
+                    children = [el(type_, children=children)]
+                tree = doc(*children)
+                tree["platform"] = "mac"
+                self.assertEqual([(i["kind"], i["identifier"]) for i in hierarchy_check.check(tree)],
+                                 [("bad-identifier", self.marker)])
+
+    def test_similar_marker_names_are_not_exempted(self):
+        for marker in [self.marker + ".1", self.marker + "Extra", "NSOutlineViewOtherKey"]:
+            with self.subTest(marker=marker):
+                issues = hierarchy_check.check(self.tree(self.row(0, "home.deck.row.1", marker=marker)))
+                self.assertEqual([(i["kind"], i["identifier"]) for i in issues], [("bad-identifier", marker)])
+
+    def test_app_owned_disclosure_and_row_duplicates_in_native_context_still_fail(self):
+        tree = self.tree(self.row(0, "home.deck.row.1", marker="home.deck.disclosure.1"),
+                         self.row(40, "home.deck.row.1", marker="home.deck.disclosure.1"))
+        self.assertEqual([(i["kind"], i["identifier"]) for i in hierarchy_check.check(tree)],
+                         [("duplicate-identifier", "home.deck.disclosure.1"),
+                          ("duplicate-identifier", "home.deck.row.1")])
+
+    def test_missing_ids_remain_reported(self):
+        marker_only = el("outlineRow", children=[el("cell", children=[el("disclosureTriangle", self.marker)])])
+        issues = hierarchy_check.check(self.tree(marker_only))
+        self.assertEqual([(i["kind"], i["type"]) for i in issues],
+                         [("missing-identifier", "outlineRow"), ("missing-identifier", "cell")])
+        issues = hierarchy_check.check(self.tree(self.row(0, "home.deck.row.1", extra=[el("button", label="Unnamed")])))
+        self.assertEqual([(i["kind"], i["label"]) for i in issues], [("missing-identifier", "Unnamed")])
+
+    def test_system_marker_does_not_suppress_adjacent_text_geometry_findings(self):
+        texts = [el("staticText", "home.deck.name.1", "First", f=(20, 0, 100, 20)),
+                 el("staticText", "home.deck.name.2", "Second", f=(30, 0, 100, 20))]
+        issues = hierarchy_check.check(self.tree(self.row(0, "home.deck.row.1", extra=texts)))
+        self.assertEqual(kinds(issues), ["text-overlap"])
+
+
 class TextOverlap(unittest.TestCase):
     def test_two_overlapping_labels_are_reported_with_both_frames(self):
         tree = doc(el("staticText", "sample.defects.first", "First", f=(16, 100, 140, 20)),

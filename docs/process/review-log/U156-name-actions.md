@@ -79,6 +79,12 @@ unchanged; these failures remain open. No full drive pass is claimed.
 production change is the Mac Form inset. `similarity/20261026T013836Z-60477`
 passed for the final source.
 
+The inherited expanded-tree failures are repaired by the separate U152 Mac
+follow-up in `U152-mac-hierarchy.md`. Its final native interaction test passes,
+and `drive/20261026T032905Z-27996` passes all 20 steps
+with zero hierarchy issues. Independent final visual review is clear. Earlier
+failed receipts remain retained; this does not complete U156 or its batch gate.
+
 Mobile rendering, system accessibility audits and integration gate verification
 remain pending. A build-created Xcode project rewrite outside
 this slice is preserved separately in an owned stash and

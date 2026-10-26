@@ -29,6 +29,7 @@
 ## Shell (U150)
 
 - Check nested controls in the real accessibility tree. On iOS, a Button in a DisclosureGroup label produced duplicate actions and inherited identifiers. Keep selection and disclosure separate; scope any accessibility representation to the leaf control. DTO previews cannot prove this.
+- Mac DisclosureGroup metadata can propagate its ID into children; label containers and Group values may be absent from AX. Test actual rows and row-scoped native triangles. Mac menu captions can be titles with empty labels: select exact action IDs and check captions within that query.
 - After media arrival, update resolver names and call the page API. Clear idle card state, including work still running. Keep the two-card test: current-page checks do not cover the next page.
 
 - Mac Settings is a separate native scene sharing the collection. `AppNavigation.sheetHost` assigns file sheets to main or Settings; an inactive or nonmatching host must not dismiss another host's sheet. FSRS admission remains on main. Original in-window Settings rules are superseded by `docs/design/native-interface-contract.md`.

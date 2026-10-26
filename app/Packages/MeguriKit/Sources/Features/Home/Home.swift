@@ -392,13 +392,6 @@ private struct HomeDeckBranch: View {
                         childBranch(child)
                     }
                 } label: { row }
-                // Contain preserves the native disclosure and selection as separate
-                // elements, and scopes metadata to this branch rather than its rows.
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel(Text(verbatim: path))
-                .accessibilityValue(expanded.wrappedValue
-                    ? Text("Expanded", bundle: .module) : Text("Collapsed", bundle: .module))
-                .accessibilityIdentifier("home.deck.disclosure.\(node.id)")
             }
             #else
             HStack {
@@ -556,11 +549,13 @@ private struct HomeSidebarBranch: View {
                     }
                 } label: { row }
                 .tag(SidebarItem.deck(DeckID(node.id)))
+                #if !os(macOS)
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(Text(verbatim: path))
                 .accessibilityValue(expanded.wrappedValue
                     ? Text("Expanded", bundle: .module) : Text("Collapsed", bundle: .module))
                 .accessibilityIdentifier("home.sidebar.disclosure.\(node.id)")
+                #endif
             }
         }
         .id(node.id)
@@ -569,12 +564,18 @@ private struct HomeSidebarBranch: View {
     private var row: some View {
         Group {
             #if os(macOS)
-            Text(verbatim: name)
-                .lineLimit(1)
-                .help(Text(verbatim: path))
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(Text(verbatim: path))
-                .accessibilityValue(Text("\(Text(node.counts.review, format: .number)) due", bundle: .module))
+            Button { collection.openDeckPage(deckID: node.id) } label: {
+                Text(verbatim: name)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(Text(verbatim: path))
+            .accessibilityLabel(Text(verbatim: path))
+            .accessibilityValue(Text("\(Text(node.counts.review, format: .number)) due", bundle: .module))
+            .accessibilityIdentifier("home.sidebar.deck.\(node.id)")
+            .tag(SidebarItem.deck(DeckID(node.id)))
             #else
             VStack(alignment: .leading, spacing: Spacing.xxSmall) {
                 Text(verbatim: name)
@@ -589,7 +590,9 @@ private struct HomeSidebarBranch: View {
             .accessibilityLabel(Text(verbatim: path))
             #endif
         }
+        #if !os(macOS)
         .accessibilityIdentifier("home.sidebar.deck.\(node.id)")
+        #endif
         .deckMenu(collection: collection, deck: node)
         .tag(SidebarItem.deck(DeckID(node.id)))
         #if os(macOS)

@@ -241,7 +241,7 @@ mg_ui_test() {
     mg_mac_ui_take || return 0
     for s in $suites; do
       case "$s" in
-        DeckManagementUITests|DeckManagementUITests/*)
+        DeckManagementUITests|DeckManagementUITests/*|MacHomeHierarchyTests|MacHomeHierarchyTests/*)
           mg_vm_fixture "$MG_ROOT/build/fixtures/recipes/local-review-1"
           result=$?
           if [ "$result" -ne 0 ]; then

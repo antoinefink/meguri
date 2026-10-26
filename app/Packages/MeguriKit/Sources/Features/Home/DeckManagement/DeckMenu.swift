@@ -47,6 +47,8 @@ private struct DeckMenuAffordances: ViewModifier {
                 .focused($menuFocused)
                 .accessibilityIdentifier("home.deckMenu.open.\(deck.id)")
                 #if os(macOS)
+                .menuStyle(.button)
+                .buttonStyle(.borderless)
                 .opacity(hovering || menuFocused ? 1 : 0)
                 .help(Text("Deck Actions", bundle: .module))
                 #endif
