@@ -1,7 +1,7 @@
 # Decks
 
 Spec: decks/decks
-Requirements: R1465, R322, R1474, R36, R37, R38, R39, R40, R41, R42, R53, R54, R55, R56, R57, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R1473, R1483, R2008
+Requirements: R1465, R322, R1474, R26, R27, R36, R37, R38, R39, R40, R41, R42, R53, R54, R55, R56, R57, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R1473, R1483, R2008
 Anki: 26.09.3
 Scenarios: conformance/scenarios/decks/
 
@@ -252,3 +252,20 @@ Refusing a missing move target (D7) or an unknown current deck id (D11), and lea
 | `decks/tree/missing-parent` | D12: a deck whose parent is missing is left out |
 
 Meguri's own behavior that no scenario shows is tested in `core/crates/meguri-engine/tests/decks.rs`: one undo restoring a rename, a move and a delete of a deck with 2 subdecks and 120 cards (rows, graves, config keys and `col.mod`); the change set of each operation; the deletion summary and the backup call (R67, R2008); the collapse step and the skip-undo selection (D15.3, D15.4); the `NotFound` refusals.
+
+## D17. All deck names (Meguri query, R26, R27)
+
+The Go to Deck query returns `DeckNameSnapshot { generation: UInt64, decks: [DeckNameEntry] }`, where each entry is `{ id: Int64, fullName: String, filtered: Bool }`.
+
+- Return exactly one entry per persisted deck record: its actual id, full human name and whether its kind is filtered (D1). Include the actual, possibly renamed default deck even when D12 hides it; include filtered decks, descendants of collapsed decks, and records with missing parents independently. Do not create entries for absent records, infer missing ancestors or substitute a `Default` name. D12's display tree is unchanged.
+- Obtain `fullName` with the existing `human_name` conversion: replace stored U+001F separators with `::` (D1). Preserve the stored components' spelling and bytes; do not apply the input component rule or stored-name normalization on this read. Order by the full stored name under `unicase` (D3), with ascending id as a stable tie-breaker. Human-name formatting does not change the sort key.
+- Read all entries in one short snapshot on one Query reader (`storage/open-and-connections` C6–C7). Return the generation of the collection actually read, checked while holding that reader (`engine/lifecycle` L3), with the entries from that snapshot. End the snapshot and release the reader within the query call. The caller rejects publication if that generation is no longer current.
+- Existing closed/unavailable collection, reader/storage error and `StaleGeneration{planned, current}` rules apply; propagate the error rather than returning an empty or partial successful snapshot. An empty array succeeds only when the snapshot has no deck records.
+- This query performs no writer operation, day maintenance, count or card query, normalization or other write, undo change or event publication. It does not change deck creation, matching, selection or filtered-deck study eligibility.
+
+Focused tests for this Meguri projection:
+
+- A hidden, empty id 1 named `Personal`, a filtered record, collapsed descendants and a missing-parent record all appear once with their actual full names, ids and kinds. No missing parent is invented; when id 1 is absent, no default entry appears.
+- Nested Unicode names retain their actual spelling and full paths; stored-name `unicase` order (including parent before descendants) and the id tie-breaker are deterministic. A read of an unnormalized stored name leaves it unchanged.
+- A concurrent rename yields one coherent before-or-after snapshot. Replacement cannot relabel old entries with a new generation: a stale reader request fails, and an already completed old-generation result is rejected at publication.
+- Closed/unavailable and storage-error cases fail without a partial value. A successful read changes no persisted state, undo history or events, and uses no writer, day-maintenance, count or card path.
