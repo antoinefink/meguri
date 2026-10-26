@@ -276,6 +276,62 @@ import Testing
         #expect(!ReviewInputOwnership.admits(cardFocused: true, editing: false, paused: false, repeated: true))
     }
 
+    @Test func nativeInputChangesOnlyAnswerElapsedAndKeepsRealHeadTokenAndUptime() async throws {
+        let input = try NativeReviewInputFixture()
+        defer { input.remove() }
+        let owner = input.owner()
+        try await input.activate(owner, bindSession: false)
+        let fixture = Fixture(nativeInput: owner)
+        fixture.now = 10
+        await fixture.model.start()
+        let realItem = try #require(fixture.model.item)
+        fixture.now = 17
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.now = 19
+        fixture.model.rate(.easy); fixture.model.rate(.easy)
+        await fixture.model.settled()
+        #expect(fixture.client.answers == 1 && fixture.client.elapsed == [1000])
+        let call = try #require(fixture.client.used.first)
+        #expect(call.session == 5 && call.item == realItem && call.item.stateToken == realItem.stateToken)
+        #expect(call.rating == .easy && call.wall == FrozenNativeReviewInput.now)
+        #expect(fixture.model.record.answers.first?.elapsedMilliseconds == 1000)
+        #expect(fixture.model.item?.cardId == 2, "The ordinary client result supplies the next head")
+        await owner.flushEvidence()
+        let receipt = try input.receipt(owner)
+        #expect(receipt.admission?.token == realItem.stateToken.bytes && receipt.completion == "accepted")
+        fixture.now = 23
+        try await fixture.model.pause()
+        #expect(fixture.model.record.activeMilliseconds == 13_000, "The hook never changes uptime/active duration")
+        #expect(await fixture.model.end())
+        await owner.flushEvidence()
+        #expect(try input.receipt(owner).ended)
+    }
+    @Test(arguments: ["rating", "card", "owner", "eligibility", "failed", "stale"])
+    func nativeInputRefusesMismatchBeforeCallAndKeepsFailedCompletionSeparate(kind: String) async throws {
+        let input = try NativeReviewInputFixture()
+        defer { input.remove() }
+        let owner = input.owner()
+        try await input.activate(owner, bindSession: false)
+        let fixture = Fixture(nativeInput: owner)
+        if kind == "card" { fixture.client.currentHead = Self.head(2) }
+        await fixture.model.start(); fixture.model.reveal(); await fixture.model.settled()
+        if kind == "eligibility" { fixture.model.nativeInputEligibility = { false } }
+        if kind == "owner" { _ = input.owner() }
+        if kind == "stale" { fixture.client.answerHead = .stale(freshHead: Self.head(1), notice: false) }
+        if kind == "failed" { fixture.client.answerFailure = true }
+        fixture.model.rate(kind == "rating" ? .good : .easy)
+        await fixture.model.settled(); await owner.flushEvidence()
+        if kind == "failed" || kind == "stale" {
+            #expect(fixture.client.answers == 1 && fixture.client.elapsed == [1000])
+            let receipt = try input.receipt(owner)
+            #expect(receipt.admission != nil && receipt.completion == kind)
+            #expect(fixture.model.record.answers.isEmpty)
+            fixture.model.reveal(); await fixture.model.settled(); fixture.model.rate(.easy); await fixture.model.settled()
+            #expect(fixture.client.answers == 1)
+        } else { #expect(fixture.client.answers == 0 && fixture.model.phase == .error) }
+        _ = await fixture.model.end(); await owner.flushEvidence()
+    }
+
     final class Fixture {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let client = Client()
@@ -283,10 +339,11 @@ import Testing
         let store: ReviewRecordStore
         var model: ReviewCoordinator!
         var now: TimeInterval = 0
-        init() {
+        init(nativeInput: NativeReviewInput? = nil) {
             store = ReviewRecordStore(file: directory.appending(path: "session.json"))
             model = ReviewCoordinator(deckID: 1, surface: surface, store: store,
-                clock: .fixed(Date(timeIntervalSince1970: 1_800_000_000)), client: client, uptime: { [weak self] in self?.now ?? 0 })
+                clock: .fixed(Date(timeIntervalSince1970: nativeInput == nil ? 1_800_000_000 : 1_894_698_000)), client: client,
+                uptime: { [weak self] in self?.now ?? 0 }, nativeInput: nativeInput, nativeGeneration: 1)
             model.retryMedia = { [surface] names in surface.arrivals.append(names); return true }
         }
         isolated deinit { try? FileManager.default.removeItem(at: directory) }
@@ -333,7 +390,9 @@ import Testing
     }
     final class Client: ReviewSessionClient {
         var answers = 0
+        var answerFailure = false
         var elapsed: [UInt64] = []
+        var used: [(session: UInt64, item: ReviewHeadItem, rating: ReviewRating, wall: Int64)] = []
         var restores: [Bool] = []
         var ends = 0
         var headReads = 0
@@ -350,6 +409,8 @@ import Testing
         func answer(sessionID: UInt64, item: ReviewHeadItem, rating: ReviewRating, at: Int64, elapsed: UInt64) async throws -> ReviewAnswerOutcome {
             answers += 1
             self.elapsed.append(elapsed)
+            used.append((sessionID, item, rating, at))
+            if answerFailure { throw BridgeError.internal("native input completion failure") }
             if case .accepted(let diff, _, _, _) = answerHead { currentHead = diff.head }
             return answerHead
         }
@@ -377,7 +438,7 @@ import Testing
             secsUntilNextLearn: waiting ? 600 : 0, reviewRemaining: false, newRemaining: false,
             siblingBuried: 0, userBuried: 0, tomorrow: .init(new: 0, learning: 0, review: 0), empty: !waiting)
     }
-    private static func head(_ id: Int64) -> ReviewHead {
+    static func head(_ id: Int64) -> ReviewHead {
         let state = ReviewSchedulingState.new(position: 1)
         let answer = ReviewAnswerState(state: state, delay: .days(amount: 1), left: 0, factor: 0,
             revlog: ReviewRevlogPreview(interval: 1, lastInterval: 0, kind: 0, factor: 0),

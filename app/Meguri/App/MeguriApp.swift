@@ -49,14 +49,14 @@ struct MeguriApp: App {
         }
         #endif
         let navigation = uiStateStore.load().map(AppNavigation.init(restoring:)) ?? AppNavigation()
-        #if MEGURI_TEST_HOOKS
-        hooks.start(navigation)
-        #endif
         var startsProduction = configuration.initialPresentation == nil && ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
         #if MEGURI_TEST_HOOKS
         startsProduction = startsProduction && hooks.shell == nil && hooks.error == nil && hooks.options.route == nil
         #endif
         let collection = startsProduction ? ReviewCollection(configuration: configuration, navigation: navigation) : nil
+        #if MEGURI_TEST_HOOKS
+        hooks.start(navigation, collection: collection)
+        #endif
         if let collection {
             features = .standard(collection: collection)
             // Preserve navigation/window restoration while unavailable areas stay absent.

@@ -212,3 +212,22 @@ Focused `core-test/20261026T182027Z-57470` passes 3 tests with zero skips;
 privacy `20261026T182025Z-57218` and similarity `20261026T182029Z-57708` pass.
 The failed results are still recorded. App execution and the batch gate
 are not yet complete.
+
+## Native input owner and public media entry
+
+Start `02eed10c`. Filtered implementation and fixes add the guarded frozen-input
+owner, actual inspection/reopen seeds, one-use answer admission, completion and
+close evidence. The public FFI media refusal is removed after backend checks;
+`core-test/20261026T182430Z-63753` passes 5 selected entry tests, including real
+initial media activation (76 unrelated tests not selected).
+
+Review found missing initial-reset and iOS orderly-close paths, then the wrong
+empty-fixture path. Round 3 closes those findings. The final privacy check
+`20261026T184128Z-83593` passes. The audio pair forwards existing backend
+observations; its independent source review is clear and playback is not yet
+proved by that API alone.
+
+Swift `20261026T184130Z-83850` compiles production code but fails the new test
+fixture: nine missing awaits and one ReviewHead/ReviewHeadItem mismatch. Earlier
+compile failures are retained. Those test repairs, hook-target compilation,
+similarity and the complete native workflow remain pending. No Unit acceptance.

@@ -1,6 +1,11 @@
 import CoreBridge
 import Foundation
 import Observation
+import Synchronization
+
+nonisolated private final class PreparedMediaSnapshot: Sendable {
+    let value = Mutex<CollectionImportMedia?>(nil)
+}
 
 /// Owned by ReviewCollection, above both shell layouts and all sheet hosts.
 @Observable @MainActor
@@ -69,6 +74,8 @@ public final class CollectionEntryCoordinator {
                 let value = try await service.inspect(source: source, location: location, operation: operation,
                     progress: progressReceiver(expected))
                 guard expected == revision else { try? await value.discard(); return }
+                do { try owner.configuration.nativeReviewInput?.inspected(value) }
+                catch { try? await value.discard(); throw error }
                 preview = value; stage = .awaitingApproval
             } catch { if expected == revision { report(error) } }
             if expected == revision { self.operation = nil; task = nil; progress = nil }
@@ -76,22 +83,33 @@ public final class CollectionEntryCoordinator {
     }
     public func confirm() {
         guard stage == .awaitingApproval, let preview, let owner else { return }
-        do { try owner.beginEntryActivation() }
+        do {
+            try owner.configuration.nativeReviewInput?.willActivate(preview)
+            try owner.beginEntryActivation()
+        }
         catch { self.preview = nil; Task { try? await preview.discard() }; report(error); return }
         revision &+= 1
         let expected = revision
         stage = .applyingPackage; message = nil; failure = nil; progress = nil; preparedMedia = nil; recoveryFinished = false
         self.preview = nil
         let operation = CollectionEntryOperation(); self.operation = operation
+        let actualPrepared = PreparedMediaSnapshot()
         task = Task {
             do {
-                let activated = try await service.activate(preview, operation: operation, progress: progressReceiver(expected))
+                let activated = try await service.activate(preview, operation: operation, progress: progressReceiver(expected, prepared: actualPrepared))
+                if let media = actualPrepared.value.withLock({ $0 }) {
+                    preparedMedia = media; owner.configuration.nativeReviewInput?.prepared(media)
+                }
+                owner.configuration.nativeReviewInput?.activated(activated)
                 lastActivation = activated
                 guard await owner.finishEntryActivation(candidateActive: true) else {
                     throw CollectionEntryFailure(after: activated, issue: .core(.unavailable(reason: "Native host setup could not finish")))
                 }
                 if expected == revision { stage = .awaitingFile; selectedSource = nil }
             } catch {
+                if let media = actualPrepared.value.withLock({ $0 }) {
+                    preparedMedia = media; owner.configuration.nativeReviewInput?.prepared(media)
+                }
                 let entryFailure = error as? CollectionEntryFailure
                 // Keep the existing activation admission closed when recovery
                 // is required. Host setup is not a media-recovery operation.
@@ -164,19 +182,24 @@ public final class CollectionEntryCoordinator {
         try? await old?.discard()
         if stage == .awaitingApproval { stage = .awaitingFile }
     }
-    private func progressReceiver(_ expected: UInt64) -> @Sendable (CoreProgress) -> Void {
+    private func progressReceiver(_ expected: UInt64, prepared: PreparedMediaSnapshot? = nil) -> @Sendable (CoreProgress) -> Void {
         { [weak self] value in
+            if let media = value.collectionMediaPrepared { prepared?.value.withLock { $0 = media } }
             Task { @MainActor in
                 guard let self, self.revision == expected, self.busy else { return }
                 // Once the commit boundary is observed, coalescing must never
                 // make the UI offer cancellation again.
-                if let media = value.collectionMediaPrepared { self.preparedMedia = media }
+                if let media = value.collectionMediaPrepared {
+                    self.preparedMedia = media
+                    self.owner?.configuration.nativeReviewInput?.prepared(media)
+                }
                 if self.progress?.cancellable == false && value.cancellable { return }
                 self.progress = value
             }
         }
     }
     private func report(_ error: any Error) {
+        owner?.configuration.nativeReviewInput?.failed(error)
         stage = .refused; preview = nil
         if let entry = error as? CollectionEntryFailure {
             failure = entry
@@ -208,19 +231,19 @@ public final class CollectionEntryCoordinator {
         case .core(.sessionActive):
             return "Finish the current review session, then inspect the file again."
         case .package(.unsupportedMedia):
-            return "This package includes media. Choose a latest-format collection-only .colpkg with no media. Media import is not available yet."
+            return "This package’s media is not supported by this operation. Choose a supported latest-format .colpkg file."
         case .package(.unsupportedFormat), .package(.tooNew), .package(.schemaUnsupported):
-            return "This format is not supported. Export a latest-format collection-only .colpkg without media, then choose that file."
+            return "This format is not supported. Export a latest-format .colpkg, then choose that file."
         case .package(.insufficientSpace), .package(.diskFull), .core(.insufficientSpace):
             return "There isn’t enough free space to safely copy, inspect and back up this collection. Free space on this device and try again."
         case .package(.corrupt), .package(.sourceNotFinalised):
-            return "This collection package is incomplete or damaged. Export a new collection-only .colpkg and choose it again. Your previous collection is unchanged."
+            return "This collection package is incomplete or damaged. Export a new .colpkg and choose it again. Your previous collection is unchanged."
         case .safetyBackup:
             return "Meguri couldn’t finish the required safety backup. Your previous collection is still active. Check free space and access to Backups, then inspect and try again. Any published backup is retained."
         case .core(.busy), .core(.unavailable):
             return "The collection is busy or unavailable. Wait for the current operation to finish, then inspect the file again."
         default:
-            return "Import could not finish. Your previous collection is still available. Choose the file again; if this continues, export a fresh collection-only .colpkg."
+            return "Import could not finish. Your previous collection is still available. Choose the file again; if this continues, export a fresh .colpkg."
         }
     }
     public var progressTitle: String {

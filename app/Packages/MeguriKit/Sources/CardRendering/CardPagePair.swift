@@ -26,6 +26,11 @@ public final class CardPagePair {
     public var onTypedText: ((CardTypedValue) -> Void)?
     public var onOpenRequest: ((CardOpenRequest) -> Void)?
     public var onRecovery: ((CardUpdate, CardUpdate) -> Void)?
+    /// Forwards native backend observations. No observer means no polling.
+    public var onPlaybackObservation: ((CardAudioController.Entry, CardAudioController.PlaybackObservation) -> Void)? {
+        get { audio.onPlaybackObservation }
+        set { audio.onPlaybackObservation = newValue }
+    }
     public var typedValue: CardTypedValue? { current.typedValue }
     public var behaviorPresenter: (any CardBehaviorPresenting)? {
         get { current.behavior.presenter }

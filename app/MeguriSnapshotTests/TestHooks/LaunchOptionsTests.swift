@@ -10,6 +10,71 @@ import Testing
 @Suite struct LaunchOptionsTests {
     typealias Options = TestHooks.LaunchOptions
 
+    private var nativeArguments: [String] { [
+        "-MeguriNativeReviewRoot", "/owned/checkout", "-MeguriNativeReviewCase", "media-case",
+        "-MeguriNativeReviewPlatform", "mac", "-MeguriNativeReviewFreezeSHA256", String(repeating: "a", count: 64),
+        "-MeguriNativeReviewFreezeBytes", "4096",
+    ] }
+    @Test func nativeReviewRequiresCompleteOptionsAndRestrictsInitialReset() throws {
+        let options = try Options(arguments: nativeArguments)
+        #expect(options.nativeReview?.caseName == "media-case")
+        #expect(options.nativeReview?.freezeBytes == 4096)
+        #expect(Options().nativeReview == nil)
+        var checkout = URL(filePath: #filePath)
+        for _ in 0..<4 { checkout.deleteLastPathComponent() }
+        let fixture = checkout.appending(path: "app/Fixtures/CollectionEntry/EmptyCollection")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.path) == [".gitkeep"])
+        #expect(try Data(contentsOf: fixture.appending(path: ".gitkeep")).isEmpty)
+        var initialArguments = nativeArguments
+        initialArguments[1] = checkout.path
+        let initial = try Options(arguments: initialArguments + ["-MeguriFixture", fixture.path])
+        #expect(initial.fixture == fixture)
+        #expect(throws: TestHookError.self) {
+            try Options(arguments: initialArguments + ["-MeguriFixture", checkout.appending(path: "app/Fixtures/EmptyCollection").path])
+        }
+        #expect(throws: TestHookError.self) { try Options(arguments: Array(nativeArguments.dropLast(2))) }
+        for pair in [["-MeguriFixture", "/fixture"], ["-MeguriRoute", "review/answer"],
+                     ["-MeguriNow", "2030-01-15T10:00:00Z"], ["-MeguriTimeZone", "UTC"]] {
+            #expect(throws: TestHookError.self) { try Options(arguments: nativeArguments + pair) }
+        }
+        var bad = nativeArguments; bad[3] = "../foreign"
+        #expect(throws: TestHookError.self) { try Options(arguments: bad) }
+    }
+
+    @Test func initialResetFromAnotherCheckoutCannotTouchTheCollection() throws {
+        let scratch = FileManager.default.temporaryDirectory.appending(path: "native-reset-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = .init(directory: scratch)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let bytes = Data("existing development database".utf8)
+        try bytes.write(to: configuration.collectionLocation.collectionFile)
+        let options = try Options(arguments: nativeArguments + ["-MeguriFixture", "/owned/checkout/app/Fixtures/CollectionEntry/EmptyCollection"])
+        #expect(throws: TestHookError.self) {
+            try options.apply(to: &configuration, installer: TestHooks.FixtureInstaller(bundleIdentifier: "test.dev"), routes: .standard)
+        }
+        #expect(try Data(contentsOf: configuration.collectionLocation.collectionFile) == bytes)
+        #expect(configuration.nativeReviewInput == nil)
+    }
+    @Test func nativeReviewGuardRunsBeforeAnyReleaseConfigurationChange() throws {
+        let options = try Options(arguments: nativeArguments)
+        var configuration = LaunchConfiguration()
+        #expect(throws: TestHookError("NativeReview requires a .dev bundle")) {
+            try options.apply(to: &configuration, installer: TestHooks.FixtureInstaller(bundleIdentifier: "com.antoinefink.meguri"), routes: .standard)
+        }
+        #expect(configuration.nativeReviewInput == nil && !configuration.clock.isFixed)
+        #if os(macOS)
+        try options.apply(to: &configuration, installer: TestHooks.FixtureInstaller(bundleIdentifier: "com.antoinefink.meguri.dev"), routes: .standard)
+        #expect(configuration.nativeReviewInput != nil && configuration.clock.isFixed)
+        #expect(configuration.timeZone?.identifier == "Europe/Paris")
+        #else
+        #expect(throws: TestHookError.self) {
+            try options.apply(to: &configuration, installer: TestHooks.FixtureInstaller(bundleIdentifier: "com.antoinefink.meguri.dev"), routes: .standard)
+        }
+        #expect(configuration.nativeReviewInput == nil)
+        #endif
+    }
+
     @Test func parsesEveryOption() throws {
         let options = try Options(arguments: [
             "-MeguriFixture", "/tmp/fixture/collection.anki2",

@@ -377,9 +377,12 @@ extension TestHooks {
     ///   will (R24, R25), with the selected deck.
     /// - `closeWindow` (Mac): closes the main window as its close button does
     ///   (R11).
+    /// - `closeNativeReview`: closes the actual F11.2 collection after session
+    ///   end. `nativeReviewClosed` acknowledges saved (Mac object / iOS state 1)
+    ///   or failed (object / state 2). Other launches do not listen for it.
     final class ShellCommands: NSObject {
         enum Command: String, CaseIterable {
-            case toggleSizeClass, presentAdd, closeWindow
+            case toggleSizeClass, presentAdd, closeWindow, closeNativeReview
         }
 
         static let shared = ShellCommands()
@@ -389,16 +392,19 @@ extension TestHooks {
         }
 
         private var navigation: AppNavigation?
+        private let nativeClose = NativeReviewCloseRequest()
         private var listening = false
         #if os(iOS)
         private var tokens: [Int32] = []
         #endif
 
-        func listen(navigation: AppNavigation, sizeClass: LaunchOptions.SizeClass?) {
+        func listen(navigation: AppNavigation, sizeClass: LaunchOptions.SizeClass?, nativeCollection: ReviewCollection? = nil) {
             self.navigation = navigation
+            nativeClose.bind(collection: nativeCollection)
             guard !listening else { return }
             listening = true
             for command in Command.allCases {
+                if command == .closeNativeReview && !nativeClose.enabled { continue }
                 #if os(macOS)
                 DistributedNotificationCenter.default().addObserver(
                     self, selector: #selector(received(_:)), name: Notification.Name(Self.name(command)), object: nil,
@@ -435,7 +441,23 @@ extension TestHooks {
                 #if os(macOS)
                 NSApplication.shared.windows.first { $0.isVisible && $0.canBecomeMain }?.performClose(nil)
                 #endif
+            case .closeNativeReview:
+                Task { await nativeClose.request { Self.acknowledgeNativeClose($0) } }
             }
+        }
+
+        private static func acknowledgeNativeClose(_ result: NativeReviewCloseRequest.Result) {
+            let name = "\(Bundle.main.bundleIdentifier ?? "").testhooks.nativeReviewClosed"
+            #if os(macOS)
+            DistributedNotificationCenter.default().postNotificationName(Notification.Name(name),
+                object: result == .saved ? "saved" : "failed", userInfo: nil, deliverImmediately: true)
+            #else
+            var token = NOTIFY_TOKEN_INVALID
+            guard notify_register_check(name, &token) == NOTIFY_STATUS_OK else { return }
+            defer { notify_cancel(token) }
+            guard notify_set_state(token, result.rawValue) == NOTIFY_STATUS_OK else { return }
+            notify_post(name)
+            #endif
         }
 
         #if os(iOS)
@@ -472,6 +494,37 @@ extension TestHooks {
             forced ?? scene.traitCollection.horizontalSizeClass
         }
         #endif
+    }
+
+    @MainActor final class NativeReviewCloseRequest {
+        enum Result: UInt64 { case saved = 1, failed = 2 }
+        private var close: (@MainActor () async throws -> Void)?
+        private var running = false
+        var enabled: Bool { close != nil }
+
+        func bind(collection: ReviewCollection?) {
+            close = nil
+            guard Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true,
+                  let collection, let input = collection.configuration.nativeReviewInput else { return }
+            close = { [weak collection] in
+                try await input.closeForEvidence {
+                    guard let collection else { return false }
+                    return await collection.close()
+                }
+            }
+        }
+
+        // Tests inject the same close/receipt boundary without a running shell.
+        init(close: (@MainActor () async throws -> Void)? = nil) { self.close = close }
+
+        func request(acknowledge: @MainActor (Result) -> Void) async {
+            guard let close else { return }
+            guard !running else { acknowledge(.failed); return }
+            running = true
+            defer { running = false }
+            do { try await close(); acknowledge(.saved) }
+            catch { acknowledge(.failed) }
+        }
     }
 }
 

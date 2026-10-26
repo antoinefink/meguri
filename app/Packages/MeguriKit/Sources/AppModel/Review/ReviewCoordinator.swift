@@ -24,6 +24,10 @@ public final class ReviewCoordinator {
     private let client: any ReviewSessionClient
     private let store: ReviewRecordStore
     private let clock: AppClock
+    private let nativeInput: NativeReviewInput?
+    private let nativeCoordinator = UUID()
+    private let nativeGeneration: UInt64
+    var nativeInputEligibility: () -> Bool = { true }
     private let uptime: () -> TimeInterval
     private var timer = ReviewActiveTime()
     private var activeTime = ReviewActiveTime()
@@ -49,7 +53,9 @@ public final class ReviewCoordinator {
 
     public init(deckID: Int64, surface: any ReviewCardSurface, store: ReviewRecordStore,
                 clock: AppClock = .system, client: any ReviewSessionClient = CoreReviewSessionClient(),
-                uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+                uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+                nativeInput: NativeReviewInput? = nil, nativeGeneration: UInt64 = 0) {
+        self.nativeInput = nativeInput; self.nativeGeneration = nativeGeneration
         self.surface = surface; self.store = store; self.clock = clock; self.client = client; self.uptime = uptime
         retryMedia = { names in
             guard let pages = surface as? ReviewPages else { return false }
@@ -97,8 +103,9 @@ public final class ReviewCoordinator {
             switch try await client.start(deckID: record.deckID) {
             case .refused(.fsrsPolicyPending): onPolicyRefusal?(); phase = .error; notice = "Enable FSRS before studying."
             case .refused(.presetUnsupported): phase = .error; notice = "This preset needs a newer Meguri"
-            case .started(let id, _, let head, _):
+            case .started(let id, let generation, let head, _):
                 sessionID = id
+                try nativeInput?.bindSession(coordinator: nativeCoordinator, session: id, generation: generation, deck: record.deckID)
                 activeTime.start(at: uptime())
                 if paused { activeTime.pause(at: uptime()) }
                 try await surface.load()
@@ -132,8 +139,15 @@ public final class ReviewCoordinator {
         busy = true; phase = .transition
         let inputTime = uptime()
         let instant = clock.now()
+        let use: NativeReviewInput.AnswerUse?
+        do {
+            use = try nativeInput?.admit(coordinator: nativeCoordinator, session: sessionID, generation: nativeGeneration,
+                deck: record.deckID, item: item, rating: rating, instant: Int64(instant.timeIntervalSince1970 * 1000),
+                eligible: nativeInputEligibility() && terminalState == .active && sideIsAnswer && !refreshPending &&
+                    presentedKey == item.renderKey)
+        } catch { busy = false; nativeInput?.failed(error); fail(error); return }
         timer.pause(at: inputTime)
-        let elapsed = timer.milliseconds(at: inputTime, capSeconds: item.homePreset.maximumAnswerSeconds)
+        let elapsed = use?.elapsed ?? timer.milliseconds(at: inputTime, capSeconds: item.homePreset.maximumAnswerSeconds)
         let answer = ReviewRecord.Answer(cardID: item.cardId, rating: Self.name(rating), kind: String(describing: item.kind),
                                          answeredAt: instant, elapsedMilliseconds: elapsed)
         pendingAnswer = answer
@@ -143,6 +157,7 @@ public final class ReviewCoordinator {
                     at: Int64(instant.timeIntervalSince1970 * 1_000), elapsed: elapsed)
                 switch outcome {
                 case .accepted(let diff, let leech, let suspended, _):
+                    if let use { nativeInput?.completed(use, outcome: "accepted") }
                     // A failure may arrive while answer() returns. Never resurrect it.
                     if let pendingAnswer, pendingAnswer.id == answer.id {
                         record.answers.append(pendingAnswer); record.undone.removeAll()
@@ -156,14 +171,17 @@ public final class ReviewCoordinator {
                     try await apply(head, question: true, inputTime: inputTime)
                     try await persist()
                 case .stale(let head, let showNotice):
+                    if let use { nativeInput?.completed(use, outcome: "stale") }
                     pendingAnswer = nil
                     if showNotice { notice = "Card changed, please answer again" }
                     try await apply(head, question: true)
                 case .notAtHead(let head):
+                    if let use { nativeInput?.completed(use, outcome: "not-at-head") }
                     pendingAnswer = nil
                     try await apply(head, question: true)
                 }
             } catch {
+                if let use { nativeInput?.completed(use, outcome: "failed") }
                 pendingAnswer = nil
                 notice = String(describing: error)
                 // An uncertain answer is never retried; ask the authoritative head.
@@ -228,6 +246,7 @@ public final class ReviewCoordinator {
     }
 
     func commitFailed(cardID: Int64, error: BridgeError) {
+        nativeInput?.failed(error)
         record.reject(cardID: cardID)
         pendingAnswer = nil
         notice = "Couldn’t save the answer. \(error)"
@@ -427,7 +446,11 @@ public final class ReviewCoordinator {
         let task = Task { () -> Bool in
             do {
                 try await pause()
-                if let sessionID { try await client.end(sessionID: sessionID); self.sessionID = nil }
+                if let sessionID {
+                    try await client.end(sessionID: sessionID)
+                    nativeInput?.ended(coordinator: nativeCoordinator, session: sessionID)
+                    self.sessionID = nil
+                }
                 record.endedAt = clock.now()
                 try await persist()
                 sessionID = nil; phase = .ended; surface.close()

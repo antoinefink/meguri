@@ -19,16 +19,20 @@ public final class CoreCollectionEntryService: CollectionEntryService, Sendable 
     private let activationOutcomeReader: ActivationOutcomeReader
     private let clock: CollectionClockRelay
     private let diskSpace: DiskSpaceRelay
+    private let inspectionSeed: @Sendable () async throws -> UInt64
     private let source: CoordinatedSourceOwner
     public init(clock: any CollectionClock = SystemCollectionClock(), diskSpace: any DiskSpaceProviding = DiskSpaceProvider(),
-                source: CoordinatedSourceOwner = CoordinatedSourceOwner()) {
+                source: CoordinatedSourceOwner = CoordinatedSourceOwner(),
+                inspectionSeed: @escaping @Sendable () async throws -> UInt64 = { UInt64.random(in: 0...UInt64.max) }) {
         self.clock = CollectionClockRelay(clock); self.diskSpace = DiskSpaceRelay(diskSpace); self.source = source
+        self.inspectionSeed = inspectionSeed
         activationOutcomeReader = { try $0() }
     }
     init(clock: any CollectionClock = SystemCollectionClock(), diskSpace: any DiskSpaceProviding = DiskSpaceProvider(),
          source: CoordinatedSourceOwner = CoordinatedSourceOwner(),
          activationOutcomeReader: @escaping ActivationOutcomeReader) {
         self.clock = CollectionClockRelay(clock); self.diskSpace = DiskSpaceRelay(diskSpace); self.source = source
+        inspectionSeed = { UInt64.random(in: 0...UInt64.max) }
         self.activationOutcomeReader = activationOutcomeReader
     }
     public func inspect(source url: URL, location: CollectionLocation, operation: CollectionEntryOperation,
@@ -38,9 +42,10 @@ public final class CoreCollectionEntryService: CollectionEntryService, Sendable 
         return try await withTaskCancellationHandler {
             try await source.withReadablePackage(at: url) { [self] coordinatedURL in
                 try operation.checkCancellation()
+                let seed = try await inspectionSeed()
                 let started = try await MaintenanceLane.shared.call(.startCollectionInspection) {
                     try startCollectionInspection(sourcePath: coordinatedURL.path, location: location.raw,
-                        clock: self.clock, diskSpace: self.diskSpace, randomSeed: UInt64.random(in: 0...UInt64.max))
+                        clock: self.clock, diskSpace: self.diskSpace, randomSeed: seed)
                 }
                 var trackingFailure: BridgeError?
                 do throws(BridgeError) {

@@ -143,7 +143,7 @@ struct CollectionEntryContent: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("Import a latest-format, collection-only .colpkg file. Packages containing media and older formats are not supported yet. No account or network connection is needed.")
+                    Text("Import a latest-format .colpkg file, including its media. Older formats are not supported. No account or network connection is needed.")
                         .accessibilityIdentifier("onboarding.collectionImport.explanation")
                 }
                 if let facts = presentation.facts {

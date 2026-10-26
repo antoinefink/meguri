@@ -510,8 +510,7 @@ pub fn start_collection_inspection(
                 &config.entry_inputs(),
                 job.cancel.clone(),
                 &job.progress,
-            )
-            .and_then(public_entry_media_guard);
+            );
             let status = inspected.as_ref().map(|_| ()).map_err(job_failure);
             completion.finish(
                 inspected
@@ -524,15 +523,6 @@ pub fn start_collection_inspection(
         job: jobs::wrap(job),
         result,
     })
-}
-// Temporary app-entry boundary only. Root removes this single guard after
-// backend verification and the native confirmation/result mapping are complete.
-// Rust package and host entry paths deliberately exercise the full backend.
-fn public_entry_media_guard(i: entry::EntryInspection) -> Result<entry::EntryInspection, EntryError> {
-    if i.facts().media_count != 0 {
-        return Err(EntryError::Package(PackageError::UnsupportedMedia));
-    }
-    Ok(i)
 }
 #[uniffi::export]
 pub fn start_collection_activation(
@@ -583,6 +573,118 @@ mod tests {
     use meguri_engine::{CancelToken, EngineConfig, ProgressSink};
     use meguri_model::{clock::FixedClock, time::EpochMillis};
     use meguri_storage::{atomic_file::Purpose, space::StatvfsSpace};
+    // This test owns no foreign event listener. Subscribe to the engine stream
+    // before each public call and wait for that exact real job's terminal event.
+    #[test]
+    fn public_initial_entry_imports_all_media_and_initializes_own_journal() {
+        use meguri_storage::ReaderRole;
+        use sha2::{Digest, Sha256};
+        use std::{fs, time::Duration};
+        struct Clock;
+        impl HostClock for Clock {
+            fn now_ms(&self) -> i64 { 1_894_701_600_000 }
+            fn offset_from_utc(&self, _: i64) -> i32 { 0 }
+            fn zone_id(&self) -> String { "UTC".into() }
+        }
+        struct Space;
+        impl DiskSpaceProvider for Space {
+            fn available_bytes(&self, _: String) -> crate::collection::DiskCapacity {
+                crate::collection::DiskCapacity::Available { bytes: u64::MAX }
+            }
+        }
+        struct Prepared(std::sync::mpsc::Sender<CollectionImportMedia>);
+        impl crate::progress::ProgressListener for Prepared {
+            fn on_progress(&self, update: crate::progress::ProgressUpdate) {
+                if let Some(media) = update.collection_media_prepared { let _ = self.0.send(media); }
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let source_dir = root.path().join("source");
+        fs::create_dir(&source_dir).unwrap();
+        let db = source_dir.join("collection.anki2");
+        let clock = Arc::new(FixedClock::new(1_894_701_600_000, meguri_model::clock::UtcOffset::UTC));
+        meguri_engine::bootstrap::create(&db, clock.as_ref(), &SeededRandom::new(37)).unwrap();
+        let config = HostConfig::new(source_dir.clone(), root.path().join("source-backups"), root.path().join("source-widget"),
+            clock, Arc::new(SeededRandom::new(38)), Arc::new(StatvfsSpace));
+        let host = meguri_host::CoreHost::open(config.clone()).unwrap();
+        let payloads = [("image.png", b"own image payload".as_slice()), ("sound.wav", b"own audio payload".as_slice()),
+                        ("_unused.txt", b"unused".as_slice()), ("empty.txt", b"".as_slice())];
+        for (name, bytes) in payloads { assert_eq!(host.media().unwrap().add(name, bytes).unwrap(), name); }
+        let source = root.path().join("input.colpkg");
+        let c = host.collection().unwrap();
+        let reader = c.reader(ReaderRole::Maintenance).unwrap();
+        let context = meguri_package::CollectionPackageWriteContext {
+            collection_directory: &source_dir, purpose: Purpose::Export,
+            finalisation: meguri_package::Finalisation::ExclusiveCreate, clock: config.clock.as_ref(),
+            random: config.random.as_ref(), space: config.disk_space_provider.as_ref(), is_cancelled: &|| false,
+        };
+        let plan = meguri_package::preflight_media_collection_export_from_live(&reader, &source, &context).unwrap();
+        meguri_package::write_media_collection_export_from_live(&reader, &source, &context, plan).unwrap();
+        drop(reader);
+        let source_entries = host.media().unwrap().store().entries().unwrap();
+        host.close().unwrap();
+        let original = fs::read(&source).unwrap();
+        let target = root.path().join("target");
+        fs::create_dir(&target).unwrap();
+        let backups = root.path().join("backups");
+        let location = CollectionLocation {
+            collection_directory: target.to_string_lossy().into_owned(), backups_directory: backups.to_string_lossy().into_owned(),
+            app_group_snapshot: root.path().join("widget").to_string_lossy().into_owned(),
+            manual_transfer_directory: root.path().join("manual").to_string_lossy().into_owned(),
+        };
+        let events = runtime::engine().unwrap().stream().subscribe();
+        let wait = |id| loop {
+            let event = events.recv_timeout(Duration::from_secs(20)).expect("public entry terminal event");
+            if let meguri_engine::EventKind::JobFinished { id: actual, outcome } = &event.kind {
+                if actual.0 == id { assert_eq!(outcome, &meguri_engine::JobOutcome::Succeeded); break; }
+            }
+        };
+        let inspection = start_collection_inspection(source.to_string_lossy().into_owned(), location,
+            Arc::new(Clock), Arc::new(Space), 39).unwrap();
+        wait(inspection.job.id);
+        let CollectionInspectOutcome::Ready { inspection: preview } = inspection.result.outcome().unwrap() else { panic!("real inspection ready") };
+        let facts = preview.facts().unwrap();
+        let bytes = payloads.iter().map(|(_, b)| b.len() as u64).sum::<u64>();
+        assert!(!facts.replacing_existing);
+        assert_eq!((facts.notes, facts.cards, facts.reviews), (0, 0, 0));
+        assert_eq!(facts.source_schema, 18);
+        assert_eq!(facts.source_sha256, Sha256::digest(&original).to_vec());
+        assert_eq!((facts.media_count, facts.media_decoded_bytes), (payloads.len() as u64, bytes));
+        assert!(!target.join("collection.anki2").exists());
+        assert!(!target.join("collection.media").exists());
+        let activation = start_collection_activation(preview.clone()).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        activation.job.progress.set_listener(Arc::new(Prepared(tx))).unwrap();
+        wait(activation.job.id);
+        let CollectionActivationOutcome::Activated { activation: result } = activation.result.outcome().unwrap() else { panic!("real initial activation") };
+        assert_eq!(result.media, CollectionImportMedia { incoming: 4, decoded_bytes: bytes, reused: 0, added: 4, trashed: 0 });
+        let prepared = rx.recv_timeout(Duration::from_secs(5)).expect("retained actual prepared counts");
+        assert_eq!(prepared, result.media);
+        assert!(result.backup.is_none());
+        assert!(!backups.exists() || fs::read_dir(&backups).unwrap().next().is_none());
+        assert!(target.join("collection.anki2").is_file());
+        let imported = runtime::host().unwrap();
+        let service = imported.media().unwrap();
+        let store = service.store();
+        let baseline = store.sync_baseline().unwrap();
+        assert!(baseline.owner.is_none()); assert_eq!(baseline.usn, 0);
+        assert!(store.download_intents().unwrap().is_empty()); assert!(store.trash_entries().unwrap().is_empty());
+        let entries = store.entries().unwrap();
+        assert_eq!(entries.len(), payloads.len());
+        assert_eq!(fs::read_dir(target.join("collection.media")).unwrap().count(), payloads.len());
+        for (name, bytes) in payloads {
+            assert_eq!(fs::read(target.join("collection.media").join(name)).unwrap(), bytes);
+            let row = entries.iter().find(|e| e.name == name).unwrap();
+            assert!(row.live && !row.pending_download);
+            assert_eq!(row.size, bytes.len() as u64);
+            assert_eq!(row.dirty, row.syncable());
+            assert_eq!(row.sha1, source_entries.iter().find(|e| e.name == name).unwrap().sha1);
+            assert_eq!(row.sync_state, if bytes.is_empty() { meguri_storage::media::MediaSyncState::None } else { meguri_storage::media::MediaSyncState::Live });
+        }
+        assert!(start_collection_activation(preview).is_err(), "opaque confirmation is consumed once");
+        crate::lifecycle::close_collection().unwrap();
+        assert_eq!(fs::read(source).unwrap(), original);
+    }
     #[test]
     fn opaque_inspection_is_single_owned_and_discard_releases_only_its_files() {
         let root = tempfile::tempdir().unwrap();

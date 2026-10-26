@@ -46,7 +46,7 @@ public final class CardAudioController {
     }
     /// Narrow native timing observation seam. No observer means no polling.
     /// Advancement comes from the backend timeline, not the play request.
-    enum PlaybackObservation {
+    public enum PlaybackObservation {
         case advanced(position: TimeInterval, duration: TimeInterval?, observedAt: TimeInterval)
         case completed(success: Bool, observedAt: TimeInterval)
     }

@@ -6,6 +6,7 @@ import SwiftUI
 /// from the launch arguments before the first scene appears (R1963). Nothing
 /// here knows about the hooks.
 public struct LaunchConfiguration {
+    public var nativeReviewInput: NativeReviewInput?
     public var clock: AppClock = .system
     public var collectionLocation: CollectionLocation = .standard
     /// Overrides of the system time zone and locale; nil keeps the system's.

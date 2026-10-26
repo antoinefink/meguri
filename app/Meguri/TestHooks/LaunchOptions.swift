@@ -1,6 +1,9 @@
 #if MEGURI_TEST_HOOKS
 import AppModel
 import Foundation
+#if os(iOS)
+import UIKit
+#endif
 
 extension TestHooks {
     /// The hook launch arguments (R1963), each a `-Meguri<Name> <value>` pair.
@@ -10,6 +13,8 @@ extension TestHooks {
     ///
     /// | Argument | Value |
     /// |---|---|
+    /// | `-MeguriNativeReviewRoot`, `-MeguriNativeReviewCase`, `-MeguriNativeReviewPlatform` | compiled checkout root, run case component, mac/iphone/ipad; all NativeReview options required together |
+    /// | `-MeguriNativeReviewFreezeSHA256`, `-MeguriNativeReviewFreezeBytes` | pinned freeze.json SHA256/size; only the compiled checkout's EmptyCollection fixture is allowed, before any case receipt; no Route/Now/TimeZone |
     /// | `-MeguriImportSource` | iOS only: absolute regular synthetic .colpkg copied to Documents/RF2 Import Tests/review.colpkg for the system picker; changes no collection or route |
     /// | `-MeguriFixture` | absolute path of a collection file (installed as `collection.anki2`) or of a collection directory (installed as the collection directory) |
     /// | `-MeguriNow` | `YYYY-MM-DDTHH:MM:SS` with `Z` or `±HH:MM`; without one, the time is local to `-MeguriTimeZone` (or the system zone) |
@@ -38,6 +43,9 @@ extension TestHooks {
             case compact, regular
         }
 
+        /// All five fields are required together. Root must be this build’s
+        /// checkout; case resolves only build/mg/ui-test/<case>/expected-replay.
+        var nativeReview: NativeReviewInput.Request?
         var fixture: URL?
         var importSource: URL?
         var now: Date?
@@ -59,6 +67,7 @@ extension TestHooks {
             "Fixture", "Now", "TimeZone", "Locale", "Animations", "ReduceMotion",
             "ReduceTransparency", "WindowSize", "Appearance", "AnkiConnectPort", "MigakuPort", "SizeClass",
             "Integrations", "Route", "BackgroundLaunch", "ImportSource",
+            "NativeReviewRoot", "NativeReviewCase", "NativeReviewPlatform", "NativeReviewFreezeSHA256", "NativeReviewFreezeBytes",
         ]
 
         init() {}
@@ -83,6 +92,27 @@ extension TestHooks {
                 }
                 values[name] = arguments[index]
                 index += 1
+            }
+
+            let nativeNames = ["NativeReviewRoot", "NativeReviewCase", "NativeReviewPlatform", "NativeReviewFreezeSHA256", "NativeReviewFreezeBytes"]
+            if nativeNames.contains(where: { values[$0] != nil }) {
+                guard nativeNames.allSatisfy({ values[$0] != nil }), let root = values["NativeReviewRoot"], root.hasPrefix("/"),
+                      let caseName = values["NativeReviewCase"], !caseName.isEmpty, caseName.count <= 120,
+                      caseName.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45, 46, 95].contains($0) }),
+                      caseName.first?.isLetter == true || caseName.first?.isNumber == true,
+                      let platform = values["NativeReviewPlatform"], ["mac", "iphone", "ipad"].contains(platform),
+                      let sha = values["NativeReviewFreezeSHA256"], sha.utf8.count == 64,
+                      sha.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                      let size = values["NativeReviewFreezeBytes"].flatMap(UInt64.init), size > 0, size <= 128 * 1024 else {
+                    throw TestHookError("NativeReview requires root, case, platform and an externally pinned freeze SHA256/byte count")
+                }
+                guard ["Route", "Now", "TimeZone"].allSatisfy({ values[$0] == nil }) else {
+                    throw TestHookError("NativeReview owns its clock; Route, Now and TimeZone are incompatible")
+                }
+                if let source = values["Fixture"], source != URL(filePath: root).appending(path: "app/Fixtures/CollectionEntry/EmptyCollection").path {
+                    throw TestHookError("NativeReview permits only the checkout EmptyCollection fixture")
+                }
+                nativeReview = .init(root: URL(filePath: root), caseName: caseName, platform: platform, freezeSHA256: sha, freezeBytes: size)
             }
 
             if let value = values["ImportSource"] {
@@ -155,6 +185,23 @@ extension TestHooks {
             installer: FixtureInstaller,
             routes: RouteRegistry
         ) throws(TestHookError) -> ShellLaunch? {
+            if let nativeReview {
+                guard installer.bundleIdentifier.hasSuffix(".dev") else { throw TestHookError("NativeReview requires a .dev bundle") }
+                #if os(macOS)
+                let platform = "mac"
+                #else
+                let platform = UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone"
+                #endif
+                guard nativeReview.platform == platform else { throw TestHookError("NativeReview platform does not match this device") }
+                let input = NativeReviewInput(request: nativeReview, collection: configuration.collectionLocation)
+                if let fixture {
+                    do { try input.validateInitialReset(from: fixture) }
+                    catch { throw TestHookError("NativeReview reset refused: \(error)") }
+                }
+                configuration.nativeReviewInput = input
+                configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_698_000))
+                configuration.timeZone = TimeZone(identifier: "Europe/Paris")
+            }
             #if os(macOS)
             if sizeClass != nil {
                 throw TestHookError("-MeguriSizeClass applies to iOS only: the Mac has no size class")

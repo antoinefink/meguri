@@ -398,7 +398,11 @@ public final class ReviewCollection {
         }
         self.exportService = exportService ?? CoreCollectionExportService()
         self.configuration = configuration; self.navigation = navigation
-        self.entryService = entryService ?? CoreCollectionEntryService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone))
+        self.entryService = entryService ?? CoreCollectionEntryService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone),
+            inspectionSeed: { [input = configuration.nativeReviewInput] in
+                if let input { return try await input.inspectionSeed() }
+                return UInt64.random(in: 0...UInt64.max)
+            })
         collection = CoreCollectionService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone))
         records = ReviewRecordStore(file: configuration.collectionLocation.directory.appending(path: "meguri-review-session.json"))
         navigation.deckSelectionAction = { [weak self] deck in
@@ -417,10 +421,12 @@ public final class ReviewCollection {
         opening = true; state = .loading; error = nil; closed = false; releasedManualHostState = nil
         defer { opening = false }
         do {
+            try await configuration.nativeReviewInput?.prepare()
             try await subscribe()
             let location = try await Self.prepareOpenLocation(configuration.collectionLocation)
             guard await Self.exists(configuration.collectionLocation.collectionFile) else { state = .noFile; return }
-            try await collection.startOpen(location, randomSeed: UInt64.random(in: 0...UInt64.max)).value()
+            let seed = try await configuration.nativeReviewInput?.reopenSeed() ?? UInt64.random(in: 0...UInt64.max)
+            try await collection.startOpen(location, randomSeed: seed).value()
             try await completeOpenedHost(loadRecord: true)
         } catch {
             let message = Self.openExplanation(error)
@@ -464,6 +470,7 @@ public final class ReviewCollection {
         preparedGeneration = generation
     }
     func prepareEntry() async throws -> CoreBridge.CollectionLocation {
+        try await configuration.nativeReviewInput?.prepare()
         try await subscribe()
         return try await Self.prepareOpenLocation(configuration.collectionLocation)
     }
@@ -667,6 +674,7 @@ public final class ReviewCollection {
             guard revision == selectionRevision, expected == generation, canSaveDeckState,
                   navigation.intentRevision == intent, admission() else { return false }
             do {
+                try configuration.nativeReviewInput?.selecting(deck: deckID, name: fullDeckName(deckID))
                 let savedGeneration = try await saveSelectedDeck(deckID)
                 guard revision == selectionRevision, expected == generation,
                       savedGeneration == expected, canSaveDeckState,
@@ -867,11 +875,19 @@ public final class ReviewCollection {
                 (goToDeckAdmission?() ?? self.reviewIsActive)
         }
         do {
+            try configuration.nativeReviewInput?.admitStudy(deck: deckID, name: fullDeckName(deckID))
             guard await selectDeck(deckID: deckID, intent: intent, admission: current).value,
                   current(), let resolver = await mediaResolverForReview(), current() else { return false }
             if goToDeckAdmission == nil { previousRecord = nil }
             let model = ReviewCoordinator(deckID: deckID, surface: makeReviewSurface(resolver),
-                store: records, clock: configuration.clock, client: reviewSessionClient)
+                store: records, clock: configuration.clock, client: reviewSessionClient,
+                nativeInput: configuration.nativeReviewInput, nativeGeneration: expected)
+            model.nativeInputEligibility = { [weak self, weak model] in
+                guard let self, let model else { return false }
+                return self.generation == expected && self.reviewIsActive && self.foreground &&
+                    self.sceneActive && self.applicationActive && self.windowVisible && self.reviewWindowActive &&
+                    (self.review === model || self.goToDeckReview === model)
+            }
             model.onPolicyRefusal = { [weak self] in self?.pendingDeck = deckID }
             if goToDeckAdmission == nil { presentReview(model) }
             else { goToDeckReview = model }
@@ -1023,6 +1039,7 @@ public final class ReviewCollection {
         do {
             try await collection.flushForBackground()
             try await collection.close()
+            try await configuration.nativeReviewInput?.closed()
             closed = true; events?.cancel(); events = nil; day?.close(); countTimer?.invalidate(); countsTask?.cancel()
             invalidateMedia(); await mediaCloseTask?.value
             state = .unopened; lifecycle = .noCollection

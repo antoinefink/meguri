@@ -62,6 +62,7 @@ import AppModel
         #expect(configuration.ankiConnectPort == nil)
         #expect(configuration.migakuPort == nil)
         #expect(configuration.initialPresentation == nil)
+        #expect(configuration.nativeReviewInput == nil)
     }
 
     @Test func anInitialPresentationNamesItsStyle() {

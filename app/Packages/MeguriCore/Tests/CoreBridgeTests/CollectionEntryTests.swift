@@ -118,6 +118,28 @@ extension CollectionSourceLifetimeTests {
 }
 
 extension EventTests {
+    @Test func inspectionSeedProviderRunsInsideRealSourceOwnerAndRefusesBeforeDispatch() async throws {
+        try await CoreEventStream.shared.start()
+        let access = RecordingSourceAccess()
+        let witness = Mutex<[UInt64]>([])
+        let service = CoreCollectionEntryService(source: CoordinatedSourceOwner(access: access), inspectionSeed: {
+            #expect(access.active.withLock { $0 })
+            witness.withLock { $0.append(43) }
+            throw BridgeError.invalidArgument("declared seed refused")
+        })
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let location = CoreBridge.CollectionLocation(collectionDirectory: root, backupsDirectory: root.appending(path: "backups"),
+            appGroupSnapshot: root.appending(path: "widget"))
+        do {
+            _ = try await service.inspect(source: URL(filePath: "/selected/package.colpkg"), location: location,
+                operation: CollectionEntryOperation(), progress: { _ in })
+            Issue.record("Seed refusal must stop before the real FFI call")
+        } catch { #expect(error as? BridgeError == .invalidArgument("declared seed refused")) }
+        #expect(witness.withLock { $0 } == [43])
+        #expect(access.visits.withLock { $0 } == ["begin", "release"])
+        #expect(!FileManager.default.fileExists(atPath: root.path))
+    }
+
     @Test func trackingFailureCancelsAndDrainsStartedRustJobBeforeReleasingSource() async throws {
         try await CoreEventStream.shared.start()
         let access = RecordingSourceAccess()

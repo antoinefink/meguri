@@ -24,7 +24,7 @@ enum TestHooks {
 
         /// Puts the navigation in the shell route's state and starts the
         /// run-time commands (`ShellCommands`).
-        func start(_ navigation: AppNavigation) {
+        func start(_ navigation: AppNavigation, collection: ReviewCollection? = nil) {
             #if os(macOS)
             if let integrations = options.integrations {
                 AppDelegate.keepsRunningWithoutWindow = integrations
@@ -32,7 +32,8 @@ enum TestHooks {
             #endif
             guard error == nil else { return }
             shell?.prepare(navigation)
-            ShellCommands.shared.listen(navigation: navigation, sizeClass: options.sizeClass)
+            ShellCommands.shared.listen(navigation: navigation, sizeClass: options.sizeClass,
+                nativeCollection: options.nativeReview == nil ? nil : collection)
         }
     }
 
