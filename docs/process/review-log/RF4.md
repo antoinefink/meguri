@@ -1629,3 +1629,12 @@ Native iPhone `001932Z-8513` reaches the folder but fails at New Folder:
 the selected folder information menu contains no creation action. The actual
 picker capture is retained. Use its separate toolbar creation control; keep
 this check and iPad verification open. This remains WIP without acceptance.
+
+Toolbar-only verification repair `002730Z-14011` has no source findings and
+passes privacy. Native `003253Z-16315` correctly refuses the missing direct
+creation control. Its bounded toolbar metadata identifies the actual More
+button as `OverflowBarButtonItem`. Use that control's menu, keeping all real
+creation and Save/Replace assertions. The phone and iPad checks remain open.
+Offline run `002734Z-14327` now reaches exact raw comparison and reports a
+database difference. Preserve that failure; do not waive equality or claim a
+compatible-client import. No further sync protocol work was started.

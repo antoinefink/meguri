@@ -417,16 +417,27 @@ import notify
                 XCTFail("The per-run native child folder must be fresh")
                 throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
             }
-            let actions = app.navigationBars.buttons.matching(NSPredicate(
-                format: "label == %@", "RF2 Import Tests, Actions Menu")).firstMatch
-            try waitForState("The loaded root folder must offer its native Actions Menu", { actionable(actions) })
-            try click(actions, app, bundle)
-            let newFolderButton = app.buttons.matching(NSPredicate(format: "label == %@", "New Folder")).firstMatch
-            let newFolderItem = app.menuItems.matching(NSPredicate(format: "label == %@", "New Folder")).firstMatch
-            try waitForState("The native folder Actions Menu must offer New Folder", {
-                actionable(newFolderButton) || actionable(newFolderItem)
-            })
-            try click(actionable(newFolderButton) ? newFolderButton : newFolderItem, app, bundle)
+            let browserBar = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].firstMatch
+            let folderBar = browserBar.exists ? browserBar : app.navigationBars["RF2 Import Tests"].firstMatch
+            let creationButtons = folderBar.buttons.matching(NSPredicate(
+                format: "label ==[c] %@ OR label ==[c] %@", "New Folder", "Create New Folder"))
+            let candidates = creationButtons.allElementsBoundByIndex.filter { actionable($0) }
+            guard candidates.count == 1, let newFolder = candidates.first else {
+                capturePicker(app)
+                let buttons = folderBar.buttons.allElementsBoundByIndex
+                let metadata = buttons.prefix(12).map { button in
+                    "label=\(String(button.label.prefix(120)).debugDescription) identifier=\(String(button.identifier.prefix(120)).debugDescription) isEnabled=\(button.isEnabled)"
+                }
+                let diagnostic = XCTAttachment(string: ([
+                    "Native toolbar buttons=\(buttons.count); actionable creation candidates=\(candidates.count)"
+                ] + metadata).joined(separator: "\n"))
+                diagnostic.name = "export-new-folder-loaded-toolbar-controls"
+                diagnostic.lifetime = .keepAlways
+                add(diagnostic)
+                XCTFail("The loaded native browser navigation bar must offer exactly one enabled, hittable New Folder or Create New Folder button")
+                throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
+            }
+            try click(newFolder, app, bundle)
             let commitName = NSPredicate(format: "label IN %@", ["Create", "Done"])
             func nameDialog() -> XCUIElement? {
                 (app.alerts.allElementsBoundByIndex + app.sheets.allElementsBoundByIndex).first { dialog in
