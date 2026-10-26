@@ -327,3 +327,23 @@ still rejects every nonempty diagnostic set. Independent review is clear.
 Swift `20261026T204858Z-3949` passes 20 tests with zero skips, including
 privacy and size-bound cases. Privacy `20261026T204900Z-4576` and similarity
 `20261026T204859Z-4331` pass. The actual category remains to be captured.
+
+`ui-test/20261026T205017Z-6322` records current-answer `audioDecode` and
+`bridgeRejected`, with no earlier-update errors. Read-only source diagnosis
+finds that answer audio preparation can start while the question is shown;
+the update label alone does not locate the time of failure. It also finds
+that generic bridge rejection uses the current update for stale traffic.
+The existing stale-message contract and tests remain required.
+
+Filtered app-hosted probe `20261026T205741Z-10648`, starting at `d66c3763`,
+adds only a generated silent-WAV regression. Independent review is clear;
+privacy `20261026T210342Z-13448` and similarity `20261026T210343Z-13672` pass.
+VM snapshot run `20261026T210344Z-13911` builds and reports 83 passes, 2
+failures and 1 skip: the old image comparison and the new backend regression.
+Its normal private file URL opens with duration 2. Both descriptor URL controls
+and actual backend preparation fail with OS status -54, including the WAV hint.
+No playback occurs. The failing regression stays enabled and recorded.
+
+The source diagnosis reports one broad search that returned the bundled public
+jQuery file. It was unused; further reads were restricted to own source files.
+No excluded Anki or private tree was read. The report is retained in the intake.
