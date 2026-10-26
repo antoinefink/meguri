@@ -174,6 +174,9 @@ public struct GoToDeckView: View {
                 }
             }
         }
+        #if os(macOS)
+        .presentationSizing(.page)
+        #endif
         .interactiveDismissDisabled(model.busy || collection.goToDeckBusy)
         .accessibilityIdentifier("home.goToDeck.sheet")
         .task(id: collection.goToDeckPresentation) { await reload() }
