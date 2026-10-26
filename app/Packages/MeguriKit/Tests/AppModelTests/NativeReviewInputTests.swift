@@ -14,8 +14,8 @@ import Testing
         let owner = fixture.owner()
         try await owner.prepare()
         #expect(try await owner.inspectionSeed() == 43)
-        #expect(throws: NativeReviewInput.Refusal.self) { try await owner.inspectionSeed() }
-        #expect(throws: NativeReviewInput.Refusal.self) { try await owner.reopenSeed() }
+        await #expect(throws: NativeReviewInput.Refusal.self) { try await owner.inspectionSeed() }
+        await #expect(throws: NativeReviewInput.Refusal.self) { try await owner.reopenSeed() }
         await owner.flushEvidence()
         #expect(owner.flushStatus == .saved)
         let receipt = try fixture.receipt(owner)
@@ -23,7 +23,7 @@ import Testing
         #expect(receipt.admission == nil && receipt.completion == nil)
         #expect(!FileManager.default.fileExists(atPath: fixture.location.collectionFile.path))
         let next = fixture.owner()
-        #expect(throws: NativeReviewInput.Refusal.self) { try await owner.inspectionSeed() }
+        await #expect(throws: NativeReviewInput.Refusal.self) { try await owner.inspectionSeed() }
         _ = next
     }
     @Test(arguments: ["absent", "edited", "other-run", "extra-key", "repeat-key", "absent-null", "limit", "steps", "build", "freeze"])
@@ -88,9 +88,9 @@ import Testing
         let reopened = fixture.owner()
         try await reopened.prepare()
         #expect(try await reopened.reopenSeed() == 44)
-        #expect(throws: NativeReviewInput.Refusal.self) { try await reopened.inspectionSeed() }
+        await #expect(throws: NativeReviewInput.Refusal.self) { try await reopened.inspectionSeed() }
         #expect(throws: NativeReviewInput.Refusal.self) { try fixture.answer(reopened) }
-        #expect(throws: NativeReviewInput.Refusal.self) { try await reopened.reopenSeed() }
+        await #expect(throws: NativeReviewInput.Refusal.self) { try await reopened.reopenSeed() }
         #expect(try Data(contentsOf: fixture.location.collectionFile) == before)
         await reopened.flushEvidence()
         #expect(try fixture.receipt(reopened).completion == "accepted")
@@ -136,7 +136,7 @@ import Testing
         let owner = fixture.owner()
         try await owner.prepare()
         try fixture.write("\(fixture.base)/input.json", Data("changed after load".utf8))
-        #expect(throws: NativeReviewInput.Refusal.self) { try await owner.inspectionSeed() }
+        await #expect(throws: NativeReviewInput.Refusal.self) { try await owner.inspectionSeed() }
         await owner.flushEvidence()
         #expect(try fixture.receipt(owner).seeds.isEmpty)
     }
@@ -237,7 +237,7 @@ import Testing
         #expect(try Data(contentsOf: sample.location.collectionFile) == database)
         try await next.prepare()
         #expect(try await next.reopenSeed() == 44)
-        #expect(throws: NativeReviewInput.Refusal.self) { try await next.inspectionSeed() }
+        await #expect(throws: NativeReviewInput.Refusal.self) { try await next.inspectionSeed() }
     }
 
     @Test func closeRequestWaitsForRealCloseAndSavedReceipt() async throws {
@@ -248,7 +248,7 @@ import Testing
         let use = try sample.answer(owner)
         owner.completed(use, outcome: "accepted")
         var calls = 0
-        #expect(throws: NativeReviewInput.Refusal.self) {
+        await #expect(throws: NativeReviewInput.Refusal.self) {
             try await owner.closeForEvidence { calls += 1; return true }
         }
         #expect(calls == 0)
@@ -280,7 +280,7 @@ import Testing
             try FileManager.default.removeItem(at: owner.receiptURL)
             try FileManager.default.createDirectory(at: owner.receiptURL, withIntermediateDirectories: false)
         }
-        #expect(throws: NativeReviewInput.Refusal.self) {
+        await #expect(throws: NativeReviewInput.Refusal.self) {
             try await owner.closeForEvidence {
                 if failure == "close" { return false }
                 if failure == "receipt" { return true }
@@ -411,7 +411,8 @@ import Testing
         if bindSession { try owner.bindSession(coordinator: coordinator, session: 5, generation: 1, deck: 1) }
     }
     @discardableResult func answer(_ owner: NativeReviewInput) throws -> NativeReviewInput.AnswerUse {
-        try owner.admit(coordinator: coordinator, session: 5, generation: 1, deck: 1, item: ReviewCoordinatorTests.head(1),
+        let item = try #require(ReviewCoordinatorTests.head(1).items.first)
+        return try owner.admit(coordinator: coordinator, session: 5, generation: 1, deck: 1, item: item,
             rating: .easy, instant: FrozenNativeReviewInput.now, eligible: true)
     }
     func installClosedFiles() throws {
