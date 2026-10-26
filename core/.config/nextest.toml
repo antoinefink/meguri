@@ -64,10 +64,11 @@ threads-required = "num-test-threads"
 filter = 'package(meguri-engine) and (binary(session_durability) or binary(session_lifecycle) or test(=c15_committed_undo_returns_restored_head_during_real_200ms_sync_incoming) or test(=c12_every_acceptance_is_observed_fullsynced_while_a_later_writer_is_held))'
 threads-required = "num-test-threads"
 
-# C8 runs four collection-owning threads across its complete session set.
+# C8 runs four internal collection-owning threads across its complete session set.
+# Reserve the whole test runner because its real journal has a wall-clock durability bound.
 [[profile.default.overrides]]
 filter = 'package(meguri-engine) and test(=c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions)'
-threads-required = 4
+threads-required = "num-test-threads"
 
 # U37 cancellation gates and pending-review response budgets need an idle runner.
 [[profile.default.overrides]]
