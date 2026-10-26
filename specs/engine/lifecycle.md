@@ -54,7 +54,7 @@ When an op is submitted, the executor decides by the current state:
 ## L5. The long-operation slot
 
 - One holder at a time among one-way sync, restore, `.colpkg` import, `.apkg` apply and Check Database (R171). A second request gets `Busy{running_op}`, naming the holder; it never queues.
-- Holding the slot leaves the state `Ready`: answers and edits still commit, normal and media sync still run.
+- Holding the slot leaves the state `Ready`: answers and edits still commit, and otherwise admissible unrelated jobs still run. Normal and media sync remain subject to independent protocol admission (`engine/jobs` J3).
 - Only the replacement ops (one-way sync, restore, `.colpkg` import) may then enter `ExclusiveBusy` (L7) (KTD17).
 - The slot can be taken in `Ready`; in `NoCollection` or `Failed` only by a replacement op (it creates or replaces the collection); in `Failed{Corrupt}` only by restore and one-way sync.
 - The slot belongs to one generation: the current one when it was taken (with nothing open, the last one), then the one its holder's own replacement makes (L8). Closing the collection frees the slot (L10). A holder whose slot a close freed gets `CollectionUnavailable` when it tries to enter the exclusive phase; a holder whose generation is no longer current (another collection was opened) gets `StaleGeneration`. Such a holder never acts on another collection, and dropping it does not free a slot taken since.
@@ -95,7 +95,7 @@ Every swap of the collection file goes through this procedure; U124's verified-r
 | `.colpkg` import | yes | yes |
 | `.apkg` import (apply) | yes | no |
 | Check Database | yes | no |
-| normal sync, media sync | no (they overlap) | no |
+| normal sync, media sync | no (they may overlap each other, subject to J3 admission) | no |
 | Check Media, Empty Cards, export, backup, optimizer, bulk ops, login, `meta` probe | no | no |
 
 ## L10. Close

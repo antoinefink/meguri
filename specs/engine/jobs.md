@@ -24,7 +24,8 @@ Long work in the core runs as jobs (KTD9): a short call starts one and returns i
 ## J3. Arbitration (C7)
 
 - Jobs that take the long-operation slot (`engine/lifecycle` L5, L9) take it when they start. If it is held, the start call returns `Busy{running_op}` naming the holder, synchronously. The job holds the slot until its work returns; the slot is released before `JobFinished` is published, so a caller that starts another job when it sees the event is not refused.
-- Normal and media sync take no slot and may run together.
+- Normal and media sync take no slot and may run together, subject to independent protocol admission.
+- An independently started normal or media sync cannot overlap a continued-processing one-way sync: before its work runs, its start returns synchronous `Busy{running_op}`, naming the one-way slot holder. This applies the transfer serialization of `sync/anki-transfers` M2 and `sync/normal-sync` N15, and the media exclusion of `sync/one-way` O4.6. The same authorized transfer's internal protocol phases are not another independent operation. This rule does not make normal or media sync a slot owner or prescribe their admission against other slot holders.
 
 ## J4. Cancel tokens
 
