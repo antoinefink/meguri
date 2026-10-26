@@ -4,6 +4,9 @@
 
 - For long jobs, save stdout/stderr to a file. Lost session handle: check PID/result before relaunching.
 
+- APFS directory `st_nlink` changes when entries are added. Pin directory device/inode/mode and nofollow bindings; keep regular-file link limits separate.
+- XCTest: `name=stem_0_UUID_A.colpkg`, `exportedFileName=UUID_B.colpkg`. Check the actual MG manifest; use one test and a `.colpkg` filter, then check the exact run name.
+
 - `cleanroom-image` builds the pinned Codex Linux runtime. `cleanroom --check` proves its boundaries without credentials; implementation/fixer runs require clean master plus a recorded session and export a patch, never write the real checkout. See `cleanroom/README.md`. Keep the command sandbox mandatory and forbidden sources/history/caches absent from its mounts.
 
 - The default Xcode MCP scheme signs ad hoc and cannot exercise the protected credential store. For a real Mac login/media pass, use `MEGURI_APP_SIGNING=team tools/mg build-app --platform mac --config Debug --standalone`, then open that exact product. Keep the dev identity and its profile; do not replace Keychain storage with a fallback.
