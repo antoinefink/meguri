@@ -533,3 +533,13 @@ native decoder probe. The run still fails its existing image comparison and
 skips 1; no baseline is replaced and the whole snapshot run stays failed.
 Actual notification transfer and six-attachment capture still require the
 fresh complete native workflow. Unit and integration acceptance stay open.
+
+## UI runner actor transfer
+
+Start `0c03d13e`. `ui-test/20261026T233808Z-39109` stops at compilation before
+running a test: its observer sends a Foundation Notification into the main
+actor. Filtered `20261026T234104Z-41048` extracts String/Bool values first and
+passes those to the receiver. Invalid userInfo still fails; every other
+validation and byte check stays unchanged. Independent review is clear.
+The model and app-hosted implementation files are unchanged, so their prior
+checks remain valid. Actual UI compilation and native capture remain pending.

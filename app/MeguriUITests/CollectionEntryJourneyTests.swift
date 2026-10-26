@@ -285,7 +285,9 @@ import notify
         let center = DistributedNotificationCenter.default()
         let observer = center.addObserver(forName: Notification.Name("\(bundle).testhooks.nativeReviewPhase"),
             object: nil, queue: .main) { [weak transfer] notification in
-                MainActor.assumeIsolated { transfer?.receive(notification) }
+                let object: String? = notification.object as? String
+                let hasUserInfo: Bool = notification.userInfo != nil
+                MainActor.assumeIsolated { transfer?.receive(object, hasUserInfo: hasUserInfo) }
             }
         defer {
             XCTAssertNil(transfer.failure, "Late/duplicate native phase reply")
@@ -352,10 +354,10 @@ import notify
             }
             expected = request
         }
-        func receive(_ notification: Notification) {
+        func receive(_ object: String?, hasUserInfo: Bool) {
             guard active, failure == nil else { return }
             do {
-                guard notification.userInfo == nil, let object = notification.object as? String,
+                guard !hasUserInfo, let object,
                       object.utf8.count <= 180 * 1024, let expected,
                       let fields = try JSONSerialization.jsonObject(with: Data(object.utf8)) as? [String: String],
                       Set(fields.keys) == Set(expected.keys).union(["data"]),
