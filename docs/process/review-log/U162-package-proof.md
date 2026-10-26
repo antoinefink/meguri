@@ -80,3 +80,7 @@ Actual iPhone execution and iPad execution remain unrun for this repair.
 Original-base gate `20261026T095453Z-62360` was cancelled after a separate active
 review-durability failure; it is incomplete. See `C8-isolation.md`.
 No mobile pass, Unit acceptance or gate acceptance is claimed.
+
+On clean `0bc98afa`, UI lint `20261026T102715Z-96947` passes 128 checks with
+zero findings; static checks `20261026T102714Z-96936` pass all three checks.
+These source checks do not supply native mobile execution evidence.

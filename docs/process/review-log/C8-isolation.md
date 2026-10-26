@@ -21,3 +21,7 @@ Privacy `20261026T101851Z-91646` and similarity `20261026T101852Z-91828` pass.
 It is incomplete and supplies no pass. Focused runtime and the original-base full gate
 remain required. The snapshot cleanup decision is pending; no backup was changed.
 Evidence and reports are retained in `build/unit-intake/U162-package-proof/`.
+
+On clean `0bc98afa`, static checks `20261026T102714Z-96936` pass all three
+checks. This confirms source rules and trailers, not runtime durability.
+The full-runner workload still needs a completed focused run.
