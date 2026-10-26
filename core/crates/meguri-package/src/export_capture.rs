@@ -2,7 +2,7 @@
 use crate::{CollectionPackageWriteContext, Error, Result, cancelled, writer};
 use sha1::{Digest as Sha1Digest, Sha1};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     ffi::{CStr, CString, OsStr, OsString},
     fs::{self, File, Metadata, OpenOptions},
     io::{Read, Write},
@@ -26,6 +26,10 @@ struct Stamp {
     dev: u64,
     ino: u64,
     length: u64,
+    mode: u32,
+    uid: u32,
+    gid: u32,
+    links: u64,
     mtime: (i64, i64),
     ctime: (i64, i64),
 }
@@ -35,6 +39,10 @@ impl Stamp {
             dev: m.dev(),
             ino: m.ino(),
             length: m.len(),
+            mode: m.mode(),
+            uid: m.uid(),
+            gid: m.gid(),
+            links: m.nlink(),
             mtime: (m.mtime(), m.mtime_nsec()),
             ctime: (m.ctime(), m.ctime_nsec()),
         }
@@ -69,6 +77,7 @@ pub struct ExportSourceValidation {
     // Non-media entries are inventoried too, without retaining an unbounded index.
     excluded: InventoryHash,
     protected: Vec<PathBuf>,
+    retained: RetainedTree,
 }
 #[derive(Default, PartialEq, Eq)]
 struct InventoryHash {
@@ -135,7 +144,7 @@ fn open_at(parent: &File, name: &OsStr, directory: bool) -> std::io::Result<File
     Ok(unsafe { File::from_raw_fd(fd) })
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct EntryMetadata {
     stamp: Stamp,
     kind: libc::mode_t,
@@ -150,6 +159,10 @@ impl EntryMetadata {
     fn identity(self) -> (u64, u64) {
         (self.stamp.dev, self.stamp.ino)
     }
+}
+// libc uses different unsigned link-count widths across Unix ABIs.
+fn link_count(count: impl Into<u64>) -> u64 {
+    count.into()
 }
 fn stat_at(parent: &File, name: &OsStr) -> std::io::Result<EntryMetadata> {
     let name = CString::new(name.as_bytes()).map_err(|_| std::io::Error::other("invalid component"))?;
@@ -172,11 +185,19 @@ fn stat_at(parent: &File, name: &OsStr) -> std::io::Result<EntryMetadata> {
     let dev = stat.st_dev as u64;
     #[cfg(not(target_vendor = "apple"))]
     let dev = stat.st_dev;
+    #[cfg(target_vendor = "apple")]
+    let mode = u32::from(stat.st_mode);
+    #[cfg(not(target_vendor = "apple"))]
+    let mode = stat.st_mode;
     Ok(EntryMetadata {
         stamp: Stamp {
             dev,
             ino: stat.st_ino,
             length: stat.st_size as u64,
+            mode,
+            uid: stat.st_uid,
+            gid: stat.st_gid,
+            links: link_count(stat.st_nlink),
             mtime,
             ctime,
         },
@@ -213,6 +234,114 @@ thread_local! {
     static BEFORE_OPEN: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
+// Only retained media recovery state is frozen across export phases. U32 and
+// output owners legitimately create/write/remove their own files during export.
+type RetainedTree = BTreeMap<PathBuf, EntryMetadata>;
+#[derive(Clone, Copy)]
+struct ProtectedLimits {
+    visits: usize,
+    depth: usize,
+    memory: usize,
+    descriptors: usize,
+}
+const PROTECTED_LIMITS: ProtectedLimits = ProtectedLimits {
+    visits: 400_000,
+    depth: 32,
+    // Conservative accounting includes both frozen/current maps, identity-set
+    // nodes, allocator overhead and traversal path scratch, before allocation.
+    memory: 128 * 1024 * 1024,
+    // Each recursive level owns a directory and a separate readdir description.
+    // Reserve eight for source authority and nonrecursive validation handles.
+    descriptors: 74,
+};
+struct ProtectedBudget {
+    limits: ProtectedLimits,
+    visits: usize,
+    memory: usize,
+}
+impl ProtectedBudget {
+    fn new(limits: ProtectedLimits) -> Self {
+        Self {
+            limits,
+            visits: 0,
+            memory: 0,
+        }
+    }
+    fn entry(&mut self, path_bytes: usize) -> Result<()> {
+        self.visits = self.visits.checked_add(1).ok_or(Error::ExportFormatLimit)?;
+        self.memory = self
+            .memory
+            .checked_add(1024)
+            .and_then(|n| path_bytes.checked_mul(4).and_then(|p| n.checked_add(p)))
+            .ok_or(Error::ExportFormatLimit)?;
+        if self.visits > self.limits.visits || self.memory > self.limits.memory {
+            return Err(Error::ExportFormatLimit);
+        }
+        Ok(())
+    }
+    fn directory(&self, depth: usize) -> Result<()> {
+        if depth > self.limits.depth || 8 + 2 * (depth + 1) > self.limits.descriptors {
+            return Err(Error::ExportFormatLimit);
+        }
+        Ok(())
+    }
+}
+#[allow(clippy::too_many_arguments)] // One bounded traversal, with explicit parent authority.
+fn retained_entry(
+    parent: &File,
+    name: &OsStr,
+    path: &Path,
+    depth: usize,
+    budget: &mut ProtectedBudget,
+    tree: &mut RetainedTree,
+    identities: &mut BTreeSet<(u64, u64)>,
+    check: &(dyn Fn() -> bool + Sync),
+) -> Result<()> {
+    cancelled(check)?;
+    budget.entry(path.as_os_str().len())?; // Count visits before inode deduplication.
+    let meta = stat_at(parent, name).map_err(source_io)?;
+    if !meta.is_dir() && !meta.is_file() {
+        return Err(unsafe_entry("retained media staging contains a link or special file"));
+    }
+    identities.insert(meta.identity());
+    if tree.insert(path.to_owned(), meta).is_some() {
+        return Err(fresh());
+    }
+    if meta.is_dir() {
+        budget.directory(depth)?;
+        let directory = open_at(parent, name, true).map_err(source_io)?;
+        if Stamp::of(&directory.metadata()?) != meta.stamp {
+            return Err(fresh());
+        }
+        visit(&directory, |child| {
+            retained_entry(
+                &directory,
+                &child,
+                &path.join(&child),
+                depth + 1,
+                budget,
+                tree,
+                identities,
+                check,
+            )
+        })?;
+        cancelled(check)?;
+        if Stamp::of(&directory.metadata()?) != meta.stamp {
+            return Err(fresh());
+        }
+    } else {
+        // Metadata-only inventory: opening proves readability/type/binding but
+        // never reads recovery payloads or adds them to the package.
+        let file = open_at(parent, name, false).map_err(source_io)?;
+        if !file.metadata()?.is_file() || Stamp::of(&file.metadata()?) != meta.stamp {
+            return Err(fresh());
+        }
+    }
+    if stat_at(parent, name).map_err(source_io)? != meta {
+        return Err(fresh());
+    }
+    Ok(())
+}
 struct ProtectedInventory {
     identities: BTreeSet<(u64, u64)>,
     parent_stamp: Stamp,
@@ -220,21 +349,25 @@ struct ProtectedInventory {
     paths: Vec<(PathBuf, Option<(u64, u64)>)>,
 }
 impl ProtectedInventory {
-    fn validate(&self, authority: &ExportSourceValidation) -> Result<()> {
+    fn validate(&self, authority: &ExportSourceValidation, check: &(dyn Fn() -> bool + Sync)) -> Result<()> {
+        cancelled(check)?;
         let parent = &authority.parent;
         if Stamp::of(&parent.metadata()?) != self.parent_stamp {
             return Err(fresh());
         }
         for (name, stamp) in &self.stages {
+            cancelled(check)?;
             if stat_at(parent, name).map_err(source_io)?.stamp != *stamp {
                 return Err(fresh());
             }
         }
         for (path, expected) in &self.paths {
+            cancelled(check)?;
             if authority.protected_path(path)?.map(EntryMetadata::identity) != *expected {
                 return Err(fresh());
             }
         }
+        authority.check_retained(check)?;
         Ok(())
     }
 }
@@ -347,7 +480,10 @@ impl ExportSourceValidation {
             files: Vec::new(),
             excluded: InventoryHash::default(),
             protected,
+            retained: RetainedTree::new(),
         };
+        proof.retained =
+            proof.read_retained(check, &mut ProtectedBudget::new(PROTECTED_LIMITS), &mut BTreeSet::new())?;
         let (files, excluded) = proof.scan(check)?;
         proof.files = files;
         proof.excluded = excluded;
@@ -417,17 +553,58 @@ impl ExportSourceValidation {
         }
         Err(unsafe_entry("protected path is not a file"))
     }
+    fn read_retained(
+        &self,
+        check: &(dyn Fn() -> bool + Sync),
+        budget: &mut ProtectedBudget,
+        identities: &mut BTreeSet<(u64, u64)>,
+    ) -> Result<RetainedTree> {
+        cancelled(check)?;
+        let name = OsStr::new("media.staging");
+        match stat_at(&self.parent, name) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(RetainedTree::new()),
+            Err(e) => return Err(source_io(e)),
+            Ok(meta) if !meta.is_dir() => return Err(unsafe_entry("media.staging is not a directory")),
+            Ok(_) => {}
+        }
+        let mut tree = RetainedTree::new();
+        retained_entry(
+            &self.parent,
+            name,
+            Path::new("media.staging"),
+            0,
+            budget,
+            &mut tree,
+            identities,
+            check,
+        )?;
+        Ok(tree)
+    }
+    fn check_retained(&self, check: &(dyn Fn() -> bool + Sync)) -> Result<()> {
+        let tree = self.read_retained(check, &mut ProtectedBudget::new(PROTECTED_LIMITS), &mut BTreeSet::new())?;
+        self.compare_retained(&tree, check)
+    }
+    fn compare_retained(&self, tree: &RetainedTree, check: &(dyn Fn() -> bool + Sync)) -> Result<()> {
+        if tree.len() != self.retained.len() {
+            return Err(fresh());
+        }
+        for (actual, expected) in tree.iter().zip(&self.retained) {
+            cancelled(check)?;
+            if actual != expected {
+                return Err(fresh());
+            }
+        }
+        Ok(())
+    }
     fn protected_identities(&self, check: &(dyn Fn() -> bool + Sync)) -> Result<ProtectedInventory> {
-        const MAX_IDENTITIES: usize = 400_000;
         let mut identities = BTreeSet::new();
         let mut stages = Vec::new();
         let mut paths = Vec::new();
-        let mut entries = 0_usize;
+        let mut budget = ProtectedBudget::new(PROTECTED_LIMITS);
+        let retained = self.read_retained(check, &mut budget, &mut identities)?;
+        self.compare_retained(&retained, check)?;
         let mut insert = |meta: EntryMetadata| -> Result<()> {
-            if entries >= MAX_IDENTITIES {
-                return Err(Error::ExportFormatLimit);
-            }
-            entries += 1;
+            budget.entry(0)?;
             identities.insert(meta.identity());
             Ok(())
         };
@@ -445,8 +622,7 @@ impl ExportSourceValidation {
             let Some(text) = name.to_str() else {
                 return Ok(());
             };
-            let media_staging = text == "media.staging";
-            let stage = media_staging || text.strip_prefix(".meguri-stage-").is_some_and(|s| !s.is_empty());
+            let stage = text.strip_prefix(".meguri-stage-").is_some_and(|s| !s.is_empty());
             let temporary = ["replace", "stage", "export", "backup", "media", "sidecar"]
                 .iter()
                 .any(|purpose| {
@@ -460,18 +636,13 @@ impl ExportSourceValidation {
                 return Ok(());
             }
             let meta = stat_at(&self.parent, &name)?;
-            if meta.is_file() && !media_staging {
+            if meta.is_file() {
                 return insert(meta);
             }
             if !stage || !meta.is_dir() {
                 return Err(unsafe_entry("internal staging has an unsafe type"));
             }
-            if stages.len() >= MAX_IDENTITIES {
-                return Err(Error::ExportFormatLimit);
-            }
-            if media_staging {
-                insert(meta)?;
-            }
+            insert(meta)?;
             let directory = open_at(&self.parent, &name, true).map_err(source_io)?;
             if Stamp::of(&directory.metadata()?) != meta.stamp {
                 return Err(fresh());
@@ -479,9 +650,8 @@ impl ExportSourceValidation {
             visit(&directory, |child| {
                 cancelled(check)?;
                 let child = stat_at(&directory, &child)?;
-                if child.is_file() {
-                    insert(child)?;
-                } else if media_staging || !child.is_dir() {
+                insert(child)?;
+                if !child.is_file() && !child.is_dir() {
                     return Err(unsafe_entry("internal staging contains a nonregular entry"));
                 }
                 Ok(()) // No recursion, including into directories in a recognized stage.
@@ -498,7 +668,7 @@ impl ExportSourceValidation {
             stages,
             paths,
         };
-        inventory.validate(self)?;
+        inventory.validate(self, check)?;
         Ok(inventory)
     }
     fn enumerate(
@@ -557,7 +727,7 @@ impl ExportSourceValidation {
                 return Err(fresh());
             }
         }
-        protected.validate(self)?;
+        protected.validate(self, check)?;
         self.bound_root()?;
         Ok(excluded)
     }
@@ -742,6 +912,10 @@ impl MediaFile {
                 dev: 0,
                 ino: 0,
                 length: u64::from(length),
+                mode: 0,
+                uid: 0,
+                gid: 0,
+                links: 0,
                 mtime: (0, 0),
                 ctime: (0, 0),
             },
@@ -857,6 +1031,185 @@ mod tests {
             }
             assert!(!directory.path().join("out.colpkg").exists());
         }
+    }
+    fn retained_fixture() -> (tempfile::TempDir, PathBuf) {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir(directory.path().join("collection.media")).unwrap();
+        fs::write(directory.path().join("collection.media/included"), b"media").unwrap();
+        let nested = directory.path().join("media.staging/r6-fixture/recovery/leaf");
+        fs::create_dir_all(&nested).unwrap();
+        let plan = nested.join("plan.json");
+        fs::write(&plan, b"saved recovery fixture bytes").unwrap();
+        (directory, plan)
+    }
+    #[test]
+    fn retained_tree_is_metadata_only_and_active_export_stage_may_change_and_disappear() {
+        let (directory, plan) = retained_fixture();
+        let bytes = fs::read(&plan).unwrap();
+        let before = Stamp::of(&fs::metadata(&plan).unwrap());
+        let output = directory.path().join("out.colpkg");
+        let mut proof = ExportSourceValidation::inventory(directory.path(), vec![output.clone()], &|| false).unwrap();
+        assert_eq!(proof.files.len(), 1);
+        assert_eq!(proof.files[0].name(), "included");
+        let stage = directory.path().join(".meguri-stage-current");
+        fs::create_dir(&stage).unwrap();
+        fs::write(stage.join("snapshot.anki2"), b"initial capture fixture").unwrap();
+        proof.capture(&stage, &|| false).unwrap();
+        fs::write(stage.join("snapshot.anki2"), b"capture fixture revised by its writer").unwrap();
+        fs::write(&output, b"package fixture in progress").unwrap();
+        proof.validate(&|| false).unwrap();
+        fs::write(&output, b"package fixture ready for delivery").unwrap();
+        proof.validate(&|| false).unwrap();
+        fs::remove_file(&output).unwrap();
+        fs::remove_dir_all(&stage).unwrap();
+        proof.validate(&|| false).unwrap();
+        assert_eq!(fs::read(&plan).unwrap(), bytes);
+        assert_eq!(Stamp::of(&fs::metadata(plan).unwrap()), before);
+    }
+    #[test]
+    fn retained_tree_nested_alias_link_and_special_entries_refuse() {
+        use std::os::unix::fs::symlink;
+        for kind in 0..4 {
+            let (directory, plan) = retained_fixture();
+            let before = fs::read(&plan).unwrap();
+            match kind {
+                0 => fs::hard_link(&plan, directory.path().join("collection.media/alias")).unwrap(),
+                1 => symlink(&plan, plan.with_file_name("link")).unwrap(),
+                2 => symlink(plan.parent().unwrap(), plan.with_file_name("directory-link")).unwrap(),
+                _ => {
+                    let path = CString::new(plan.with_file_name("fifo").as_os_str().as_bytes()).unwrap();
+                    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+                }
+            }
+            assert!(matches!(
+                ExportSourceValidation::inventory(directory.path(), vec![], &|| false),
+                Err(Error::ExportSourceInvalid { .. })
+            ));
+            assert_eq!(fs::read(plan).unwrap(), before);
+        }
+    }
+    #[test]
+    fn retained_tree_changes_at_any_depth_refuse_after_inventory_capture_and_before_ready() {
+        use std::os::unix::fs::PermissionsExt;
+        for phase in 0..3 {
+            for change in 0..8 {
+                let (directory, plan) = retained_fixture();
+                let mut proof = ExportSourceValidation::inventory(directory.path(), vec![], &|| false).unwrap();
+                let stage = directory.path().join(".meguri-stage-current");
+                if phase == 1 {
+                    fs::create_dir(&stage).unwrap();
+                    proof.capture(&stage, &|| false).unwrap();
+                }
+                let mutate = move || {
+                    match change {
+                        0 => fs::write(plan.with_file_name("added"), b"new").unwrap(),
+                        1 => fs::remove_file(&plan).unwrap(),
+                        2 => fs::rename(&plan, plan.with_file_name("renamed")).unwrap(),
+                        3 => {
+                            // Overwrite the existing inode without changing its byte count.
+                            let bytes = fs::read(&plan).unwrap();
+                            fs::write(&plan, vec![b'x'; bytes.len()]).unwrap();
+                            File::open(&plan)
+                                .unwrap()
+                                .set_modified(std::time::SystemTime::UNIX_EPOCH)
+                                .unwrap();
+                        }
+                        4 => fs::set_permissions(&plan, fs::Permissions::from_mode(0o400)).unwrap(),
+                        5 => {
+                            let parent = plan.parent().unwrap();
+                            fs::rename(parent, parent.with_extension("retained")).unwrap();
+                            fs::create_dir(parent).unwrap();
+                            fs::write(&plan, b"saved recovery fixture bytes").unwrap();
+                        }
+                        6 => {
+                            let ancestor = plan.parent().unwrap().parent().unwrap();
+                            fs::rename(ancestor, ancestor.with_extension("retained")).unwrap();
+                            fs::create_dir_all(plan.parent().unwrap()).unwrap();
+                            fs::write(&plan, b"saved recovery fixture bytes").unwrap();
+                        }
+                        _ => {
+                            fs::rename(&plan, plan.with_file_name("old-plan")).unwrap();
+                            fs::write(&plan, b"saved recovery fixture bytes").unwrap();
+                        }
+                    }
+                };
+                if phase == 0 {
+                    // Apply this edit before the first payload descriptor opens;
+                    // the next retained-tree pass must detect the modified inode.
+                    BEFORE_OPEN.with(|action| *action.borrow_mut() = Some(Box::new(mutate)));
+                } else {
+                    mutate();
+                }
+                assert!(proof.validate(&|| false).is_err(), "phase {phase}, change {change}");
+                assert_eq!(
+                    fs::read(directory.path().join("collection.media/included")).unwrap(),
+                    b"media"
+                );
+                assert!(!directory.path().join("out.colpkg").exists());
+            }
+        }
+    }
+    #[test]
+    fn retained_tree_cancellation_and_each_bound_stop_without_mutating_evidence() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (directory, plan) = retained_fixture();
+        let proof = ExportSourceValidation::inventory(directory.path(), vec![], &|| false).unwrap();
+        let before = Stamp::of(&fs::metadata(&plan).unwrap());
+        let bytes = fs::read(&plan).unwrap();
+        for limits in [
+            ProtectedLimits {
+                visits: 2,
+                ..PROTECTED_LIMITS
+            },
+            ProtectedLimits {
+                depth: 1,
+                ..PROTECTED_LIMITS
+            },
+            ProtectedLimits {
+                memory: 1024,
+                ..PROTECTED_LIMITS
+            },
+            ProtectedLimits {
+                descriptors: 10,
+                ..PROTECTED_LIMITS
+            },
+        ] {
+            assert!(matches!(
+                proof.read_retained(&|| false, &mut ProtectedBudget::new(limits), &mut BTreeSet::new()),
+                Err(Error::ExportFormatLimit)
+            ));
+        }
+        assert_eq!(Stamp::of(&fs::metadata(&plan).unwrap()), before);
+        fs::hard_link(&plan, plan.with_file_name("same-inode")).unwrap();
+        let mut budget = ProtectedBudget::new(PROTECTED_LIMITS);
+        let mut identities = BTreeSet::new();
+        let tree = proof.read_retained(&|| false, &mut budget, &mut identities).unwrap();
+        assert_eq!(budget.visits, tree.len());
+        assert_eq!(identities.len() + 1, budget.visits);
+        let exact = ProtectedLimits {
+            visits: budget.visits - 1,
+            ..PROTECTED_LIMITS
+        };
+        assert!(matches!(
+            proof.read_retained(&|| false, &mut ProtectedBudget::new(exact), &mut BTreeSet::new()),
+            Err(Error::ExportFormatLimit)
+        ));
+        fs::remove_file(plan.with_file_name("same-inode")).unwrap();
+        // Reinventory after adding and removing a name in the saved directory.
+        let proof = ExportSourceValidation::inventory(directory.path(), vec![], &|| false).unwrap();
+        let before_cancel = Stamp::of(&fs::metadata(&plan).unwrap());
+        let calls = AtomicUsize::new(0);
+        let cancel = || calls.fetch_add(1, Ordering::SeqCst) >= 3;
+        assert!(matches!(proof.check_retained(&cancel), Err(Error::Cancelled)));
+        let calls = AtomicUsize::new(0);
+        let cancel = || calls.fetch_add(1, Ordering::SeqCst) >= 2;
+        assert!(matches!(
+            proof.compare_retained(&proof.retained, &cancel),
+            Err(Error::Cancelled)
+        ));
+        assert_eq!(fs::read(&plan).unwrap(), bytes);
+        let after = Stamp::of(&fs::metadata(&plan).unwrap());
+        assert_eq!(after, before_cancel);
     }
     #[test]
     fn arithmetic_limits_without_large_allocations_or_io() {

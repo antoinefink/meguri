@@ -577,6 +577,15 @@ mod tests {
     // before each public call and wait for that exact real job's terminal event.
     #[test]
     fn public_initial_entry_imports_all_media_and_initializes_own_journal() {
+        public_initial_entry_all_media_fixture(false);
+    }
+    #[test]
+    fn public_initial_all_media_import_close_reopen_and_public_export_preserves_r6_evidence() {
+        public_initial_entry_all_media_fixture(true);
+    }
+    fn public_initial_entry_all_media_fixture(export_after_reopen: bool) {
+        static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _serial = SERIAL.lock().unwrap();
         use meguri_storage::ReaderRole;
         use sha2::{Digest, Sha256};
         use std::{fs, time::Duration};
@@ -671,7 +680,7 @@ mod tests {
         };
         let inspection = start_collection_inspection(
             source.to_string_lossy().into_owned(),
-            location,
+            location.clone(),
             Arc::new(Clock),
             Arc::new(Space),
             39,
@@ -717,42 +726,177 @@ mod tests {
         assert!(result.backup.is_none());
         assert!(!backups.exists() || fs::read_dir(&backups).unwrap().next().is_none());
         assert!(target.join("collection.anki2").is_file());
-        let imported = runtime::host().unwrap();
-        let service = imported.media().unwrap();
-        let store = service.store();
-        let baseline = store.sync_baseline().unwrap();
-        assert!(baseline.owner.is_none());
-        assert_eq!(baseline.usn, 0);
-        assert!(store.download_intents().unwrap().is_empty());
-        assert!(store.trash_entries().unwrap().is_empty());
-        let entries = store.entries().unwrap();
-        assert_eq!(entries.len(), payloads.len());
-        assert_eq!(
-            fs::read_dir(target.join("collection.media")).unwrap().count(),
-            payloads.len()
-        );
-        for (name, bytes) in payloads {
-            assert_eq!(fs::read(target.join("collection.media").join(name)).unwrap(), bytes);
-            let row = entries.iter().find(|e| e.name == name).unwrap();
-            assert!(row.live && !row.pending_download);
-            assert_eq!(row.size, bytes.len() as u64);
-            assert_eq!(row.dirty, row.syncable());
-            assert_eq!(row.sha1, source_entries.iter().find(|e| e.name == name).unwrap().sha1);
+        {
+            let imported = runtime::host().unwrap();
+            let service = imported.media().unwrap();
+            let store = service.store();
+            let baseline = store.sync_baseline().unwrap();
+            assert!(baseline.owner.is_none());
+            assert_eq!(baseline.usn, 0);
+            assert!(store.download_intents().unwrap().is_empty());
+            assert!(store.trash_entries().unwrap().is_empty());
+            let entries = store.entries().unwrap();
+            assert_eq!(entries.len(), payloads.len());
             assert_eq!(
-                row.sync_state,
-                if bytes.is_empty() {
-                    meguri_storage::media::MediaSyncState::None
-                } else {
-                    meguri_storage::media::MediaSyncState::Live
-                }
+                fs::read_dir(target.join("collection.media")).unwrap().count(),
+                payloads.len()
             );
-        }
-        assert!(
-            start_collection_activation(preview).is_err(),
-            "opaque confirmation is consumed once"
-        );
+            for (name, bytes) in payloads {
+                assert_eq!(fs::read(target.join("collection.media").join(name)).unwrap(), bytes);
+                let row = entries.iter().find(|e| e.name == name).unwrap();
+                assert!(row.live && !row.pending_download);
+                assert_eq!(row.size, bytes.len() as u64);
+                assert_eq!(row.dirty, row.syncable());
+                assert_eq!(row.sha1, source_entries.iter().find(|e| e.name == name).unwrap().sha1);
+                assert_eq!(
+                    row.sync_state,
+                    if bytes.is_empty() {
+                        meguri_storage::media::MediaSyncState::None
+                    } else {
+                        meguri_storage::media::MediaSyncState::Live
+                    }
+                );
+            }
+            assert!(
+                start_collection_activation(preview).is_err(),
+                "opaque confirmation is consumed once"
+            );
+        } // Drop all imported host/media references before public close/reopen.
         crate::lifecycle::close_collection().unwrap();
+        if export_after_reopen {
+            use crate::collection_export::{CollectionExportOutcome, start_collection_export};
+            let evidence = retained_recovery_evidence(&target.join("media.staging"));
+            assert!(
+                evidence
+                    .iter()
+                    .any(|(path, _, _, _, _)| path.file_name().is_some_and(|n| n == "plan.json")),
+                "the actual import must retain its R6 plan"
+            );
+            let opened = crate::collection::start_open(location, Arc::new(Clock), Arc::new(Space), 40).unwrap();
+            wait(opened.id);
+            assert_eq!(retained_recovery_evidence(&target.join("media.staging")), evidence);
+            for (name, bytes) in payloads {
+                assert_eq!(fs::read(target.join("collection.media").join(name)).unwrap(), bytes);
+            }
+            let exported = start_collection_export().unwrap();
+            wait(exported.job.id);
+            let CollectionExportOutcome::Ready { artifact } = exported.result.outcome().unwrap() else {
+                panic!("public all-media export must deliver Ready after real import/reopen")
+            };
+            let acquired = artifact.acquire().unwrap();
+            wait(acquired.job.id);
+            let output = std::path::PathBuf::from(acquired.lease.path().unwrap());
+            assert_small_export_member_set(&output, payloads.len());
+            assert_eq!(retained_recovery_evidence(&target.join("media.staging")), evidence);
+            for (name, bytes) in payloads {
+                assert_eq!(fs::read(target.join("collection.media").join(name)).unwrap(), bytes);
+            }
+            let finished = acquired.lease.finish().unwrap();
+            wait(finished.id);
+            crate::lifecycle::close_collection().unwrap();
+            // Independently check fixed bytes through the real public consumer,
+            // rather than deriving expectations from export's manifest/capture.
+            let roundtrip = root.path().join("roundtrip");
+            fs::create_dir(&roundtrip).unwrap();
+            let inspection = start_collection_inspection(
+                output.to_string_lossy().into_owned(),
+                CollectionLocation {
+                    collection_directory: roundtrip.to_string_lossy().into_owned(),
+                    backups_directory: root.path().join("roundtrip-backups").to_string_lossy().into_owned(),
+                    app_group_snapshot: root.path().join("roundtrip-widget").to_string_lossy().into_owned(),
+                    manual_transfer_directory: root.path().join("roundtrip-manual").to_string_lossy().into_owned(),
+                },
+                Arc::new(Clock),
+                Arc::new(Space),
+                41,
+            )
+            .unwrap();
+            wait(inspection.job.id);
+            let CollectionInspectOutcome::Ready { inspection: preview } = inspection.result.outcome().unwrap() else {
+                panic!("export must inspect through the public media consumer")
+            };
+            assert_eq!(preview.facts().unwrap().media_count, payloads.len() as u64);
+            let activation = start_collection_activation(preview).unwrap();
+            wait(activation.job.id);
+            assert!(matches!(
+                activation.result.outcome().unwrap(),
+                CollectionActivationOutcome::Activated { .. }
+            ));
+            assert_eq!(
+                fs::read_dir(roundtrip.join("collection.media")).unwrap().count(),
+                payloads.len()
+            );
+            for (name, bytes) in payloads {
+                assert_eq!(fs::read(roundtrip.join("collection.media").join(name)).unwrap(), bytes);
+            }
+            crate::lifecycle::close_collection().unwrap();
+            assert_eq!(retained_recovery_evidence(&target.join("media.staging")), evidence);
+            if let Some(job) = artifact.discard().unwrap() {
+                wait(job.id);
+            }
+        }
         assert_eq!(fs::read(source).unwrap(), original);
+    }
+    // Synthetic, small fixtures only. Compare the real retained names, native
+    // identities and file bytes, including directories; do not interpret plans.
+    fn retained_recovery_evidence(root: &std::path::Path) -> Vec<(std::path::PathBuf, u64, u64, bool, Vec<u8>)> {
+        use std::{fs, os::unix::fs::MetadataExt, path::Path};
+        fn walk(root: &Path, path: &Path, out: &mut Vec<(std::path::PathBuf, u64, u64, bool, Vec<u8>)>) {
+            let meta = fs::symlink_metadata(path).unwrap();
+            assert!(meta.is_dir() || meta.is_file());
+            out.push((
+                path.strip_prefix(root).unwrap().to_owned(),
+                meta.dev(),
+                meta.ino(),
+                meta.is_dir(),
+                if meta.is_file() {
+                    fs::read(path).unwrap()
+                } else {
+                    vec![]
+                },
+            ));
+            if meta.is_dir() {
+                for child in fs::read_dir(path).unwrap() {
+                    walk(root, &child.unwrap().path(), out);
+                }
+            }
+        }
+        let mut out = vec![];
+        walk(root, root, &mut out);
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+    // Independent central-directory reader for this small generated archive.
+    // Exact names/counts exclude recovery plans, journals, trash and staging.
+    fn assert_small_export_member_set(path: &std::path::Path, media: usize) {
+        let bytes = std::fs::read(path).unwrap();
+        let u16_at = |offset| u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap()) as usize;
+        let u32_at = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+        let end = bytes.len() - 22;
+        assert_eq!(&bytes[end..end + 4], b"PK\x05\x06");
+        assert_eq!(u16_at(end + 20), 0);
+        assert_eq!(u16_at(end + 10), media + 4);
+        let mut offset = u32_at(end + 16);
+        let central_end = offset + u32_at(end + 12);
+        let mut names = std::collections::BTreeSet::new();
+        for _ in 0..media + 4 {
+            assert_eq!(&bytes[offset..offset + 4], b"PK\x01\x02");
+            let length = u16_at(offset + 28);
+            let name = std::str::from_utf8(&bytes[offset + 46..offset + 46 + length])
+                .unwrap()
+                .to_owned();
+            assert!(names.insert(name), "no duplicate members");
+            offset += 46 + length + u16_at(offset + 30) + u16_at(offset + 32);
+        }
+        assert_eq!(offset, central_end);
+        assert_eq!(central_end, end);
+        let mut expected: std::collections::BTreeSet<String> =
+            ["meta", "collection.anki21b", "collection.anki2", "media"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
+        expected.extend((0..media).map(|i| i.to_string()));
+        assert_eq!(names, expected);
     }
     #[test]
     fn opaque_inspection_is_single_owned_and_discard_releases_only_its_files() {

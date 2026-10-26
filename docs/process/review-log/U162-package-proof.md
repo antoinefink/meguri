@@ -471,3 +471,38 @@ wording review are clear after this scope fix. Privacy
 `20261026T223846Z-99466` passes; three failed wording scans remain retained.
 No scanner exceptions or acceptance changes are introduced. Implementation
 and native proof remain open.
+
+## Retained import state — Rust repair
+
+Start `f3b375ca`; exports `20261026T223941Z-737` and
+`20261026T225143Z-6658`. Independent R1/R2 reviews are clear. The first Docker
+compile `20261026T224923Z-5044` finds an ABI-width mismatch in link counts;
+the second export normalizes it without suppressions. The protected tree has
+explicit entry, depth, memory and descriptor bounds, nofollow authority,
+cancellation and nested binding/stamp checks. Current export staging keeps its
+owner's lifecycle. Existing guards and journal assertions remain enabled.
+
+`core-test/20261026T225520Z-10704` passes all 26 selected export tests, including
+actual public import, close/reopen, export and re-import with fixed media bytes
+and retained R6 evidence checks. Unselected tests are not claimed as run.
+`core-lint/20261026T225718Z-12099` passes. Final privacy
+`20261026T230629Z-18419` and similarity `20261026T230630Z-18610` cover both
+prepared repairs and pass. The final Rust delta removes one redundant test
+comment; production and assertions are unchanged. Both earlier failed wording
+scans remain retained. Native export and the full integration gate stay open.
+
+## Receipt handoff — remaining directory admission failure
+
+The six-file transport starts at `f3b375ca`. Independent R1 finds P2
+`PHASE-READ-ANCESTOR-BINDING`; R2 closes it with a post-read nofollow walk and
+parent identity check. Frozen input, exact phase bytes and original proof stay.
+Swift `20261026T225213Z-7241` fails a new nested Testing macro; R2 uses separate
+locals. `20261026T225806Z-12928` compiles and passes 24 of 29 tests, but five
+tests fail on directory admission, producing 16 issues. No pass is claimed.
+
+A bounded numeric diagnostic in `20261026T230413Z-16981` preserves the guards.
+One positive control `swift-test/20261026T230630Z-18562` fails with initial
+stage 0, errno 20, component 1 and root depth 6. No path text is emitted. The
+cause still needs confirmation before changing filesystem admission. Privacy
+wording is now clear as recorded above; actual six-attachment capture remains
+unproven. Do not start another full native case until positive reads pass.
