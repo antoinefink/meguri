@@ -137,7 +137,7 @@ impl Parties<'_> {
                 .ok_or_else(|| ExecError::new("protocol_error", "begin reported no sync endpoints"))
                 .and_then(sync_info)?;
             check(&sync)?;
-            if session.actors.is_some() {
+            if let Some(actors) = session.actors.as_mut() {
                 let route = sync
                     .route
                     .as_ref()
@@ -156,11 +156,7 @@ impl Parties<'_> {
                 session.lease = Some(EdgeLease::acquire(command, &sync.endpoints.actors, route, expected)?);
                 let lease = session.lease.as_ref().expect("acquired lease");
                 lease.check_endpoint()?;
-                session
-                    .actors
-                    .as_mut()
-                    .expect("mixed actors")
-                    .seat(Some(&lease.endpoint), &sync.account);
+                actors.seat(Some(&lease.endpoint), &sync.account);
             }
             if session.actors.is_none() && sync.route.is_some() {
                 return Err(unavailable("replay begin must have null route"));

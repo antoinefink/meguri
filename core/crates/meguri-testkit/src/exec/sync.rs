@@ -129,14 +129,14 @@ fn sync(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
             let mut job = meguri_sync::Job::new(&options(), Some(key), session.random.as_ref()).map_err(error)?;
             let reader = collection.reader(meguri_storage::ReaderRole::Sync).map_err(error)?;
             let local = meguri_sync::LocalRecord::read(&*reader).map_err(error)?;
+            // Actor steps are serial; Task::wait also waits for JobFinished,
+            // after the normal job has released its captured memory reference.
+            let memory = Arc::get_mut(&mut session.sync.memory)
+                .ok_or_else(|| error("actor status memory ownership invariant: unexpected shared ownership"))?
+                .get_mut()
+                .unwrap();
             meguri_sync::transport::runtime::block_on(host.engine().threads(), options().cancel_token(), async {
-                Ok(session
-                    .sync
-                    .memory
-                    .lock()
-                    .unwrap()
-                    .status(&mut job, &local, session.clock.as_ref())
-                    .await)
+                Ok(memory.status(&mut job, &local, session.clock.as_ref()).await)
             })
             .map_err(error)?
             .map(|o| match o.status {

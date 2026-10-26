@@ -72,10 +72,7 @@ fn nested_replacements_release_rollback_and_composition_preserve_both_sides() {
     drop(second_journal);
     drop(collection);
     let reads = merged.image_reads();
-    assert_eq!(
-        merged.entries().map(|e| e.key().clone()).collect::<Vec<_>>(),
-        [key.clone()]
-    );
+    assert_eq!(merged.entries().map(|e| e.key()).collect::<Vec<_>>(), [&key]);
     assert_eq!(merged.image_reads(), reads, "enumeration reads no payload");
     std::thread::scope(|threads| {
         for _ in 0..4 {
