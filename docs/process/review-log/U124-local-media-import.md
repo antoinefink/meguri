@@ -85,3 +85,10 @@ The new native Form paint assertion fails in both appearances with zero changed
 text pixels. Screen dimensions are fixed, but actual images are still blank.
 The run remains failed, no baselines were recorded, and visual approval remains
 pending. The enabled regression will cover the next capture repair.
+
+The next isolated layer-capture proposal passed source review, privacy
+`20261026T182939Z-70210` and similarity `20261026T182942Z-70448`.
+Team-signed snapshots `20261026T183100Z-71139` still fail the paint regression.
+That proposal was not retained in product source; its patch and failed evidence
+remain in the intake. Native workflow execution takes priority over another
+capture experiment. The snapshot failure stays open for the required gate.
