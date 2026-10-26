@@ -65,3 +65,18 @@ requirements and the original-base integration gate remain outstanding. No Unit
 trailer or release acceptance is claimed.
 
 Final repaired-test similarity `similarity/20261026T095230Z-56684` passes.
+
+## Mobile native Files selector repair
+
+Start `51e07b93`. Retained synthetic failure `ui-test/20261026T011056Z-33684`
+shows one focused native Files TextView; the test searched TextFields.
+Filtered fixer `cleanroom/20261026T101505Z-87607` uses the exact observed local
+root and editor identifiers, with uniqueness and existing state/actionability
+checks. The modal TextField path and nonce, Cancel, Save, Replace and destination
+assertions remain unchanged. Independent R1 is clear; privacy
+`20261026T101851Z-91646` and similarity `20261026T101852Z-91828` pass.
+
+Actual iPhone execution and iPad execution remain unrun for this repair.
+Original-base gate `20261026T095453Z-62360` was cancelled after a separate active
+review-durability failure; it is incomplete. See `C8-isolation.md`.
+No mobile pass, Unit acceptance or gate acceptance is claimed.

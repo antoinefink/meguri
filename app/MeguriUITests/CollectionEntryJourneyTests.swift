@@ -496,23 +496,23 @@ import notify
                         && dialog.buttons.matching(commitName).count == 1
                 }
             }
-            func inlineNameField() -> XCUIElement? {
+            func inlineNameTextView() -> XCUIElement? {
                 guard self.nativeExportFolderIsOpen("RF2 Import Tests", app),
                       app.keyboards.firstMatch.exists, !app.alerts.firstMatch.exists,
                       nameDialogs().isEmpty else { return nil }
-                // Exclude Settings fields from the inline folder editor candidates.
-                let settingsFields = self.element(app, "settings.root.content").descendants(matching: .textField)
-                guard !settingsFields.allElementsBoundByIndex.contains(where: { actionable($0) }) else { return nil }
-                let fields = app.descendants(matching: .textField).allElementsBoundByIndex.filter { actionable($0) }
-                guard fields.count == 1 else { return nil }
-                let cellFields = app.cells.descendants(matching: .textField).allElementsBoundByIndex
-                    .filter { actionable($0) }
-                return cellFields.count == 1 ? cellFields.first : fields.first
+                let roots = app.descendants(matching: .any).matching(identifier:
+                    "DOC.browsingRoot Source: com.apple.FileProvider.LocalStorage, Title: RF2 Import Tests")
+                    .allElementsBoundByIndex
+                guard roots.count == 1, let root = roots.first, root.exists else { return nil }
+                let textViews = root.descendants(matching: .textView).matching(identifier: "DOC.inlineRenameField")
+                    .allElementsBoundByIndex
+                guard textViews.count == 1, let textView = textViews.first, actionable(textView) else { return nil }
+                return textView
             }
             try waitForState("New Folder must offer one known name dialog or the unique inline Files name editor", {
                 let dialogs = nameDialogs()
                 return (dialogs.count == 1 && actionable(dialogs[0].textFields.firstMatch))
-                    || (dialogs.isEmpty && inlineNameField() != nil)
+                    || (dialogs.isEmpty && inlineNameTextView() != nil)
             })
             let dialogs = nameDialogs()
             if dialogs.count == 1, let dialog = dialogs.first,
@@ -531,13 +531,13 @@ import notify
                     !dialog.exists && (self.nativeExportFolderIsOpen(stem, app)
                         || (self.nativeExportFolderIsOpen("RF2 Import Tests", app) && childTarget() != nil))
                 })
-            } else if dialogs.isEmpty, let field = inlineNameField() {
+            } else if dialogs.isEmpty, let textView = inlineNameTextView() {
                 // Native New Folder has already focused and selected the entire inline name.
-                field.typeText(stem)
+                textView.typeText(stem)
                 try waitForState("The inline Files name must equal the exact safe nonce stem before Return", {
-                    inlineNameField() != nil && field.value as? String == stem
+                    inlineNameTextView() != nil && textView.value as? String == stem
                 })
-                field.typeText("\n")
+                textView.typeText("\n")
                 try waitForState("Return must finish inline naming and reveal the exact native child", {
                     !app.keyboards.firstMatch.exists && (self.nativeExportFolderIsOpen(stem, app)
                         || (self.nativeExportFolderIsOpen("RF2 Import Tests", app) && childTarget() != nil))
