@@ -150,3 +150,20 @@ sizing. Source review is clear; privacy and similarity receipts are retained.
 checks, and retains 30 old-image differences. Inspection of normal, empty and
 recovery states shows wrapping and native section groups. No controls or sizing
 metrics were customized. Independent visual review and native actions are pending.
+
+## Native status order
+
+Start `a91af770`. Combined render `20261026T201320Z-53326` captures the Mac,
+iPhone and iPad states. It retains 175 old-image differences and 490 deferred
+cells; the run is not passing and no baselines changed. The external critic
+launch was blocked by automatic approval review because its render packet and
+external destination lack specific approval. No critic session ran.
+
+Local independent review found one P2: at the largest small-phone text size,
+generic onboarding hid the current progress or recovery message. Filtered fix
+`20261026T202612Z-77744` only moves those existing sections first. Source review
+is clear; privacy `20261026T203003Z-80796` and similarity
+`20261026T203003Z-80837` pass. Exact error/loading renders
+`20261026T203002Z-80448` confirm the repair, and local review closes LV1.
+Those images still differ from old references. Official critic review,
+baseline approval and native workflow verification remain open.

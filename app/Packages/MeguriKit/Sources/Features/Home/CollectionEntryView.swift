@@ -142,36 +142,6 @@ struct CollectionEntryContent: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    Text("Import a latest-format .colpkg file, including its media. Older formats are not supported. No account or network connection is needed.")
-                        .accessibilityIdentifier("onboarding.collectionImport.explanation")
-                }
-                if let facts = presentation.facts {
-                    Section {
-                        Text("\(facts.notes) notes · \(facts.cards) cards · \(facts.reviews) reviews")
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.counts")
-                        LabeledContent("Destination", value: "this device")
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.destination")
-                        LabeledContent("Validated media files", value: facts.mediaCount.formatted())
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.media.files")
-                        LabeledContent("Decoded media bytes", value: facts.mediaDecodedBytes.formatted())
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.media.bytes")
-                        Text(facts.replacingExisting
-                            ? "This will replace the local collection on this device. Meguri must finish a safety backup of your current collection, including saved answers, before replacing it. If that backup fails, import stops."
-                            : "There is no local collection file to replace. A pre-import safety backup is not needed.")
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.safety")
-                        Text("Existing media is kept. Supplied media is merged by name and content; replaced versions are saved in trash. Restoring a safety backup’s media needs those saved files.")
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.media.retention")
-                        Button(facts.replacingExisting ? "Replace Collection" : "Import Collection", action: actions.confirm)
-                            .keyboardShortcut(.defaultAction)
-                            .accessibilityIdentifier("onboarding.collectionImport.confirm")
-                    } header: {
-                        Text("Collection Preview")
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.heading")
-                    }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("onboarding.collectionImport.preview")
-                }
                 if let progress = presentation.progress {
                     Section {
                         Text(verbatim: progress.title)
@@ -205,6 +175,36 @@ struct CollectionEntryContent: View {
                                 .accessibilityIdentifier("onboarding.collectionImport.recover")
                         }
                     }
+                }
+                Section {
+                    Text("Import a latest-format .colpkg file, including its media. Older formats are not supported. No account or network connection is needed.")
+                        .accessibilityIdentifier("onboarding.collectionImport.explanation")
+                }
+                if let facts = presentation.facts {
+                    Section {
+                        Text("\(facts.notes) notes · \(facts.cards) cards · \(facts.reviews) reviews")
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.counts")
+                        LabeledContent("Destination", value: "this device")
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.destination")
+                        LabeledContent("Validated media files", value: facts.mediaCount.formatted())
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.media.files")
+                        LabeledContent("Decoded media bytes", value: facts.mediaDecodedBytes.formatted())
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.media.bytes")
+                        Text(facts.replacingExisting
+                            ? "This will replace the local collection on this device. Meguri must finish a safety backup of your current collection, including saved answers, before replacing it. If that backup fails, import stops."
+                            : "There is no local collection file to replace. A pre-import safety backup is not needed.")
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.safety")
+                        Text("Existing media is kept. Supplied media is merged by name and content; replaced versions are saved in trash. Restoring a safety backup’s media needs those saved files.")
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.media.retention")
+                        Button(facts.replacingExisting ? "Replace Collection" : "Import Collection", action: actions.confirm)
+                            .keyboardShortcut(.defaultAction)
+                            .accessibilityIdentifier("onboarding.collectionImport.confirm")
+                    } header: {
+                        Text("Collection Preview")
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.heading")
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("onboarding.collectionImport.preview")
                 }
                 if presentation.finalMedia != nil || (!presentation.busy && presentation.preparedMedia != nil) || presentation.generation != nil || presentation.backup != nil || presentation.backupPublication != nil || presentation.mediaReference != nil {
                     Section("Import Details") {
