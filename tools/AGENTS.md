@@ -10,6 +10,7 @@
 - A project shellScript may be a quoted string or an array of lines. Decode both before checking its exact body; don't depend on one-line formatting.
 
 - `cleanroom-image` builds the pinned Codex Linux runtime. `cleanroom --check` proves its boundaries without credentials; implementation/fixer runs require clean master plus a recorded session and export a patch, never write the real checkout. See `cleanroom/README.md`. Keep the command sandbox mandatory and forbidden sources/history/caches absent from its mounts.
+- Completed cleanroom source copies can consume hundreds of MB each. Reclaim only finished passing copies with complete exports and a reachable base; retain patches, seed patches, manifests, results, logs and reports. Never discard unfinished or unexported prepared work.
 
 - The default Xcode MCP scheme signs ad hoc and cannot exercise the protected credential store. For a real Mac login/media pass, use `MEGURI_APP_SIGNING=team tools/mg build-app --platform mac --config Debug --standalone`, then open that exact product. Keep the dev identity and its profile; do not replace Keychain storage with a fallback.
 
