@@ -215,6 +215,60 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: sample.location.collectionFile.path))
     }
 
+    @Test(arguments: [true, false])
+    func initialResetAcceptsEquivalentCheckoutURLHints(requestIsDirectory: Bool) throws {
+        let sample = try NativeReviewInputFixture()
+        defer { sample.remove() }
+        let requestRoot = URL(filePath: sample.root.path, directoryHint: requestIsDirectory ? .isDirectory : .notDirectory)
+        let admittedRoot = URL(filePath: sample.root.path, directoryHint: requestIsDirectory ? .notDirectory : .isDirectory)
+        try #require(requestRoot != admittedRoot)
+        try #require(requestRoot.path == admittedRoot.path)
+        let original = sample.request
+        let request = NativeReviewInput.Request(root: requestRoot, caseName: original.caseName, platform: original.platform,
+            freezeSHA256: original.freezeSHA256, freezeBytes: original.freezeBytes)
+        let owner = NativeReviewInput(request: request, collection: sample.location, admittedRoot: admittedRoot,
+            evidenceRoot: sample.root.appending(path: "container/test-evidence"))
+        let source = sample.root.appending(path: "app/Fixtures/CollectionEntry/EmptyCollection")
+        try sample.write("app/Fixtures/CollectionEntry/EmptyCollection/.gitkeep", Data())
+        try owner.validateInitialReset(from: source)
+        // Equivalent URL representations still cannot reset a recorded case.
+        try FileManager.default.createDirectory(at: owner.receiptURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data().write(to: owner.receiptURL)
+        #expect(throws: NativeReviewInput.Refusal.self) { try owner.validateInitialReset(from: source) }
+    }
+
+    @Test(arguments: ["foreign", "non-file", "noncanonical", "link", "freeze"])
+    func initialResetRetainsCheckoutAndFrozenInputGuards(change: String) throws {
+        let sample = try NativeReviewInputFixture()
+        defer { sample.remove() }
+        try sample.write("app/Fixtures/CollectionEntry/EmptyCollection/.gitkeep", Data())
+        var requestRoot = sample.root, admittedRoot = sample.root
+        switch change {
+        case "foreign": requestRoot = sample.root.deletingLastPathComponent()
+        case "non-file":
+            requestRoot = try #require(URL(string: "https://localhost\(sample.root.path)"))
+            try #require(requestRoot.path == admittedRoot.path && !requestRoot.isFileURL)
+        case "noncanonical":
+            requestRoot = URL(filePath: sample.root.path + "/.", directoryHint: .isDirectory)
+            try #require(requestRoot.path != requestRoot.standardizedFileURL.path)
+            admittedRoot = requestRoot
+        case "link":
+            requestRoot = sample.root.appending(path: "checkout-link", directoryHint: .isDirectory)
+            try FileManager.default.createSymbolicLink(at: requestRoot, withDestinationURL: sample.root)
+            admittedRoot = requestRoot
+        case "freeze": try sample.write("\(sample.base)/freeze.json", Data("{}".utf8))
+        default: break
+        }
+        let original = sample.request
+        let request = NativeReviewInput.Request(root: requestRoot, caseName: original.caseName, platform: original.platform,
+            freezeSHA256: original.freezeSHA256, freezeBytes: original.freezeBytes)
+        let owner = NativeReviewInput(request: request, collection: sample.location, admittedRoot: admittedRoot,
+            evidenceRoot: sample.root.appending(path: "container/test-evidence"))
+        #expect(throws: NativeReviewInput.Refusal.self) {
+            try owner.validateInitialReset(from: admittedRoot.appending(path: "app/Fixtures/CollectionEntry/EmptyCollection"))
+        }
+    }
+
     @Test(arguments: ["arbitrary", "source", "missing", "extra", "bytes", "link"])
     func initialResetRejectsOtherSourcesAndMarkerChanges(change: String) throws {
         let sample = try NativeReviewInputFixture()

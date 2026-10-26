@@ -138,7 +138,7 @@ import Darwin
     public func validateInitialReset(from source: URL) throws {
         try requireCurrent()
         try FrozenNativeReviewInput.check(loaded == nil && receipt == nil, "reset after input preparation")
-        try FrozenNativeReviewInput.check(request.root == admittedRoot, "reset checkout mismatch")
+        try FrozenNativeReviewInput.check(request.root.isFileURL && request.root.path == admittedRoot.path, "reset checkout mismatch")
         let relative = "app/Fixtures/CollectionEntry/EmptyCollection"
         let expected = admittedRoot.appending(path: relative)
         try FrozenNativeReviewInput.check(source.isFileURL && source.path == expected.path, "reset fixture path")

@@ -242,7 +242,11 @@ import notify
             importSource: importSource, locale: "en_US", animations: false, extra: native).arguments
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
-        try click(element(app, "home.collection.import"), app, bundle)
+        let entry = element(app, "home.collection.import")
+        let launchError = element(app, "testhooks.error.message")
+        XCTAssertTrue(entry.waitForExistence(timeout: 20),
+            "Native first launch must expose Import Collection: \(launchError.exists ? text(launchError) : app.debugDescription)")
+        try click(entry, app, bundle)
         try click(element(app, "onboarding.collectionImport.choose"), app, bundle)
         try pick(source, app, bundle)
         XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.counts"), "1 notes · 1 cards · \(reviews) reviews"))

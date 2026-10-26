@@ -281,3 +281,20 @@ Independent source review is clear. `selftest/20261026T200734Z-45432` passes
 all 8 focused tests with zero skips. Privacy `20261026T200744Z-45725` and
 similarity `20261026T200758Z-46280` pass. The earlier failure remains recorded;
 actual Docker preparation and native execution still require a fresh run.
+
+`ui-test/20261026T200831Z-47176` completes Docker preparation and the real Rust
+replay, then fails before Import Collection. Focused VM drive
+`20261026T201147Z-50808` exposes the launch refusal: the checkout URLs differ
+in directory hints even though their paths match. It is diagnostic evidence,
+not a passing native workflow.
+
+Filtered fix `20261026T201256Z-52664`, starting at `3d42ea79`, uses the loader's
+existing exact file-URL path rule for initial reset. The canonical path, link,
+ownership, receipt and frozen-input guards remain. Added cases cover both URL
+representations and refusal boundaries. Independent review is clear; focused
+Swift execution and a fresh native workflow are still pending.
+
+`swift-test/20261026T202255Z-72349` passes all 16 selected tests with zero
+skips, including both URL representations and all retained refusal cases.
+Privacy `20261026T202020Z-65904` and similarity `20261026T202019Z-65553` pass.
+The fresh native case remains required.
