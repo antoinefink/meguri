@@ -143,3 +143,19 @@ and diagnostic list. Real Cancel, Back and overflow actionability, navigation
 bounds and final Cancel checks remain; real Save/Replace assertions elsewhere
 are unchanged. Independent R1 is clear. Privacy `20261026T135222Z-86956` and
 similarity `20261026T135219Z-86690` results are retained; native checks are pending.
+
+## Native export proof on all three platforms
+
+On clean `85969338`, iPad `ui-test/20261026T141305Z-4872` and iPhone
+`ui-test/20261026T141724Z-9854` each pass the actual native Cancel/Save/Replace
+test with zero skips. Return still requires the same editor to disappear.
+Independent iPad proof `package-interop-check/20261026T141724Z-9729` and final
+iPhone proof `package-interop-check/20261026T142152Z-14415` both pass against
+their own frozen pre-launch source copies. Each proves 12 tables, 2,425 rows,
+270 media files, matching timing, zero stamp edits and zero client-open edits.
+
+The earlier Mac native/export proof remains retained above. This closes the
+bounded three-platform export gap. Historical failed receipts remain failures.
+It does not establish media-bearing file import/review/relaunch, full U162,
+the original-base integration gate or milestone acceptance. P16 implementation
+is now in progress; the public media-input refusal remains until verification.
