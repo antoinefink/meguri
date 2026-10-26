@@ -419,22 +419,50 @@ import notify
             }
             let browserBar = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].firstMatch
             let folderBar = browserBar.exists ? browserBar : app.navigationBars["RF2 Import Tests"].firstMatch
-            let creationButtons = folderBar.buttons.matching(NSPredicate(
-                format: "label ==[c] %@ OR label ==[c] %@", "New Folder", "Create New Folder"))
-            let candidates = creationButtons.allElementsBoundByIndex.filter { actionable($0) }
-            guard candidates.count == 1, let newFolder = candidates.first else {
+            let creationName = NSPredicate(
+                format: "label ==[c] %@ OR label ==[c] %@", "New Folder", "Create New Folder")
+            let creationButtons = folderBar.buttons.matching(creationName)
+            func captureCreationFailure(_ reason: String) {
                 capturePicker(app)
                 let buttons = folderBar.buttons.allElementsBoundByIndex
-                let metadata = buttons.prefix(12).map { button in
-                    "label=\(String(button.label.prefix(120)).debugDescription) identifier=\(String(button.identifier.prefix(120)).debugDescription) isEnabled=\(button.isEnabled)"
+                let menuControls = app.buttons.matching(creationName).allElementsBoundByIndex
+                    + app.menuItems.allElementsBoundByIndex
+                let metadata = (Array(buttons.prefix(12)) + Array(menuControls.prefix(12))).map { control in
+                    "type=\(control.elementType) label=\(String(control.label.prefix(120)).debugDescription) identifier=\(String(control.identifier.prefix(120)).debugDescription) isEnabled=\(control.isEnabled) isHittable=\(control.isHittable) frame=\(control.frame)"
                 }
                 let diagnostic = XCTAttachment(string: ([
-                    "Native toolbar buttons=\(buttons.count); actionable creation candidates=\(candidates.count)"
+                    reason, "Native toolbar buttons=\(buttons.count); menu controls=\(menuControls.count)"
                 ] + metadata).joined(separator: "\n"))
                 diagnostic.name = "export-new-folder-loaded-toolbar-controls"
                 diagnostic.lifetime = .keepAlways
                 add(diagnostic)
-                XCTFail("The loaded native browser navigation bar must offer exactly one enabled, hittable New Folder or Create New Folder button")
+            }
+            var candidates = creationButtons.allElementsBoundByIndex.filter { actionable($0) }
+            if candidates.isEmpty {
+                // The observed Files More control is separate from the folder title's info menu.
+                let moreButtons = folderBar.buttons.matching(NSPredicate(
+                    format: "identifier == %@ AND label ==[c] %@", "OverflowBarButtonItem", "More"))
+                let moreCandidates = moreButtons.allElementsBoundByIndex
+                guard moreCandidates.count == 1, let more = moreCandidates.first, actionable(more) else {
+                    captureCreationFailure("The loaded native toolbar must offer one enabled, hittable More button")
+                    XCTFail("The native folder creation menu requires the observed unique More control")
+                    throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
+                }
+                try click(more, app, bundle)
+                let offered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    candidates = (app.buttons.matching(creationName).allElementsBoundByIndex
+                        + app.menuItems.matching(creationName).allElementsBoundByIndex).filter { actionable($0) }
+                    return candidates.count == 1
+                }, object: nil)
+                guard XCTWaiter().wait(for: [offered], timeout: 10) == .completed else {
+                    captureCreationFailure("Native More menu actionable creation candidates=\(candidates.count)")
+                    XCTFail("The visible native More menu must offer exactly one enabled, hittable New Folder or Create New Folder button or item")
+                    throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
+                }
+            }
+            guard candidates.count == 1, let newFolder = candidates.first, actionable(newFolder) else {
+                captureCreationFailure("Actionable creation candidates=\(candidates.count)")
+                XCTFail("Native folder creation requires exactly one enabled, hittable New Folder or Create New Folder control")
                 throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
             }
             try click(newFolder, app, bundle)

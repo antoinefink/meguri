@@ -1638,3 +1638,11 @@ creation and Save/Replace assertions. The phone and iPad checks remain open.
 Offline run `002734Z-14327` now reaches exact raw comparison and reports a
 database difference. Preserve that failure; do not waive equality or claim a
 compatible-client import. No further sync protocol work was started.
+
+More-control repair `003718Z-19663` is source-reviewed with no findings.
+Lint `004142Z-21465`, private `004145Z-21999` and similarity `004147Z-22238`
+pass. Phone `004247Z-22823` reaches New Folder and retains its real inline
+editor capture; the test incorrectly expects a modal dialog. Keep that native
+failure open and use its observed inline editor in the focused repair. No
+release, unit or milestone acceptance changes. Native deck-name work can reuse
+the existing core while these first-review workflow checks remain pending.
