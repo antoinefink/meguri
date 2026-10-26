@@ -32,3 +32,36 @@ Further differences remain unproven. This is active offline file compatibility,
 not frozen server work. No Unit trailer or full gate acceptance is claimed.
 
 Final tooling similarity `20261026T090115Z-5133` passes for both files.
+
+## Prepared baseline and fresh Mac proof
+
+Start `f60a1cf9`; implementation checkpoint `8f034ed5`. F11.1 prepares a fresh
+run-owned fixture before launch and preserves its generated parent. Docker checks
+the single clock-config write. Native capture and package verification use this
+same frozen copy; exact comparisons remain enabled.
+
+Filtered implementation `cleanroom/20261026T092045Z-25654` and test-only fixer
+`cleanroom/20261026T095059Z-54307` retain exports. Independent R1 found two test
+setup defects: overlapping expected/output directories and duplicate decoding.
+R2 closes both without changing production guards or assertions. Reports:
+`/tmp/meguri-u162-prepared-fixture-review-r{1,2}.json`.
+
+| Check | Receipt | Result |
+|---|---|---|
+| Native preparation/capture wiring | `selftest/20261026T093740Z-39201` | Pass, 14 checks |
+| Original clock/host regression | `selftest/20261026T093848Z-40536` | Fail; test setup corrected above |
+| Final clock/host regression | `selftest/20261026T095208Z-56016` | Pass, 2 checks |
+| Six-file privacy | `private/20261026T093847Z-40340` | Pass |
+| Six-file similarity | `similarity/20261026T093845Z-40040` | Pass |
+| Final test privacy | `private/20261026T095232Z-56893` | Pass |
+| Actual Mac native export | `ui-test/20261026T094106Z-41714` | Pass, no skips |
+| Independent fresh package proof | `package-interop-check/20261026T094529Z-47013` | Pass |
+
+The fresh package matches 12 tables, 2,425 rows and all 270 media files
+(4,650,232 bytes), before client opening. Stamp edits and client-open edits are
+zero; timing also matches. Historical failures above remain evidence. This closes
+the bounded Mac proof failure, not U162. Mobile/native intake, remaining unit
+requirements and the original-base integration gate remain outstanding. No Unit
+trailer or release acceptance is claimed.
+
+Final repaired-test similarity `similarity/20261026T095230Z-56684` passes.

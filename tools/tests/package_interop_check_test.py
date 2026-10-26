@@ -440,8 +440,10 @@ class NativeClock(Fixture):
         self.db = prepared / 'collection.anki2'
         self.args.expected = str(prepared)
         self.pack()
+        self.run = self.run.with_name('unit-proof')
+        self.run.mkdir(parents=True)
+        self.args.run = str(self.run)
         work = self.stage()
-        self.decode()
         interop.compare_databases(self.db, work / 'decoded/collection.anki2')
         parent = self.root / 'build/generated/frozen/collection.anki2'
         self.rejects(lambda: interop.compare_databases(self.db, parent), 'pre-client-database-difference')
