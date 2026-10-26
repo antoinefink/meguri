@@ -294,6 +294,7 @@ PY
 @test "physical device artifacts: UI target dependency, phase ordering and sandbox declarations stay wired" {
   python3 - "$REPO_ROOT" <<'PY'
 from pathlib import Path
+import json
 import re
 import sys
 
@@ -319,7 +320,28 @@ outputs = re.search(r"outputPaths = \((.*?)\);", phase, re.S)[1]
 assert re.findall(r'"([^"\n]+)"', outputs) == [
     "$(TARGET_TEMP_DIR)/MeguriBuildUnderTest"]
 assert 'shellPath = /bin/bash;' in phase
-assert 'prepare-ui-device-artifacts.sh' in re.search(r"shellScript = ([^\n]+)", phase)[1]
+def shell_script(phase):
+    quoted = r'"(?:\\.|[^"\\])*"'
+    array = r'\(\s*(?:' + quoted + r'\s*(?:,\s*' + quoted + r'\s*)*,?\s*)?\)'
+    matches = re.findall(r'shellScript = (' + quoted + '|' + array + r');', phase, re.S)
+    assert len(matches) == 1, "Expected one literal script field"
+    raw = matches[0]
+    if raw.startswith('('):
+        return '\n'.join(json.loads(item) for item in re.findall(quoted, raw))
+    return json.loads(raw)
+
+expected_script = '/bin/bash "${SRCROOT}/../tools/scripts/prepare-ui-device-artifacts.sh"\n'
+assert shell_script(phase) == expected_script
+assert shell_script('shellScript = ' + json.dumps(expected_script) + ';') == expected_script
+array_script = '(' + json.dumps(expected_script.rstrip('\n')) + ', "",)'
+assert shell_script('shellScript = ' + array_script + ';') == expected_script
+for unsupported in ['shellScript = 7;', 'shellScript = ("ok", unquoted,);']:
+    try:
+        shell_script(unsupported)
+    except (AssertionError, ValueError):
+        pass
+    else:
+        raise AssertionError("Unsupported script form accepted")
 resources = block("4D4547555249000000000304")
 assert "isa = PBXResourcesBuildPhase;" in resources
 assert "0311 /* MeguriBuildUnderTest in Resources */" in re.search(r"files = \((.*?)\);", resources, re.S)[1]

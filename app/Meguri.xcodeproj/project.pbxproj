@@ -9,11 +9,11 @@
 /* Begin PBXBuildFile section */
 		4D4547555249000000000110 /* MeguriKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000510 /* MeguriKit */; };
 		4D4547555249000000000111 /* CoreBridge in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000511 /* CoreBridge */; };
+		4D4547555249000000000112 /* MeguriWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4D4547555249000000000021 /* MeguriWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		4D4547555249000000000113 /* Instrumentation in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000513 /* Instrumentation */; };
 		4D4547555249000000000310 /* Instrumentation in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000514 /* Instrumentation */; };
 		4D4547555249000000000311 /* MeguriBuildUnderTest in Resources */ = {isa = PBXBuildFile; fileRef = 4D4547555249000000000024 /* MeguriBuildUnderTest */; };
 		4D4547555249000000000410 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000512 /* SnapshotTesting */; };
-		4D4547555249000000000112 /* MeguriWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4D4547555249000000000021 /* MeguriWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,7 +44,7 @@
 		4D4547555249000000000105 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			dstPath = "";
-			dstSubfolderSpec = 13;
+			dstSubfolder = PlugIns;
 			files = (
 				4D4547555249000000000112 /* MeguriWidget.appex in Embed Foundation Extensions */,
 			);
@@ -57,7 +57,7 @@
 		4D4547555249000000000021 /* MeguriWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MeguriWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		4D4547555249000000000022 /* MeguriUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MeguriUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4D4547555249000000000023 /* MeguriSnapshotTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MeguriSnapshotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		4D4547555249000000000024 /* MeguriBuildUnderTest */ = {isa = PBXFileReference; lastKnownFileType = folder; includeInIndex = 0; path = MeguriBuildUnderTest; sourceTree = TARGET_TEMP_DIR; };
+		4D4547555249000000000024 /* MeguriBuildUnderTest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = folder; path = MeguriBuildUnderTest; sourceTree = TARGET_TEMP_DIR; };
 		4D4547555249000000000030 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
 		4D4547555249000000000031 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		4D4547555249000000000032 /* Profile.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Profile.xcconfig; sourceTree = "<group>"; };
@@ -78,11 +78,6 @@
 			membershipExceptions = (
 				"Info-iOS.plist",
 				"Info-macOS.plist",
-				"Meguri-iOS.entitlements",
-				"Meguri-macOS-AdHoc.entitlements",
-				"Meguri-macOS-Dev-AdHoc.entitlements",
-				"Meguri-macOS-Dev.entitlements",
-				"Meguri-macOS.entitlements",
 			);
 			target = 4D4547555249000000000100 /* Meguri */;
 		};
@@ -90,9 +85,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				"MeguriWidget-iOS.entitlements",
-				"MeguriWidget-macOS-AdHoc.entitlements",
-				"MeguriWidget-macOS.entitlements",
 			);
 			target = 4D4547555249000000000200 /* MeguriWidget */;
 		};
@@ -180,6 +172,17 @@
 			);
 			sourceTree = "<group>";
 		};
+		4D4547555249000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				4D4547555249000000000020 /* Meguri.app */,
+				4D4547555249000000000021 /* MeguriWidget.appex */,
+				4D4547555249000000000022 /* MeguriUITests.xctest */,
+				4D4547555249000000000023 /* MeguriSnapshotTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
 		4D4547555249000000000004 /* Config */ = {
 			isa = PBXGroup;
 			children = (
@@ -204,17 +207,6 @@
 				4D4547555249000000000521 /* MeguriKit */,
 			);
 			path = Packages;
-			sourceTree = "<group>";
-		};
-		4D4547555249000000000003 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				4D4547555249000000000020 /* Meguri.app */,
-				4D4547555249000000000021 /* MeguriWidget.appex */,
-				4D4547555249000000000022 /* MeguriUITests.xctest */,
-				4D4547555249000000000023 /* MeguriSnapshotTests.xctest */,
-			);
-			name = Products;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -257,8 +249,6 @@
 				4D4547555249000000000204 /* Resources */,
 			);
 			buildRules = (
-			);
-			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
 				4D4547555249000000000011 /* MeguriWidget */,
@@ -400,11 +390,47 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		4D4547555249000000000101 /* Check core configuration */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			inputPaths = (
+				"$(SRCROOT)/Packages/MeguriCore/Binaries/.stamp",
+			);
+			name = "Check core configuration";
+			shellPath = /bin/sh;
+			shellScript = (
+				"# The Meguri schemes' pre-action builds the core XCFramework for this",
+				"# configuration (tools/scripts/build-core-xcframework.sh --xcode). A build",
+				"# without it (another scheme, -target) would link whatever core is there, and",
+				"# a core left from another configuration could put test hooks into a Release",
+				"# or App Store build (R1967, KTD18, KTD21): check the core stamp.",
+				"stamp=\"${SRCROOT}/Packages/MeguriCore/Binaries/.stamp\"",
+				"fail() {",
+				"  echo \"error: core XCFramework: $1; run tools/mg core-xcframework --configuration ${CONFIGURATION} (pre-action log: build/xcode/core-pre-action.log)\"",
+				"  exit 1",
+				"}",
+				"[ -f \"$stamp\" ] || fail \"missing\"",
+				"value() { sed -n \"s/^$1=//p\" \"$stamp\"; }",
+				"[ \"$(value hash)\" != incomplete ] || fail \"an interrupted build left it incomplete\"",
+				"[ \"$(value configuration)\" = \"${CONFIGURATION}\" ] || fail \"built for $(value configuration), not ${CONFIGURATION}\"",
+				"[ \"$(value features)\" = \"${MEGURI_CORE_FEATURES}\" ] || fail \"features '$(value features)', expected '${MEGURI_CORE_FEATURES}'\"",
+				"case \"${PLATFORM_NAME}\" in",
+				"  macosx) slice=mac ;;",
+				"  iphonesimulator) slice=sim ;;",
+				"  iphoneos) slice=device ;;",
+				"  *) fail \"unsupported platform ${PLATFORM_NAME}\" ;;",
+				"esac",
+				"case \",$(value slices),\" in",
+				"  *\",$slice,\"*) ;;",
+				"  *) fail \"no $slice slice (it has $(value slices))\" ;;",
+				"esac",
+				"",
+			);
+			showEnvVarsInLog = 0;
+		};
 		4D4547555249000000000305 /* Prepare UI device artifacts */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
-			files = (
-			);
 			inputPaths = (
 				"$(SRCROOT)/../tools/scripts/prepare-ui-device-artifacts.sh",
 				"$(BUILT_PRODUCTS_DIR)/Meguri.app",
@@ -414,26 +440,10 @@
 				"$(TARGET_TEMP_DIR)/MeguriBuildUnderTest",
 			);
 			shellPath = /bin/bash;
-			shellScript = "/bin/bash \"${SRCROOT}/../tools/scripts/prepare-ui-device-artifacts.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-		4D4547555249000000000101 /* Check core configuration */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			files = (
+			shellScript = (
+				"/bin/bash \"${SRCROOT}/../tools/scripts/prepare-ui-device-artifacts.sh\"",
+				"",
 			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"$(SRCROOT)/Packages/MeguriCore/Binaries/.stamp",
-			);
-			name = "Check core configuration";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			shellPath = /bin/sh;
-			shellScript = "# The Meguri schemes' pre-action builds the core XCFramework for this\n# configuration (tools/scripts/build-core-xcframework.sh --xcode). A build\n# without it (another scheme, -target) would link whatever core is there, and\n# a core left from another configuration could put test hooks into a Release\n# or App Store build (R1967, KTD18, KTD21): check the core stamp.\nstamp=\"${SRCROOT}/Packages/MeguriCore/Binaries/.stamp\"\nfail() {\n  echo \"error: core XCFramework: $1; run tools/mg core-xcframework --configuration ${CONFIGURATION} (pre-action log: build/xcode/core-pre-action.log)\"\n  exit 1\n}\n[ -f \"$stamp\" ] || fail \"missing\"\nvalue() { sed -n \"s/^$1=//p\" \"$stamp\"; }\n[ \"$(value hash)\" != incomplete ] || fail \"an interrupted build left it incomplete\"\n[ \"$(value configuration)\" = \"${CONFIGURATION}\" ] || fail \"built for $(value configuration), not ${CONFIGURATION}\"\n[ \"$(value features)\" = \"${MEGURI_CORE_FEATURES}\" ] || fail \"features '$(value features)', expected '${MEGURI_CORE_FEATURES}'\"\ncase \"${PLATFORM_NAME}\" in\n  macosx) slice=mac ;;\n  iphonesimulator) slice=sim ;;\n  iphoneos) slice=device ;;\n  *) fail \"unsupported platform ${PLATFORM_NAME}\" ;;\nesac\ncase \",$(value slices),\" in\n  *\",$slice,\"*) ;;\n  *) fail \"no $slice slice (it has $(value slices))\" ;;\nesac\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -708,6 +718,11 @@
 			package = 4D4547555249000000000501 /* XCLocalSwiftPackageReference "Packages/MeguriCore" */;
 			productName = CoreBridge;
 		};
+		4D4547555249000000000512 /* SnapshotTesting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4D4547555249000000000502 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
+			productName = SnapshotTesting;
+		};
 		4D4547555249000000000513 /* Instrumentation */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 4D4547555249000000000501 /* XCLocalSwiftPackageReference "Packages/MeguriCore" */;
@@ -717,11 +732,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4D4547555249000000000501 /* XCLocalSwiftPackageReference "Packages/MeguriCore" */;
 			productName = Instrumentation;
-		};
-		4D4547555249000000000512 /* SnapshotTesting */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 4D4547555249000000000502 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
-			productName = SnapshotTesting;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
