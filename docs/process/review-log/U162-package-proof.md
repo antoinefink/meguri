@@ -114,3 +114,18 @@ privacy `20261026T130829Z-41745` and similarity `20261026T130831Z-42020` pass.
 All guards, interactions, assertions and ten-second limits are unchanged.
 Runtime is pending. Extra observation can affect timing; a passing diagnostic
 run alone must not be described as a repair.
+
+## Native editor admission repair
+
+Diagnostic `ui-test/20261026T131026Z-43150` still fails; it does not prove export.
+Its bounded attachments prove one exact local root and one native TextView:
+enabled, hittable, focused with selected text, and no software keyboard.
+Alerts and sheets both count zero. The software-keyboard guard excluded this
+valid native naming state. The single generated picker screen was inspected.
+
+Start `61b5c2ab`. Filtered fixer `cleanroom/20261026T131816Z-49901` removes that
+proxy guard. Exact owner, identifier, uniqueness and actionability checks remain.
+Return now requires this exact editor to disappear plus the existing actual-child
+or navigation proof. All actions, nonce checks and limits remain unchanged.
+Independent R1 is clear; privacy `20261026T132217Z-54957` and similarity
+`20261026T132217Z-54958` pass. iPad and shared iPhone execution are still pending.

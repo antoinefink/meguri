@@ -527,7 +527,7 @@ import notify
             }
             func inlineNameTextView() -> XCUIElement? {
                 guard self.nativeExportFolderIsOpen("RF2 Import Tests", app),
-                      app.keyboards.firstMatch.exists, !app.alerts.firstMatch.exists,
+                      !app.alerts.firstMatch.exists,
                       nameDialogs().isEmpty else { return nil }
                 let roots = app.descendants(matching: .any).matching(identifier:
                     "DOC.browsingRoot Source: com.apple.FileProvider.LocalStorage, Title: RF2 Import Tests")
@@ -568,7 +568,7 @@ import notify
                 })
                 textView.typeText("\n")
                 try waitForState("Return must finish inline naming and reveal the exact native child", {
-                    !app.keyboards.firstMatch.exists && (self.nativeExportFolderIsOpen(stem, app)
+                    !textView.exists && (self.nativeExportFolderIsOpen(stem, app)
                         || (self.nativeExportFolderIsOpen("RF2 Import Tests", app) && childTarget() != nil))
                 })
             } else {
