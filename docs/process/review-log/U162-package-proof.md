@@ -371,3 +371,40 @@ keep their earlier shape. Independent R2 review is clear. Swift
 `20261026T213557Z-53572` passes 9 tests. Both have zero skips. Privacy
 `20261026T213458Z-52047` and similarity `20261026T213458Z-52244` pass.
 The actual native rejection reason still requires the integrated media run.
+
+## Private native audio copy — verification in progress
+
+Start `cb92e0a6`; implementation export `20261026T212529Z-33802` follows M11.
+R1 review found P2 `AUDIO-COPY-SHARED-AREA-STAT`: shared-directory metadata
+changes from sibling copies must not invalidate its stable identity. Seeded
+repair `20261026T215020Z-62604` checks both observations for owner, type and
+0700 permissions with matching device/inode; source and regular-file checks
+remain strict. Independent R2 review is clear, with deterministic positive
+sibling-change and negative substitution/mode tests.
+
+Initial Swift `20261026T214624Z-59664` failed compilation of two test tasks;
+the repair keeps clips within Void-returning main-actor tasks and preserves
+the expected-error assertions. Swift `20261026T220013Z-67973` compiles and
+passes 44 of 45 tests, zero skips. Its new streaming test wrongly requires an
+empty Data value at EOF, where FileHandle may return nil; the exact EOF check
+is being repaired. Native preparation, pause/seek/stop lifetime, cancellation
+and shared-area race cases pass in this run, but this is not sandboxed app
+or playback-timing evidence.
+
+Privacy `20261026T220016Z-68742` fails on test-only text. R3 replaces that
+text; the scanner stays unchanged. Similarity `20261026T220019Z-69114` passes.
+Swift `20261026T215943Z-66708` could not access Docker from its sandbox and
+did not build. The authorized MG invocation above ran normally. These results
+leave U124/U162 and their integration gate open.
+
+Seeded R3 `20261026T220108Z-69939` changes only synthetic test names, the
+redundant comment and that EOF assertion. Independent review is clear; the
+other five seed files are byte-identical. Focused Swift
+`20261026T220242Z-70853` passes all 45 tests, zero skips. Privacy
+`20261026T220245Z-71584` and similarity `20261026T220300Z-72280` pass.
+
+VM snapshots `20261026T220307Z-72642`: the app-hosted decoder test passes.
+The descriptor controls still fail with -54; the production backend opens the
+same generated WAV, duration 2. Test totals: 84 pass, 1 image comparison fails,
+1 skip. The snapshot run remains failed. Limits, assertions and baselines
+stay unchanged. Full native import, review, reopen and export still need proof.

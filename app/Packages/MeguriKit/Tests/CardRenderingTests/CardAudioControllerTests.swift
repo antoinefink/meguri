@@ -901,6 +901,9 @@ enum NativeCardAudioChecks {
             fixture.add("/silent.mp3", audio.data, "audio/mpeg")
             let resolver = try await fixture.resolved()
             let file = try await resolver.openAudioName("silent.mp3")
+            // Prepare M11 input from the open descriptor now.
+            // The decoder must retain those bytes after the path changes.
+            _ = try await file.playbackURL()
             let outside = fixture.root.deletingLastPathComponent().appending(path: "meguri-audio-escape-\(UUID()).mp3")
             defer { try? FileManager.default.removeItem(at: outside) }
             try SpikeAssets.silentMP3(minimumBytes: 8 * 1024).data.write(to: outside)

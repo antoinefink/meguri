@@ -36,8 +36,13 @@ import Testing
             try Self.rewind(descriptor)
             let duplicate = Darwin.dup(descriptor)
             guard duplicate >= 0 else { throw Self.posixError() }
+            var opening = stat()
+            guard fstat(duplicate, &opening) == 0 else {
+                Darwin.close(duplicate)
+                throw Self.posixError()
+            }
             // Ownership transfers to MediaFile; close it even if preparation throws.
-            let media = MediaFile(descriptor: duplicate, name: "silence.wav", length: UInt64(wav.count))
+            let media = MediaFile(descriptor: duplicate, name: "silence.wav", opening: opening)
             do {
                 let clip = try await AVQueuePlayback().prepare(media)
                 backend = .success(duration: clip.duration)

@@ -136,7 +136,7 @@ public actor MediaPathResolver {
                 Darwin.close(fd)
                 continue
             }
-            return MediaFile(descriptor: fd, name: candidate, length: UInt64(info.st_size))
+            return MediaFile(descriptor: fd, name: candidate, opening: info)
         }
         throw Failure.missing
     }
@@ -147,25 +147,94 @@ public actor MediaFile {
     public nonisolated let name: String
     public nonisolated let length: UInt64
     private var descriptor: Int32
+    private let opening: MediaFileIdentity
+    private var playbackCopy: NativePlaybackCopy?
+    private var nativeInUse = false
+    private var closeRequested = false
 
-    init(descriptor: Int32, name: String, length: UInt64) { self.descriptor = descriptor; self.name = name; self.length = length }
-    deinit { if descriptor >= 0 { Darwin.close(descriptor) } }
+    init(descriptor: Int32, name: String, opening: stat) {
+        self.descriptor = descriptor; self.name = name; self.length = UInt64(opening.st_size)
+        self.opening = MediaFileIdentity(opening)
+    }
+    isolated deinit {
+        if descriptor >= 0 { Darwin.close(descriptor) }
+        playbackCopy = nil
+    }
 
     public func read(offset: UInt64, count: Int) throws -> Data {
-        guard descriptor >= 0, offset <= UInt64(Int64.max), count > 0 && count <= 65_536 else { throw MediaPathResolver.Failure.read }
+        guard descriptor >= 0, !closeRequested, offset <= UInt64(Int64.max), count > 0 && count <= 65_536 else { throw MediaPathResolver.Failure.read }
         var data = Data(count: count)
-        let received = data.withUnsafeMutableBytes { pread(descriptor, $0.baseAddress, count, off_t(offset)) }
+        var received: Int
+        repeat {
+            received = data.withUnsafeMutableBytes { pread(descriptor, $0.baseAddress, count, off_t(offset)) }
+        } while received < 0 && errno == EINTR && !Task.isCancelled
         guard received > 0 else { throw MediaPathResolver.Failure.read }
         data.count = received
         return data
     }
 
-    public func close() { if descriptor >= 0 { Darwin.close(descriptor); descriptor = -1 } }
+    public func close() {
+        closeRequested = true
+        // A close racing decoder initialization cannot unlink its input. The
+        // native owner must stop/revoke callbacks before ending this ownership.
+        guard !nativeInUse else { return }
+        if descriptor >= 0 { Darwin.close(descriptor); descriptor = -1 }
+        playbackCopy = nil
+    }
 
-    /// Only an already-open descriptor can reach AVFoundation. Never expose
-    /// a path that could be replaced by a symlink between lookup and play.
-    func playbackURL() throws -> URL {
-        guard descriptor >= 0 else { throw MediaPathResolver.Failure.closed }
-        return URL(fileURLWithPath: "/dev/fd/\(descriptor)")
+    func beginNativePlayback() throws -> URL {
+        guard !nativeInUse else { throw NativePlaybackCopy.Failure.copy }
+        let url = try playbackURL()
+        nativeInUse = true
+        return url
+    }
+
+    func requireNativePlaybackOpen() throws {
+        guard !closeRequested, nativeInUse, descriptor >= 0 else { throw CancellationError() }
+    }
+
+    func endNativePlayback() {
+        nativeInUse = false
+        close()
+    }
+
+    /// Actor-isolated synchronous work stays off MainActor and cannot race close.
+    /// The only reader is the retained descriptor; no collection path is reopened.
+    func playbackURL(in area: URL? = nil, hooks: NativePlaybackCopy.Hooks = .init()) throws -> URL {
+        try Task.checkCancellation()
+        guard descriptor >= 0, !closeRequested else { throw MediaPathResolver.Failure.closed }
+        if let playbackCopy { return playbackCopy.url }
+        let copy = try NativePlaybackCopy.create(extension: (name as NSString).pathExtension.lowercased(),
+            length: length, area: area, hooks: hooks,
+            validate: {
+                var info = stat()
+                guard fstat(self.descriptor, &info) == 0, self.opening == MediaFileIdentity(info) else {
+                    throw NativePlaybackCopy.Failure.copy
+                }
+            }, read: { try self.read(offset: $0, count: $1) })
+        try Task.checkCancellation()
+        playbackCopy = copy
+        return copy.url
+    }
+}
+
+/// Includes opening timestamps, not merely the descriptor's current length.
+nonisolated struct MediaFileIdentity: Equatable {
+    let device: dev_t
+    let inode: ino_t
+    let mode: mode_t
+    let owner: uid_t
+    let links: nlink_t
+    let length: off_t
+    let modifiedSeconds: Int
+    let modifiedNanos: Int
+    let changedSeconds: Int
+    let changedNanos: Int
+
+    init(_ info: stat) {
+        device = info.st_dev; inode = info.st_ino; mode = info.st_mode
+        owner = info.st_uid; links = info.st_nlink; length = info.st_size
+        modifiedSeconds = info.st_mtimespec.tv_sec; modifiedNanos = info.st_mtimespec.tv_nsec
+        changedSeconds = info.st_ctimespec.tv_sec; changedNanos = info.st_ctimespec.tv_nsec
     }
 }
