@@ -525,8 +525,7 @@ pub(crate) fn reconcile_with_media(
 }
 
 pub(crate) fn begin(
-    live: &Path,
-    candidate: &Path,
+    paths: (&Path, &Path),
     reason: crate::replace::ReplaceReason,
     binding: &AccountBinding,
     random: &dyn RandomSource,
@@ -534,6 +533,7 @@ pub(crate) fn begin(
     cancel: &dyn Fn() -> bool,
     before_record: impl FnOnce(),
 ) -> Result<(), StorageError> {
+    let (live, candidate) = paths;
     ensure(live, binding, random)?;
     let old_identity = fingerprint_native_checked(live, cancel, false)?;
     let (candidate_file, candidate_native) =
@@ -812,37 +812,37 @@ fn complete(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
     sidecar::update_document(&sidecar_path(live), |doc| {
         let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing completed journal"))?;
         bound(&state, binding)?;
-        if let Some(intent) = state.intent.take() {
-            if let Some(media) = intent.media {
-                let operation = serde_json::to_value(intent.operation).map_err(failure)?;
-                let record = state
-                    .extra
-                    .get_mut("collectionMediaReplacements")
-                    .and_then(Value::as_array_mut)
-                    .and_then(|records| {
-                        records
-                            .iter_mut()
-                            .find(|record| record.get("operation") == Some(&operation))
-                    })
-                    .ok_or_else(|| failure("missing media completion evidence"))?;
-                let candidate = record
-                    .get("candidateActive")
-                    .and_then(Value::as_bool)
-                    .ok_or_else(|| failure("missing media completion decision"))?;
-                let expected = if candidate { &intent.candidate } else { &intent.prior };
-                if &state.active != expected
-                    || record.get("root").and_then(Value::as_str) != Some(media.recovery_reference())
-                    || record.get("priorPublication") != Some(&serde_json::to_value(&intent.prior).map_err(failure)?)
-                    || record.get("candidatePublication")
-                        != Some(&serde_json::to_value(&intent.candidate).map_err(failure)?)
-                {
-                    return Err(failure("media completion publication differs"));
-                }
-                record
-                    .as_object_mut()
-                    .ok_or_else(|| failure("invalid media completion record"))?
-                    .insert("completed".into(), true.into());
+        if let Some(intent) = state.intent.take()
+            && let Some(media) = intent.media
+        {
+            let operation = serde_json::to_value(intent.operation).map_err(failure)?;
+            let record = state
+                .extra
+                .get_mut("collectionMediaReplacements")
+                .and_then(Value::as_array_mut)
+                .and_then(|records| {
+                    records
+                        .iter_mut()
+                        .find(|record| record.get("operation") == Some(&operation))
+                })
+                .ok_or_else(|| failure("missing media completion evidence"))?;
+            let candidate = record
+                .get("candidateActive")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| failure("missing media completion decision"))?;
+            let expected = if candidate { &intent.candidate } else { &intent.prior };
+            if &state.active != expected
+                || record.get("root").and_then(Value::as_str) != Some(media.recovery_reference())
+                || record.get("priorPublication") != Some(&serde_json::to_value(&intent.prior).map_err(failure)?)
+                || record.get("candidatePublication")
+                    != Some(&serde_json::to_value(&intent.candidate).map_err(failure)?)
+            {
+                return Err(failure("media completion publication differs"));
             }
+            record
+                .as_object_mut()
+                .ok_or_else(|| failure("invalid media completion record"))?
+                .insert("completed".into(), true.into());
         }
         put(doc, &state)
     })?;

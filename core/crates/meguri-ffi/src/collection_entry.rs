@@ -582,9 +582,15 @@ mod tests {
         use std::{fs, time::Duration};
         struct Clock;
         impl HostClock for Clock {
-            fn now_ms(&self) -> i64 { 1_894_701_600_000 }
-            fn offset_from_utc(&self, _: i64) -> i32 { 0 }
-            fn zone_id(&self) -> String { "UTC".into() }
+            fn now_ms(&self) -> i64 {
+                1_894_701_600_000
+            }
+            fn offset_from_utc(&self, _: i64) -> i32 {
+                0
+            }
+            fn zone_id(&self) -> String {
+                "UTC".into()
+            }
         }
         struct Space;
         impl DiskSpaceProvider for Space {
@@ -595,7 +601,9 @@ mod tests {
         struct Prepared(std::sync::mpsc::Sender<CollectionImportMedia>);
         impl crate::progress::ProgressListener for Prepared {
             fn on_progress(&self, update: crate::progress::ProgressUpdate) {
-                if let Some(media) = update.collection_media_prepared { let _ = self.0.send(media); }
+                if let Some(media) = update.collection_media_prepared {
+                    let _ = self.0.send(media);
+                }
             }
         }
         let root = tempfile::tempdir().unwrap();
@@ -604,19 +612,35 @@ mod tests {
         let db = source_dir.join("collection.anki2");
         let clock = Arc::new(FixedClock::new(1_894_701_600_000, meguri_model::clock::UtcOffset::UTC));
         meguri_engine::bootstrap::create(&db, clock.as_ref(), &SeededRandom::new(37)).unwrap();
-        let config = HostConfig::new(source_dir.clone(), root.path().join("source-backups"), root.path().join("source-widget"),
-            clock, Arc::new(SeededRandom::new(38)), Arc::new(StatvfsSpace));
+        let config = HostConfig::new(
+            source_dir.clone(),
+            root.path().join("source-backups"),
+            root.path().join("source-widget"),
+            clock,
+            Arc::new(SeededRandom::new(38)),
+            Arc::new(StatvfsSpace),
+        );
         let host = meguri_host::CoreHost::open(config.clone()).unwrap();
-        let payloads = [("image.png", b"own image payload".as_slice()), ("sound.wav", b"own audio payload".as_slice()),
-                        ("_unused.txt", b"unused".as_slice()), ("empty.txt", b"".as_slice())];
-        for (name, bytes) in payloads { assert_eq!(host.media().unwrap().add(name, bytes).unwrap(), name); }
+        let payloads = [
+            ("image.png", b"own image payload".as_slice()),
+            ("sound.wav", b"own audio payload".as_slice()),
+            ("_unused.txt", b"unused".as_slice()),
+            ("empty.txt", b"".as_slice()),
+        ];
+        for (name, bytes) in payloads {
+            assert_eq!(host.media().unwrap().add(name, bytes).unwrap(), name);
+        }
         let source = root.path().join("input.colpkg");
         let c = host.collection().unwrap();
         let reader = c.reader(ReaderRole::Maintenance).unwrap();
         let context = meguri_package::CollectionPackageWriteContext {
-            collection_directory: &source_dir, purpose: Purpose::Export,
-            finalisation: meguri_package::Finalisation::ExclusiveCreate, clock: config.clock.as_ref(),
-            random: config.random.as_ref(), space: config.disk_space_provider.as_ref(), is_cancelled: &|| false,
+            collection_directory: &source_dir,
+            purpose: Purpose::Export,
+            finalisation: meguri_package::Finalisation::ExclusiveCreate,
+            clock: config.clock.as_ref(),
+            random: config.random.as_ref(),
+            space: config.disk_space_provider.as_ref(),
+            is_cancelled: &|| false,
         };
         let plan = meguri_package::preflight_media_collection_export_from_live(&reader, &source, &context).unwrap();
         meguri_package::write_media_collection_export_from_live(&reader, &source, &context, plan).unwrap();
@@ -628,37 +652,67 @@ mod tests {
         fs::create_dir(&target).unwrap();
         let backups = root.path().join("backups");
         let location = CollectionLocation {
-            collection_directory: target.to_string_lossy().into_owned(), backups_directory: backups.to_string_lossy().into_owned(),
+            collection_directory: target.to_string_lossy().into_owned(),
+            backups_directory: backups.to_string_lossy().into_owned(),
             app_group_snapshot: root.path().join("widget").to_string_lossy().into_owned(),
             manual_transfer_directory: root.path().join("manual").to_string_lossy().into_owned(),
         };
         let events = runtime::engine().unwrap().stream().subscribe();
         let wait = |id| loop {
-            let event = events.recv_timeout(Duration::from_secs(20)).expect("public entry terminal event");
+            let event = events
+                .recv_timeout(Duration::from_secs(20))
+                .expect("public entry terminal event");
             if let meguri_engine::EventKind::JobFinished { id: actual, outcome } = &event.kind {
-                if actual.0 == id { assert_eq!(outcome, &meguri_engine::JobOutcome::Succeeded); break; }
+                if actual.0 == id {
+                    assert_eq!(outcome, &meguri_engine::JobOutcome::Succeeded);
+                    break;
+                }
             }
         };
-        let inspection = start_collection_inspection(source.to_string_lossy().into_owned(), location,
-            Arc::new(Clock), Arc::new(Space), 39).unwrap();
+        let inspection = start_collection_inspection(
+            source.to_string_lossy().into_owned(),
+            location,
+            Arc::new(Clock),
+            Arc::new(Space),
+            39,
+        )
+        .unwrap();
         wait(inspection.job.id);
-        let CollectionInspectOutcome::Ready { inspection: preview } = inspection.result.outcome().unwrap() else { panic!("real inspection ready") };
+        let CollectionInspectOutcome::Ready { inspection: preview } = inspection.result.outcome().unwrap() else {
+            panic!("real inspection ready")
+        };
         let facts = preview.facts().unwrap();
         let bytes = payloads.iter().map(|(_, b)| b.len() as u64).sum::<u64>();
         assert!(!facts.replacing_existing);
         assert_eq!((facts.notes, facts.cards, facts.reviews), (0, 0, 0));
         assert_eq!(facts.source_schema, 18);
         assert_eq!(facts.source_sha256, Sha256::digest(&original).to_vec());
-        assert_eq!((facts.media_count, facts.media_decoded_bytes), (payloads.len() as u64, bytes));
+        assert_eq!(
+            (facts.media_count, facts.media_decoded_bytes),
+            (payloads.len() as u64, bytes)
+        );
         assert!(!target.join("collection.anki2").exists());
         assert!(!target.join("collection.media").exists());
         let activation = start_collection_activation(preview.clone()).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         activation.job.progress.set_listener(Arc::new(Prepared(tx))).unwrap();
         wait(activation.job.id);
-        let CollectionActivationOutcome::Activated { activation: result } = activation.result.outcome().unwrap() else { panic!("real initial activation") };
-        assert_eq!(result.media, CollectionImportMedia { incoming: 4, decoded_bytes: bytes, reused: 0, added: 4, trashed: 0 });
-        let prepared = rx.recv_timeout(Duration::from_secs(5)).expect("retained actual prepared counts");
+        let CollectionActivationOutcome::Activated { activation: result } = activation.result.outcome().unwrap() else {
+            panic!("real initial activation")
+        };
+        assert_eq!(
+            result.media,
+            CollectionImportMedia {
+                incoming: 4,
+                decoded_bytes: bytes,
+                reused: 0,
+                added: 4,
+                trashed: 0
+            }
+        );
+        let prepared = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("retained actual prepared counts");
         assert_eq!(prepared, result.media);
         assert!(result.backup.is_none());
         assert!(!backups.exists() || fs::read_dir(&backups).unwrap().next().is_none());
@@ -667,11 +721,16 @@ mod tests {
         let service = imported.media().unwrap();
         let store = service.store();
         let baseline = store.sync_baseline().unwrap();
-        assert!(baseline.owner.is_none()); assert_eq!(baseline.usn, 0);
-        assert!(store.download_intents().unwrap().is_empty()); assert!(store.trash_entries().unwrap().is_empty());
+        assert!(baseline.owner.is_none());
+        assert_eq!(baseline.usn, 0);
+        assert!(store.download_intents().unwrap().is_empty());
+        assert!(store.trash_entries().unwrap().is_empty());
         let entries = store.entries().unwrap();
         assert_eq!(entries.len(), payloads.len());
-        assert_eq!(fs::read_dir(target.join("collection.media")).unwrap().count(), payloads.len());
+        assert_eq!(
+            fs::read_dir(target.join("collection.media")).unwrap().count(),
+            payloads.len()
+        );
         for (name, bytes) in payloads {
             assert_eq!(fs::read(target.join("collection.media").join(name)).unwrap(), bytes);
             let row = entries.iter().find(|e| e.name == name).unwrap();
@@ -679,9 +738,19 @@ mod tests {
             assert_eq!(row.size, bytes.len() as u64);
             assert_eq!(row.dirty, row.syncable());
             assert_eq!(row.sha1, source_entries.iter().find(|e| e.name == name).unwrap().sha1);
-            assert_eq!(row.sync_state, if bytes.is_empty() { meguri_storage::media::MediaSyncState::None } else { meguri_storage::media::MediaSyncState::Live });
+            assert_eq!(
+                row.sync_state,
+                if bytes.is_empty() {
+                    meguri_storage::media::MediaSyncState::None
+                } else {
+                    meguri_storage::media::MediaSyncState::Live
+                }
+            );
         }
-        assert!(start_collection_activation(preview).is_err(), "opaque confirmation is consumed once");
+        assert!(
+            start_collection_activation(preview).is_err(),
+            "opaque confirmation is consumed once"
+        );
         crate::lifecycle::close_collection().unwrap();
         assert_eq!(fs::read(source).unwrap(), original);
     }

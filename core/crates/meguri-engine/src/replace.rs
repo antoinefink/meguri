@@ -289,13 +289,21 @@ pub(crate) fn swap(
     // Every replacement retires queued tokens. Manual Import requires a new
     // publication decision; Export preserves the exact prior decision.
     let intent = media.as_ref().map(|m| m.intent.clone());
-    device_state::begin(live, &stage.path(), reason, binding, random, intent, &cancelled, || {
-        if let Some(m) = media.as_mut() {
-            m.published = true;
-            m.owner.recovery_required();
-            m.recovered.store(false, std::sync::atomic::Ordering::Release);
-        }
-    })
+    device_state::begin(
+        (live, &stage.path()),
+        reason,
+        binding,
+        random,
+        intent,
+        &cancelled,
+        || {
+            if let Some(m) = media.as_mut() {
+                m.published = true;
+                m.owner.recovery_required();
+                m.recovered.store(false, std::sync::atomic::Ordering::Release);
+            }
+        },
+    )
     .map_err(|e| {
         if cancelled() {
             ReplaceError::from(EngineError::Cancelled)
@@ -635,7 +643,7 @@ pub(crate) fn run_swap(
                         // R6 completion precedes cleanup. A cleanup failure only
                         // retains owned recovery bytes; it cannot undo activation.
                         let _ = m.intent.cleanup(&m.store);
-                        outcome.map_err(Into::into)
+                        outcome
                     }
                     Err(e) => Err(ReplaceError::MediaRecoveryRequired {
                         recovery_reference: m.intent.recovery_reference().to_owned(),

@@ -102,3 +102,11 @@ the intake. `core-test/20261026T184002Z-82234` passes both storage media-import
 tests with zero skips. The next lint run `20261026T183909Z-81099` clears those
 four findings and reports three engine findings. Those remain to repair; the
 full lint check is still failed.
+
+Filtered engine repair `20261026T184111Z-83050` closes those three findings;
+independent review, privacy `20261026T184614Z-88404` and similarity
+`20261026T184616Z-88652` pass. Replacement tests
+`core-test/20261026T184932Z-92406` pass 25 tests with zero skips.
+`core-format/20261026T184714Z-89479` formats the engine and new FFI test;
+the FFI delta contains only whitespace. Lint `20261026T184611Z-88142` now
+reports two redundant conversions in package inspection. These remain open.
