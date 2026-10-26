@@ -92,3 +92,13 @@ Team-signed snapshots `20261026T183100Z-71139` still fail the paint regression.
 That proposal was not retained in product source; its patch and failed evidence
 remain in the intake. Native workflow execution takes priority over another
 capture experiment. The snapshot failure stays open for the required gate.
+
+## Rust lint repairs
+
+`core-lint/20261026T183541Z-76631` reported four nested-if findings in storage.
+Filtered fix `20261026T183647Z-77453` preserves evaluation and error order;
+independent review is clear. Privacy and similarity receipts are retained in
+the intake. `core-test/20261026T184002Z-82234` passes both storage media-import
+tests with zero skips. The next lint run `20261026T183909Z-81099` clears those
+four findings and reports three engine findings. Those remain to repair; the
+full lint check is still failed.

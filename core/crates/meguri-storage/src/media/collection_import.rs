@@ -365,10 +365,10 @@ impl InitialMediaState {
         if found != self.files || native != self.native_files {
             return Err(invalid());
         }
-        if let Some(store) = store {
-            if !store.try_close()? {
-                return Err(invalid());
-            }
+        if let Some(store) = store
+            && !store.try_close()?
+        {
+            return Err(invalid());
         }
         self.remove_journal()
     }
@@ -632,11 +632,11 @@ impl MediaStore {
             return Err(invalid());
         }
         let mut guard = self.inner.db.lock().map_err(|_| invalid())?;
-        if let Some(db) = guard.take() {
-            if let Err((db, error)) = db.close() {
-                *guard = Some(db);
-                return Err(error.into());
-            }
+        if let Some(db) = guard.take()
+            && let Err((db, error)) = db.close()
+        {
+            *guard = Some(db);
+            return Err(error.into());
         }
         let bound = fs::symlink_metadata(&self.inner.journal)?;
         if !bound.is_file() || bound.nlink() != 1 || bound.dev() != identity.dev() || bound.ino() != identity.ino() {
@@ -1114,10 +1114,10 @@ impl CollectionMediaIntent {
                 if !m.is_dir() || (m.dev(), m.ino()) != v.native {
                     return Err(invalid());
                 }
-                if let Some(found) = present_checked(&store.trash_dir().join(&v.trash), cancel)? {
-                    if found != v.bytes {
-                        return Err(invalid());
-                    }
+                if let Some(found) = present_checked(&store.trash_dir().join(&v.trash), cancel)?
+                    && found != v.bytes
+                {
+                    return Err(invalid());
                 }
             }
         }
@@ -1188,10 +1188,10 @@ impl CollectionMediaIntent {
                 if present_checked(&store.trash_dir().join(&old.trash), cancel)?.is_some() {
                     require_checked(&store.trash_dir().join(&old.trash), &old.bytes, cancel)?;
                     // Its original name may now hold the candidate bytes.
-                    if let Some(found) = present_checked(&source, cancel)? {
-                        if old.name != a.incoming.name || found != a.bytes {
-                            return Err(invalid());
-                        }
+                    if let Some(found) = present_checked(&source, cancel)?
+                        && (old.name != a.incoming.name || found != a.bytes)
+                    {
+                        return Err(invalid());
                     }
                     Self::record_trash(store, old)?;
                 } else {
