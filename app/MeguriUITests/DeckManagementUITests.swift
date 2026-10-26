@@ -96,6 +96,170 @@ final class DeckManagementUITests: XCTestCase {
         XCTAssertFalse(element(app, "home.deckName.sheet").exists)
     }
 
+    func testGoToDeckNativeSearchNavigationAndKeyboardOwnership() throws {
+        let build = try BuildUnderTest.current()
+        guard build.hasHooks else { throw XCTSkip("generated fixtures require a hook build") }
+        let bundle = try build.bundleIdentifier
+        guard bundle.hasSuffix(".dev") else { throw XCTSkip("development container required") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(
+            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"),
+            now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false).arguments
+        app.launch()
+        defer { app.terminate() }
+        let enable = element(app, "home.policy.enable")
+        if enable.waitForExistence(timeout: 5) { try click(enable, app: app, bundle: bundle) }
+        XCTAssertTrue(element(app, "home.collection.createDeck").waitForExistence(timeout: 20))
+
+        let paths = ["QZ90::QZ91", "QZ90::QZ92"]
+        let pagePrefix = "home.deck.page."
+        let page = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", pagePrefix)).firstMatch
+        var pageIDs: [String] = []
+        for path in paths {
+            try app.bringToFront(bundleIdentifier: bundle)
+            app.typeKey("n", modifierFlags: [.command, .option])
+            let name = element(app, "home.deckName.name")
+            XCTAssertTrue(name.waitForExistence(timeout: 10))
+            try click(name, app: app, bundle: bundle)
+            try app.bringToFront(bundleIdentifier: bundle)
+            app.typeText(path)
+            XCTAssertTrue(waitForValue(name, path))
+            try click(element(app, "home.deckName.confirm"), app: app, bundle: bundle)
+            XCTAssertTrue(element(app, "home.deckName.done").waitForExistence(timeout: 10))
+            XCTAssertTrue(savedName(app, path))
+            try click(element(app, "home.deckName.done"), app: app, bundle: bundle)
+            XCTAssertTrue(element(app, "home.deckName.sheet").waitForNonExistence(timeout: 10))
+            if let previous = pageIDs.last {
+                XCTAssertTrue(element(app, previous).waitForNonExistence(timeout: 10))
+            }
+            XCTAssertTrue(page.waitForExistence(timeout: 10))
+            let identifier = page.identifier
+            XCTAssertTrue(identifier.hasPrefix(pagePrefix))
+            XCTAssertFalse(identifier.dropFirst(pagePrefix.count).isEmpty)
+            pageIDs.append(identifier)
+        }
+        XCTAssertNotEqual(pageIDs[0], pageIDs[1])
+        // Derive picker row identities only from the pages the real create flow opened.
+        let rowIDs = pageIDs.map { "home.goToDeck.deck." + $0.dropFirst(pagePrefix.count) }
+        let picker = app.sheets.firstMatch
+        let sheet = element(app, "home.goToDeck.sheet")
+        let search = picker.searchFields.firstMatch
+        let list = picker.descendants(matching: .any).matching(identifier: "home.goToDeck.list").firstMatch
+        let go = picker.buttons.matching(identifier: "home.goToDeck.go").firstMatch
+        let firstRow = picker.descendants(matching: .any).matching(identifier: rowIDs[0]).firstMatch
+        let secondRow = picker.descendants(matching: .any).matching(identifier: rowIDs[1]).firstMatch
+
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("o", modifierFlags: [.command, .shift])
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.sheets.count, 1)
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertEqual(picker.searchFields.count, 1)
+        XCTAssertTrue(waitForValue(search, ""))
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        XCTAssertTrue(go.waitForExistence(timeout: 10))
+        try click(search, app: app, bundle: bundle)
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeText("QZ90 QZ91")
+        XCTAssertTrue(waitForValue(search, "QZ90 QZ91"))
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForValue(firstRow, paths[0]))
+        XCTAssertFalse(firstRow.frame.isEmpty)
+        XCTAssertTrue(list.frame.contains(firstRow.frame))
+        XCTAssertTrue(firstRow.isHittable)
+        XCTAssertFalse(secondRow.exists)
+        XCTAssertTrue(go.isEnabled)
+
+        let resized = expectation(description: "The main window resized with the picker query retained")
+        let center = DistributedNotificationCenter.default()
+        let observer = center.addObserver(forName: Notification.Name(bundle + ".testhooks.windowResized"),
+            object: nil, queue: .main) { _ in resized.fulfill() }
+        defer { center.removeObserver(observer) }
+        center.postNotificationName(Notification.Name(bundle + ".testhooks.resizeWindow"),
+            object: "minimum", userInfo: nil, deliverImmediately: true)
+        wait(for: [resized], timeout: 10)
+        XCTAssertEqual(app.sheets.count, 1)
+        XCTAssertTrue(waitForValue(search, "QZ90 QZ91"))
+        XCTAssertTrue(firstRow.exists)
+        XCTAssertFalse(firstRow.frame.isEmpty)
+        XCTAssertTrue(list.frame.contains(firstRow.frame))
+        XCTAssertTrue(firstRow.isHittable)
+        XCTAssertTrue(go.isEnabled)
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(element(app, pageIDs[0]).waitForExistence(timeout: 10))
+
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("o", modifierFlags: [.command, .shift])
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.sheets.count, 1)
+        XCTAssertTrue(waitForValue(search, ""))
+        try click(search, app: app, bundle: bundle)
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeText("QZ90 QZ91")
+        XCTAssertTrue(waitForValue(search, "QZ90 QZ91"))
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 10))
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeText("/")
+        XCTAssertTrue(waitForValue(search, "QZ90 QZ91/"))
+        // More text must reach the same native editor after slash, without refocusing it.
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeText("QZ93")
+        XCTAssertTrue(waitForValue(search, "QZ90 QZ91/QZ93"))
+        XCTAssertEqual(app.sheets.count, 1)
+        XCTAssertTrue(sheet.exists)
+        XCTAssertTrue(list.exists)
+        XCTAssertTrue(firstRow.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(secondRow.waitForNonExistence(timeout: 10))
+        XCTAssertFalse(go.isEnabled)
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(element(app, pageIDs[0]).waitForExistence(timeout: 10))
+
+        // The visible toolbar action must expose the same native picker and real rows.
+        let toolbarAction = app.toolbars.buttons.matching(identifier: "home.collection.goToDeck").firstMatch
+        XCTAssertTrue(toolbarAction.waitForExistence(timeout: 10))
+        XCTAssertTrue(toolbarAction.isHittable)
+        try click(toolbarAction, app: app, bundle: bundle)
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.sheets.count, 1)
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForValue(search, ""))
+        try click(search, app: app, bundle: bundle)
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeText("QZ90")
+        XCTAssertTrue(waitForValue(search, "QZ90"))
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 10))
+        XCTAssertTrue(secondRow.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForValue(secondRow, paths[1]))
+        XCTAssertFalse(secondRow.frame.isEmpty)
+        XCTAssertTrue(list.frame.contains(secondRow.frame))
+        XCTAssertTrue(secondRow.isHittable)
+        try click(firstRow, app: app, bundle: bundle)
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey(XCUIKeyboardKey.downArrow.rawValue, modifierFlags: [])
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(element(app, pageIDs[1]).waitForExistence(timeout: 10))
+        XCTAssertFalse(element(app, pageIDs[0]).exists)
+
+        // Exercise the deck page's native key path once, without forcing a responder.
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeText("/")
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10), "Slash from the deck page must reach Home's native focus path")
+        XCTAssertEqual(app.sheets.count, 1)
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        try click(picker.buttons.matching(identifier: "home.goToDeck.cancel").firstMatch, app: app, bundle: bundle)
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(element(app, pageIDs[1]).waitForExistence(timeout: 10))
+    }
+
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
