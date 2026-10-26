@@ -467,41 +467,71 @@ import notify
             }
             try click(newFolder, app, bundle)
             let commitName = NSPredicate(format: "label IN %@", ["Create", "Done"])
-            func nameDialog() -> XCUIElement? {
-                (app.alerts.allElementsBoundByIndex + app.sheets.allElementsBoundByIndex).first { dialog in
+            func nameDialogs() -> [XCUIElement] {
+                (app.alerts.allElementsBoundByIndex + app.sheets.allElementsBoundByIndex).filter { dialog in
                     dialog.exists && dialog.textFields.count == 1
                         && (dialog.label == "New Folder" || dialog.staticTexts["New Folder"].exists
                             || dialog.navigationBars["New Folder"].exists)
                         && dialog.buttons.matching(commitName).count == 1
                 }
             }
-            try waitForState("New Folder must present its native name dialog and Create or Done", {
-                guard let dialog = nameDialog() else { return false }
-                return actionable(dialog.textFields.firstMatch)
+            func inlineNameField() -> XCUIElement? {
+                guard self.nativeExportFolderIsOpen("RF2 Import Tests", app),
+                      app.keyboards.firstMatch.exists, !app.alerts.firstMatch.exists,
+                      nameDialogs().isEmpty else { return nil }
+                // Exclude Settings fields from the inline folder editor candidates.
+                let settingsFields = self.element(app, "settings.root.content").descendants(matching: .textField)
+                guard !settingsFields.allElementsBoundByIndex.contains(where: { actionable($0) }) else { return nil }
+                let fields = app.descendants(matching: .textField).allElementsBoundByIndex.filter { actionable($0) }
+                guard fields.count == 1 else { return nil }
+                let cellFields = app.cells.descendants(matching: .textField).allElementsBoundByIndex
+                    .filter { actionable($0) }
+                return cellFields.count == 1 ? cellFields.first : fields.first
+            }
+            try waitForState("New Folder must offer one known name dialog or the unique inline Files name editor", {
+                let dialogs = nameDialogs()
+                return (dialogs.count == 1 && actionable(dialogs[0].textFields.firstMatch))
+                    || (dialogs.isEmpty && inlineNameField() != nil)
             })
-            guard let dialog = nameDialog() else {
+            let dialogs = nameDialogs()
+            if dialogs.count == 1, let dialog = dialogs.first,
+               actionable(dialog.textFields.firstMatch) {
+                let field = dialog.textFields.firstMatch
+                let previous = field.value as? String ?? ""
+                try click(field, app, bundle)
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count) + stem)
+                try waitForState("The native new-folder dialog must contain the exact safe nonce stem", {
+                    field.value as? String == stem
+                })
+                let commit = dialog.buttons.matching(commitName).firstMatch
+                try waitForState("The native new-folder dialog must enable Create or Done", { actionable(commit) })
+                try click(commit, app, bundle)
+                try waitForState("Creating the child must dismiss the dialog and reveal that exact folder", {
+                    !dialog.exists && (self.nativeExportFolderIsOpen(stem, app)
+                        || (self.nativeExportFolderIsOpen("RF2 Import Tests", app) && childTarget() != nil))
+                })
+            } else if dialogs.isEmpty, let field = inlineNameField() {
+                // Native New Folder has already focused and selected the entire inline name.
+                field.typeText(stem)
+                try waitForState("The inline Files name must equal the exact safe nonce stem before Return", {
+                    inlineNameField() != nil && field.value as? String == stem
+                })
+                field.typeText("\n")
+                try waitForState("Return must finish inline naming and reveal the exact native child", {
+                    !app.keyboards.firstMatch.exists && (self.nativeExportFolderIsOpen(stem, app)
+                        || (self.nativeExportFolderIsOpen("RF2 Import Tests", app) && childTarget() != nil))
+                })
+            } else {
                 capturePicker(app)
-                XCTFail("The loaded native new-folder name dialog must remain available")
+                XCTFail("The loaded native new-folder naming mode must remain unique and actionable")
                 throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
             }
-            let field = dialog.textFields.firstMatch
-            let previous = field.value as? String ?? ""
-            try click(field, app, bundle)
-            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count) + stem)
-            try waitForState("The native new-folder dialog must contain the exact safe nonce stem", {
-                field.value as? String == stem
-            })
-            let commit = dialog.buttons.matching(commitName).firstMatch
-            try waitForState("The native new-folder dialog must enable Create or Done", { actionable(commit) })
-            try click(commit, app, bundle)
-            try waitForState("Creating the child must dismiss the dialog and reveal that exact folder", {
-                !dialog.exists && (self.nativeExportFolderIsOpen(stem, app)
-                    || (self.nativeExportFolderIsOpen("RF2 Import Tests", app) && childTarget() != nil))
-            })
         }
         if !nativeExportFolderIsOpen(stem, app) {
-            try waitForState("RF2 Import Tests must offer the exact existing nonce child", { childTarget() != nil })
-            guard let target = childTarget() else {
+            try waitForState("RF2 Import Tests must offer the exact existing nonce child", {
+                self.nativeExportFolderIsOpen("RF2 Import Tests", app) && childTarget() != nil
+            })
+            guard nativeExportFolderIsOpen("RF2 Import Tests", app), let target = childTarget() else {
                 capturePicker(app)
                 XCTFail("The exact native nonce child must remain actionable")
                 throw NSError(domain: "CollectionEntryJourneyTests", code: 5)

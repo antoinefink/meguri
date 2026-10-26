@@ -1646,3 +1646,18 @@ editor capture; the test incorrectly expects a modal dialog. Keep that native
 failure open and use its observed inline editor in the focused repair. No
 release, unit or milestone acceptance changes. Native deck-name work can reuse
 the existing core while these first-review workflow checks remain pending.
+# Native destination verification deferred during app delivery (2026-10-26)
+
+The iPhone run `ui-test/20261026T011056Z-33684` failed one test, with no skips:
+`testNativeMediaExportCancelSaveReplace` could not identify the inline native
+Files folder-name editor. Its result and captures are retained. The native
+Mac destination run `ui-test/20261026T000312Z-96495` passed, but it does not prove
+the phone or iPad destination workflow. The iPad media destination check remains
+unrun. No acceptance or gate pass is inferred from these results.
+
+Further native-picker automation repair is deferred while the next app slice
+adds deck-name actions. The independent package check
+`package-interop-check/20261026T002734Z-14327` also remains failed with
+`pre-client-database-difference`; no compatible-client import proof is claimed.
+These checks remain required before RF4/E7 acceptance. Sync protocol work remains
+parked under the recorded app-first execution decision.
