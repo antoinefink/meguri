@@ -143,3 +143,10 @@ launch, close-request and protected credential tests. The image has the requeste
 dimensions and native background. The overall run still fails 30 comparisons
 against old images, with 195 cells deferred. No baselines or approvals changed.
 The rendered import form also needs a better native layout before visual acceptance.
+
+The next UI change uses only SwiftUI's grouped form style and form presentation
+sizing. Source review is clear; privacy and similarity receipts are retained.
+`snapshots/20261026T195310Z-36566` compiles, passes the paint and app-hosted
+checks, and retains 30 old-image differences. Inspection of normal, empty and
+recovery states shows wrapping and native section groups. No controls or sizing
+metrics were customized. Independent visual review and native actions are pending.

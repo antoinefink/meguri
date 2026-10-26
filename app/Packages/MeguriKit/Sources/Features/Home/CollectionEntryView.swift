@@ -253,12 +253,14 @@ struct CollectionEntryContent: View {
                         .accessibilityIdentifier("onboarding.collectionImport.cancel")
                 }
             }
+            .formStyle(.grouped)
             .accessibilityIdentifier("onboarding.collectionImport.content")
             .navigationTitle("Import Collection")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
         }
+        .presentationSizing(.form)
         .interactiveDismissDisabled(presentation.busy || presentation.requiresRecovery)
     }
 
