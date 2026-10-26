@@ -141,6 +141,8 @@ folder. Include every regular media file: externally added, unreferenced,
 `_`-prefixed, zero-byte and larger than 100 MiB. The journal and the references
 in notes, templates or CSS must not restrict this list. Read no other media
 root, trash, staging area, child folder or symbolic-link destination.
+This limits payload selection. The protected metadata checks in E7.2 add no
+files to the archive.
 
 Apply `media/media-files#M8` only to exclude operating-system metadata. Flat
 subdirectories are not media (`#M1`); never recurse into them. A symbolic link,
@@ -171,6 +173,38 @@ or pass them to Swift. Open each exact directory entry relative to the
 validated media root without following links, require a regular file and keep
 its descriptor while copying. Reject any alias of the collection, its SQLite
 sidecars, operation output or internal staging.
+
+P16/R6 may leave directories and plans inside `media.staging`; permit that tree
+as protected state. Freeze the retained trees present at export preflight.
+A nested directory is not by itself an export error.
+Visit its files and directories through directory descriptors, with finite
+traversal bounds and no symbolic-link resolution. For every entry, save its
+native identity, name and containing-directory binding. On entering a directory,
+prove that its opened identity matches the recorded parent entry. Repeat that
+binding check when leaving. Keep the full inventory and check it after capture
+and after the final package digest, before Ready. Any addition, removal, rename,
+replacement, metadata change or ancestor rebinding fails the attempt wherever
+it occurs. Checking only the root timestamp cannot establish this proof.
+
+Retain the ceiling of 400,000 protected-entry visits, including repeated inode
+identities. Use finite limits for depth, memory and simultaneous descriptors.
+Observe cancellation while walking and while checking the saved inventory.
+An unreadable entry, link, special file, changed binding or media hard link to
+any protected descendant requires refusal. Cancellation or any exceeded limit
+also stops export. No branch may be omitted to obtain a successful result.
+Use the current invalid-source, changed-source, cancellation and limit results;
+public host/FFI behavior stays the same. Plans, journals, recovery data, staging
+and trash must never become archive payloads. Leave retained plans and saved
+media untouched. P16/R6 continue to define storage, retention and recovery rules;
+export adds neither another layout nor a cleanup pass.
+
+Do not apply this frozen-tree rule to the current export's U32 operation stage
+or output. Its owner may create these after preflight, write during capture or
+package creation, and remove staging before delivery. Keep ownership, binding
+and alias checks for every such item. Accept its owner's writes and stage
+cleanup under E3. Refuse a different owner, changed authority or replaced
+binding. Validate the finished artifact through E3; the writable output is
+not part of the retained source inventory.
 
 Record file identity, length and high-resolution modification/change metadata.
 Check them around each capture and again before Ready. Rescan the root's exact
@@ -223,6 +257,15 @@ media bytes/names and journal/pending state throughout.
 
 Extend every applicable E6 focused check to the complete E7 and P15 contract,
 including each refusal and failure outcome and all safety invariants.
+Import generated media through the actual public host, close and reopen without
+reseeding, then export through that host. Keep R6 plans and any saved old media
+present; compare their identities and bytes before/after. Independently check
+the archive against fixed media/review expectations and exclude all internal
+state. A directly assembled export fixture cannot prove this sequence.
+Cover nested hard-link aliases, symlinks and special files. Change nested names,
+contents, directory bindings and ancestors between inventory, capture and Ready;
+require safe refusal. Exercise cancellation and each traversal bound while
+proving that retained recovery evidence was not changed.
 
 Native VM checks on Mac, iPhone and iPad must save a media-inclusive artifact
 through the actual destination flow and validate the resulting bytes. Replace

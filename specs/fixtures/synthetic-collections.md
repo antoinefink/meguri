@@ -481,3 +481,35 @@ Load and display the imported PNG through the real card renderer. Use production
 Bind the saved native package and each step receipt to the frozen input and expected files, platform, built app and run. Check every frozen file hash again. Fail if a receipt is absent or differs, input changes, a seed or action was not declared, an answer repeats, or the owner is old. Do not fix the expected files after the run. Send the actual saved file and expected states fixed before launch to the existing strict independent archive and compatible-client checks. Compare every table, cell, storage class and stamp, and every media name and byte. Allow only the declared R7/U44 changes. Do not mask cells or omit timing fields. Neither the later app nor the decoded package may supply expected state. Keep all E7.4 client evidence and all original checks.
 
 Check the fixture and input record together, and refuse changes to either. Test that actual calls receive their declared seeds and admit the answer only once. Test the declared elapsed value while keeping real deadlines. Check R7, the state after the answer and reopen, and the displayed media. Complete the native case on all three platforms. Keep the selectors and evidence for the collection-only cases and F11.1. Replay or export alone cannot complete this case, U124/U162 or any milestone.
+
+**Mac phase attachments.** Under `MEGURI_TEST_HOOKS` and the `.dev` check, this
+synthetic case may send stored phase bytes from the app to the UI test runner
+when their sandboxes prevent direct access. A fixed enum admits only `import`,
+`accepted`, `closed` and `reopened`. Open the corresponding immutable file from
+the evidence directory bound to the run; follow no links. Verify identity and
+length before and after reading. Enforce 128 KiB per file, bounded work and a
+size limit on the encoded notification object string. Reuse notifications with
+`userInfo: nil` and `deliverImmediately` for requests and replies.
+Allow no arbitrary path, extra entitlement, server, general transport or mode
+outside this synthetic case.
+
+Each side must verify the active hook's identity, the case and platform fixed
+before launch, and a nonce newly issued for this request.
+Require one matching response; a missing, duplicate,
+cancelled, mismatched or retired-owner response fails. The file's historical
+owner is separate from this transport check. Earlier phases may retain the old
+launch's owner after reopening; do not demand equality with the current owner.
+Keep their contents unchanged for the existing owner/admission proof checks.
+Send the stored bytes verbatim instead of generating JSON from live records.
+
+Use `XCTAttachment(data:uniformTypeIdentifier:)` with `public.json` to retain the
+received bytes under `native-review-import.json`, `native-review-accepted.json`,
+`native-review-closed.json` and `native-review-reopened.json`. Together with
+`native-review-app.json` and the package, these remain the six required named
+xcresult attachments for Mac capture. The package still uses the runner-owned
+native Save URL. Neither runner nor capture script may substitute container
+reads or another evidence source. Check exact equality between the stored file,
+response and retained attachment. Controls must fail for an absent or changed
+file, excess size, wrong phase or wrong request binding/nonce. Verify that valid
+records from the earlier launch transfer unchanged after reopening, while a
+reply from its retired transport owner is refused.

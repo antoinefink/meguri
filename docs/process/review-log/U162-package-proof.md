@@ -446,3 +446,28 @@ strict bridge suites pass. Privacy `20261026T222123Z-87568` and similarity
 `20261026T222124Z-87761` pass. The actual Mac full workflow still needs a fresh
 run on this repair. Already-posted messages cannot be retracted by JavaScript;
 any separately observed late delivery remains subject to M8.
+
+## Native Mac R8 — export and receipt gaps
+
+Start `dd0f5609`. UI run `20261026T222441Z-90990` reaches actual image decode,
+completed native audio, one accepted answer, close and reopen. The strict
+media check now passes. The full test fails at export preparation with
+`exportSourceInvalid`; no package or complete chain proof is accepted.
+
+Independent source diagnosis identifies the retained R6 directory under
+`media.staging`. Export's protected inventory rejects its directory type,
+although P16/R6 must retain that recovery evidence. The repair must inventory
+its contents safely and preserve them, rather than remove or ignore them.
+
+The same run reports 513 errors while XCTest copies four URL attachments
+from the app sandbox. An attachment name in the log does not prove that its
+bytes reached xcresult. A scoped test-only receipt handoff is needed; keep
+the Mac proof's exact-file xcresult contract and all validation unchanged.
+
+The E7/F11.2 clarification starts at `dd0f5609`, spec-writer session
+`s-20261026T041939Z-a8f043ce`. R1 finds P2 `SPEC-R1-F1`: retained-tree checks
+must allow the current export owner's mutable output lifecycle. R2 and final
+wording review are clear after this scope fix. Privacy
+`20261026T223846Z-99466` passes; three failed wording scans remain retained.
+No scanner exceptions or acceptance changes are introduced. Implementation
+and native proof remain open.
