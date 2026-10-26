@@ -306,8 +306,8 @@ pub(crate) fn open(mut file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<
     suffix.extend_from_slice(&44_u64.to_le_bytes());
     suffix.extend_from_slice(&[45, 0, 45, 0]);
     suffix.extend_from_slice(&[0; 8]);
-    suffix.extend_from_slice(&u64::from(needed).to_le_bytes());
-    suffix.extend_from_slice(&u64::from(needed).to_le_bytes());
+    suffix.extend_from_slice(&needed.to_le_bytes());
+    suffix.extend_from_slice(&needed.to_le_bytes());
     suffix.extend_from_slice(&central_size.to_le_bytes());
     suffix.extend_from_slice(&dir.start.to_le_bytes());
     suffix.extend_from_slice(b"PK\x06\x07");

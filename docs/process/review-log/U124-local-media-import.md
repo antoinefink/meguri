@@ -111,3 +111,10 @@ independent review, privacy `20261026T184614Z-88404` and similarity
 the FFI delta includes formatter line breaks and trailing commas. Lint
 `20261026T184611Z-88142` now
 reports two redundant conversions in package inspection. These remain open.
+
+Those conversions are removed by filtered fix `20261026T185204Z-96098`.
+Independent review, privacy `20261026T185314Z-97467` and similarity
+`20261026T185317Z-97713` pass. Inspection tests
+`core-test/20261026T185626Z-953` pass all 26 tests with zero skips.
+Lint `20261026T185311Z-97209` reaches four further findings in the FFI and
+test targets. They remain open; no lint failure is suppressed.
