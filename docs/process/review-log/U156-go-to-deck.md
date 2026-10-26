@@ -133,3 +133,20 @@ resize, Return, editor slash and Escape, then fails at line 258: clicking the
 first result and pressing Down/Return opens the first actual deck rather than
 the second. A scoped fixture-only failure hierarchy confirms the first page ID.
 Open item: List keyboard selection. U156 remains unaccepted.
+
+## Mac results focus
+
+Supplemental base: `27bb6899`. Filtered fixer
+`cleanroom/20261026T071554Z-12263` changes only the Mac query/results FocusState
+and requests native List focus on a simultaneous tap. It does not assign the
+selection or handle arrow keys. Independent focus R1 is clear in source.
+Privacy `20261026T072541Z-20804` and similarity `20261026T072541Z-21037` pass.
+
+The first invocation, `ui-test/20261026T072337Z-17469`, stopped before building
+because its restricted environment could not reach Docker. Readiness check
+`doctor/20261026T072429Z-18463` verifies OrbStack and VM access; the existing
+Apple-account warning remains. The actual runtime run is
+`ui-test/20261026T072442Z-19005`: the unchanged first-row click, Down and Return
+now opens the second actual deck page. Every earlier phase passes. The run
+fails only at line 264, where slash from that page fails to open the picker.
+That shortcut remains open; this is not a passing test or accepted unit.

@@ -112,7 +112,8 @@ public struct GoToDeckView: View {
     @Bindable private var model: GoToDeckModel
     @Environment(\.shellLayout) private var layout
     #if os(macOS)
-    @FocusState private var queryFocused: Bool
+    private enum InputFocus: Hashable { case query, results }
+    @FocusState private var inputFocus: InputFocus?
     #endif
 
     public init(collection: ReviewCollection) {
@@ -127,8 +128,8 @@ public struct GoToDeckView: View {
                     Text("Search Decks", bundle: .module)
                 }
                 .accessibilityIdentifier("home.goToDeck.search")
-                .focused($queryFocused)
-                .onAppear { queryFocused = true }
+                .focused($inputFocus, equals: .query)
+                .onAppear { inputFocus = .query }
                 .onSubmit(of: .text) { model.submit(layout: layout) }
                 #endif
                 if model.loading {
@@ -149,6 +150,12 @@ public struct GoToDeckView: View {
                                 .accessibilityIdentifier("home.goToDeck.deck.\(entry.id)")
                         }
                     }
+                    #if os(macOS)
+                    .focused($inputFocus, equals: .results)
+                    .simultaneousGesture(TapGesture().onEnded {
+                        inputFocus = .results
+                    })
+                    #endif
                     .accessibilityIdentifier("home.goToDeck.list")
                     .overlay {
                         if model.matches.isEmpty {
