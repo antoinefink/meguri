@@ -1829,8 +1829,19 @@ fn rf4_interrupted_exclusions_are_rechecked_and_edited_eligible_files_upload_on_
     assert_eq!(partial.media.counters.oversized, ["large.bin"]);
     assert_eq!(partial.media.counters.uploaded_files, 1);
     host.close().unwrap();
+    let folder = fs::File::open(&directory).unwrap();
+    let previous_mtime = folder.metadata().unwrap().modified().unwrap();
     fs::write(directory.join("empty.bin"), b"now eligible").unwrap();
     fs::write(directory.join("large.bin"), b"also eligible").unwrap();
+    // In-place writes leave the folder marker unchanged. Make these outside
+    // edits directory-visible so the marker-aware resume rechecks exclusions.
+    let edited_mtime = previous_mtime + std::time::Duration::from_secs(1);
+    folder
+        .set_times(fs::FileTimes::new().set_modified(edited_mtime))
+        .unwrap();
+    assert_eq!(folder.metadata().unwrap().modified().unwrap(), edited_mtime);
+    assert_ne!(edited_mtime, previous_mtime);
+    drop(folder);
     let restarted = CoreHost::open(config).unwrap();
     settle(&restarted);
     let preview = media_preview(&restarted, &op);
