@@ -974,3 +974,144 @@ mod host_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod media_adapter_tests {
+    use super::super::storage::SessionCollection;
+    use super::*;
+    use meguri_storage::media::{MediaBaselineOwner, MediaSyncState};
+
+    fn load(text: &str) -> (tempfile::TempDir, LoadedScenario) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("media.yaml");
+        std::fs::write(&path, text).unwrap();
+        (dir, crate::scenario::load(&path).unwrap())
+    }
+
+    #[test]
+    fn media_quick_check_preserves_marker_fast_path_and_exact_pending_values() {
+        let (_dir, loaded) = load(
+            "id: media/quick-adapter\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\n\
+             setup: {media_files: [{name: x, text: x}]}\nsteps:\n\
+             - observe: [media_quick_check]\n\
+             - media_outside: [{name: x, text: hello}]\n\
+             - observe: [media_quick_check]\n\
+             - observe: [media_pending]\n\
+             - advance: 1s\n\
+             - media_outside: [{name: x, remove: true}]\n\
+             - observe: [media_quick_check]\n",
+        );
+        for hosted in [false, true] {
+            let executor = MeguriExecutor::new();
+            let mut session = executor.session(&loaded, None).unwrap();
+            executor.new_collection(&mut session).unwrap();
+            if hosted {
+                session.engine_collection().unwrap();
+            }
+            executor.run_setup(&mut session).unwrap();
+            let steps = &loaded.scenario.steps;
+            let original = json!({"media_quick_check":{"x":"11f6ad8ec52a2984abaafd7c3b516503785c2072"}});
+            assert_eq!(executor.step(&mut session, &steps[0]).unwrap(), original);
+            let store = session.storage.media(session.clock.clone()).unwrap();
+            let before = store.diagnostics();
+            executor.step(&mut session, &steps[1]).unwrap();
+            assert_eq!(executor.step(&mut session, &steps[2]).unwrap(), original);
+            let after = store.diagnostics();
+            assert_eq!((after.scans, after.hashes), (before.scans, before.hashes));
+            assert_eq!(
+                executor.step(&mut session, &steps[3]).unwrap(),
+                json!({"media_pending":{"x":"aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d"}})
+            );
+            assert!(store.diagnostics().scans > after.scans);
+            assert!(store.diagnostics().hashes > after.hashes);
+            executor.step(&mut session, &steps[4]).unwrap();
+            executor.step(&mut session, &steps[5]).unwrap();
+            assert_eq!(
+                executor.step(&mut session, &steps[6]).unwrap(),
+                json!({"media_quick_check":{"x":null}})
+            );
+        }
+    }
+
+    #[test]
+    fn media_reset_retains_files_facts_owner_and_trash_without_network_and_obeys_host_job_exclusion() {
+        let (_dir, loaded) = load(
+            "id: media/reset-adapter\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\n\
+             setup: {media_files: [{name: keep, text: hello}, {name: gone, text: x}]}\nsteps:\n\
+             - observe: [media_quick_check]\n\
+             - trash_media: {names: [gone]}\n\
+             - media_reset: {}\n\
+             - observe: [media_quick_check]\n",
+        );
+        let executor = MeguriExecutor::new();
+        let mut session = executor.session(&loaded, None).unwrap();
+        executor.new_collection(&mut session).unwrap();
+        // trash_media promotes, so exercise reset against that same hosted owner.
+        session.engine_collection().unwrap();
+        let store = session.storage.media(session.clock.clone()).unwrap();
+        store
+            .bind_sync_owner(&MediaBaselineOwner::new("synthetic-owner"))
+            .unwrap();
+        executor.run_setup(&mut session).unwrap();
+        let steps = &loaded.scenario.steps;
+        executor.step(&mut session, &steps[0]).unwrap();
+        executor.step(&mut session, &steps[1]).unwrap();
+        let facts = store.sync_entry("keep").unwrap().unwrap();
+        let trash = store.trash_entries().unwrap();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(
+            store.sync_entry("gone").unwrap().unwrap().sync_state,
+            MediaSyncState::Deleted
+        );
+        let initial_baseline = store.sync_baseline().unwrap();
+        // Seed a prior cursor through the production page-commit API, offline.
+        store.commit_media_page(&initial_baseline, 7, &[]).unwrap();
+        let baseline = store.sync_baseline().unwrap();
+        assert_eq!(baseline.usn, 7);
+        let SessionCollection::Hosted { host, .. } = session.storage.collection().unwrap() else {
+            panic!("expected hosted media");
+        };
+        let media = host.media().unwrap();
+        for kind in [
+            meguri_engine::media::MediaJobKind::Sync,
+            meguri_engine::media::MediaJobKind::CheckMedia,
+        ] {
+            let lease = media.try_job(kind).unwrap();
+            assert!(executor.step(&mut session, &steps[2]).is_err());
+            assert!(executor.step(&mut session, &steps[3]).is_err());
+            assert_eq!(store.sync_baseline().unwrap(), baseline);
+            assert_eq!(store.sync_entry("keep").unwrap().unwrap(), facts);
+            drop(lease);
+        }
+        assert_eq!(executor.step(&mut session, &steps[2]).unwrap(), json!({}));
+        let reset_baseline = store.sync_baseline().unwrap();
+        assert_eq!(reset_baseline.owner, baseline.owner);
+        assert_eq!(reset_baseline.usn, 0);
+        assert!(reset_baseline.epoch > baseline.epoch);
+        let reset_facts = store.sync_entry("keep").unwrap().unwrap();
+        assert_eq!(
+            (
+                &reset_facts.sha1,
+                reset_facts.size,
+                reset_facts.mtime_secs,
+                reset_facts.mtime_nanos
+            ),
+            (&facts.sha1, facts.size, facts.mtime_secs, facts.mtime_nanos)
+        );
+        assert_eq!(reset_facts.sync_state, MediaSyncState::None);
+        assert!(!reset_facts.dirty);
+        assert!(store.pending().unwrap().is_empty());
+        assert!(store.sync_entry("gone").unwrap().is_none());
+        assert_eq!(std::fs::read(store.media_dir().join("keep")).unwrap(), b"hello");
+        assert!(!store.media_dir().join("gone").exists());
+        assert_eq!(store.trash_entries().unwrap(), trash);
+        let scans = store.diagnostics().scans;
+        assert_eq!(
+            executor.step(&mut session, &steps[3]).unwrap(),
+            json!({"media_quick_check":{"keep":"aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d"}})
+        );
+        assert!(store.diagnostics().scans > scans, "reset must unset the folder marker");
+        assert_eq!(store.sync_baseline().unwrap(), reset_baseline);
+        assert!(!executor.capabilities().ops.contains("media_sync"));
+    }
+}

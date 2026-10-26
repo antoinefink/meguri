@@ -1481,7 +1481,7 @@ fn review_session_scenario(steps: Value, actors: Option<Value>) -> Result<scenar
 }
 
 #[test]
-fn review_session_markers_are_local_and_keep_the_real_executor_pending() {
+fn review_session_markers_are_local_and_supported_by_the_real_executor() {
     use meguri_testkit::exec::{Executor, MeguriExecutor};
     use meguri_testkit::scenario::ReviewSession;
 
@@ -1496,7 +1496,7 @@ fn review_session_markers_are_local_and_keep_the_real_executor_pending() {
     assert!(Step::NAMES.contains(&"review_session"));
     assert!(parsed.needs().ops.contains("review_session"));
     let executor = MeguriExecutor::new();
-    assert!(executor.missing(&parsed.needs()).ops.contains("review_session"));
+    assert!(!executor.missing(&parsed.needs()).ops.contains("review_session"));
 
     let actors = Some(json!(["client_a", "meguri"]));
     let oracle_only = review_session_scenario(json!([{"review_session": "begin"}]), actors.clone()).unwrap();
@@ -1513,7 +1513,7 @@ fn review_session_markers_are_local_and_keep_the_real_executor_pending() {
     .unwrap();
     assert!(mixed.needs_of_meguri_actors().ops.contains("review_session"));
     assert!(
-        executor
+        !executor
             .missing(&mixed.needs_of_meguri_actors())
             .ops
             .contains("review_session")

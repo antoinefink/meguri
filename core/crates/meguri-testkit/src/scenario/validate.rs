@@ -230,6 +230,9 @@ fn actors(s: &Scenario) -> Result<(), FormatError> {
             Step::Actor(name) if !actors.contains(name) => {
                 return at(format!("actor {name} is not declared in actors (sync-ops.md S2.3)"));
             }
+            Step::MediaSync(_) if by.is_some_and(|actor| !logged_in.contains(actor)) => {
+                return at("media_sync requires this actor's prior login (media-sync-ops.md V3)".to_owned());
+            }
             Step::Sync(sync) => {
                 let Some(actor) = by else { continue };
                 if logged_in.insert(actor) && sync.kind != SyncKind::Login {

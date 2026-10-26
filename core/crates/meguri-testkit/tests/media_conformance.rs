@@ -59,3 +59,77 @@ fn media_model_rejects_shapes_and_names_the_schema_forbids() {
         .collect();
     assert!(accepted.is_empty(), "invalid media scenarios accepted: {accepted:?}");
 }
+
+#[test]
+fn media_sync_vocabulary_requires_exact_args_and_its_own_prior_login() {
+    use meguri_testkit::scenario::{ObservationKind, Scenario, Step};
+    use serde_json::{Value, json};
+    let scenario = |steps: Value, actors: Option<Value>| {
+        let mut value = json!({"id":"media/model", "clock":{"tz":"UTC", "start":"2030-01-15T10:00:00"}, "steps":steps});
+        if let Some(actors) = actors {
+            value["actors"] = actors;
+        }
+        Scenario::from_value(&value)
+    };
+    let actors = Some(json!(["client_a", "meguri"]));
+    let login = json!({"sync":{"kind":"login"}});
+    for op in ["media_reset", "media_sync"] {
+        for bad in [
+            Value::Null,
+            json!([]),
+            json!([{}]),
+            json!(true),
+            json!(""),
+            json!({"extra":true}),
+        ] {
+            assert!(scenario(json!([login, {op:bad}]), actors.clone()).is_err(), "{op}");
+        }
+    }
+    let parsed = scenario(json!([{"media_reset":{}}, {"observe":["media_quick_check"]}]), None).unwrap();
+    assert_eq!(parsed.steps[0].name(), "media_reset");
+    assert!(Step::NAMES.contains(&"media_reset"));
+    assert!(Step::NAMES.contains(&"media_sync"));
+    assert_eq!(
+        ObservationKind::from_name("media_quick_check"),
+        Some(ObservationKind::MediaQuickCheck)
+    );
+    assert!(parsed.needs().observations.contains("media_quick_check"));
+    for bad in [
+        json!({}),
+        json!([]),
+        json!(["#c0"]),
+        json!(false),
+        json!({"extra":true}),
+    ] {
+        assert!(scenario(json!([{"observe":[{"media_quick_check":bad}]}]), None).is_err());
+    }
+    assert!(scenario(json!([{"media_sync":{}}]), None).is_err());
+    assert!(scenario(json!([{"media_sync":{}}, login]), actors.clone()).is_err());
+    assert!(scenario(json!([login, {"actor":"meguri"}, {"media_sync":{}}]), actors.clone()).is_err());
+    let parsed = scenario(
+        json!([
+            login, {"media_sync":{}}, {"actor":"meguri"}, login,
+            {"media_sync":{}}, {"actor":"client_a"}, {"media_sync":{}}
+        ]),
+        actors,
+    )
+    .unwrap();
+    assert!(!parsed.steps[1].is_global());
+    assert_eq!(parsed.step_actors()[1].unwrap().as_str(), "client_a");
+    assert_eq!(parsed.step_actors()[4].unwrap().as_str(), "meguri");
+    assert_eq!(parsed.step_actors()[6].unwrap().as_str(), "client_a");
+}
+
+#[test]
+fn published_media_reset_scenarios_parse_but_keep_media_sync_missing() {
+    use meguri_testkit::{exec::Executor, scenario};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance/scenarios/sync/media/tracking");
+    let executor = MeguriExecutor::new();
+    for name in ["reset-identical", "reset-pending"] {
+        let loaded = scenario::load(&root.join(format!("{name}.yaml"))).unwrap();
+        let missing = executor.missing(&loaded.scenario.needs_of_meguri_actors());
+        assert!(missing.ops.contains("media_sync"), "{name}");
+        assert!(!missing.ops.contains("media_reset"), "{name}");
+        assert!(!missing.observations.contains("media_quick_check"), "{name}");
+    }
+}

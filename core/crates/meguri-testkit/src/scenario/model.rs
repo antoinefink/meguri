@@ -922,11 +922,13 @@ pub enum Step {
     TrashMedia(MediaNames),
     RestoreMediaTrash(NoArgs),
     EmptyMediaTrash(NoArgs),
+    MediaReset(NoArgs),
+    MediaSync(NoArgs),
     Advance(Duration),
     SetClock(DateTimeText),
     AddNote(NoteSpec),
     Answer(AnswerSpec),
-    /// sync-ops.md S13: a marker, pending until the real executor supports it.
+    /// sync-ops.md S13: begin/end the current collection's review session.
     ReviewSession(ReviewSession),
     Observe(Vec<ObservationRequest>),
     /// record-ops.md W2.
@@ -1082,7 +1084,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 74] = [
+    pub const NAMES: [&'static str; 76] = [
         "advance",
         "set_clock",
         "add_note",
@@ -1091,6 +1093,8 @@ impl Step {
         "trash_media",
         "restore_media_trash",
         "empty_media_trash",
+        "media_reset",
+        "media_sync",
         "answer",
         "review_session",
         "observe",
@@ -1160,7 +1164,7 @@ impl Step {
     ];
 
     /// The ops only actor scenarios have (sync-ops.md S1).
-    pub const ACTOR_OPS: [&'static str; 4] = ["actor", "sync", "net_fault", "converge"];
+    pub const ACTOR_OPS: [&'static str; 5] = ["actor", "sync", "media_sync", "net_fault", "converge"];
 
     /// The op name as written in scenarios.
     pub fn name(&self) -> &'static str {
@@ -1170,6 +1174,8 @@ impl Step {
             Step::TrashMedia(_) => "trash_media",
             Step::RestoreMediaTrash(_) => "restore_media_trash",
             Step::EmptyMediaTrash(_) => "empty_media_trash",
+            Step::MediaReset(_) => "media_reset",
+            Step::MediaSync(_) => "media_sync",
             Step::Advance(_) => "advance",
             Step::SetClock(_) => "set_clock",
             Step::AddNote(_) => "add_note",
@@ -1979,6 +1985,7 @@ pub enum ObservationKind {
     MediaDir,
     MediaTrash,
     MediaPending,
+    MediaQuickCheck,
     Ids,
     Timing,
     Card,
@@ -2059,12 +2066,13 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 45] = [
+    pub const ALL: [ObservationKind; 46] = [
         ObservationKind::TypeAnswer,
         ObservationKind::ReviewHtml,
         ObservationKind::MediaDir,
         ObservationKind::MediaTrash,
         ObservationKind::MediaPending,
+        ObservationKind::MediaQuickCheck,
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -2114,6 +2122,7 @@ impl ObservationKind {
             ObservationKind::MediaDir => "media_dir",
             ObservationKind::MediaTrash => "media_trash",
             ObservationKind::MediaPending => "media_pending",
+            ObservationKind::MediaQuickCheck => "media_quick_check",
             ObservationKind::Ids => "ids",
             ObservationKind::Timing => "timing",
             ObservationKind::Card => "card",
@@ -2168,6 +2177,7 @@ impl ObservationKind {
             ObservationKind::MediaDir
             | ObservationKind::MediaTrash
             | ObservationKind::MediaPending
+            | ObservationKind::MediaQuickCheck
             | ObservationKind::Timing
             | ObservationKind::Queue
             | ObservationKind::DeckCounts

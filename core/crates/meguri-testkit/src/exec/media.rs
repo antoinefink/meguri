@@ -18,9 +18,11 @@ pub(super) fn register(registry: &mut Registry) {
     registry.op("trash_media", trash);
     registry.op("restore_media_trash", restore);
     registry.op("empty_media_trash", empty);
+    registry.op("media_reset", reset);
     registry.observation("media_dir", directory);
     registry.observation("media_trash", trash_entries);
     registry.observation("media_pending", pending);
+    registry.observation("media_quick_check", quick_check);
 }
 fn core(error: impl std::fmt::Display) -> ExecError {
     ExecError::new("core_error", error.to_string())
@@ -212,6 +214,37 @@ fn trash_entries(session: &mut Session<'_>, _: &ObservationRequest) -> Result<Va
 fn pending(session: &mut Session<'_>, _: &ObservationRequest) -> Result<Value, ExecError> {
     let store = store(session)?;
     store.register_full(|_, _| true).map_err(core)?;
+    pending_value(&store)
+}
+
+/// Pin hosted generation/lifecycle and share its media-job exclusion. Raw
+/// protocol sessions have no host job owner and keep their existing store.
+fn local_check<T>(
+    session: &mut Session<'_>,
+    work: impl FnOnce(&MediaStore) -> Result<T, ExecError>,
+) -> Result<T, ExecError> {
+    let store = store(session)?;
+    if let Some(super::storage::SessionCollection::Hosted { host, collection }) = session.storage.collection() {
+        // The maintenance lease pins replacement/close while admission uses Query.
+        let _reader = collection
+            .reader(meguri_storage::ReaderRole::Maintenance)
+            .map_err(core)?;
+        let media = host.media().map_err(core)?;
+        if let Some(job) = host.engine().jobs().running().into_iter().find(|job| {
+            job.name == meguri_engine::JobKind::MediaSync.name()
+                || job.name == meguri_engine::JobKind::CheckMedia.name()
+        }) {
+            return Err(core(meguri_engine::EngineError::Busy { running_op: job.name }));
+        }
+        let _job = media
+            .try_job(meguri_engine::media::MediaJobKind::CheckMedia)
+            .map_err(core)?;
+        media.check_generation(collection.generation().0).map_err(core)?;
+        return work(&store);
+    }
+    work(&store)
+}
+fn pending_value(store: &MediaStore) -> Result<Value, ExecError> {
     Ok(Value::Object(
         store
             .pending()
@@ -220,4 +253,14 @@ fn pending(session: &mut Session<'_>, _: &ObservationRequest) -> Result<Value, E
             .map(|entry| (entry.name, entry.sha1.map_or(Value::Null, Value::String)))
             .collect(),
     ))
+}
+fn quick_check(session: &mut Session<'_>, _: &ObservationRequest) -> Result<Value, ExecError> {
+    local_check(session, |store| {
+        store.check_changes().map_err(core)?;
+        pending_value(store)
+    })
+}
+fn reset(session: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
+    local_check(session, |store| store.reset_sync().map_err(core))?;
+    Ok(OpResult::Done)
 }

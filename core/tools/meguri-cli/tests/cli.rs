@@ -29,6 +29,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert_eq!(
         json["supports"]["ops"],
         serde_json::json!([
+            "actor",
             "add_deck",
             "add_media",
             "add_note",
@@ -59,6 +60,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "handoff",
             "legacy_update",
             "media_outside",
+            "media_reset",
             "open",
             "redo",
             "remove_config",
@@ -71,6 +73,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "reparent_decks",
             "reparent_tags",
             "restore_media_trash",
+            "review_session",
             "save_deck_options",
             "set_clock",
             "set_config",
@@ -82,6 +85,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "set_scheduling_prefs",
             "set_tag_collapsed",
             "suspend",
+            "sync",
             "trash_media",
             "unbury_deck",
             "undo",
@@ -146,6 +150,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "legacy_json",
             "media_dir",
             "media_pending",
+            "media_quick_check",
             "media_trash",
             "next_states",
             "notetype_structure",
@@ -165,15 +170,20 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "undo_status",
         ])
     );
-    // dsl.md D7.2: 72 ops besides observe, the actor ops of sync-ops.md, the
-    // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
-    // set_config, undo-ops.md's undo, redo and remove_config, the eight ops
-    // of tag-ops.md, browser-config-ops.md's browser_config_set, the note
-    // type ops of notetype-ops.md and the deck ops of deck-ops.md, plus save_deck_options
-    // and set_scheduling_prefs, the scheduling operations of sched-ops.md,
-    // and the four parsing-only backup ops of backup-ops.md and backup-trigger-ops.md.
-    // D8 also lists the declared answer.filtered part; Meguri does not support it.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 73);
+    // dsl.md D7.2/D8: the current step vocabulary excludes observe and adds
+    // the declared answer.filtered part, including parsing-only operations.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 76);
+    for (op, supported) in [("media_reset", true), ("media_sync", false)] {
+        assert!(
+            json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
+            "{op}"
+        );
+        assert_eq!(
+            json["supports"]["ops"].as_array().unwrap().iter().any(|o| o == op),
+            supported,
+            "{op}"
+        );
+    }
     for op in ["add_backup_files", "force_backup", "save_backup_settings", "backup"] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
@@ -265,7 +275,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "{kind}"
         );
     }
-    for kind in ["review_html", "type_answer"] {
+    for kind in ["media_quick_check", "review_html", "type_answer"] {
         assert!(
             json["language"]["observations"]
                 .as_array()
