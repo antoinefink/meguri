@@ -5,6 +5,7 @@
 nonisolated public enum SheetRoute: Hashable, Identifiable, Sendable {
     /// Add (U195), with `deck` preselected when given (R48).
     case add(deck: DeckID?)
+    case goToDeck
     case fsrsAdmission
     case collectionEntry
     case collectionExport

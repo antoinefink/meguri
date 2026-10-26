@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// A deck's id in the collection (the `id` of Anki's deck records).
 nonisolated public struct DeckID: RawRepresentable, Hashable, Codable, Sendable, CustomStringConvertible {
@@ -79,4 +80,9 @@ nonisolated public enum ScrollAnchorKey: Hashable, Sendable {
 /// width, the sidebar layout at regular width and on the Mac.
 nonisolated public enum ShellLayout: Sendable {
     case compact, sidebar
+}
+
+extension EnvironmentValues {
+    /// The live presenting shell layout, supplied by RootView independently of sheet traits.
+    @Entry public var shellLayout: ShellLayout = .sidebar
 }

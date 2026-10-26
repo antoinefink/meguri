@@ -101,12 +101,42 @@
         }
       }
     },
+    "Couldn’t Load Decks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t Load Decks"
+          }
+        }
+      }
+    },
     "Couldn’t Open Collection": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Couldn’t Open Collection"
+          }
+        }
+      }
+    },
+    "Couldn’t open this deck. Try Go again, or cancel.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t open this deck. Try Go again, or cancel."
+          }
+        }
+      }
+    },
+    "Couldn’t read the decks. Try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t read the decks. Try again."
           }
         }
       }
@@ -191,6 +221,36 @@
         }
       }
     },
+    "Go": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go"
+          }
+        }
+      }
+    },
+    "Go to Deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go to Deck"
+          }
+        }
+      }
+    },
+    "Go to Deck…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go to Deck…"
+          }
+        }
+      }
+    },
     "Import a collection in Settings to see your decks here.": {
       "localizations": {
         "en": {
@@ -217,6 +277,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Learning"
+          }
+        }
+      }
+    },
+    "Loading decks…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading decks…"
           }
         }
       }
@@ -271,32 +341,22 @@
         }
       }
     },
+    "No Matching Decks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Matching Decks"
+          }
+        }
+      }
+    },
     "No decks": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "No decks"
-          }
-        }
-      }
-    },
-    "Opening collection…": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Opening collection…"
-          }
-        }
-      }
-    },
-    "Overview": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Overview"
           }
         }
       }
@@ -311,12 +371,32 @@
         }
       }
     },
+    "Opening collection…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening collection…"
+          }
+        }
+      }
+    },
     "Opening saved deck…": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Opening saved deck…"
+          }
+        }
+      }
+    },
+    "Overview": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Overview"
           }
         }
       }
@@ -371,6 +451,16 @@
         }
       }
     },
+    "Retry": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry"
+          }
+        }
+      }
+    },
     "Saved name": {
       "localizations": {
         "en": {
@@ -387,6 +477,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Saving deck name…"
+          }
+        }
+      }
+    },
+    "Search Decks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search Decks"
           }
         }
       }
@@ -417,6 +517,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Study with FSRS"
+          }
+        }
+      }
+    },
+    "Studying filtered decks isn’t supported yet. Choose a regular deck.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Studying filtered decks isn’t supported yet. Choose a regular deck."
+          }
+        }
+      }
+    },
+    "The collection is busy or has changed. Cancel and open Go to Deck again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The collection is busy or has changed. Cancel and open Go to Deck again."
           }
         }
       }

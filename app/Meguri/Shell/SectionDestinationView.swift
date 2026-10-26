@@ -47,6 +47,7 @@ struct ShellFeatures {
         }
         features.sheet = { route, navigation in
             switch route {
+            case .goToDeck: AnyView(GoToDeckView(collection: collection))
             case .collectionEntry: AnyView(CollectionEntryView(coordinator: collection.entry))
             case .deckName: AnyView(DeckNameSheet(model: collection.deckActions))
             case .collectionExport: AnyView(CollectionExportDestination(coordinator: collection.collectionExport))

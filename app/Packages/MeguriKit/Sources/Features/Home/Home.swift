@@ -35,12 +35,35 @@ public struct HomeView: View {
         .navigationTitle(deckID == nil ? String(localized: "Decks", bundle: .module) : "")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                if collection.review == nil, collection.navigation.review == nil {
+                    Button { collection.presentGoToDeck() } label: {
+                        Text("Go to Deck…", bundle: .module)
+                    }
+                    .disabled(!collection.canPresentGoToDeck())
+                    .accessibilityIdentifier("home.collection.goToDeck")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button { collection.deckActions.present(.create) } label: {
                     Text("Create Deck", bundle: .module)
                 }
                 .disabled(!collection.deckActions.canPresent(.create))
                 .accessibilityIdentifier("home.collection.createDeck")
             }
+        }
+        .onKeyPress(keys: [KeyEquivalent("/")], phases: .down) { press in
+            guard press.modifiers.isEmpty, collection.navigation.section == .home,
+                  collection.canPresentGoToDeck() else { return .ignored }
+            #if os(macOS)
+            // Native editing, sheet and menu tracking own their input, even if
+            // an unhandled event bubbles to Home's key path.
+            guard NSApp.isActive, let window = NSApp.keyWindow, window.attachedSheet == nil,
+                  !(window.firstResponder is NSTextInputClient),
+                  RunLoop.current.currentMode != .eventTracking,
+                  let event = NSApp.currentEvent, event.type == .keyDown, !event.isARepeat else { return .ignored }
+            #endif
+            collection.presentGoToDeck()
+            return .handled
         }
         .accessibilityIdentifier("home.collection.screen")
     }

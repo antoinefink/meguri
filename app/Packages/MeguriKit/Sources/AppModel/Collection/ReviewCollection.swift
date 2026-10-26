@@ -78,15 +78,23 @@ public final class ReviewCollection {
         deckNamesOwner = value
         return value
     }
+    private var goToDeckRevision: UInt64 = 0
+    public private(set) var goToDeckPresentation: UInt64?
+    public private(set) var goToDeckBusy = false
+    private var goToDeckTask: Task<GoToDeckResult, Never>?
+    private var goToDeckReview: ReviewCoordinator?
+
     private var deckNamesReserved: Bool {
+        if goToDeckBusy || goToDeckReview != nil || navigation.sheet == .goToDeck { return true }
         if case .deckName = navigation.sheet { return true }
         return deckNamesOwner?.busy == true
     }
-    func deckNamesAllowed(host: AppNavigation.SheetHost, route: SheetRoute?) -> Bool {
+    func deckNamesAllowed(host: AppNavigation.SheetHost, route: SheetRoute?, allowGoToDeckRecovery: Bool = false) -> Bool {
         guard host == .main, foreground, !resuming, !closed, !closing,
-              !opening, !starting, !enabling, state == .ready,
+              !opening, (!starting || (route == .goToDeck && goToDeckBusy)), !enabling, state == .ready,
               case .ready(let current) = lifecycle, current == generation,
               review == nil, navigation.review == nil,
+              (goToDeckReview == nil || route == .goToDeck || allowGoToDeckRecovery),
               entryOwner?.busy != true, entryOwner?.pickerPresented != true, entryOwner?.preview == nil,
               exportOwner?.busy != true,
               exportOwner?.artifact == nil, exportOwner?.providerLease == nil,
@@ -94,6 +102,100 @@ public final class ReviewCollection {
               navigation.sheet == route else { return false }
         return route == nil || navigation.sheetHost == .main
     }
+    public enum GoToDeckResult: Equatable, Sendable { case opened, unavailable, filtered, failed }
+
+    public func canPresentGoToDeck(host: AppNavigation.SheetHost = .main) -> Bool {
+        !goToDeckBusy && deckNamesOwner?.busy != true &&
+            deckNamesAllowed(host: host, route: nil, allowGoToDeckRecovery: true)
+    }
+
+    public func presentGoToDeck(host: AppNavigation.SheetHost = .main) {
+        guard canPresentGoToDeck(host: host) else { return }
+        goToDeckRevision &+= 1
+        goToDeckPresentation = goToDeckRevision
+        navigation.present(.goToDeck)
+    }
+
+    public func goToDeckIsCurrent(_ token: UInt64, generation expected: UInt64) -> Bool {
+        token == goToDeckPresentation && expected == generation &&
+            deckNamesAllowed(host: .main, route: .goToDeck) && deckNamesOwner?.busy != true
+    }
+
+    public func cancelGoToDeck(_ token: UInt64) -> Task<Bool, Never> {
+        guard token == goToDeckPresentation, navigation.sheet == .goToDeck,
+              navigation.sheetHost == .main, !goToDeckBusy else { return Task { false } }
+        guard let pending = goToDeckReview else {
+            cancelGoToDeckAfterActivation(token)
+            return Task { true }
+        }
+        goToDeckBusy = true
+        let task = Task { () -> GoToDeckResult in
+            defer { goToDeckBusy = false; goToDeckTask = nil }
+            guard await pending.end() else { return .failed }
+            if goToDeckReview === pending { goToDeckReview = nil }
+            cancelGoToDeckAfterActivation(token)
+            return .opened
+        }
+        goToDeckTask = task
+        return Task { await task.value == .opened }
+    }
+
+    /// The caller supplies an entry from its current D17 snapshot, never a tree projection.
+    public func activateGoToDeck(_ entry: DeckNameEntry, generation expected: UInt64,
+                                presentation token: UInt64, layout: ShellLayout) -> Task<GoToDeckResult, Never> {
+        guard !goToDeckBusy, goToDeckIsCurrent(token, generation: expected) else {
+            return Task { .unavailable }
+        }
+        guard !entry.filtered else { return Task { .filtered } }
+        goToDeckBusy = true
+        let intent = navigation.intentRevision
+        let task = Task { () -> GoToDeckResult in
+            defer { goToDeckBusy = false; goToDeckTask = nil }
+            let current: @MainActor @Sendable () -> Bool = { self.goToDeckIsCurrent(token, generation: expected) && self.navigation.intentRevision == intent }
+            guard current() else { return .unavailable }
+            if let pending = goToDeckReview {
+                guard await pending.end() else { return .failed }
+                if goToDeckReview === pending { goToDeckReview = nil }
+                guard current() else { return .unavailable }
+            }
+            if layout == .compact {
+                let opened = await startStudy(deckID: entry.id, goToDeckAdmission: current)
+                return opened ? .opened : .failed
+            }
+            do {
+                let detail = try await resolveDeckPage(id: entry.id, fullName: entry.fullName, generation: expected)
+                guard current() else { return .unavailable }
+                // openDeckPage owns the new intent; subsequent checks keep its route/lifecycle authority.
+                var completedIntent: UInt64?
+                let opened = await openDeckPage(deckID: entry.id, detail: detail, admission: {
+                    self.goToDeckIsCurrent(token, generation: expected)
+                }, didOpen: { completedIntent = self.navigation.intentRevision }).value
+                guard opened, completedIntent == navigation.intentRevision,
+                      goToDeckIsCurrent(token, generation: expected) else { return .failed }
+                cancelGoToDeckAfterActivation(token)
+                return .opened
+            } catch { return .failed }
+        }
+        goToDeckTask = task
+        return task
+    }
+
+    private func cancelGoToDeckAfterActivation(_ token: UInt64) {
+        guard token == goToDeckPresentation, navigation.sheet == .goToDeck, navigation.sheetHost == .main else { return }
+        goToDeckPresentation = nil
+        navigation.dismissSheet()
+    }
+
+    private func endGoToDeckGeneration() {
+        goToDeckReview?.generationEnded()
+        goToDeckReview = nil
+    }
+
+    private func invalidateGoToDeck() {
+        goToDeckPresentation = nil
+        if navigation.sheet == .goToDeck, navigation.sheetHost == .main { navigation.dismissSheet() }
+    }
+
     public func fullDeckName(_ id: Int64) -> String? {
         func find(_ nodes: [CountedDeckNode], parents: [String]) -> String? {
             for node in nodes {
@@ -232,7 +334,7 @@ public final class ReviewCollection {
     private func completeOpenedHost(loadRecord: Bool) async throws {
         lifecycle = try await collection.lifecycle()
         guard case .ready(let value) = lifecycle else { state = .unavailable; return }
-        if generation != value { invalidateDeckActions(); exportOwner?.generationChanged() }
+        if generation != value { endGoToDeckGeneration(); invalidateDeckActions(); exportOwner?.generationChanged() }
         generation = value; state = .ready; error = nil; closed = false; releasedManualHostState = nil
         if loadRecord {
             do { previousRecord = try await records.load() }
@@ -361,6 +463,7 @@ public final class ReviewCollection {
         case .mediaArrived(let names): scheduleMediaRefresh(names: names, generation: event.generation)
         case .collectionReplaced(let next):
             guard preparedGeneration != next else { return }
+            endGoToDeckGeneration()
             exportOwner?.generationChanged()
             invalidateDeckActions()
             generation = next; day?.pause()
@@ -393,6 +496,7 @@ public final class ReviewCollection {
         switch value {
         case .ready(let next):
             if generation != next {
+                endGoToDeckGeneration()
                 invalidateDeckActions(); invalidateMedia(); exportOwner?.generationChanged()
             }
             generation = next
@@ -410,6 +514,7 @@ public final class ReviewCollection {
     private var canSaveDeckState: Bool { state == .ready && !opening && !closed && !closing && !resuming }
 
     private func invalidateDeckActions() {
+        invalidateGoToDeck()
         deckNamesOwner?.invalidate()
         selectedDeckDetail = nil
         selectionRevision &+= 1; collapseRevision &+= 1; countsRevision &+= 1; deckTreeRevision &+= 1
@@ -426,40 +531,43 @@ public final class ReviewCollection {
         openDeckPage(deckID: detail.id, detail: detail)
     }
 
-    private func openDeckPage(deckID: Int64, detail: DeckPageDetail?) -> Task<Bool, Never> {
+    private func openDeckPage(deckID: Int64, detail: DeckPageDetail?,
+                              admission: @escaping @MainActor () -> Bool = { true },
+                              didOpen: @escaping @MainActor () -> Void = {}) -> Task<Bool, Never> {
         let intent = navigation.beginDeckSelection()
-        let selection = selectDeck(deckID: deckID, intent: intent)
+        let selection = selectDeck(deckID: deckID, intent: intent, admission: admission)
         let expected = generation, revision = selectionRevision
         return Task {
             guard await selection.value, expected == generation, revision == selectionRevision,
-                  canSaveDeckState, navigation.intentRevision == intent else { return false }
+                  canSaveDeckState, admission(), navigation.intentRevision == intent else { return false }
             if navigation.sidebarSelection != .deck(DeckID(deckID)) {
                 navigation.openDeckPage(DeckID(deckID))
             }
             selectedDeckDetail = deck(deckID) == nil
                 ? detail.map { (page: $0, generation: expected, intent: navigation.intentRevision) } : nil
+            didOpen()
             return true
         }
     }
 
     /// Serial writes preserve core selection order; superseded queued requests need no write.
-    private func selectDeck(deckID: Int64, intent: UInt64) -> Task<Bool, Never> {
+    private func selectDeck(deckID: Int64, intent: UInt64, admission: @escaping @MainActor () -> Bool = { true }) -> Task<Bool, Never> {
         selectionRevision &+= 1
         let revision = selectionRevision, expected = generation, previous = selectionTask
         let task = Task {
             _ = await previous?.value
             guard revision == selectionRevision, expected == generation, canSaveDeckState,
-                  navigation.intentRevision == intent else { return false }
+                  navigation.intentRevision == intent, admission() else { return false }
             do {
                 let savedGeneration = try await saveSelectedDeck(deckID)
                 guard revision == selectionRevision, expected == generation,
                       savedGeneration == expected, canSaveDeckState,
-                      navigation.intentRevision == intent else { return false }
+                      navigation.intentRevision == intent, admission() else { return false }
                 if error == "Couldn’t select this deck. Try again." { error = nil }
                 return true
             } catch {
                 if revision == selectionRevision, expected == generation, canSaveDeckState,
-                   navigation.intentRevision == intent {
+                   navigation.intentRevision == intent, admission() {
                     self.error = "Couldn’t select this deck. Try again."
                 }
                 return false
@@ -589,16 +697,19 @@ public final class ReviewCollection {
     }
 
     func resolveDeckPage(_ mutation: DeckMutation) async throws -> DeckPageDetail {
-        if let node = deck(mutation.id) {
-            return DeckPageDetail(id: node.id, name: node.name, counts: node.counts)
+        try await resolveDeckPage(id: mutation.id, fullName: mutation.name, generation: mutation.summary.generation)
+    }
+
+    private func resolveDeckPage(id: Int64, fullName: String, generation expected: UInt64) async throws -> DeckPageDetail {
+        guard expected == generation, canSaveDeckState else {
+            throw BridgeError.staleGeneration(planned: expected, current: generation)
         }
-        // The mutation supplies the stored identity/name; studyState reads that
-        // exact ID even when the empty Default deck is hidden from tree queries.
-        let expected = generation
-        let state = try await CoreDeckService().studyState(deckID: mutation.id)
-        guard expected == generation, mutation.summary.generation == expected,
-              canSaveDeckState, state.deck == mutation.id else { throw BridgeError.staleGeneration(planned: expected, current: generation) }
-        return DeckPageDetail(id: mutation.id, name: mutation.name, counts: state.listCounts)
+        if let node = deck(id) { return DeckPageDetail(id: id, name: fullName, counts: node.counts) }
+        let state = try await CoreDeckService().studyState(deckID: id)
+        guard expected == generation, canSaveDeckState, state.deck == id else {
+            throw BridgeError.staleGeneration(planned: expected, current: generation)
+        }
+        return DeckPageDetail(id: id, name: fullName, counts: state.listCounts)
     }
 
     public func readPolicy() async {
@@ -629,29 +740,64 @@ public final class ReviewCollection {
     }
     public var canStudy: Bool { !deckNamesReserved && !opening && entryOwner?.busy != true && navigation.sheet != .collectionEntry && state == .ready && reviewIsActive && !resuming && !starting && review == nil && policy == .ok }
     public func startStudy(deckID: Int64) async {
-        guard canStudy else { return }
-        guard policy == .ok else { pendingDeck = deckID; await readPolicy(); return }
+        _ = await startStudy(deckID: deckID, goToDeckAdmission: nil)
+    }
+
+    /// A picker continuation may prepare behind its own sheet. It uses the same
+    /// selection, media, policy and session gates, then publishes review atomically.
+    private func startStudy(deckID: Int64, goToDeckAdmission: (@MainActor () -> Bool)?) async -> Bool {
+        let admitted = { goToDeckAdmission?() ?? self.canStudy }
+        guard admitted(), policy == .ok, foreground,
+              sceneActive, applicationActive, windowVisible, reviewWindowActive else { return false }
         starting = true
         defer { starting = false }
+        let expected = generation, intent = navigation.intentRevision
+        let current: @MainActor @Sendable () -> Bool = {
+            expected == self.generation && intent == self.navigation.intentRevision &&
+                self.canSaveDeckState && self.foreground && self.sceneActive && self.applicationActive &&
+                self.windowVisible && self.reviewWindowActive &&
+                (goToDeckAdmission?() ?? self.reviewIsActive)
+        }
         do {
-            let expected = generation, intent = navigation.intentRevision
-            guard await selectDeck(deckID: deckID, intent: intent).value,
-                  expected == generation, intent == navigation.intentRevision else { return }
-            guard let resolver = await mediaResolverForReview(), reviewIsActive, state == .ready,
-                  expected == generation, intent == navigation.intentRevision else { return }
-            previousRecord = nil // The visible Home record has now been acknowledged.
+            guard await selectDeck(deckID: deckID, intent: intent, admission: current).value,
+                  current(), let resolver = await mediaResolverForReview(), current() else { return false }
+            if goToDeckAdmission == nil { previousRecord = nil }
             let model = ReviewCoordinator(deckID: deckID, surface: makeReviewSurface(resolver),
                 store: records, clock: configuration.clock)
             model.onPolicyRefusal = { [weak self] in self?.pendingDeck = deckID }
-            presentReview(model)
+            if goToDeckAdmission == nil { presentReview(model) }
+            else { goToDeckReview = model }
             await model.start()
+            if goToDeckAdmission != nil {
+                guard current(), model.sessionID != nil, model.phase != .error else {
+                    // Drain a partially started session before releasing the reservation.
+                    if pendingDeck == deckID { pendingDeck = nil }
+                    if expected != generation {
+                        model.generationEnded()
+                        if goToDeckReview === model { goToDeckReview = nil }
+                    } else if await model.end(), goToDeckReview === model {
+                        goToDeckReview = nil
+                    }
+                    return false
+                }
+                goToDeckReview = nil
+                previousRecord = nil
+                if let token = goToDeckPresentation { cancelGoToDeckAfterActivation(token) }
+                presentReview(model)
+                return true
+            }
             if !reviewIsActive { model.beginPause(); try await model.pause() }
             if model.sessionID == nil {
                 navigation.endReview(); review = nil
                 if pendingDeck != nil { await readPolicy() }
                 else { error = model.notice }
+                return false
             }
-        } catch { self.error = String(describing: error) }
+            return true
+        } catch {
+            if goToDeckAdmission == nil { self.error = String(describing: error) }
+            return false
+        }
     }
     func presentReview(_ model: ReviewCoordinator) {
         reviewVisible = true
@@ -697,12 +843,17 @@ public final class ReviewCollection {
     public func setForeground(_ active: Bool) {
         guard active != foreground else { return }
         foreground = active
+        if !active { invalidateGoToDeck() }
         resuming = active
         if !active { review?.beginPause(); day?.pause(); countTimer?.invalidate() }
         let previous = lifecycleTask
         lifecycleTask = Task {
             await previous?.value
-            if !active { await deckNamesOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain() }
+            if !active {
+                _ = await goToDeckTask?.value
+                try? await goToDeckReview?.pause()
+                await deckNamesOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain()
+            }
             await openTask?.value
             guard !closed, state != .unopened, state != .noFile else { resuming = false; return }
             do {
@@ -741,6 +892,11 @@ public final class ReviewCollection {
         closing = true
         defer { closing = false }
         invalidateDeckActions()
+        _ = await goToDeckTask?.value
+        if let pending = goToDeckReview {
+            guard await pending.end() else { return false }
+            goToDeckReview = nil
+        }
         await deckNamesOwner?.cancelAndDrain()
         _ = await selectionTask?.value
         await collapseTask?.value

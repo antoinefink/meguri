@@ -75,6 +75,7 @@ struct RootView: View {
             navigation: navigation, features: features, configuration: configuration,
             isActive: !(layout == .compact && navigation.review != nil)
         ))
+        .environment(\.shellLayout, layout)
         .sheet(isPresented: $launchSheet) {
             launchContent
                 #if os(macOS)

@@ -299,9 +299,10 @@ import Testing
         var reveals = 0
         var presented: [Int64] = []
         var calls: [String] = []
+        var onLoad: (() async throws -> Void)?
         var onResume: (() -> Void)?
         var arrivals: [[String]] = []
-        func load() async throws { calls.append("load") }
+        func load() async throws { calls.append("load"); try await onLoad?() }
         func render(sessionID: UInt64, items: [ReviewHeadItem]) async throws { calls.append("render") }
         func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws { presented.append(item.cardId); calls.append("present") }
         func preload(item: ReviewHeadItem) async throws {}

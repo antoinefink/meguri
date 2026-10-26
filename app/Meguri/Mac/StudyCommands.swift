@@ -76,6 +76,13 @@ struct StudyCommands: Commands {
                 .disabled(context?.fileActionsAvailable != true || context?.collection.collectionExport.canPresent != true)
         }
         CommandMenu("Deck") {
+            Button("Go to Deck…") {
+                guard let context else { return }
+                context.collection.presentGoToDeck(host: context.host)
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .disabled(context.map { !$0.collection.canPresentGoToDeck(host: $0.host) } ?? true)
+            .accessibilityIdentifier("home.goToDeck.command")
             Button("Rename Deck…") {
                 guard let context, let deck = context.selectedDeck else { return }
                 context.collection.deckActions.present(.rename(deck.rawValue), host: context.host)
