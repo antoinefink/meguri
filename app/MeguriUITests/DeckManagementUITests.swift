@@ -218,13 +218,23 @@ final class DeckManagementUITests: XCTestCase {
         XCTAssertTrue(list.exists)
         XCTAssertTrue(firstRow.waitForNonExistence(timeout: 10))
         XCTAssertTrue(secondRow.waitForNonExistence(timeout: 10))
-        XCTAssertFalse(go.isEnabled)
+        let createRow = picker.descendants(matching: .any).matching(identifier: "home.goToDeck.create").firstMatch
+        XCTAssertTrue(createRow.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForValue(createRow, "Create deck named QZ90 QZ91/QZ93"))
+        XCTAssertFalse(createRow.frame.isEmpty)
+        XCTAssertTrue(list.frame.contains(createRow.frame))
+        XCTAssertTrue(createRow.isHittable)
+        XCTAssertTrue(go.isEnabled)
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
         XCTAssertTrue(picker.waitForNonExistence(timeout: 10))
         XCTAssertEqual(app.sheets.count, 0)
         XCTAssertTrue(list.waitForNonExistence(timeout: 10))
         XCTAssertTrue(element(app, pageIDs[0]).waitForExistence(timeout: 10))
+
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label == %@", "home.sidebar.deck.", "QZ90 QZ91/QZ93")).firstMatch.exists,
+            "Escape must not create the offered deck")
 
         // The visible toolbar action must expose the same native picker and real rows.
         let toolbarAction = app.toolbars.buttons.matching(identifier: "home.collection.goToDeck").firstMatch
@@ -271,6 +281,89 @@ final class DeckManagementUITests: XCTestCase {
         XCTAssertEqual(app.sheets.count, 0)
         XCTAssertTrue(list.waitForNonExistence(timeout: 10))
         XCTAssertTrue(element(app, pageIDs[1]).waitForExistence(timeout: 10))
+    }
+
+    func testGoToDeckNativeCreateAndCaseInsensitiveExactMatch() throws {
+        let build = try BuildUnderTest.current()
+        guard build.hasHooks else { throw XCTSkip("generated fixtures require a hook build") }
+        let bundle = try build.bundleIdentifier
+        guard bundle.hasSuffix(".dev") else { throw XCTSkip("development container required") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(
+            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"),
+            now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false).arguments
+        app.launch()
+        defer { app.terminate() }
+        let enable = element(app, "home.policy.enable")
+        if enable.waitForExistence(timeout: 5) { try click(enable, app: app, bundle: bundle) }
+        XCTAssertTrue(element(app, "home.collection.createDeck").waitForExistence(timeout: 20))
+
+        let name = "QZCreate" + UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8)
+        let picker = app.sheets.firstMatch
+        let search = picker.textFields.matching(identifier: "home.goToDeck.search").firstMatch
+        let list = picker.descendants(matching: .any).matching(identifier: "home.goToDeck.list").firstMatch
+        let createRow = picker.descendants(matching: .any).matching(identifier: "home.goToDeck.create").firstMatch
+        let go = picker.buttons.matching(identifier: "home.goToDeck.go").firstMatch
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("o", modifierFlags: [.command, .shift])
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForValue(search, ""))
+        XCTAssertFalse(createRow.exists, "Blank input must not offer creation")
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeText(name)
+        XCTAssertTrue(waitForValue(search, name))
+        XCTAssertTrue(createRow.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForValue(createRow, "Create deck named " + name))
+        XCTAssertFalse(createRow.frame.isEmpty)
+        XCTAssertTrue(list.frame.contains(createRow.frame))
+        XCTAssertTrue(createRow.isHittable)
+        try click(createRow, app: app, bundle: bundle)
+        XCTAssertTrue(go.isEnabled)
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(picker.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(app.sheets.count, 0)
+        XCTAssertTrue(list.waitForNonExistence(timeout: 10))
+        let pagePrefix = "home.deck.page."
+        let page = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", pagePrefix)).firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        XCTAssertTrue(page.staticTexts.matching(NSPredicate(format: "value == %@", name)).firstMatch.waitForExistence(timeout: 10))
+        let pageID = page.identifier
+        XCTAssertTrue(pageID.hasPrefix(pagePrefix))
+        XCTAssertFalse(pageID.dropFirst(pagePrefix.count).isEmpty)
+        let rowID = "home.goToDeck.deck." + pageID.dropFirst(pagePrefix.count)
+
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("o", modifierFlags: [.command, .shift])
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForValue(search, ""))
+        XCTAssertFalse(createRow.exists)
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeText(name.lowercased())
+        XCTAssertTrue(waitForValue(search, name.lowercased()))
+        let actualRow = picker.descendants(matching: .any).matching(identifier: rowID).firstMatch
+        XCTAssertTrue(actualRow.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForValue(actualRow, name))
+        XCTAssertTrue(element(app, "home.goToDeck.checkingName").waitForNonExistence(timeout: 10))
+        XCTAssertFalse(createRow.exists, "An exact name match with different case must suppress creation")
+        XCTAssertFalse(actualRow.frame.isEmpty)
+        XCTAssertTrue(list.frame.contains(actualRow.frame))
+        XCTAssertTrue(actualRow.isHittable)
+        try click(actualRow, app: app, bundle: bundle)
+        XCTAssertTrue(go.isEnabled)
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(picker.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(app.sheets.count, 0)
+        XCTAssertTrue(list.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(element(app, pageID).waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, pageID).staticTexts.matching(NSPredicate(format: "value == %@", name)).firstMatch.waitForExistence(timeout: 10))
     }
 
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {

@@ -81,7 +81,7 @@ public final class DeckActionsModel {
             do {
                 let mutation: DeckMutation
                 switch action {
-                case .create, .subdeck: mutation = try await createDeck(draft)
+                case .create, .subdeck: mutation = try await createNamedDeck(draft)
                 case .rename(let id):
                     let job = try await startRename(id, draft)
                     rename = job
@@ -106,6 +106,12 @@ public final class DeckActionsModel {
             pendingResult = result
             await publishResult(action: action, revision: current)
         }
+    }
+
+    /// Both name entry surfaces use this collection-owned writer. The picker
+    /// retains its reservation and committed result through its continuation.
+    func createNamedDeck(_ draft: String) async throws -> DeckMutation {
+        try await createDeck(draft)
     }
 
     private func publishResult(action: Action, revision current: UInt64) async {

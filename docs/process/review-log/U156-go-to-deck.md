@@ -183,3 +183,46 @@ The D18 prose scan initially flagged three lines anonymously in
 `private/20261026T073331Z-25515`. The spec writer rewrote those complete lines
 without changing the contract or guard. `private/20261026T073455Z-28137` passes
 for the repaired spec and review log.
+
+## Create from the query: implementation
+
+The picker now offers a native create row after the core confirms no exact match.
+New empty decks open their overview in either layout. Existing results retain
+R27 behavior. The owner retains a committed result and retries navigation without another write.
+
+Exports: implementer `cleanroom/20261026T073757Z-31411`, fixer
+`cleanroom/20261026T080036Z-46035`, and test repair
+`cleanroom/20261026T082551Z-76080`. Independent R1 found two P1 and two P2 issues.
+R2 closes them: drain pending sessions before the writer, bind saved results to
+the original query and presentation, identify Retry, and preserve typed refusals.
+Tests with the real collection cover those paths. R3 approves the final test repair.
+
+## Focused checks
+
+| Receipt | Result |
+|---|---|
+| `swift-test/20261026T075318Z-41515` | Compile fails on two mutable test captures. The fixer uses MainActor reference state. |
+| `swift-test/20261026T081246Z-52569` | 81 pass, one fails: the test yields before it installs its conflict. |
+| `swift-test/20261026T082923Z-78473` | All 82 pass, no skips. Conflict setup precedes every await; zero writer-call assertions remain. |
+| `private/20261026T075305Z-41115` | Fail: 6 locations in the model tests. |
+| `private/20261026T081246Z-52648` | Two synthetic name declarations still match. |
+| `private/20261026T082924Z-78819` | All seven UI files pass after neutral fixture replacements. Guard unchanged. |
+| `ui-test/20261026T082044Z-67785` | Three Mac tests pass: name actions, full picker keyboard flow, creation and exact-match reuse. |
+| `drive/20261026T083117Z-80675` | 24 steps pass with zero hierarchy issues. |
+
+The native test uses actual page IDs and exact native text values.
+Its former disabled-Go assertion now checks the valid Create option instead.
+Independent review approves both changes. The final repair changes only package
+test setup and fixture text; native production and UI-test inputs stay unchanged.
+
+## Rendered result and remaining coverage
+
+Independent review inspects four actual captures in light and dark modes at default and minimum
+sizes. The create row and new empty overview are readable, with no P0–P2 finding.
+Native error and saved-result renders, actual filtered fallback through the owner,
+mobile evidence and the full integration gate remain open. Full U156 still needs
+its remaining deck actions and providers. This checkpoint carries no Unit trailer.
+
+Final UI similarity `20261026T083929Z-87700` passes for all seven files.
+Standalone build `20261026T083808Z-85475` passes. The new preview opens normally
+on Antoine’s desktop; no host UI is driven.

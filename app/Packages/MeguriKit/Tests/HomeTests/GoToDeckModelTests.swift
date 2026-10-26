@@ -6,11 +6,224 @@ import Testing
 
 @MainActor
 @Suite struct GoToDeckModelTests {
-    @Test func snapshotOrderLiteralNamesAndActualIDSelection() async {
-        let fixture = PickerFixture()
-        let picker = PickerFixture.makeModel(fixture)
+    @Test func canonicalReadAloneControlsCreateAndBlankNeverLooksUp() async {
+        let harness = DeckPickerHarness()
+        var queries: [String] = []
+        harness.lookupName = { query in
+            queries.append(query)
+            return .init(generation: 11, deck: query == "new" ? nil : harness.snapshot.decks.first)
+        }
+        let picker = DeckPickerHarness.makeModel(harness)
         await picker.load(presentation: 1, generation: 11)
-        #expect(picker.matches == fixture.snapshot.decks)
+        picker.query = " \n\t "
+        await picker.waitForLookup()
+        #expect(queries.isEmpty && !picker.canCreate)
+        // Display filtering is not authority for canonical absence or Default's identity.
+        picker.query = " DEFAULT: "
+        await picker.waitForLookup()
+        #expect(picker.matches.isEmpty && !picker.canCreate)
+        picker.query = "new"
+        #expect(!picker.canCreate && !picker.canSubmit)
+        await picker.waitForLookup()
+        #expect(picker.canCreate && picker.selection == .create && picker.canSubmit)
+        #expect(queries == [" DEFAULT: ", "new"])
+    }
+
+    @Test func newerDraftDiscardsEarlierNameDecision() async {
+        let harness = DeckPickerHarness(), barrier = PickerGate()
+        let (finishedRead, finishRead) = AsyncStream<Void>.makeStream()
+        harness.lookupName = { text in
+            switch text {
+            case "Fresh Entry": return .init(generation: 11, deck: nil)
+            case "Pending Entry":
+                await barrier.hold(); finishRead.finish()
+                return .init(generation: 11, deck: nil)
+            default: return .init(generation: 11, deck: harness.snapshot.decks.first)
+            }
+        }
+        let model = DeckPickerHarness.makeModel(harness)
+        await model.load(presentation: 1, generation: 11)
+        model.query = "Fresh Entry"
+        await model.waitForLookup()
+        #expect(model.canCreate && model.selection == .create)
+        model.query = "Pending Entry"
+        #expect(!model.canCreate && model.selection != .create)
+        await barrier.entered()
+        model.query = "Current Entry"
+        #expect(!model.canCreate && model.selection != .create)
+        await model.waitForLookup()
+        barrier.release()
+        for await _ in finishedRead {}
+        #expect(!model.canCreate && !model.canSubmit)
+        model.submit(layout: .sidebar)
+        #expect(harness.submittedNames.isEmpty)
+    }
+
+    @Test(arguments: ["readFailure", "collectionChange", "sheetChange", "replyChange"])
+    func nameDecisionRequiresMatchingOrigin(reason: String) async {
+        let harness = DeckPickerHarness(), barrier = PickerGate()
+        harness.lookupName = { _ in
+            await barrier.hold()
+            if reason == "readFailure" { throw BridgeError.internal("synthetic read detail") }
+            return .init(generation: reason == "replyChange" ? 12 : 11, deck: nil)
+        }
+        let model = DeckPickerHarness.makeModel(harness)
+        await model.load(presentation: 1, generation: 11)
+        model.query = "Candidate Deck"
+        await barrier.entered()
+        if reason == "collectionChange" { harness.generation = 12 }
+        if reason == "sheetChange" { harness.active = false }
+        barrier.release(); await model.waitForLookup()
+        #expect(!model.canCreate && !model.canSubmit)
+        model.submit(layout: .compact)
+        #expect(harness.submittedNames.isEmpty)
+        let expected: GoToDeckModel.Message? = reason == "readFailure" ? .lookupFailed :
+            reason == "replyChange" ? .unavailable : nil
+        #expect(model.message == expected)
+    }
+
+    @Test func savedContinuationKeepsSubmittedTextAndReadsCurrentLayout() async {
+        let harness = DeckPickerHarness(), barrier = PickerGate()
+        harness.lookupName = { _ in .init(generation: 11, deck: nil) }
+        harness.outcome = .saved; harness.operationGate = barrier
+        let model = DeckPickerHarness.makeModel(harness)
+        await model.load(presentation: 1, generation: 11)
+        let original = "  QZ74 :: QZ75:  "
+        model.query = original
+        await model.waitForLookup()
+        model.submit(layout: .sidebar); model.submit(layout: .compact)
+        #expect(model.busy && harness.submittedNames == [original])
+        await barrier.entered()
+        model.liveLayout = .compact
+        barrier.release(); await model.waitForActivation()
+        #expect(model.hasSavedResult && model.message == .saved && model.canSubmit)
+        await model.load(presentation: 1, generation: 11)
+        #expect(model.hasSavedResult && model.message == .saved)
+        #expect(harness.observedLayouts == [.compact])
+        model.query = "Another Branch"
+        #expect(model.query == original)
+        harness.operationGate = nil; harness.outcome = .opened
+        model.submit(layout: .compact); await model.waitForActivation()
+        #expect(harness.submittedNames == [original, original])
+        // The owner separately proves that continuation requests share one write.
+        #expect(harness.actions.isEmpty)
+    }
+
+    @Test func savedReplyRestoresItsOwnDraftAfterAnEditDuringTheWrite() async {
+        let harness = DeckPickerHarness(), barrier = PickerGate()
+        harness.lookupName = { _ in .init(generation: 11, deck: nil) }
+        harness.operationGate = barrier; harness.outcome = .saved
+        let model = DeckPickerHarness.makeModel(harness)
+        await model.load(presentation: 1, generation: 11)
+        model.query = "Original Path"
+        await model.waitForLookup()
+        model.submit(layout: .sidebar)
+        await barrier.entered()
+        model.query = "Later Draft"
+        await model.waitForLookup()
+        barrier.release(); await model.waitForActivation()
+        #expect(model.hasSavedResult && model.message == .saved && model.query == "Original Path")
+        model.query = "Third Draft"
+        #expect(model.query == "Original Path")
+        harness.operationGate = nil
+        model.submit(layout: .compact); await model.waitForActivation()
+        #expect(harness.submittedNames == ["Original Path", "Original Path"])
+    }
+
+    @Test func ownerIntentChangeKeepsSavedModelBoundToSubmittedQuery() async throws {
+        let owner = await makeOwner(), barrier = PickerGate()
+        owner.presentGoToDeck()
+        let token = try #require(owner.goToDeckPresentation)
+        var requests: [String] = []
+        let model = GoToDeckModel(read: { .init(generation: 11, decks: []) },
+            isCurrent: { owner.goToDeckIsCurrent($0, generation: $1) },
+            activate: { owner.activateGoToDeck($0, generation: $1, presentation: $2, layout: $3) },
+            dismiss: { owner.cancelGoToDeck($0) },
+            matchName: { _ in .init(generation: 11, deck: nil) },
+            create: { text, _, _, _, _ in
+                requests.append(text)
+                // Real-writer owner tests establish this committed-result contract.
+                let first = requests.count == 1
+                return Task { if first { await barrier.hold() }; return .saved }
+            })
+        await model.load(presentation: token, generation: 11)
+        model.query = "Submitted Origin"; await model.waitForLookup()
+        model.submit(layout: .sidebar)
+        await barrier.entered()
+        let intent = owner.navigation.intentRevision
+        owner.navigation.show(.settings)
+        #expect(owner.navigation.intentRevision != intent)
+        barrier.release(); await model.waitForActivation()
+        #expect(model.hasSavedResult && model.message == .saved && model.canSubmit)
+        #expect(owner.goToDeckPresentation == token && owner.navigation.sheet == .goToDeck)
+        #expect(owner.navigation.section == .settings && owner.navigation.homeDeckPage == nil && owner.review == nil)
+        model.query = "Different Request"
+        #expect(model.query == "Submitted Origin")
+        model.submit(layout: .compact)
+        await model.waitForActivation()
+        #expect(requests == ["Submitted Origin", "Submitted Origin"])
+    }
+
+    @Test(arguments: ["parent", "depth", "internal", "argument"])
+    func ownerCreateRefusalLeavesRawDraftEditable(kind: String) async throws {
+        let owner = await makeOwner()
+        owner.presentGoToDeck()
+        let token = try #require(owner.goToDeckPresentation)
+        var writes: [String] = [], selections: [Int64] = []
+        owner.deckActions.createDeck = { text in
+            writes.append(text)
+            switch kind {
+            case "parent": throw BridgeError.deckRefused(.filteredParent)
+            case "depth": throw BridgeError.deckRefused(.tooDeep)
+            case "internal": throw BridgeError.internal("synthetic operation detail")
+            default: throw BridgeError.invalidArgument("synthetic operation detail")
+            }
+        }
+        owner.saveSelectedDeck = { id in selections.append(id); return 11 }
+        let model = GoToDeckModel(read: { .init(generation: 11, decks: []) },
+            isCurrent: { owner.goToDeckIsCurrent($0, generation: $1) },
+            activate: { owner.activateGoToDeck($0, generation: $1, presentation: $2, layout: $3) },
+            dismiss: { owner.cancelGoToDeck($0) },
+            matchName: { _ in .init(generation: 11, deck: nil) },
+            create: { owner.createGoToDeck(name: $0, match: $1, presentation: $2, knownDecks: $3, layout: $4) })
+        await model.load(presentation: token, generation: 11)
+        let raw = "  QZ76 :: QZ77:  "
+        model.query = raw; await model.waitForLookup()
+        model.submit(layout: .compact); await model.waitForActivation()
+        let expected: GoToDeckModel.Message = kind == "parent" ? .filteredParent :
+            kind == "depth" ? .tooDeep : .activationFailed
+        #expect(model.message == expected && !model.hasSavedResult && model.query == raw)
+        #expect(model.canCreate && model.canSubmit && writes == [raw] && selections.isEmpty)
+        #expect(owner.review == nil && owner.navigation.review == nil && owner.navigation.homeDeckPage == nil)
+        #expect(owner.goToDeckPresentation == token && owner.navigation.sheet == .goToDeck)
+        model.query = "Shorter Path"; await model.waitForLookup()
+        #expect(model.query == "Shorter Path" && model.message == nil && model.canSubmit)
+        model.submit(layout: .sidebar); await model.waitForActivation()
+        #expect(writes == [raw, "Shorter Path"] && selections.isEmpty && !model.hasSavedResult)
+    }
+
+    @Test func lookupFailureRetryCompletesNameDecisionWithoutWriting() async {
+        let harness = DeckPickerHarness()
+        var reads = 0
+        harness.lookupName = { _ in
+            reads += 1
+            if reads == 1 { throw BridgeError.internal("synthetic lookup detail") }
+            return .init(generation: 11, deck: nil)
+        }
+        let model = DeckPickerHarness.makeModel(harness)
+        await model.load(presentation: 1, generation: 11)
+        model.query = "Retry Candidate"; await model.waitForLookup()
+        #expect(model.message == .lookupFailed && !model.canCreate && !model.canSubmit)
+        model.retryLookup(); await model.waitForLookup()
+        #expect(model.message == nil && model.canCreate && model.canSubmit && reads == 2)
+        #expect(harness.submittedNames.isEmpty && harness.actions.isEmpty)
+    }
+
+    @Test func snapshotOrderLiteralNamesAndActualIDSelection() async {
+        let harness = DeckPickerHarness()
+        let picker = DeckPickerHarness.makeModel(harness)
+        await picker.load(presentation: 1, generation: 11)
+        #expect(picker.matches == harness.snapshot.decks)
         #expect(picker.selectedID == 1) // Empty Default is included by D17, independently of any display tree.
         picker.query = "ja 1"
         #expect(picker.matches.map(\.id) == [42, 43])
@@ -24,76 +237,76 @@ import Testing
         picker.query = "missing"
         #expect(picker.selectedID == nil && !picker.canSubmit)
         picker.submit(layout: .sidebar)
-        #expect(fixture.actions.isEmpty)
+        #expect(harness.actions.isEmpty)
         picker.query = "Default"
         picker.selectedID = 42 // A stale native selection cannot submit an invisible row.
         #expect(!picker.canSubmit)
         picker.submit(layout: .sidebar)
-        #expect(fixture.actions.isEmpty)
+        #expect(harness.actions.isEmpty)
     }
 
     @Test func failureRetainsDraftSelectionAndRetryUsesSameIDWithLiveLayout() async {
-        let fixture = PickerFixture()
-        fixture.outcome = .failed
-        let picker = PickerFixture.makeModel(fixture)
+        let harness = DeckPickerHarness()
+        harness.outcome = .failed
+        let picker = DeckPickerHarness.makeModel(harness)
         await picker.load(presentation: 1, generation: 11)
         picker.query = "ja 1"; picker.selectedID = 43
         picker.submit(layout: .sidebar)
         await picker.waitForActivation()
         #expect(picker.message == .activationFailed)
         #expect(picker.query == "ja 1" && picker.selectedID == 43)
-        fixture.outcome = .opened
+        harness.outcome = .opened
         picker.submit(layout: .compact)
         await picker.waitForActivation()
-        #expect(fixture.actions.map { $0.0.id } == [43, 43])
-        #expect(fixture.actions.map { $0.1 } == [.sidebar, .compact])
-        #expect(fixture.actions.last?.0.fullName == "Japanese::Lesson11")
+        #expect(harness.actions.map { $0.0.id } == [43, 43])
+        #expect(harness.actions.map { $0.1 } == [.sidebar, .compact])
+        #expect(harness.actions.last?.0.fullName == "Japanese::Lesson11")
     }
 
     @Test func loadingRetryKeepsTypedQueryAndNeverPublishesRawDiagnostics() async {
-        let fixture = PickerFixture(), gate = PickerGate()
-        fixture.read = { await gate.hold(); throw BridgeError.internal("private diagnostic") }
-        let picker = PickerFixture.makeModel(fixture)
+        let harness = DeckPickerHarness(), gate = PickerGate()
+        harness.read = { await gate.hold(); throw BridgeError.internal("private diagnostic") }
+        let picker = DeckPickerHarness.makeModel(harness)
         let first = Task { await picker.load(presentation: 1, generation: 11) }
         await gate.entered()
         picker.query = "猫"
         #expect(picker.loading && !picker.canSubmit)
         gate.release(); await first.value
         #expect(picker.message == .loadFailed && picker.snapshot == nil)
-        fixture.read = { fixture.snapshot }
+        harness.read = { harness.snapshot }
         await picker.load(presentation: 1, generation: 11)
         #expect(picker.query == "猫" && picker.selectedID == 91)
         #expect(picker.message == nil)
     }
 
     @Test func repeatedSubmitIsReservedBeforeWaitingAndNewQuerySurvivesLateFailure() async {
-        let fixture = PickerFixture(), gate = PickerGate()
-        fixture.actionGate = gate; fixture.outcome = .failed
-        let picker = PickerFixture.makeModel(fixture)
+        let harness = DeckPickerHarness(), gate = PickerGate()
+        harness.operationGate = gate; harness.outcome = .failed
+        let picker = DeckPickerHarness.makeModel(harness)
         await picker.load(presentation: 1, generation: 11)
         picker.query = "ja 1"; picker.selectedID = 43
         picker.submit(layout: .sidebar); picker.submit(layout: .sidebar)
-        #expect(picker.busy && fixture.actions.count == 1)
+        #expect(picker.busy && harness.actions.count == 1)
         await gate.entered()
         picker.query = "猫"
         picker.submit(layout: .compact)
         gate.release(); await picker.waitForActivation()
-        #expect(fixture.actions.count == 1)
+        #expect(harness.actions.count == 1)
         #expect(picker.query == "猫" && picker.selectedID == 91 && picker.message == nil)
     }
 
     @Test(arguments: [false, true])
     func lateReadCannotReplaceNewerSnapshotOrPublishAfterDismissal(reload: Bool) async {
-        let fixture = PickerFixture(), gate = PickerGate()
-        let old = fixture.snapshot
-        fixture.read = { await gate.hold(); return old }
-        let picker = PickerFixture.makeModel(fixture)
+        let harness = DeckPickerHarness(), gate = PickerGate()
+        let old = harness.snapshot
+        harness.read = { await gate.hold(); return old }
+        let picker = DeckPickerHarness.makeModel(harness)
         let first = Task { await picker.load(presentation: 1, generation: 11) }
         await gate.entered()
         picker.query = "猫"
         if reload {
-            fixture.snapshot = DeckNameSnapshot(generation: 11, decks: [.init(id: 90, fullName: "猫::新", filtered: false)])
-            fixture.read = { fixture.snapshot }
+            harness.snapshot = DeckNameSnapshot(generation: 11, decks: [.init(id: 90, fullName: "猫::新", filtered: false)])
+            harness.read = { harness.snapshot }
             await picker.load(presentation: 1, generation: 11)
         } else {
             picker.cancel()
@@ -101,16 +314,16 @@ import Testing
         }
         gate.release(); await first.value
         #expect(picker.query == "猫")
-        #expect(picker.snapshot == (reload ? fixture.snapshot : nil))
+        #expect(picker.snapshot == (reload ? harness.snapshot : nil))
         #expect(picker.selectedID == (reload ? 90 : nil))
         #expect(picker.message == nil)
     }
 
     @Test func ownerLifecycleInvalidatesHeldRead() async throws {
-        let owner = await makeOwner(), fixture = PickerFixture(), gate = PickerGate()
+        let owner = await makeOwner(), harness = DeckPickerHarness(), gate = PickerGate()
         owner.presentGoToDeck()
         let token = try #require(owner.goToDeckPresentation)
-        let picker = GoToDeckModel(read: { await gate.hold(); return fixture.snapshot },
+        let picker = GoToDeckModel(read: { await gate.hold(); return harness.snapshot },
             isCurrent: { owner.goToDeckIsCurrent($0, generation: $1) },
             activate: { owner.activateGoToDeck($0, generation: $1, presentation: $2, layout: $3) },
             dismiss: { owner.cancelGoToDeck($0) })
@@ -124,13 +337,13 @@ import Testing
     }
 
     @Test func snapshotGenerationMismatchCannotActivate() async {
-        let fixture = PickerFixture()
-        fixture.snapshot = .init(generation: 12, decks: fixture.snapshot.decks)
-        let picker = PickerFixture.makeModel(fixture)
+        let harness = DeckPickerHarness()
+        harness.snapshot = .init(generation: 12, decks: harness.snapshot.decks)
+        let picker = DeckPickerHarness.makeModel(harness)
         await picker.load(presentation: 1, generation: 11)
         #expect(picker.message == .unavailable && !picker.canSubmit)
         picker.submit(layout: .compact)
-        #expect(fixture.actions.isEmpty)
+        #expect(harness.actions.isEmpty)
     }
 
     @Test func ownerAdmissionFilteredRefusalAndSidebarRetryUseExistingSelection() async throws {
@@ -224,7 +437,7 @@ import Testing
     }
 }
 
-@MainActor private final class PickerFixture {
+@MainActor private final class DeckPickerHarness {
     var snapshot = DeckNameSnapshot(generation: 11, decks: [
         .init(id: 1, fullName: "Default", filtered: false),
         .init(id: 9, fullName: "Filtered", filtered: true),
@@ -236,16 +449,33 @@ import Testing
     var active = true
     var outcome: ReviewCollection.GoToDeckResult = .opened
     var actions: [(DeckNameEntry, ShellLayout)] = []
-    var actionGate: PickerGate?
+    var operationGate: PickerGate?
     var read: (@MainActor () async throws -> DeckNameSnapshot)?
+    var lookupName: (@MainActor (String) async throws -> DeckNameMatch)?
+    var submittedNames: [String] = []
+    var observedLayouts: [ShellLayout] = []
 
-    static func makeModel(_ fixture: PickerFixture) -> GoToDeckModel {
-        GoToDeckModel(read: { try await fixture.read?() ?? fixture.snapshot },
-            isCurrent: { token, generation in fixture.active && token == 1 && generation == fixture.generation },
-            activate: { entry, _, _, layout in
-                fixture.actions.append((entry, layout))
-                return Task { await fixture.actionGate?.hold(); return fixture.outcome }
-            }, dismiss: { _ in fixture.active = false; return Task { true } })
+    static func makeModel(_ harness: DeckPickerHarness) -> GoToDeckModel {
+        GoToDeckModel(read: { try await harness.read?() ?? harness.snapshot },
+            isCurrent: { token, epoch in harness.active && token == 1 && epoch == harness.generation },
+            activate: { row, _, _, arrangement in
+                harness.actions.append((row, arrangement))
+                return Task {
+                    await harness.operationGate?.hold()
+                    return harness.outcome
+                }
+            }, dismiss: { _ in
+                harness.active = false
+                return Task { true }
+            }, matchName: harness.lookupName,
+            create: { text, _, _, _, arrangement in
+                harness.submittedNames.append(text)
+                return Task {
+                    await harness.operationGate?.hold()
+                    harness.observedLayouts.append(arrangement())
+                    return harness.outcome
+                }
+            })
     }
 }
 

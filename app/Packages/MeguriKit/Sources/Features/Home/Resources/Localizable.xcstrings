@@ -1,6 +1,26 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "This path has too many new parent decks. Choose a shorter path.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This path has too many new parent decks. Choose a shorter path."
+          }
+        }
+      }
+    },
+    "A filtered deck can’t contain subdecks. Choose another path.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A filtered deck can’t contain subdecks. Choose another path."
+          }
+        }
+      }
+    },
     "%@ due": {
       "localizations": {
         "en": {
@@ -131,6 +151,16 @@
         }
       }
     },
+    "Couldn’t check this deck name. Try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t check this deck name. Try again."
+          }
+        }
+      }
+    },
     "Couldn’t read the decks. Try again.": {
       "localizations": {
         "en": {
@@ -157,6 +187,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Create Deck"
+          }
+        }
+      }
+    },
+    "Create deck named %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create deck named %@"
           }
         }
       }
@@ -547,6 +587,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "There is no collection in Meguri yet. Local collection import is coming next."
+          }
+        }
+      }
+    },
+    "The deck was saved. Couldn’t open it. Try Go again, or cancel.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The deck was saved. Couldn’t open it. Try Go again, or cancel."
           }
         }
       }
