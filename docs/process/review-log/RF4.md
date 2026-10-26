@@ -1596,3 +1596,20 @@ that expected change as replacement. File and directory identities need their
 own checks; keep file link limits and all binding/inventory assertions.
 The actual package is retained for the separate offline proof. No native job,
 unit or full interoperability acceptance is claimed from this failed receipt.
+
+Final source round six has no P0–P2 findings. The directory authority check now
+uses device, inode and mode; regular-file link and hash limits remain intact.
+Selftest `20261026T000310Z-96225` passes 12 cases. Private
+`20261026T000315Z-96947` and similarity `20261026T000659Z-1239` pass.
+Mac `20261026T000312Z-96495` passes the native case and complete destination
+capture: 3,804,831 bytes. The report explicitly leaves E7.4 client proof pending.
+The iPhone check reaches Files, then cannot find an editable filename field.
+Its failure is retained at `20261026T000455Z-98647`. A test-owned child folder
+can give the real picker a fresh destination while keeping its standard name.
+That focused verification repair and iPad checks remain open.
+
+Offline proof `20261025T235908Z-94151` fails before publishing proof. Decoder
+output includes the map after its payload checks, but raw database/client
+acceptance remains incomplete. A bounded source audit identifies the missing
+schema collation registration. No sync protocol work was resumed. No Unit or
+integration gate is accepted by this checkpoint.

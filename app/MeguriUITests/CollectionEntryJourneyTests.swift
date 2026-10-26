@@ -51,6 +51,9 @@ import notify
         if dismissResult != .completed { capturePicker(app) }
         XCTAssertEqual(dismissResult, .completed, app.debugDescription)
         let importCollection = app.buttons["settings.root.importCollection"].firstMatch
+        #if os(iOS)
+        try revealSettingsControl("settings.root.importCollection", app)
+        #endif
         let importReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             settingsContent.exists && importCollection.exists && importCollection.isEnabled && importCollection.isHittable
         }, object: nil)
@@ -171,12 +174,64 @@ import notify
         #endif
     }
 
+    #if os(iOS)
+    private func revealSettingsControl(_ identifier: String, _ app: XCUIApplication) throws {
+        let root = element(app, "settings.root.content")
+        let target = root.buttons.matching(identifier: identifier).firstMatch
+        let window = app.windows.containing(.any, identifier: "settings.root.content").firstMatch
+        let scroll: XCUIElement? = {
+            guard root.exists else { return nil }
+            if [.scrollView, .table, .collectionView].contains(root.elementType) { return root }
+            for query in [root.collectionViews, root.tables, root.scrollViews] {
+                if query.firstMatch.exists { return query.firstMatch }
+            }
+            for query in [app.collectionViews, app.tables, app.scrollViews] {
+                let owner = query.containing(.any, identifier: "settings.root.content").firstMatch
+                if owner.exists { return owner }
+            }
+            return nil
+        }()
+        func finite(_ frame: CGRect) -> Bool {
+            !frame.isNull && !frame.isInfinite && !frame.isEmpty
+                && [frame.minX, frame.minY, frame.width, frame.height].allSatisfy { $0.isFinite }
+        }
+        // Search the owning Form even when its lazy rows have no AX element yet.
+        // As in ManualTransferJourneyTests.reveal, search above, then below.
+        for attempt in 0..<24 {
+            guard app.state == .runningForeground, !app.sheets.firstMatch.exists,
+                  !app.alerts.firstMatch.exists, !app.keyboards.firstMatch.exists,
+                  root.exists, window.exists, let scroll, scroll.exists,
+                  scroll.isEnabled, scroll.isHittable else { break }
+            let scrollFrame = scroll.frame
+            let viewport = scrollFrame.intersection(root.frame).intersection(window.frame).intersection(app.frame)
+            guard finite(scrollFrame), finite(viewport) else { break }
+            if target.exists && target.isEnabled && target.isHittable { return }
+            let towardsBottom = target.exists ? target.frame.maxY > viewport.maxY : attempt >= 8
+            let origin = scroll.coordinate(withNormalizedOffset: .zero)
+            let upper = origin.withOffset(CGVector(dx: viewport.midX - scrollFrame.minX,
+                                                  dy: viewport.minY + viewport.height * 0.2 - scrollFrame.minY))
+            let lower = origin.withOffset(CGVector(dx: viewport.midX - scrollFrame.minX,
+                                                  dy: viewport.minY + viewport.height * 0.8 - scrollFrame.minY))
+            let start = towardsBottom ? lower : upper
+            let end = towardsBottom ? upper : lower
+            start.press(forDuration: 0, thenDragTo: end)
+        }
+        guard target.exists && target.isEnabled && target.isHittable else {
+            XCTFail("Settings Form must reveal an existing, enabled, hittable \(identifier) within 24 native gestures")
+            throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
+        }
+    }
+    #endif
+
     private func exerciseNativeExport(_ app: XCUIApplication, _ bundle: String,
                                       destinationFolder: URL?, destinationFilename: String? = nil) throws -> URL {
         try openCollectionSettings(app, bundle)
         let settingsContent = element(app, "settings.root.content")
         XCTAssertTrue(settingsContent.waitForExistence(timeout: 10), "Native navigation must open Settings: \(app.debugDescription)")
         let export = app.buttons["settings.root.exportCollection"].firstMatch
+        #if os(iOS)
+        try revealSettingsControl("settings.root.exportCollection", app)
+        #endif
         let exportReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             settingsContent.exists && export.exists && export.isEnabled && export.isHittable
         }, object: nil)

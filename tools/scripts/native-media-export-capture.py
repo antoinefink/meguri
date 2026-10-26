@@ -47,6 +47,12 @@ def node_identity(metadata):
     return metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_nlink
 
 
+def directory_identity(metadata):
+    # Directory link counts can change when ordinary files are added (APFS).
+    require(stat.S_ISDIR(metadata.st_mode), 'expected a directory')
+    return metadata.st_dev, metadata.st_ino, metadata.st_mode
+
+
 def file_metadata(metadata):
     require(stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1,
             'expected a regular file with one link')
@@ -64,14 +70,14 @@ def retained_directory(path):
         for name in path.parts[1:]:
             child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
             stack.callback(os.close, child)
-            identity = node_identity(os.fstat(child))
+            identity = directory_identity(os.fstat(child))
             links.append((parent, name, child, identity))
             parent = child
 
         def verify():
             for directory, name, child, identity in links:
-                require(node_identity(os.fstat(child)) == identity
-                        and node_identity(os.stat(name, dir_fd=directory, follow_symlinks=False)) == identity,
+                require(directory_identity(os.fstat(child)) == identity
+                        and directory_identity(os.stat(name, dir_fd=directory, follow_symlinks=False)) == identity,
                         'capture directory was replaced')
 
         verify()

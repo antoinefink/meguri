@@ -1488,7 +1488,7 @@ PY
     called '^xcrun xcresulttool export attachments --path .*/mac.xcresult --output-path .*/native-media-attachments --test-id CollectionEntryJourneyTests/testNativeMediaExportCancelSaveReplace\(\) --filter \*\.colpkg$'
     [ "$(grep -c '^xcrun xcresulttool export attachments ' "$STUB_LOG")" -eq 1 ]
     phase=manifest
-    case "$mode" in export-error|directory) phase=export ;; esac
+    case "$mode" in export-error) phase=export ;; esac
     [ "$(field .details.native_media_capture_failure.phase)" = "$phase" ]
     [ "$(field .details.native_media_export)" = null ]
     [ "$(field '[.artifacts[] | select(.kind | startswith("native-media"))] | length')" = 0 ]
@@ -1503,8 +1503,10 @@ PY
 import importlib.util
 import json
 import os
+import stat
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('capture', sys.argv[1])
@@ -1518,7 +1520,8 @@ human_name = stem + '_0_00000000-0000-4000-8000-000000000008.colpkg'
 original = b'native-A'
 foreign = b'foreignB'
 
-for case in ('success', 'occupied', 'wrong-owner', 'wrong-bundle', 'export-occupied',
+for case in ('success', 'directory-linkcount-growth', 'file-linkcount-growth',
+             'occupied', 'wrong-owner', 'wrong-bundle', 'export-occupied',
              'export-symlink', 'ancestor-symlink', 'bundle-symlink',
              'manifest-symlink', 'file-symlink', 'hardlink', 'fifo',
              'missing-package', 'ancestor-replacement', 'folder-replacement', 'file-replacement',
@@ -1559,6 +1562,12 @@ for case in ('success', 'occupied', 'wrong-owner', 'wrong-bundle', 'export-occup
         directory.symlink_to(retained, target_is_directory=True)
     before = None
     exported_calls = []
+    stat_path = os.stat
+    stat_fd = os.fstat
+    output_metadata = stat_path(output_dir)
+    directory_counts = {(output_metadata.st_dev, output_metadata.st_ino):
+                        (output_dir, {filename}, output_metadata.st_nlink)}
+    observed_growth = {}
 
     def export(args, **kwargs):
         global before
@@ -1569,6 +1578,9 @@ for case in ('success', 'occupied', 'wrong-owner', 'wrong-bundle', 'export-occup
         assert kwargs == {'check': True, 'stdout': capture.subprocess.DEVNULL,
                           'stderr': capture.subprocess.DEVNULL}
         assert not list(exported.iterdir())
+        metadata = stat_path(exported)
+        directory_counts[(metadata.st_dev, metadata.st_ino)] = (
+            exported, {'manifest.json', basename}, metadata.st_nlink)
         source.write_bytes(original)
         manifest_path.write_text(json.dumps(manifest))
         if case == 'missing-package':
@@ -1591,6 +1603,30 @@ for case in ('success', 'occupied', 'wrong-owner', 'wrong-bundle', 'export-occup
     fired = False
     source_reads = []
     source_read_calls = 0
+
+    def portable_metadata(metadata):
+        identity = (metadata.st_dev, metadata.st_ino)
+        if case == 'directory-linkcount-growth' and stat.S_ISDIR(metadata.st_mode) \
+                and identity in directory_counts:
+            directory, names, initial_links = directory_counts[identity]
+            # Only expected regular-file creation changes the simulated link count.
+            growth = len(set(os.listdir(directory)) & names)
+            observed_growth[directory] = growth
+            links = initial_links + growth
+        elif case == 'file-linkcount-growth' and fired and before is not None \
+                and identity == (before.st_dev, before.st_ino):
+            links = metadata.st_nlink + 1
+        else:
+            return metadata
+        fields = {name: getattr(metadata, name) for name in dir(metadata) if name.startswith('st_')}
+        fields['st_nlink'] = links
+        return SimpleNamespace(**fields)
+
+    def portable_stat(*args, **kwargs):
+        return portable_metadata(stat_path(*args, **kwargs))
+
+    def portable_fstat(*args, **kwargs):
+        return portable_metadata(stat_fd(*args, **kwargs))
 
     def intercept(fd, count):
         global fired, source_read_calls
@@ -1625,10 +1661,12 @@ for case in ('success', 'occupied', 'wrong-owner', 'wrong-bundle', 'export-occup
 
     try:
         with patch.object(capture.subprocess, 'run', side_effect=export), \
-             patch.object(capture.os, 'read', side_effect=intercept):
+             patch.object(capture.os, 'read', side_effect=intercept), \
+             patch.object(capture.os, 'stat', side_effect=portable_stat), \
+             patch.object(capture.os, 'fstat', side_effect=portable_fstat):
             capture.mac_capture(run, filename, bundle)
     except (ValueError, OSError):
-        assert case != 'success', case
+        assert case not in ('success', 'directory-linkcount-growth'), case
         if case == 'occupied':
             assert output.read_bytes() == foreign
         else:
@@ -1636,10 +1674,12 @@ for case in ('success', 'occupied', 'wrong-owner', 'wrong-bundle', 'export-occup
         if case == 'ancestor-replacement':
             assert not (root / 'own-run-retained/native-media-export' / filename).exists()
     else:
-        assert case == 'success', case
+        assert case in ('success', 'directory-linkcount-growth'), case
         assert output.read_bytes() == original
         assert source.read_bytes() == original
         assert capture.file_identity(output)['bytes'] == len(original)
+        if case == 'directory-linkcount-growth':
+            assert observed_growth == {exported: 2, output_dir: 1}, observed_growth
     assert escaped.read_bytes() == foreign
     if case in ('wrong-owner', 'wrong-bundle', 'export-occupied', 'export-symlink',
                 'ancestor-symlink', 'bundle-symlink'):
@@ -1649,7 +1689,8 @@ for case in ('success', 'occupied', 'wrong-owner', 'wrong-bundle', 'export-occup
     if case in ('ancestor-replacement', 'folder-replacement', 'file-replacement'):
         assert fired and b''.join(source_reads) == original, case
         assert source.read_bytes() == foreign, case
-    if case in ('same-length-mutation', 'rehash-mutation', 'destination-mutation', 'manifest-mutation', 'extra-export'):
+    if case in ('same-length-mutation', 'rehash-mutation', 'destination-mutation', 'manifest-mutation',
+                'extra-export', 'file-linkcount-growth'):
         assert fired, case
     assert not (run / 'native-media-export.json').exists()
 
