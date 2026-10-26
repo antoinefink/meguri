@@ -5,6 +5,7 @@ mod anonymize;
 mod conformance;
 mod fp_probe;
 mod generate;
+mod native_review;
 mod private;
 mod private_suite;
 mod profile_extract;
@@ -15,6 +16,7 @@ fn main() {
     let status = match args.split_first() {
         Some((command, rest)) if command == "conformance" => conformance::main(rest),
         Some((command, rest)) if command == "generate" => generate::main(rest),
+        Some((command, rest)) if command == "internal-native-review" => native_review::main(rest),
         Some((command, rest)) if command == "fp-probe" => fp_probe::main(rest),
         Some((command, rest)) if command == "profile-extract" => profile_extract::main(rest),
         Some((command, rest)) if command == "private" => private::main(rest),

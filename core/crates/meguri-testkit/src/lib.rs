@@ -21,4 +21,5 @@ pub mod sync_stub;
 pub mod timing;
 pub mod wallclock;
 
+pub mod native_review;
 pub mod normal_support;

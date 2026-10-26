@@ -197,3 +197,18 @@ skips. Privacy `20261026T154633Z-73601` passes.
 This is source preparation only. Real generated-parent execution, packaging,
 declared runtime inputs, Rust expected-state replay and the full native chain
 remain pending. No Unit or milestone acceptance is claimed.
+
+## Frozen Rust replay
+
+Start `02eed10c`. The filtered replay work adds strict declared inputs,
+pre-launch source/import/review states, 18 frozen artifacts and an external
+freeze identity. It runs the real import, answer, end and reopen paths; the
+expectation checks delivery and persistence, not independent scheduling parity.
+
+Independent review closed the dependency and enabled positive-test findings.
+The compile repair and final wording-only closure preserve the schema, bounds
+and validation order. Final closure report is retained in the U162 intake.
+Focused `core-test/20261026T182027Z-57470` passes 3 tests with zero skips;
+privacy `20261026T182025Z-57218` and similarity `20261026T182029Z-57708` pass.
+The failed results are still recorded. App execution and the batch gate
+are not yet complete.
