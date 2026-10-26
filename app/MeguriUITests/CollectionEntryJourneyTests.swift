@@ -669,7 +669,6 @@ import notify
         let cancelOther = app.otherElements.matching(exactCancel).firstMatch
         let back = app.buttons.matching(identifier: "BackButton").firstMatch
         let more = app.buttons.matching(identifier: "OverflowBarButtonItem").firstMatch
-        let save = app.buttons.matching(identifier: "DOCPicker.actionButton").firstMatch
         func actionable(_ target: XCUIElement) -> Bool {
             target.exists && target.isEnabled && target.isHittable
         }
@@ -679,7 +678,7 @@ import notify
             return actionable(cancelOther) ? cancelOther : nil
         }
         func completedRoot() -> Bool {
-            !back.exists && (actionable(save) || actionable(more))
+            !back.exists && actionable(more)
         }
         func captureFailure(_ reason: String) {
             capturePicker(app)
@@ -692,8 +691,7 @@ import notify
                 "Cancel MenuItem: \(attributes(cancelMenuItem))",
                 "Cancel Other: \(attributes(cancelOther))",
                 "Back: \(attributes(back))",
-                "More: \(attributes(more))",
-                "Save: \(attributes(save))"]
+                "More: \(attributes(more))"]
             let diagnostic = XCTAttachment(string: rows.joined(separator: "\n"))
             diagnostic.name = "export-cancel-postwait-native-attributes"
             diagnostic.lifetime = .keepAlways

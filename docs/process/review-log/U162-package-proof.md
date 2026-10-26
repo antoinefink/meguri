@@ -129,3 +129,17 @@ Return now requires this exact editor to disappear plus the existing actual-chil
 or navigation proof. All actions, nonce checks and limits remain unchanged.
 Independent R1 is clear; privacy `20261026T132217Z-54957` and similarity
 `20261026T132217Z-54958` pass. iPad and shared iPhone execution are still pending.
+
+## Cancellation readiness
+
+`ui-test/20261026T132410Z-57679` fails before folder naming. In the cancellation
+phase, the Save button's AX hit-point query fails. That control is not used to
+cancel. The folder-editor repair therefore remains unverified by this run.
+
+Filtered fixer `cleanroom/20261026T134059Z-73426` makes root readiness require
+the actionable overflow control, the actual next cancellation action when
+Cancel and Back are absent. It removes Save only from that helper's readiness
+and diagnostic list. Real Cancel, Back and overflow actionability, navigation
+bounds and final Cancel checks remain; real Save/Replace assertions elsewhere
+are unchanged. Independent R1 is clear. Privacy `20261026T135222Z-86956` and
+similarity `20261026T135219Z-86690` results are retained; native checks are pending.
