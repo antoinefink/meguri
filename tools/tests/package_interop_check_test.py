@@ -429,6 +429,433 @@ class NativeClock(Fixture):
         self.assertFalse(any(p.name.endswith(('-wal', '-shm', '-journal')) for p in prepared.rglob('*')))
         self.assertFalse((prepared / 'preparation.json').exists())
 
+    def review_parent(self):
+        """Small own F9-shaped rows, using the real schema and recipe metadata.
+
+        Histories exercise preservation, not scheduler correctness; integration
+        must use tools/mg fixtures local-review --seed 1, never this test DB.
+        """
+        import re
+        self.db.unlink()
+        conn = sqlite3.connect(self.db)
+        conn.create_collation('unicase', lambda a, b: (a > b) - (a < b))
+        declarations = []
+        for line in (REPO / 'specs/storage/schema-18.md').read_text().splitlines():
+            cells = re.findall(r'`([^`]+)`', line)
+            if line.startswith('| `') and cells[-1].startswith('CREATE '):
+                declarations.append(cells[-1])
+        for sql in declarations:
+            conn.execute(sql)
+        crt = 1884308400  # 120 days before 2030-01-15 04:00 Europe/Paris
+        ntid = crt * 1000
+        def put(table, **values):
+            columns = interop.COLUMNS[table].split()
+            conn.execute('INSERT INTO ' + table + ' VALUES (' + ','.join('?' for _ in columns) + ')',
+                         [values[c] for c in columns])
+        put('col', id=1, crt=crt, mod=1894698000000, scm=ntid, ver=18, dty=0, usn=0,
+            ls=0, conf='', models='', decks='', dconf='', tags='')
+        config = dict(activeDecks=[1], addToCur=True, collapseTime=0, creationOffset=-60,
+            curDeck=1, curModel=ntid, dayLearnFirst=False, dueCounts=True, estTimes=True, fsrs=True,
+            lastUnburied=120, loadBalancerEnabled=True, newSpread=0, nextPos=5, rollover=4,
+            sched2021=True, schedVer=2, sortBackwards=False, sortType='noteFld', timeLim=0)
+        for key, value in config.items():
+            put('config', KEY=key, usn=-1, mtime_secs=crt,
+                val=json.dumps(value, separators=(',', ':')).encode())
+        for did, name in ((1, 'Default'), (ntid + 1, 'Local Review'), (ntid + 2, 'Local Review\x1fCards')):
+            put('decks', id=did, name=name, mtime_secs=crt, usn=-1, common=b'', kind=b'\x0a\x02\x08\x01')
+        put('deck_config', id=1, name='Default', mtime_secs=crt, usn=-1, config=b'\xc0\x01\x3c')
+        put('notetypes', id=ntid, name='Meguri Basic', mtime_secs=crt, usn=-1, config=b'')
+        for ordinal, name in enumerate(('Front', 'Back')):
+            put('fields', ntid=ntid, ord=ordinal, name=name, config=b'')
+        put('templates', ntid=ntid, ord=0, name='Card 1', mtime_secs=crt, usn=-1,
+            config=message_field(1, b'<div>{{Front}}</div>') + message_field(2, b'{{FrontSide}} {{Back}}'))
+        put('tags', tag='local-review', usn=-1, collapsed=0, config=None)
+        for n in range(1, 5):
+            first = (crt + 100 * 86400 + n * 3600) * 1000
+            nid = first - 86400000
+            last = first + 7 * 86400000
+            front = 'Question ' + str(n)
+            put('notes', id=nid, guid='own-guid-' + str(n), mid=ntid, mod=nid // 1000, usn=-1,
+                tags=' local-review ', flds=front + '\x1fAnswer ' + str(n), sfld=front,
+                csum=int.from_bytes(hashlib.sha1(front.encode()).digest()[:4], 'big'), flags=0, data='')
+            put('cards', id=nid, nid=nid, did=ntid + 2, ord=0, mod=last // 1000, usn=-1,
+                type=2, queue=2, due=111, ivl=4, factor=2500, reps=2, lapses=0, left=0,
+                odue=0, odid=0, flags=0, data=json.dumps(dict(pos=n, s=4.1, d=5.0, dr=0.9,
+                    decay=0.154, lrt=last // 1000), separators=(',', ':')))
+            for stamp, interval, prev, kind in ((first, 1, 0, 0), (last, 4, 1, 1)):
+                put('revlog', id=stamp, cid=nid, usn=-1, ease=3, ivl=interval, lastIvl=prev,
+                    factor=2500, time=1000, type=kind)
+        conn.commit()
+        conn.close()
+        for p in self.media.iterdir():
+            p.unlink()
+        manifest = dict(generator_version=5, kind='recipe', name='local-review', seed=1,
+            cards_requested=4, now_ms=1894698000000, utc_offset_secs=3600,
+            profile_sha256=None, worst_case_sha256=None, media='files',
+            counts=dict(notes=4, cards=4, revlog=8, notetypes=1, decks=3, presets=1, tags=1,
+                        media_refs=0, media_files=0, media_bytes=0), dump_sha256=self.review_dump_hash())
+        (self.expected / 'manifest.json').write_text(json.dumps(manifest))
+        self.review_run = self.root / 'build/mg/ui-test/own-review-case'
+        self.review_output = self.review_run / 'source-preparation'
+        self.review_output.mkdir(parents=True)
+        return manifest
+
+    def review_dump_hash(self):
+        # Independently encode F10.3 from SQL declaration order, not the
+        # operation's neutral-row machinery or its derivation record.
+        conn = sqlite3.connect(self.db)
+        conn.create_collation('unicase', lambda a, b: (a > b) - (a < b))
+        digest = hashlib.sha256()
+        try:
+            for table in ('col', 'config', 'deck_config', 'decks', 'notetypes', 'fields',
+                          'templates', 'tags', 'graves', 'notes', 'cards', 'revlog'):
+                digest.update(table.encode() + b'\0')
+                keys = {'config': 'KEY', 'fields': 'ntid,ord', 'templates': 'ntid,ord',
+                        'tags': 'tag', 'graves': 'oid,type'}.get(table, 'id')
+                for row in conn.execute('SELECT * FROM ' + table + ' ORDER BY ' + keys):
+                    for value in row:
+                        if value is None:
+                            digest.update(b'\0')
+                        elif type(value) is int:
+                            digest.update(b'\1' + struct.pack('<q', value))
+                        elif type(value) is float:
+                            digest.update(b'\2' + struct.pack('<d', value))
+                        else:
+                            data = value.encode() if isinstance(value, str) else value
+                            digest.update((b'\3' if isinstance(value, str) else b'\4')
+                                          + struct.pack('<Q', len(data)) + data)
+                    digest.update(b'\xff')
+            return digest.hexdigest()
+        finally:
+            conn.close()
+
+    def prepare_review_source(self):
+        interop.prepare_native_review(argparse.Namespace(root=str(self.root), run=str(self.review_run),
+            expected=str(self.expected), output=str(self.review_output), platform='mac'))
+        return self.review_output / 'fixture'
+
+    def test_native_review_source_preserves_parent_history_and_records_exact_derivation(self):
+        manifest = self.review_parent()
+        parent = {p.relative_to(self.expected).as_posix(): p.read_bytes()
+                  for p in self.expected.rglob('*') if p.is_file()}
+        original = list(interop.raw_rows(self.db))
+        prepared = self.prepare_review_source()
+        self.assertEqual(parent, {p.relative_to(self.expected).as_posix(): p.read_bytes()
+                                 for p in self.expected.rglob('*') if p.is_file()})
+        record_path = self.review_output / 'preparation.json'
+        record = json.loads(record_path.read_text())
+        self.assertEqual(record_path.stat().st_mode & 0o222, 0)
+        self.assertEqual(record['generator_request']['seed'], manifest['seed'])
+        self.assertEqual(record['generator_request']['recipe']['decks'][0]['due'], 4)
+        self.assertEqual(record['run'], 'build/mg/ui-test/own-review-case')
+        self.assertEqual(record['platform'], 'mac')
+        self.assertEqual(record['stage'], 'source-only-before-app')
+        self.assertEqual(record['preset_cap_answer_time_secs'], 60)
+        rows = list(interop.raw_rows(prepared / 'collection.anki2'))
+        self.assertEqual({t: sum(r[0] == t for r in rows) for t in ('decks', 'notes', 'cards', 'revlog')},
+                         dict(decks=1, notes=1, cards=1, revlog=2))
+        card = record['source_facts']['card_id']
+        self.assertEqual(record['source_facts']['deck_id'], 1)
+        self.assertEqual(record['source_facts']['deck_name'], 'Default')
+        self.assertEqual(record['source_facts']['note_id'], card)
+        history = [r for r in rows if r[0] == 'revlog']
+        self.assertEqual(history, [r for r in original if r[0] == 'revlog' and r[2][1][1] == card])
+        actual = next(r[2] for r in rows if r[0] == 'cards')
+        previous = next(r[2] for r in original if r[:2] == ('cards', str(card)))
+        self.assertEqual(actual[:2] + actual[3:], previous[:2] + previous[3:])
+        offset = next(r[2] for r in rows if r[:2] == ('config', 'localOffset'))
+        self.assertEqual(offset, [('text', 'localOffset'), ('integer', -1),
+                                  ('integer', 1884308400), ('blob', b'-60')])
+        self.assertEqual(record['clock'], dict(now=NATIVE_NOW, tz=NATIVE_TZ, now_ms=1894698000000))
+        derived = json.loads((prepared / 'manifest.json').read_text())
+        self.assertEqual(derived, record['source_facts'])
+        self.assertEqual(derived['parent_manifest'], manifest)
+        # Apply exact before/after evidence to raw cells; no unrecorded changes.
+        def encoded(table, cells):
+            return [dict(column=c, storage_class=k, **({'value_hex': v.hex()} if k == 'blob'
+                                                       else {'value': v}))
+                    for c, (k, v) in zip(interop.COLUMNS[table].split(), cells)]
+        reconstructed = {(t, k): encoded(t, v) for t, k, v in original}
+        for change in record['row_changes']:
+            key = change['table'], change['key']
+            self.assertEqual(reconstructed.get(key), change['before'])
+            if change['after'] is None:
+                reconstructed.pop(key)
+            else:
+                reconstructed[key] = change['after']
+        self.assertEqual(reconstructed, {(t, k): encoded(t, v) for t, k, v in rows})
+        for name, identity in record['parent_files'].items():
+            self.assertEqual(identity, dict(sha256=hashlib.sha256(parent[name]).hexdigest(), bytes=len(parent[name])))
+        for name, identity in record['prepared_files'].items():
+            data = (prepared / name).read_bytes()
+            self.assertEqual(identity, dict(sha256=hashlib.sha256(data).hexdigest(), bytes=len(data)))
+        self.assertFalse(any(p.name.endswith(('-wal', '-shm', '-journal')) for p in prepared.rglob('*')))
+
+    def test_native_review_source_media_are_valid_exact_own_patterns_and_referenced(self):
+        import wave
+        import zlib
+        self.review_parent()
+        prepared = self.prepare_review_source()
+        media = prepared / 'collection.media'
+        self.assertEqual(set(p.name for p in media.iterdir()),
+                         {'meguri-review.png', 'meguri-review.wav', '_meguri-unused.txt'})
+        png = (media / 'meguri-review.png').read_bytes()
+        self.assertEqual(png[:8], b'\x89PNG\r\n\x1a\n')
+        position, chunks = 8, {}
+        while position < len(png):
+            length = struct.unpack_from('>I', png, position)[0]
+            kind = png[position + 4:position + 8]
+            data = png[position + 8:position + 8 + length]
+            crc = struct.unpack_from('>I', png, position + 8 + length)[0]
+            self.assertEqual(crc, zlib.crc32(kind + data) & 0xffffffff)
+            chunks[kind] = data
+            position += 12 + length
+        self.assertEqual(position, len(png))
+        self.assertEqual(set(chunks), {b'IHDR', b'sRGB', b'IDAT', b'IEND'})
+        self.assertEqual(struct.unpack('>IIBBBBB', chunks[b'IHDR']), (4, 4, 8, 6, 0, 0, 0))
+        self.assertEqual(chunks[b'sRGB'], b'\0')
+        self.assertEqual(zlib.decompress(chunks[b'IDAT']), (b'\0' + b'\x33\x66\x99\xff' * 4) * 4)
+        with wave.open(str(media / 'meguri-review.wav'), 'rb') as audio:
+            self.assertEqual((audio.getnchannels(), audio.getsampwidth(), audio.getframerate(),
+                              audio.getnframes(), audio.getcomptype()), (1, 2, 8000, 16000, 'NONE'))
+            self.assertEqual(audio.readframes(16001), bytes(32000))
+        self.assertEqual((media / '_meguri-unused.txt').read_bytes(), b'Meguri own unused media fixture\n')
+        note = next(v for t, _, v in interop.raw_rows(prepared / 'collection.anki2') if t == 'notes')
+        self.assertIn('<img src="meguri-review.png">', note[6][1])
+        self.assertIn('[sound:meguri-review.wav]', note[6][1])
+        self.assertNotIn('_meguri-unused', note[6][1])
+        record = json.loads((self.review_output / 'preparation.json').read_text())
+        for name, fact in record['media'].items():
+            data = (media / name).read_bytes()
+            self.assertEqual(bytes.fromhex(fact['content_hex']), data)
+            self.assertEqual(fact['sha256'], hashlib.sha256(data).hexdigest())
+            self.assertEqual(fact['sha1'], hashlib.sha1(data).hexdigest())
+            self.assertEqual(fact['bytes'], len(data))
+            self.assertEqual(fact['referenced'], not name.startswith('_'))
+
+    def test_native_review_source_refuses_wrong_shape_and_cleans_owned_output(self):
+        self.review_parent()
+        parent = self.db.read_bytes()
+        for sql in ("UPDATE cards SET queue=-2", "UPDATE config SET val=X'31' WHERE KEY='collapseTime'",
+                    'DELETE FROM revlog WHERE id=(SELECT min(id) FROM revlog)',
+                    "INSERT INTO config VALUES ('localOffset', -1, 1884308400, '-60')",
+                    "INSERT INTO config VALUES ('localOffset', -1, 1884308401, X'2D3630')",
+                    'CREATE TRIGGER unexpected AFTER UPDATE ON notes BEGIN SELECT 1; END'):
+            with self.subTest(sql=sql):
+                conn = sqlite3.connect(self.db)
+                conn.execute(sql)
+                conn.commit()
+                conn.close()
+                # A matching hash cannot turn a non-recipe shape into admission.
+                manifest_path = self.expected / 'manifest.json'
+                manifest = json.loads(manifest_path.read_text())
+                manifest['dump_sha256'] = self.review_dump_hash()
+                manifest_path.write_text(json.dumps(manifest))
+                self.rejects(self.prepare_review_source)
+                self.assertEqual(list(self.review_output.iterdir()), [])
+                self.db.write_bytes(parent)
+
+    def test_native_review_source_refuses_changed_parent_links_nonempty_and_ambient_output(self):
+        self.review_parent()
+        original_read = interop.read_file
+        changed = False
+        def change_parent(fd, name, *args, **kwargs):
+            nonlocal changed
+            result = original_read(fd, name, *args, **kwargs)
+            if name == 'collection.anki2' and args and not changed:
+                changed = True
+                with self.db.open('ab') as stream:
+                    stream.write(b'changed')
+            return result
+        with mock.patch.object(interop, 'read_file', side_effect=change_parent):
+            self.rejects(self.prepare_review_source, 'source-changed')
+        self.assertEqual(list(self.review_output.iterdir()), [])
+        sentinel = self.review_output / 'retain'
+        sentinel.write_bytes(b'owned elsewhere')
+        self.rejects(self.prepare_review_source, 'native-preparation-output-not-empty')
+        self.assertEqual(sentinel.read_bytes(), b'owned elsewhere')
+        sentinel.unlink()
+        for link in ('soft', 'hard'):
+            with self.subTest(link=link):
+                alias = self.expected / 'linked'
+                if link == 'soft':
+                    alias.symlink_to(self.db)
+                else:
+                    os.link(self.db, alias)
+                self.rejects(self.prepare_review_source)
+                self.assertTrue(alias.exists())
+                self.assertEqual(list(self.review_output.iterdir()), [])
+                alias.unlink()
+        good = self.review_output
+        self.review_output = self.root / 'ambient'
+        self.review_output.mkdir()
+        self.rejects(self.prepare_review_source, 'native-review-output-scope')
+        self.assertEqual(list(self.review_output.iterdir()), [])
+        self.review_output = good
+
+    def test_native_review_source_cleanup_after_write_failure_and_correct_existing_offset(self):
+        self.review_parent()
+        conn = sqlite3.connect(self.db)
+        conn.execute('INSERT INTO config VALUES (?, -1, 1884308400, ?)', ('localOffset', b'-60'))
+        conn.commit()
+        conn.close()
+        manifest_path = self.expected / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text())
+        manifest['dump_sha256'] = self.review_dump_hash()
+        manifest_path.write_text(json.dumps(manifest))
+        original = interop.write_json
+        def fail_record(fd, name, *args, **kwargs):
+            original(fd, name, *args, **kwargs)
+            if name == 'preparation.json':
+                raise OSError('injected publication failure')
+        with mock.patch.object(interop, 'write_json', side_effect=fail_record):
+            with self.assertRaises(OSError):
+                self.prepare_review_source()
+        self.assertEqual(list(self.review_output.iterdir()), [])
+        self.prepare_review_source()
+        record = json.loads((self.review_output / 'preparation.json').read_text())
+        self.assertFalse(any(c['table'] == 'config' and c['key'] == 'localOffset' for c in record['row_changes']))
+
+    def test_native_review_source_preserves_exclusive_file_creation_collisions(self):
+        self.review_parent()
+        parent = self.db.read_bytes()
+        original_open = os.open
+        for relative in ('fixture/collection.anki2', 'fixture/collection.media/meguri-review.png',
+                         'fixture/manifest.json', 'preparation.json'):
+            with self.subTest(path=relative):
+                foreign = self.review_output / relative
+                inserted = []
+                def collide(name, flags, *args, **kwargs):
+                    if name == foreign.name and flags & os.O_EXCL:
+                        foreign.write_bytes(b'other owner: preserve these bytes')
+                        inserted.append(foreign.stat())
+                    return original_open(name, flags, *args, **kwargs)
+                with mock.patch.object(interop.os, 'open', side_effect=collide):
+                    with self.assertRaises(FileExistsError):
+                        self.prepare_review_source()
+                self.assertEqual(len(inserted), 1)
+                self.assertEqual(foreign.read_bytes(), b'other owner: preserve these bytes')
+                self.assertEqual((foreign.stat().st_dev, foreign.stat().st_ino),
+                                 (inserted[0].st_dev, inserted[0].st_ino))
+                self.assertEqual(self.db.read_bytes(), parent)
+                self.assertEqual({p.relative_to(self.review_output).as_posix()
+                                  for p in self.review_output.rglob('*') if p.is_file()}, {relative})
+                shutil.rmtree(self.review_output)
+                self.review_output.mkdir()
+
+    def test_native_review_source_preserves_unexpected_files_during_failure_cleanup(self):
+        self.review_parent()
+        original = interop.write_json
+        for directory in ('fixture', 'fixture/collection.media'):
+            with self.subTest(directory=directory):
+                foreign = self.review_output / directory / 'other-owner.txt'
+                def fail_record(fd, name, *args, **kwargs):
+                    if name == 'preparation.json':
+                        foreign.write_bytes(b'keep unrelated output')
+                        raise OSError('injected publication failure')
+                    return original(fd, name, *args, **kwargs)
+                with mock.patch.object(interop, 'write_json', side_effect=fail_record):
+                    with self.assertRaisesRegex(OSError, 'injected publication failure'):
+                        self.prepare_review_source()
+                self.assertEqual(foreign.read_bytes(), b'keep unrelated output')
+                self.assertEqual({p.relative_to(self.review_output).as_posix()
+                                  for p in self.review_output.rglob('*') if p.is_file()},
+                                 {directory + '/other-owner.txt'})
+                shutil.rmtree(self.review_output)
+                self.review_output.mkdir()
+
+    def test_native_review_source_preserves_substituted_file_bindings_during_cleanup(self):
+        self.review_parent()
+        publish_json = interop.write_json
+        for entry in ('fixture/collection.anki2', 'fixture/manifest.json',
+                      'fixture/collection.media/meguri-review.png', 'preparation.json'):
+            for form in ('file', 'symlink'):
+                with self.subTest(path=entry, kind=form):
+                    slot = self.review_output / entry
+                    saved = self.review_run / 'saved.bin'
+                    referent = self.review_run / 'target.bin'
+                    referent.write_bytes(b'\x00\x81\x02')
+                    snapshots = []
+                    def interrupt_write(handle, filename, *values, **options):
+                        outcome = publish_json(handle, filename, *values, **options)
+                        if filename == 'preparation.json':
+                            slot.rename(saved)
+                            if form == 'file':
+                                slot.write_bytes(b'\x03\x82\x00')
+                            else:
+                                slot.symlink_to(referent)
+                            snapshots.append(slot.lstat())
+                            raise OSError('injected publication failure')
+                        return outcome
+                    with mock.patch.object(interop, 'write_json', side_effect=interrupt_write):
+                        with self.assertRaisesRegex(OSError, 'injected publication failure'):
+                            self.prepare_review_source()
+                    self.assertEqual((slot.lstat().st_dev, slot.lstat().st_ino),
+                                     (snapshots[0].st_dev, snapshots[0].st_ino))
+                    self.assertEqual(slot.is_symlink(), form == 'symlink')
+                    self.assertEqual(slot.read_bytes(), b'\x03\x82\x00' if form == 'file'
+                                     else b'\x00\x81\x02')
+                    self.assertEqual(referent.read_bytes(), b'\x00\x81\x02')
+                    self.assertTrue(saved.is_file())
+                    saved.unlink()
+                    referent.unlink()
+                    shutil.rmtree(self.review_output)
+                    self.review_output.mkdir()
+
+    def test_native_review_source_preserves_substituted_directories_during_cleanup(self):
+        self.review_parent()
+        store_json = interop.write_json
+        for folder in ('fixture', 'fixture/collection.media'):
+            with self.subTest(directory=folder):
+                location = self.review_output / folder
+                backup = self.review_run / 'saved-folder'
+                identities = []
+                def stop_after_write(descriptor, leaf, *arguments, **keywords):
+                    written = store_json(descriptor, leaf, *arguments, **keywords)
+                    if leaf == 'preparation.json':
+                        location.rename(backup)
+                        location.mkdir()
+                        (location / 'item.bin').write_bytes(b'\x04\x00\x83')
+                        identities.append(location.stat())
+                        raise OSError('injected publication failure')
+                    return written
+                with mock.patch.object(interop, 'write_json', side_effect=stop_after_write):
+                    with self.assertRaisesRegex(OSError, 'injected publication failure'):
+                        self.prepare_review_source()
+                self.assertEqual((location.stat().st_dev, location.stat().st_ino),
+                                 (identities[0].st_dev, identities[0].st_ino))
+                self.assertEqual((location / 'item.bin').read_bytes(), b'\x04\x00\x83')
+                self.assertEqual(list(backup.iterdir()), [])
+                shutil.rmtree(backup)
+                shutil.rmtree(self.review_output)
+                self.review_output.mkdir()
+
+    def test_native_review_source_cleanup_removes_owned_partial_record_write(self):
+        self.review_parent()
+        original = interop.write_json
+        partial = []
+        record = self.review_output / 'preparation.json'
+        class BrokenWriter(io.BufferedWriter):
+            def write(stream, data):
+                super().write(data[:13])
+                stream.flush()
+                partial.append(record.read_bytes())
+                raise OSError('injected partial record write')
+        def fail_record(fd, name, *args, **kwargs):
+            if name == 'preparation.json':
+                with mock.patch.object(interop.os, 'fdopen', side_effect=lambda target, mode:
+                                       BrokenWriter(io.FileIO(target, mode, closefd=True))):
+                    return original(fd, name, *args, **kwargs)
+            return original(fd, name, *args, **kwargs)
+        with mock.patch.object(interop, 'write_json', side_effect=fail_record):
+            with self.assertRaisesRegex(OSError, 'injected partial record write'):
+                self.prepare_review_source()
+        self.assertEqual(len(partial), 1)
+        self.assertEqual(len(partial[0]), 13)
+        self.assertEqual(list(self.review_output.iterdir()), [])
+        self.prepare_review_source()
+        self.assertEqual(json.loads(record.read_text())['stage'], 'source-only-before-app')
+
     def test_native_media_prepared_expected_keeps_strict_independent_package_comparison(self):
         (self.expected / 'manifest.json').write_text('{}')
         prepared = self.prepare_media_baseline() / 'fixture'

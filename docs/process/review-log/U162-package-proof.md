@@ -178,3 +178,22 @@ Privacy findings required a prose-only rewrite of six F11.2 paragraphs. The
 final independent semantic review is clear; all input, media, timing and proof
 requirements remain. Privacy scan `20261026T145803Z-44709` passes. No guard or
 exception changed. These are test contracts, not implementation or acceptance.
+
+## Generated media-chain source
+
+Start `f588201c`; filtered implementer `cleanroom/20261026T151920Z-61316`
+adds the internal pinned-decoder source preparation and focused tests. It keeps
+one generated card and its history, adds valid PNG/WAV and unused media, and
+records exact changes and frozen parent/source identities. Existing recipes,
+goldens, defaults and F11.1 remain.
+
+R1 found cleanup that could delete files without proving ownership. Filtered
+fixer `20261026T153444Z-67695` adds creation/binding checks and collision tests.
+R2 is clear. Privacy required another neutral comment/test rewrite, supplied by
+`20261026T154401Z-71860`; final semantic review is clear. Focused NativeClock and
+HostCompatibility checks pass in `selftest/20261026T154723Z-74214` with zero
+skips. Privacy `20261026T154633Z-73601` passes.
+
+This is source preparation only. Real generated-parent execution, packaging,
+declared runtime inputs, Rust expected-state replay and the full native chain
+remain pending. No Unit or milestone acceptance is claimed.

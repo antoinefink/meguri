@@ -44,6 +44,7 @@ import argparse
 import bisect
 import ctypes
 import datetime as dt
+import errno
 import hashlib
 import io
 import json
@@ -465,7 +466,7 @@ def json_bytes(data):
                       parse_constant=lambda _: require(False, 'nonfinite-json'))
 
 
-def write_json(fd, name, value, mode=0o600):
+def write_json(fd, name, value, mode=0o600, on_create=None):
     # All producers are bounded; also stop encoding at the byte limit.
     encoded = bytearray()
     for piece in json.JSONEncoder(sort_keys=True, ensure_ascii=True).iterencode(value):
@@ -477,6 +478,8 @@ def write_json(fd, name, value, mode=0o600):
     out = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                   mode, dir_fd=fd)
     with os.fdopen(out, 'wb') as stream:
+        if on_create is not None:
+            on_create(stream.fileno())
         stream.write(encoded)
 
 
@@ -813,6 +816,446 @@ def prepare_native_media(args):
     finally:
         os.close(src)
         os.close(dest)
+
+
+# This operation admits only the committed F9 local-review recipe's generated
+# shape. It is not a collection repair API or an expected-state replay engine.
+F112_SCHEMA = {
+    'col': ('table', 'col', 'CREATE TABLE col ( id integer PRIMARY KEY, crt integer NOT NULL, mod integer NOT NULL, scm integer NOT NULL, ver integer NOT NULL, dty integer NOT NULL, usn integer NOT NULL, ls integer NOT NULL, conf text NOT NULL, models text NOT NULL, decks text NOT NULL, dconf text NOT NULL, tags text NOT NULL )'),
+    'notes': ('table', 'notes', 'CREATE TABLE notes ( id integer PRIMARY KEY, guid text NOT NULL, mid integer NOT NULL, mod integer NOT NULL, usn integer NOT NULL, tags text NOT NULL, flds text NOT NULL, sfld integer NOT NULL, csum integer NOT NULL, flags integer NOT NULL, data text NOT NULL )'),
+    'cards': ('table', 'cards', 'CREATE TABLE cards ( id integer PRIMARY KEY, nid integer NOT NULL, did integer NOT NULL, ord integer NOT NULL, mod integer NOT NULL, usn integer NOT NULL, type integer NOT NULL, queue integer NOT NULL, due integer NOT NULL, ivl integer NOT NULL, factor integer NOT NULL, reps integer NOT NULL, lapses integer NOT NULL, left integer NOT NULL, odue integer NOT NULL, odid integer NOT NULL, flags integer NOT NULL, data text NOT NULL )'),
+    'revlog': ('table', 'revlog', 'CREATE TABLE revlog ( id integer PRIMARY KEY, cid integer NOT NULL, usn integer NOT NULL, ease integer NOT NULL, ivl integer NOT NULL, lastIvl integer NOT NULL, factor integer NOT NULL, time integer NOT NULL, type integer NOT NULL )'),
+    'graves': ('table', 'graves', 'CREATE TABLE graves ( oid integer NOT NULL, type integer NOT NULL, usn integer NOT NULL, PRIMARY KEY (oid, type) ) WITHOUT ROWID'),
+    'deck_config': ('table', 'deck_config', 'CREATE TABLE deck_config ( id integer PRIMARY KEY NOT NULL, name text NOT NULL COLLATE unicase, mtime_secs integer NOT NULL, usn integer NOT NULL, config blob NOT NULL )'),
+    'config': ('table', 'config', 'CREATE TABLE config ( KEY text NOT NULL PRIMARY KEY, usn integer NOT NULL, mtime_secs integer NOT NULL, val blob NOT NULL ) without rowid'),
+    'tags': ('table', 'tags', 'CREATE TABLE tags ( tag text NOT NULL PRIMARY KEY COLLATE unicase, usn integer NOT NULL, collapsed boolean NOT NULL, config blob NULL ) without rowid'),
+    'fields': ('table', 'fields', 'CREATE TABLE fields ( ntid integer NOT NULL, ord integer NOT NULL, name text NOT NULL COLLATE unicase, config blob NOT NULL, PRIMARY KEY (ntid, ord) ) without rowid'),
+    'templates': ('table', 'templates', 'CREATE TABLE templates ( ntid integer NOT NULL, ord integer NOT NULL, name text NOT NULL COLLATE unicase, mtime_secs integer NOT NULL, usn integer NOT NULL, config blob NOT NULL, PRIMARY KEY (ntid, ord) ) without rowid'),
+    'notetypes': ('table', 'notetypes', 'CREATE TABLE notetypes ( id integer NOT NULL PRIMARY KEY, name text NOT NULL COLLATE unicase, mtime_secs integer NOT NULL, usn integer NOT NULL, config blob NOT NULL )'),
+    'decks': ('table', 'decks', 'CREATE TABLE decks ( id integer PRIMARY KEY NOT NULL, name text NOT NULL COLLATE unicase, mtime_secs integer NOT NULL, usn integer NOT NULL, common blob NOT NULL, kind blob NOT NULL )'),
+    'ix_notes_usn': ('index', 'notes', 'CREATE INDEX ix_notes_usn ON notes (usn)'),
+    'ix_cards_usn': ('index', 'cards', 'CREATE INDEX ix_cards_usn ON cards (usn)'),
+    'ix_revlog_usn': ('index', 'revlog', 'CREATE INDEX ix_revlog_usn ON revlog (usn)'),
+    'ix_cards_nid': ('index', 'cards', 'CREATE INDEX ix_cards_nid ON cards (nid)'),
+    'ix_cards_sched': ('index', 'cards', 'CREATE INDEX ix_cards_sched ON cards (did, queue, due)'),
+    'ix_revlog_cid': ('index', 'revlog', 'CREATE INDEX ix_revlog_cid ON revlog (cid)'),
+    'ix_notes_csum': ('index', 'notes', 'CREATE INDEX ix_notes_csum ON notes (csum)'),
+    'idx_fields_name_ntid': ('index', 'fields', 'CREATE UNIQUE INDEX idx_fields_name_ntid ON fields (name, ntid)'),
+    'idx_templates_name_ntid': ('index', 'templates', 'CREATE UNIQUE INDEX idx_templates_name_ntid ON templates (name, ntid)'),
+    'idx_templates_usn': ('index', 'templates', 'CREATE INDEX idx_templates_usn ON templates (usn)'),
+    'idx_notetypes_name': ('index', 'notetypes', 'CREATE UNIQUE INDEX idx_notetypes_name ON notetypes (name)'),
+    'idx_notetypes_usn': ('index', 'notetypes', 'CREATE INDEX idx_notetypes_usn ON notetypes (usn)'),
+    'idx_decks_name': ('index', 'decks', 'CREATE UNIQUE INDEX idx_decks_name ON decks (name)'),
+    'idx_notes_mid': ('index', 'notes', 'CREATE INDEX idx_notes_mid ON notes (mid)'),
+    'idx_cards_odid': ('index', 'cards', 'CREATE INDEX idx_cards_odid ON cards (odid) WHERE odid != 0'),
+    'idx_graves_pending': ('index', 'graves', 'CREATE INDEX idx_graves_pending ON graves (usn)'),
+}
+F112_RECIPE = {
+    'recipe': 'local-review',
+    'description': 'Four due text cards for local review, undo and process restart.',
+    'now': NATIVE_START, 'learn_ahead_secs': 0,
+    'decks': [{'name': 'Local Review::Cards', 'new': 0, 'learning': 0, 'due': 4,
+               'later': 0, 'tags': ['local-review'],
+               'fields': ['Question {n}', 'Answer {n}'], 'media': {'images': 0, 'sounds': 0}}],
+}
+
+
+def prepare_native_review(args):
+    """Derive the F11.2 collection and media in the pinned decoder service.
+
+    The generated input mount stays read-only. Write the derived files under
+    this ui-test run's source-preparation directory at its checkout path.
+    This step produces source evidence only. Packages, runtime seed inputs,
+    native receipts and expected database states after opening remain separate.
+    """
+    import zlib
+
+    root = absolute(args.root)
+    run = source_path(root, args.run)
+    require(run.parent == root / 'build/mg/ui-test', 'native-review-run-scope')
+    require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,119}', run.name) is not None,
+            'native-review-run-scope')
+    source, output = source_path(root, args.expected), absolute(args.output)
+    require(output.parent == run and output.name == 'source-preparation', 'native-review-output-scope')
+    require(args.platform in ('mac', 'iphone', 'ipad'), 'native-review-platform')
+    require(not source.is_relative_to(run) and not run.is_relative_to(source), 'source-overlap')
+    src = open_dir(source, root)
+    dest = fixture = media_fd = None
+    created_files, created_dirs = [], []
+    def remember_file(parent, name, fd):
+        # Retain the inode until cleanup finishes, including after a failed write.
+        created_files.append((parent, name, os.dup(fd)))
+    try:
+        dest = open_dir(output, root)
+        require(not entry_names(dest), 'native-preparation-output-not-empty')
+        dest_pin = os.fstat(dest)
+        initial = scan_tree(src)
+        require(not any(n.endswith(('-wal', '-shm', '-journal')) for n in initial), 'sqlite-sidecar')
+        require(set(initial) == {'', 'collection.anki2', 'manifest.json', 'collection.media'},
+                'native-review-layout')
+        require(initial['collection.anki2'][5] <= 8 * CHUNK, 'native-review-size-scope')
+        require(initial['manifest.json'][5] <= 128 * 1024, 'native-review-size-scope')
+        manifest = load_json(src, 'manifest.json')
+        require(isinstance(manifest, dict) and set(manifest) == {
+            'generator_version', 'kind', 'name', 'seed', 'cards_requested', 'now_ms',
+            'utc_offset_secs', 'profile_sha256', 'worst_case_sha256', 'media', 'counts',
+            'dump_sha256'}, 'native-review-manifest')
+        require(manifest['generator_version'] == 5 and manifest['kind'] == 'recipe'
+                and manifest['name'] == 'local-review' and manifest['cards_requested'] == 4
+                and manifest['now_ms'] == NATIVE_NOW * 1000 and manifest['utc_offset_secs'] == 3600
+                and manifest['profile_sha256'] is None and manifest['worst_case_sha256'] is None
+                and manifest['media'] == 'files' and type(manifest['seed']) is int
+                and 0 <= manifest['seed'] < 2**64, 'native-review-manifest')
+        parent_files = {}
+        for name in ('collection.anki2', 'manifest.json'):
+            info, digest, _ = read_file(src, name)
+            parent_files[name] = {'sha256': digest, 'bytes': info['size']}
+        fixture = mkdir(dest, 'fixture')
+        created_dirs.append((dest, 'fixture', os.fstat(fixture)))
+        target = os.open('collection.anki2', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o600, dir_fd=fixture)
+        with os.fdopen(target, 'wb') as stream:
+            remember_file(fixture, 'collection.anki2', stream.fileno())
+            info, digest, _ = read_file(src, 'collection.anki2', stream, limit=8 * CHUNK)
+            stream.flush()
+            os.fsync(stream.fileno())
+        require(parent_files['collection.anki2'] == {'sha256': digest, 'bytes': info['size']},
+                'source-changed')
+        db = output / 'fixture/collection.anki2'
+        fixture_pin = os.fstat(fixture)
+        reader = sqlite_reader(db)
+        try:
+            schema = reader.execute('SELECT type,name,tbl_name,sql FROM sqlite_schema '
+                                    'NOT INDEXED ORDER BY type COLLATE BINARY,name COLLATE BINARY LIMIT 33').fetchall()
+            require(len(schema) <= 30, 'native-review-schema')
+            actual_schema = {}
+            for kind, name, table, sql in schema:
+                if name in ('sqlite_stat1', 'sqlite_stat4'):
+                    require(kind == 'table' and table == name and sql == {
+                        'sqlite_stat1': 'CREATE TABLE sqlite_stat1(tbl,idx,stat)',
+                        'sqlite_stat4': 'CREATE TABLE sqlite_stat4(tbl,idx,neq,nlt,ndlt,sample)'}[name],
+                        'native-review-schema')
+                    continue
+                require(sql is not None, 'native-review-schema')
+                actual_schema[name] = (kind, table, ' '.join(sql.split()))
+            require(actual_schema == F112_SCHEMA, 'native-review-schema')
+        finally:
+            reader.close()
+        # This finite fixture is tiny. Bound aggregate materialization in addition
+        # to raw_rows' per-cell and database limits. Never load an arbitrary DB.
+        before, budget = {}, 0
+        for table, key, cells in raw_rows(db):
+            budget += sum(len(v) if isinstance(v, (str, bytes)) else 8 for _, v in cells)
+            require(len(before) < 128 and budget <= 2 * CHUNK, 'native-review-row-scope')
+            before[table, key] = cells
+        rows = {t: {k: dict(zip(COLUMNS[t].split(), (v for _, v in cells)))
+                    for (table, k), cells in before.items() if table == t} for t in COLUMNS}
+        counts = {name: len(rows[table]) for name, table in (
+            ('notes', 'notes'), ('cards', 'cards'), ('revlog', 'revlog'),
+            ('notetypes', 'notetypes'), ('decks', 'decks'), ('presets', 'deck_config'), ('tags', 'tags'))}
+        counts.update(media_refs=0, media_files=0, media_bytes=0)
+        require(manifest['counts'] == counts and 8 <= counts['revlog'] <= 28
+                and counts['notes'] == counts['cards'] == 4 and counts['decks'] == 3
+                and counts['notetypes'] == counts['presets'] == counts['tags'] == 1
+                and len(rows['fields']) == 2 and len(rows['templates']) == 1
+                and not rows['graves'], 'native-review-shape')
+        # F10.3, for this admitted shape only (one ASCII tag, hence no Unicode
+        # sort implementation). Retain the original hash, not a post-app dump.
+        logical = hashlib.sha256()
+        for table in ('col', 'config', 'deck_config', 'decks', 'notetypes', 'fields',
+                      'templates', 'tags', 'graves', 'notes', 'cards', 'revlog'):
+            logical.update(table.encode() + b'\0')
+            for (t, _), cells in before.items():
+                if t != table:
+                    continue
+                for kind, value in cells:
+                    logical.update(bytes([{'null': 0, 'integer': 1, 'real': 2, 'text': 3, 'blob': 4}[kind]]))
+                    if kind in ('integer', 'real'):
+                        logical.update(struct.pack('<q' if kind == 'integer' else '<d', value))
+                    elif kind in ('text', 'blob'):
+                        data = value.encode('utf-8') if kind == 'text' else value
+                        logical.update(struct.pack('<Q', len(data)) + data)
+                logical.update(b'\xff')
+        require(logical.hexdigest() == manifest['dump_sha256'], 'native-review-parent-dump')
+        crt = NATIVE_NOW - 6 * 3600 - 120 * 86400
+        require(rows['col'] == {'1': dict(id=1, crt=crt, mod=NATIVE_NOW * 1000, scm=crt * 1000,
+                ver=18, dty=0, usn=0, ls=0, conf='', models='', decks='', dconf='', tags='')},
+                'native-review-col')
+        nt = next(iter(rows['notetypes'].values()))
+        require(nt['id'] == crt * 1000 and nt['name'] == 'Meguri Basic'
+                and nt['mtime_secs'] == crt and nt['usn'] == -1, 'native-review-notetype')
+        expected_config = dict(activeDecks=[1], addToCur=True, collapseTime=0, creationOffset=-60,
+            curDeck=1, curModel=nt['id'], dayLearnFirst=False, dueCounts=True, estTimes=True, fsrs=True,
+            lastUnburied=120, loadBalancerEnabled=True, newSpread=0, nextPos=5, rollover=4,
+            sched2021=True, schedVer=2, sortBackwards=False, sortType='noteFld', timeLim=0)
+        if 'localOffset' in rows['config']:
+            expected_config['localOffset'] = -60
+        require(set(rows['config']) == set(expected_config), 'native-review-config')
+        for key, value in expected_config.items():
+            require(before['config', key] == [('text', key), ('integer', -1), ('integer', crt),
+                    ('blob', json.dumps(value, separators=(',', ':')).encode())], 'native-review-config')
+        deck_names = {1: 'Default', crt * 1000 + 1: 'Local Review',
+                      crt * 1000 + 2: 'Local Review\x1fCards'}
+        for deck in rows['decks'].values():
+            require(deck['name'] == deck_names.get(deck['id']) and deck['mtime_secs'] == crt
+                    and deck['usn'] == -1 and deck['common'] == b'' and deck['kind'] == b'\x0a\x02\x08\x01',
+                    'native-review-decks')
+        require(set(rows['deck_config']) == {'1'} and rows['deck_config']['1']['name'] == 'Default'
+                and rows['deck_config']['1']['mtime_secs'] == crt
+                and rows['deck_config']['1']['usn'] == -1, 'native-review-preset')
+        # Expose the actual cap for the subsequent input owner; no declared answer
+        # or runtime seed exists yet. Parse only the existing bounded wire helper.
+        cap = [v for n, wire, v in proto_fields(rows['deck_config']['1']['config']) if n == 24 and wire == 0]
+        require(cap == [60], 'native-review-preset-cap')
+        require(set(rows['tags']) == {'local-review'}, 'native-review-tags')
+        require({r['ord']: (r['ntid'], r['name']) for r in rows['fields'].values()}
+                == {0: (nt['id'], 'Front'), 1: (nt['id'], 'Back')}, 'native-review-fields')
+        template = next(iter(rows['templates'].values()))
+        require(template['ntid'] == nt['id'] and template['ord'] == 0, 'native-review-template')
+        formats = {n: bytes(v) for n, wire, v in proto_fields(template['config']) if n in (1, 2) and wire == 2}
+        require(b'{{Front}}' in formats.get(1, b'') and b'{{Back}}' in formats.get(2, b''),
+                'native-review-template')
+        selected = None
+        for note in rows['notes'].values():
+            parts = note['flds'].split('\x1f')
+            require(len(parts) == 2 and parts[0] in ['Question ' + str(n) for n in range(1, 5)]
+                    and parts[1] == parts[0].replace('Question', 'Answer')
+                    and note['mid'] == nt['id'] and note['tags'] == ' local-review '
+                    and note['sfld'] == parts[0] and note['csum'] == int.from_bytes(
+                        hashlib.sha1(parts[0].encode()).digest()[:4], 'big')
+                    and note['mod'] == note['id'] // 1000 and note['usn'] == -1
+                    and note['flags'] == 0 and note['data'] == '', 'native-review-notes')
+            cards = [c for c in rows['cards'].values() if c['nid'] == note['id']]
+            require(len(cards) == 1, 'native-review-card-reference')
+            card = cards[0]
+            history = [r for r in rows['revlog'].values() if r['cid'] == card['id']]
+            require(2 <= len(history) <= 7 and card['id'] == note['id']
+                    and card['did'] == crt * 1000 + 2 and card['ord'] == 0
+                    and card['usn'] == -1 and card['type'] == card['queue'] == 2
+                    and card['reps'] == len(history) and card['left'] == card['odue'] == card['odid'] == card['flags'] == 0,
+                    'native-review-card')
+            previous, last_ivl = card['id'], 0
+            for entry in history:
+                require(all(type(v) is int for v in entry.values()) and previous < entry['id']
+                        and entry['id'] < (crt + 120 * 86400) * 1000 and entry['usn'] == -1
+                        and 1 <= entry['ease'] <= 4 and 0 <= entry['type'] <= 2
+                        and 1000 <= entry['time'] <= 30000 and entry['lastIvl'] == last_ivl,
+                        'native-review-history')
+                previous, last_ivl = entry['id'], entry['ivl']
+            last = history[-1]
+            last_day = (last['id'] // 1000 - crt) // 86400
+            state = json_bytes(card['data'].encode())
+            require(100 <= last_day <= 119 and card['mod'] == last['id'] // 1000
+                    and card['ivl'] == last['ivl'] and 1 <= card['ivl'] <= 120 - last_day
+                    and card['due'] == last_day + card['ivl'] and card['due'] <= 120
+                    and card['lapses'] == sum(r['type'] == 1 and r['ease'] == 1 for r in history)
+                    and set(state) == {'pos', 's', 'd', 'dr', 'decay', 'lrt'}
+                    and state['pos'] == int(parts[0][-1]) and state['lrt'] == card['mod']
+                    and state['dr'] == 0.9 and 0 < state['s'] and 1 <= state['d'] <= 10,
+                    'native-review-schedule')
+            if parts[0] == 'Question 1':
+                require(selected is None, 'native-review-notes')
+                selected = (note, card, history)
+        require(selected is not None and len({n['flds'] for n in rows['notes'].values()}) == 4
+                and sum(c['reps'] for c in rows['cards'].values()) == counts['revlog'], 'native-review-references')
+        note, card, history = selected
+        after = dict(before)
+        for table in ('notes', 'cards', 'revlog', 'decks'):
+            keep = {'notes': {str(note['id'])}, 'cards': {str(card['id'])},
+                    'revlog': {str(h['id']) for h in history}, 'decks': {'1'}}[table]
+            after = {k: v for k, v in after.items() if k[0] != table or k[1] in keep}
+        def replace(table, key, column, kind, value):
+            cells = list(after[table, key])
+            cells[COLUMNS[table].split().index(column)] = (kind, value)
+            after[table, key] = cells
+        replace('notes', str(note['id']), 'flds', 'text',
+                'Question 1\x1f<p>Meguri media answer</p><img src="meguri-review.png"> [sound:meguri-review.wav]')
+        replace('cards', str(card['id']), 'did', 'integer', 1)
+        replace('config', 'nextPos', 'val', 'blob', b'2')
+        after['config', 'localOffset'] = [('text', 'localOffset'), ('integer', -1),
+                                         ('integer', crt), ('blob', b'-60')]
+        check = open_dir(output / 'fixture', root)
+        try:
+            require((os.fstat(check).st_dev, os.fstat(check).st_ino) == (fixture_pin.st_dev, fixture_pin.st_ino),
+                    'source-changed')
+        finally:
+            os.close(check)
+        owned(db.lstat())
+        conn = sqlite3.connect(db.as_uri() + '?mode=rw', uri=True)
+        # Only the three admitted own ASCII deck names can occur in index
+        # maintenance. This finite ordering is not a Unicode collation substitute;
+        # public raw/proof readers retain their refusing callback unchanged.
+        def fixture_deck_order(left, right):
+            require(left in deck_names.values() and right in deck_names.values(), 'native-review-collation')
+            return (left > right) - (left < right)
+        conn.create_collation('unicase', fixture_deck_order)
+        conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, CELL_LIMIT)
+        conn.setlimit(sqlite3.SQLITE_LIMIT_SQL_LENGTH, 16384)
+        try:
+            conn.execute('PRAGMA trusted_schema=OFF')
+            conn.execute('PRAGMA cache_size=-2048')
+            conn.execute('PRAGMA temp_store=MEMORY')
+            conn.execute('DELETE FROM revlog WHERE cid != ?', (card['id'],))
+            conn.execute('DELETE FROM cards WHERE id != ?', (card['id'],))
+            conn.execute('DELETE FROM notes WHERE id != ?', (note['id'],))
+            conn.execute('DELETE FROM decks WHERE id != 1')
+            conn.execute('UPDATE cards SET did=1 WHERE id=?', (card['id'],))
+            conn.execute('UPDATE notes SET flds=? WHERE id=?',
+                         (after['notes', str(note['id'])][6][1], note['id']))
+            conn.execute("UPDATE config SET val=? WHERE KEY='nextPos'", (sqlite3.Binary(b'2'),))
+            if 'localOffset' not in rows['config']:
+                conn.execute('INSERT INTO config VALUES (?, -1, ?, ?)', ('localOffset', crt, sqlite3.Binary(b'-60')))
+            conn.commit()
+            require(conn.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()[0] == 0,
+                    'native-preparation-checkpoint')
+        finally:
+            conn.close()
+        require(dict(((t, k), v) for t, k, v in raw_rows(db)) == after, 'native-review-unexpected-cell-change')
+        reader = sqlite_reader(db)
+        try:
+            require(reader.execute('SELECT type,name,tbl_name,sql FROM sqlite_schema '
+                'NOT INDEXED ORDER BY type COLLATE BINARY,name COLLATE BINARY').fetchall() == schema,
+                'native-preparation-schema-changed')
+        finally:
+            reader.close()
+        # TestMedia.png's default: own 4x4 solid sRGB RGBA (0.2,0.4,0.6,1).
+        # Encode PNG losslessly here instead of requiring Apple ImageIO in Docker.
+        def png_chunk(name, data):
+            return struct.pack('>I', len(data)) + name + data + struct.pack('>I', zlib.crc32(name + data) & 0xffffffff)
+        png = (b'\x89PNG\r\n\x1a\n' + png_chunk(b'IHDR', struct.pack('>IIBBBBB', 4, 4, 8, 6, 0, 0, 0))
+               + png_chunk(b'sRGB', b'\0') + png_chunk(b'IDAT', zlib.compress((b'\0' + bytes((51, 102, 153, 255)) * 4) * 4))
+               + png_chunk(b'IEND', b''))
+        # Byte-for-byte TestMedia.silentWAV(seconds: 2): 8000 Hz mono s16le.
+        wav = struct.pack('<4sI8sIHHIIHH4sI', b'RIFF', 32036, b'WAVEfmt ', 16,
+                          1, 1, 8000, 16000, 2, 16, b'data', 32000) + bytes(32000)
+        payloads = {'meguri-review.png': png, 'meguri-review.wav': wav,
+                    '_meguri-unused.txt': b'Meguri own unused media fixture\n'}
+        media_fd = mkdir(fixture, 'collection.media')
+        created_dirs.append((fixture, 'collection.media', os.fstat(media_fd)))
+        media_facts = {}
+        for name, data in payloads.items():
+            target = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400, dir_fd=media_fd)
+            with os.fdopen(target, 'wb') as stream:
+                remember_file(media_fd, name, stream.fileno())
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            media_facts[name] = {'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data),
+                'sha1': hashlib.sha1(data).hexdigest(), 'referenced': not name.startswith('_'),
+                'content_hex': data.hex()}
+        def evidence(table, cells):
+            return [{'column': c, 'storage_class': kind, 'value_hex' if kind == 'blob' else 'value':
+                     value.hex() if kind == 'blob' else value}
+                    for c, (kind, value) in zip(COLUMNS[table].split(), cells)] if cells is not None else None
+        changes = []
+        for table, key in sorted(before.keys() | after.keys()):
+            if before.get((table, key)) != after.get((table, key)):
+                changes.append({'table': table, 'key': key, 'before': evidence(table, before.get((table, key))),
+                                'after': evidence(table, after.get((table, key)))})
+        # Describe the source edits and retain the original generator record.
+        # This manifest supplies no expected results for a later app run.
+        derived = {'kind': 'meguri-f11.2-source', 'parent_manifest': manifest,
+            'parent_manifest_identity': parent_files['manifest.json'],
+            'note_id': note['id'], 'card_id': card['id'], 'deck_id': 1, 'deck_name': 'Default',
+            'row_counts': {t: sum(k[0] == t for k in after) for t in COLUMNS},
+            'media_refs': 2, 'media_files': 3, 'media_bytes': sum(len(v) for v in payloads.values())}
+        write_json(fixture, 'manifest.json', derived, mode=0o400,
+                   on_create=lambda fd: remember_file(fixture, 'manifest.json', fd))
+        os.chmod('collection.anki2', 0o400, dir_fd=fixture, follow_symlinks=False)
+        prepared_files = {}
+        for name in ('collection.anki2', 'manifest.json'):
+            info, digest, _ = read_file(fixture, name)
+            prepared_files[name] = {'sha256': digest, 'bytes': info['size']}
+        for name in payloads:
+            info, digest, _ = read_file(media_fd, name)
+            require(media_facts[name]['sha256'] == digest and media_facts[name]['bytes'] == info['size'],
+                    'native-review-media-changed')
+            prepared_files['collection.media/' + name] = {'sha256': digest, 'bytes': info['size']}
+        frozen_tree = scan_tree(fixture, digest=True)
+        require(set(frozen_tree) == {'', 'collection.anki2', 'manifest.json', 'collection.media'}
+                | {'collection.media/' + n for n in payloads}, 'native-review-output-changed')
+        os.fsync(media_fd)
+        os.fsync(fixture)
+        require(scan_tree(src, digest=True) == initial, 'source-changed')
+        for name, identity in parent_files.items():
+            info, digest, _ = read_file(src, name)
+            require(identity == {'sha256': digest, 'bytes': info['size']}, 'source-changed')
+        check = open_dir(source, root)
+        try:
+            require(signature(os.fstat(check)) == initial[''], 'source-changed')
+        finally:
+            os.close(check)
+        check = open_dir(output / 'fixture', root)
+        try:
+            require((os.fstat(check).st_dev, os.fstat(check).st_ino) == (fixture_pin.st_dev, fixture_pin.st_ino),
+                    'source-changed')
+        finally:
+            os.close(check)
+        check = open_dir(output, root)
+        try:
+            require((os.fstat(check).st_dev, os.fstat(check).st_ino) == (dest_pin.st_dev, dest_pin.st_ino),
+                    'source-changed')
+        finally:
+            os.close(check)
+        write_json(dest, 'preparation.json', {'schema_version': 1, 'operation': 'prepare-native-review',
+            'stage': 'source-only-before-app', 'run': str(run.relative_to(root)), 'platform': args.platform,
+            'source': str(source.relative_to(root)), 'prepared_source': str((output / 'fixture').relative_to(root)),
+            'clock': {'now': NATIVE_START, 'tz': NATIVE_TZ, 'now_ms': NATIVE_NOW * 1000},
+            'generator_request': {'recipe': F112_RECIPE, 'seed': manifest['seed'], 'generator_version': 5},
+            'parent_files': parent_files, 'prepared_files': prepared_files, 'media': media_facts,
+            'row_changes': changes, 'source_facts': derived,
+            'selected_parent_deck': {'id': card['did'], 'name': 'Local Review::Cards'},
+            'preserved_card': {c: v for c, v in card.items() if c != 'did'},
+            'preserved_history': history, 'preset_cap_answer_time_secs': cap[0],
+            'media_pattern': {'owner': 'CardRenderingTests/Support/WebTestHarness.swift TestMedia',
+                'png': {'width': 4, 'height': 4, 'rgba': [51, 102, 153, 255], 'color_space': 'sRGB'},
+                'wav': {'format': 'PCM', 'channels': 1, 'sample_rate': 8000, 'bits': 16, 'samples': 16000}},
+            'derivation': ['retain Question 1 and its one due card and complete generated history',
+                'retain Default as sole normal deck; move retained card to deck 1',
+                'replace only retained note Back with own media HTML; Front/sort/checksum unchanged',
+                'set nextPos BLOB JSON to 2; retain config stamps',
+                'insert localOffset only if absent: BLOB JSON -60, usn -1, mtime_secs col.crt',
+                'write own PNG, silent WAV and unused underscore file; replace manifest with derivation manifest'],
+            'remaining': ['package identity', 'runtime seed/action input owner', 'real Rust expected states',
+                          'native import/playback/answer/reopen/export and strict proofs']}, mode=0o400,
+                   on_create=lambda fd: remember_file(dest, 'preparation.json', fd))
+        record_fd = os.open('preparation.json', FILE_FLAGS, dir_fd=dest)
+        try:
+            os.fsync(record_fd)
+        finally:
+            os.close(record_fd)
+        require(scan_tree(fixture, digest=True) == frozen_tree, 'native-review-output-changed')
+        require(scan_tree(src, digest=True) == initial, 'source-changed')
+        os.fsync(dest)
+    except BaseException:
+        # Remove only entries created here whose bindings still match.
+        # Leave other entries intact, even if an owned directory stays nonempty.
+        for parent, name, fd in reversed(created_files):
+            try:
+                current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                if (stat.S_ISREG(current.st_mode) and current.st_nlink == 1
+                        and signature(current) == signature(os.fstat(fd))):
+                    os.unlink(name, dir_fd=parent)
+            except FileNotFoundError:
+                pass
+        for parent, name, pin in reversed(created_dirs):
+            try:
+                current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                if ((current.st_dev, current.st_ino, current.st_mode, current.st_uid)
+                        == (pin.st_dev, pin.st_ino, pin.st_mode, pin.st_uid)):
+                    os.rmdir(name, dir_fd=parent)
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+                    raise
+        raise
+    finally:
+        for _, _, fd in created_files:
+            os.close(fd)
+        for fd in (media_fd, fixture, dest, src):
+            if fd is not None:
+                os.close(fd)
 
 
 def compare_databases(expected, decoded):
@@ -1597,6 +2040,9 @@ def main():
     p = sub.add_parser('prepare-native-media', help=argparse.SUPPRESS)
     p.add_argument('--expected', required=True)
     p.add_argument('--output', required=True)
+    p = sub.add_parser('prepare-native-review', help=argparse.SUPPRESS)
+    for name in ('root', 'run', 'expected', 'output', 'platform'):
+        p.add_argument('--' + name, required=True)
     p = sub.add_parser('decode')
     p.add_argument('--package', required=True)
     p.add_argument('--expected', required=True)
@@ -1608,6 +2054,8 @@ def main():
     try:
         if args.command == 'prepare-native-media':
             prepare_native_media(args)
+        elif args.command == 'prepare-native-review':
+            prepare_native_review(args)
         elif args.command == 'decode':
             decode(args)
         elif args.command == 'stage':
