@@ -161,3 +161,25 @@ restrictions. The repaired contract uses the returned ID's added change in the
 existing operation summary; it adds no result flag or writer. Contract R2 is
 clear. A new empty deck opens its overview in every layout. Implementation,
 focused verification, native proof and the integration gate remain pending.
+
+## Home keyboard focus
+
+Supplemental base: `24651c48`. Filtered fixer
+`cleanroom/20261026T073050Z-23908` adds a native Mac Home focus target and
+restores it when the visible page becomes eligible after picker dismissal.
+The exact page, section, path, sheet and review predicates limit ownership.
+Existing editor, menu, active-window and repeated-key guards stay enabled.
+Independent Home-focus R1 is clear in source. Privacy
+`20261026T073417Z-27489` and similarity `20261026T073416Z-27216` pass.
+
+Native result `ui-test/20261026T073400Z-25997`: pass. The test checks:
+initial query focus, filtering, minimum resize, Return, text slash ownership,
+Escape, toolbar entry, native results Down/Return to the second actual page,
+and page slash followed by cancel. One test passes, no skips. Rendered Home
+focus and strict hierarchy checks remain next; the full unit and batch gate
+are still open.
+
+The D18 prose scan initially flagged three lines anonymously in
+`private/20261026T073331Z-25515`. The spec writer rewrote those complete lines
+without changing the contract or guard. `private/20261026T073455Z-28137` passes
+for the repaired spec and review log.

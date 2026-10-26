@@ -9,6 +9,10 @@ import AppKit
 public struct HomeView: View {
     public let collection: ReviewCollection
     public let deckID: Int64?
+    #if os(macOS)
+    @State private var isVisible = false
+    @FocusState private var homeFocused: Bool
+    #endif
     public init(collection: ReviewCollection, deckID: Int64? = nil) { self.collection = collection; self.deckID = deckID }
     public var body: some View {
         Group {
@@ -51,13 +55,26 @@ public struct HomeView: View {
                 .accessibilityIdentifier("home.collection.createDeck")
             }
         }
+        #if os(macOS)
+        .focusable(homeKeyboardActive)
+        // Home owns unhandled keys without drawing a focus ring around the page.
+        .focusEffectDisabled()
+        .focused($homeFocused)
+        .onAppear { isVisible = true }
+        .onDisappear { isVisible = false }
+        .onChange(of: homeKeyboardActive, initial: true) { _, active in
+            // The deck page can change while the picker still owns focus.
+            // Hand it to the visible Home only after the sheet is dismissed.
+            homeFocused = active
+        }
+        #endif
         .onKeyPress(keys: [KeyEquivalent("/")], phases: .down) { press in
             guard press.modifiers.isEmpty, collection.navigation.section == .home,
                   collection.canPresentGoToDeck() else { return .ignored }
             #if os(macOS)
             // Native editing, sheet and menu tracking own their input, even if
             // an unhandled event bubbles to Home's key path.
-            guard NSApp.isActive, let window = NSApp.keyWindow, window.attachedSheet == nil,
+            guard homeKeyboardActive, NSApp.isActive, let window = NSApp.keyWindow, window.attachedSheet == nil,
                   !(window.firstResponder is NSTextInputClient),
                   RunLoop.current.currentMode != .eventTracking,
                   let event = NSApp.currentEvent, event.type == .keyDown, !event.isARepeat else { return .ignored }
@@ -67,6 +84,15 @@ public struct HomeView: View {
         }
         .accessibilityIdentifier("home.collection.screen")
     }
+    #if os(macOS)
+    private var homeKeyboardActive: Bool {
+        isVisible && collection.navigation.section == .home &&
+            collection.navigation.homeDeckPage?.rawValue == deckID &&
+            collection.navigation.path(.home).isEmpty &&
+            collection.review == nil && collection.navigation.review == nil &&
+            collection.navigation.sheet == nil
+    }
+    #endif
     private var showsRootDeckList: Bool {
         guard case .ready = collection.state, !collection.decks.isEmpty else { return false }
         return deckID.flatMap { collection.deckPage($0) } == nil
