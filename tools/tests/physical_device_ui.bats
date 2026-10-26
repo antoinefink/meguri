@@ -1873,6 +1873,7 @@ case "$1" in
     echo "review-helper $action $dir" >>"$STUB_LOG"
     case "$action" in
       start) mkdir "$dir/source-preparation" "$dir/native-review-export" ;;
+      decoder-root) exec "$FX_REAL_PYTHON" "$@" ;;
       bind)
         printf '{"freeze":{"sha256":"%064d","bytes":100},"native_filename":"Meguri-Media-00000000000000000000000000000001.colpkg"}\n' 0 >"$dir/native-review-binding.json" ;;
       stage-paths)
@@ -1925,7 +1926,12 @@ review_run() {
   called "^review-stage $SB/build/fixtures/recipes/local-review-1$"
   called "^review-stage $dir/native-review-binding.json$"
   called "review-decoder .*prepare-native-review --root /work --run /work/build/mg/ui-test/$(basename "$dir") .*--platform iphone"
-  called "review-rust .*internal-native-review /work '$(basename "$dir")' 'iphone' '[a-f0-9]{40}' 101 102 103 104"
+  called "review-decoder .* -u $(id -u):$(id -g) -v $SB/tools/scripts/package-interop-check.py:/decoder.py:ro -v $dir/decoder-root:/work:ro -v $SB/build/fixtures/recipes/local-review-1:/work/build/fixtures/recipes/local-review-1:ro -v $dir/source-preparation:/work/build/mg/ui-test/$(basename "$dir")/source-preparation package-interop-decoder"
+  not_called "review-decoder .* -v $SB:/work"
+  called '^review-rust -- cd core && cargo build -q -p meguri-cli$'
+  called "^review-rust -u $(id -u):$(id -g) -v $dir/empty-cargo-home:/cargo-home:ro -v [^ ]+_cargo-target:/cargo-target:ro -- python3 /work/tools/scripts/native-media-review-capture.py derive '/work/build/mg/ui-test/$(basename "$dir")' 'iphone' '[a-f0-9]{40}'$"
+  not_called 'review-rust .*cargo run'
+  not_called 'review-rust .*(chown|chmod)'
   stage_line="$(grep -n '^review-stage ' "$STUB_LOG" | tail -1 | cut -d: -f1)"
   test_line="$(grep -n '^review-test ' "$STUB_LOG" | cut -d: -f1)"
   [ "$stage_line" -lt "$test_line" ]
@@ -1980,6 +1986,275 @@ review_run() {
   run python3 "$SB/tools/scripts/native-media-review-capture.py" start "$SB/build/mg/ui-test/../escaped" mac
   [ "$status" -ne 0 ]
   [ ! -e "$SB/build/mg/escaped/native-review-source.json" ]
+}
+
+@test "native review decoder tree is owned empty and matches the actual narrow mount paths" {
+  run python3 - "$SB" <<'PY'
+import importlib.util
+import os
+import stat
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+root = Path(sys.argv[1])
+def load(name, filename):
+    spec = importlib.util.spec_from_file_location(name, root / 'tools/scripts' / filename)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+capture = load('review_capture', 'native-media-review-capture.py')
+decoder = load('package_decoder', 'package-interop-check.py')
+parent = root / 'build/fixtures/recipes/local-review-1'
+parent.mkdir(parents=True)
+(parent / 'sentinel').write_bytes(b'actual parent, never copied')
+
+for case in ('success', 'occupied-tree', 'occupied-output', 'output-link', 'parent-link',
+             'run-mode', 'output-mode', 'foreign-owner'):
+    run = root / 'build/mg/ui-test' / case
+    run.mkdir(parents=True)
+    output = run / 'source-preparation'
+    output.mkdir(mode=0o700)
+    if case == 'occupied-tree':
+        (run / 'decoder-root').mkdir()
+        (run / 'decoder-root/retained').write_bytes(b'keep')
+    elif case == 'occupied-output':
+        (output / 'retained').write_bytes(b'keep')
+    elif case == 'output-link':
+        output.rename(run / 'retained-output')
+        output.symlink_to(run / 'retained-output', target_is_directory=True)
+    elif case == 'parent-link':
+        parent.rename(parent.with_name('retained-parent'))
+        parent.symlink_to(parent.with_name('retained-parent'), target_is_directory=True)
+    elif case == 'run-mode':
+        run.chmod(0o722)
+    elif case == 'output-mode':
+        output.chmod(0o722)
+    try:
+        with patch.object(capture.os, 'getuid', return_value=os.getuid() + (case == 'foreign-owner')):
+            capture.decoder_root(run)
+    except (ValueError, OSError):
+        assert case != 'success', case
+    else:
+        assert case == 'success', case
+        skeleton = run / 'decoder-root'
+        relative = 'build/mg/ui-test/' + run.name + '/source-preparation'
+        expected = {'build', 'build/fixtures', 'build/fixtures/recipes',
+                    'build/fixtures/recipes/local-review-1', 'build/mg', 'build/mg/ui-test',
+                    'build/mg/ui-test/' + run.name, relative}
+        assert {p.relative_to(skeleton).as_posix() for p in skeleton.rglob('*')} == expected
+        for directory in [skeleton, *skeleton.rglob('*')]:
+            info = directory.lstat()
+            assert stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+            assert stat.S_IMODE(info.st_mode) == 0o700
+        # Use the real preparer's unchanged ancestor guard on both mount paths.
+        for name in ('build/fixtures/recipes/local-review-1', relative):
+            fd = decoder.open_dir(skeleton / name, skeleton)
+            assert os.listdir(fd) == []
+            os.close(fd)
+        # Docker overlays only these real leaves; it never sees parent copies.
+        assert list(output.iterdir()) == []
+        assert list((run / 'empty-cargo-home').iterdir()) == []
+        assert not list((skeleton / 'build/fixtures/recipes/local-review-1').iterdir())
+        try:
+            capture.decoder_root(run)
+        except (ValueError, OSError):
+            pass
+        else:
+            raise AssertionError('reused tree admitted')
+        (skeleton / 'build/mg').chmod(0o722)
+        try:
+            with capture.owned_directory(skeleton / relative):
+                pass
+        except (ValueError, OSError):
+            pass
+        else:
+            raise AssertionError('owned ancestor mode admitted')
+    if case == 'parent-link':
+        parent.unlink()
+        parent.with_name('retained-parent').rename(parent)
+    assert (parent / 'sentinel').read_bytes() == b'actual parent, never copied'
+    if case == 'occupied-tree':
+        assert (run / 'decoder-root/retained').read_bytes() == b'keep'
+    if case == 'occupied-output':
+        assert (output / 'retained').read_bytes() == b'keep'
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "native review publishes a single-link owned CLI and refuses source or destination changes" {
+  run python3 - "$SB" <<'PY'
+import importlib.util
+import json
+import os
+import stat
+import sys
+from contextlib import ExitStack
+from pathlib import Path
+from unittest.mock import patch
+
+root = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location('review_capture', root / 'tools/scripts/native-media-review-capture.py')
+capture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(capture)
+revision = 'a' * 40
+original = b'compiled own CLI fixture'
+foreign = b'changed own CLI fixture!'
+
+for case in ('success', 'source-mutation', 'source-substitution', 'destination-substitution',
+             'occupied', 'directory-link', 'foreign-owner', 'compiler-mode', 'compiler-link', 'size-bound'):
+    run = root / 'build/mg/ui-test' / ('code-' + case)
+    run.mkdir(parents=True)
+    cache = root / 'compiled-fixture' / case
+    cache.mkdir(parents=True)
+    compiler = cache / 'meguri-cli'
+    compiler.write_bytes(original)
+    compiler.chmod(0o755)
+    os.link(compiler, cache / 'deps-link')
+    before = compiler.stat()
+    destination = run / 'run-code/meguri-cli'
+    if case == 'occupied':
+        destination.parent.mkdir()
+        destination.write_bytes(b'keep')
+    elif case == 'directory-link':
+        (run / 'retained-code').mkdir()
+        destination.parent.symlink_to(run / 'retained-code', target_is_directory=True)
+    elif case == 'compiler-mode':
+        compiler.chmod(0o777)
+    elif case == 'compiler-link':
+        compiler.unlink()
+        compiler.symlink_to(cache / 'deps-link')
+    real_read, real_write = os.read, os.write
+    fired = False
+    source_reads = 0
+    def intercept_read(fd, count):
+        global fired, source_reads
+        info = os.fstat(fd)
+        if (info.st_dev, info.st_ino) == (before.st_dev, before.st_ino):
+            source_reads += 1
+            # First hash completes before publication begins.
+            if not fired and source_reads == 3 and case in ('source-mutation', 'source-substitution'):
+                fired = True
+                if case == 'source-substitution':
+                    compiler.rename(cache / 'retained-compiler')
+                compiler.write_bytes(foreign)
+                compiler.chmod(0o755)
+        return real_read(fd, count)
+    def intercept_write(fd, data):
+        global fired
+        count = real_write(fd, data)
+        if case == 'destination-substitution' and not fired:
+            fired = True
+            destination.rename(destination.with_name('retained-publication'))
+            destination.write_bytes(foreign)
+            destination.chmod(0o500)
+        return count
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(capture, 'COMPILED', compiler))
+        stack.enter_context(patch.object(capture, 'revision', return_value=revision))
+        stack.enter_context(patch.object(capture.os, 'read', side_effect=intercept_read))
+        stack.enter_context(patch.object(capture.os, 'write', side_effect=intercept_write))
+        if case == 'foreign-owner':
+            stack.enter_context(patch.object(capture.os, 'getuid', return_value=os.getuid() + 1))
+        if case == 'size-bound':
+            stack.enter_context(patch.object(capture, 'CODE_LIMIT', len(original) - 1))
+        try:
+            with capture.compiled_code() as (fd, verify, pin, actual):
+                binary = capture.publish_code(run, fd, verify, pin, actual)
+        except (ValueError, OSError):
+            assert case != 'success', case
+            assert not (run / 'native-review-code.json').exists()
+        else:
+            assert case == 'success', case
+            info = binary.stat()
+            assert info.st_uid == os.getuid() and info.st_nlink == 1
+            assert stat.S_IMODE(info.st_mode) == 0o500
+            assert binary.read_bytes() == compiler.read_bytes() == original
+            assert capture.code_signature(compiler.stat()) == capture.code_signature(before)
+            assert compiler.stat().st_nlink == 2
+            code = {'revision': revision, 'build_profile': 'dev', 'executable': actual}
+            record = capture.published_code(run, code)
+            assert record['compiled'] == record['executable'] == actual == capture.identity(binary)
+            assert record['compiler_pin'] == pin
+            # Ordinary input identity must continue to refuse Cargo's hardlink.
+            try:
+                capture.identity(compiler)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError('input hardlink guard changed')
+            for change in ('mode', 'hardlink', 'bytes'):
+                if change == 'mode':
+                    binary.chmod(0o700)
+                elif change == 'hardlink':
+                    binary.chmod(0o500)
+                    os.link(binary, run / 'extra-code-link')
+                else:
+                    (run / 'extra-code-link').unlink()
+                    binary.chmod(0o700)
+                    binary.write_bytes(foreign)
+                    binary.chmod(0o500)
+                try:
+                    capture.published_code(run, code)
+                except (ValueError, OSError):
+                    pass
+                else:
+                    raise AssertionError('changed publication admitted: ' + change)
+    if case in ('source-mutation', 'source-substitution', 'destination-substitution'):
+        assert fired, case
+    if case == 'occupied':
+        assert destination.read_bytes() == b'keep'
+    if case == 'destination-substitution':
+        assert destination.read_bytes() == foreign
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "native review derivation invokes the published CLI with the exact runtime inputs" {
+  run python3 - "$SB" <<'PY'
+import importlib.util
+import json
+import os
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+root = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location('review_capture', root / 'tools/scripts/native-media-review-capture.py')
+capture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(capture)
+run = root / 'build/mg/ui-test/actual-code-path'
+run.mkdir(parents=True)
+compiler = root / 'compiler-fixture/meguri-cli'
+compiler.parent.mkdir()
+compiler.write_bytes(b'own compiled CLI fixture')
+compiler.chmod(0o755)
+os.link(compiler, compiler.with_name('deps-link'))
+revision = 'a' * 40
+calls = []
+def execute(args, **kwargs):
+    calls.append(args)
+    binary = run / 'run-code/meguri-cli'
+    assert args == [str(binary), 'internal-native-review', str(root), run.name, 'mac',
+                    revision, '101', '102', '103', '104']
+    assert kwargs == {'check': True}
+    assert binary.stat().st_nlink == 1 and binary.stat().st_uid == os.getuid()
+    record = capture.read(run / 'native-review-code.json')
+    assert record['compiled'] == capture.identity(binary)
+    expected = run / 'expected-replay'
+    expected.mkdir()
+    capture.write(expected / 'input.json', {'code': {'revision': revision, 'build_profile': 'dev',
+                  'executable': capture.identity(binary)}})
+with patch.object(capture, 'COMPILED', compiler), \
+     patch.object(capture, 'Path', side_effect=lambda value: root if value == '/work' else Path(value)), \
+     patch.object(capture, 'revision', return_value=revision), \
+     patch.object(capture.subprocess, 'run', side_effect=execute):
+    capture.derive(run, 'mac', revision)
+assert len(calls) == 1
+assert capture.read(run / 'native-review-rust.json') == capture.read(run / 'expected-replay/input.json')['code']
+assert compiler.stat().st_nlink == 2 and compiler.read_bytes() == b'own compiled CLI fixture'
+PY
+  [ "$status" -eq 0 ]
 }
 
 @test "native review frozen helper accepts retained Rust work but keeps expected inputs exact" {

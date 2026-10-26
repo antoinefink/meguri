@@ -200,18 +200,24 @@ mg_ui_test__review_prepare() {
   if [ ! -d "$MG_ROOT/build/fixtures/recipes/local-review-1" ]; then
     "$MG_TOOLS/mg" fixtures local-review --seed 1 --media files || return 1
   fi
+  python3 "$helper" decoder-root "$MG_RUN_DIR" || return 1
   mg_compose --progress plain build package-interop-decoder >&2 </dev/null || return 1
   mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" \
     -u "$(id -u):$(id -g)" \
     -v "$decoder:/decoder.py:ro" \
+    -v "$MG_RUN_DIR/decoder-root:/work:ro" \
     -v "$MG_ROOT/build/fixtures/recipes/local-review-1:/work/build/fixtures/recipes/local-review-1:ro" \
     -v "$MG_RUN_DIR/source-preparation:$container_run/source-preparation" package-interop-decoder \
     python3 /decoder.py prepare-native-review --root /work --run "$container_run" \
     --expected /work/build/fixtures/recipes/local-review-1 --output "$container_run/source-preparation" \
     --platform "$MG_UI_REVIEW_PLATFORM" </dev/null || return 1
-  # One trusted existing Rust derivation, completed before the native launch.
-  # Explicit dev profile; source_open/package_write remain replay provenance.
-  mg_conf__dev -- "cd core && cargo run -q -p meguri-cli -- internal-native-review /work '$case_name' '$MG_UI_REVIEW_PLATFORM' '$revision' 101 102 103 104 && python3 /work/tools/scripts/native-media-review-capture.py rust-code '$container_run'" || return 1
+  # Build with the existing root/cache authority, then publish and execute only
+  # a run-owned single-link copy as the host owner. No cargo in the replay step;
+  # hide its home and mount the compiler output volume read-only.
+  mg_conf__dev -- "cd core && cargo build -q -p meguri-cli" || return 1
+  mg_conf__dev -u "$(id -u):$(id -g)" -v "$MG_RUN_DIR/empty-cargo-home:/cargo-home:ro" \
+    -v "$(mg_compose_project)_cargo-target:/cargo-target:ro" -- \
+    "python3 /work/tools/scripts/native-media-review-capture.py derive '$container_run' '$MG_UI_REVIEW_PLATFORM' '$revision'" || return 1
   python3 "$helper" bind "$MG_RUN_DIR" "$(mg_app_products "$app_platform" Debug)/Meguri.app" Debug || return 1
   paths="$(python3 "$helper" stage-paths "$MG_RUN_DIR")" || return 1
   while IFS= read -r path; do

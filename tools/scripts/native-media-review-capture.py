@@ -8,6 +8,7 @@ import secrets
 import stat
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 # Reuse the retained descriptor and exclusive-copy authority of F11.1 without
@@ -24,10 +25,56 @@ PHASES = ["import", "accepted", "closed", "reopened"]
 require = export.require
 identity = export.file_identity
 read = export.read_record
+COMPILED = Path("/cargo-target/debug/meguri-cli")
+CODE_LIMIT = 512 * 1024 * 1024
+
+
+@contextmanager
+def owned_directory(path):
+    require(path.is_relative_to(ROOT), "owned directory scope")
+    with export.retained_directory(path) as (directory, verify):
+        def check():
+            verify()
+            # Retain/check every admitted ancestor, including the checkout.
+            for current in (path, *path.parents):
+                if not current.is_relative_to(ROOT):
+                    break
+                info = current.lstat()
+                require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+                        and info.st_mode & 0o022 == 0, "owned directory owner/mode")
+            verify()
+        check()
+        yield directory, check
+        check()
+
+
+def fresh_directory(path):
+    with owned_directory(path.parent) as (parent, verify):
+        os.mkdir(path.name, mode=0o700, dir_fd=parent)
+        with owned_directory(path) as (directory, check):
+            require(not os.listdir(directory), "fresh empty directory")
+            check()
+        verify()
+
+
+def decoder_root(run):
+    # Empty mount points only. The actual generated parent and output leaf
+    # replace these two leaves; no input bytes or checkout enter this tree.
+    with owned_directory(run / "source-preparation") as (directory, _):
+        require(not os.listdir(directory), "fresh preparation output")
+    with owned_directory(ROOT / "build/fixtures/recipes/local-review-1"):
+        pass
+    skeleton = run / "decoder-root"
+    for name in ("", "build", "build/fixtures", "build/fixtures/recipes",
+                 "build/fixtures/recipes/local-review-1", "build/mg", "build/mg/ui-test",
+                 "build/mg/ui-test/" + run.name,
+                 "build/mg/ui-test/" + run.name + "/source-preparation"):
+        fresh_directory(skeleton / name)
+    fresh_directory(run / "empty-cargo-home")
 
 
 def write(path, value):
-    with export.retained_directory(path.parent) as (directory, _):
+    with owned_directory(path.parent) as (directory, _):
         fd = os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400, dir_fd=directory)
         with os.fdopen(fd, "w") as stream:
             json.dump(value, stream, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -68,8 +115,8 @@ def source_start(run, platform):
     require(platform in ("mac", "iphone", "ipad"), "platform")
     require(not (run / "native-review-source.json").exists(), "fresh native case required")
     write(run / "native-review-source.json", {"revision": revision(), "platform": platform, "files": source_files()})
-    (run / "source-preparation").mkdir(mode=0o700)
-    (run / "native-review-export").mkdir(mode=0o700)
+    fresh_directory(run / "source-preparation")
+    fresh_directory(run / "native-review-export")
 
 
 def source_unchanged(run):
@@ -176,6 +223,7 @@ def bind(run, app, configuration):
     value, files = frozen(run)
     require(value["platform"] == source["platform"], "platform binding")
     require(read(run / "native-review-rust.json") == value["code"], "actual Rust executable binding")
+    published_code(run, value["code"])
     stamp = ROOT / "app/Packages/MeguriCore/Binaries/.stamp"
     lines = stamp.read_text().splitlines()
     require(all(s in lines for s in ("configuration=Debug", "profile=dev", "features=ankiweb,test-hooks")), "native Rust configuration")
@@ -183,13 +231,15 @@ def bind(run, app, configuration):
         "platform": value["platform"], "configuration": configuration, "revision": source["revision"],
         "source_identity": identity(run / "native-review-source.json"), "freeze": identity(run / "expected-replay/freeze.json"),
         "input": identity(run / "expected-replay/input.json"), "files": files, "app": str(app), "mach_o": app_files(app, value["platform"]),
-        "core_stamp": identity(stamp), "rust": value["code"], "native_filename": "Meguri-Media-" + secrets.token_hex(16) + ".colpkg"})
+        "core_stamp": identity(stamp), "rust": value["code"],
+        "native_filename": "Meguri-Media-" + secrets.token_hex(16) + ".colpkg"})
 
 
 def recheck(run):
     source_unchanged(run)
     value, files = frozen(run)
     binding = read(run / "native-review-binding.json")
+    published_code(run, value["code"])
     require(binding["version"] == 1 and binding["case"] == run.name and binding["run"] == value["run"]
             and binding["platform"] == value["platform"] and binding["configuration"] == "Debug"
             and binding["revision"] == revision(), "caller run/config binding")
@@ -203,29 +253,134 @@ def recheck(run):
     return value, binding
 
 
-def rust_identity(run):
-    # Called by the existing dev service, after cargo's real internal command.
-    require(ROOT == Path("/work"), "Rust identity runs in dev")
-    value = read(run / "expected-replay/input.json")
-    # Cargo hardlinks its top-level executable to deps/. Read-only code
-    # identity admits those links; copied input/capture authority still requires
-    # one link through the unchanged retained-file helper.
-    binary = Path("/cargo-target/debug/meguri-cli")
-    with export.retained_directory(binary.parent) as (directory, verify_directory):
-        fd = os.open(binary.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+def code_signature(info):
+    return [*export.node_identity(info), info.st_uid, info.st_gid,
+            info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+
+
+def code_hash(fd):
+    # Bound reads even if a compiler output grows while being inspected.
+    import hashlib
+    digest, size = hashlib.sha256(), 0
+    os.lseek(fd, 0, os.SEEK_SET)
+    while True:
+        block = os.read(fd, min(1024 * 1024, CODE_LIMIT + 1 - size))
+        if not block:
+            break
+        size += len(block)
+        require(size <= CODE_LIMIT, "dev executable size")
+        digest.update(block)
+    return {"sha256": digest.hexdigest(), "bytes": size}
+
+
+@contextmanager
+def compiled_code():
+    # Read-only compiler output may have Cargo's deps/ hardlink. This authority
+    # is used only for code; input/capture reads retain their one-link guard.
+    with export.retained_directory(COMPILED.parent) as (directory, verify_directory):
+        fd = os.open(COMPILED.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
         try:
             before = os.fstat(fd)
-            require(stat.S_ISREG(before.st_mode) and 0 < before.st_size <= 512 * 1024 * 1024, "dev executable bound")
-            def pinned(info):
-                return export.node_identity(info), info.st_size, info.st_mtime_ns, info.st_ctime_ns
-            actual = export.hash_fd(fd)
-            require(pinned(before) == pinned(os.fstat(fd)) == pinned(os.stat(binary.name, dir_fd=directory, follow_symlinks=False))
-                    and actual["bytes"] == before.st_size, "dev executable changed")
+            require(stat.S_ISREG(before.st_mode) and 0 < before.st_size <= CODE_LIMIT
+                    and before.st_mode & 0o022 == 0 and before.st_mode & 0o111, "dev executable bound")
+            pin = code_signature(before)
+            def verify():
+                require(pin == code_signature(os.fstat(fd))
+                        == code_signature(os.stat(COMPILED.name, dir_fd=directory, follow_symlinks=False)),
+                        "dev executable changed")
+                verify_directory()
+            actual = code_hash(fd)
+            verify()
+            require(actual["bytes"] == before.st_size, "dev executable size changed")
+            yield fd, verify, pin, actual
+            verify()
+        finally:
+            os.close(fd)
+
+
+def publish_code(run, source_fd, verify_source, pin, actual):
+    directory = run / "run-code"
+    fresh_directory(directory)
+    binary = directory / "meguri-cli"
+    with owned_directory(directory) as (parent, verify_directory):
+        fd = os.open(binary.name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+        try:
+            os.lseek(source_fd, 0, os.SEEK_SET)
+            remaining = actual["bytes"]
+            while remaining:
+                block = os.read(source_fd, min(1024 * 1024, remaining))
+                require(block, "compiled code truncated")
+                remaining -= len(block)
+                pending = memoryview(block)
+                while pending:
+                    count = os.write(fd, pending)
+                    require(count > 0, "code write progress")
+                    pending = pending[count:]
+            require(not os.read(source_fd, 1), "compiled code grew")
+            verify_source()
+            require(code_hash(source_fd) == actual, "compiled code hash changed")
+            verify_source()
+            os.fsync(fd)
+            os.fchmod(fd, 0o500)
+            before = export.file_metadata(os.fstat(fd))
+            require(code_hash(fd) == actual and before == export.file_metadata(os.fstat(fd))
+                    == export.file_metadata(os.stat(binary.name, dir_fd=parent, follow_symlinks=False)), "published code changed")
             verify_directory()
         finally:
             os.close(fd)
-    require(value["code"]["executable"] == actual, "actual dev CLI hash")
+    write(run / "native-review-code.json", {"version": 1, "run": run.relative_to(ROOT).as_posix(),
+          "revision": revision(), "build_profile": "dev", "compiler": str(COMPILED), "compiler_pin": pin,
+          "compiled": actual, "published": binary.relative_to(ROOT).as_posix(), "executable": actual})
+    return binary
+
+
+def published_code(run, code):
+    record = read(run / "native-review-code.json")
+    binary = run / "run-code/meguri-cli"
+    require(record["version"] == 1 and record["run"] == run.relative_to(ROOT).as_posix()
+            and record["revision"] == code["revision"] == revision()
+            and record["build_profile"] == code["build_profile"] == "dev"
+            and record["compiler"] == str(COMPILED) and len(record["compiler_pin"]) == 9
+            and record["published"] == binary.relative_to(ROOT).as_posix(), "published code binding")
+    with owned_directory(binary.parent) as (directory, _):
+        with export.retained_file(directory, binary.name) as (fd, verify):
+            info = os.fstat(fd)
+            require(info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o500, "published code owner/mode")
+            require(record["compiled"] == record["executable"] == code["executable"] == code_hash(fd), "published compiler hash")
+            verify()
+    return record
+
+
+def rust_identity(run):
+    require(ROOT == Path("/work"), "Rust identity runs in dev")
+    value = read(run / "expected-replay/input.json")
+    record = published_code(run, value["code"])
+    with compiled_code() as (_, _, pin, actual):
+        require(record["compiler_pin"] == pin and record["compiled"] == actual, "compiler identity changed")
     write(run / "native-review-rust.json", value["code"])
+
+
+def derive(run, platform, current_revision):
+    require(ROOT == Path("/work") and platform in ("mac", "iphone", "ipad")
+            and current_revision == revision(), "dev derivation arguments")
+    with compiled_code() as (fd, verify, pin, actual):
+        binary = publish_code(run, fd, verify, pin, actual)
+        code = {"revision": current_revision, "build_profile": "dev", "executable": actual}
+        published_code(run, code)
+        with owned_directory(binary.parent) as (directory, _):
+            with export.retained_file(directory, binary.name) as (published, verify_published):
+                require(code_hash(published) == actual, "pre-derive executable hash")
+                verify_published()
+                verify()
+                subprocess.run([str(binary), "internal-native-review", str(ROOT), run.name, platform,
+                                current_revision, "101", "102", "103", "104"], check=True)
+                verify_published()
+                require(code_hash(published) == actual, "post-derive executable hash")
+                verify_published()
+        verify()
+        require(code_hash(fd) == actual, "compiler hash after derive")
+        verify()
+        rust_identity(run)
 
 
 def sim_capture(run, container, device):
@@ -370,6 +525,12 @@ def main():
     if action == "start":
         platform, = args
         source_start(run, platform)
+    elif action == "decoder-root":
+        require(not args, "decoder arguments")
+        decoder_root(run)
+    elif action == "derive":
+        platform, current_revision = args
+        derive(run, platform, current_revision)
     elif action == "rust-code":
         require(not args, "Rust arguments")
         rust_identity(run)

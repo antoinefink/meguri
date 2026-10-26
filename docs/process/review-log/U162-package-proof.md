@@ -267,3 +267,17 @@ in the intake. Future searches must exclude the vendor directory.
 
 Actual prelaunch preparation and native execution remain pending. No Unit or
 milestone acceptance is claimed.
+
+## Preparation ownership repair
+
+Start `949a6e67`. `ui-test/20261026T193948Z-29128` fails before app launch:
+the decoder rejects Docker-created ancestors owned by root. No test ran.
+Filtered repair `20261026T194957Z-33990` supplies fresh owned mount points,
+keeps the parent read-only and runs derivation as the host owner. A bounded,
+exclusive single-link copy of the compiled CLI is executed and checked before
+and after derivation. Compiler caches and existing input guards stay unchanged.
+
+Independent source review is clear. `selftest/20261026T200734Z-45432` passes
+all 8 focused tests with zero skips. Privacy `20261026T200744Z-45725` and
+similarity `20261026T200758Z-46280` pass. The earlier failure remains recorded;
+actual Docker preparation and native execution still require a fresh run.
