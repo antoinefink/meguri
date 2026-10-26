@@ -47,10 +47,28 @@ extension EventTests {
             #expect(tree.nextChangeAt == 1_894_766_400)
             #expect(try await decks.studyState(deckID: 1).empty)
             #expect(try await decks.descriptionHTML(deckID: 1) == "")
+            _ = try await decks.renameDeck(id: 1, name: "Personal")
+            let child = try await decks.addDeck(name: "日本語::子")
+            let names = try await decks.allDeckNames()
+            #expect(names.generation == first)
+            #expect(names.decks.count == 3)
+            #expect(names.decks.first == CoreBridge.DeckNameEntry(id: 1, fullName: "Personal", filtered: false))
+            #expect(names.decks.last == CoreBridge.DeckNameEntry(id: child.id, fullName: "日本語::子", filtered: false))
+            #expect(try await decks.treeWithCounts().nodes.allSatisfy { $0.id != 1 })
             try await service.close()
             #expect(try await service.lifecycle() == .noCollection)
+            do {
+                _ = try await decks.allDeckNames()
+                Issue.record("Closed all-deck query succeeded")
+            } catch {
+                guard case .unavailable = error else { throw error }
+            }
             try await service.open(location, randomSeed: 37)
             #expect(try await service.waitAvailable(timeoutMilliseconds: 0) == first + 1)
+            let reopenedNames = try await decks.allDeckNames()
+            #expect(reopenedNames.generation == first + 1)
+            #expect(reopenedNames.decks == names.decks)
+            #expect(names.generation == first)
             try await service.close()
             // Drain through the final close before another serialized test can
             // replace the listener or consume this process-wide stream.

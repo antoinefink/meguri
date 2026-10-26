@@ -447,10 +447,266 @@ fn exported_open_counts_review_close_reopen_upgrade_and_races() {
     assert_eq!(outcome, JobOutcome::Succeeded);
     lifecycle::close_collection().unwrap();
     verify_imported_sentinels(&location, persisted.1);
+    #[cfg(feature = "test-hooks")]
+    all_deck_name_projection_regressions(&rx, &mut events);
     assert!(
         events.windows(2).all(|e| e[0].seq < e[1].seq),
         "one process dispatcher preserves order across reopen"
     );
+}
+
+#[cfg(feature = "test-hooks")]
+fn all_deck_name_projection_regressions(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>) {
+    use meguri_ffi::decks::all_deck_names;
+    use meguri_model::{
+        ids::DeckId,
+        proto::{
+            ProtoBlob,
+            deck::{DeckKind, DeckKindMessage, FilteredDeck},
+        },
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let location = self::location(dir.path());
+    meguri_engine::bootstrap::create(
+        &Path::new(&location.collection_directory).join("collection.anki2"),
+        &FixedClock::new(NOW, UtcOffset::UTC),
+        &SeededRandom::new(37),
+    )
+    .unwrap();
+    let open = |events: &mut Vec<CoreEvent>| {
+        let job = collection::start_open(location.clone(), Arc::new(Clock), Arc::new(Space), 37).unwrap();
+        let (outcome, more) = finish(rx, job.id);
+        events.extend(more);
+        assert_eq!(outcome, JobOutcome::Succeeded);
+    };
+    open(events);
+    let c = meguri_ffi::test_hooks::collection_for_testing().unwrap();
+    c.run(
+        OpSpec::named("D17 persisted projection fixture", OpSource::Maintenance),
+        |ctx| {
+            for (id, name) in [
+                (1, "Personal"),
+                (-7, "alpha"),
+                (7, "alpha\u{1f}É"),
+                (8, "alpha\u{1f}É\u{1f}東京"),
+                (9, "alpha?"),
+                (12, "Missing\u{1f}Leaf"),
+                (-9, "Search"),
+                (13, " E\u{301} \u{1f} :猫: "),
+            ] {
+                // Raw typed rows model imported spelling without input repair.
+                let mut deck = meguri_engine::decks::new_deck(name.into());
+                deck.id = DeckId(id);
+                if id == -9 {
+                    deck.kind = ProtoBlob::new(DeckKindMessage::new(DeckKind::Filtered(FilteredDeck::default())));
+                }
+                ctx.scope().put(&deck)?;
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    meguri_engine::decks::rename(&c, DeckId(9), "alpha!".into()).unwrap();
+    meguri_engine::decks::rename(&c, DeckId(9), "alpha!!".into()).unwrap();
+    c.undo(meguri_engine::UndoScope::Global).unwrap();
+    {
+        let reader = c.reader(ReaderRole::Query).unwrap();
+        let tree = meguri_engine::decks::tree::tree(&*reader).unwrap();
+        assert!(tree.iter().all(|node| node.id != DeckId(1)));
+        assert!(tree.iter().all(|node| node.id != DeckId(12)));
+        assert!(tree.iter().find(|node| node.id == DeckId(-7)).unwrap().study_collapsed);
+    }
+    fn state(c: &meguri_engine::Collection) -> Vec<String> {
+        let reader = c.reader(ReaderRole::Query).unwrap();
+        [
+            "col",
+            "decks",
+            "cards",
+            "notes",
+            "revlog",
+            "graves",
+            "config",
+            "deck_config",
+            "notetypes",
+            "fields",
+            "templates",
+            "tags",
+        ]
+        .iter()
+        .map(|table| {
+            format!(
+                "{:?}",
+                reader
+                    .execute_raw(&format!("SELECT * FROM {table} ORDER BY 1"), &[])
+                    .unwrap()
+                    .rows
+            )
+        })
+        .collect()
+    }
+    c.run(
+        OpSpec::named("D17 settle rollover", OpSource::Rollover).stamp(meguri_storage::StampMode::Raw),
+        |_| Ok(()),
+    )
+    .unwrap();
+    let before = state(&c);
+    let undo = c.peek_undo(meguri_engine::UndoScope::Global).unwrap();
+    let redo = c.peek_redo(meguri_engine::UndoScope::Global).unwrap();
+    assert!(matches!(undo, meguri_engine::UndoStatus::Available(_)));
+    assert!(matches!(redo, meguri_engine::UndoStatus::Available(_)));
+    let drain = meguri_ffi::jobs::start("D17 before read", c.generation().0, |_| Ok(())).unwrap();
+    let (outcome, more) = finish(rx, drain.id);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    events.extend(more);
+    let seq = c.last_seq();
+    let names = all_deck_names().unwrap();
+    assert_eq!(names.generation, c.generation().0);
+    assert_eq!(
+        names
+            .decks
+            .iter()
+            .map(|d| (d.id, d.full_name.as_str(), d.filtered))
+            .collect::<Vec<_>>(),
+        [
+            (13, " E\u{301} :: :猫: ", false),
+            (-7, "alpha", false),
+            (7, "alpha::É", false),
+            (8, "alpha::É::東京", false),
+            (9, "alpha!", false),
+            (12, "Missing::Leaf", false),
+            (1, "Personal", false),
+            (-9, "Search", true),
+        ]
+    );
+    assert_eq!(state(&c), before);
+    assert_eq!(c.last_seq(), seq);
+    assert_eq!(c.peek_undo(meguri_engine::UndoScope::Global).unwrap(), undo);
+    assert_eq!(c.peek_redo(meguri_engine::UndoScope::Global).unwrap(), redo);
+    let drain = meguri_ffi::jobs::start("D17 after read", c.generation().0, |_| Ok(())).unwrap();
+    let (outcome, more) = finish(rx, drain.id);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    assert_eq!(
+        more.len(),
+        1,
+        "the read publishes no events before the completion marker"
+    );
+    events.extend(more);
+    // Search sorts after the valid rows, so a decode failure must discard
+    // entries already read rather than return a successful prefix.
+    let saved = {
+        use meguri_storage::Record;
+        let reader = c.reader(ReaderRole::Query).unwrap();
+        reader.deck(DeckId(-9)).unwrap().unwrap().to_cells()
+    };
+    let mut malformed = saved.clone();
+    malformed[5] = meguri_storage::Cell::Blob(vec![0xff]);
+    c.run(
+        OpSpec::named("D17 malformed deck fixture", OpSource::Maintenance).stamp(meguri_storage::StampMode::Raw),
+        move |ctx| {
+            ctx.scope().restore(
+                meguri_storage::Table::Decks,
+                &meguri_storage::RowKey::Id(-9),
+                Some(&malformed),
+            )?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    c.run(
+        OpSpec::named("D17 settle malformed fixture", OpSource::Rollover).stamp(meguri_storage::StampMode::Raw),
+        |_| Ok(()),
+    )
+    .unwrap();
+    let before_failure = state(&c);
+    let failure_undo = c.peek_undo(meguri_engine::UndoScope::Global).unwrap();
+    let failure_redo = c.peek_redo(meguri_engine::UndoScope::Global).unwrap();
+    let drain = meguri_ffi::jobs::start("D17 before failed read", c.generation().0, |_| Ok(())).unwrap();
+    let (outcome, more) = finish(rx, drain.id);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    events.extend(more);
+    let failure_seq = c.last_seq();
+    assert!(matches!(all_deck_names(), Err(CoreError::Internal { .. })));
+    assert_eq!(state(&c), before_failure);
+    assert_eq!(c.last_seq(), failure_seq);
+    assert_eq!(c.peek_undo(meguri_engine::UndoScope::Global).unwrap(), failure_undo);
+    assert_eq!(c.peek_redo(meguri_engine::UndoScope::Global).unwrap(), failure_redo);
+    let drain = meguri_ffi::jobs::start("D17 after failed read", c.generation().0, |_| Ok(())).unwrap();
+    let (outcome, more) = finish(rx, drain.id);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    assert_eq!(more.len(), 1, "the failed read publishes no events");
+    events.extend(more);
+    c.run(
+        OpSpec::named("D17 restore deck fixture", OpSource::Maintenance).stamp(meguri_storage::StampMode::Raw),
+        move |ctx| {
+            ctx.scope().restore(
+                meguri_storage::Table::Decks,
+                &meguri_storage::RowKey::Id(-9),
+                Some(&saved),
+            )?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(all_deck_names().unwrap(), names);
+    let threads = meguri_engine::ThreadRegistry::default();
+    let start = Arc::new(Barrier::new(2));
+    let writer_start = start.clone();
+    let writer_collection = c.clone();
+    let writer = threads
+        .spawn("ffi-deck-name-rename", meguri_engine::Qos::Default, move |_| {
+            writer_start.wait();
+            meguri_engine::decks::rename(&writer_collection, DeckId(-7), "beta".into()).unwrap();
+        })
+        .unwrap();
+    start.wait();
+    let racing = all_deck_names().unwrap();
+    writer.join().unwrap();
+    let paths = racing
+        .decks
+        .iter()
+        .filter(|d| [-7, 7, 8].contains(&d.id))
+        .map(|d| d.full_name.as_str())
+        .collect::<Vec<_>>();
+    assert!(paths == ["alpha", "alpha::É", "alpha::É::東京"] || paths == ["beta", "beta::É", "beta::É::東京"]);
+    c.run(
+        OpSpec::named("D17 absent default fixture", OpSource::Maintenance),
+        |ctx| {
+            ctx.scope().remove_deck(DeckId(1))?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(all_deck_names().unwrap().decks.len(), 7);
+    assert!(
+        all_deck_names()
+            .unwrap()
+            .decks
+            .iter()
+            .all(|d| d.id != 1 && d.full_name != "Default")
+    );
+    lifecycle::close_collection().unwrap();
+    assert!(matches!(all_deck_names(), Err(CoreError::Unavailable { .. })));
+    open(events);
+    let current = all_deck_names().unwrap();
+    assert_eq!(current.generation, names.generation + 1);
+    assert_ne!(
+        current.generation, names.generation,
+        "completed old results remain old at publication"
+    );
+    assert!(
+        matches!(c.reader(ReaderRole::Query), Err(meguri_engine::EngineError::StaleGeneration { planned, current: got })
+            if planned.0 == names.generation && got.0 == current.generation)
+    );
+    let c = meguri_ffi::test_hooks::collection_for_testing().unwrap();
+    c.run(OpSpec::named("D17 no records fixture", OpSource::Maintenance), |ctx| {
+        for deck in ctx.scope().deck_rows()? {
+            ctx.scope().remove_deck(deck.id)?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert!(all_deck_names().unwrap().decks.is_empty());
+    lifecycle::close_collection().unwrap();
 }
 
 // Mirrors model ChangeSet::is_empty, including flags outside the row lists.

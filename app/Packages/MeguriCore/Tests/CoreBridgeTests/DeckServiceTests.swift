@@ -3,6 +3,20 @@ import MeguriCoreBindings
 @testable import CoreBridge
 
 @Suite struct DeckServiceTests {
+    @Test func deckNameSnapshotPreservesSignedIDsGenerationSpellingAndOrder() {
+        let raw = MeguriCoreBindings.DeckNameSnapshot(generation: .max, decks: [
+            .init(id: .min, fullName: " E\u{301} :: :猫: ", filtered: true),
+            .init(id: .max, fullName: "alpha::É::東京", filtered: false),
+            .init(id: 1, fullName: "Personal", filtered: false),
+        ])
+        let value = CoreBridge.DeckNameSnapshot(raw)
+        #expect(value == CoreBridge.DeckNameSnapshot(generation: .max, decks: [
+            .init(id: .min, fullName: " E\u{301} :: :猫: ", filtered: true),
+            .init(id: .max, fullName: "alpha::É::東京", filtered: false),
+            .init(id: 1, fullName: "Personal", filtered: false),
+        ]))
+        #expect(value.decks[0].fullName.utf8.elementsEqual(" E\u{301} :: :猫: ".utf8))
+    }
     @Test func committingProgressDisablesCancellationWithoutInventingCounts() {
         let value = CoreBridge.CoreProgress(.init(jobId: 37, phase: .committing, etaMillis: nil, completed: 0, total: nil))
         #expect(value.phase == .committing && !value.cancellable)

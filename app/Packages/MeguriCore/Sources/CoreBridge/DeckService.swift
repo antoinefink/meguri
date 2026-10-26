@@ -1,6 +1,28 @@
 internal import MeguriCoreBindings
 import Instrumentation
 
+public struct DeckNameEntry: Sendable, Hashable {
+    public let id: Int64
+    public let fullName: String
+    public let filtered: Bool
+    public init(id: Int64, fullName: String, filtered: Bool) {
+        self.id = id; self.fullName = fullName; self.filtered = filtered
+    }
+    init(_ raw: MeguriCoreBindings.DeckNameEntry) {
+        self.init(id: raw.id, fullName: raw.fullName, filtered: raw.filtered)
+    }
+}
+public struct DeckNameSnapshot: Sendable, Hashable {
+    public let generation: UInt64
+    public let decks: [DeckNameEntry]
+    public init(generation: UInt64, decks: [DeckNameEntry]) {
+        self.generation = generation; self.decks = decks
+    }
+    init(_ raw: MeguriCoreBindings.DeckNameSnapshot) {
+        self.init(generation: raw.generation, decks: raw.decks.map(DeckNameEntry.init))
+    }
+}
+
 public struct CountedDeckNode: Sendable, Hashable {
     public let id: Int64
     public let name: String
@@ -32,6 +54,7 @@ public struct CountedDeckTree: Sendable, Hashable {
     }
 }
 public protocol DeckService: Sendable {
+    func allDeckNames() async throws(BridgeError) -> DeckNameSnapshot
     func startRenameDeck(id: Int64, name: String) async throws(BridgeError) -> CoreDeckRenameJob
     func startMoveDecks(ids: [Int64], parent: Int64?) async throws(BridgeError) -> CoreDeckMoveJob
     func startCollapseDecks(ids: [Int64], scope: DeckCollapseScope, collapsed: Bool) async throws(BridgeError) -> CoreDeckCollapseJob
@@ -48,6 +71,9 @@ public protocol DeckService: Sendable {
 }
 public actor CoreDeckService: DeckService {
     public init() {}
+    public func allDeckNames() async throws(BridgeError) -> DeckNameSnapshot {
+        try await QueryLane.shared.call(.allDeckNames) { DeckNameSnapshot(try MeguriCoreBindings.allDeckNames()) }
+    }
     public func treeWithCounts() async throws(BridgeError) -> CountedDeckTree {
         try await QueryLane.shared.call(.deckTreeWithCounts) { CountedDeckTree(try deckTreeWithCounts()) }
     }

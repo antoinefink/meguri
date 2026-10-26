@@ -6,7 +6,44 @@ use crate::{
 };
 use meguri_engine::decks;
 use meguri_model::ids::DeckId;
-use meguri_storage::ReaderRole;
+use meguri_storage::{ReadRows, ReaderRole};
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DeckNameEntry {
+    pub id: i64,
+    pub full_name: String,
+    pub filtered: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DeckNameSnapshot {
+    pub generation: u64,
+    pub decks: Vec<DeckNameEntry>,
+}
+
+fn name_entries(mut rows: Vec<meguri_model::deck::Deck>) -> Vec<DeckNameEntry> {
+    rows.sort_by(|a, b| meguri_text::fold::compare_folded(&a.name, &b.name).then_with(|| a.id.cmp(&b.id)));
+    rows.into_iter()
+        .map(|deck| DeckNameEntry {
+            id: deck.id.0,
+            full_name: decks::names::human_name(&deck.name),
+            filtered: decks::is_filtered(&deck),
+        })
+        .collect()
+}
+
+/// D17: persisted records, independent of display-tree visibility and counts.
+#[uniffi::export]
+pub fn all_deck_names() -> Result<DeckNameSnapshot, CoreError> {
+    callback::enter("all_deck_names");
+    let collection = runtime::host()?.collection()?;
+    let reader = collection.reader(ReaderRole::Query)?;
+    let snapshot = reader.snapshot()?;
+    Ok(DeckNameSnapshot {
+        generation: snapshot.generation().0,
+        decks: name_entries(snapshot.deck_rows().map_err(meguri_engine::EngineError::from)?),
+    })
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct DeckMutation {
     pub summary: MutationSummary,
@@ -228,4 +265,31 @@ pub fn start_collapse_decks(
         handle: crate::jobs::wrap(handle),
         result: Arc::new(DeckCollapseJob { result }),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_use_stored_unicode_order_and_id_ties_before_human_conversion() {
+        let rows = [(9, "Straße"), (3, "STRASSE"), (7, "a!"), (6, "a\u{1f}子"), (5, "a")]
+            .into_iter()
+            .map(|(id, name)| {
+                let mut deck = decks::new_deck(name.into());
+                deck.id = DeckId(id);
+                deck
+            })
+            .collect();
+        assert_eq!(
+            name_entries(rows)
+                .into_iter()
+                .map(|entry| (entry.id, entry.full_name))
+                .collect::<Vec<_>>(),
+            [(5, "a"), (6, "a::子"), (7, "a!"), (3, "STRASSE"), (9, "Straße")]
+                .into_iter()
+                .map(|(id, name)| (id, name.to_owned()))
+                .collect::<Vec<_>>()
+        );
+    }
 }
