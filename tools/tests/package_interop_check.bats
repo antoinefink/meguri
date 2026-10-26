@@ -31,7 +31,7 @@ bats_require_minimum_version 1.5.0
 }
 
 @test "package interop: bounded JSON SQLite clocks and growing source reads" {
-  python3 "$BATS_TEST_DIRNAME/package_interop_check_test.py" AllocationBounds
+  python3 "$BATS_TEST_DIRNAME/package_interop_check_test.py" AllocationBounds RawSchema
 }
 
 @test "package interop: isolated DB and media archive proof, corruption, frame settings and bounds" {

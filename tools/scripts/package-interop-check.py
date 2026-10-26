@@ -15,6 +15,8 @@ rows against the frozen expected DB (including stamps), and independently checks
 the complete map and every payload against captured names/lengths/SHA-1s. No repair is run.
 All SQLite reads stay in that pinned service; Python 3.9 host paths consume only
 bounded neutral raw rows and clock evidence bound to the frozen input hashes.
+The registered unicase callback only latches and refuses: no Unicode comparison
+is implemented or certified. Raw scans use NOT INDEXED and explicit BINARY keys.
 
 Conservative GENERATED-FIXTURE scope (not the app's intake limits): package and
 individual source files <=512 MiB, DB <=256 MiB, SQLite cells/row payloads <=1 MiB, <=100,000
@@ -555,6 +557,67 @@ def sources(root, package, expected):
         raise
 
 
+class RawCursor:
+    def __init__(self, reader, cursor):
+        self.reader, self.cursor = reader, cursor
+
+    def fetchone(self):
+        self.reader.check()
+        try:
+            return self.cursor.fetchone()
+        finally:
+            self.reader.check()
+
+    def fetchall(self):
+        return list(self)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        row = self.fetchone()
+        if row is None:
+            raise StopIteration
+        return row
+
+
+class RawConnection:
+    """Raw-cell access only; a collation attempt permanently poisons this handle."""
+    def __init__(self, connection):
+        self.connection = connection
+        self.collation_invoked = False
+        connection.create_collation('unicase', self.refuse_collation)
+
+    def refuse_collation(self, left, right):
+        # NEVER return a comparison, even for ASCII or identical strings. This
+        # registration permits schema preparation, not semantic index access.
+        self.collation_invoked = True
+        raise Refusal('sqlite-collation-required')
+
+    def check(self):
+        require(not self.collation_invoked, 'sqlite-collation-required')
+
+    def execute(self, sql, parameters=()):
+        self.check()
+        try:
+            return RawCursor(self, self.connection.execute(sql, parameters))
+        finally:
+            # Also refuses if SQLite catches the callback exception internally.
+            self.check()
+
+    def close(self):
+        try:
+            self.connection.close()
+        finally:
+            self.check()
+
+    def getlimit(self, category):
+        return self.connection.getlimit(category)
+
+    def set_trace_callback(self, callback):
+        self.connection.set_trace_callback(callback)
+
+
 def sqlite_reader(path):
     owned(path.lstat())
     require(0 < path.stat().st_size <= DB_LIMIT, 'sqlite-size-scope')
@@ -563,10 +626,15 @@ def sqlite_reader(path):
     # during CAST/length preflight. No client/library collection open occurs.
     conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, CELL_LIMIT)
     conn.setlimit(sqlite3.SQLITE_LIMIT_SQL_LENGTH, 16384)
-    conn.execute('PRAGMA query_only=ON')
-    conn.execute('PRAGMA cache_size=-2048')
-    conn.execute('PRAGMA temp_store=MEMORY')
-    return conn
+    reader = RawConnection(conn)
+    try:
+        reader.execute('PRAGMA query_only=ON')
+        reader.execute('PRAGMA cache_size=-2048')
+        reader.execute('PRAGMA temp_store=MEMORY')
+        return reader
+    except BaseException:
+        reader.close()
+        raise
 
 
 def raw_rows(path):
@@ -579,7 +647,7 @@ def raw_rows(path):
             columns = declaration.split()
             actual = [r[1] for r in conn.execute('PRAGMA table_info("' + table + '")')]
             require(len(actual) == len(columns) and set(actual) == set(columns), 'sqlite-columns')
-            count = conn.execute('SELECT count(*) FROM "' + table + '"').fetchone()[0]
+            count = conn.execute('SELECT count(*) FROM "' + table + '" NOT INDEXED').fetchone()[0]
             total += count
             require(total <= ROW_LIMIT, 'sqlite-row-scope')
             keys = KEYS.get(table, ('id',))
@@ -588,7 +656,7 @@ def raw_rows(path):
             for col in columns:
                 quoted = '"' + col + '"'
                 limit = 256 if col in keys else CELL_LIMIT
-                oversized = conn.execute('SELECT 1 FROM "' + table + '" WHERE '
+                oversized = conn.execute('SELECT 1 FROM "' + table + '" NOT INDEXED WHERE '
                     'length(CAST(' + quoted + ' AS BLOB)) > ? LIMIT 1', (limit,)).fetchone()
                 require(oversized is None, 'sqlite-cell-scope')
             key_sql = ','.join('"' + k + '" COLLATE BINARY' for k in keys)
@@ -596,14 +664,14 @@ def raw_rows(path):
             selection = ','.join('typeof("' + c + '"),"' + c + '"' for c in columns)
             last_key = None
             for key_values in conn.execute('SELECT ' + key_sql + ' FROM "' + table +
-                                           '" ORDER BY ' + key_sql):
+                                           '" NOT INDEXED ORDER BY ' + key_sql):
                 require(all(type(v) is (str if k in ('KEY', 'tag') else int)
                             for k, v in zip(keys, key_values)), 'sqlite-key-scope')
                 key = ','.join(str(v) for v in key_values)
                 require(key != last_key, 'sqlite-duplicate-key')
                 last_key = key
                 cursor = conn.execute('SELECT ' + selection + ' FROM "' + table +
-                                      '" WHERE ' + where + ' LIMIT 2', key_values)
+                                      '" NOT INDEXED WHERE ' + where + ' LIMIT 2', key_values)
                 row = cursor.fetchone()
                 require(row is not None and cursor.fetchone() is None, 'sqlite-duplicate-key')
                 values = []
@@ -616,8 +684,10 @@ def raw_rows(path):
     except sqlite3.DataError as error:
         raise Refusal('sqlite-cell-or-row-scope') from error
     finally:
-        conn.close()
-        require(signature(path.lstat()) == initial, 'staged-input-changed')
+        try:
+            conn.close()
+        finally:
+            require(signature(path.lstat()) == initial, 'staged-input-changed')
 
 
 def compare_databases(expected, decoded):
@@ -1081,7 +1151,7 @@ def timing_for(db_path, now, tz='UTC', *, clock_values=None):
     clock_offset(now, tz)
     conn = sqlite_reader(db_path)
     try:
-        rows = conn.execute('SELECT id, crt, ver FROM col LIMIT 2').fetchall()
+        rows = conn.execute('SELECT id, crt, ver FROM col NOT INDEXED LIMIT 2').fetchall()
         require(len(rows) == 1 and rows[0][0] == 1 and rows[0][2] == 18, 'schema-scope')
         crt = rows[0][1]
         require(type(crt) is int and 0 <= crt <= now, 'clock-scope')
@@ -1089,11 +1159,13 @@ def timing_for(db_path, now, tz='UTC', *, clock_values=None):
         for key in ('creationOffset', 'rollover', 'schedVer'):
             # Lazy BLOB length bounds clock values before selecting payloads.
             rows = conn.execute("SELECT typeof(val), CASE WHEN typeof(val)='blob' "
-                                "THEN length(val) ELSE -1 END FROM config WHERE \"KEY\"=? LIMIT 2",
+                                "THEN length(val) ELSE -1 END FROM config NOT INDEXED "
+                                'WHERE "KEY" COLLATE BINARY=? LIMIT 2',
                                 (key,)).fetchall()
             require(len(rows) == 1 and rows[0][0] == 'blob' and
                     0 <= rows[0][1] <= CLOCK_LIMIT, 'collection-clock-scope')
-            value = conn.execute('SELECT val FROM config WHERE "KEY"=?', (key,)).fetchone()[0]
+            value = conn.execute('SELECT val FROM config NOT INDEXED '
+                                 'WHERE "KEY" COLLATE BINARY=?', (key,)).fetchone()[0]
             decoded[key] = json_bytes(value)
             if clock_values is not None:
                 clock_values[key] = value.hex()

@@ -1613,3 +1613,11 @@ output includes the map after its payload checks, but raw database/client
 acceptance remains incomplete. A bounded source audit identifies the missing
 schema collation registration. No sync protocol work was resumed. No Unit or
 integration gate is accepted by this checkpoint.
+
+Raw-reader repair `001323Z-4062` is a binary-only scanner with a latched,
+refusing collation callback. It returns no Unicode comparison. Review finds one
+P2: four new schema checks were absent from the selected test classes. Fixer
+`001908Z-7649` adds them to the existing selection and changes neutral test
+names only. Second source review is clear. Selftest `002117Z-11041` passes
+nine cases including those four checks. Private `002119Z-11314` and
+similarity `002531Z-13025` pass. A new actual package run is still needed.

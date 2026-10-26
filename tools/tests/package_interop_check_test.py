@@ -35,10 +35,16 @@ NATIVE_TZ = 'Europe/Paris'
 
 def dump_db(path):
     conn = sqlite3.connect(path)
+    collation_invoked = False
+    def refuse_comparison(left, right):
+        nonlocal collation_invoked
+        collation_invoked = True
+        raise AssertionError('synthetic dump requested collation')
     try:
+        conn.create_collation('unicase', refuse_comparison)
         result = {}
         for table in interop.COLUMNS:
-            cursor = conn.execute('SELECT * FROM ' + table)
+            cursor = conn.execute('SELECT * FROM ' + table + ' NOT INDEXED')
             names = [x[0] for x in cursor.description]
             rows = {}
             for values in cursor:
@@ -52,6 +58,8 @@ def dump_db(path):
         return result
     finally:
         conn.close()
+        if collation_invoked:
+            raise AssertionError('synthetic dump requested collation')
 
 
 def outputs(run):
@@ -1162,7 +1170,8 @@ class AllocationBounds(Fixture):
         fetches = [q for q in queries if q.startswith('SELECT val')]
         self.assertEqual(len(fetches), 3)
         self.assertFalse(any('unrelated-huge' in q for q in queries))
-        self.assertTrue(all('WHERE "KEY"=' in q for q in fetches))
+        self.assertTrue(all('FROM config NOT INDEXED WHERE "KEY" COLLATE BINARY=' in q
+                            for q in fetches))
 
     def test_oversized_required_key_fails_before_value_select(self):
         conn = sqlite3.connect(self.db)
@@ -1186,6 +1195,143 @@ class AllocationBounds(Fixture):
         conn.commit()
         conn.close()
         self.rejects(lambda: list(interop.raw_rows(self.db)), 'sqlite-cell')
+
+
+class RawSchema(Fixture):
+    def setUp(self):
+        super().setUp()
+        # Public storage/schema-18 S2/S3 only. Rebuild this generated fixture
+        # with real affinities, primary trees and all four unique name indexes.
+        definitions = {
+            'col': 'id integer PRIMARY KEY, crt integer NOT NULL, mod integer NOT NULL, '
+                   'scm integer NOT NULL, ver integer NOT NULL, dty integer NOT NULL, '
+                   'usn integer NOT NULL, ls integer NOT NULL, conf text NOT NULL, '
+                   'models text NOT NULL, decks text NOT NULL, dconf text NOT NULL, tags text NOT NULL',
+            'notes': 'id integer PRIMARY KEY, guid text NOT NULL, mid integer NOT NULL, '
+                     'mod integer NOT NULL, usn integer NOT NULL, tags text NOT NULL, '
+                     'flds text NOT NULL, sfld integer NOT NULL, csum integer NOT NULL, '
+                     'flags integer NOT NULL, data text NOT NULL',
+            'cards': 'id integer PRIMARY KEY, ' + ', '.join(n + ' integer NOT NULL' for n in
+                     'nid did ord mod usn type queue due ivl factor reps lapses left odue odid flags'.split())
+                     + ', data text NOT NULL',
+            'revlog': 'id integer PRIMARY KEY, ' + ', '.join(n + ' integer NOT NULL' for n in
+                      'cid usn ease ivl lastIvl factor time type'.split()),
+            'graves': 'oid integer NOT NULL, type integer NOT NULL, usn integer NOT NULL, PRIMARY KEY (oid, type)',
+            'decks': 'id integer PRIMARY KEY NOT NULL, name text NOT NULL COLLATE unicase, '
+                     'mtime_secs integer NOT NULL, usn integer NOT NULL, common blob NOT NULL, kind blob NOT NULL',
+            'deck_config': 'id integer PRIMARY KEY NOT NULL, name text NOT NULL COLLATE unicase, '
+                           'mtime_secs integer NOT NULL, usn integer NOT NULL, config blob NOT NULL',
+            'notetypes': 'id integer NOT NULL PRIMARY KEY, name text NOT NULL COLLATE unicase, '
+                         'mtime_secs integer NOT NULL, usn integer NOT NULL, config blob NOT NULL',
+            'fields': 'ntid integer NOT NULL, ord integer NOT NULL, name text NOT NULL COLLATE unicase, '
+                      'config blob NOT NULL, PRIMARY KEY (ntid, ord)',
+            'templates': 'ntid integer NOT NULL, ord integer NOT NULL, name text NOT NULL COLLATE unicase, '
+                         'mtime_secs integer NOT NULL, usn integer NOT NULL, config blob NOT NULL, PRIMARY KEY (ntid, ord)',
+            'tags': 'tag text NOT NULL PRIMARY KEY COLLATE unicase, usn integer NOT NULL, '
+                    'collapsed boolean NOT NULL, config blob NULL',
+            'config': 'KEY text NOT NULL PRIMARY KEY, usn integer NOT NULL, mtime_secs integer NOT NULL, val blob NOT NULL',
+        }
+        # Only these independently known fixed facts may construct the fixture:
+        # Synthetic == synthetic, and synthetic < Z < ä under S4. No general
+        # Unicode comparator, BINARY fallback, core or external client is used.
+        ranks = {'Synthetic': 0, 'synthetic': 0, 'Z': 1, 'ä': 2}
+        def fixed_comparison(left, right):
+            if left not in ranks or right not in ranks:
+                raise AssertionError('unknown fixture comparison')
+            return (ranks[left] > ranks[right]) - (ranks[left] < ranks[right])
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.create_collation('unicase', fixed_comparison)
+            for table, declaration in definitions.items():
+                rows = conn.execute('SELECT * FROM ' + table).fetchall()
+                conn.execute('DROP TABLE ' + table)
+                suffix = ' WITHOUT ROWID' if table in interop.KEYS else ''
+                conn.execute('CREATE TABLE ' + table + ' (' + declaration + ')' + suffix)
+                insert = 'INSERT INTO ' + table + ' VALUES (' + ','.join('?' for _ in rows[0]) + ')'
+                conn.executemany(insert, rows)
+                if table == 'tags':
+                    conn.executemany(insert, [('Z', -1, 1, b'\x00\xff'), ('ä', 7, 0, None)])
+                if table in ('decks', 'deck_config', 'notetypes', 'fields', 'templates'):
+                    columns = interop.COLUMNS[table].split()
+                    for identity, name in ((2, 'Z'), (3, 'ä')):
+                        row = list(rows[0])
+                        row[columns.index('ord' if table in ('fields', 'templates') else 'id')] = identity
+                        row[columns.index('name')] = name
+                        conn.execute(insert, row)
+            for table, index, keys in (
+                    ('fields', 'idx_fields_name_ntid', 'name, ntid'),
+                    ('templates', 'idx_templates_name_ntid', 'name, ntid'),
+                    ('notetypes', 'idx_notetypes_name', 'name'),
+                    ('decks', 'idx_decks_name', 'name')):
+                conn.execute('CREATE UNIQUE INDEX ' + index + ' ON ' + table + ' (' + keys + ')')
+            conn.commit()
+        finally:
+            conn.close()
+        self.pack()
+
+    def test_raw_binary_scan_never_invokes_unicase_and_preserves_source(self):
+        before = (self.db.read_bytes(), interop.signature(self.db.stat()))
+        with mock.patch.object(interop.RawConnection, 'refuse_collation', autospec=True,
+                               side_effect=AssertionError('raw scan called unicase')) as callback:
+            rows = list(interop.raw_rows(self.db))
+            self.assertEqual([key for table, key, _ in rows if table == 'tags'],
+                             ['Z', 'synthetic', 'ä'])  # Differs from the primary tree's S4 order.
+            work = self.stage()
+            self.verify('ready')
+            self.assertEqual(json.loads((work / 'decoded/expected.json').read_text()), dump_db(self.db))
+            callback.assert_not_called()
+        self.assertEqual(before, (self.db.read_bytes(), interop.signature(self.db.stat())))
+        proof = json.loads((work / 'decoded/proof.json').read_text())
+        self.assertTrue(proof['pre_client_database_equal'])
+        self.assertTrue(proof['pre_client_media_equal'])
+        self.assertEqual(proof['pre_client_stamp_edits'], 0)
+
+    def test_real_schema_native_clock_and_complete_fake_client_binding(self):
+        self.native_clock()
+        self.valid_outputs()
+        self.verify()
+
+    def test_semantic_query_refuses_and_caught_exception_cannot_publish_proof(self):
+        interop.stage(self.args)
+        original = interop.sqlite_reader
+        handles = []
+        def poisoned(path):
+            conn = original(path)
+            handles.append(conn)
+            self.rejects(lambda: conn.execute('SELECT tag FROM tags NOT INDEXED '
+                         'WHERE tag COLLATE unicase=?', ('Z',)).fetchall(), 'sqlite-collation-required')
+            self.assertTrue(conn.collation_invoked)
+            self.rejects(lambda: conn.execute('SELECT 1'), 'sqlite-collation-required')
+            return conn  # Deliberately caught callback failure remains fatal.
+        with mock.patch.object(interop, 'sqlite_reader', poisoned):
+            self.rejects(self.decode, 'sqlite-collation-required')
+        self.assertTrue(handles)
+        self.assertFalse((self.run / 'interop/decoded/proof.json').exists())
+
+    def test_adapter_retains_collation_failure_after_callback_error_is_caught(self):
+        # An adapter may catch a callback error while executing or fetching.
+        # The raw connection must retain that failure through later calls and close.
+        for operation in ('execute', 'fetch'):
+            with self.subTest(phase=operation):
+                adapter = mock.Mock()
+                raw_connection = interop.RawConnection(adapter)
+                def capture_callback_error(*unused_arguments):
+                    try:
+                        raw_connection.refuse_collation('Z', 'synthetic')
+                    except interop.Refusal:
+                        pass
+                    return mock.Mock() if operation == 'execute' else ('Z',)
+                if operation == 'execute':
+                    adapter.execute.side_effect = capture_callback_error
+                    self.rejects(lambda: raw_connection.execute('SELECT 1'), 'sqlite-collation-required')
+                else:
+                    row_cursor = raw_connection.execute('SELECT 1')
+                    adapter.execute.return_value.fetchone.side_effect = capture_callback_error
+                    self.rejects(row_cursor.fetchone, 'sqlite-collation-required')
+                self.assertTrue(raw_connection.collation_invoked)
+                self.rejects(lambda: raw_connection.execute('SELECT 1'), 'sqlite-collation-required')
+                self.rejects(raw_connection.close, 'sqlite-collation-required')
+                adapter.close.assert_called_once()
 
 
 class Decoder(Fixture):
