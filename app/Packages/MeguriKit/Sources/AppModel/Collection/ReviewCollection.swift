@@ -12,6 +12,20 @@ public final class ReviewCollection {
     public private(set) var lifecycle: CollectionLifecycle = .noCollection
     public private(set) var generation: UInt64 = 0
     public private(set) var decks: [CountedDeckNode] = []
+    /// Page content may belong to a deck intentionally absent from the tree.
+    public struct DeckPageDetail: Sendable, Hashable {
+        public let id: Int64
+        public let name: String
+        public let counts: ReviewCounts
+    }
+    private var selectedDeckDetail: (page: DeckPageDetail, generation: UInt64, intent: UInt64)?
+    private var currentSelectedDeckDetail: DeckPageDetail? {
+        guard let selectedDeckDetail, selectedDeckDetail.generation == generation,
+              selectedDeckDetail.intent == navigation.intentRevision,
+              navigation.section == .home, navigation.homeDeckPage?.rawValue == selectedDeckDetail.page.id,
+              canSaveDeckState, case .ready(let current) = lifecycle, current == generation else { return nil }
+        return selectedDeckDetail.page
+    }
     public private(set) var review: ReviewCoordinator?
     public private(set) var previousRecord: ReviewRecord?
     public private(set) var policy: FsrsPolicyStatus?
@@ -57,6 +71,49 @@ public final class ReviewCollection {
         return value
     }
     private var exportOwner: CollectionExportCoordinator?
+    private var deckNamesOwner: DeckActionsModel?
+    public var deckActions: DeckActionsModel {
+        if let deckNamesOwner { return deckNamesOwner }
+        let value = DeckActionsModel(owner: self)
+        deckNamesOwner = value
+        return value
+    }
+    private var deckNamesReserved: Bool {
+        if case .deckName = navigation.sheet { return true }
+        return deckNamesOwner?.busy == true
+    }
+    func deckNamesAllowed(host: AppNavigation.SheetHost, route: SheetRoute?) -> Bool {
+        guard host == .main, foreground, !resuming, !closed, !closing,
+              !opening, !starting, !enabling, state == .ready,
+              case .ready(let current) = lifecycle, current == generation,
+              review == nil, navigation.review == nil,
+              entryOwner?.busy != true, entryOwner?.pickerPresented != true, entryOwner?.preview == nil,
+              exportOwner?.busy != true,
+              exportOwner?.artifact == nil, exportOwner?.providerLease == nil,
+              manualOwner?.busy != true, manualOwner?.preview == nil, manualOwner?.mediaPreview == nil,
+              navigation.sheet == route else { return false }
+        return route == nil || navigation.sheetHost == .main
+    }
+    public func fullDeckName(_ id: Int64) -> String? {
+        func find(_ nodes: [CountedDeckNode], parents: [String]) -> String? {
+            for node in nodes {
+                let path = node.name.contains("::") ? node.name : (parents + [node.name]).joined(separator: "::")
+                if node.id == id { return path }
+                if let match = find(node.children, parents: path.components(separatedBy: "::")) { return match }
+            }
+            return nil
+        }
+        return find(decks, parents: []) ?? currentSelectedDeckDetail.flatMap { $0.id == id ? $0.name : nil }
+    }
+    func refreshDeckNames(generation expected: UInt64) async throws -> Bool {
+        deckTreeRevision &+= 1; countsRevision &+= 1
+        let revision = deckTreeRevision
+        let tree = try await loadDeckTree()
+        guard expected == generation, tree.generation == expected, revision == deckTreeRevision,
+              foreground, !closed, !closing, !resuming else { return false }
+        decks = tree.nodes
+        return true
+    }
     private let exportService: any CollectionExportService
     public var collectionExport: CollectionExportCoordinator {
         if let exportOwner { return exportOwner }
@@ -92,7 +149,7 @@ public final class ReviewCollection {
         lifecycle = .noCollection; state = restored
     }
     var exportAllowed: Bool {
-        guard !opening, !enabling, state == .ready, case .ready = lifecycle else { return false }
+        guard !opening, !enabling, !deckNamesReserved, state == .ready, case .ready = lifecycle else { return false }
         return true
     }
     @ObservationIgnored var loadDeckTree: @MainActor () async throws -> CountedDeckTree
@@ -201,7 +258,7 @@ public final class ReviewCollection {
         return try await Self.prepareOpenLocation(configuration.collectionLocation)
     }
     var entryAllowed: Bool { (state == .ready || manualOwner?.preview == nil) && manualAllowed && state != .unavailable }
-    var manualAllowed: Bool { entryOwner?.busy != true && exportOwner?.busy != true && !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed) }
+    var manualAllowed: Bool { !deckNamesReserved && entryOwner?.busy != true && exportOwner?.busy != true && !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed) }
     func beginManualActivation() throws {
         guard review == nil, !starting else { throw BridgeError.sessionActive }
         guard manualAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
@@ -353,12 +410,23 @@ public final class ReviewCollection {
     private var canSaveDeckState: Bool { state == .ready && !opening && !closed && !closing && !resuming }
 
     private func invalidateDeckActions() {
+        deckNamesOwner?.invalidate()
+        selectedDeckDetail = nil
         selectionRevision &+= 1; collapseRevision &+= 1; countsRevision &+= 1; deckTreeRevision &+= 1
         pendingStudyCollapse.removeAll()
     }
 
     /// Admission is synchronous so a later row/section click wins even before a task runs.
     @discardableResult public func openDeckPage(deckID: Int64) -> Task<Bool, Never> {
+        let detail = currentSelectedDeckDetail
+        return openDeckPage(deckID: deckID, detail: detail?.id == deckID ? detail : nil)
+    }
+
+    func openDeckPage(_ detail: DeckPageDetail) -> Task<Bool, Never> {
+        openDeckPage(deckID: detail.id, detail: detail)
+    }
+
+    private func openDeckPage(deckID: Int64, detail: DeckPageDetail?) -> Task<Bool, Never> {
         let intent = navigation.beginDeckSelection()
         let selection = selectDeck(deckID: deckID, intent: intent)
         let expected = generation, revision = selectionRevision
@@ -368,6 +436,8 @@ public final class ReviewCollection {
             if navigation.sidebarSelection != .deck(DeckID(deckID)) {
                 navigation.openDeckPage(DeckID(deckID))
             }
+            selectedDeckDetail = deck(deckID) == nil
+                ? detail.map { (page: $0, generation: expected, intent: navigation.intentRevision) } : nil
             return true
         }
     }
@@ -500,6 +570,37 @@ public final class ReviewCollection {
         return find(decks)
     }
 
+    public func deckPage(_ id: Int64) -> DeckPageDetail? {
+        if let node = deck(id) {
+            return DeckPageDetail(id: node.id, name: node.name, counts: node.counts)
+        }
+        let detail = currentSelectedDeckDetail
+        return detail?.id == id ? detail : nil
+    }
+
+    /// Rename refreshes page authority without selecting another deck or changing navigation.
+    func refreshRenamedDeckPage(_ mutation: DeckMutation) async throws {
+        guard navigation.homeDeckPage?.rawValue == mutation.id else { return }
+        let expected = generation, intent = navigation.intentRevision
+        let detail = try await resolveDeckPage(mutation)
+        guard expected == generation, intent == navigation.intentRevision,
+              navigation.homeDeckPage?.rawValue == mutation.id, canSaveDeckState else { return }
+        selectedDeckDetail = deck(mutation.id) == nil ? (page: detail, generation: expected, intent: intent) : nil
+    }
+
+    func resolveDeckPage(_ mutation: DeckMutation) async throws -> DeckPageDetail {
+        if let node = deck(mutation.id) {
+            return DeckPageDetail(id: node.id, name: node.name, counts: node.counts)
+        }
+        // The mutation supplies the stored identity/name; studyState reads that
+        // exact ID even when the empty Default deck is hidden from tree queries.
+        let expected = generation
+        let state = try await CoreDeckService().studyState(deckID: mutation.id)
+        guard expected == generation, mutation.summary.generation == expected,
+              canSaveDeckState, state.deck == mutation.id else { throw BridgeError.staleGeneration(planned: expected, current: generation) }
+        return DeckPageDetail(id: mutation.id, name: mutation.name, counts: state.listCounts)
+    }
+
     public func readPolicy() async {
         guard !enabling else { return }
         let expected = generation
@@ -526,7 +627,7 @@ public final class ReviewCollection {
             if let deck = pendingDeck { pendingDeck = nil; Task { await startStudy(deckID: deck) } }
         } catch { self.error = String(describing: error) }
     }
-    public var canStudy: Bool { !opening && entryOwner?.busy != true && navigation.sheet != .collectionEntry && state == .ready && reviewIsActive && !resuming && !starting && review == nil && policy == .ok }
+    public var canStudy: Bool { !deckNamesReserved && !opening && entryOwner?.busy != true && navigation.sheet != .collectionEntry && state == .ready && reviewIsActive && !resuming && !starting && review == nil && policy == .ok }
     public func startStudy(deckID: Int64) async {
         guard canStudy else { return }
         guard policy == .ok else { pendingDeck = deckID; await readPolicy(); return }
@@ -601,7 +702,7 @@ public final class ReviewCollection {
         let previous = lifecycleTask
         lifecycleTask = Task {
             await previous?.value
-            if !active { await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain() }
+            if !active { await deckNamesOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain() }
             await openTask?.value
             guard !closed, state != .unopened, state != .noFile else { resuming = false; return }
             do {
@@ -616,6 +717,7 @@ public final class ReviewCollection {
                     resuming = false
                     deferredSuspend = nil
                     refreshCounts()
+                    deckNamesOwner?.resumeResult()
                 } else {
                     do { try await review?.pause() }
                     catch { self.error = String(describing: error) }
@@ -639,6 +741,7 @@ public final class ReviewCollection {
         closing = true
         defer { closing = false }
         invalidateDeckActions()
+        await deckNamesOwner?.cancelAndDrain()
         _ = await selectionTask?.value
         await collapseTask?.value
         await manualOwner?.cancelAndDrain()

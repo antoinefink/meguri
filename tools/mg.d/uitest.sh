@@ -239,6 +239,19 @@ mg_ui_test() {
     mg_mac_ui_begin || return 0
     mg_app_build mac "$config" ${build_args[0]+"${build_args[@]}"} || return 0
     mg_mac_ui_take || return 0
+    for s in $suites; do
+      case "$s" in
+        DeckManagementUITests|DeckManagementUITests/*)
+          mg_vm_fixture "$MG_ROOT/build/fixtures/recipes/local-review-1"
+          result=$?
+          if [ "$result" -ne 0 ]; then
+            if [ "$result" -eq 2 ]; then mg_queued_settle; else mg_status error; fi
+            return 0
+          fi
+          break
+          ;;
+      esac
+    done
     if [ -n "$media" ]; then
       mg_ui_test__media_prepare "$MG_MAC_RUNNER"
       result=$?

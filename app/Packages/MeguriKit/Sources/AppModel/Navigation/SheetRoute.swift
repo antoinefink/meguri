@@ -8,6 +8,7 @@ nonisolated public enum SheetRoute: Hashable, Identifiable, Sendable {
     case fsrsAdmission
     case collectionEntry
     case collectionExport
+    case deckName(DeckActionsModel.Action)
     /// Explicit server-transfer preparation, decisions and retained history.
     case manualTransfer
 

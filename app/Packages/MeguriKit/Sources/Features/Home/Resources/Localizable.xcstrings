@@ -1,6 +1,16 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ due": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ due"
+          }
+        }
+      }
+    },
     "%@ learning": {
       "localizations": {
         "en": {
@@ -51,6 +61,36 @@
         }
       }
     },
+    "Cancel": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "Cancelling…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelling…"
+          }
+        }
+      }
+    },
+    "Close": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        }
+      }
+    },
     "Collection is busy…": {
       "localizations": {
         "en": {
@@ -71,12 +111,142 @@
         }
       }
     },
+    "Create": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create"
+          }
+        }
+      }
+    },
+    "Create Deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create Deck"
+          }
+        }
+      }
+    },
+    "Deck Actions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck Actions"
+          }
+        }
+      }
+    },
+    "Deck name": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck name"
+          }
+        }
+      }
+    },
+    "Decks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Decks"
+          }
+        }
+      }
+    },
+    "Done": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Done"
+          }
+        }
+      }
+    },
+    "Due": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Due"
+          }
+        }
+      }
+    },
     "Enable FSRS": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Enable FSRS"
+          }
+        }
+      }
+    },
+    "Import a collection in Settings to see your decks here.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import a collection in Settings to see your decks here."
+          }
+        }
+      }
+    },
+    "Import a collection to start studying.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import a collection to start studying."
+          }
+        }
+      }
+    },
+    "Learning": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Learning"
+          }
+        }
+      }
+    },
+    "New": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New"
+          }
+        }
+      }
+    },
+    "New Subdeck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Subdeck"
+          }
+        }
+      }
+    },
+    "New Subdeck…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Subdeck…"
           }
         }
       }
@@ -101,6 +271,16 @@
         }
       }
     },
+    "No decks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No decks"
+          }
+        }
+      }
+    },
     "Opening collection…": {
       "localizations": {
         "en": {
@@ -111,12 +291,112 @@
         }
       }
     },
+    "Overview": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Overview"
+          }
+        }
+      }
+    },
+    "Open Deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Deck"
+          }
+        }
+      }
+    },
+    "Opening saved deck…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening saved deck…"
+          }
+        }
+      }
+    },
     "Previous Session": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Previous Session"
+          }
+        }
+      }
+    },
+    "Refresh Decks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh Decks"
+          }
+        }
+      }
+    },
+    "Rename": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rename"
+          }
+        }
+      }
+    },
+    "Rename Deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rename Deck"
+          }
+        }
+      }
+    },
+    "Rename…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rename…"
+          }
+        }
+      }
+    },
+    "Saved name": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved name"
+          }
+        }
+      }
+    },
+    "Saving deck name…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saving deck name…"
+          }
+        }
+      }
+    },
+    "Study": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Study"
           }
         }
       }
@@ -161,26 +441,6 @@
         }
       }
     },
-    "Your decks will appear here when the collection opens.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Your decks will appear here when the collection opens."
-          }
-        }
-      }
-    },
-    "Import a collection in Settings to see your decks here.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Import a collection in Settings to see your decks here."
-          }
-        }
-      }
-    },
     "Your collection couldn’t open. See Decks for details, or import a collection in Settings.": {
       "localizations": {
         "en": {
@@ -191,92 +451,22 @@
         }
       }
     },
+    "Your decks will appear here when the collection opens.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your decks will appear here when the collection opens."
+          }
+        }
+      }
+    },
     "Your decks will appear when the current collection operation finishes.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Your decks will appear when the current collection operation finishes."
-          }
-        }
-      }
-    },
-    "Decks": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Decks"
-          }
-        }
-      }
-    },
-    "Study": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Study"
-          }
-        }
-      }
-    },
-    "Import a collection to start studying.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Import a collection to start studying."
-          }
-        }
-      }
-    },
-    "No decks": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No decks"
-          }
-        }
-      }
-    },
-    "New": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New"
-          }
-        }
-      }
-    },
-    "Learning": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Learning"
-          }
-        }
-      }
-    },
-    "Due": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Due"
-          }
-        }
-      }
-    },
-    "%@ due": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ due"
           }
         }
       }

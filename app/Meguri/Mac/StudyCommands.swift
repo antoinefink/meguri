@@ -9,7 +9,7 @@ struct NativeCommandContext {
     let host: AppNavigation.SheetHost
 
     var fileActionsAvailable: Bool {
-        collection.navigation.sheet == nil && !collection.manualTransfers.busy
+        collection.navigation.sheet == nil && !collection.deckActions.busy && !collection.manualTransfers.busy
             && collection.manualTransfers.preview == nil && collection.manualTransfers.mediaPreview == nil
     }
     func present(_ route: SheetRoute) {
@@ -40,8 +40,13 @@ struct NativeCommandContext {
     }
     var selectedDeck: DeckID? {
         guard host == .main, fileActionsAvailable, collection.navigation.section == .home,
-              let deck = collection.navigation.homeDeckPage, collection.deck(deck.rawValue) != nil else { return nil }
+              let deck = collection.navigation.homeDeckPage, collection.deckPage(deck.rawValue) != nil else { return nil }
         return deck
+    }
+    var canCreateDeck: Bool { collection.deckActions.canPresent(.create, host: host) }
+    var canRenameDeck: Bool {
+        guard let selectedDeck else { return false }
+        return collection.deckActions.canPresent(.rename(selectedDeck.rawValue), host: host)
     }
 }
 
@@ -57,12 +62,26 @@ struct StudyCommands: Commands {
     @FocusedValue(\.nativeCommandContext) private var context
     var body: some Commands {
         CommandGroup(after: .newItem) {
+            Button("New Deck…") {
+                guard let context else { return }
+                context.collection.deckActions.present(.create, host: context.host)
+            }
+                .keyboardShortcut("n", modifiers: [.command, .option])
+                .disabled(context?.canCreateDeck != true)
             Button("Import Collection…") { context?.present(.collectionEntry) }
                 .keyboardShortcut("i", modifiers: .command)
                 .disabled(context?.fileActionsAvailable != true || context?.collection.entry.canPresent != true)
             Button("Export Collection…") { context?.present(.collectionExport) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(context?.fileActionsAvailable != true || context?.collection.collectionExport.canPresent != true)
+        }
+        CommandMenu("Deck") {
+            Button("Rename Deck…") {
+                guard let context, let deck = context.selectedDeck else { return }
+                context.collection.deckActions.present(.rename(deck.rawValue), host: context.host)
+            }
+            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .disabled(context?.canRenameDeck != true)
         }
         // Keep the system Edit responder chain for native text/DOM undo and redo.
         // Explicit answer restoration remains available in Study and card input.

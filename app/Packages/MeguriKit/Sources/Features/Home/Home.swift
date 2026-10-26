@@ -13,7 +13,7 @@ public struct HomeView: View {
     public var body: some View {
         Group {
             if showsRootDeckList {
-                HomeDeckTree(nodes: collection.decks, navigation: collection.navigation,
+                HomeDeckTree(nodes: collection.decks, navigation: collection.navigation, collection: collection,
                     previousAnswerCount: collection.previousRecord?.answers.count, error: collection.error,
                     isExpanded: { collection.studyExpanded(deckID: $0) },
                     isExpansionPending: { collection.isStudyExpansionPending(deckID: $0) },
@@ -33,16 +33,25 @@ public struct HomeView: View {
             }
         }
         .navigationTitle(deckID == nil ? String(localized: "Decks", bundle: .module) : "")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { collection.deckActions.present(.create) } label: {
+                    Text("Create Deck", bundle: .module)
+                }
+                .disabled(!collection.deckActions.canPresent(.create))
+                .accessibilityIdentifier("home.collection.createDeck")
+            }
+        }
         .accessibilityIdentifier("home.collection.screen")
     }
     private var showsRootDeckList: Bool {
         guard case .ready = collection.state, !collection.decks.isEmpty else { return false }
-        return deckID.flatMap { collection.deck($0) } == nil
+        return deckID.flatMap { collection.deckPage($0) } == nil
     }
     private var centersContent: Bool {
         #if os(macOS)
         if case .ready = collection.state {
-            return collection.decks.isEmpty || deckID.flatMap { collection.deck($0) } != nil
+            return collection.decks.isEmpty || deckID.flatMap { collection.deckPage($0) } != nil
         }
         if case .noFile = collection.state { return true }
         #endif
@@ -75,7 +84,7 @@ public struct HomeView: View {
     private var showsDeckSessionFooter: Bool {
         #if os(macOS)
         if case .ready = collection.state {
-            return deckID.flatMap { collection.deck($0) } != nil
+            return deckID.flatMap { collection.deckPage($0) } != nil
         }
         #endif
         return false
@@ -96,7 +105,7 @@ public struct HomeView: View {
             ErrorStateView(Text("Couldn’t Open Collection", bundle: .module), message: Text(verbatim: message),
                 retryIdentifier: "home.collection.retry", retry: { Task { await collection.start() } })
         case .ready:
-            if let deckID, let deck = collection.deck(deckID) {
+            if let deckID, let deck = collection.deckPage(deckID) {
                 #if os(macOS)
                 macDeckContent(deck)
                 #else
@@ -134,7 +143,7 @@ public struct HomeView: View {
     }
 
     #if os(macOS)
-    private func macDeckContent(_ deck: CountedDeckNode) -> some View {
+    private func macDeckContent(_ deck: ReviewCollection.DeckPageDetail) -> some View {
         VStack {
             Text(verbatim: deck.name)
                 .font(.title)
@@ -236,6 +245,7 @@ public struct HomeDeckTree: View {
     public let nodes: [CountedDeckNode]
     public let select: (Int64) -> Void
     private let navigation: AppNavigation?
+    private let collection: ReviewCollection?
     private let previousAnswerCount: Int?
     private let error: String?
     private let isExpanded: ((Int64) -> Bool)?
@@ -245,13 +255,13 @@ public struct HomeDeckTree: View {
     @State private var restoring: Int64?
     @State private var tracking = false
 
-    public init(nodes: [CountedDeckNode], navigation: AppNavigation? = nil,
+    public init(nodes: [CountedDeckNode], navigation: AppNavigation? = nil, collection: ReviewCollection? = nil,
                 previousAnswerCount: Int? = nil, error: String? = nil,
                 isExpanded: ((Int64) -> Bool)? = nil,
                 isExpansionPending: ((Int64) -> Bool)? = nil,
                 setExpanded: ((Int64, Bool, Bool) -> Void)? = nil,
                 select: @escaping (Int64) -> Void) {
-        self.nodes = nodes; self.navigation = navigation
+        self.nodes = nodes; self.navigation = navigation; self.collection = collection
         self.previousAnswerCount = previousAnswerCount; self.error = error; self.select = select
         self.isExpanded = isExpanded; self.setExpanded = setExpanded
         self.isExpansionPending = isExpansionPending
@@ -263,7 +273,7 @@ public struct HomeDeckTree: View {
                 List {
                     Section {
                         ForEach(nodes, id: \.id) { node in
-                            HomeDeckBranch(node: node, ancestors: [], depth: 0, select: select,
+                            HomeDeckBranch(node: node, collection: collection, ancestors: [], depth: 0, select: select,
                                 isExpanded: isExpanded, isExpansionPending: isExpansionPending,
                                 setExpanded: setExpanded, frameChanged: recordFrame)
                         }
@@ -352,6 +362,7 @@ public struct HomeDeckTree: View {
 
 private struct HomeDeckBranch: View {
     let node: CountedDeckNode
+    let collection: ReviewCollection?
     let ancestors: [String]
     let depth: Int
     let select: (Int64) -> Void
@@ -408,7 +419,7 @@ private struct HomeDeckBranch: View {
     }
 
     private func childBranch(_ child: CountedDeckNode) -> some View {
-        AnyView(HomeDeckBranch(node: child, ancestors: path.components(separatedBy: "::"), depth: depth + 1,
+        AnyView(HomeDeckBranch(node: child, collection: collection, ancestors: path.components(separatedBy: "::"), depth: depth + 1,
             select: select, isExpanded: isExpanded, isExpansionPending: isExpansionPending,
             setExpanded: setExpanded, frameChanged: frameChanged))
     }
@@ -474,6 +485,7 @@ private struct HomeDeckBranch: View {
             frameChanged(node.id, $0)
         }
         .onDisappear { frameChanged(node.id, nil) }
+        .deckMenu(collection: collection, deck: node)
     }
 
     private var subtitle: String? {
@@ -558,7 +570,6 @@ private struct HomeSidebarBranch: View {
         Group {
             #if os(macOS)
             Text(verbatim: name)
-                .badge(Text(node.counts.review, format: .number))
                 .lineLimit(1)
                 .help(Text(verbatim: path))
                 .accessibilityElement(children: .combine)
@@ -579,7 +590,11 @@ private struct HomeSidebarBranch: View {
             #endif
         }
         .accessibilityIdentifier("home.sidebar.deck.\(node.id)")
+        .deckMenu(collection: collection, deck: node)
         .tag(SidebarItem.deck(DeckID(node.id)))
+        #if os(macOS)
+        .badge(Text(node.counts.review, format: .number))
+        #endif
     }
 }
 
