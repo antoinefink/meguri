@@ -1621,3 +1621,11 @@ P2: four new schema checks were absent from the selected test classes. Fixer
 names only. Second source review is clear. Selftest `002117Z-11041` passes
 nine cases including those four checks. Private `002119Z-11314` and
 similarity `002531Z-13025` pass. A new actual package run is still needed.
+
+Touch verification repair `001255Z-3523` uses one nonce child folder and the
+standard file name. Source review is clear; selftest `001929Z-8218` passes
+12 cases and private `001935Z-9011` passes. Similarity `002531Z-13025` passes.
+Native iPhone `001932Z-8513` reaches the folder but fails at New Folder:
+the selected folder information menu contains no creation action. The actual
+picker capture is retained. Use its separate toolbar creation control; keep
+this check and iPad verification open. This remains WIP without acceptance.

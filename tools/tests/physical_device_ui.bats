@@ -1002,14 +1002,24 @@ mg_app_xcodebuild_test() {
     local filename="$TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME"
     [[ "$filename" =~ ^Meguri-Media-[a-f0-9]{32}\.colpkg$ ]] || return 98
     [ "${FX_MEDIA_ORDER:-before}" != before ] || echo old-method-overwrite >"$FX_NATIVE_DOCS/Meguri-Collection.colpkg"
-    [ ! -e "$FX_NATIVE_DOCS/$filename" ] || return 99
+    local saved="$FX_NATIVE_DOCS/$filename"
+    if [ "$2" != mac ]; then
+      local stem="${filename%.colpkg}"
+      [ ! -e "$FX_NATIVE_DOCS/$stem" ] && [ ! -L "$FX_NATIVE_DOCS/$stem" ] || return 99
+      mkdir "$FX_NATIVE_DOCS/$stem" || return 99
+      echo "media-new-folder $stem" >>"$STUB_LOG"
+      saved="$FX_NATIVE_DOCS/$stem/Meguri-Collection.colpkg"
+      echo "media-touch-save $stem/Meguri-Collection.colpkg" >>"$STUB_LOG"
+    fi
+    [ ! -e "$saved" ] || return 99
     echo "media-first-save $filename" >>"$STUB_LOG"
-    echo first-save >"$FX_NATIVE_DOCS/$filename"
+    echo first-save >"$saved"
     echo "media-replace $filename" >>"$STUB_LOG"
-    echo native-saved-package >"$FX_NATIVE_DOCS/$filename"
+    [ "$2" = mac ] || echo "media-touch-replace $stem/Meguri-Collection.colpkg" >>"$STUB_LOG"
+    echo native-saved-package >"$saved"
     [ "${FX_MEDIA_ORDER:-before}" != after ] || echo old-method-overwrite >"$FX_NATIVE_DOCS/Meguri-Collection.colpkg"
     if [ "$2" = mac ]; then
-      cp "$FX_NATIVE_DOCS/$filename" "$1.xcresult/native-attachment.colpkg"
+      cp "$saved" "$1.xcresult/native-attachment.colpkg"
       echo "media-mac-attachment $filename" >>"$STUB_LOG"
     fi
   fi
@@ -1022,7 +1032,9 @@ mg_mac_vm_ssh() {
   [ "${FX_CAPTURE_QUEUED:-0}" = 0 ] || return 255
   [ "${FX_MISSING:-0}" = 0 ] || return 1
   case "$1" in *"$(mvl_q "$TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME")") ;; *) return 97 ;; esac
-  cp "$FX_NATIVE_DOCS/$TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME" \
+  local stem="${TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME%.colpkg}"
+  echo "media-capture-source $stem/Meguri-Collection.colpkg" >>"$STUB_LOG"
+  cp "$FX_NATIVE_DOCS/$stem/Meguri-Collection.colpkg" \
     "$TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_OUT/$TEST_RUNNER_MEGURI_NATIVE_MEDIA_EXPORT_NAME"
 }
 mg_sim_fetch() { echo "media-fetch $*" >>"$STUB_LOG"; }
@@ -1170,6 +1182,13 @@ media_run() {
       save_line="$(grep -n '^media-mac-attachment ' "$STUB_LOG" | cut -d: -f1)"
       capture_line="$(grep -n '^xcrun xcresulttool export attachments ' "$STUB_LOG" | cut -d: -f1)"
       [ "$save_line" -lt "$capture_line" ]
+    else
+      called "^media-new-folder ${filename%.colpkg}$"
+      called "^media-touch-save ${filename%.colpkg}/Meguri-Collection\.colpkg$"
+      called "^media-touch-replace ${filename%.colpkg}/Meguri-Collection\.colpkg$"
+      called "^media-capture-source ${filename%.colpkg}/Meguri-Collection\.colpkg$"
+      [ "$(cat "$FX_NATIVE_DOCS/${filename%.colpkg}/Meguri-Collection.colpkg")" = native-saved-package ]
+      [ "$(cat "$FX_NATIVE_DOCS/Meguri-Collection.colpkg")" = old-method-overwrite ]
     fi
     [ "$(field '[.artifacts[] | select(.kind | startswith("native-media"))] | length')" = 3 ]
     not_called 'Library/Application Support|Preferences|credentials|host-lease|xcrun simctl'
@@ -1322,6 +1341,11 @@ media_run() {
       not_called '^media-(ssh|copy-out|simctl|fetch)'
     else
       called "^media-fetch .*/native-media-export/$filename$"
+      [ "$(grep -c "^media-new-folder ${filename%.colpkg}$" "$STUB_LOG")" -eq 1 ]
+      called "^media-touch-save ${filename%.colpkg}/Meguri-Collection\.colpkg$"
+      called "^media-touch-replace ${filename%.colpkg}/Meguri-Collection\.colpkg$"
+      called "^media-capture-source ${filename%.colpkg}/Meguri-Collection\.colpkg$"
+      [ "$(cat "$FX_NATIVE_DOCS/${filename%.colpkg}/Meguri-Collection.colpkg")" = native-saved-package ]
     fi
     [ "$(jq -r .native_filename "$(dirname "$result")/expected-source.json")" = "$filename" ]
     [ "$(cat "$(dirname "$result")/native-media-export/$filename")" = native-saved-package ]
@@ -1344,6 +1368,11 @@ capture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(capture)
 base = Path(sys.argv[2])
 filename = 'Meguri-Media-' + '1' * 32 + '.colpkg'
+device = '00000000-0000-4000-8000-000000000003'
+container = ('/Users/meguri/Library/Developer/CoreSimulator/Devices/' + device
+             + '/data/Containers/Data/Application/00000000-0000-4000-8000-000000000004')
+assert capture.simulator_source(container, device, filename) == (
+    Path(container) / 'Documents/RF2 Import Tests' / Path(filename).stem / 'Meguri-Collection.colpkg')
 original = b'native-A'
 foreign = b'foreignB'
 
@@ -1355,16 +1384,22 @@ for invalid in ('Meguri-Collection.colpkg', '../' + filename, filename + '\n',
         pass
     else:
         raise AssertionError('unsafe filename accepted')
+    try:
+        capture.simulator_source(container, device, invalid)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('unsafe nonce child accepted')
 
 for case in ('success', 'occupied', 'file-replacement', 'file-symlink',
              'directory-replacement', 'directory-symlink', 'same-length-mutation',
              'destination-mutation', 'initial-symlink', 'initial-directory-symlink', 'hardlink', 'fifo'):
     root = base / case
-    source_dir = root / 'Documents/RF2 Import Tests'
+    source_dir = root / 'Documents/RF2 Import Tests' / Path(filename).stem
     output_dir = root / 'own-run/native-media-export'
     source_dir.mkdir(parents=True)
     output_dir.mkdir(parents=True)
-    source = source_dir / filename
+    source = source_dir / 'Meguri-Collection.colpkg'
     output = output_dir / filename
     escaped = root / 'escaped.colpkg'
     escaped.write_bytes(foreign)
@@ -1406,7 +1441,7 @@ for case in ('success', 'occupied', 'file-replacement', 'file-symlink',
                 if case == 'directory-symlink':
                     substitute = root / 'substitute'
                     substitute.mkdir()
-                    (substitute / filename).write_bytes(foreign)
+                    (substitute / source.name).write_bytes(foreign)
                     source_dir.symlink_to(substitute, target_is_directory=True)
                 else:
                     source_dir.mkdir()

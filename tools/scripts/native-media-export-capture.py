@@ -43,6 +43,18 @@ def package_name(value):
     return value
 
 
+def simulator_source(container, device, filename):
+    filename = package_name(filename)
+    require(re.fullmatch(UUID, device), 'invalid leased simulator identifier')
+    require(re.fullmatch(r'/Users/[A-Za-z0-9._-]+/Library/Developer/CoreSimulator/Devices/'
+                         + re.escape(device) + r'/data/Containers/Data/Application/' + UUID,
+                         container, re.IGNORECASE), 'unexpected simulator container shape')
+    # Files keeps the product filename; only this run's validated nonce child
+    # may be read. Never inspect or enumerate the surrounding app container.
+    return (Path(container) / 'Documents/RF2 Import Tests'
+            / Path(filename).stem / 'Meguri-Collection.colpkg')
+
+
 def node_identity(metadata):
     return metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_nlink
 
@@ -300,11 +312,7 @@ def main():
     elif action == 'simulator':
         container, device, filename = args
         filename = package_name(filename)
-        require(re.fullmatch(UUID, device), 'invalid leased simulator identifier')
-        require(re.fullmatch(r'/Users/[A-Za-z0-9._-]+/Library/Developer/CoreSimulator/Devices/'
-                             + re.escape(device) + r'/data/Containers/Data/Application/' + UUID,
-                             container, re.IGNORECASE), 'unexpected simulator container shape')
-        source = Path(container) / 'Documents/RF2 Import Tests' / filename
+        source = simulator_source(container, device, filename)
         copy_package(source, destination / filename)
     elif action == 'receipt':
         PHASE = 'receipt'

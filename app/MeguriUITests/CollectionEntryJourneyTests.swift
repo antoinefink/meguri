@@ -260,7 +260,9 @@ import notify
         if delegateResult != .completed { capturePicker(app) }
         XCTAssertEqual(delegateResult, .completed, "Native cancellation must return the export to Ready: \(app.debugDescription)")
         // The native local folder is installed by the existing public source hook.
-        let saved = URL(fileURLWithPath: "/RF2 Import Tests").appending(path: destinationFilename ?? "Meguri-Collection.colpkg")
+        let root = URL(fileURLWithPath: "/RF2 Import Tests")
+        let folder = destinationFilename.map { root.appending(path: String($0.dropLast(".colpkg".count))) } ?? root
+        let saved = folder.appending(path: "Meguri-Collection.colpkg")
         #endif
         XCTAssertTrue(element(app, "settings.importExport.ready").waitForExistence(timeout: 10))
         for replacement in [false, true] {
@@ -300,20 +302,29 @@ import notify
                 try click(replace, app, bundle)
             }
             #else
-            try selectLocalExportFolder(app, bundle)
             if let destinationFilename {
-                try selectNativeExportFilename(app.textFields, destinationFilename, app, bundle)
+                try selectNativeExportChild(String(destinationFilename.dropLast(".colpkg".count)),
+                                            create: !replacement, app, bundle)
+            } else {
+                try selectLocalExportFolder(app, bundle)
             }
             let save = app.buttons.matching(identifier: "DOCPicker.actionButton").firstMatch
+            let folderName = destinationFilename.map { String($0.dropLast(".colpkg".count)) } ?? "RF2 Import Tests"
             let saveReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                save.exists && save.isEnabled && save.isHittable
+                self.nativeExportFolderIsOpen(folderName, app)
+                    && save.exists && save.label == "Save" && save.isEnabled && save.isHittable
             }, object: nil)
-            XCTAssertEqual(XCTWaiter().wait(for: [saveReady], timeout: 10), .completed,
-                "The destination folder must offer an enabled, hittable native Save action")
+            guard XCTWaiter().wait(for: [saveReady], timeout: 10) == .completed else {
+                capturePicker(app)
+                XCTFail("The exact destination folder must offer an enabled, hittable native Save action")
+                throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
+            }
             capture(app, "export-native-save-ready")
             try click(save, app, bundle)
             if replacement {
-                guard confirmNativeExportReplacement(app) else { throw NSError(domain: "CollectionEntryJourneyTests", code: 3) }
+                guard confirmNativeExportReplacement(app, expectedFilename: destinationFilename == nil ? nil : "Meguri-Collection.colpkg") else {
+                    throw NSError(domain: "CollectionEntryJourneyTests", code: 3)
+                }
             }
             #endif
             XCTAssertTrue(element(app, "settings.importExport.saved").waitForExistence(timeout: 30), app.debugDescription)
@@ -333,8 +344,9 @@ import notify
         }
         return saved
     }
-    // Select the real native filename field by its exact current filename,
-    // never a search field or an app hook. Both saves enter the same owned name.
+    #if os(macOS)
+    // NSSavePanel exposes a filename editor. Touch Files keeps the product's
+    // filename and instead creates a fresh child through its native controls.
     private func selectNativeExportFilename(_ fields: XCUIElementQuery, _ filename: String,
                                             _ app: XCUIApplication, _ bundle: String) throws {
         let stem = String(filename.dropLast(".colpkg".count))
@@ -345,30 +357,143 @@ import notify
         let previous = try XCTUnwrap(field.value as? String)
         let entered = previous.hasSuffix(".colpkg") ? filename : stem
         try click(field, app, bundle)
-        #if os(macOS)
         field.typeKey("a", modifierFlags: .command)
         field.typeText(entered)
-        #else
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count) + entered)
-        #endif
         XCTAssertEqual(field.value as? String, entered, "The native destination must use this run's exact filename")
     }
+    #endif
     #if os(iOS)
-    private func confirmNativeExportReplacement(_ app: XCUIApplication) -> Bool {
+    private func nativeExportFolderIsOpen(_ name: String, _ app: XCUIApplication) -> Bool {
+        let actions = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].buttons
+            .matching(NSPredicate(format: "label == %@", "\(name), Actions Menu")).firstMatch
+        return app.navigationBars[name].firstMatch.exists || actions.exists
+    }
+
+    private func selectNativeExportChild(_ stem: String, create: Bool,
+                                         _ app: XCUIApplication, _ bundle: String) throws {
+        func actionable(_ target: XCUIElement) -> Bool {
+            target.exists && target.isEnabled && target.isHittable
+        }
+        func waitForState(_ message: String, _ condition: @escaping () -> Bool) throws {
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
+            guard XCTWaiter().wait(for: [ready], timeout: 10) == .completed else {
+                capturePicker(app)
+                XCTFail(message)
+                throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
+            }
+        }
+        let childCell = app.cells.containing(NSPredicate(format: "label IN %@",
+            [stem, "\(stem), Folder"])).firstMatch
+        let childFolder = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label == %@ OR identifier == %@", "\(stem), Folder", "\(stem), Folder")).firstMatch
+        func childTarget() -> XCUIElement? {
+            let child = childCell.exists ? childCell : childFolder
+            guard child.exists else { return nil }
+            let image = child.images.firstMatch
+            let target = image.exists ? image : child
+            return actionable(target) ? target : nil
+        }
+        if !create {
+            // Admit a remembered child only by its actual native navigation bar.
+            // Otherwise use the existing local-root navigation before selecting it.
+            let local = app.descendants(matching: .any).matching(NSPredicate(
+                format: "label IN %@", ["On My iPhone", "On My iPad"])).firstMatch
+            let root = app.descendants(matching: .any).matching(NSPredicate(
+                format: "label IN %@", ["RF2 Import Tests", "RF2 Import Tests, Folder"])).firstMatch
+            let meguri = app.cells.containing(NSPredicate(format: "label == %@", "Meguri")).firstMatch
+            try waitForState("Files must load the owned child or a known local folder location", {
+                self.nativeExportFolderIsOpen(stem, app) || self.nativeExportFolderIsOpen("RF2 Import Tests", app)
+                    || actionable(root) || actionable(meguri) || actionable(local)
+            })
+            if nativeExportFolderIsOpen(stem, app) { return }
+        }
+        try selectLocalExportFolder(app, bundle)
+        try waitForState("The native RF2 Import Tests navigation bar must precede child selection", {
+            self.nativeExportFolderIsOpen("RF2 Import Tests", app)
+        })
+        if create {
+            guard !childCell.exists && !childFolder.exists else {
+                capturePicker(app)
+                XCTFail("The per-run native child folder must be fresh")
+                throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
+            }
+            let actions = app.navigationBars.buttons.matching(NSPredicate(
+                format: "label == %@", "RF2 Import Tests, Actions Menu")).firstMatch
+            try waitForState("The loaded root folder must offer its native Actions Menu", { actionable(actions) })
+            try click(actions, app, bundle)
+            let newFolderButton = app.buttons.matching(NSPredicate(format: "label == %@", "New Folder")).firstMatch
+            let newFolderItem = app.menuItems.matching(NSPredicate(format: "label == %@", "New Folder")).firstMatch
+            try waitForState("The native folder Actions Menu must offer New Folder", {
+                actionable(newFolderButton) || actionable(newFolderItem)
+            })
+            try click(actionable(newFolderButton) ? newFolderButton : newFolderItem, app, bundle)
+            let commitName = NSPredicate(format: "label IN %@", ["Create", "Done"])
+            func nameDialog() -> XCUIElement? {
+                (app.alerts.allElementsBoundByIndex + app.sheets.allElementsBoundByIndex).first { dialog in
+                    dialog.exists && dialog.textFields.count == 1
+                        && (dialog.label == "New Folder" || dialog.staticTexts["New Folder"].exists
+                            || dialog.navigationBars["New Folder"].exists)
+                        && dialog.buttons.matching(commitName).count == 1
+                }
+            }
+            try waitForState("New Folder must present its native name dialog and Create or Done", {
+                guard let dialog = nameDialog() else { return false }
+                return actionable(dialog.textFields.firstMatch)
+            })
+            guard let dialog = nameDialog() else {
+                capturePicker(app)
+                XCTFail("The loaded native new-folder name dialog must remain available")
+                throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
+            }
+            let field = dialog.textFields.firstMatch
+            let previous = field.value as? String ?? ""
+            try click(field, app, bundle)
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count) + stem)
+            try waitForState("The native new-folder dialog must contain the exact safe nonce stem", {
+                field.value as? String == stem
+            })
+            let commit = dialog.buttons.matching(commitName).firstMatch
+            try waitForState("The native new-folder dialog must enable Create or Done", { actionable(commit) })
+            try click(commit, app, bundle)
+            try waitForState("Creating the child must dismiss the dialog and reveal that exact folder", {
+                !dialog.exists && (self.nativeExportFolderIsOpen(stem, app)
+                    || (self.nativeExportFolderIsOpen("RF2 Import Tests", app) && childTarget() != nil))
+            })
+        }
+        if !nativeExportFolderIsOpen(stem, app) {
+            try waitForState("RF2 Import Tests must offer the exact existing nonce child", { childTarget() != nil })
+            guard let target = childTarget() else {
+                capturePicker(app)
+                XCTFail("The exact native nonce child must remain actionable")
+                throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
+            }
+            try click(target, app, bundle)
+        }
+        try waitForState("The actual native navigation bar must name this run's exact child folder", {
+            self.nativeExportFolderIsOpen(stem, app)
+        })
+    }
+
+    private func confirmNativeExportReplacement(_ app: XCUIApplication, expectedFilename: String? = nil) -> Bool {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let exactReplace = NSPredicate(format: "label == %@", "Replace")
-        let appAlertReplace = app.alerts.buttons.matching(exactReplace)
+        let namedFile = NSPredicate(format: "label CONTAINS %@", expectedFilename ?? "")
+        let appAlerts = expectedFilename == nil ? app.alerts : app.alerts.containing(namedFile)
+        let systemAlerts = expectedFilename == nil ? springboard.alerts : springboard.alerts.containing(namedFile)
+        let appAlertReplace = appAlerts.buttons.matching(exactReplace)
         let appReplace = app.buttons.matching(exactReplace)
-        let systemReplace = springboard.alerts.buttons.matching(exactReplace)
+        let systemReplace = systemAlerts.buttons.matching(exactReplace)
         func actionable(_ query: XCUIElementQuery) -> XCUIElement? {
             query.allElementsBoundByIndex.first { $0.exists && $0.isEnabled && $0.isHittable }
         }
         var replace: XCUIElement?
         let offered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            replace = actionable(appAlertReplace) ?? actionable(appReplace) ?? actionable(systemReplace)
+            replace = actionable(appAlertReplace) ?? (expectedFilename == nil ? actionable(appReplace) : nil)
+                ?? actionable(systemReplace)
             return replace != nil
         }, object: nil)
         guard XCTWaiter().wait(for: [offered], timeout: 30) == .completed, let replace else {
+            capturePicker(app)
             #if targetEnvironment(simulator)
             // Public synthetic picker evidence only; never capture a host screen.
             func captureWindowAndHierarchy(_ owner: XCUIApplication, _ name: String) {
@@ -411,7 +536,7 @@ import notify
             diagnostic.lifetime = .keepAlways
             add(diagnostic)
             #endif
-            XCTFail("Native replacement must offer an existing, enabled, hittable exact Replace Button in Meguri or a SpringBoard alert within 30 seconds")
+            XCTFail("Native replacement must offer an existing, enabled, hittable exact Replace Button in Meguri or a SpringBoard alert within 30 seconds, naming \(expectedFilename ?? "the existing export")")
             return false
         }
         replace.tap()
@@ -438,7 +563,7 @@ import notify
             !back.exists && (actionable(save) || actionable(more))
         }
         func captureFailure(_ reason: String) {
-            capture(app, "export-cancel-postwait")
+            capturePicker(app)
             func attributes(_ target: XCUIElement) -> String {
                 guard target.exists else { return "exists=false" }
                 return "elementType=\(target.elementType) label=\(target.label.debugDescription) identifier=\(target.identifier.debugDescription) exists=true isEnabled=\(target.isEnabled) isHittable=\(target.isHittable) frame=\(target.frame)"
@@ -537,7 +662,7 @@ import notify
         func waitForState(_ message: String, _ condition: @escaping () -> Bool) -> Bool {
             let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
             guard XCTWaiter().wait(for: [ready], timeout: 10) == .completed else {
-                capture(app, "export-folder-navigation-failed")
+                capturePicker(app)
                 let diagnostic = XCTAttachment(string: message)
                 diagnostic.name = "export-folder-navigation-state"
                 diagnostic.lifetime = .keepAlways
@@ -558,6 +683,7 @@ import notify
         if isInFolder() { return }
         if folderTarget() == nil && !actionable(meguri) {
             guard actionable(local) else {
+                capturePicker(app)
                 XCTFail("Files must offer the native On My iPhone or On My iPad location")
                 return
             }
@@ -569,6 +695,7 @@ import notify
         if isInFolder() { return }
         if folderTarget() == nil {
             guard actionable(meguri) else {
+                capturePicker(app)
                 XCTFail("The local location must offer the native Meguri container")
                 return
             }
@@ -577,6 +704,7 @@ import notify
                 folderTarget() != nil
             }) else { return }
         }
+        if folderTarget() == nil { capturePicker(app) }
         let target = try XCTUnwrap(folderTarget(), "RF2 Import Tests must have a hittable native folder target")
         try click(target, app, bundle)
         _ = waitForState("Opening RF2 Import Tests must show its native folder navigation title", {
