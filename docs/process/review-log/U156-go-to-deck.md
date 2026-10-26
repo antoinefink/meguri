@@ -150,3 +150,14 @@ Apple-account warning remains. The actual runtime run is
 now opens the second actual deck page. Every earlier phase passes. The run
 fails only at line 264, where slash from that page fails to open the picker.
 That shortcut remains open; this is not a passing test or accepted unit.
+
+## Create from the query: contract
+
+Supplemental start: `24651c48`. Spec writer session
+`s-20261026T041939Z-a8f043ce` defines D18 using Meguri's existing D1/D2/D5/D17
+and R27 contracts, without reference-code reads. Independent contract R1 found
+one P2: a raced existing result must retain R27 activation and filtered-deck
+restrictions. The repaired contract uses the returned ID's added change in the
+existing operation summary; it adds no result flag or writer. Contract R2 is
+clear. A new empty deck opens its overview in every layout. Implementation,
+focused verification, native proof and the integration gate remain pending.

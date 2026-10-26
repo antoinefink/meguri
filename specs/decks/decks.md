@@ -269,3 +269,21 @@ Focused tests for this Meguri projection:
 - Nested Unicode names retain their actual spelling and full paths; stored-name `unicase` order (including parent before descendants) and the id tie-breaker are deterministic. A read of an unnormalized stored name leaves it unchanged.
 - A concurrent rename yields one coherent before-or-after snapshot. Replacement cannot relabel old entries with a new generation: a stale reader request fails, and an already completed old-generation result is rejected at publication.
 - Closed/unavailable and storage-error cases fail without a partial value. A successful read changes no persisted state, undo history or events, and uses no writer, day-maintenance, count or card path.
+
+## D18. Create from Go to Deck (Meguri UI, R27)
+
+- The create row is available when the typed name passes the normal create rules and a completed read for this query, collection generation and sheet finds no matching deck (D1/D2). Compare with the core's existing name functions across all D17 records. This read makes no changes; Swift case conversion is not the name-matching rule. Wait or show the read error rather than treating an unfinished, failed or out-of-date read as no match. Use only recorded deck ids and names, including for Default.
+- Activating the row submits the raw query through the existing collection-owned create path. Check readiness, generation, originating main-host presentation and conflicts, and reserve the operation before yielding. Keep that reservation through the result, without an unreserved dismiss-and-present interval or an empty second name form. Recheck authority before writer dispatch and result publication; repeated activation admits one operation.
+- Use D5's writer result for the deck id, name and generation. The call created the returned deck if and only if `mutation.summary.changes.decks` has an item whose `id == mutation.id` and `change == .added`. Changes to parent decks do not answer this question. Without that item, the returned deck already existed. When this deck is not in the earlier snapshot, query its kind by the returned id before opening it. Use this result without another created flag, writer operation or read just to determine whether the deck was created.
+- A newly created deck opens its overview in every layout, as New Deck does. An existing result follows R27's existing-deck activation using the layout current at activation, with the existing filtered-deck restriction. Success dismisses only the originating presentation; generation or route replacement prevents stale publication or dismissal of its successor.
+- After creation commits, a refresh or navigation failure retains the saved identity and reports that the deck was saved. Retry only refresh/navigation, never creation. Dismissal does not imply that the committed write was rolled back.
+
+Focused tests:
+
+| Case | Required result |
+|---|---|
+| D1 normalization and D2 equality, including `Straße`/`STRASSE`; hidden or renamed Default | Exact match suppresses Create using actual core semantics; the check writes nothing and fabricates no identity or name. |
+| Query/generation/presentation changes while the read waits; lookup error | Obsolete or failed results cannot establish absence, dispatch creation or publish into another presentation. |
+| Repeated Return or conflicting work during admission | One admitted existing create writer, raw query preserved, no unreserved route handoff. |
+| A deck is created, or another caller creates a matching name after the read, in each layout; the other caller creates a filtered deck; the result contains added parent decks | Test `.added` for the returned id. A deck created by this call opens its overview; an existing deck follows R27 with the layout then in use and the filtered-deck refusal. Read the existing deck's kind if it was missing from the snapshot. Added parents do not count as creation of the returned deck. |
+| Creation commits, then refresh/navigation fails or layout changes before retry | Retry targets the saved identity without another create; the new deck opens its overview in either layout. Stale ownership cannot navigate or dismiss another presentation. |
