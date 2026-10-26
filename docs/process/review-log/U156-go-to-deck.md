@@ -106,3 +106,30 @@ copy at the exact StandaloneDerivedData path. No host UI is driven, no fixture i
 imported there, and no connection values are inspected. The independent native
 journeys run in the dedicated VM. Full U156, mobile/native layout evidence and
 the original-base integration gate remain open.
+
+## Native query control
+
+Supplemental start: `f179d5c6`; record
+`build/unit-starts/U156-native-entry-controls-20261026.json`.
+The native search intake finds no public child-ID endpoint on implicit
+searchable, and the current AX metadata cannot prove framework ownership.
+No identifier exemption or fake metadata is added.
+
+Filtered repair `cleanroom/20261026T065606Z-90788` uses a standard Mac SwiftUI
+TextField with actual `home.goToDeck.search` ID and native focus. Mobile search,
+Core operations are preserved. The test uses the actual
+native sheet and identified child controls, including their real disappearance;
+it no longer waits for the absent NavigationStack container ID.
+
+Independent entry-control R1 is clear in source and after inspecting four actual
+captures. Drive `20261026T070950Z-2894` passes all 19 steps with zero hierarchy
+issues; the checker is unchanged. The identified query, results and actions are
+readable in both appearances at default/minimum sizes. Privacy
+`20261026T070234Z-95769` passes.
+Similarity `20261026T070236Z-96017` passes.
+
+`ui-test/20261026T065936Z-92851`: opening, focus and search pass; so do
+resize, Return, editor slash and Escape, then fails at line 258: clicking the
+first result and pressing Down/Return opens the first actual deck rather than
+the second. A scoped fixture-only failure hierarchy confirms the first page ID.
+Open item: List keyboard selection. U156 remains unaccepted.

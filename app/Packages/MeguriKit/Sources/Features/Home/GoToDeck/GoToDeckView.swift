@@ -111,6 +111,9 @@ public struct GoToDeckView: View {
     private let collection: ReviewCollection
     @Bindable private var model: GoToDeckModel
     @Environment(\.shellLayout) private var layout
+    #if os(macOS)
+    @FocusState private var queryFocused: Bool
+    #endif
 
     public init(collection: ReviewCollection) {
         self.collection = collection
@@ -119,6 +122,15 @@ public struct GoToDeckView: View {
     public var body: some View {
         NavigationStack {
             VStack {
+                #if os(macOS)
+                TextField(text: $model.query, prompt: Text("Search Decks", bundle: .module)) {
+                    Text("Search Decks", bundle: .module)
+                }
+                .accessibilityIdentifier("home.goToDeck.search")
+                .focused($queryFocused)
+                .onAppear { queryFocused = true }
+                .onSubmit(of: .text) { model.submit(layout: layout) }
+                #endif
                 if model.loading {
                     ProgressView { Text("Loading decks…", bundle: .module) }
                         .accessibilityIdentifier("home.goToDeck.loading")
@@ -152,11 +164,14 @@ public struct GoToDeckView: View {
                 }
                 if model.busy { ProgressView().accessibilityIdentifier("home.goToDeck.progress") }
             }
+            #if !os(macOS)
             .searchable(text: $model.query, prompt: Text("Search Decks", bundle: .module))
+            #endif
             .disabled(model.busy)
-            .onSubmit(of: .search) { model.submit(layout: layout) }
             #if os(macOS)
             .padding()
+            #else
+            .onSubmit(of: .search) { model.submit(layout: layout) }
             #endif
             .navigationTitle(Text("Go to Deck", bundle: .module))
             .toolbar {

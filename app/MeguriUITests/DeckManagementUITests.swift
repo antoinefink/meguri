@@ -144,8 +144,7 @@ final class DeckManagementUITests: XCTestCase {
         // Derive picker row identities only from the pages the real create flow opened.
         let rowIDs = pageIDs.map { "home.goToDeck.deck." + $0.dropFirst(pagePrefix.count) }
         let picker = app.sheets.firstMatch
-        let sheet = element(app, "home.goToDeck.sheet")
-        let search = picker.searchFields.firstMatch
+        let search = picker.textFields.matching(identifier: "home.goToDeck.search").firstMatch
         let list = picker.descendants(matching: .any).matching(identifier: "home.goToDeck.list").firstMatch
         let go = picker.buttons.matching(identifier: "home.goToDeck.go").firstMatch
         let firstRow = picker.descendants(matching: .any).matching(identifier: rowIDs[0]).firstMatch
@@ -153,14 +152,14 @@ final class DeckManagementUITests: XCTestCase {
 
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("o", modifierFlags: [.command, .shift])
-        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
         XCTAssertEqual(app.sheets.count, 1)
         XCTAssertTrue(search.waitForExistence(timeout: 10))
-        XCTAssertEqual(picker.searchFields.count, 1)
+        XCTAssertEqual(picker.textFields.matching(identifier: "home.goToDeck.search").count, 1)
         XCTAssertTrue(waitForValue(search, ""))
         XCTAssertTrue(list.waitForExistence(timeout: 10))
         XCTAssertTrue(go.waitForExistence(timeout: 10))
-        try click(search, app: app, bundle: bundle)
+        // Presentation must focus the native query without a click or responder override.
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeText("QZ90 QZ91")
         XCTAssertTrue(waitForValue(search, "QZ90 QZ91"))
@@ -189,13 +188,18 @@ final class DeckManagementUITests: XCTestCase {
         XCTAssertTrue(go.isEnabled)
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("\r", modifierFlags: [])
-        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(picker.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(app.sheets.count, 0)
+        XCTAssertTrue(list.waitForNonExistence(timeout: 10))
         XCTAssertTrue(element(app, pageIDs[0]).waitForExistence(timeout: 10))
 
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("o", modifierFlags: [.command, .shift])
-        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
         XCTAssertEqual(app.sheets.count, 1)
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertTrue(go.waitForExistence(timeout: 10))
         XCTAssertTrue(waitForValue(search, ""))
         try click(search, app: app, bundle: bundle)
         try app.bringToFront(bundleIdentifier: bundle)
@@ -210,14 +214,16 @@ final class DeckManagementUITests: XCTestCase {
         app.typeText("QZ93")
         XCTAssertTrue(waitForValue(search, "QZ90 QZ91/QZ93"))
         XCTAssertEqual(app.sheets.count, 1)
-        XCTAssertTrue(sheet.exists)
+        XCTAssertTrue(picker.exists)
         XCTAssertTrue(list.exists)
         XCTAssertTrue(firstRow.waitForNonExistence(timeout: 10))
         XCTAssertTrue(secondRow.waitForNonExistence(timeout: 10))
         XCTAssertFalse(go.isEnabled)
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
-        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(picker.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(app.sheets.count, 0)
+        XCTAssertTrue(list.waitForNonExistence(timeout: 10))
         XCTAssertTrue(element(app, pageIDs[0]).waitForExistence(timeout: 10))
 
         // The visible toolbar action must expose the same native picker and real rows.
@@ -225,9 +231,11 @@ final class DeckManagementUITests: XCTestCase {
         XCTAssertTrue(toolbarAction.waitForExistence(timeout: 10))
         XCTAssertTrue(toolbarAction.isHittable)
         try click(toolbarAction, app: app, bundle: bundle)
-        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
         XCTAssertEqual(app.sheets.count, 1)
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
         XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertTrue(go.waitForExistence(timeout: 10))
         XCTAssertTrue(waitForValue(search, ""))
         try click(search, app: app, bundle: bundle)
         try app.bringToFront(bundleIdentifier: bundle)
@@ -244,19 +252,24 @@ final class DeckManagementUITests: XCTestCase {
         app.typeKey(XCUIKeyboardKey.downArrow.rawValue, modifierFlags: [])
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("\r", modifierFlags: [])
-        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(picker.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(app.sheets.count, 0)
+        XCTAssertTrue(list.waitForNonExistence(timeout: 10))
         XCTAssertTrue(element(app, pageIDs[1]).waitForExistence(timeout: 10))
         XCTAssertFalse(element(app, pageIDs[0]).exists)
 
         // Exercise the deck page's native key path once, without forcing a responder.
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeText("/")
-        XCTAssertTrue(sheet.waitForExistence(timeout: 10), "Slash from the deck page must reach Home's native focus path")
+        XCTAssertTrue(picker.waitForExistence(timeout: 10), "Slash from the deck page must reach Home's native focus path")
         XCTAssertEqual(app.sheets.count, 1)
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         XCTAssertTrue(list.waitForExistence(timeout: 10))
+        XCTAssertTrue(go.waitForExistence(timeout: 10))
         try click(picker.buttons.matching(identifier: "home.goToDeck.cancel").firstMatch, app: app, bundle: bundle)
-        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(picker.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(app.sheets.count, 0)
+        XCTAssertTrue(list.waitForNonExistence(timeout: 10))
         XCTAssertTrue(element(app, pageIDs[1]).waitForExistence(timeout: 10))
     }
 
