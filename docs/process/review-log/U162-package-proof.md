@@ -310,3 +310,11 @@ the same bounded wait. Independent review is clear. Focused coordinator run
 `20261026T203250Z-86382` and similarity `20261026T203251Z-86539` pass.
 Renderer and playback behavior are unchanged; the next native case must expose
 the precise failure before further repair.
+
+`ui-test/20261026T203359Z-88425` now refuses promptly and reports
+`media renderer binding`, before DOM decode. Filtered diagnostic refinement
+`20261026T203738Z-91216`, starting at `98bc9766`, preserves each predicate and
+its order but gives it a fixed refusal reason. No content or path is included.
+Independent review is clear. Focused Swift `20261026T204125Z-96426` passes
+16 tests with zero skips; privacy `20261026T204041Z-95476` and similarity
+`20261026T204057Z-95958` pass. This is diagnosis, not a playback repair.

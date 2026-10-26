@@ -380,10 +380,16 @@ import Darwin
     /// retained inside this evaluation across decode(), never a second page.
     func captureImage(pair: CardPagePair, coordinator: UUID, session: UInt64, generation: UInt64) async throws {
         try requireCurrent()
-        guard let input = loaded?.input, let owner = sessionOwner,
-              owner.coordinator == coordinator, owner.session == session, owner.generation == generation,
-              let update = pair.current.update, update.card == input.chosen.card_id, update.side == .answer,
-              pair.current.presented, pair.diagnostics.entries.isEmpty else { throw Refusal(reason: "media renderer binding") }
+        guard let input = loaded?.input else { throw Refusal(reason: "media renderer input not loaded") }
+        guard let owner = sessionOwner else { throw Refusal(reason: "media renderer session owner missing") }
+        guard owner.coordinator == coordinator else { throw Refusal(reason: "media renderer coordinator mismatch") }
+        guard owner.session == session else { throw Refusal(reason: "media renderer session mismatch") }
+        guard owner.generation == generation else { throw Refusal(reason: "media renderer generation mismatch") }
+        guard let update = pair.current.update else { throw Refusal(reason: "media renderer current update missing") }
+        guard update.card == input.chosen.card_id else { throw Refusal(reason: "media renderer declared card mismatch") }
+        guard update.side == .answer else { throw Refusal(reason: "media renderer answer side required") }
+        guard pair.current.presented else { throw Refusal(reason: "media renderer current page not presented") }
+        guard pair.diagnostics.entries.isEmpty else { throw Refusal(reason: "media renderer diagnostics present") }
         let page = pair.current, terminations = page.terminations
         let documentURL = page.webView.url
         let binding = try mediaVisit(pair: pair, coordinator: coordinator, session: session, generation: generation)
