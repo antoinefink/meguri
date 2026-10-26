@@ -1847,9 +1847,10 @@ PY
   grep -qF 'live="$MG_RUN_DIR/t1-live.json"' "$REPO_ROOT/tools/mg.d/conformance.sh"
   # The scanner's own tests run the branch's scanner, in a full checkout of the tip.
   jq -e '.runs[] | select(.id == "similarity-selftest" and .where == "tip" and .merge_args == null)' "$out" >/dev/null
-  # The jobs that compare the branch with the lock and the harvest inventory
-  # under oracle/ read that tree's files.
-  [ "$(jq -r '[.runs[] | select(.oracle_files) | .id] | join(" ")' "$out")" = "goldens-check harvest-report harvest-coverage" ]
+  # Runs that read the branch's oracle/ files, including route transport.
+  jq -e '[.runs[] | select(.id == "conformance-route-transport") | {placement, needs, oracle_files}]
+    == [{placement: ["host", "docker:oracle"], needs: ["oracle"], oracle_files: true}]' "$out" >/dev/null
+  [ "$(jq -r '[.runs[] | select(.oracle_files) | .id] | join(" ")' "$out")" = "goldens-check harvest-report conformance-route-transport harvest-coverage" ]
   # A pin bump in a sparse worktree whose main checkout has the old oracle/:
   # gate --local runs the rest and leaves those two to the merge.
   printf 'conformance/oracle.json\0conformance/catalog/harvest.csv\0' >"$BATS_TEST_TMPDIR/changed"
