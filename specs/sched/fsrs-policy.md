@@ -183,7 +183,7 @@ Anki 26.09.3 reads neither place: it ignores such a field or member and schedule
 - Its decks still count (U41) and browse (U84). Searches, statistics and Card Info read its cards' stored values.
 - `startSession` on a deck whose tree holds a card with an unsupported home preset refuses with `PresetUnsupported{presetIds}`: the ids of the unsupported home presets it found, ascending. The `FsrsPolicyPending` check (S3) comes first. Nothing is written (U43's C5 result).
 - Grade Now on a selection that holds such a card refuses with `PresetUnsupported` and writes nothing (U48). Answering such a card on any path fails with U45's `UnsupportedParams` and writes nothing.
-- Nothing automatic writes the preset or its cards: `enableFsrs` (E2), U46's bulk recomputes and U47's optimizer skip it. The preset row keeps its bytes, `mtime_secs` and `usn` through open, saves of other presets and sync (`sched/presets#V8`); its cards keep their rows. Only an explicit edit of that preset writes it; U49 decides whether its editor offers one.
+- Nothing automatic writes the preset or its cards: `enableFsrs` (E2), U46's bulk recomputes and U47's optimizer (`sched/optimizer#O3`) skip it. The preset row keeps its bytes, `mtime_secs` and `usn` through open, saves of other presets and sync (`sched/presets#V8`); its cards keep their rows. Only an explicit edit of that preset writes it; U49 decides whether its editor offers one.
 - The study message ("This preset needs a newer Meguri") is U51's.
 - A preset can become unsupported while a review session is open, when a sync brings a 34-value list or a later list. U1 and U2 are the test behind U43's `PresetUnsupported` session event; when the session emits it and what it does next are U43's (`sched/review-session`).
 
@@ -216,7 +216,7 @@ These keep their bytes through every Meguri operation (answers, day rollovers, `
 |---|---|---|
 | config | `cardStateCustomizer` | K2 |
 | config | `fsrsLegacyEvaluate` | another client's evaluation option |
-| config | `fsrsHealthCheck` | read by U47, never written |
+| config | `fsrsHealthCheck` | read by U47 (`sched/optimizer#O6`), never written |
 | config | `fsrsShortTermWithStepsEnabled` | read by U45, never written |
 | config | `newCardsIgnoreReviewLimit`, `applyAllParentLimits` | written only by U49's save, and only when the user changes them (`sched/config-keys` G4) |
 | config | every key that `sched/config-keys` G2 does not list as written by Meguri, unknown keys included | `storage/config-table#C7` |
@@ -239,7 +239,7 @@ These keep their bytes through every Meguri operation (answers, day rollovers, `
 1. a day of answers on a normal preset, across a day rollover;
 2. `enableFsrs` from FSRS off;
 3. a bulk recompute over all cards (U46);
-4. an optimizer commit for a normal preset (U47);
+4. an optimizer commit for a normal preset (U47, `sched/optimizer#O9`);
 5. a save of another preset;
 6. a `SyncIncoming` op that changes other keys and cards (`engine/op-model`; it needs no real sync);
 7. close and open.

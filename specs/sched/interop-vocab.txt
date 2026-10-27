@@ -223,3 +223,21 @@ scm
 ls
 terminalState
 ReviewTerminalState
+
+# FSRS optimizer (sched/optimizer, U47): the config key it writes, the
+# response field the oracle op returns, and the pinned fsrs crate's training
+# and evaluation API.
+lastFsrsOptimize
+fsrs_items
+compute_parameters
+TrainingConfig
+training_config
+num_epochs
+enable_short_term
+num_relearning_steps
+CombinedProgressState
+want_abort
+Interrupted
+evaluate_with_time_series_splits
+log_loss
+rmse_bins
