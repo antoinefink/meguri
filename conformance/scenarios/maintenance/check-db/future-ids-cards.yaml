@@ -1,0 +1,22 @@
+# C10.4 of specs/maintenance/check-database.md: a new card (type 0, so C8.7
+# never reads its review-log rows) and a review-log row of it, both with ids
+# two days after the clock: each table re-keys its row to now_ms, the row's
+# cid follows its card, future_ids 2, scm set. A second run finds nothing.
+id: maintenance/check-db/future-ids-cards
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - db_exec: {sql: "UPDATE cards SET id = 1894878000000, usn = 5"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894878000000, 1894878000000, 5, 3, 1, 0, 2500, 4000, 0)"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT id, usn FROM cards"}
+  - db_exec: {sql: "SELECT id, cid, usn FROM revlog"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

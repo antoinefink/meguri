@@ -1,0 +1,56 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "media_pending": {
+          "Cat.jpg": "9677cf2e659a266f741aaeea3b6da206c1ccd546",
+          "cat.jpg": "9677cf2e659a266f741aaeea3b6da206c1ccd546"
+        }
+      },
+      {},
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": [],
+          "missing_notes": [],
+          "oversize": [],
+          "renamed": {
+            "Cat.jpg": "cat.jpg"
+          },
+          "trash_count": 0,
+          "unused": ["cat.jpg"]
+        }
+      },
+      {
+        "media_dir": {
+          "cat.jpg": {
+            "sha1": "9677cf2e659a266f741aaeea3b6da206c1ccd546",
+            "size": 9
+          }
+        },
+        "media_trash": []
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["<img src=\"cat.jpg\">|<img src=\"cat.jpg\">", 1894705200, -1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/case/same-content",
+  "scenario_sha256": "55997980f8092beeb8a9ff495b3e0b7a1166b2870791c23e0613ce6c8df852a7",
+  "tz": "UTC"
+}

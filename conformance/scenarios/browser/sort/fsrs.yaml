@@ -1,0 +1,47 @@
+# specs/browser/sorting.md S1, S4, S7 (stability, difficulty,
+# retrievability): cards mode by the card data "s", "d" and the retrievability
+# of S7; cards without the value first ascending. #c5 holds "s" without "d":
+# it sorts by stability but has no retrievability. Elapsed time comes from
+# "lrt" when present (#c3, #c4; #c8's lies in the future and counts as 0),
+# else from due and interval (#c2, #c7), and is 0 for #c6, a learning card due
+# later today. #c2 and #c4 have equal values on all three keys. Notes mode
+# refuses all three (R1130, R1140). The clock moves 100 days first, so today
+# is 100.
+id: browser/sort/fsrs
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, fields: [no-memory, g]}
+    - {notetype: Solo, fields: [s10-d3-no-lrt, g]}
+    - {notetype: Solo, fields: [s2-d9-lrt-1d, g]}
+    - {notetype: Solo, fields: [s10-d3-lrt-7d, g]}
+    - {notetype: Solo, fields: [s-only, g]}
+    - {notetype: Solo, fields: [learning-s30, g]}
+    - {notetype: Solo, fields: [s5-d6-no-lrt, g]}
+    - {notetype: Solo, fields: [lrt-future, g]}
+steps:
+  - advance: 100d
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 103, ivl = 10, factor = 2500, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)", params: ['{"s":10.0,"d":3.0}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 101, ivl = 2, factor = 2500, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)", params: ['{"s":2.0,"d":9.0,"decay":0.2,"lrt":1903255200}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 107, ivl = 14, factor = 2500, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)", params: ['{"s":10.0,"d":3.0,"lrt":1902736800}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 102, ivl = 3, factor = 2500, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)", params: ['{"s":1.5}']}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1903342200, ivl = 0, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 5)", params: ['{"s":30.0,"d":7.0}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 100, ivl = 20, factor = 2500, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 6)", params: ['{"s":5.0,"d":6.0}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 110, ivl = 10, factor = 2500, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 7)", params: ['{"s":50.0,"d":1.0,"lrt":1903345200}']}
+  - observe:
+      - search:
+          - {query: '', order: {column: stability}}
+          - {query: '', order: {column: stability, reverse: true}}
+          - {query: '', order: {column: difficulty}}
+          - {query: '', order: {column: difficulty, reverse: true}}
+          - {query: '', order: {column: retrievability}}
+          - {query: '', order: {column: retrievability, reverse: true}}
+          - {query: '', kind: notes, order: {column: stability}}
+          - {query: '', kind: notes, order: {column: difficulty}}
+          - {query: '', kind: notes, order: {column: retrievability, reverse: true}}

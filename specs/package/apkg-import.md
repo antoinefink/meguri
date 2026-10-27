@@ -377,7 +377,7 @@ Decided 2026-10-27: Meguri differs where Anki fails, guesses, can overwrite a fi
 
 ### I18.1 What the oracle maintainer adds
 
-No `apkg-import` scenario can be recorded yet: the oracle driver's `import` has only the collection package forms (`specs/conformance/package-ops.md` E2), and `export` has no latest deck-package form (`package/apkg-export#A17`). Needed, with the package-ops owner fixing their shapes in `specs/conformance/package-ops.md`:
+Status (2026-10-27): the oracle driver has the deck-package `import` form (`specs/conformance/package-ops.md` E6) and the latest deck-package `export` (E7); the refusal fixtures are under `conformance/fixtures/package/apkg/` (`oracle/fixtures/package/apkg.py`). The fixtures made with old clients (legacy 1, v1 scheduler, ids past the cutoff, a map member past P8's ratio) do not exist yet, so `legacy-1`, `v1-scheduler` and I3.1's card-id repair are not recorded. What I18.1 asked for:
 
 - `import`, deck-package form: `{format: apkg, fixture | name, merge_notetypes, update_notes: if_newer | always | never, update_notetypes: ..., with_scheduling, with_deck_configs}`, every option required. Output: the I13 log with logical ids (`#nN` for target notes, package ids where I13 says so), each list's fields, and `found_notes`. Rejections `too_new`, `corrupt`, `notetype_kind_conflict`. Oracle: Anki's deck-package import with those options into the session collection, its media folder and media database. Capability `import.apkg`.
 - The latest deck-package form of `export` (A17), so a scenario can export its own collection, change it, and import the package back.

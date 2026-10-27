@@ -1,0 +1,22 @@
+# A referenced file whose name Check Media would change
+# (specs/package/apkg-export.md A9.2 rule 5; package-ops.md E7). The field
+# references con.jpg, which exists: the export is refused with
+# media_check_required and writes nothing.
+id: package/apkg-export/media-unnormalized
+description: A referenced media name that Check Media would change refuses the export.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: ["<img src=\"con.jpg\">", a]}
+  media_files:
+    - {name: con.jpg, text: "picture"}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: refused.apkg, limit: {deck: Lang}, scheduling: true, presets: false, media: true}

@@ -1,0 +1,30 @@
+# N6.6 of specs/maintenance/check-database-notes.md: a note whose only card
+# was deleted by db_exec, its note type's last deck (_nt_<id>_lastDeck) set
+# to a second deck by db_exec: its ord 0 card is generated in that deck at
+# the next position (nextPos moves), with local stamps; nothing is counted
+# and scm stays. A second run finds nothing.
+id: maintenance/check-db-notes/no-card-note
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox, Second]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+steps:
+  - db_exec: {sql: "DELETE FROM cards WHERE nid = (SELECT id FROM notes WHERE sfld = 'one')"}
+  - db_exec:
+      sql: >-
+        INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val)
+        VALUES ('_nt_' || (SELECT id FROM notetypes WHERE name = 'Single') || '_lastDeck', 5, 0,
+        CAST(CAST((SELECT id FROM decks WHERE name = 'Second') AS TEXT) AS BLOB))
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.type, c.queue, c.due, c.mod, c.usn, (SELECT name FROM decks WHERE id = c.did) FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld, c.ord"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT), usn FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

@@ -1,0 +1,41 @@
+# U35 test 5 with "Keep notes with no valid cards" on (specs/notes/empty-cards.md
+# E4). Card 2 of the first note is deleted (its card 1 is valid). A note whose
+# only card is empty keeps it. A note with both cards empty keeps the card of
+# ordinal 0. A cloze note whose text lost every cloze keeps ordinal 0. Three
+# card graves, no note grave, every note kept, the review-log row of the
+# deleted card kept. A scan afterwards lists the kept cards again.
+id: cardgen/empty/keep-notes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Optional
+      fields: [Front, Back, Add Reverse]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{#Add Reverse}}{{Back}}{{/Add Reverse}}", back: "{{Front}}"}
+    - name: Cloze Text
+      kind: cloze
+      fields: [Text, Back Extra]
+      templates:
+        - {name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Back Extra}}"}
+  decks: [Words]
+  notes:
+    - {notetype: Optional, deck: Words, fields: [a, A, y]}
+    - {notetype: Optional, deck: Words, fields: ["", B, y]}
+    - {notetype: Optional, deck: Words, fields: [c, C, y]}
+    - {notetype: Cloze Text, deck: Words, fields: ["{{c1::x}} {{c2::y}}", ""]}
+steps:
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT 1894700000000, id, -1, 3, 1, 0, 2500, 6000, 0 FROM cards WHERE ord = 1 AND nid = (SELECT id FROM notes WHERE sfld = 'a')"}
+  - edit_note: {note: "#n1", fields: {Add Reverse: ""}}
+  - edit_note: {note: "#n2", fields: {Add Reverse: ""}}
+  - edit_note: {note: "#n3", fields: {Front: "", Add Reverse: ""}}
+  - edit_note: {note: "#n4", fields: {Text: "no cloze left"}}
+  - advance: 1h
+  - empty_cards: {}
+  - delete_empty_cards: {keep_notes: true}
+  - observe: [card]
+  - db_exec: {sql: "SELECT type, usn, count(*) FROM graves GROUP BY type, usn ORDER BY type"}
+  - db_exec: {sql: "SELECT count(*) FROM notes"}
+  - db_exec: {sql: "SELECT id, ease, (SELECT count(*) FROM cards WHERE cards.id = revlog.cid) FROM revlog ORDER BY id"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - empty_cards: {}

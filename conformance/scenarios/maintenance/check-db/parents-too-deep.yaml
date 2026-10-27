@@ -1,0 +1,19 @@
+# A deck renamed by db_exec to 1::2::...::13 with none of its ancestors
+# present (specs/maintenance/check-database.md C10.2): its parent has 12
+# components, so Anki's deck add refuses it as too deep and Check Database
+# stops, changing nothing (collection-check.md K10 failed); Meguri creates its
+# twelve ancestors as normal decks (decks_missing 1, deviation
+# check-db-parents-past-deck-limits). No undo_status, no second run.
+id: maintenance/check-db/parents-too-deep
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - db_exec: {sql: "UPDATE decks SET name = '1' || char(31) || '2' || char(31) || '3' || char(31) || '4' || char(31) || '5' || char(31) || '6' || char(31) || '7' || char(31) || '8' || char(31) || '9' || char(31) || '10' || char(31) || '11' || char(31) || '12' || char(31) || '13', usn = 5 WHERE name = 'Inbox'"}
+  - advance: 1h
+  - check_db: {}

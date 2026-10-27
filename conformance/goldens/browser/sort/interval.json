@@ -1,0 +1,84 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "search": [
+          {
+            "ids": ["#c1", "#c2", "#c9", "#c12", "#c13", "#c3", "#c6", "#c11", "#c10", "#c4", "#c5", "#c8", "#c7"]
+          },
+          {
+            "ids": ["#c7", "#c4", "#c5", "#c8", "#c10", "#c6", "#c11", "#c3", "#c1", "#c2", "#c9", "#c12", "#c13"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n10", "#n3", "#n6", "#n9", "#n4", "#n5", "#n8", "#n7"]
+          },
+          {
+            "ids": ["#n7", "#n8", "#n5", "#n4", "#n9", "#n6", "#n3", "#n1", "#n2", "#n10"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/sort/interval",
+  "scenario_sha256": "ea8dec6641a4d5a2b568f7f00343705325b185f2c96ff5ec290e7197ab15743e",
+  "tz": "UTC"
+}

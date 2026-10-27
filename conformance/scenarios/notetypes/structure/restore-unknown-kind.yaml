@@ -1,0 +1,43 @@
+# Restore to Default when the note type's kind is unknown
+# (specs/notetypes/restore-to-default.md D2). The stored original_stock_kind
+# is set to 0 by appending protobuf field 9 with value 0 to the note type's
+# config (a later occurrence wins, specs/model/protobuf-records.md P2).
+# Without a kind the restore is refused with needs_stock_kind and nothing
+# changes; with the kind basic it restores and stores kind 1. A note type
+# made from scratch has original_stock_kind 1, so restoring Plain without a
+# kind gives Basic.
+id: notetypes/structure/restore-unknown-kind
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Custom
+      fields: [Q, A]
+      templates:
+        - {name: Ask, front: "{{Q}}", back: "{{A}}"}
+    - name: Plain
+      fields: [Word]
+      templates:
+        - {name: Show, front: "{{Word}}", back: ""}
+  notes:
+    - {notetype: Custom, fields: [q1, a1]}
+steps:
+  - db_exec: {sql: "UPDATE notetypes SET config = CAST(config || X'4800' AS BLOB) WHERE name = 'Custom'"}
+  - observe:
+      - {notetype_structure: {notetypes: [Custom, Plain]}}
+  - advance: 1m
+  # step 3
+  - restore_notetype: {notetype: Custom}
+  - observe:
+      - {notetype_structure: {notetypes: [Custom]}}
+      - {db_dump: {tables: [notes, cards]}}
+  - advance: 1m
+  # step 6
+  - restore_notetype: {notetype: Custom, kind: basic}
+  - observe:
+      - {notetype_structure: {notetypes: [Custom]}}
+      - {db_dump: {tables: [notes, cards]}}
+  - advance: 1m
+  # step 9
+  - restore_notetype: {notetype: Plain}
+  - observe:
+      - {notetype_structure: {notetypes: [Plain]}}

@@ -1,0 +1,30 @@
+# N7 of specs/maintenance/check-database-notes.md: with every note, card and
+# note type deleted by db_exec, Check Database adds the stock Basic kind under
+# its name and makes it the current note type; nothing is counted and scm
+# stays. Anki writes the row with mtime_secs 0 and usn 0, Meguri with local
+# stamps (deviation check-db-basic-stamped). The reopen drops Anki's note
+# type cache. Stock-kind interop (R1959): only the name, structure and stamps
+# are observed. A second run finds nothing.
+id: maintenance/check-db-notes/no-notetypes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - db_exec: {sql: "DELETE FROM cards"}
+  - db_exec: {sql: "DELETE FROM notes"}
+  - db_exec: {sql: "DELETE FROM templates"}
+  - db_exec: {sql: "DELETE FROM fields"}
+  - db_exec: {sql: "DELETE FROM notetypes"}
+  - reopen: {}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM notetypes"}
+  - observe: [notetype_structure]
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) = CAST((SELECT id FROM notetypes) AS TEXT) FROM config WHERE KEY = 'curModel'"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

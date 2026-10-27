@@ -1,0 +1,56 @@
+# A copy from an import without a merge is merged away (specs/package/
+# notetype-merge.md J1, J5, J8; apkg-import.md I7; package-ops.md E6). The
+# package's Pair has a third field Extra (removed again in the target). An
+# import without a merge adds the copy Pair+ (curModel), n2 (deleted in the
+# target) under it; a note "three" is added to Pair+ (its _nt_ key written). The next import with Merge
+# note types merges Pair+ into Pair (same original id): its notes move to
+# Pair, Pair+ is removed with its _nt_ key, curModel follows J8, and col.scm
+# is set.
+id: package/notetype-merge/copy-cleanup
+description: A merge moves an earlier copy's notes into the target note type and removes the copy.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{add_field: Extra}]}
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{remove_field: Extra}]}
+  - delete_notes: {notes: ["#n2"]}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - add_note: {notetype: Pair+, deck: Lang, fields: [three, c, ""]}
+  - db_exec: {sql: "SELECT name FROM notetypes WHERE name LIKE 'Pair%' ORDER BY id"}
+  - db_exec: {sql: "SELECT n.sfld, t.name FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT count(*) FROM config WHERE KEY = '_nt_' || (SELECT id FROM notetypes WHERE name = 'Pair+') || '_lastDeck'"}
+  - db_exec: {sql: "SELECT t.name FROM config c JOIN notetypes t ON CAST(c.val AS TEXT) = CAST(t.id AS TEXT) WHERE c.KEY = 'curModel'"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT name FROM notetypes WHERE name LIKE 'Pair%' ORDER BY id"}
+  - db_exec: {sql: "SELECT n.sfld, t.name, n.flds FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT count(*) FROM config WHERE KEY LIKE '_nt_%' AND KEY NOT IN (SELECT '_nt_' || id || '_lastDeck' FROM notetypes)"}
+  - db_exec: {sql: "SELECT t.name FROM config c JOIN notetypes t ON CAST(c.val AS TEXT) = CAST(t.id AS TEXT) WHERE c.KEY = 'curModel'"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}

@@ -1,0 +1,18 @@
+# C10.1 of specs/maintenance/check-database.md: review-log rows with ivl 1.5,
+# lastIvl -2.5, time -5 and time 3,000,000,000 are rewritten with ivl and
+# lastIvl rounded (halves away from zero) and time rounded and clamped to
+# [0, 2^31 - 1]; usn and the other columns stay; revlog_properties 4, scm set.
+# The rows name no card, so the card stage never reads them. A second run
+# finds nothing.
+id: maintenance/check-db/revlog-values
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500001, 7, 5, 3, 1.5, 1, 2500, 4000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500002, 7, 5, 3, 4, -2.5, 2500, 4000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500003, 7, 5, 3, 4, 2, 2500, -5, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500004, 7, 5, 3, 4, 2, 2500, 3000000000, 1)"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT id, usn, typeof(ivl), ivl, typeof(lastIvl), lastIvl, typeof(time), time, type FROM revlog ORDER BY id"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

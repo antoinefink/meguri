@@ -1,0 +1,24 @@
+# stats/studied-today T3.1, T3.3, T4.5: stored values no answer writes but
+# another client or a damaged collection can hold (2026-10-12, Europe/Paris,
+# rollover 4). The Home line counts every row whose type is not 4 or 5 and
+# sums times as stored. The Today section reads the type's low byte (type
+# 260 reads as 4, Manual, and is left out; 6 and -1 count as Learn), counts a
+# time outside 0 to 4,294,967,295 ms as 0, and truncates a fractional last
+# interval before the mature test.
+id: stats/today/odd-values
+clock: {tz: Europe/Paris, start: "2026-10-10T12:00:00"}
+steps:
+  - set_config: {key: rollover, value: 4}
+  - set_clock: "2026-10-12T20:00:00"
+  # From 10:00, one minute apart, on card id 1000, which no card has
+  # (type, ease, lastIvl, time ms):
+  #   6, 3, 0, 1000
+  #   260, 3, 0, 2000
+  #   -1, 3, 0, 3000
+  #   1, 3, 5, -5000
+  #   1, 3, 5, 5000000000
+  #   1, 0, 21, 6000
+  #   1, 3, 20.9, 7000
+  #   2, 2, 21.5, 8000
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1791792000000, 1000, -1, 3, 1, 0, 2500, 1000, 6), (1791792060000, 1000, -1, 3, 1, 0, 2500, 2000, 260), (1791792120000, 1000, -1, 3, 1, 0, 2500, 3000, -1), (1791792180000, 1000, -1, 3, 10, 5, 2500, -5000, 1), (1791792240000, 1000, -1, 3, 10, 5, 2500, 5000000000, 1), (1791792300000, 1000, -1, 0, 30, 21, 2500, 6000, 1), (1791792360000, 1000, -1, 3, 30, 20.9, 2500, 7000, 1), (1791792420000, 1000, -1, 2, 30, 21.5, 2500, 8000, 2)"}
+  - observe: [studied_today_text, studied_today_raw, {today_stats: [collection]}]

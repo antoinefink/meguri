@@ -1,0 +1,38 @@
+# Refused deck packages (specs/package/apkg-import.md I16, I3; package-ops.md
+# E6.4; fixtures of oracle/fixtures/package/apkg.py). An .apkg that is not a
+# zip archive, a legacy map naming ../x.jpg and a legacy map that is not JSON
+# are corrupt; meta version 4 is too_new. After each refusal the target and
+# its media folder are unchanged. Anki refuses the non-zip file before its
+# import transaction and keeps its undo history, as Meguri does, so undo is
+# observed after that refusal only: the other refusals happen inside Anki's
+# transaction, which empties its undo history (Meguri keeps it, E6.4).
+id: package/apkg-import/refusals
+description: Unreadable deck packages are refused with too_new or corrupt and change nothing.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+steps:
+  - observe: [timing]
+  # A raw write, then an undoable edit the non-zip refusal leaves on top.
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: [one, edited]}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, revlog, graves, decks, deck_config, tags, config]}
+      - undo_status
+  - advance: 1m
+  - import: {format: apkg, fixture: package/apkg/not-a-zip.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe: [undo_status]
+  - import: {format: apkg, fixture: package/apkg/meta-version-4.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - import: {format: apkg, fixture: package/apkg/legacy-traversal.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - import: {format: apkg, fixture: package/apkg/legacy-map-not-json.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, revlog, graves, decks, deck_config, tags, config]}
+      - media_dir

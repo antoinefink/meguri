@@ -1,0 +1,18 @@
+# C11 of specs/maintenance/check-media.md: a field [sound:ABC.mp3] with the
+# file abc.mp3. Meguri matches references case-insensitively on every volume,
+# so the reference is satisfied; Anki on the case-sensitive Linux volume
+# reports ABC.mp3 missing and abc.mp3 unused (deviation
+# check-media-case-insensitive-references).
+id: maintenance/check-media/refs/case-insensitive
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["[sound:ABC.mp3]", ""]}
+  media_files:
+    - {name: abc.mp3, text: "a sound"}
+steps:
+  - check_media: {}

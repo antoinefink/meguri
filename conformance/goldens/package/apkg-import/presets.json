@@ -1,0 +1,213 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 2
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["one", "a"],
+              "note": "#n1"
+            },
+            {
+              "fields": ["two", "b"],
+              "note": "#n2"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 2,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": []
+        }
+      },
+      {
+        "db_dump": {
+          "deck_config": {
+            "1": {
+              "config": {
+                "sha256": "b2d3a13378af8601b372cc76113debc42f7b2c4c669788ee98c3705a7af51d94"
+              },
+              "id": 1,
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1894701600001": {
+              "config": {
+                "sha256": "007d351feb7a3e7c8523a92f707fdcca2a997041a8977f4cd94dc55d09bf6ce3"
+              },
+              "id": 1894701600001,
+              "mtime_secs": 1894701660,
+              "name": "Fast",
+              "usn": -1
+            }
+          },
+          "decks": {
+            "1": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1894701600000": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600000,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701660,
+              "name": "Lang",
+              "usn": -1
+            },
+            "1894701600001": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600001,
+              "kind": {
+                "sha256": "28ace4b5d677c1970a8141ed9617650c8ac94deda7f1d554ede177e947a09ff1"
+              },
+              "mtime_secs": 1894701600,
+              "name": "Other",
+              "usn": -1
+            }
+          }
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["one", "a"],
+              "note": "#n1"
+            },
+            {
+              "fields": ["two", "b"],
+              "note": "#n2"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 2,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": []
+        }
+      },
+      {
+        "db_dump": {
+          "deck_config": {
+            "1": {
+              "config": {
+                "sha256": "b2d3a13378af8601b372cc76113debc42f7b2c4c669788ee98c3705a7af51d94"
+              },
+              "id": 1,
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1894701600000": {
+              "config": {
+                "sha256": "3cd3049a137a48da05410c4c6d60a7e30af4e74bc2cec460fe3c92a7648e3376"
+              },
+              "id": 1894701600000,
+              "mtime_secs": 1894701600,
+              "name": "Slow",
+              "usn": -1
+            },
+            "1894701600001": {
+              "config": {
+                "sha256": "007d351feb7a3e7c8523a92f707fdcca2a997041a8977f4cd94dc55d09bf6ce3"
+              },
+              "id": 1894701600001,
+              "mtime_secs": 1894701660,
+              "name": "Fast",
+              "usn": -1
+            }
+          },
+          "decks": {
+            "1": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1894701600000": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600000,
+              "kind": {
+                "sha256": "637f0c6d6c9fe8d8ccdaecef76dd0a1e20ba5e67c1982bfa341254e1d6939e69"
+              },
+              "mtime_secs": 1894701780,
+              "name": "Lang",
+              "usn": -1
+            },
+            "1894701600001": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600001,
+              "kind": {
+                "sha256": "28ace4b5d677c1970a8141ed9617650c8ac94deda7f1d554ede177e947a09ff1"
+              },
+              "mtime_secs": 1894701600,
+              "name": "Other",
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/presets",
+  "scenario_sha256": "f124109009b9657e0e9e1144bd108d6b7192de7ee328c034b99846c426248df8",
+  "tz": "UTC"
+}

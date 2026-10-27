@@ -1,0 +1,47 @@
+# specs/browser/sorting.md S4, S5 (cardMod, noteMod): Card Modified by the
+# card's mod, in notes mode by the largest mod of the note's cards (equal
+# values in note id order); Note Modified by the note's mod, then ordinal in
+# cards mode. Equal stamps form equal-key runs (specs/conformance/browser-ops.md
+# B2), except where notes mode keeps note id order (R1127, R1144).
+id: browser/sort/modified
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, fields: [one, g]}
+    - {notetype: Solo, fields: [two, g]}
+    - {notetype: Pair, fields: [three, x]}
+    - {notetype: Pair, fields: [four, x]}
+    - {notetype: Solo, fields: [five, g]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET mod = 1894700000 WHERE nid IN (SELECT id FROM notes ORDER BY id LIMIT 2)"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1894650000 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1894750000 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1894800000 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1894600000 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1894750000 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1894600000 WHERE id IN (SELECT id FROM notes ORDER BY id LIMIT 2)"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1894500000 WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1894600000 WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1894900000 WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - observe:
+      - search:
+          - {query: '', order: {column: cardMod}}
+          - {query: '', order: {column: cardMod, reverse: true}}
+          - {query: '', kind: notes, order: {column: cardMod}}
+          - {query: '', kind: notes, order: {column: cardMod, reverse: true}}
+          - {query: '', order: {column: noteMod}}
+          - {query: '', order: {column: noteMod, reverse: true}}
+          - {query: '', kind: notes, order: {column: noteMod}}
+          - {query: '', kind: notes, order: {column: noteMod, reverse: true}}

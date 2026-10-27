@@ -1,0 +1,29 @@
+# The default deck's name taken by another deck (specs/package/apkg-export.md
+# A4, A6; package-ops.md E7, E11). Deck 1 is renamed Inbox and a new deck
+# takes the name Default; it holds n1 (c1 there, c2 moved to deck 1) and n2.
+# Exporting Default without scheduling: the package has no deck row with id
+# 1 (the new collection's default deck gives way to the exported Default) and
+# c2 keeps did 1.
+id: package/apkg-export/default-name-clash
+description: A deck named Default other than deck 1 replaces the package's default deck row.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  notetypes:
+    - name: Both
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+steps:
+  - observe: [timing]
+  - rename_deck: {deck: Default, name: Inbox}
+  - add_deck: {name: Default}
+  - add_note: {notetype: Both, deck: Default, fields: [one, a]}
+  - add_note: {notetype: Both, deck: Default, fields: [two, b]}
+  - db_exec:
+      sql: "UPDATE cards SET did = 1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
+  - advance: 1m
+  - export: {format: apkg, name: clash.apkg, limit: {deck: Default}, scheduling: false, presets: false, media: false}
+  - observe:
+      - package_db_dump: {name: clash.apkg, tables: [cards, decks]}

@@ -1,0 +1,56 @@
+# Cards without scheduling (specs/package/apkg-import.md I6; apkg-export.md
+# A6; package-ops.md E6). The source: nextPos 7, a review card, a suspended
+# card with flag 2, a new card at position 3, a card held by the filtered
+# deck Cram (fixed id 900), a card in the default deck, tags marked, leech and
+# leech::x. After the export every note is deleted, Cram is emptied and
+# deleted, and the target's nextPos set to 40. Importing without scheduling:
+# every card new at the package's positions, counted for cards without one
+# from the package collection's own nextPos (the export does not carry the
+# source's 7), flags 0, marked and leech removed, Cram added as a normal deck,
+# the default deck not taken, the target's nextPos still 40.
+id: package/apkg-import/scheduling-off
+description: An import without scheduling makes every card new at the package's positions.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a], tags: [marked, leech, "leech::x", kept]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+    - {notetype: Pair, deck: Lang, fields: [three, c]}
+    - {notetype: Pair, deck: Lang, fields: [four, d]}
+    - {notetype: Pair, fields: [five, e]}
+steps:
+  - observe: [timing]
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, factor = v.column6, reps = v.column7, flags = v.column8
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 2, 2, 10, 10, 2500, 3, 0),
+          (2, 2, -1, 5, 4, 2300, 2, 2),
+          (3, 0, 0, 3, 0, 0, 0, 0),
+          (4, 0, 0, 4, 0, 0, 0, 0),
+          (5, 0, 0, 5, 0, 0, 0, 0)
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  - db_exec:
+      sql: "UPDATE cards SET odid = did, did = 900, odue = due, due = -100000 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"
+  - set_config: {key: nextPos, value: 7}
+  - reopen: {}
+  - advance: 1m
+  - export: {format: apkg, name: plain.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - delete_notes: {notes: ["#n1", "#n2", "#n3", "#n4", "#n5"]}
+  - delete_decks: {decks: [Cram]}
+  - set_config: {key: nextPos, value: 40}
+  - advance: 1m
+  - import: {format: apkg, name: plain.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: false, with_deck_configs: false}
+  - observe:
+      - db_dump: {tables: [notes, cards, revlog, decks]}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}

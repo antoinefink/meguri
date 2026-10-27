@@ -1,0 +1,40 @@
+# specs/browser/columns.md C8, C13: Anki's notes-mode averages overflow, and
+# Meguri reproduces them. #n1 has 27 review cards at factor 2500: their sum,
+# 67500, is taken modulo 65536 before dividing, so Avg. Ease is 7, not 250.
+# #n2 has two review cards with interval 30000 days: 60000 days times 86400
+# seconds is taken modulo 2^32, so Avg. Interval is 14.1 years, while each
+# card shows 82.2 years in cards mode.
+id: browser/columns/aggregates
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - notetype: Gap
+      fields:
+        - "{{c1::w1}} {{c2::w2}} {{c3::w3}} {{c4::w4}} {{c5::w5}} {{c6::w6}} {{c7::w7}} {{c8::w8}} {{c9::w9}} {{c10::w10}} {{c11::w11}} {{c12::w12}} {{c13::w13}} {{c14::w14}} {{c15::w15}} {{c16::w16}} {{c17::w17}} {{c18::w18}} {{c19::w19}} {{c20::w20}} {{c21::w21}} {{c22::w22}} {{c23::w23}} {{c24::w24}} {{c25::w25}} {{c26::w26}} {{c27::w27}}"
+        - ""
+    - {notetype: Pair, fields: [long, x]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 1, ivl = 1, factor = 2500, reps = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 30000, ivl = 30000, factor = 2500, reps = 20 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - observe:
+      - browser_rows:
+          columns: [cardEase, cardIvl]
+          rows: ["#c1", "#c28", "#c29"]
+  - set_config: {key: browserTableShowNotesMode, value: true}
+  - observe:
+      - browser_rows:
+          columns: [template, cardEase, cardIvl, cardReps]
+          rows: ["#n1", "#n2"]

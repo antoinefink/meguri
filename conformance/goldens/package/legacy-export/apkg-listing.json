@@ -1,0 +1,85 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "export": {
+          "notes": 3
+        }
+      },
+      {
+        "package_listing": {
+          "entries": [
+            {
+              "method": 0,
+              "name": "meta"
+            },
+            {
+              "method": 8,
+              "name": "collection.anki21"
+            },
+            {
+              "method": 0,
+              "name": "collection.anki2"
+            },
+            {
+              "method": 0,
+              "name": "media"
+            }
+          ],
+          "meta_version": 2,
+          "sqlite": {
+            "collection.anki2": {
+              "cards": 1,
+              "journal": "rollback",
+              "notes": 1,
+              "opens": true,
+              "revlog": 0,
+              "ver": 11
+            },
+            "collection.anki21": {
+              "cards": 3,
+              "journal": "rollback",
+              "notes": 3,
+              "opens": true,
+              "revlog": 1,
+              "ver": 11
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/legacy-export/apkg-listing",
+  "scenario_sha256": "2a9baf964faeefbe1cb4fe1e62b53f0de44eeb64609b0357e52a96497fa5b837",
+  "tz": "UTC"
+}

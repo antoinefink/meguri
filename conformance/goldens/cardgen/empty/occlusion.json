@@ -1,0 +1,152 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "ensure_io_notetype": {
+          "name": "Image Occlusion"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c4", "#c5", "#c6"],
+          "note": "#n2"
+        }
+      },
+      {},
+      {},
+      {
+        "empty_cards": [
+          {
+            "notes": [
+              {
+                "all_empty": false,
+                "cards": 3,
+                "note": "#n1",
+                "ords": [1]
+              }
+            ],
+            "notetype": "Cloze Text"
+          },
+          {
+            "notes": [
+              {
+                "all_empty": false,
+                "cards": 3,
+                "note": "#n2",
+                "ords": [2]
+              }
+            ],
+            "notetype": "Image Occlusion"
+          }
+        ]
+      },
+      {
+        "delete_empty_cards": {
+          "deleted": 2,
+          "kept_valid": 0
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Default",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c2": null,
+          "#c3": {
+            "data": {},
+            "did": "Default",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 2,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {},
+            "did": "Default",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c5": {
+            "data": {},
+            "did": "Default",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c6": null
+        }
+      },
+      {
+        "empty_cards": []
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "cardgen/empty/occlusion",
+  "scenario_sha256": "55eb1a072447db3f11bcae49b7b184bc00401dc86cabb0b0ab082c8b09afc046",
+  "tz": "UTC"
+}

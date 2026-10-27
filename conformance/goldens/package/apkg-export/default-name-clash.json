@@ -1,0 +1,159 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "rename_deck": {
+          "name": "Inbox"
+        }
+      },
+      {
+        "add_deck": {
+          "name": "Default"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c1", "#c2"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c3", "#c4"],
+          "note": "#n2"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 2
+        }
+      },
+      {
+        "package_db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600003": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600003,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "decks": {
+            "1894701600000": {
+              "common": {
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "id": 1894701600000,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701600,
+              "name": "Default",
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-export/default-name-clash",
+  "scenario_sha256": "d6158c9f16d46f1aa1e802a629cbae00b0fd32bbb2208b3a724030513728778a",
+  "tz": "UTC"
+}

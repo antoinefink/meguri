@@ -1,0 +1,77 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 1
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": [
+            {
+              "fields": [" cat-fab65e9f5fe15204fe8915f89bb92f00f50b26f7.jpg ", "a"],
+              "note": "#n1"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, 1894701600, -1, "<img src=\"cat-fab65e9f5fe15204fe8915f89bb92f00f50b26f7.jpg\">\u001fa"]
+          ]
+        }
+      },
+      {
+        "media_dir": {
+          "cat-fab65e9f5fe15204fe8915f89bb92f00f50b26f7.jpg": {
+            "sha1": "fab65e9f5fe15204fe8915f89bb92f00f50b26f7",
+            "size": 13
+          },
+          "cat.jpg": {
+            "sha1": "5d95b586da00d0cd7ad6b4982acf7647d82f6e9e",
+            "size": 14
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/ae67",
+  "scenario_sha256": "161c17c127a1aa8a6df7224f6c64b6f203db7b06d95c937decceee971c512d53",
+  "tz": "UTC"
+}

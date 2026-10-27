@@ -1,0 +1,22 @@
+# An export that selects no note (specs/package/apkg-export.md A3;
+# package-ops.md E3, E7). Every card of Empty moved to Full: exporting Empty
+# writes a package with no note, {notes: 0}, in the latest layout.
+id: package/apkg-export/empty-selection
+description: A deck whose notes all moved away exports a package with no note.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Empty, Full]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Empty, fields: [one, a]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'Full')"}
+  - advance: 1m
+  - export: {format: apkg, name: empty.apkg, limit: {deck: Empty}, scheduling: true, presets: false, media: true}
+  - observe:
+      - package_listing: {name: empty.apkg}

@@ -1,0 +1,66 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "check_media": {
+          "dirs": ["x"],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": ["c.png"],
+          "missing_notes": ["#n1"],
+          "oversize": ["big.bin"],
+          "renamed": {},
+          "trash_count": 0,
+          "unused": ["b.jpg"]
+        }
+      },
+      {
+        "media_dir": {
+          ".DS_Store": {
+            "sha1": "2275b051231141e520ab57d968f9f9f7965ecc8a",
+            "size": 6
+          },
+          "_font.ttf": {
+            "sha1": "da1e23023d0484666ff7dc35a695cdaec2455dfa",
+            "size": 6
+          },
+          "a.jpg": {
+            "sha1": "f454ee9339eab8026bd877a14b42b4620d13c3c3",
+            "size": 11
+          },
+          "b.jpg": {
+            "sha1": "fa39a359cc61da3696caf3c77266633984cb709a",
+            "size": 12
+          },
+          "big.bin": {
+            "sha1": "7c14c9a507c6867bc72b94dc5077855b09343bb8",
+            "size": 125829120
+          },
+          "e.txt": {
+            "sha1": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+            "size": 0
+          },
+          "snd.mp3": {
+            "sha1": "c67b95a7dedc01fe523f052476e9e32ad989ff00",
+            "size": 7
+          },
+          "x": {
+            "dir": true
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/report/basic",
+  "scenario_sha256": "6cb08ec341bac510184a9aa62b27cf5eac64e41729dbe26e63ea430d8f3cc29a",
+  "tz": "UTC"
+}

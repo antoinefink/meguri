@@ -1,0 +1,37 @@
+# specs/browser/columns.md C3.1: rows whose record is gone are "deleted";
+# rows that need Check Database are "damaged". #n2 is deleted with its card
+# #c2; #n3's cards (#c3, #c4) are removed from under it; #c5 (#n4) points to a
+# deck that does not exist. The other rows of the request are unaffected.
+id: browser/columns/row-errors
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, fields: [kept, g]}
+    - {notetype: Solo, fields: [deleted, g]}
+    - {notetype: Pair, fields: [no-cards, x]}
+    - {notetype: Solo, fields: [missing-deck, g]}
+steps:
+  - db_exec: {sql: "DELETE FROM cards WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET did = 424242 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)"}
+  - delete_notes: {notes: ["#n2"]}
+  - observe:
+      - browser_rows:
+          columns: [noteFld, deck, cardDue]
+          rows: ["#c1", "#c2", "#c3", "#c5"]
+  - set_config: {key: browserTableShowNotesMode, value: true}
+  - observe:
+      - browser_rows:
+          columns: [noteFld, deck, cardDue]
+          rows: ["#n1", "#n2", "#n3", "#n4"]

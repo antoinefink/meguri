@@ -1,0 +1,38 @@
+# N4 of specs/maintenance/check-database-notes.md: a note type with three
+# fields and three templates, two notes, whose notetypes, fields and
+# templates rows are deleted by db_exec. Check Database recovers it as
+# db-check-<ms>-3 (fields Front, Back, 3; templates Card 1 to Card 3), moves
+# both notes to it, keeps their cards (notetypes_recovered 1, scm set). The
+# reopen drops Anki's note type cache, which db_exec does not clear. No
+# undo_status (check-database C14). A second run finds nothing.
+id: maintenance/check-db-notes/recover-notetype
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Triple
+      fields: [Alpha, Beta, Gamma]
+      templates:
+        - {name: T1, front: "{{Alpha}}", back: "{{Beta}}"}
+        - {name: T2, front: "{{Beta}}", back: "{{Gamma}}"}
+        - {name: T3, front: "{{Gamma}}", back: "{{Alpha}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Triple, deck: Inbox, fields: [a1, b1, c1]}
+    - {notetype: Triple, deck: Inbox, fields: [a2, b2, c2]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 5"}
+  - db_exec: {sql: "DELETE FROM fields WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Triple')"}
+  - db_exec: {sql: "DELETE FROM templates WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Triple')"}
+  - db_exec: {sql: "DELETE FROM notetypes WHERE name = 'Triple'"}
+  - reopen: {}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM notetypes WHERE name LIKE 'db-check-%'"}
+  - observe:
+      - notetype_structure: {notetypes: [db-check-1894705200000-3]}
+  - db_exec: {sql: "SELECT ord, name, mtime_secs, usn FROM templates WHERE ntid = (SELECT id FROM notetypes WHERE name LIKE 'db-check-%') ORDER BY ord"}
+  - db_exec: {sql: "SELECT n.sfld, n.mod, n.usn, (SELECT name FROM notetypes WHERE id = n.mid) FROM notes n ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld, c.ord"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) = CAST((SELECT id FROM notetypes WHERE name LIKE 'db-check-%') AS TEXT) FROM config WHERE KEY = 'curModel'"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

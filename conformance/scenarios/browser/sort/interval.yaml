@@ -1,0 +1,48 @@
+# specs/browser/sorting.md S4, S5 (cardIvl): cards mode by stored interval;
+# notes mode by the average interval of the review and relearning cards only:
+# #n8's learning card does not count (average 10, as #n4 and #n5, kept in note
+# id order), #n9 averages 4 and 2 to 3; #n1, #n2 and #n10 have no such card
+# and no key (R1125, R1144).
+id: browser/sort/interval
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, fields: [new, g]}
+    - {notetype: Solo, fields: [learning, g]}
+    - {notetype: Solo, fields: [ivl-1, g]}
+    - {notetype: Solo, fields: [ivl-10-a, g]}
+    - {notetype: Solo, fields: [ivl-10-b, g]}
+    - {notetype: Solo, fields: [relearning-2, g]}
+    - {notetype: Solo, fields: [ivl-400, g]}
+    - {notetype: Pair, fields: [review-and-learning, x]}
+    - {notetype: Pair, fields: [review-and-relearning, x]}
+    - {notetype: Pair, fields: [both-new, x]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894702200 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 1, ivl = 1, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 10, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 10, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "UPDATE cards SET type = 3, queue = 1, due = 1894702800, ivl = 2, factor = 2300, lapses = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 5)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 400, ivl = 400, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 6)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 10, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 7) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894702200 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 7) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 4, ivl = 4, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 8) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET type = 3, queue = 1, due = 1894702800, ivl = 2, factor = 2300, lapses = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 8) AND ord = 1"}
+  - observe:
+      - search:
+          - {query: '', order: {column: cardIvl}}
+          - {query: '', order: {column: cardIvl, reverse: true}}
+          - {query: '', kind: notes, order: {column: cardIvl}}
+          - {query: '', kind: notes, order: {column: cardIvl, reverse: true}}

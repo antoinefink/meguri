@@ -1,0 +1,21 @@
+# C2 step 2 of specs/maintenance/check-media.md with upper case: the NFD-named
+# file Cafe U+0301 .jpg is renamed in place to its NFC name, case kept
+# (Caf U+00E9 .jpg); Anki writes the lowercase NFC name (deviation
+# check-media-nfd-keeps-case). Fields name both spellings (the NFD one
+# written by db_exec, since the add stores fields in NFC).
+id: maintenance/check-media/rename/nfd-upper
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"Café.jpg\">", "<img src=\"Café.jpg\">"]}
+  media_files:
+    - {name: "Café.jpg", text: "accent image"}
+steps:
+  - db_exec: {sql: "UPDATE notes SET flds = '<img src=\"Caf' || char(233) || '.jpg\">' || char(31) || '<img src=\"Cafe' || char(769) || '.jpg\">'"}
+  - advance: 1h
+  - check_media: {}
+  - observe: [media_dir, media_trash, {db_dump: {tables: [notes]}}]

@@ -1,0 +1,117 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["5"]
+          ]
+        }
+      },
+      {},
+      {
+        "change_notetype_info": {
+          "card_counts": [
+            [0, 2],
+            [1, 2]
+          ],
+          "discarded_fields": [],
+          "dropped_templates": [],
+          "field_content": [2, 2],
+          "fields": [0, 1, null],
+          "new_fields": ["A", "B", "C"],
+          "new_notetype": "Three",
+          "new_templates": ["T1", "T2", "T3"],
+          "old_fields": ["A", "B"],
+          "old_notetype": "Two",
+          "old_templates": ["T1", "T2"],
+          "removed_cards": 0,
+          "schema": 1894701600000,
+          "templates": [0, 1, null]
+        }
+      },
+      {
+        "change_notetype": {
+          "notes": 2
+        }
+      },
+      {
+        "change_notetype_info": {
+          "card_counts": [
+            [0, 1]
+          ],
+          "discarded_fields": [],
+          "dropped_templates": [],
+          "field_content": [0, 0],
+          "fields": [0, 1, null],
+          "new_fields": ["A", "B", "C"],
+          "new_notetype": "Three",
+          "new_templates": ["T1", "T2", "T3"],
+          "old_fields": ["A", "B"],
+          "old_notetype": "Two",
+          "old_templates": ["T1", "T2"],
+          "removed_cards": 0,
+          "schema": 1894705200000,
+          "templates": [0, 1, null]
+        }
+      },
+      {
+        "change_notetype": {
+          "notes": 1
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["x", 0, "Last", 0, 1, 1894701600, -1],
+            ["x", 1, "Last", 0, 1, 1894701600, -1],
+            ["x", 2, "Last", 0, 1, 1894701600, -1],
+            ["a", 0, "Left", 0, 2, 1894701600, -1],
+            ["a", 1, "Right", 0, 2, 1894701600, -1],
+            ["a", 2, "Last", 0, 2, 1894705200, -1],
+            ["c", 0, "Left", 2, 5, 1894701600, -1],
+            ["c", 1, "Left", 2, 5, 1894701600, -1],
+            ["c", 2, "Left", 0, 5, 1894705200, -1],
+            ["", 0, "Last", 0, 6, 1894705200, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["7"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, 1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/change/placement",
+  "scenario_sha256": "404d4dc26221fcfdcda2618fe012d9f44eb67b2ee669277e51b064abbcbcf9f5",
+  "tz": "UTC"
+}

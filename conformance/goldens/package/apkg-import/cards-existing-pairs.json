@@ -1,0 +1,122 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 1
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["one", "a"],
+              "note": "#n1"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": []
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 9,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 5,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701000,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 2,
+              "reps": 2,
+              "type": 2,
+              "usn": 3
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 4261788892,
+              "data": "",
+              "flags": 0,
+              "flds": "one\u001fa",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "one",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/cards-existing-pairs",
+  "scenario_sha256": "44150570ed5819e4ccedd0a9c1450e97b17ac63c57e166926377f55fe4c78d06",
+  "tz": "UTC"
+}

@@ -1,0 +1,122 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "empty_cards": [
+          {
+            "notes": [
+              {
+                "all_empty": true,
+                "cards": 2,
+                "note": "#n4",
+                "ords": [0, 1]
+              }
+            ],
+            "notetype": "Cloze Text"
+          },
+          {
+            "notes": [
+              {
+                "all_empty": false,
+                "cards": 2,
+                "note": "#n1",
+                "ords": [1]
+              },
+              {
+                "all_empty": true,
+                "cards": 1,
+                "note": "#n2",
+                "ords": [1]
+              },
+              {
+                "all_empty": true,
+                "cards": 2,
+                "note": "#n3",
+                "ords": [0, 1]
+              }
+            ],
+            "notetype": "Optional"
+          }
+        ]
+      },
+      {
+        "delete_empty_cards": {
+          "deleted": 6,
+          "kept_valid": 0
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Words",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c2": null,
+          "#c3": null,
+          "#c4": null,
+          "#c5": null,
+          "#c6": null,
+          "#c7": null
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, -1, 6],
+            [1, -1, 3]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["a"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200000]
+          ]
+        }
+      },
+      {
+        "empty_cards": []
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "cardgen/empty/delete-notes",
+  "scenario_sha256": "2904f9fb3a8808fa1e28d6a2995d92316e173706a34804d33e80ddc3eb6f6312",
+  "tz": "UTC"
+}

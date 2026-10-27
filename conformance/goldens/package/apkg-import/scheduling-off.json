@@ -1,0 +1,310 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "export": {
+          "notes": 5
+        }
+      },
+      {},
+      {
+        "delete_decks": {
+          "count": 0
+        }
+      },
+      {},
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 5,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": ["one", "a"],
+              "note": "#n1"
+            },
+            {
+              "fields": ["two", "b"],
+              "note": "#n2"
+            },
+            {
+              "fields": ["three", "c"],
+              "note": "#n3"
+            },
+            {
+              "fields": ["four", "d"],
+              "note": "#n4"
+            },
+            {
+              "fields": ["five", "e"],
+              "note": "#n5"
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600002,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600003": {
+              "data": "{}",
+              "did": 1894701720000,
+              "due": 4,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600003,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600003,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600004": {
+              "data": "{}",
+              "did": 1,
+              "due": 5,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600004,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600004,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "decks": {
+            "1": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1894701600000": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600000,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701600,
+              "name": "Lang",
+              "usn": -1
+            },
+            "1894701720000": {
+              "common": {
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "id": 1894701720000,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701720,
+              "name": "Cram",
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 4261788892,
+              "data": "",
+              "flags": 0,
+              "flds": "one\u001fa",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "one",
+              "tags": " kept leech::x ",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 2910334669,
+              "data": "",
+              "flags": 0,
+              "flds": "two\u001fb",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "two",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600002": {
+              "csum": 3087201156,
+              "data": "",
+              "flags": 0,
+              "flds": "three\u001fc",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "three",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600003": {
+              "csum": 2676981484,
+              "data": "",
+              "flags": 0,
+              "flds": "four\u001fd",
+              "guid": "#random",
+              "id": 1894701600003,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "four",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600004": {
+              "csum": 1303560671,
+              "data": "",
+              "flags": 0,
+              "flds": "five\u001fe",
+              "guid": "#random",
+              "id": 1894701600004,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "five",
+              "tags": "",
+              "usn": -1
+            }
+          },
+          "revlog": {}
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["40"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/scheduling-off",
+  "scenario_sha256": "2e3b3670f994cb5b89f71ed2792cc79f5a65eef25185382125a0cecc756066a6",
+  "tz": "UTC"
+}

@@ -5,7 +5,7 @@ Requirements: R1884, R1886, R1887, R1920; supports R1118–R1131, R1139–R1145
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/sort/, conformance/scenarios/browser/columns/
 
-What the browser scenarios observe: sorted searches (an `order` member on `search` requests, `search-ops.md` S1) and Browse rows (the `browser_rows` kind). Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` are to hold their shapes (B6). What they exercise is `specs/browser/sorting.md` and `specs/browser/columns.md`.
+What the browser scenarios observe: sorted searches (an `order` member on `search` requests, `search-ops.md` S1) and Browse rows (the `browser_rows` kind). Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. What they exercise is `specs/browser/sorting.md` and `specs/browser/columns.md`.
 
 ## B1. Sorted searches
 
@@ -69,7 +69,7 @@ Each cell is one of these JSON values. `browser/columns` C7 and C8 say which val
 | `originalPosition` | `` → empty; an optional `-` and digits → position |
 | `cardDue` | `` → empty; `(filtered)` → filtered; `((filtered))` → filtered, wrapped; `New #` and an optional `-` and digits → new position; the same in parentheses → wrapped; `YYYY-MM-DD` → date; in parentheses → wrapped |
 | `noteCrt`, `cardMod`, `noteMod` | `YYYY-MM-DD @ HH:MM` → date-time |
-| `cardIvl`, `stability` | `` → empty; `(new)`, `(learning)` → marker; a decimal number, U+0020 and one of `second`, `seconds`, `minute`, `minutes`, `hour`, `hours`, `day`, `days`, `month`, `months`, `year`, `years` → time span, the unit in its plural form |
+| `cardIvl`, `stability` | `` → empty; `(new)`, `(learning)` (Interval only) → marker; a decimal number, U+0020 and one of `second`, `seconds`, `minute`, `minutes`, `hour`, `hours`, `day`, `days`, `month`, `months`, `year`, `years` → time span, the unit in its plural form |
 
 A cell text that matches none of its column's forms is recorded as `{unparsed: <text>}`, which no Meguri cell equals, so the scenario fails and the spec writer looks at it. Scenarios keep Question and Answer away from template errors and blank cloze cards, whose cells hold Anki's localized messages (R1887). Anki's backend errors map to row errors: a deleted card or note to `deleted`; a missing record or a note without cards (Anki asks for Check Database) to `damaged`; any other failure is a run error (`anki_error`).
 
@@ -78,9 +78,10 @@ A cell text that matches none of its column's forms is recorded as `{unparsed: <
 ## B5. What scenarios hold
 
 - Note types, decks and notes come from `setup`; card states, stamps and card data from `db_exec` steps (`record-ops.md` W1), which address cards by note position and ordinal (`nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET k) AND ord = j`) because Anki creates a cloze note's cards in no set order. A card in a filtered deck is a card whose `did` names an ordinary deck and whose `odid` and `odue` hold its home deck and due: Browse shows it and sorts it exactly like a card of a real filtered deck, which the setup cannot create.
-- A note whose first card has ordinal 1 is made by adding the note with only its second template's field filled and filling the first afterwards with `edit_note` (`record-ops.md` W2), which generates the ordinal 0 card with a higher id.
+- A note whose first card has ordinal 1 is made by adding the note with only its second template's field filled and filling the first afterwards with `edit_note` (`record-ops.md` W2), which generates the ordinal 0 card with a higher id. `edit_note` gives that card no logical id (`note-ops.md` N3): a scenario that names it runs `adopt` (`normalized-dump.md` N5) after the edit.
+- `db_exec` steps change only the `cards`, `notes` and `config` tables, never `notetypes`, templates, fields or `decks`: Anki's Browse rows read note types and decks through caches that a `db_exec` write does not clear, so the oracle would show the earlier state. Note type and deck changes go through their ops.
 - Equal-key runs need no declaration (B2).
 
 ## B6. Status
 
-Draft (`observations.md` O4). On this branch neither the oracle driver nor Meguri's runner implements `order` on `search` requests or `browser_rows`, and the scenario and observation schemas do not hold their shapes. The 22 scenarios of `browser/sorting` S11 and `browser/columns` C15 are therefore not here yet; their goldens were recorded at the current oracle pin by a driver that implemented both observations as B1 to B4 say. The driver change, the schema change and the scenarios come together: a ported golden must match its scenario's `scenario_sha256` and the current pin, or it is recorded again. The oracle driver also needs `edit_note` to give the cards a save generates the next logical ids `#cN` in ordinal order (`dsl.md` D7.1), which B5's ordinal-1 first cards use. U84 marks the scenarios active in `conformance/scenarios/browser/area.yaml` as its adapter lands (`dsl.md` D9.1).
+Stable: the oracle driver implements `order` on `search` requests and `browser_rows`, `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes, and the 22 scenarios of `browser/sorting` S11 and `browser/columns` C15 have goldens recorded at the current oracle pin. Meguri's runner does not implement either yet: until the testkit's scenario model reads `order` and `browser_rows`, T0 reports those scenarios as `invalid` (`dsl.md` D10), and until U84's adapter lands, `pending`. U84 marks the scenarios active in `conformance/scenarios/browser/area.yaml` as its adapter lands (`dsl.md` D9.1).

@@ -1,0 +1,592 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "browser_rows": [
+          {
+            "cells": {
+              "answer": {
+                "text": "x1"
+              },
+              "cardDue": {
+                "date": "2030-04-25"
+              },
+              "cardEase": {
+                "percent": 125
+              },
+              "cardIvl": {
+                "span": {
+                  "amount": "10",
+                  "unit": "days"
+                }
+              },
+              "cardLapses": {
+                "count": 1
+              },
+              "cardMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "cardReps": {
+                "count": 6
+              },
+              "deck": {
+                "text": "Lang"
+              },
+              "difficulty": null,
+              "note": {
+                "text": "Pair"
+              },
+              "noteCrt": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteFld": {
+                "text": "review-and-learning"
+              },
+              "noteMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteTags": {
+                "text": ""
+              },
+              "originalPosition": null,
+              "question": {
+                "text": "review-and-learning"
+              },
+              "retrievability": null,
+              "stability": null,
+              "template": {
+                "count": 2
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "x2"
+              },
+              "cardDue": null,
+              "cardEase": {
+                "marker": "new"
+              },
+              "cardIvl": null,
+              "cardLapses": {
+                "count": 0
+              },
+              "cardMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "cardReps": {
+                "count": 0
+              },
+              "deck": {
+                "text": "Lang"
+              },
+              "difficulty": null,
+              "note": {
+                "text": "Pair"
+              },
+              "noteCrt": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteFld": {
+                "text": "only-new"
+              },
+              "noteMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteTags": {
+                "text": ""
+              },
+              "originalPosition": {
+                "position": 2
+              },
+              "question": {
+                "text": "only-new"
+              },
+              "retrievability": null,
+              "stability": null,
+              "template": {
+                "count": 2
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "x3"
+              },
+              "cardDue": null,
+              "cardEase": {
+                "marker": "new"
+              },
+              "cardIvl": null,
+              "cardLapses": {
+                "count": 0
+              },
+              "cardMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "cardReps": {
+                "count": 0
+              },
+              "deck": {
+                "text": "(2)"
+              },
+              "difficulty": null,
+              "note": {
+                "text": "Pair"
+              },
+              "noteCrt": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteFld": {
+                "text": "two-decks"
+              },
+              "noteMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteTags": {
+                "text": ""
+              },
+              "originalPosition": {
+                "position": 3
+              },
+              "question": {
+                "text": "two-decks"
+              },
+              "retrievability": null,
+              "stability": null,
+              "template": {
+                "count": 2
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "forward-later"
+              },
+              "cardDue": {
+                "date": "2030-04-29"
+              },
+              "cardEase": {
+                "percent": 250
+              },
+              "cardIvl": {
+                "span": {
+                  "amount": "4",
+                  "unit": "days"
+                }
+              },
+              "cardLapses": {
+                "count": 0
+              },
+              "cardMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "cardReps": {
+                "count": 2
+              },
+              "deck": {
+                "text": "Lang"
+              },
+              "difficulty": {
+                "percent": 22
+              },
+              "note": {
+                "text": "Pair"
+              },
+              "noteCrt": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteFld": {
+                "text": "forward-later"
+              },
+              "noteMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteTags": {
+                "text": ""
+              },
+              "originalPosition": {
+                "position": 7
+              },
+              "question": {
+                "text": "backward-first"
+              },
+              "retrievability": {
+                "percent": 100
+              },
+              "stability": {
+                "span": {
+                  "amount": "10",
+                  "unit": "days"
+                }
+              },
+              "template": {
+                "count": 2
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "g"
+              },
+              "cardDue": null,
+              "cardEase": {
+                "percent": 250
+              },
+              "cardIvl": {
+                "span": {
+                  "amount": "6",
+                  "unit": "days"
+                }
+              },
+              "cardLapses": {
+                "count": 0
+              },
+              "cardMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "cardReps": {
+                "count": 3
+              },
+              "deck": {
+                "text": "Lang"
+              },
+              "difficulty": null,
+              "note": {
+                "text": "Solo"
+              },
+              "noteCrt": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteFld": {
+                "text": "suspended-review"
+              },
+              "noteMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteTags": {
+                "text": "marked"
+              },
+              "originalPosition": null,
+              "question": {
+                "text": "suspended-review"
+              },
+              "retrievability": null,
+              "stability": null,
+              "template": {
+                "count": 1
+              }
+            },
+            "tint": "marked"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "x6"
+              },
+              "cardDue": {
+                "date": "2030-05-05"
+              },
+              "cardEase": {
+                "percent": 260
+              },
+              "cardIvl": {
+                "span": {
+                  "amount": "11",
+                  "unit": "days"
+                }
+              },
+              "cardLapses": {
+                "count": 0
+              },
+              "cardMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "cardReps": {
+                "count": 6
+              },
+              "deck": {
+                "text": "(2)"
+              },
+              "difficulty": null,
+              "note": {
+                "text": "Pair"
+              },
+              "noteCrt": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteFld": {
+                "text": "filtered-and-review"
+              },
+              "noteMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteTags": {
+                "text": ""
+              },
+              "originalPosition": null,
+              "question": {
+                "text": "filtered-and-review"
+              },
+              "retrievability": null,
+              "stability": null,
+              "template": {
+                "count": 2
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "x7"
+              },
+              "cardDue": null,
+              "cardEase": {
+                "marker": "new"
+              },
+              "cardIvl": null,
+              "cardLapses": {
+                "count": 0
+              },
+              "cardMod": {
+                "datetime": "2030-03-17 17:55"
+              },
+              "cardReps": {
+                "count": 0
+              },
+              "deck": {
+                "text": "Lang"
+              },
+              "difficulty": null,
+              "note": {
+                "text": "Pair"
+              },
+              "noteCrt": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteFld": {
+                "text": "latest-mod"
+              },
+              "noteMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteTags": {
+                "text": ""
+              },
+              "originalPosition": {
+                "position": 7
+              },
+              "question": {
+                "text": "latest-mod"
+              },
+              "retrievability": null,
+              "stability": null,
+              "template": {
+                "count": 2
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "g"
+              },
+              "cardDue": null,
+              "cardEase": {
+                "marker": "new"
+              },
+              "cardIvl": null,
+              "cardLapses": {
+                "count": 0
+              },
+              "cardMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "cardReps": {
+                "count": 0
+              },
+              "deck": {
+                "text": "Cram (Lang)"
+              },
+              "difficulty": null,
+              "note": {
+                "text": "Solo"
+              },
+              "noteCrt": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteFld": {
+                "text": "only-filtered"
+              },
+              "noteMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteTags": {
+                "text": ""
+              },
+              "originalPosition": {
+                "position": -99999
+              },
+              "question": {
+                "text": "only-filtered"
+              },
+              "retrievability": null,
+              "stability": null,
+              "template": {
+                "count": 1
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "x9"
+              },
+              "cardDue": {
+                "date": "2030-04-25"
+              },
+              "cardEase": {
+                "percent": 230
+              },
+              "cardIvl": {
+                "span": {
+                  "amount": "4",
+                  "unit": "days"
+                }
+              },
+              "cardLapses": {
+                "count": 2
+              },
+              "cardMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "cardReps": {
+                "count": 10
+              },
+              "deck": {
+                "text": "Lang"
+              },
+              "difficulty": null,
+              "note": {
+                "text": "Pair"
+              },
+              "noteCrt": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteFld": {
+                "text": "relearning-and-review"
+              },
+              "noteMod": {
+                "datetime": "2030-01-15 10:00"
+              },
+              "noteTags": {
+                "text": ""
+              },
+              "originalPosition": null,
+              "question": {
+                "text": "relearning-and-review"
+              },
+              "retrievability": null,
+              "stability": null,
+              "template": {
+                "count": 2
+              }
+            },
+            "tint": "none"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/columns/notes-mode",
+  "scenario_sha256": "957f02e0c6621a9c87883a61bc1453977aa44193bee1d9fb8dc33083e9d2cfcd",
+  "tz": "UTC"
+}

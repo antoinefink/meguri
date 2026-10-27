@@ -1,0 +1,45 @@
+# U35 test 4 and the deleted note (R948; specs/notetypes/change-notetype.md M8
+# checks 3 and 4). Another schema change after the screen opened (here a raw
+# write to col.scm) makes the save refuse with schema_changed: no note, card,
+# stamp or col value changes. A note of the selection deleted after the screen
+# opened makes it refuse with not_found, again changing nothing, the other
+# note included. Opening the screen again on what is left succeeds.
+# The change runs as accepted: the oracle answers no schema question and
+# Meguri's change takes no confirmation input (change-notetype-ops.md H2,
+# notetypes/schema-changes.md G4).
+id: notetypes/change/refusals
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+    - name: Pair Reverse
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{Back}}", back: "{{Front}}"}
+  notes:
+    - {notetype: Pair, fields: [vexo, one]}
+    - {notetype: Pair, fields: [zwei, two]}
+steps:
+  - change_notetype_info: {notes: ["#n1", "#n2"], notetype: Pair Reverse}
+  - advance: 1m
+  - db_exec: {sql: "UPDATE col SET scm = scm + 1000"}
+  - change_notetype: {}
+  - db_exec: {sql: "SELECT n.sfld, t.name, n.mod, n.usn FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT count(*) FROM cards"}
+  - db_exec: {sql: "SELECT scm, mod FROM col"}
+  - change_notetype_info: {notes: ["#n1", "#n2"], notetype: Pair Reverse}
+  - advance: 1m
+  - delete_notes: {notes: ["#n2"]}
+  - advance: 1m
+  - change_notetype: {}
+  - db_exec: {sql: "SELECT n.sfld, t.name, n.mod, n.usn FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT count(*) FROM cards"}
+  - db_exec: {sql: "SELECT scm, mod FROM col"}
+  - change_notetype_info: {notes: ["#n1"], notetype: Pair Reverse}
+  - change_notetype: {}
+  - db_exec: {sql: "SELECT n.sfld, t.name, n.mod, n.usn FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT scm, mod FROM col"}

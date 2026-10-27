@@ -1,0 +1,63 @@
+# specs/browser/sorting.md S4, S5, S6 (cardDue): new positions, learning
+# timestamps and review days on one scale (R1143): filtered cards by their
+# filtered-deck due first, then new cards by position, then by instant. Notes
+# mode takes the earliest due of the cards that are not new, suspended,
+# buried or filtered; notes with none (only new cards: #n1, #n15) come first
+# ascending and last descending (R1144, AE50). Today is 0, now 1894701600.
+id: browser/sort/due
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Cram]
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, fields: [new-1, g]}
+    - {notetype: Solo, fields: [new-suspended, g]}
+    - {notetype: Solo, fields: [learning, g]}
+    - {notetype: Solo, fields: [review-today, g]}
+    - {notetype: Solo, fields: [review-overdue, g]}
+    - {notetype: Solo, fields: [review-tomorrow, g]}
+    - {notetype: Solo, fields: [interday-learning, g]}
+    - {notetype: Solo, fields: [review-suspended, g]}
+    - {notetype: Solo, fields: [review-buried, g]}
+    - {notetype: Solo, fields: [relearning, g]}
+    - {notetype: Solo, fields: [learning-suspended, g]}
+    - {notetype: Solo, fields: [filtered-review, g]}
+    - {notetype: Solo, fields: [filtered-new, g]}
+    - {notetype: Pair, fields: [mixed, m]}
+    - {notetype: Pair, fields: [only-new, n]}
+    - {notetype: Solo, fields: [new-buried, g]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET due = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0)"}
+  - db_exec: {sql: "UPDATE cards SET queue = -1, due = 2 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894702200 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 3, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = -3, ivl = 5, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 1, ivl = 2, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 5)"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 3, due = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 6)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -1, due = 2, ivl = 4, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 7)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -3, due = 5, ivl = 6, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 8)"}
+  - db_exec: {sql: "UPDATE cards SET type = 3, queue = 1, due = 1894705200, ivl = 1, factor = 2300, lapses = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 9)"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = -1, due = 1894702800 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 10)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 7, factor = 2500, odid = did, odue = 4, did = (SELECT id FROM decks WHERE name = 'Cram'), due = -100000 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 11)"}
+  - db_exec: {sql: "UPDATE cards SET odid = did, odue = 6, did = (SELECT id FROM decks WHERE name = 'Cram'), due = -99999 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 12)"}
+  - db_exec: {sql: "UPDATE cards SET due = 7 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 13) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 4, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 13) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET due = 8 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 14)"}
+  - db_exec: {sql: "UPDATE cards SET queue = -2, due = 9 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 15)"}
+  - observe:
+      - search:
+          - {query: '', order: {column: cardDue}}
+          - {query: '', order: {column: cardDue, reverse: true}}
+          - {query: '', kind: notes, order: {column: cardDue}}
+          - {query: '', kind: notes, order: {column: cardDue, reverse: true}}

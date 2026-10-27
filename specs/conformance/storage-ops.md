@@ -7,8 +7,6 @@ Scenarios: conformance/scenarios/storage/
 
 The scenario vocabulary the storage area needs (U22, U33): the op `open`, which replaces the scenario's collection with a copy of a fixture file, or of a session file, and opens it, how executors reach fixture files, the observation `schema_objects`, the op `schema11_copy`, which writes a schema-11 copy of the collection to a session file (P4), and the observations `file_col`, `file_objects` and `file_query`, which read such a file without opening it as a collection (P5 to P8). Scenarios also use the op `db_exec`, whose definition is `record-ops.md` W1 (U23's spec side; P2 restates what the storage scenarios rely on), and the observation `db_dump` (`observations.md` O8, U13's spec side). The behavior these observe is `specs/storage/`.
 
-P1's `file` form and P4 to P8 are draft (`dsl.md` D7.2, `observations.md` O4): the oracle driver does not carry them yet. The driver op, the scenario and observation schemas, the testkit model and the `dsl.md` and `observations.md` rows come together with the driver work, and until then no scenario uses them.
-
 ## P1. `open`
 
 ### P1.1 Argument and effect
@@ -160,7 +158,7 @@ Value: `{rows: [[<value>, ...], ...]}`, the rows the statement returns, values b
 
 ### P8.1 Names
 
-A session file name is a file name of ASCII letters, digits, `.`, `_` and `-` that starts with a letter or digit, ends in `.anki2` and is not `collection.anki2` (else `invalid_scenario` when the scenario loads). `open: {file}`, `file_col`, `file_objects` and `file_query` name a file that an earlier `schema11_copy` step of the scenario wrote, before a handoff included; a name with no such file in the session directory is a run error (`unknown_ref`).
+A session file name is a file name of lower-case ASCII letters, digits, `.`, `_` and `-` that starts with a letter or digit, ends in `.anki2` and is not `collection.anki2` (else `invalid_scenario` when the scenario loads). Upper-case letters are refused because a case-insensitive volume (APFS, where Meguri and the native oracle lane run) gives names that differ only in case one file: `Collection.anki2` would be the collection itself, and two session files could replace each other on one side only. `open: {file}`, `file_col`, `file_objects` and `file_query` name a file that an earlier `schema11_copy` step of the scenario wrote, before a handoff included; a name with no such file in the session directory is a run error (`unknown_ref`).
 
 ### P8.2 Reading a session file
 

@@ -1,0 +1,59 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": [],
+          "missing_notes": [],
+          "oversize": [],
+          "renamed": {
+            "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdef.jpg": "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcde.jpg"
+          },
+          "trash_count": 0,
+          "unused": []
+        }
+      },
+      {
+        "db_dump": {
+          "notes": {
+            "1894701600000": {
+              "csum": 3646656400,
+              "data": "",
+              "flags": 0,
+              "flds": "<img src=\"abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcde.jpg\">\u001f",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894705200,
+              "sfld": " abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcde.jpg ",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        },
+        "media_dir": {
+          "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcde.jpg": {
+            "sha1": "d2938c9ff0e2d4db51b8fd3c5491bf251ba7fd1e",
+            "size": 10
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/rename/long-name",
+  "scenario_sha256": "855335f5b311c8f09b79521416cbb84589ab781db3f29f2e2d1ee9c2932ac182",
+  "tz": "UTC"
+}

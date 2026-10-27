@@ -1,0 +1,37 @@
+# U35 test 6 (specs/notes/empty-cards.md E4, E5). Four notes have their card 2
+# listed. Before the delete, Add Reverse is set again on the first and Back is
+# filled on the second, and the fourth note is deleted. Meguri's delete looks
+# again: the first two keep card 2 (the first one's review-log row still
+# belongs to a card) and are reported as kept because they became valid; the
+# third note's card 2 is deleted; the fourth note's cards are gone and
+# skipped. Anki deletes every listed card that still exists: deviation
+# empty-cards-recheck.
+id: cardgen/empty/recheck
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Optional
+      fields: [Front, Back, Add Reverse]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{#Add Reverse}}{{Back}}{{/Add Reverse}}", back: "{{Front}}"}
+  notes:
+    - {notetype: Optional, fields: [a, A, y]}
+    - {notetype: Optional, fields: [b, B, y]}
+    - {notetype: Optional, fields: [c, C, y]}
+    - {notetype: Optional, fields: [d, D, y]}
+steps:
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT 1894700000000, id, -1, 3, 1, 0, 2500, 6000, 0 FROM cards WHERE ord = 1 AND nid = (SELECT id FROM notes WHERE sfld = 'a')"}
+  - edit_note: {note: "#n1", fields: {Add Reverse: ""}}
+  - edit_note: {note: "#n2", fields: {Back: ""}}
+  - edit_note: {note: "#n3", fields: {Add Reverse: ""}}
+  - edit_note: {note: "#n4", fields: {Add Reverse: ""}}
+  - empty_cards: {}
+  - edit_note: {note: "#n1", fields: {Add Reverse: "y"}}
+  - edit_note: {note: "#n2", fields: {Back: "B again"}}
+  - delete_notes: {notes: ["#n4"]}
+  - advance: 1h
+  - delete_empty_cards: {keep_notes: false}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - db_exec: {sql: "SELECT id, ease, (SELECT count(*) FROM cards WHERE cards.id = revlog.cid) FROM revlog ORDER BY id"}
+  - db_exec: {sql: "SELECT type, count(*) FROM graves GROUP BY type ORDER BY type"}

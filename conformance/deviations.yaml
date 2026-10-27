@@ -341,6 +341,21 @@ deviations:
     scenarios: [preservation/notetype/structure-changes]
     pointer: /steps/9/db_exec/rows
     transform: {replace: [[1, 1, 1]]}
+  # specs/notetypes/structure-changes.md S4 and field-rename.md F3: a field
+  # rename or removal edits only the tags that name the field; Anki writes
+  # every tag of every text in canonical form, drops the alternate-delimiter
+  # directive and gives every empty browser front the first field.
+  - id: template-rewrite-keeps-text
+    requirement: R923
+    summary: After renaming Extra to Note, Spaced keeps its spaced tags and extra braces, Alt keeps its alternate delimiters (so {{x}} stays text), every browser text stays empty, and only the tags naming Extra are rewritten.
+    test: notetypes/structure/rewrite-format
+    scenarios: [notetypes/structure/rewrite-format]
+    pointer: /steps/4/notetype_templates/Styled
+    transform:
+      replace:
+        - {name: Spaced, front: "{{ Front }} {{{Back}}} {{text:Note}}", back: "{{# Front }}x{{/ Front }}{{Back}}", browser_front: "", browser_back: ""}
+        - {name: Alt, front: "{{=<% %>=}}<%Back%> {{x}} <%Note%>", back: "{{=<% %>=}}<%Front%>", browser_front: "", browser_back: ""}
+        - {name: Broken, front: "{{Note}}{{Front}}", back: "{{#Extra}}{{Back}}", browser_front: "", browser_back: ""}
   # specs/notetypes/structure-changes.md S8 and field-rename.md F3: card
   # requirements come from the fronts as rewritten; Anki computes them from
   # the fronts before its rewrite.
@@ -381,6 +396,15 @@ deviations:
         - [c, 1, Last, 3]
         - [c, 2, Last, 3]
         - [c, 3, Target, 3]
+  # specs/notetypes/restore-to-default.md D5: a restore that changes the
+  # template count sets col.scm; Anki does not when it only adds templates.
+  - id: restore-template-add-schema
+    requirement: R1477
+    summary: Restoring the Basic note type Plain as Basic (and reversed card) adds a template and marks the schema modified (scm > ls).
+    test: notetypes/structure/restore-forced-kind
+    scenarios: [notetypes/structure/restore-forced-kind]
+    pointer: /steps/7/db_exec/rows
+    transform: {replace: [[1]]}
   # specs/engine/undo.md A8: a redo whose rows changed outside the undo
   # history (here a trigger took the answer's review-log id) is refused by
   # Meguri's check (M4.2) and dropped; Anki applies it, keeps the other row
@@ -556,6 +580,37 @@ deviations:
         "Bar": {collapsed: 1, config: null, tag: "Bar", usn: -1}
         "Bar::c": {collapsed: 1, config: null, tag: "Bar::c", usn: -1}
         "Bar::x": {collapsed: 1, config: null, tag: "Bar::x", usn: -1}
+  # specs/notes/empty-cards.md E4, E5: Meguri's delete looks at the live rows
+  # again and keeps listed cards that became valid; Anki deletes every listed
+  # card that still exists. Pointers are cardgen/empty/recheck's steps 10 to 13.
+  - id: empty-cards-recheck
+    requirement: R952
+    summary: The delete reports one card deleted and two listed cards kept because they became valid; Anki deletes three and keeps none.
+    test: cardgen/empty/recheck
+    scenarios: [cardgen/empty/recheck]
+    pointer: /steps/10/delete_empty_cards
+    transform: {replace: {deleted: 1, kept_valid: 2}}
+  - id: empty-cards-recheck-cards
+    requirement: R952
+    summary: After the delete, the notes a and b still have their card 2.
+    test: cardgen/empty/recheck
+    scenarios: [cardgen/empty/recheck]
+    pointer: /steps/11/db_exec/rows
+    transform: {replace: [["a", 0], ["a", 1], ["b", 0], ["b", 1], ["c", 0]]}
+  - id: empty-cards-recheck-review-log
+    requirement: R952
+    summary: The review-log row of note a's card 2 still belongs to an existing card.
+    test: cardgen/empty/recheck
+    scenarios: [cardgen/empty/recheck]
+    pointer: /steps/12/db_exec/rows
+    transform: {replace: [[1894700000000, 3, 1]]}
+  - id: empty-cards-recheck-graves
+    requirement: R952
+    summary: Only the third note's card 2 gets a card grave from the delete, next to the deleted fourth note's two card graves and its note grave.
+    test: cardgen/empty/recheck
+    scenarios: [cardgen/empty/recheck]
+    pointer: /steps/13/db_exec/rows
+    transform: {replace: [[0, 3], [1, 1]]}
   # specs/conformance/float-determinism.md F8, F9 (KTD24): Meguri uses the
   # platform math library, as Anki does. On macOS the expected FSRS next-state
   # values come from the Apple oracle's overlay (conformance/goldens-apple/)
@@ -978,3 +1033,167 @@ deviations:
       replace:
         "café.mp3": {sha1: "91c489cb245f6627d97c2c8a047398017897eaae", size: 3}
         plain.png: {sha1: "4b369ec8d5ad47a8e3f8144d219e077a293d3840", size: 3}
+  # specs/maintenance/check-database.md C17 and check-database-notes.md N9:
+  # Check Database differences (deviations added with their goldens, R1889).
+  - id: check-db-no-change-keeps-mod
+    requirement: R1472
+    summary: A Check Database run that changes no row leaves col.mod as it was; Anki sets col.mod on every run (specs/maintenance/check-database.md C11).
+    test: maintenance/check-db/healthy
+    scenarios: [maintenance/check-db/healthy]
+    pointer: /steps/6/db_exec/rows
+    transform: {replace: [[1894788000000, 1894701600000]]}
+  - id: check-db-lrt-reads-needed-columns
+    requirement: R1643
+    summary: A review-log ivl of 3,000,000,000 on a reviewed card is clamped and counted; Anki stops with an error, changing nothing (specs/maintenance/check-database.md C8.7, C10.1).
+    test: maintenance/check-db/revlog-ivl-overflow
+    scenarios: [maintenance/check-db/revlog-ivl-overflow]
+    pointer: /steps/3/check_db
+    transform: {replace: {"card_last_review_time": 0, "card_properties": 0, "cards_without_note": 0, "cards_without_template": 0, "decks_missing": 0, "duplicate_card_ords": 0, "field_counts": 0, "future_ids": 0, "new_positions_too_high": 0, "notes_invalid_utf8": 0, "notetypes_recovered": 0, "revlog_properties": 1}}
+  - id: check-db-future-ids-skip-used
+    requirement: R1643
+    summary: A future note id is re-keyed to the first unused id from now_ms up (now_ms + 1, since a note holds now_ms); Anki stops with a constraint error, changing nothing (specs/maintenance/check-database.md C10.4).
+    test: maintenance/check-db/future-ids-taken
+    scenarios: [maintenance/check-db/future-ids-taken]
+    pointer: /steps/5/check_db
+    transform: {replace: {"card_last_review_time": 0, "card_properties": 0, "cards_without_note": 0, "cards_without_template": 0, "decks_missing": 0, "duplicate_card_ords": 0, "field_counts": 0, "future_ids": 1, "new_positions_too_high": 0, "notes_invalid_utf8": 0, "notetypes_recovered": 0, "revlog_properties": 0}}
+  - id: check-db-parents-past-deck-limits
+    requirement: R1642
+    summary: A missing parent under a filtered deck (F::x for F::x::y) or with 12 components is created with its missing ancestors as normal decks and counted once; Anki's deck add refuses it and Check Database stops, changing nothing (specs/maintenance/check-database.md C10.2).
+    test: maintenance/check-db/parents-under-filtered
+    scenarios: [maintenance/check-db/parents-under-filtered, maintenance/check-db/parents-too-deep]
+    pointer: /steps/*/check_db
+    transform: {replace: {"card_last_review_time": 0, "card_properties": 0, "cards_without_note": 0, "cards_without_template": 0, "decks_missing": 1, "duplicate_card_ords": 0, "field_counts": 0, "future_ids": 0, "new_positions_too_high": 0, "notes_invalid_utf8": 0, "notetypes_recovered": 0, "revlog_properties": 0}}
+  - id: check-db-tags-keep-rows
+    requirement: R1642
+    summary: The notes stage keeps the tag rows a (expanded) and a::b (collapsed) with their usn, registers New and removes only the unused row old; Anki empties the registry and rebuilds it from the notes (specs/maintenance/check-database-notes.md N2).
+    test: maintenance/check-db-notes/tag-rebuild
+    scenarios: [maintenance/check-db-notes/tag-rebuild]
+    pointer: /steps/7/db_exec/rows
+    transform: {replace: [[a, 5, 0, null], ["a::b", 5, 1, null], [New, -1, 1, null]]}
+  - id: check-db-tags-keep-rows-tree
+    requirement: R1642
+    summary: The tag tree keeps a expanded, since its row stays (specs/maintenance/check-database-notes.md N2).
+    test: maintenance/check-db-notes/tag-rebuild
+    scenarios: [maintenance/check-db-notes/tag-rebuild]
+    pointer: /steps/8/tag_tree
+    transform:
+      replace:
+        - {name: a, collapsed: false, children: [{name: b, collapsed: true, children: []}]}
+        - {name: New, collapsed: true, children: []}
+  - id: check-db-basic-stamped
+    requirement: R1644
+    summary: The fallback Basic note type added when none is left gets local stamps (mtime_secs now, usn -1); Anki writes mtime_secs 0 and usn 0 (specs/maintenance/check-database-notes.md N7).
+    test: maintenance/check-db-notes/no-notetypes
+    scenarios: [maintenance/check-db-notes/no-notetypes]
+    pointer: /steps/8/db_exec/rows
+    transform: {replace: [[Basic, 1894705200, -1]]}
+  - id: check-db-default-deck-restored
+    requirement: R1644
+    summary: With deck 1 missing, the card the notes stage generates for a note without cards makes Check Database create deck 1 as Default and count it; Anki stops with an error, changing nothing (specs/maintenance/check-database-notes.md N6.6).
+    test: maintenance/check-db-notes/default-deck-missing
+    scenarios: [maintenance/check-db-notes/default-deck-missing]
+    pointer: /steps/6/check_db
+    transform: {replace: {"card_last_review_time": 0, "card_properties": 0, "cards_without_note": 0, "cards_without_template": 0, "decks_missing": 1, "duplicate_card_ords": 0, "field_counts": 0, "future_ids": 0, "new_positions_too_high": 0, "notes_invalid_utf8": 0, "notetypes_recovered": 0, "revlog_properties": 0}}
+  # specs/maintenance/check-media.md C20: Check Media differences, with the
+  # goldens of C22 (Linux oracle, case-sensitive volume).
+  - id: check-media-rename-trashes-old
+    requirement: R2018
+    summary: After the fix op Meguri moves the three renamed files' old names to the trash, so the trash holds three entries; Anki deletes the old files permanently (specs/maintenance/check-media.md C4, C10 step 5).
+    test: maintenance/check-media/rename/invalid-chars
+    scenarios: [maintenance/check-media/rename/invalid-chars]
+    pointer: /steps/1/check_media/trash_count
+    transform: {replace: 3}
+  - id: check-media-rename-trashes-old-trash
+    requirement: R2018
+    summary: The trash holds the old names Bar?.PNG, con.jpg and foo[.jpg with their bytes (specs/maintenance/check-media.md C10 step 5).
+    test: maintenance/check-media/rename/invalid-chars
+    scenarios: [maintenance/check-media/rename/invalid-chars]
+    pointer: /steps/2/media_trash
+    transform: {replace: [{"name": "Bar?.PNG", "sha1": "92bb25b31ad56da2feacb845756de9b33ea6fabe", "size": 14}, {"name": "con.jpg", "sha1": "06a0004d0c22198dd4849d398ebfc6f3366a5e5f", "size": 14}, {"name": "foo[.jpg", "sha1": "c35f990b976f468104111fd94cdcccb22fb5d3b9", "size": 13}]}
+  - id: check-media-rename-trashes-old-rerun
+    requirement: R2018
+    summary: Both runs report the three old names of the first run's renames in the trash (specs/maintenance/check-media.md C10 step 5).
+    test: maintenance/check-media/rerun/no-change
+    scenarios: [maintenance/check-media/rerun/no-change]
+    pointer: /steps/*/check_media/trash_count
+    transform: {replace: 3}
+  - id: check-media-nfd-keeps-case
+    requirement: R1646
+    summary: The NFD file Cafe U+0301 .jpg is renamed in place to its NFC name with its case kept, so both references are satisfied and nothing is unused; Anki stores it lowercased as caf U+00E9 .jpg and reports Caf U+00E9 .jpg missing (specs/maintenance/check-media.md C2 step 2, C20).
+    test: maintenance/check-media/rename/nfd-upper
+    scenarios: [maintenance/check-media/rename/nfd-upper]
+    pointer: /steps/2/check_media
+    transform: {replace: {"unused": [], "missing": [], "missing_notes": [], "renamed": {"Café.jpg": "Café.jpg"}, "dirs": [], "oversize": [], "extracted": 0, "trash_count": 0, "field_templates": []}}
+  - id: check-media-nfd-keeps-case-dir
+    requirement: R1646
+    summary: The folder holds Caf U+00E9 .jpg (specs/maintenance/check-media.md C2 step 2).
+    test: maintenance/check-media/rename/nfd-upper
+    scenarios: [maintenance/check-media/rename/nfd-upper]
+    pointer: /steps/3/media_dir
+    transform: {replace: {"Café.jpg": {"sha1": "e2006572f8bbce6c97bcd2089cb8d1556413172e", "size": 12}}}
+  - id: check-media-extracted-not-missing
+    requirement: R1647
+    summary: The images Check Media just extracted are present, so only the two references that are not inline images are missing, in note 4; Anki reports the paste- names missing in the same run (specs/maintenance/check-media.md C7, C11).
+    test: maintenance/check-media/inline/extract
+    scenarios: [maintenance/check-media/inline/extract]
+    pointer: /steps/1/check_media
+    transform: {replace: {"unused": [], "missing": ["data:image/png;base64,not*base64", "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4="], "missing_notes": ["#n4"], "renamed": {}, "dirs": [], "oversize": [], "extracted": 4, "trash_count": 0, "field_templates": []}}
+  - id: check-media-template-references
+    requirement: R1645
+    summary: A file a template names literally is not unused; Anki does not read templates here and reports logo.png unused (specs/maintenance/check-media.md C9).
+    test: maintenance/check-media/templates/literal-ref
+    scenarios: [maintenance/check-media/templates/literal-ref]
+    pointer: /steps/0/check_media/unused
+    transform: {replace: []}
+  - id: check-media-case-insensitive-references
+    requirement: R1645
+    summary: The reference ABC.mp3 is satisfied by the file abc.mp3, so nothing is missing or unused; Anki on the case-sensitive volume reports ABC.mp3 missing and abc.mp3 unused (specs/maintenance/check-media.md C11).
+    test: maintenance/check-media/refs/case-insensitive
+    scenarios: [maintenance/check-media/refs/case-insensitive]
+    pointer: /steps/0/check_media
+    transform: {replace: {"unused": [], "missing": [], "missing_notes": [], "renamed": {}, "dirs": [], "oversize": [], "extracted": 0, "trash_count": 0, "field_templates": []}}
+  - id: check-media-empty-oversize-present
+    requirement: R1645
+    summary: A referenced empty file and a referenced oversize file are present, so nothing is missing; Anki reports both missing (specs/maintenance/check-media.md C3, C11).
+    test: maintenance/check-media/refs/empty-oversize
+    scenarios: [maintenance/check-media/refs/empty-oversize]
+    pointer: /steps/0/check_media
+    transform: {replace: {"unused": [], "missing": [], "missing_notes": [], "renamed": {}, "dirs": [], "oversize": ["huge.mp3"], "extracted": 0, "trash_count": 0, "field_templates": []}}
+  - id: check-media-case-variant-merge-name
+    requirement: R1648
+    summary: Identical case variants Cat.jpg and cat.jpg merge into cat.jpg, which the rewritten references use, so nothing is unused, and Cat.jpg goes to the trash; Anki reports the kept cat.jpg unused and deletes Cat.jpg permanently (specs/maintenance/check-media.md C5, C11).
+    test: maintenance/check-media/case/same-content
+    scenarios: [maintenance/check-media/case/same-content]
+    pointer: /steps/2/check_media
+    transform: {replace: {"unused": [], "missing": [], "missing_notes": [], "renamed": {"Cat.jpg": "cat.jpg"}, "dirs": [], "oversize": [], "extracted": 0, "trash_count": 1, "field_templates": []}}
+  - id: check-media-case-variant-merge-name-trash
+    requirement: R2018
+    summary: The merged name Cat.jpg is in the trash with its bytes (specs/maintenance/check-media.md C5, C10 step 5).
+    test: maintenance/check-media/case/same-content
+    scenarios: [maintenance/check-media/case/same-content]
+    pointer: /steps/3/media_trash
+    transform: {replace: [{"name": "Cat.jpg", "sha1": "9677cf2e659a266f741aaeea3b6da206c1ccd546", "size": 9}]}
+  - id: check-media-case-variant-kept
+    requirement: R1648
+    summary: Case variants Cat.jpg and cat.jpg with different bytes both stay (listed as a case conflict) and both references are satisfied, so nothing is renamed, missing or unused; Anki adds Cat.jpg's bytes under a hash name and rewrites its reference (specs/maintenance/check-media.md C5).
+    test: maintenance/check-media/case/other-content
+    scenarios: [maintenance/check-media/case/other-content]
+    pointer: /steps/2/check_media
+    transform: {replace: {"unused": [], "missing": [], "missing_notes": [], "renamed": {}, "dirs": [], "oversize": [], "extracted": 0, "trash_count": 0, "field_templates": []}}
+  - id: check-media-case-variant-kept-dir
+    requirement: R1648
+    summary: The folder keeps Cat.jpg and cat.jpg (specs/maintenance/check-media.md C5).
+    test: maintenance/check-media/case/other-content
+    scenarios: [maintenance/check-media/case/other-content]
+    pointer: /steps/3/media_dir
+    transform:
+      replace:
+        Cat.jpg: {sha1: "f4e13214f584b05bf4b18d6fbfd0dce6a9265dcd", size: 9}
+        cat.jpg: {sha1: "a13a42fff8ad4460d9b0acd026f68e8e69657833", size: 9}
+  - id: check-media-case-variant-kept-note
+    requirement: R1648
+    summary: The note keeps both references and is not written (specs/maintenance/check-media.md C5, C10 step 2).
+    test: maintenance/check-media/case/other-content
+    scenarios: [maintenance/check-media/case/other-content]
+    pointer: /steps/4/db_exec/rows
+    transform: {replace: [["<img src=\"Cat.jpg\">|<img src=\"cat.jpg\">", 1894701600, -1]]}

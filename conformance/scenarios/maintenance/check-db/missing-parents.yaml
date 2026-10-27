@@ -1,0 +1,23 @@
+# C10.2 of specs/maintenance/check-database.md: decks renamed by db_exec to
+# A::B::C, X::Y and X::Z (U+001F between components) with none of their
+# parents present: A::B (with its ancestor A) and X are created, ids and names
+# observed, decks_missing 2 (one per parent created for a deck), scm
+# unchanged. No undo_status (C14). A second run finds nothing.
+id: maintenance/check-db/missing-parents
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Pdeck, Qdeck, Rdeck]
+  notes: [{notetype: Single, deck: Pdeck, fields: [one, uno]}]
+steps:
+  - db_exec: {sql: "UPDATE decks SET name = 'A' || char(31) || 'B' || char(31) || 'C', usn = 5 WHERE name = 'Pdeck'"}
+  - db_exec: {sql: "UPDATE decks SET name = 'X' || char(31) || 'Y', usn = 5 WHERE name = 'Qdeck'"}
+  - db_exec: {sql: "UPDATE decks SET name = 'X' || char(31) || 'Z', usn = 5 WHERE name = 'Rdeck'"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT id, replace(name, char(31), '::'), mtime_secs, usn FROM decks ORDER BY name"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

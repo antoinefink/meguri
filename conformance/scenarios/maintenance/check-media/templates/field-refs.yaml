@@ -1,0 +1,20 @@
+# C9 of specs/maintenance/check-media.md: template sides with a media or sound
+# tag whose name holds a field reference are listed in field_templates (a
+# sound tag naming {{Audio}} on a front, an img naming {{Front}} on a back);
+# a template naming _logo.png literally lists nothing, and the _ file is never
+# unused.
+id: maintenance/check-media/templates/field-refs
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Tmpl
+      fields: [Front, Audio]
+      templates:
+        - {name: Listen, front: "[sound:{{Audio}}]{{Front}}", back: "<img src=\"{{Front}}\">"}
+        - {name: Logo, front: "<img src=\"_logo.png\">{{Front}}", back: "{{Audio}}"}
+  notes:
+    - {notetype: Tmpl, fields: [word, clip]}
+  media_files:
+    - {name: _logo.png, text: "a logo"}
+steps:
+  - check_media: {}

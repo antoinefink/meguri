@@ -1,0 +1,35 @@
+# A filtered deck whose card's home deck is gone (specs/package/apkg-export.md
+# A5; package-ops.md E7, E11). The filtered deck Cram (fixed id 900) holds a
+# new card from Lang and a review card whose odid names no deck (4242). With
+# scheduling, A5's condition fails: every filtered card returns home in place
+# (it stays in Cram, odid 0, due from odue, queue from its type, odue 0) and
+# Cram becomes a normal deck on preset 1.
+id: package/apkg-export/filtered-home-missing
+description: With scheduling, a filtered card whose home deck is missing sends every filtered card home in place.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang, Other]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+    - {notetype: Pair, deck: Other, fields: [three, c]}
+steps:
+  - observe: [timing]
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  # c1: new, position 3, in Cram from Lang. c2: review due 12 at home, held
+  # by Cram with due 5 and the missing home deck 4242.
+  - db_exec:
+      sql: "UPDATE cards SET odid = did, did = 900, odue = 3, due = -100000 WHERE id = (SELECT min(id) FROM cards)"
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, ivl = 10, factor = 2500, reps = 3, did = 900, odid = 4242, odue = 12, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
+  - reopen: {}
+  - advance: 1m
+  - export: {format: apkg, name: home.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - observe:
+      - package_db_dump: {name: home.apkg, tables: [cards, decks]}

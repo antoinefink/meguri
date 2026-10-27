@@ -1,0 +1,31 @@
+# N2 of specs/maintenance/check-database-notes.md: tag rows a (expanded),
+# a::b (used, collapsed) and old (unused, expanded), each with usn 5 (rows
+# written by db_exec: Anki's add registers a::b collapsed and no row a), and
+# a note tagged a::b and New, which has no row (the note's tags set by
+# db_exec). Anki empties the registry and rebuilds it from the notes; Meguri
+# keeps the rows, adds New and removes only old (deviation
+# check-db-tags-keep-rows). Nothing is counted, scm stays. A second run finds
+# nothing.
+id: maintenance/check-db-notes/tag-rebuild
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno], tags: ["a::b"]}
+steps:
+  - db_exec: {sql: "INSERT INTO tags (tag, usn, collapsed, config) VALUES ('a', 5, 0, NULL)"}
+  - db_exec: {sql: "INSERT INTO tags (tag, usn, collapsed, config) VALUES ('old', 5, 0, NULL)"}
+  - db_exec: {sql: "UPDATE tags SET usn = 5, collapsed = 1 WHERE tag = 'a::b'"}
+  - db_exec: {sql: "UPDATE notes SET tags = ' a::b New ', usn = 5"}
+  - db_exec: {sql: "SELECT tag, usn, collapsed FROM tags ORDER BY tag"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT tag, usn, collapsed, config FROM tags ORDER BY tag"}
+  - observe: [tag_tree]
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

@@ -1,0 +1,55 @@
+# Renaming fields (specs/notetypes/structure-changes.md S2, S4, S5). Renaming
+# Front to Question rewrites its plain, filtered, conditional, negated and
+# closing references in the front, back, browser front and browser back of
+# both templates; the reference inside a comment and the FrontSide special
+# stay. The second save swaps the names of Question and Extra through a
+# temporary name: each reference follows its own field. Renames are not
+# schema changes (scm stays at ls), touch no note and no card, and stamp
+# only the note type (usn -1).
+id: notetypes/structure/rename-field
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Vocab
+      fields: [Front, Back, Extra]
+      templates:
+        - name: Forward
+          front: "{{Front}}<br>{{text:Front}}"
+          back: "{{FrontSide}}<hr id=answer>{{#Front}}{{Back}}{{/Front}}{{^Front}}-{{/Front}}<!-- {{Front}} -->"
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}} {{hint:Extra}}"}
+  notes:
+    - {notetype: Vocab, fields: [gato, cat, feline]}
+    - {notetype: Vocab, fields: [perro, dog, ""]}
+steps:
+  - update_notetype:
+      notetype: Vocab
+      edits:
+        - {template: {name: Forward, browser_front: "[{{Front}}]", browser_back: "{{#Front}}{{Back}}{{/Front}}"}}
+        - {template: {name: Reverse, browser_front: "{{Back}} {{Extra}}", browser_back: "{{^Front}}?{{/Front}}{{Front}}"}}
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1700000000, usn = 5 WHERE name = 'Vocab'"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 6
+  - update_notetype: {notetype: Vocab, edits: [{rename_field: {from: Front, to: Question}}], skip_checks: true}
+  - observe:
+      - {notetype_templates: {notetypes: [Vocab]}}
+      - {db_dump: {tables: [notes, cards]}}
+  - db_exec: {sql: "SELECT n.mtime_secs, n.usn, c.scm > c.ls FROM notetypes n, col c WHERE n.name = 'Vocab'"}
+  - advance: 1m
+  # step 10: Question and Extra swap names
+  - update_notetype:
+      notetype: Vocab
+      edits:
+        - {rename_field: {from: Extra, to: Tmp}}
+        - {rename_field: {from: Question, to: Extra}}
+        - {rename_field: {from: Tmp, to: Question}}
+      skip_checks: true
+  - observe:
+      - {notetype_templates: {notetypes: [Vocab]}}
+  - db_exec:
+      sql: >-
+        SELECT f.ord, f.name FROM fields f JOIN notetypes n ON n.id = f.ntid
+        WHERE n.name = 'Vocab' ORDER BY f.ord
+  - db_exec: {sql: "SELECT scm > ls FROM col"}

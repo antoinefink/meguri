@@ -1,0 +1,27 @@
+# Note and card ids already taken (specs/package/apkg-import.md I9 step 3,
+# I11.1; package-ops.md E6). After the export the target's n1 gets another
+# GUID with db_exec, so the package's n1 matches no target note but its id
+# and its card's id are taken: it is added with id + 999 and its card with
+# card id + 999. n2 matches by GUID and is a duplicate.
+id: package/apkg-import/ids
+description: A new note or card whose id the target holds takes the id plus 999.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: ids.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - db_exec: {sql: "UPDATE notes SET guid = 'local-guid' WHERE sfld = 'one'"}
+  - advance: 1m
+  - import: {format: apkg, name: ids.apkg, merge_notetypes: false, update_notes: never, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT id, guid = 'local-guid', sfld FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT id, nid FROM cards ORDER BY id"}

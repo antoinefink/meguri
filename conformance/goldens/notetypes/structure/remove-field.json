@@ -1,0 +1,245 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "update_notetype": {
+          "name": "Trio"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Trio"
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600003": {
+              "data": "{}",
+              "did": 1,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600003,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600004": {
+              "data": "{}",
+              "did": 1,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600004,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600002,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701660000": {
+              "data": "{}",
+              "did": 1,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701660000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701660,
+              "nid": 1894701600002,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "graves": {},
+          "notes": {
+            "1894701600000": {
+              "csum": 3923189598,
+              "data": "",
+              "flags": 0,
+              "flds": "b\u001fc",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": "c",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 3661210606,
+              "data": "",
+              "flags": 0,
+              "flds": "\u001fe",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": "e",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600002": {
+              "csum": 2513112061,
+              "data": "",
+              "flags": 0,
+              "flds": "y\u001f",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": "",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        },
+        "notetype_templates": {
+          "Trio": [
+            {
+              "back": "{{Back}}<br>{{Extra}}",
+              "browser_back": "",
+              "browser_front": " / {{Extra}}",
+              "front": "{{Back}}",
+              "name": "Forward"
+            },
+            {
+              "back": "",
+              "browser_back": "{{Back}}",
+              "browser_front": "{{Back}}",
+              "front": "{{Back}} ()",
+              "name": "Reverse"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Back"],
+            [1, "Extra"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/structure/remove-field",
+  "scenario_sha256": "3d44e4dda56b064ef83c4d8ccca8ddb2c3e644b425d69535aa2725d48d9dd42a",
+  "tz": "UTC"
+}

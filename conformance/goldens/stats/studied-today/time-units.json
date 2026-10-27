@@ -1,0 +1,68 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-10T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "studied_today_raw": {
+          "cards": 1,
+          "time_ms": 59000
+        },
+        "studied_today_text": "Studied 1 card in 59 seconds today (59s/card)"
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "studied_today_raw": {
+          "cards": 2,
+          "time_ms": 60000
+        },
+        "studied_today_text": "Studied 2 cards in 1 minute today (30s/card)"
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "studied_today_raw": {
+          "cards": 3,
+          "time_ms": 5400000
+        },
+        "studied_today_text": "Studied 3 cards in 90 minutes today (1800s/card)"
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "studied_today_raw": {
+          "cards": 4,
+          "time_ms": 18000000
+        },
+        "studied_today_text": "Studied 4 cards in 300 minutes today (4500s/card)"
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/studied-today/time-units",
+  "scenario_sha256": "8d1d75adcefbb73262ec960989c64b975d806568efd58b0f07b98efb0a202c18",
+  "tz": "Europe/Paris"
+}

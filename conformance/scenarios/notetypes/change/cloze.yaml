@@ -1,0 +1,43 @@
+# U35 test 3 and the way back (specs/notetypes/change-notetype.md M1, M9.2,
+# M9.3). A cloze note with c1, c2 and c3 moves to Two, a standard note type
+# with two templates: no template map is offered; ordinals 0 and 1 stay
+# untouched (ordinal 1 although Two's second template now requires nothing)
+# and ordinal 2 is deleted with a grave. A Two note whose first field holds
+# c1 and c3 moves to the cloze note type: its cards keep their ordinals and
+# the card for c3 is created in the deck the note's cards share, at their
+# position. Real ids of a cloze note's cards are never observed
+# (notes/card-generation.md G8).
+# The change runs as accepted: the oracle answers no schema question and
+# Meguri's change takes no confirmation input (change-notetype-ops.md H2,
+# notetypes/schema-changes.md G4).
+id: notetypes/change/cloze
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Cloze Text
+      kind: cloze
+      fields: [Text, Back Extra]
+      templates:
+        - {name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Back Extra}}"}
+    - name: Two
+      fields: [A, B]
+      templates:
+        - {name: T1, front: "{{A}}", back: "{{B}}"}
+        - {name: T2, front: "{{B}}", back: "{{A}}"}
+  decks: [Geography]
+  notes:
+    - {notetype: Cloze Text, deck: Geography, fields: ["{{c1::Paris}} is in {{c2::France}}, in {{c3::Europe}}", ""]}
+    - {notetype: Two, deck: Geography, fields: ["{{c1::Qorvin}} and {{c3::Tesk}}", "b"]}
+steps:
+  - advance: 1h
+  - change_notetype_info: {notes: ["#n1"], notetype: Two}
+  - change_notetype: {}
+  - observe: ["card(#c1, #c2, #c3)"]
+  - db_exec: {sql: "SELECT type, usn FROM graves"}
+  - db_exec: {sql: "SELECT n.sfld, t.name, replace(n.flds, char(31), '|'), n.mod, n.usn FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - advance: 1h
+  - change_notetype_info: {notes: ["#n2"], notetype: Cloze Text}
+  - change_notetype: {}
+  - observe: ["card(#c4, #c5)"]
+  - db_exec: {sql: "SELECT n.sfld, c.ord, replace(d.name, char(31), '::'), c.type, c.due, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid LEFT JOIN decks d ON d.id = c.did ORDER BY n.id, c.ord"}
+  - db_exec: {sql: "SELECT count(*) FROM graves"}

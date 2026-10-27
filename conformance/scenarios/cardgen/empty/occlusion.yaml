@@ -1,0 +1,25 @@
+# Empty Cards for cloze numbers (specs/notes/empty-cards.md E1, R1015): a
+# cloze note whose c2 was removed from the text, and an image-occlusion note
+# whose third mask was removed. Removing a mask or a cloze leaves its card
+# (notes/card-generation.md G7); the scan lists it and the delete removes it.
+# A scan afterwards finds nothing.
+id: cardgen/empty/occlusion
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Cloze Text
+      kind: cloze
+      fields: [Text, Back Extra]
+      templates:
+        - {name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Back Extra}}"}
+  notes:
+    - {notetype: Cloze Text, fields: ["{{c1::a}} {{c2::b}} {{c3::c}}", ""]}
+steps:
+  - ensure_io_notetype: {}
+  - add_note: {notetype: Image Occlusion, fields: {Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.2:oi=1}}<br>{{c2::image-occlusion:rect:left=.4:top=.1:width=.2:height=.2:oi=1}}<br>{{c3::image-occlusion:rect:left=.7:top=.1:width=.2:height=.2:oi=1}}", Image: "<img src=\"map.png\">"}}
+  - edit_note: {note: "#n1", fields: {Text: "{{c1::a}} b {{c3::c}}"}}
+  - edit_note: {note: "#n2", fields: {Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.2:oi=1}}<br>{{c2::image-occlusion:rect:left=.4:top=.1:width=.2:height=.2:oi=1}}"}}
+  - empty_cards: {}
+  - delete_empty_cards: {keep_notes: true}
+  - observe: [card]
+  - empty_cards: {}

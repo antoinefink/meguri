@@ -1,0 +1,32 @@
+# stats/studied-today T7 (R1300, data side) through real answers: each read
+# of the Home line and of the Today section includes every answer made
+# before it, and once Anki's next day starts (rollover 4, 2026-10-13 04:00
+# in Europe/Paris) both start again from zero. New cards answered Good and
+# Again write Learn rows; the third answer is on a card still in learning.
+id: stats/studied-today/refresh
+clock: {tz: Europe/Paris, start: "2026-10-12T08:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [r1, x]}
+    - {notetype: Pair, deck: Lang, fields: [r2, x]}
+steps:
+  - observe: [studied_today_text, {today_stats: [collection]}]
+  - advance: 1m
+  - answer: {card: "#c1", rating: good, time_ms: 4000}
+  - observe: [studied_today_text, {today_stats: [collection]}]
+  - advance: 1m
+  - answer: {card: "#c2", rating: again, time_ms: 12000}
+  - observe: [studied_today_text, {today_stats: [collection]}]
+  - set_clock: "2026-10-13T03:59:59"
+  - observe: [studied_today_text, {today_stats: [collection]}]
+  - advance: 1s
+  - observe: [studied_today_text, {today_stats: [collection]}]
+  - advance: 10m
+  - answer: {card: "#c1", rating: good, time_ms: 30000}
+  - observe: [studied_today_text, {today_stats: [collection]}]

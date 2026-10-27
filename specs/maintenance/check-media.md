@@ -3,7 +3,7 @@
 Spec: maintenance/check-media
 Requirements: R1645, R1646, R1647, R1648, R1649, R1650, R1651, R2018; supports R989, R1584, R1585, R2008, R2020, AE79
 Anki: 26.09.3
-Scenarios: conformance/scenarios/maintenance/check-media/ (listed in C22; none recorded yet)
+Scenarios: conformance/scenarios/maintenance/check-media/ (listed in C22, recorded on the Linux oracle)
 
 What Check Media finds and fixes, and the four actions its report offers: Tag Missing, Delete Unused, Restore Deleted and Empty Trash. The media store it works on (names, the add path, lookup, tracking, the trash) is `media/media-files`; the journal, the media-job lease and the CloudKit file-fact feed are `media/media-journal`. This file states what Check Media decides on top of them. Where Meguri departs from Anki 26.09.3, C20 says so.
 

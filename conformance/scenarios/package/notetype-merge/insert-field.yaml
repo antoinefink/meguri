@@ -1,0 +1,44 @@
+# A field inserted before a field the target has (specs/package/
+# notetype-merge.md J4.1, J4.4, J7; package-ops.md E6). The package's Pair is
+# Front, Extra, Back with sort field Back, newer than the target's Front,
+# Back sorted by Front (the edits undone in the target by inverse edits, its
+# mtime set back). The merge gives Front, Back, Extra, the incoming notes'
+# values moved by the field map 0, 2, 1, and the sort field Back (index 2 of
+# the incoming record kept as a number).
+id: package/notetype-merge/insert-field
+description: A new field in the middle of the incoming note type is appended after the target's fields.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{add_field: Extra}, {move_field: {field: Extra, to: 1}}, {sort_field: Back}]}
+  - edit_note: {note: "#n1", fields: {Extra: middle}}
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{remove_field: Extra}, {sort_field: Front}]}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1894701600 WHERE name = 'Pair'"}
+  - reopen: {}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: always, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes ORDER BY id"}

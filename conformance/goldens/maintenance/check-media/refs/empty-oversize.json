@@ -1,0 +1,31 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": ["blank.png", "huge.mp3"],
+          "missing_notes": ["#n1"],
+          "oversize": ["huge.mp3"],
+          "renamed": {},
+          "trash_count": 0,
+          "unused": []
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/refs/empty-oversize",
+  "scenario_sha256": "ca8a82262fc997c2b2235d6877d703d01235f7fa755769d36f1ea97812b79b99",
+  "tz": "UTC"
+}

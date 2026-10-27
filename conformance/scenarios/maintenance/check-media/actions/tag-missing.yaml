@@ -1,0 +1,26 @@
+# C13 of specs/maintenance/check-media.md: after report/basic's run, Tag
+# Missing adds missing-media to the one note with a missing reference as one
+# undoable update_tag step; undo removes it. A raw no-op write first empties
+# Anki's undo history of the setup's adds (undo-ops.md V5).
+id: maintenance/check-media/actions/tag-missing
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"a.jpg\"> [sound:snd.mp3]", "<img src=\"c.png\"> <img src=\"https://example.org/r.png\">"], tags: [kept]}
+    - {notetype: Media, fields: ["<img src=\"a.jpg\">", ""]}
+  media_files:
+    - {name: a.jpg, text: "first image"}
+    - {name: b.jpg, text: "second image"}
+    - {name: snd.mp3, text: "a sound"}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = usn"}
+  - check_media: {}
+  - advance: 1m
+  - tag_missing_media: {}
+  - observe: [undo_status, {db_dump: {tables: [notes]}}]
+  - undo: {}
+  - observe: [{db_dump: {tables: [notes]}}]

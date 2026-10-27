@@ -1,0 +1,20 @@
+# stats/studied-today T3.3, T4.2 (R1370, R1371): no counted row today has a
+# last interval of 21 days or more, so the Today section shows "No mature
+# cards were studied today." Yesterday's mature row, and today's Manual and
+# Rescheduled rows with mature last intervals, do not count (2026-10-12,
+# Europe/Paris, rollover 4).
+id: stats/today/no-mature
+clock: {tz: Europe/Paris, start: "2026-10-10T12:00:00"}
+steps:
+  - set_config: {key: rollover, value: 4}
+  - set_clock: "2026-10-12T20:00:00"
+  # On card id 1000, which no card has (type, ease, lastIvl, time ms):
+  #   2026-10-11 10:00: 1, 3, 30, 4000   yesterday: not counted
+  #   2026-10-12 10:00: 1, 3, 20, 5000
+  #   2026-10-12 10:01: 0, 3, 0, 6000
+  #   2026-10-12 10:02: 2, 1, -1200, 7000
+  #   2026-10-12 10:03: 1, 1, 20, 8000
+  #   2026-10-12 10:04: 4, 0, 50, 0       Manual: not counted
+  #   2026-10-12 10:05: 5, 0, 30, 0       Rescheduled: not counted
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1791705600000, 1000, -1, 3, 60, 30, 2500, 4000, 1), (1791792000000, 1000, -1, 3, 45, 20, 2500, 5000, 1), (1791792060000, 1000, -1, 3, 0, 0, 0, 6000, 0), (1791792120000, 1000, -1, 1, -600, -1200, 2300, 7000, 2), (1791792180000, 1000, -1, 1, 1, 20, 2300, 8000, 1), (1791792240000, 1000, -1, 0, 0, 50, 0, 0, 4), (1791792300000, 1000, -1, 0, 0, 30, 0, 0, 5)"}
+  - observe: [studied_today_text, {today_stats: [collection]}]

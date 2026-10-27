@@ -1,0 +1,197 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "change_notetype_info": {
+          "card_counts": [
+            [0, 1]
+          ],
+          "discarded_fields": [],
+          "dropped_templates": [],
+          "field_content": [1, 1],
+          "fields": [0, 1],
+          "new_fields": ["Front", "Back"],
+          "new_notetype": "Pair Reverse",
+          "new_templates": ["Card 1", "Card 2"],
+          "old_fields": ["Front", "Back"],
+          "old_notetype": "Pair",
+          "old_templates": ["Card 1"],
+          "removed_cards": 0,
+          "schema": 1894701600000,
+          "templates": [0, null]
+        }
+      },
+      {
+        "change_notetype": {
+          "notes": 1
+        }
+      },
+      {
+        "change_notetype_info": {
+          "card_counts": [
+            [0, 1],
+            [1, 1]
+          ],
+          "discarded_fields": [],
+          "dropped_templates": [],
+          "field_content": [1, 1],
+          "fields": [0, 1],
+          "new_fields": ["Front", "Back"],
+          "new_notetype": "Pair Reverse",
+          "new_templates": ["Card 1", "Card 2"],
+          "old_fields": ["Front", "Back"],
+          "old_notetype": "Pair Reverse",
+          "old_templates": ["Card 1", "Card 2"],
+          "removed_cards": 0,
+          "schema": 1894705200000,
+          "templates": [0, 1]
+        }
+      },
+      {
+        "change_notetype": {
+          "notes": 1
+        }
+      },
+      {
+        "change_notetype_info": {
+          "card_counts": [
+            [0, 1],
+            [1, 1]
+          ],
+          "discarded_fields": [],
+          "dropped_templates": [1],
+          "field_content": [1, 1],
+          "fields": [0, 1],
+          "new_fields": ["Front", "Back"],
+          "new_notetype": "Pair",
+          "new_templates": ["Card 1"],
+          "old_fields": ["Front", "Back"],
+          "old_notetype": "Pair Reverse",
+          "old_templates": ["Card 1", "Card 2"],
+          "removed_cards": 1,
+          "schema": 1894705200000,
+          "templates": [0]
+        }
+      },
+      {
+        "change_notetype": {
+          "notes": 1
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Words",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "Words",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c3": null,
+          "#c4": {
+            "data": {},
+            "did": "Words",
+            "due": 3,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c5": null
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["vexo", 0, "Words", 0, 0, 1, 0, 0, 1894705200, -1],
+            ["vexo", 1, "Words", 0, 0, 1, 0, 0, 1894705200, -1],
+            ["zwei", 0, "Words", 0, 0, 2, 0, 0, 1894701600, -1],
+            ["zwei", 1, "Words", 0, 0, 2, 0, 0, 1894705200, -1],
+            ["dral", 0, "Words", 0, 0, 3, 0, 0, 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894700000000, 3, 5, 0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, -1, 2]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/change/template-map",
+  "scenario_sha256": "f1fdd7c698c21e11850d54dc94c8d49bbdb021eb46ab180523d299a9a36ed5c8",
+  "tz": "UTC"
+}

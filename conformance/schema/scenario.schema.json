@@ -322,6 +322,11 @@
           "pattern": "^\\s*(media_dir|media_trash|media_pending|media_quick_check)\\s*$"
         },
         {
+          "description": "stats-ops.md H2, H5: studied_today_raw and studied_today_text take no references.",
+          "type": "string",
+          "pattern": "^\\s*(studied_today_raw|studied_today_text)\\s*$"
+        },
+        {
           "type": "object",
           "minProperties": 1,
           "maxProperties": 1,
@@ -386,7 +391,7 @@
             "backup_files": { "description": "backup-ops.md F5: the files of the backups folder.", "type": "null" },
             "backup_settings": { "description": "backup-ops.md F6: the backup limits as read now.", "type": "null" },
             "search": {
-              "description": "search-ops.md S1: searches run in order, each in cards mode (default) or notes mode.",
+              "description": "search-ops.md S1: searches run in order, each in cards mode (default) or notes mode; browser-ops.md B1: order sorts the result by a column.",
               "type": "array",
               "minItems": 1,
               "items": {
@@ -395,7 +400,42 @@
                 "additionalProperties": false,
                 "properties": {
                   "query": { "type": "string" },
-                  "kind": { "enum": ["cards", "notes"] }
+                  "kind": { "enum": ["cards", "notes"] },
+                  "order": {
+                    "description": "browser-ops.md B1: the column key (any string; unknown and unsortable keys give unsortable) and the direction, ascending when reverse is false or missing.",
+                    "type": "object",
+                    "required": ["column"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "column": { "type": "string" },
+                      "reverse": { "type": "boolean" }
+                    }
+                  }
+                }
+              }
+            },
+            "browser_rows": {
+              "description": "browser-ops.md B3: Browse rows for these columns, cards or notes as the config key browserTableShowNotesMode says; references of that mode's kind only; at most one request per step.",
+              "type": "object",
+              "required": ["columns", "rows"],
+              "additionalProperties": false,
+              "properties": {
+                "columns": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "noteFld", "question", "answer", "template", "deck", "cardDue", "cardEase", "cardIvl", "cardReps", "cardLapses",
+                      "noteCrt", "cardMod", "noteMod", "note", "noteTags", "originalPosition", "stability", "difficulty", "retrievability"
+                    ]
+                  }
+                },
+                "rows": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "type": "string", "pattern": "^#[nc][1-9][0-9]*$" }
                 }
               }
             },
@@ -430,6 +470,51 @@
             },
             "stats": { "description": "Draft.", "type": ["object", "null"] },
             "digest": { "type": "null" },
+            "studied_today_raw": { "description": "stats-ops.md H2.", "type": "null" },
+            "studied_today_text": { "description": "stats-ops.md H5.", "type": "null" },
+            "studied_today_format": {
+              "description": "stats-ops.md H6: [cards, time_ms] pairs.",
+              "type": "object",
+              "required": ["inputs"],
+              "additionalProperties": false,
+              "properties": {
+                "inputs": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "array",
+                    "prefixItems": [
+                      { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                      { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 }
+                    ],
+                    "minItems": 2,
+                    "maxItems": 2
+                  }
+                }
+              }
+            },
+            "today_stats": {
+              "description": "stats-ops.md H7: scopes, each collection, {deck: name} or {search: text}.",
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "anyOf": [
+                  { "const": "collection" },
+                  {
+                    "type": "object",
+                    "required": ["deck"],
+                    "additionalProperties": false,
+                    "properties": { "deck": { "type": "string", "minLength": 1 } }
+                  },
+                  {
+                    "type": "object",
+                    "required": ["search"],
+                    "additionalProperties": false,
+                    "properties": { "search": { "type": "string" } }
+                  }
+                ]
+              }
+            },
             "type_answer": {
               "description": "specs/conformance/type-answer-ops.md K1: the type-in comparison over [expected, typed] pairs of strings; never touches the scenario's collection.",
               "type": "object",
@@ -521,6 +606,13 @@
                 }
               ]
             },
+            "notetype_templates": {
+              "description": "notetype-structure-ops.md M3: the stored template texts of the named note types.",
+              "type": "object",
+              "required": ["notetypes"],
+              "additionalProperties": false,
+              "properties": { "notetypes": { "$ref": "#/$defs/names" } }
+            },
             "blob_decode": {
               "description": "model-ops.md L4: whether the named records' protobuf blobs decode.",
               "type": "object",
@@ -530,6 +622,38 @@
                 "notetypes": { "$ref": "#/$defs/names" },
                 "decks": { "$ref": "#/$defs/names" },
                 "presets": { "$ref": "#/$defs/names" }
+              }
+            },
+            "file_col": {
+              "description": "storage-ops.md P5: col columns of a session file a schema11_copy step wrote, read without opening it as a collection.",
+              "type": "object",
+              "required": ["name", "columns"],
+              "additionalProperties": false,
+              "properties": {
+                "name": { "$ref": "#/$defs/session_file" },
+                "columns": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "enum": ["crt", "mod", "scm", "ver", "dty", "usn", "ls", "conf", "models", "decks", "dconf", "tags"] }
+                }
+              }
+            },
+            "file_objects": {
+              "description": "storage-ops.md P6: schema_objects of a session file a schema11_copy step wrote.",
+              "type": "object",
+              "required": ["name"],
+              "additionalProperties": false,
+              "properties": { "name": { "$ref": "#/$defs/session_file" } }
+            },
+            "file_query": {
+              "description": "storage-ops.md P7: one statement that only reads, on a session file a schema11_copy step wrote.",
+              "type": "object",
+              "required": ["name", "sql"],
+              "additionalProperties": false,
+              "properties": {
+                "name": { "$ref": "#/$defs/session_file" },
+                "sql": { "type": "string", "minLength": 1 }
               }
             },
             "package_col": {
@@ -546,6 +670,28 @@
                   "items": { "enum": ["ver", "conf", "models", "decks", "dconf", "tags"] }
                 }
               }
+            },
+            "package_media": {
+              "description": "package-ops.md E10: the media map of a package in the session directory (name) or of a fixture package (fixture), with each numbered entry's decoded size.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": { "$ref": "#/$defs/any_package_name" },
+                "fixture": { "$ref": "#/$defs/package_fixture" }
+              },
+              "oneOf": [{ "required": ["name"] }, { "required": ["fixture"] }]
+            },
+            "package_db_dump": {
+              "description": "package-ops.md E11: db_dump's value (O8) of a package's collection entry, read with plain SQLite; tables and raw as db_dump's.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": { "$ref": "#/$defs/any_package_name" },
+                "fixture": { "$ref": "#/$defs/package_fixture" },
+                "tables": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/dump_table" } },
+                "raw": { "type": "boolean" }
+              },
+              "oneOf": [{ "required": ["name"] }, { "required": ["fixture"] }]
             },
             "package_listing": {
               "description": "package-ops.md E3: the layout of a package in the session directory (name) or of a fixture package (fixture).",
@@ -879,6 +1025,29 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.apkg$"
     },
+    "session_file": {
+      "description": "storage-ops.md P8.1: a collection file in the session directory that a schema11_copy step writes; lower case only, so no name is collection.anki2 or another session file on a case-insensitive volume; never collection.anki2.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*\\.anki2$",
+      "not": { "const": "collection.anki2" }
+    },
+    "export_limit": {
+      "description": "package-ops.md E7: collection, a deck by its stored name, or a non-empty list of note or card references.",
+      "anyOf": [
+        { "const": "collection" },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "deck": { "type": "string", "minLength": 1 },
+            "notes": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^#n[1-9][0-9]*$" } },
+            "cards": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^#c[1-9][0-9]*$" } }
+          }
+        }
+      ]
+    },
     "colpkg_name": {
       "description": "package-ops.md E1, E2.1: a collection package file in the session directory.",
       "type": "string",
@@ -933,13 +1102,22 @@
           }
         },
         "open": {
-          "description": "storage-ops.md P1: replace the collection with a copy of conformance/fixtures/<fixture> and open it. Only in scenarios with no setup whose first step is open (checked when the scenario loads).",
+          "description": "storage-ops.md P1: replace the collection with a copy of conformance/fixtures/<fixture>, or of the session file <file> an earlier schema11_copy step wrote, and open it. Only in scenarios with no setup whose first step is an open naming a fixture (checked when the scenario loads).",
           "type": "object",
-          "required": ["fixture"],
+          "minProperties": 1,
+          "maxProperties": 1,
           "additionalProperties": false,
           "properties": {
-            "fixture": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)*\\.anki2$" }
+            "fixture": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)*\\.anki2$" },
+            "file": { "$ref": "#/$defs/session_file" }
           }
+        },
+        "schema11_copy": {
+          "description": "storage-ops.md P4: write a schema-11 copy of the collection to a session file; the collection does not change.",
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": { "name": { "$ref": "#/$defs/session_file" } }
         },
         "observe": { "type": "array", "items": { "$ref": "#/$defs/observation_request" } },
         "edit_note": {
@@ -1253,7 +1431,7 @@
           ]
         },
         "import": {
-          "description": "The collection package forms are exactly {format: colpkg, fixture} or {format: colpkg, name} (package-ops.md E2); other forms are draft (package).",
+          "description": "The collection package forms are exactly {format: colpkg, fixture} or {format: colpkg, name} (package-ops.md E2); the deck package form is {format: apkg, fixture | name, merge_notetypes, update_notes, update_notetypes, with_scheduling, with_deck_configs} (package-ops.md E6); other forms are draft (package).",
           "if": { "type": "object", "required": ["format"], "properties": { "format": { "const": "colpkg" } } },
           "then": {
             "type": "object",
@@ -1266,10 +1444,30 @@
             },
             "oneOf": [{ "required": ["fixture"] }, { "required": ["name"] }]
           },
-          "else": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["fixture"], "properties": { "fixture": { "type": "string" } } }] }
+          "else": {
+            "if": { "type": "object", "required": ["format"], "properties": { "format": { "const": "apkg" } } },
+            "then": {
+              "description": "package-ops.md E6.1: the deck package form, exactly one of fixture and name, every option.",
+              "type": "object",
+              "required": ["format", "merge_notetypes", "update_notes", "update_notetypes", "with_scheduling", "with_deck_configs"],
+              "additionalProperties": false,
+              "properties": {
+                "format": { "const": "apkg" },
+                "fixture": { "allOf": [{ "$ref": "#/$defs/package_fixture" }, { "pattern": "\\.apkg$" }] },
+                "name": { "$ref": "#/$defs/package_name" },
+                "merge_notetypes": { "type": "boolean" },
+                "update_notes": { "enum": ["if_newer", "always", "never"] },
+                "update_notetypes": { "enum": ["if_newer", "always", "never"] },
+                "with_scheduling": { "type": "boolean" },
+                "with_deck_configs": { "type": "boolean" }
+              },
+              "oneOf": [{ "required": ["fixture"] }, { "required": ["name"] }]
+            },
+            "else": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["fixture"], "properties": { "fixture": { "type": "string" } } }] }
+          }
         },
         "export": {
-          "description": "Draft (package), except the legacy package form {format: apkg, name, legacy: true} (model-ops.md L6) and the collection package form {format: colpkg, name} (package-ops.md E1).",
+          "description": "Draft (package), except the legacy package form {format: apkg, name, legacy: true} (model-ops.md L6), the collection package form {format: colpkg, name} (package-ops.md E1) and the deck package form {format: apkg, name, limit, scheduling, presets, media} (package-ops.md E7).",
           "allOf": [
             { "$ref": "#/$defs/draft_args" },
             { "required": ["format", "name"], "properties": { "format": { "enum": ["apkg", "colpkg"] }, "name": { "type": "string" } } },
@@ -1293,6 +1491,22 @@
                 "properties": {
                   "format": { "const": "colpkg" },
                   "name": { "$ref": "#/$defs/colpkg_name" }
+                }
+              }
+            },
+            {
+              "if": { "required": ["format"], "properties": { "format": { "const": "apkg" } }, "not": { "required": ["legacy"] } },
+              "then": {
+                "description": "package-ops.md E7: the deck package form, every key.",
+                "required": ["format", "name", "limit", "scheduling", "presets", "media"],
+                "additionalProperties": false,
+                "properties": {
+                  "format": { "const": "apkg" },
+                  "name": { "$ref": "#/$defs/package_name" },
+                  "limit": { "$ref": "#/$defs/export_limit" },
+                  "scheduling": { "type": "boolean" },
+                  "presets": { "type": "boolean" },
+                  "media": { "type": "boolean" }
                 }
               }
             }
@@ -1400,6 +1614,21 @@
         },
         "empty_media_trash": {
           "description": "Stable (media-ops.md F8): delete every media trash entry permanently.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "check_media": {
+          "description": "Draft (media-ops.md F14.1): a Check Media run to its end; its output is kept for the next delete_unused_media and tag_missing_media steps.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "delete_unused_media": {
+          "description": "Draft (media-ops.md F14.2): trash the unused list of the latest check_media step. Between that step and this one only observe, advance, set_clock and tag_missing_media may run (checked when the scenario loads).",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "tag_missing_media": {
+          "description": "Draft (media-ops.md F14.3): add the tag missing-media to the missing_notes of the latest check_media step, as one undoable update_tag step.",
           "type": "object",
           "maxProperties": 0
         },
@@ -1607,6 +1836,56 @@
           "description": "notetype-ops.md T6: the on-demand Image Occlusion note type.",
           "type": "object",
           "maxProperties": 0
+        },
+        "change_notetype_info": {
+          "description": "change-notetype-ops.md H1: the change screen opened on these notes with this target note type (stored name); rejections not_found, multiple_notetypes.",
+          "type": "object",
+          "required": ["notes", "notetype"],
+          "additionalProperties": false,
+          "properties": {
+            "notes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/note_ref" } },
+            "notetype": { "type": "string", "minLength": 1 }
+          }
+        },
+        "change_notetype": {
+          "description": "change-notetype-ops.md H2: the change saved for the latest change_notetype_info step, run as accepted; a missing map takes that step's default. Lengths and ordinals are checked against that step's note types when the step runs (invalid_scenario). Rejections no_changes, schema_changed, not_found, multiple_notetypes (Meguri's only).",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fields": { "type": "array", "items": { "anyOf": [{ "$ref": "#/$defs/uint" }, { "type": "null" }] } },
+            "templates": { "type": "array", "items": { "anyOf": [{ "$ref": "#/$defs/uint" }, { "type": "null" }] } }
+          }
+        },
+        "empty_cards": {
+          "description": "empty-cards-ops.md Y1: the Empty Cards scan; the executor keeps its listed cards for the next delete_empty_cards steps.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "delete_empty_cards": {
+          "description": "empty-cards-ops.md Y2: delete the cards the latest empty_cards step listed, with the Keep notes with no valid cards option.",
+          "type": "object",
+          "required": ["keep_notes"],
+          "additionalProperties": false,
+          "properties": { "keep_notes": { "type": "boolean" } }
+        },
+        "remove_notetype": {
+          "description": "notetype-structure-ops.md M1: removes the named note type with its notes and cards; output none.",
+          "type": "object",
+          "required": ["notetype"],
+          "additionalProperties": false,
+          "properties": { "notetype": { "type": "string", "minLength": 1 } }
+        },
+        "restore_notetype": {
+          "description": "notetype-structure-ops.md M2: Restore to Default with the given stock kind, or the stored one; output none, rejection needs_stock_kind.",
+          "type": "object",
+          "required": ["notetype"],
+          "additionalProperties": false,
+          "properties": {
+            "notetype": { "type": "string", "minLength": 1 },
+            "kind": {
+              "enum": ["basic", "basic_and_reversed", "basic_optional_reversed", "basic_typing", "cloze", "image_occlusion"]
+            }
+          }
         }
       }
     },

@@ -1,0 +1,41 @@
+# specs/browser/sorting.md S3, S4, S5 (template): cards mode sorts by template
+# rank (name under unicase, then note type id, then ordinal), then ordinal:
+# Pair's "Forward" ranks before Echo's "forward" (Pair is the older note
+# type), and the cloze cards of Gap sort by ordinal under one rank, so Gap 2
+# comes before Gap 10 (R1121, R1143). Notes mode sorts by card count, equal
+# counts by note id (R1144).
+id: browser/sort/card-type
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+    - name: Echo
+      fields: [Front, Back]
+      templates:
+        - {name: forward, front: "{{Front}}", back: "{{Back}}"}
+      css: ".card { margin: 0; }"
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, fields: [a1, b1]}
+    - {notetype: Echo, fields: [a2, b2]}
+    - {notetype: Gap, fields: ["{{c1::x}} {{c2::y}} {{c10::z}}", ""]}
+    - {notetype: Pair, fields: [a4, ""]}
+    - {notetype: Echo, fields: [a5, b5]}
+    - {notetype: Gap, fields: ["{{c2::only}}", ""]}
+steps:
+  - observe:
+      - search:
+          - {query: '', order: {column: template}}
+          - {query: '', order: {column: template, reverse: true}}
+          - {query: '', kind: notes, order: {column: template}}
+          - {query: '', kind: notes, order: {column: template, reverse: true}}

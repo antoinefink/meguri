@@ -1,0 +1,51 @@
+# specs/storage/schema11-downgrade.md D3-D5 (R1481, R2013). The schema-18
+# fixture gets, by raw SQL, one add-on member in the other of the note type
+# Pair, its field Front, its template Forward, the deck Lang and each preset
+# (protobuf field 255 appended; a later occurrence of a field replaces an
+# earlier one), LaTeX texts of its own on both note types, every bounded value
+# of the preset Default out of range (a NaN hard interval included), every
+# bounded value of Slow at its bound, and a tag state schema 11 cannot hold.
+# One member per record with sorted nested keys keeps every blob's bytes the
+# same in Meguri and Anki. The copy's col row, objects, journal mode, graves
+# and rows are read without opening it; the collection's own dump and objects
+# are the same before and after the copy.
+id: storage/downgrade/contents
+description: The schema-11 copy of a collection holds what Anki's downgrade writes, and the collection itself does not change.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - db_exec: {sql: "UPDATE notetypes SET config = CAST(config || X'2a0a25207061697220707265320b25207061697220706f7374fa0f277b227a7a5f6164646f6e223a7b2261223a5b747275652c2278222c322e355d2c2262223a317d7d' AS BLOB) WHERE name = 'Pair'"}
+  - db_exec: {sql: "UPDATE notetypes SET config = CAST(config || X'2a09252067617020707265320a252067617020706f7374' AS BLOB) WHERE name = 'Gap'"}
+  - db_exec: {sql: "UPDATE fields SET config = CAST(config || X'fa0f117b227a7a5f666c64223a226b656570227d' AS BLOB) WHERE name = 'Front' AND ntid = (SELECT id FROM notetypes WHERE name = 'Pair')"}
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || X'fa0f227b227a7a5f746d706c223a5b312c7b2263223a5b6e756c6c5d2c2264223a307d5d7d' AS BLOB) WHERE name = 'Forward' AND ntid = (SELECT id FROM notetypes WHERE name = 'Pair')"}
+  - db_exec: {sql: "UPDATE decks SET common = CAST(common || X'fa0f1a7b22785f6164646f6e223a5b312c7b2261223a747275657d5d7d' AS BLOB) WHERE name = 'Lang'"}
+  # Default: new/day 10000, reviews/day 10000, starting ease 1.3, easy bonus
+  # 5.5, hard interval NaN, new interval 1.5, interval modifier 0.4, maximum
+  # interval 40000, minimum interval 36501, graduating 0, easy 40000, leech
+  # 10000, maximum answer time 0, new/day minimum 10000, desired retention
+  # 0.995, historical retention 0.5; then {"zz_preset":{"a":[2.5],"b":1}}.
+  - db_exec: {sql: "UPDATE deck_config SET config = CAST(config || X'48904e50904e5d6666a63f650000b0406d0000c07f750000c03f7dcdcccc3e8001c0b8028801959d029001009801c0b802b001904ec001009802904ead0252b87e3fc5020000003ffa0f1f7b227a7a5f707265736574223a7b2261223a5b322e355d2c2262223a317d7d' AS BLOB) WHERE id = 1"}
+  # Slow, every bound kept: 9999, 0, 1.31, 1.0, 0.5, 1.0, 2.0, 36500, 1,
+  # 36500, 1, 9999, 9999, 9999, 0.7, 0.97 in the same field order; then
+  # {"lapse":{"zz_lapse":"x"}}.
+  - db_exec: {sql: "UPDATE deck_config SET config = CAST(config || X'488f4e50005d14aea73f650000803f6d0000003f750000803f7d000000408001949d028801019001949d02980101b0018f4ec0018f4e98028f4ead023333333fc502ec51783ffa0f1a7b226c61707365223a7b227a7a5f6c61707365223a2278227d7d' AS BLOB) WHERE name = 'Slow'"}
+  - db_exec: {sql: "UPDATE tags SET collapsed = 0, config = X'0a0178' WHERE tag = 'vocab'"}
+  - observe: [schema_objects, db_dump]
+  - schema11_copy: {name: legacy.anki2}
+  - observe:
+      - file_col: {name: legacy.anki2, columns: [crt, mod, scm, ver, dty, usn, ls, conf, models, decks, dconf, tags]}
+      - file_objects: {name: legacy.anki2}
+  - observe:
+      - file_query: {name: legacy.anki2, sql: "SELECT * FROM pragma_journal_mode"}
+  - observe:
+      - file_query: {name: legacy.anki2, sql: "SELECT * FROM pragma_integrity_check"}
+  - observe:
+      - file_query: {name: legacy.anki2, sql: "SELECT usn, oid, type FROM graves ORDER BY oid, type"}
+  - observe:
+      - file_query: {name: legacy.anki2, sql: "SELECT * FROM notes ORDER BY id"}
+  - observe:
+      - file_query: {name: legacy.anki2, sql: "SELECT * FROM cards ORDER BY id"}
+  - observe:
+      - file_query: {name: legacy.anki2, sql: "SELECT * FROM revlog ORDER BY id"}
+  - db_exec: {sql: "SELECT * FROM pragma_journal_mode"}
+  - observe: [schema_objects, db_dump]

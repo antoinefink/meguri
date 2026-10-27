@@ -1,0 +1,22 @@
+# C17 of specs/maintenance/check-media.md: after actions/delete-unused, a
+# second Check Media shows the trash count, Empty Trash removes every entry
+# and the folder stays as it was.
+id: maintenance/check-media/actions/empty-trash
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"a.jpg\">", ""]}
+  media_files:
+    - {name: a.jpg, text: "first image"}
+    - {name: b.jpg, text: "second image"}
+steps:
+  - observe: [media_pending]
+  - check_media: {}
+  - delete_unused_media: {}
+  - check_media: {}
+  - empty_media_trash: {}
+  - observe: [media_trash, media_dir]

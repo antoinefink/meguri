@@ -11,6 +11,19 @@
     "steps": { "type": "array", "items": { "$ref": "#/$defs/step_output" } }
   },
   "$defs": {
+    "import_log_list": {
+      "description": "package-ops.md E6.3: I13's entries; note a target note's logical id or a real id.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["note", "fields"],
+        "additionalProperties": false,
+        "properties": {
+          "note": { "anyOf": [{ "$ref": "#/$defs/note_key" }, { "type": "integer" }] },
+          "fields": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
     "card_key": { "type": "string", "pattern": "^#c[1-9][0-9]*$" },
     "render_av_entry": {
       "description": "render-ops.md Q5.2, specs/render/av-tags.md A6: a sound entry by its decoded name, or a TTS entry by its language.",
@@ -77,16 +90,59 @@
           }
         },
         "check_db": {
-          "description": "specs/conformance/collection-check.md K10: the K5 problem counts, or the rejection corrupt.",
+          "description": "specs/conformance/collection-check.md K10: the K5 problem counts, or the rejection corrupt or failed.",
           "anyOf": [
             { "$ref": "#/$defs/check_db_counts" },
             {
               "allOf": [
                 { "$ref": "#/$defs/rejection" },
-                { "properties": { "error": { "enum": ["corrupt"] } } }
+                { "properties": { "error": { "enum": ["corrupt", "failed"] } } }
               ]
             }
           ]
+        },
+        "check_media": {
+          "description": "specs/conformance/media-ops.md F14.1: the part of Check Media's report that Anki also gives.",
+          "type": "object",
+          "required": ["unused", "missing", "missing_notes", "renamed", "dirs", "oversize", "extracted", "trash_count", "field_templates"],
+          "additionalProperties": false,
+          "properties": {
+            "unused": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "missing": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "missing_notes": { "type": "array", "items": { "anyOf": [{ "$ref": "#/$defs/note_key" }, { "type": "integer" }] } },
+            "renamed": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } },
+            "dirs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "oversize": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "extracted": { "type": "integer", "minimum": 0 },
+            "trash_count": { "type": "integer", "minimum": 0 },
+            "field_templates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["notetype", "template", "side"],
+                "additionalProperties": false,
+                "properties": {
+                  "notetype": { "type": "string" },
+                  "template": { "type": "string" },
+                  "side": { "enum": ["front", "back"] }
+                }
+              }
+            }
+          }
+        },
+        "delete_unused_media": {
+          "description": "specs/conformance/media-ops.md F14.2: the number of files trashed.",
+          "type": "object",
+          "required": ["count"],
+          "additionalProperties": false,
+          "properties": { "count": { "type": "integer", "minimum": 0 } }
+        },
+        "tag_missing_media": {
+          "description": "specs/conformance/media-ops.md F14.3: the number of notes written.",
+          "type": "object",
+          "required": ["count"],
+          "additionalProperties": false,
+          "properties": { "count": { "type": "integer", "minimum": 0 } }
         },
         "add_media": {
           "description": "specs/conformance/media-ops.md F5: the stored name, or a Meguri-only rejection.",
@@ -203,18 +259,42 @@
         },
         "schema_objects": {
           "description": "storage-ops.md P3: sqlite_master rows sorted by type, then name; sql normalized.",
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["type", "name", "tbl_name", "sql"],
-            "additionalProperties": false,
-            "properties": {
-              "type": { "enum": ["table", "index", "view", "trigger"] },
-              "name": { "type": "string" },
-              "tbl_name": { "type": "string" },
-              "sql": { "type": ["string", "null"] }
-            }
+          "$ref": "#/$defs/schema_object_list"
+        },
+        "schema11_copy": {
+          "description": "storage-ops.md P4: a successful copy records {}, so this member holds only a rejection.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_json"] } } }]
+        },
+        "file_col": {
+          "description": "storage-ops.md P5: the requested col columns of a session file; integers as stored, the JSON columns parsed.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "crt": { "type": "integer" },
+            "mod": { "type": "integer" },
+            "scm": { "type": "integer" },
+            "ver": { "type": "integer" },
+            "dty": { "type": "integer" },
+            "usn": { "type": "integer" },
+            "ls": { "type": "integer" },
+            "conf": { "type": "object" },
+            "models": { "$ref": "#/$defs/objects_by_id" },
+            "decks": { "$ref": "#/$defs/objects_by_id" },
+            "dconf": { "$ref": "#/$defs/objects_by_id" },
+            "tags": { "type": "object", "additionalProperties": { "type": "integer" } }
           }
+        },
+        "file_objects": {
+          "description": "storage-ops.md P6: schema_objects of a session file.",
+          "$ref": "#/$defs/schema_object_list"
+        },
+        "file_query": {
+          "description": "storage-ops.md P7: the rows the statement returned on a session file; [] when none.",
+          "type": "object",
+          "required": ["rows"],
+          "additionalProperties": false,
+          "properties": { "rows": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/sql_value" } } } }
         },
         "card": {
           "type": "object",
@@ -318,10 +398,130 @@
           "additionalProperties": false,
           "properties": { "name": { "type": "string" } }
         },
+        "change_notetype_info": {
+          "description": "change-notetype-ops.md H1: names, default maps, their loss preview, counts and the schema stamp, or a rejection.",
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "old_notetype", "new_notetype", "old_fields", "new_fields", "old_templates", "new_templates", "fields", "templates",
+                "discarded_fields", "dropped_templates", "removed_cards", "field_content", "card_counts", "schema"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "old_notetype": { "type": "string" },
+                "new_notetype": { "type": "string" },
+                "old_fields": { "type": "array", "items": { "type": "string" } },
+                "new_fields": { "type": "array", "items": { "type": "string" } },
+                "old_templates": { "type": "array", "items": { "type": "string" } },
+                "new_templates": { "type": "array", "items": { "type": "string" } },
+                "fields": { "type": "array", "items": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] } },
+                "templates": {
+                  "anyOf": [
+                    { "type": "array", "items": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] } },
+                    { "type": "null" }
+                  ]
+                },
+                "discarded_fields": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+                "dropped_templates": { "anyOf": [{ "type": "array", "items": { "type": "integer", "minimum": 0 } }, { "type": "null" }] },
+                "removed_cards": { "type": "integer", "minimum": 0 },
+                "field_content": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+                "card_counts": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "prefixItems": [{ "type": "integer", "minimum": 0 }, { "type": "integer", "minimum": 1 }],
+                    "minItems": 2,
+                    "maxItems": 2
+                  }
+                },
+                "schema": { "type": "integer" }
+              }
+            },
+            { "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["not_found", "multiple_notetypes"] } } }] }
+          ]
+        },
+        "change_notetype": {
+          "description": "change-notetype-ops.md H2: the number of notes changed, or a rejection (multiple_notetypes is Meguri's only).",
+          "anyOf": [
+            {
+              "type": "object",
+              "required": ["notes"],
+              "additionalProperties": false,
+              "properties": { "notes": { "type": "integer", "minimum": 1 } }
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/rejection" },
+                { "properties": { "error": { "enum": ["no_changes", "schema_changed", "not_found", "multiple_notetypes"] } } }
+              ]
+            }
+          ]
+        },
+        "empty_cards": {
+          "description": "empty-cards-ops.md Y1: per note type with empty cards, in the scan's order, its notes (ascending id) with the ordinals of their empty cards.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["notetype", "notes"],
+            "additionalProperties": false,
+            "properties": {
+              "notetype": { "type": "string" },
+              "notes": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["note", "ords", "cards", "all_empty"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "note": { "anyOf": [{ "$ref": "#/$defs/note_key" }, { "type": "integer" }] },
+                    "ords": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 0 } },
+                    "cards": { "type": "integer", "minimum": 1 },
+                    "all_empty": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "delete_empty_cards": {
+          "description": "empty-cards-ops.md Y2: cards deleted and listed cards kept because they became valid (always 0 on the oracle, notes/empty-cards E5).",
+          "type": "object",
+          "required": ["deleted", "kept_valid"],
+          "additionalProperties": false,
+          "properties": {
+            "deleted": { "type": "integer", "minimum": 0 },
+            "kept_valid": { "type": "integer", "minimum": 0 }
+          }
+        },
         "notetype_structure": {
           "description": "notetype-ops.md T8: note types by stored name, without template text, CSS or ids.",
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/notetype_structure" }
+        },
+        "restore_notetype": {
+          "description": "notetype-structure-ops.md M2: the op has no output, so only a rejection appears.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["needs_stock_kind"] } } }]
+        },
+        "notetype_templates": {
+          "description": "notetype-structure-ops.md M3: per stored name, the templates in ordinal order with their four texts as stored.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "front", "back", "browser_front", "browser_back"],
+              "additionalProperties": false,
+              "properties": {
+                "name": { "type": "string" },
+                "front": { "type": "string" },
+                "back": { "type": "string" },
+                "browser_front": { "type": "string" },
+                "browser_back": { "type": "string" }
+              }
+            }
+          }
         },
         "blob_decode": {
           "description": "model-ops.md L4: per record, ok or invalid_blob.",
@@ -334,21 +534,67 @@
           }
         },
         "export": {
-          "description": "dsl.md D7.2: the legacy package form outputs {notes} (model-ops.md L6); the collection package form outputs nothing (package-ops.md E1); the other forms are draft (package).",
-          "type": "object",
-          "properties": { "notes": { "type": "integer", "minimum": 0 } }
-        },
-        "import": {
-          "description": "package-ops.md E2.3: the collection package forms output nothing, so this member holds only their rejection; the other forms are draft (package).",
+          "description": "dsl.md D7.2: the legacy package form and the deck package form output {notes} (model-ops.md L6, package-ops.md E7), the deck package form or its rejection; the collection package form outputs nothing (package-ops.md E1); the other forms are draft (package).",
           "anyOf": [
             {
               "allOf": [
                 { "$ref": "#/$defs/rejection" },
-                { "properties": { "error": { "enum": ["too_new", "corrupt"] } } }
+                { "properties": { "error": { "enum": ["invalid_ids", "media_check_required"] } } }
               ]
             },
-            { "type": "object", "not": { "required": ["error"] } }
+            {
+              "type": "object",
+              "not": { "required": ["error"] },
+              "properties": { "notes": { "type": "integer", "minimum": 0 } }
+            }
           ]
+        },
+        "import": {
+          "description": "package-ops.md E2.3, E6.3, E6.4: the collection package forms output nothing, so this member holds only their rejection; the deck package form outputs the import log or its rejection.",
+          "anyOf": [
+            {
+              "allOf": [
+                { "$ref": "#/$defs/rejection" },
+                { "properties": { "error": { "enum": ["too_new", "corrupt", "notetype_kind_conflict"] } } }
+              ]
+            },
+            {
+              "type": "object",
+              "required": ["found_notes", "new", "updated", "duplicate", "conflicting", "missing_notetype", "missing_deck", "first_field_match", "empty_first_field"],
+              "additionalProperties": false,
+              "properties": {
+                "found_notes": { "type": "integer", "minimum": 0 },
+                "new": { "$ref": "#/$defs/import_log_list" },
+                "updated": { "$ref": "#/$defs/import_log_list" },
+                "duplicate": { "$ref": "#/$defs/import_log_list" },
+                "conflicting": { "$ref": "#/$defs/import_log_list" },
+                "missing_notetype": { "$ref": "#/$defs/import_log_list" },
+                "missing_deck": { "$ref": "#/$defs/import_log_list" },
+                "first_field_match": { "$ref": "#/$defs/import_log_list" },
+                "empty_first_field": { "$ref": "#/$defs/import_log_list" }
+              }
+            },
+            { "type": "object", "maxProperties": 0 }
+          ]
+        },
+        "package_media": {
+          "description": "package-ops.md E10: the package's media map records in map order (latest) or ascending member number (legacy), sha1 lower-case hex, entry_size the numbered entry's decoded size.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "size", "sha1", "entry_size"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "size": { "type": ["integer", "null"], "minimum": 0 },
+              "sha1": { "anyOf": [{ "type": "string", "pattern": "^([0-9a-f]{2})*$" }, { "type": "null" }] },
+              "entry_size": { "type": ["integer", "null"], "minimum": 0 }
+            }
+          }
+        },
+        "package_db_dump": {
+          "description": "package-ops.md E11: db_dump's value (O8) of the package's collection entry.",
+          "$ref": "#/$defs/db_dump"
         },
         "package_listing": {
           "description": "package-ops.md E3: the archive's entries in order with their compression methods, the meta version (null without a meta entry, invalid when it does not decode), and the facts of each raw SQLite entry.",
@@ -708,6 +954,48 @@
           }
         },
         "db_dump": { "$ref": "#/$defs/db_dump" },
+        "studied_today_raw": {
+          "description": "stats-ops.md H2: the counted rows and the sum of their stored time.",
+          "type": "object",
+          "required": ["cards", "time_ms"],
+          "additionalProperties": false,
+          "properties": {
+            "cards": { "type": "integer", "minimum": 0 },
+            "time_ms": { "type": "integer" }
+          }
+        },
+        "studied_today_text": {
+          "description": "stats-ops.md H5: the Home studied-today line (stats/studied-today T2), English.",
+          "type": "string",
+          "pattern": "^Studied "
+        },
+        "studied_today_format": {
+          "description": "stats-ops.md H6: the Home line for each requested pair, in request order.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^Studied " }
+        },
+        "today_stats": {
+          "description": "stats-ops.md H7: the Stats Today values (stats/studied-today T3.3) per requested scope, in request order.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["answers", "time_ms", "correct", "learn", "review", "relearn", "filtered", "mature", "mature_correct"],
+            "additionalProperties": false,
+            "properties": {
+              "answers": { "type": "integer", "minimum": 0 },
+              "time_ms": { "type": "integer", "minimum": 0 },
+              "correct": { "type": "integer", "minimum": 0 },
+              "learn": { "type": "integer", "minimum": 0 },
+              "review": { "type": "integer", "minimum": 0 },
+              "relearn": { "type": "integer", "minimum": 0 },
+              "filtered": { "type": "integer", "minimum": 0 },
+              "mature": { "type": "integer", "minimum": 0 },
+              "mature_correct": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
         "browser_config": {
           "description": "specs/conformance/browser-config-ops.md B2: the 23 browser and search config keys as Anki's own reads give them; the last eight are stored JSON values of any shape.",
           "type": "object",
@@ -861,7 +1149,7 @@
           }
         },
         "search": {
-          "description": "specs/conformance/search-ops.md S1: one output per request, in request order.",
+          "description": "specs/conformance/search-ops.md S1: one output per request, in request order; with order, specs/conformance/browser-ops.md B1, B2.",
           "type": "array",
           "items": {
             "anyOf": [
@@ -871,13 +1159,52 @@
                 "additionalProperties": false,
                 "properties": {
                   "ids": {
-                    "description": "#cN (cards mode) or #nN (notes mode) in logical-id order, then real ids of unnamed rows in ascending order.",
+                    "description": "Without order: #cN (cards mode) or #nN (notes mode) in logical-id order, then real ids of unnamed rows in ascending order. With order: the sorted result, unnamed rows as real ids at their place, each equal-key run in logical-id order (browser-ops.md B2).",
                     "type": "array",
                     "items": { "anyOf": [{ "type": "string", "pattern": "^#[nc][1-9][0-9]*$" }, { "type": "integer" }] }
                   }
                 }
               },
-              { "$ref": "#/$defs/search_error" }
+              { "$ref": "#/$defs/search_error" },
+              {
+                "description": "browser-ops.md B1: the order names a column that is not one of the 19 keys or not sortable in the request's mode.",
+                "type": "object",
+                "required": ["error"],
+                "additionalProperties": false,
+                "properties": { "error": { "const": "unsortable" } }
+              }
+            ]
+          }
+        },
+        "browser_rows": {
+          "description": "specs/conformance/browser-ops.md B3, B4: one entry per requested reference, in request order.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["tint", "cells"],
+                "additionalProperties": false,
+                "properties": {
+                  "tint": { "enum": ["none", "flag_1", "flag_2", "flag_3", "flag_4", "flag_5", "flag_6", "flag_7", "marked", "suspended", "buried"] },
+                  "cells": {
+                    "type": "object",
+                    "propertyNames": {
+                      "enum": [
+                        "noteFld", "question", "answer", "template", "deck", "cardDue", "cardEase", "cardIvl", "cardReps", "cardLapses",
+                        "noteCrt", "cardMod", "noteMod", "note", "noteTags", "originalPosition", "stability", "difficulty", "retrievability"
+                      ]
+                    },
+                    "additionalProperties": { "$ref": "#/$defs/browser_cell" }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["error"],
+                "additionalProperties": false,
+                "properties": { "error": { "enum": ["deleted", "damaged"] } }
+              }
             ]
           }
         },
@@ -1162,7 +1489,74 @@
         "children": { "type": "array", "items": { "$ref": "#/$defs/deck_tree_node" } }
       }
     },
+    "schema_object_list": {
+      "description": "storage-ops.md P3: one entry per sqlite_master row, sorted by type, then name; sql normalized (P3.2), null when SQLite stores none.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "name", "tbl_name", "sql"],
+        "additionalProperties": false,
+        "properties": {
+          "type": { "enum": ["table", "index", "view", "trigger"] },
+          "name": { "type": "string" },
+          "tbl_name": { "type": "string" },
+          "sql": { "type": ["string", "null"] }
+        }
+      }
+    },
     "text_strings": { "type": "array", "items": { "type": "string" } },
+    "browser_cell": {
+      "description": "specs/conformance/browser-ops.md B4; unparsed is the oracle's record of a text it could not read, which no Meguri cell equals.",
+      "anyOf": [
+        { "type": "null" },
+        { "type": "object", "required": ["text"], "additionalProperties": false, "properties": { "text": { "type": "string" } } },
+        { "type": "object", "required": ["count"], "additionalProperties": false, "properties": { "count": { "type": "integer", "minimum": 0 } } },
+        { "type": "object", "required": ["percent"], "additionalProperties": false, "properties": { "percent": { "type": "integer" } } },
+        { "type": "object", "required": ["position"], "additionalProperties": false, "properties": { "position": { "type": "integer" } } },
+        {
+          "type": "object",
+          "required": ["date"],
+          "additionalProperties": false,
+          "properties": { "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, "wrapped": { "const": true } }
+        },
+        {
+          "type": "object",
+          "required": ["new_position"],
+          "additionalProperties": false,
+          "properties": { "new_position": { "type": "integer" }, "wrapped": { "const": true } }
+        },
+        {
+          "type": "object",
+          "required": ["filtered"],
+          "additionalProperties": false,
+          "properties": { "filtered": { "const": true }, "wrapped": { "const": true } }
+        },
+        {
+          "type": "object",
+          "required": ["datetime"],
+          "additionalProperties": false,
+          "properties": { "datetime": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$" } }
+        },
+        { "type": "object", "required": ["marker"], "additionalProperties": false, "properties": { "marker": { "enum": ["new", "learning"] } } },
+        {
+          "type": "object",
+          "required": ["span"],
+          "additionalProperties": false,
+          "properties": {
+            "span": {
+              "type": "object",
+              "required": ["unit", "amount"],
+              "additionalProperties": false,
+              "properties": {
+                "unit": { "enum": ["seconds", "minutes", "hours", "days", "months", "years"] },
+                "amount": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+              }
+            }
+          }
+        },
+        { "type": "object", "required": ["unparsed"], "additionalProperties": false, "properties": { "unparsed": { "type": "string" } } }
+      ]
+    },
     "sha1": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "op_count": {
       "type": "object",

@@ -1,0 +1,45 @@
+# N6.2 and N6.3 of specs/maintenance/check-database-notes.md on a
+# two-template note type: an extra card of ord 5 is deleted
+# (cards_without_template 1); then two extra cards of ord 5 on another note
+# give duplicate_card_ords 1 and cards_without_template 2 (the duplicate is
+# counted again), and both are gone. No graves; scm set. A last run finds
+# nothing.
+id: maintenance/check-db-notes/missing-template
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Two
+      fields: [Front, Back]
+      templates:
+        - {name: Fwd, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Rev, front: "{{Back}}", back: "{{Front}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Two, deck: Inbox, fields: [one, uno]}
+    - {notetype: Two, deck: Inbox, fields: [two, dos]}
+steps:
+  - db_exec:
+      sql: >-
+        INSERT INTO cards
+        SELECT 1000, nid, did, 5, mod, 5, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data
+        FROM cards WHERE nid = (SELECT id FROM notes WHERE sfld = 'one') AND ord = 0
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld, c.ord"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - db_exec:
+      sql: >-
+        INSERT INTO cards
+        SELECT 1001, nid, did, 5, mod, 5, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data
+        FROM cards WHERE nid = (SELECT id FROM notes WHERE sfld = 'two') AND ord = 0
+  - db_exec:
+      sql: >-
+        INSERT INTO cards
+        SELECT 1002, nid, did, 5, mod, 5, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data
+        FROM cards WHERE nid = (SELECT id FROM notes WHERE sfld = 'two') AND ord = 0
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld, c.ord"}
+  - db_exec: {sql: "SELECT count(*) FROM graves"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

@@ -1,0 +1,254 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Trio"
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600003": {
+              "data": "{}",
+              "did": 1,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600003,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600002,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600004": {
+              "data": "{}",
+              "did": 1,
+              "due": 4,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600004,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600003,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600005": {
+              "data": "{}",
+              "did": 1,
+              "due": 4,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600005,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600003,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701660000": {
+              "data": "{}",
+              "did": 1,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701660000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701660,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "graves": {},
+          "notes": {
+            "1894701600000": {
+              "csum": 2264392759,
+              "data": "",
+              "flags": 0,
+              "flds": "a\u001fb\u001fh",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1700000000,
+              "sfld": "a",
+              "tags": "",
+              "usn": 5
+            },
+            "1894701600001": {
+              "csum": 2225411716,
+              "data": "",
+              "flags": 0,
+              "flds": "c\u001fd\u001f",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1700000000,
+              "sfld": "c",
+              "tags": "",
+              "usn": 5
+            },
+            "1894701600002": {
+              "csum": 1491514276,
+              "data": "",
+              "flags": 0,
+              "flds": "e\u001f\u001f",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1700000000,
+              "sfld": "e",
+              "tags": "",
+              "usn": 5
+            },
+            "1894701600003": {
+              "csum": 1242175777,
+              "data": "",
+              "flags": 0,
+              "flds": "f\u001f\u001fh",
+              "guid": "#random",
+              "id": 1894701600003,
+              "mid": 1894701600006,
+              "mod": 1700000000,
+              "sfld": "f",
+              "tags": "",
+              "usn": 5
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["5"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/structure/edit-front",
+  "scenario_sha256": "854ec7e2984860edb08884374cba8b02a548057b5f8bb4570e36a11e3fbaee50",
+  "tz": "UTC"
+}

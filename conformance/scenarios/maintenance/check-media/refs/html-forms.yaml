@@ -1,0 +1,23 @@
+# C6 of specs/maintenance/check-media.md with text/media-references M2 to M4:
+# references from audio and source tags, an object data attribute, quoted
+# and unquoted src, a > inside another attribute, and a sound tag with an
+# entity naming the file a & b.mp3; the one unreferenced file is unused.
+id: maintenance/check-media/refs/html-forms
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<audio src=\"m1.mp3\"></audio><source src=m2.mp3>", "<object data='m3.svg'></object><img alt=\"x>y\" src=\"m4.png\">[sound:a &amp; b.mp3]"]}
+  media_files:
+    - {name: m1.mp3, text: "one"}
+    - {name: m2.mp3, text: "two"}
+    - {name: m3.svg, text: "three"}
+    - {name: m4.png, text: "four"}
+    - {name: "a & b.mp3", text: "five"}
+    - {name: m5.png, text: "six"}
+steps:
+  - check_media: {}
+  - observe: [media_dir, {db_dump: {tables: [notes]}}]

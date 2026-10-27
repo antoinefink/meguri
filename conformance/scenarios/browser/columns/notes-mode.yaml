@@ -1,0 +1,57 @@
+# specs/browser/columns.md C5, C8 in notes mode (browserTableShowNotesMode
+# true), every column. Today is 100 after the clock moves. #n1: Due is its
+# learning card's (the earliest), Avg. Ease 125 (2500 and a learning card's
+# 0), Avg. Interval 10 days (the learning card does not count). #n2 has only
+# new cards (AE50: no Due). #n3 and #n6 spread over two decks; #n6's filtered
+# card is left out of Due. #n4's first card is its Backward card (the
+# Forward card comes later from edit_note), which gives Question, Answer,
+# Position and the FSRS cells. #n5 is marked (tint) and suspended (no Due).
+# #n7: Card Modified is its cards' latest mod. #n8's only card is filtered:
+# its deck shows the home deck. #n9 averages intervals 2 and 5 to 3.5 days.
+id: browser/columns/notes-mode
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, Other, Cram]
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [review-and-learning, x1]}
+    - {notetype: Pair, deck: Lang, fields: [only-new, x2]}
+    - {notetype: Pair, deck: Lang, fields: [two-decks, x3]}
+    - {notetype: Pair, deck: Lang, fields: ["", backward-first]}
+    - {notetype: Solo, deck: Lang, fields: [suspended-review, g], tags: [marked]}
+    - {notetype: Pair, deck: Lang, fields: [filtered-and-review, x6]}
+    - {notetype: Pair, deck: Lang, fields: [latest-mod, x7]}
+    - {notetype: Solo, deck: Lang, fields: [only-filtered, g]}
+    - {notetype: Pair, deck: Lang, fields: [relearning-and-review, x9]}
+steps:
+  - edit_note: {note: "#n4", fields: {Front: forward-later}}
+  - advance: 100d
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 103, ivl = 10, factor = 2500, reps = 5, lapses = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1903342200, factor = 0, reps = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'Other') WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 104, ivl = 4, factor = 2500, reps = 2, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3) AND ord = 1", params: ['{"pos":7,"s":10.0,"d":3.0}']}
+  - db_exec: {sql: "UPDATE cards SET due = 50 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -1, due = 105, ivl = 6, factor = 2500, reps = 3 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 9, factor = 2500, reps = 2, odid = did, odue = 106, did = (SELECT id FROM decks WHERE name = 'Cram'), due = -100000 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 5) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 110, ivl = 12, factor = 2700, reps = 4 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 5) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1900000000 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 6) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1900000500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 6) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET odid = did, odue = 8, did = (SELECT id FROM decks WHERE name = 'Cram'), due = -99999 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 7)"}
+  - db_exec: {sql: "UPDATE cards SET type = 3, queue = 1, due = 1903345200, ivl = 2, factor = 2100, reps = 7, lapses = 2 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 8) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 105, ivl = 5, factor = 2500, reps = 3 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 8) AND ord = 1"}
+  - set_config: {key: browserTableShowNotesMode, value: true}
+  - observe:
+      - browser_rows:
+          columns: [noteFld, question, answer, template, deck, cardDue, cardEase, cardIvl, cardReps, cardLapses, noteCrt, cardMod, noteMod, note, noteTags, originalPosition, stability, difficulty, retrievability]
+          rows: ["#n1", "#n2", "#n3", "#n4", "#n5", "#n6", "#n7", "#n8", "#n9"]

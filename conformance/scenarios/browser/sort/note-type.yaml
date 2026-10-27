@@ -1,0 +1,44 @@
+# specs/browser/sorting.md S3, S4, S5 (note): note types rank by name under
+# unicase (Alpha, beta, delta, gamma, Échelle), whatever their creation order;
+# the cards and notes of one note type are an equal-key run
+# (specs/conformance/browser-ops.md B2) (R1128, R1143).
+id: browser/sort/note-type
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: beta
+      fields: [Front, Back]
+      templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Alpha
+      fields: [Front, Back]
+      templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: gamma
+      fields: [Front, Back]
+      templates:
+        - {name: Card, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Other, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+    - name: Échelle
+      fields: [Front, Back]
+      templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: delta
+      fields: [Front, Back]
+      templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: beta, fields: [b1, x]}
+    - {notetype: Alpha, fields: [a1, x]}
+    - {notetype: gamma, fields: [g1, x]}
+    - {notetype: beta, fields: [b2, x]}
+    - {notetype: Échelle, fields: [e1, x]}
+    - {notetype: delta, fields: [d1, x]}
+steps:
+  - observe:
+      - search:
+          - {query: '', order: {column: note}}
+          - {query: '', order: {column: note, reverse: true}}
+          - {query: '', kind: notes, order: {column: note}}
+          - {query: '', kind: notes, order: {column: note, reverse: true}}

@@ -1,0 +1,23 @@
+# C8.3 of specs/maintenance/check-database.md: a review card with odue 10 and
+# odid 0 gets odue 0 (first branch); a new card with odue 1.5 gets odue 2
+# (rounded, second branch). Both stamped, card_properties 2, scm unchanged. A
+# second run finds nothing.
+id: maintenance/check-db/card-odue
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 5, odue = 10, odid = 0, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'one')"}
+  - db_exec: {sql: "UPDATE cards SET odue = 1.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'two')"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, typeof(c.odue), c.odue, c.odid, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

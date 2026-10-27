@@ -1,0 +1,27 @@
+# N6.1 of specs/maintenance/check-database-notes.md: a note whose flds are the
+# bytes 66 ff 6f 1f 62 and whose tags are the bytes 20 61 ff 20 (written by
+# CAST(X'..' AS TEXT)) gets U+FFFD for each ill-formed byte, its sort field
+# and checksum computed again, its mod and usn kept; a second note with valid
+# flds and tags whose sfld alone is the bytes 78 ff gets sfld and csum
+# computed again, flds and tags unchanged. notes_invalid_utf8 2, scm stays. A
+# second run finds nothing.
+id: maintenance/check-db-notes/invalid-utf8
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos], tags: [plain]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET flds = CAST(X'66ff6f1f62' AS TEXT), tags = CAST(X'2061ff20' AS TEXT), usn = 5 WHERE sfld = 'one'"}
+  - db_exec: {sql: "UPDATE notes SET sfld = CAST(X'78ff' AS TEXT), usn = 5 WHERE sfld = 'two'"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT id, replace(flds, char(31), '|'), typeof(sfld), sfld, csum, tags, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT tag, usn FROM tags ORDER BY tag"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

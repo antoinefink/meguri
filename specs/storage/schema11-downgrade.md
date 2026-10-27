@@ -3,11 +3,11 @@
 Spec: storage/schema11-downgrade
 Requirements: R1481, R2013; supports R1464, R1466
 Anki: 26.09.3
-Scenarios: none yet; `conformance/scenarios/storage/downgrade/` once the oracle driver has the op (D11)
+Scenarios: conformance/scenarios/storage/downgrade/
 
 What Meguri writes when a collection must reach an Anki release older than schema 18: a separate file at schema 11, with the note types, decks, presets, config and tags back in the JSON columns of `col`, the old `graves` layout, the schema-18 tables and indexes removed, and the rollback-journal mode older releases need (R1481). Its only callers are the legacy package exports with "Support older Anki versions" (U123 for `.apkg`, from a closed staging file; U124 for `.colpkg`, from the open collection; `package/legacy-export` L4, L7 and L8), which add no conversion of their own. Manual Anki transfers (KTD26) send the collection at schema 18 (`sync/one-way#O6.2` keeps `col.ver`), so they need no downgrade.
 
-The copy must equal, value for value, what Anki 26.09.3's own downgrade to schema 11 makes of the same collection (goldens under `conformance/goldens/storage/downgrade/` once recorded, D11). The record → object conversion is the model area's (`model/schema11-json` S3 to S12, U21); this spec adds what the storage does around it. Meguri never downgrades the collection it has open, and never writes the source at all (R2013).
+The copy must equal, value for value, what Anki 26.09.3's own downgrade to schema 11 makes of the same collection (goldens under `conformance/goldens/storage/downgrade/`, D11). The record → object conversion is the model area's (`model/schema11-json` S3 to S12, U21); this spec adds what the storage does around it. Meguri never downgrades the collection it has open, and never writes the source at all (R2013).
 
 ## D1. Entry point and guarantees
 
@@ -197,14 +197,14 @@ So the copy holds D4's objects plus the source's foreign objects minus those on 
 
 ## D11. Scenarios and tests
 
-The scenarios below are not in the suite yet: they wait for the oracle driver to carry `conformance/storage-ops` P1's `file` form and P4 to P7, and are ported with their goldens then. They start from the fixture `storage/schema-18.anki2` (`storage/schema-upgrade#U16`: no stock note type; note types `Pair` and `Gap`, decks `Default`, `Lang`, `Lang::Verbs` and the filtered `Cram`, presets `Default` and `Slow`, tags, review-log rows, graves and the config key `meguriFixture` stored as non-compact text). They add, with `db_exec`, one `other` member to the note type `Pair`, its field `Front`, its template `Forward`, the deck `Lang` and each preset, out-of-range values (D5) to the preset `Default`, values at their bounds to `Slow`, and a tag state schema 11 cannot hold. The ops and observations are `specs/conformance/storage-ops.md` P1, P4 to P7.
+The scenarios start from the fixture `storage/schema-18.anki2` (`storage/schema-upgrade#U16`: no stock note type; note types `Pair` and `Gap`, decks `Default`, `Lang`, `Lang::Verbs` and the filtered `Cram`, presets `Default` and `Slow`, tags, review-log rows, graves and the config key `meguriFixture` stored as non-compact text). They add, with `db_exec`, one `other` member to the note type `Pair`, its field `Front`, its template `Forward`, the deck `Lang` and each preset, out-of-range values (D5) to the preset `Default`, values at their bounds to `Slow`, and a tag state schema 11 cannot hold. The ops and observations are `specs/conformance/storage-ops.md` P1, P4 to P7.
 
 | Scenario | Covers | Golden |
 |---|---|---|
-| `storage/downgrade/contents` | D3 to D5: the copy's `col` row (objects with their `other` members, compact config values, preset range checks), objects, journal mode, integrity, graves, notes, cards and review log; the collection's own dump and objects unchanged by the copy | awaits the driver ops (oracle maintainer) |
-| `storage/downgrade/roundtrip` | D7: the copy, opened (and so upgraded) in place of the collection, against the dump before the copy; `other` members survive the round trip in the blobs | awaits the driver ops |
-| `storage/downgrade/oracle-opens` (live) | T1: Meguri writes the copy, the oracle reads it and opens it; its dump equals the golden of Anki's own copy and upgrade | awaits the driver ops |
-| `storage/downgrade/config-invalid` | D3.1, D8: a config value with a number beyond the 64-bit float range, then one that is not JSON, refuse the copy (`invalid_json`) and leave the collection as it was; with an in-range value the copy succeeds | awaits the driver ops |
+| `storage/downgrade/contents` | D3 to D5: the copy's `col` row (objects with their `other` members, compact config values, preset range checks), objects, journal mode, integrity, graves, notes, cards and review log; the collection's own dump and objects unchanged by the copy | recorded |
+| `storage/downgrade/roundtrip` | D7: the copy, opened (and so upgraded) in place of the collection, against the dump before the copy; `other` members survive the round trip in the blobs | recorded |
+| `storage/downgrade/oracle-opens` (live) | T1: Meguri writes the copy, the oracle reads it and opens it; its dump equals the golden of Anki's own copy and upgrade | recorded |
+| `storage/downgrade/config-invalid` | D3.1, D8: a config value with a number beyond the 64-bit float range, then one that is not JSON, refuse the copy (`invalid_json`) and leave the collection as it was; with an in-range value the copy succeeds | recorded |
 
 `core/crates/meguri-storage/tests/downgrade.rs` (Meguri only) covers what no scenario shows:
 

@@ -1,0 +1,23 @@
+# A filtered deck F and a normal deck renamed by db_exec to F::x::y
+# (specs/maintenance/check-database.md C10.2): Anki's deck add refuses the
+# parent F::x under a filtered deck and its Check Database stops, changing
+# nothing (collection-check.md K10 failed); Meguri creates the normal deck
+# F::x (decks_missing 1, deviation check-db-parents-past-deck-limits). No
+# undo_status, no second run.
+id: maintenance/check-db/parents-under-filtered
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - db_exec:
+      sql: >-
+        INSERT INTO decks (id, name, mtime_secs, usn, common, kind)
+        VALUES (100, 'F', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')
+  - db_exec: {sql: "UPDATE decks SET name = 'F' || char(31) || 'x' || char(31) || 'y', usn = 5 WHERE name = 'Inbox'"}
+  - advance: 1h
+  - check_db: {}

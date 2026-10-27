@@ -1,0 +1,30 @@
+# The five option keys (specs/package/apkg-import.md I5; package-ops.md E6.2).
+# Three imports of one package with different options; after each, the
+# stored values of mergeNotetypes, updateNotes, updateNotetypes,
+# withScheduling and withDeckConfigs.
+id: package/apkg-import/options-keys
+description: The import writes its five options to the collection's config keys.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: one.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn FROM config WHERE KEY IN ('mergeNotetypes', 'updateNotes', 'updateNotetypes', 'withScheduling', 'withDeckConfigs') ORDER BY KEY"}
+  - advance: 1m
+  - import: {format: apkg, name: one.apkg, merge_notetypes: true, update_notes: always, update_notetypes: never, with_scheduling: true, with_deck_configs: true}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('mergeNotetypes', 'updateNotes', 'updateNotetypes', 'withScheduling', 'withDeckConfigs') ORDER BY KEY"}
+  - advance: 1m
+  - import: {format: apkg, name: one.apkg, merge_notetypes: false, update_notes: never, update_notetypes: always, with_scheduling: false, with_deck_configs: false}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('mergeNotetypes', 'updateNotes', 'updateNotetypes', 'withScheduling', 'withDeckConfigs') ORDER BY KEY"}
+  - advance: 1m
+  - import: {format: apkg, name: one.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: false, with_deck_configs: false}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('mergeNotetypes', 'updateNotes', 'updateNotetypes', 'withScheduling', 'withDeckConfigs') ORDER BY KEY"}

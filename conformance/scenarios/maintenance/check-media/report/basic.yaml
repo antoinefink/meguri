@@ -1,0 +1,27 @@
+# The folder classes and the used, unused and missing lists of
+# specs/maintenance/check-media.md C3 and C11: a.jpg (img) and snd.mp3
+# (sound) are used; b.jpg is unused; _font.ttf starts with _ and is never
+# unused; the subfolder x and the 120 MiB big.bin are listed apart; .DS_Store
+# and the empty e.txt appear nowhere; c.png is missing and the remote
+# reference is not a reference.
+id: maintenance/check-media/report/basic
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"a.jpg\"> [sound:snd.mp3]", "<img src=\"c.png\"> <img src=\"https://example.org/r.png\">"]}
+  media_files:
+    - {name: a.jpg, text: "first image"}
+    - {name: b.jpg, text: "second image"}
+    - {name: snd.mp3, text: "a sound"}
+    - {name: _font.ttf, text: "a font"}
+    - {name: x, dir: true}
+    - {name: big.bin, fill: {size: 125829120, byte: 7}}
+    - {name: .DS_Store, text: "finder"}
+    - {name: e.txt, text: ""}
+steps:
+  - check_media: {}
+  - observe: [media_dir]

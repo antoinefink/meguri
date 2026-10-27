@@ -1,0 +1,41 @@
+# Update note types Always with equal mtime_secs (specs/package/
+# notetype-merge.md J4.2; package-ops.md E6). The package's Pair has CSS A;
+# the target's has CSS B, saved in the same second, so both mtimes are
+# equal. If newer, the target governs (B stays); Always, the incoming governs
+# (A), unlike an import without a merge (apkg-import.md I7).
+id: package/notetype-merge/update-always-equal
+description: Equal modification times; Always takes the incoming note type in a merge.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{css: ".card { margin: 1px; }"}]}
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - update_notetype: {notetype: Pair, edits: [{css: ".card { margin: 9px; }"}]}
+  - db_exec: {sql: "SELECT mtime_secs FROM notetypes WHERE name = 'Pair'"}
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: never, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - legacy_json: {notetypes: [Pair]}
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: never, update_notetypes: always, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - legacy_json: {notetypes: [Pair]}

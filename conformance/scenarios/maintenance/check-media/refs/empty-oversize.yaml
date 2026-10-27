@@ -1,0 +1,18 @@
+# C3 of specs/maintenance/check-media.md: fields referencing an empty file and
+# a file one byte over 100 MiB. Meguri counts both present (listed under
+# empty and oversize); Anki reports both missing (deviation
+# check-media-empty-oversize-present).
+id: maintenance/check-media/refs/empty-oversize
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"blank.png\">", "[sound:huge.mp3]"]}
+  media_files:
+    - {name: blank.png, text: ""}
+    - {name: huge.mp3, fill: {size: 104857601, byte: 1}}
+steps:
+  - check_media: {}

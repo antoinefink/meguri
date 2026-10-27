@@ -1,0 +1,22 @@
+# C4 and C6 of specs/maintenance/check-media.md: files whose names the name
+# transform changes, referenced as written: foo[.jpg becomes foo.jpg, Bar?.PNG
+# becomes bar.png and con.jpg becomes con_.jpg, and every field naming them is
+# rewritten. Meguri moves the old files to the trash after the fix op; Anki's
+# trash differs (deviation check-media-rename-trashes-old).
+id: maintenance/check-media/rename/invalid-chars
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"foo[.jpg\">", "<img src=\"Bar?.PNG\"> <img src=\"con.jpg\">"]}
+  media_files:
+    - {name: "foo[.jpg", text: "bracket image"}
+    - {name: "Bar?.PNG", text: "question image"}
+    - {name: con.jpg, text: "reserved image"}
+steps:
+  - advance: 1h
+  - check_media: {}
+  - observe: [media_dir, media_trash, {db_dump: {tables: [notes]}}]

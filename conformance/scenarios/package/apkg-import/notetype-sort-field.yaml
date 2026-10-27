@@ -1,0 +1,36 @@
+# A note type update with another sort field (specs/package/apkg-import.md
+# I7, I9; package-ops.md E6). The package's Pair sorts by Back: the sort
+# field was changed, the package exported, and the change undone, so the
+# target's Pair sorts by Front with its older mtime. Importing with Update
+# note types if newer updates Pair, rewrites every target note's sfld, csum,
+# mod (now) and usn, and sets col.scm; the package's notes, compared if newer
+# against the new mod, are duplicates.
+id: package/apkg-import/notetype-sort-field
+description: An imported note type with another sort field rewrites the target's notes and sets the schema.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, zebra]}
+    - {notetype: Pair, deck: Lang, fields: [two, apple]}
+steps:
+  - observe: [timing]
+  # A raw write first: the undo history then holds only this scenario's steps.
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{sort_field: Back}]}
+  - export: {format: apkg, name: sort.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - undo: {}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - db_exec: {sql: "SELECT id, sfld, csum, mod, usn FROM notes ORDER BY id"}
+  - advance: 1m
+  - import: {format: apkg, name: sort.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT id, sfld, csum, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm = ls, scm FROM col"}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}

@@ -1,0 +1,154 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 3
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["equal", "b"],
+              "note": "#n2"
+            },
+            {
+              "fields": ["newer", "c"],
+              "note": "#n3"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 3,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": [
+            {
+              "fields": ["older", "a"],
+              "note": "#n1"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["older", "older\u001fa", 1894701600, -1],
+            ["equal", "equal\u001ftarget", 1894701600, -1],
+            ["newer", "newer\u001ftarget", 1894701700, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["equal", "b"],
+              "note": "#n2"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 3,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": [
+            {
+              "fields": ["older", "a"],
+              "note": "#n1"
+            },
+            {
+              "fields": ["newer", "c"],
+              "note": "#n3"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["older", "older\u001fa", 1894701600, -1],
+            ["equal", "equal\u001ftarget", 1894701600, -1],
+            ["newer", "newer\u001fc", 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["older", "a"],
+              "note": "#n1"
+            },
+            {
+              "fields": ["equal", "b"],
+              "note": "#n2"
+            },
+            {
+              "fields": ["newer", "c"],
+              "note": "#n3"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 3,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["older", "older\u001ftarget", 1894701500, -1],
+            ["equal", "equal\u001ftarget", 1894701600, -1],
+            ["newer", "newer\u001ftarget", 1894701700, -1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/update-matrix",
+  "scenario_sha256": "8c18abf27fc79b38a24eed3ddb59bec50b0eeaec75a851846b11e3922774d907",
+  "tz": "UTC"
+}

@@ -1,0 +1,33 @@
+# The info query's counts (specs/notetypes/change-notetype.md M5, M6): ten
+# notes, seven with text in Back. A single space and "<br>" are text the change
+# would discard, so they count, although they require no card 2: card counts
+# show five cards of ordinal 1. The counts are the same for every target; a
+# smaller selection counts only its notes.
+id: notetypes/change/info-counts
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair Reverse
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{Back}}", back: "{{Front}}"}
+    - name: Single
+      fields: [Text]
+      templates:
+        - {name: Card 1, front: "{{Text}}", back: ""}
+  notes:
+    - {notetype: Pair Reverse, fields: [w1, b1]}
+    - {notetype: Pair Reverse, fields: [w2, b2]}
+    - {notetype: Pair Reverse, fields: [w3, b3]}
+    - {notetype: Pair Reverse, fields: [w4, b4]}
+    - {notetype: Pair Reverse, fields: [w5, b5]}
+    - {notetype: Pair Reverse, fields: [w6, " "]}
+    - {notetype: Pair Reverse, fields: [w7, "<br>"]}
+    - {notetype: Pair Reverse, fields: [w8, ""]}
+    - {notetype: Pair Reverse, fields: [w9, ""]}
+    - {notetype: Pair Reverse, fields: [w10, ""]}
+steps:
+  - change_notetype_info: {notes: ["#n1", "#n2", "#n3", "#n4", "#n5", "#n6", "#n7", "#n8", "#n9", "#n10"], notetype: Pair Reverse}
+  - change_notetype_info: {notes: ["#n1", "#n2", "#n3", "#n4", "#n5", "#n6", "#n7", "#n8", "#n9", "#n10"], notetype: Single}
+  - change_notetype_info: {notes: ["#n6", "#n7", "#n8"], notetype: Single}

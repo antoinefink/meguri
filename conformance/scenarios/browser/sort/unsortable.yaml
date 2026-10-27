@@ -1,0 +1,34 @@
+# specs/browser/sorting.md S1 and specs/conformance/browser-ops.md B1:
+# Question and Answer sort in neither mode; keys outside the 19 (case
+# included) are refused too. A parse error of the query comes before
+# "unsortable", which comes before the run errors invalid_regex and
+# search_failed (R1140). Needs the regex term (U81).
+id: browser/sort/unsortable
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, fields: [dog, g]}
+    - {notetype: Solo, fields: [cat, g]}
+steps:
+  - observe:
+      - search:
+          - {query: '', order: {column: question}}
+          - {query: '', kind: notes, order: {column: question}}
+          - {query: '', order: {column: answer, reverse: true}}
+          - {query: '', kind: notes, order: {column: answer}}
+          - {query: '', order: {column: bogus}}
+          - {query: '', order: {column: ''}}
+          - {query: '', order: {column: NoteFld}}
+          - {query: '(', order: {column: question}}
+          - {query: '"re:("', order: {column: question}}
+          - {query: '"re:("', order: {column: noteFld}}
+          - {query: '-and', order: {column: question}}
+          - {query: '-and', order: {column: noteFld}}
+          - {query: '', order: {column: noteFld}}

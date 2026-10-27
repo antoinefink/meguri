@@ -1,0 +1,19 @@
+# N6.5 of specs/maintenance/check-database-notes.md: a note mod two days
+# ahead becomes now in seconds, its usn kept; nothing is counted and scm
+# stays. A second run finds nothing.
+id: maintenance/check-db-notes/future-mtime
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - db_exec: {sql: "UPDATE notes SET mod = 1894874400, usn = 5"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT mod, usn FROM notes"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

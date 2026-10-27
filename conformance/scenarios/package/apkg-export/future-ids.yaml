@@ -1,0 +1,25 @@
+# Ids more than a day ahead (specs/package/apkg-export.md A8 rule 1, R1623;
+# package-ops.md E7). n1's id is moved three days ahead with db_exec and its
+# card's nid follows (the card id stays current): the export of its deck is
+# refused with invalid_ids. An export of the other deck, whose ids are
+# current, succeeds.
+id: package/apkg-export/future-ids
+description: A note id three days ahead refuses the export with invalid_ids.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang, Other]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Other, fields: [two, b]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "UPDATE cards SET nid = nid + 259200000 WHERE nid = (SELECT min(id) FROM notes)"}
+  - db_exec: {sql: "UPDATE notes SET id = id + 259200000 WHERE id = (SELECT min(id) FROM notes)"}
+  - advance: 1m
+  - export: {format: apkg, name: ahead.apkg, limit: {deck: Lang}, scheduling: true, presets: false, media: false}
+  - export: {format: apkg, name: other.apkg, limit: {deck: Other}, scheduling: true, presets: false, media: false}

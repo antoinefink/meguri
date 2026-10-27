@@ -192,7 +192,7 @@ No ported scenario observes any of them. A scenario that observes `conf` of a le
 
 Verification of U123 also includes `conformance/scenarios/model/schema11/apkg-notetypes` (recorded; `export` legacy form `conformance/model-ops#L6` and `package_col` `conformance/model-ops#L7`), on Meguri's executor on the macOS and Linux lanes.
 
-No `legacy-export` scenario is recorded yet. Two of them use only ops and observations that exist in the runner and the oracle driver today (`export` legacy form, `conformance/model-ops#L6`; `package_col`, `conformance/model-ops#L7`; `package_listing`, `conformance/package-ops#E3`), so they need recording only. The others use forms fixed, as drafts, in `specs/conformance/package-ops.md`, which neither executor implements yet; they need the driver work and the recording:
+Status (2026-10-27): `apkg-listing` and `apkg-columns` are recorded; the others wait for E8 and E9, still draft. Two of them use only ops and observations that exist in the runner and the oracle driver today (`export` legacy form, `conformance/model-ops#L6`; `package_col`, `conformance/model-ops#L7`; `package_listing`, `conformance/package-ops#E3`), so they need recording only. The others use forms fixed, as drafts, in `specs/conformance/package-ops.md`, which neither executor implements yet; they need the driver work and the recording:
 
 - `export`, deck-package form with `legacy: true`: `conformance/package-ops#E8` (capabilities `export.apkg` and `export.apkg.legacy`).
 - `export`, collection-package options `{format: colpkg, name, media?, legacy?}`: `conformance/package-ops#E9` (capability `export.colpkg.legacy`, and `export.colpkg.media` with media).

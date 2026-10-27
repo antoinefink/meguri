@@ -1,0 +1,45 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-10T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "studied_today_raw": {
+          "cards": 8,
+          "time_ms": 5000022000
+        },
+        "studied_today_text": "Studied 8 cards in 83333.71 minutes today (625002.75s/card)",
+        "today_stats": [
+          {
+            "answers": 7,
+            "correct": 6,
+            "filtered": 0,
+            "learn": 2,
+            "mature": 2,
+            "mature_correct": 1,
+            "relearn": 1,
+            "review": 4,
+            "time_ms": 25000
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/today/odd-values",
+  "scenario_sha256": "7828e8f3b4e7645f42259b4bb0100cb0fc96df1dfe7cb709e4a6916d8446e0b8",
+  "tz": "Europe/Paris"
+}

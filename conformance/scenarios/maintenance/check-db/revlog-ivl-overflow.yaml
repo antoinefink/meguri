@@ -1,0 +1,19 @@
+# A review-log row of a reviewed card with ivl 3,000,000,000
+# (specs/maintenance/check-database.md C8.7, C10.1): Anki's Check Database
+# stops with an error, changing nothing (collection-check.md K10 failed);
+# Meguri clamps it and counts it (revlog_properties 1, deviation
+# check-db-lrt-reads-needed-columns). No second run.
+id: maintenance/check-db/revlog-ivl-overflow
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - answer: {card: "#c1", rating: easy}
+  - db_exec: {sql: "UPDATE revlog SET ivl = 3000000000, usn = 5"}
+  - advance: 1h
+  - check_db: {}

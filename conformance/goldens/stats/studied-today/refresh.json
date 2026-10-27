@@ -1,0 +1,122 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T08:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "studied_today_text": "Studied 0 cards in 0 seconds today (0s/card)",
+        "today_stats": [
+          {
+            "answers": 0,
+            "correct": 0,
+            "filtered": 0,
+            "learn": 0,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 0,
+            "time_ms": 0
+          }
+        ]
+      },
+      {},
+      {},
+      {
+        "studied_today_text": "Studied 1 card in 4 seconds today (4s/card)",
+        "today_stats": [
+          {
+            "answers": 1,
+            "correct": 1,
+            "filtered": 0,
+            "learn": 1,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 0,
+            "time_ms": 4000
+          }
+        ]
+      },
+      {},
+      {},
+      {
+        "studied_today_text": "Studied 2 cards in 16 seconds today (8s/card)",
+        "today_stats": [
+          {
+            "answers": 2,
+            "correct": 1,
+            "filtered": 0,
+            "learn": 2,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 0,
+            "time_ms": 16000
+          }
+        ]
+      },
+      {},
+      {
+        "studied_today_text": "Studied 2 cards in 16 seconds today (8s/card)",
+        "today_stats": [
+          {
+            "answers": 2,
+            "correct": 1,
+            "filtered": 0,
+            "learn": 2,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 0,
+            "time_ms": 16000
+          }
+        ]
+      },
+      {},
+      {
+        "studied_today_text": "Studied 0 cards in 0 seconds today (0s/card)",
+        "today_stats": [
+          {
+            "answers": 0,
+            "correct": 0,
+            "filtered": 0,
+            "learn": 0,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 0,
+            "time_ms": 0
+          }
+        ]
+      },
+      {},
+      {},
+      {
+        "studied_today_text": "Studied 1 card in 30 seconds today (30s/card)",
+        "today_stats": [
+          {
+            "answers": 1,
+            "correct": 1,
+            "filtered": 0,
+            "learn": 1,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 0,
+            "time_ms": 30000
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/studied-today/refresh",
+  "scenario_sha256": "8d2a9d51d5b4c6451ce69ed13b056c283c01c64c1233cf81ef4517af87e91285",
+  "tz": "Europe/Paris"
+}

@@ -1,0 +1,211 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {},
+      {
+        "export": {
+          "notes": 5
+        }
+      },
+      {
+        "delete_decks": {
+          "count": 3
+        }
+      },
+      {
+        "rename_deck": {
+          "name": "Japanese"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 1,
+          "next_day_at": 1894766400,
+          "now": 1894701720,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["one", "a"],
+              "note": "#n1"
+            },
+            {
+              "fields": ["five", "e"],
+              "note": "#n5"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 5,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": ["two", "b"],
+              "note": "#n2"
+            },
+            {
+              "fields": ["three", "c"],
+              "note": "#n3"
+            },
+            {
+              "fields": ["four", "d"],
+              "note": "#n4"
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "deck_tree": [
+          {
+            "children": [
+              {
+                "children": [],
+                "name": "verbs"
+              }
+            ],
+            "name": "Japanese"
+          },
+          {
+            "children": [],
+            "name": "Kanji"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "name": "N5"
+              }
+            ],
+            "name": "Kanji 1894701720"
+          },
+          {
+            "children": [],
+            "name": "Lang"
+          }
+        ],
+        "decks": {
+          "Default": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1,
+            "mtime_secs": 0,
+            "study_collapsed": true,
+            "usn": 0
+          },
+          "Japanese": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600000,
+            "mtime_secs": 1894701660,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "Japanese::verbs": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701720001,
+            "mtime_secs": 1894701720,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "Kanji": {
+            "browser_collapsed": true,
+            "config_id": null,
+            "filtered": true,
+            "id": 900,
+            "mtime_secs": 0,
+            "study_collapsed": true,
+            "usn": 0
+          },
+          "Kanji 1894701720": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701720000,
+            "mtime_secs": 1894701720,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "Kanji 1894701720::N5": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701720002,
+            "mtime_secs": 1894701720,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "Lang": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600004,
+            "mtime_secs": 1894701720,
+            "study_collapsed": true,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Lang", "0A0808014A0408031001"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["one", "Japanese"],
+            ["two", "Japanese\u001fverbs"],
+            ["three", "Kanji 1894701720"],
+            ["four", "Kanji 1894701720\u001fN5"],
+            ["five", "Lang"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/decks",
+  "scenario_sha256": "9b797774ad19599a8882433509f29bc56ead80d08cde1b5c69d7cda61fa28c8d",
+  "tz": "UTC"
+}

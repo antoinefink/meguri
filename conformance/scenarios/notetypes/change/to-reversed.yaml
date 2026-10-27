@@ -1,0 +1,36 @@
+# U35 test 1 (R948; specs/notetypes/change-notetype.md M9): two Pair notes move
+# to Pair Reverse with the default maps. Fields map by name and Extra starts
+# empty. Card 1 is not touched; card 2 is created in card 1's deck at card 1's
+# new-card position (notes/deck-placement-and-position.md D3, P2), and the
+# note whose Back is empty gets none. The notes are stamped, col.scm and
+# col.mod are now; no grave is written. The unselected note stays.
+# The change runs as accepted: the oracle answers no schema question and
+# Meguri's change takes no confirmation input (change-notetype-ops.md H2,
+# notetypes/schema-changes.md G4).
+id: notetypes/change/to-reversed
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+    - name: Pair Reverse
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{Back}}", back: "{{Front}}"}
+  decks: [German, French]
+  notes:
+    - {notetype: Pair, deck: German, fields: [Hund, dog]}
+    - {notetype: Pair, deck: French, fields: [chat, ""]}
+    - {notetype: Pair, deck: German, fields: [Katze, cat]}
+steps:
+  - advance: 1h
+  - change_notetype_info: {notes: ["#n1", "#n2"], notetype: Pair Reverse}
+  - change_notetype: {}
+  - observe: [card]
+  - db_exec: {sql: "SELECT n.sfld, c.ord, replace(d.name, char(31), '::'), c.type, c.queue, c.due, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid LEFT JOIN decks d ON d.id = c.did ORDER BY n.id, c.ord, c.id"}
+  - db_exec: {sql: "SELECT n.sfld, t.name, replace(n.flds, char(31), '|'), n.csum, n.mod, n.usn, n.tags FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT scm, mod FROM col"}
+  - db_exec: {sql: "SELECT count(*) FROM graves"}

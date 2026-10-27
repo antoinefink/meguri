@@ -170,7 +170,7 @@ Every other character is kept. NFKD folds compatibility forms: fullwidth `ｄｏ
 
 ### T8.3 Match
 
-The pattern is `%`, T3.1 of the value, `%`, then put through T8.1 as a whole. The sort text and field string are put through T8.1 too, and the test is T5.1 (or T7.2). Because the pattern is transformed after T3.1, a character whose NFKD is a pattern character becomes one: U+FF05 and U+FE6A become `%` (any run), U+FF3F, U+FE33, U+FE34 and U+FE4D–U+FE4F become `_` (one character), U+FF3C and U+FE68 become `\` (escape). `nc:a％b` therefore finds `a％b`, `azb` and `ıstanbul`. The scenario `search/text/nc` is to pin this and the table below; it is not yet written, so no golden holds these examples today (`nc:uber` is pinned by `search/folding/umlaut`, the transform through other terms by `search/tags/regex-and-nc` and `search/fields/modes`).
+The pattern is `%`, T3.1 of the value, `%`, then put through T8.1 as a whole. The sort text and field string are put through T8.1 too, and the test is T5.1 (or T7.2). Because the pattern is transformed after T3.1, a character whose NFKD is a pattern character becomes one: U+FF05 and U+FE6A become `%` (any run), U+FF3F, U+FE33, U+FE34 and U+FE4D–U+FE4F become `_` (one character), U+FF3C and U+FE68 become `\` (escape). `nc:a％b` therefore finds `a％b`, `azb` and `þaw ayakkabı €xit` (`search/text/nc`; `nc:uber` is pinned by `search/folding/umlaut`, the transform through other terms by `search/tags/regex-and-nc` and `search/fields/modes`).
 
 | Search | Stored | Matches? |
 |---|---|---|

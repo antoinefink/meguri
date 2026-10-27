@@ -1,0 +1,238 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {
+        "export": {
+          "notes": 1
+        }
+      },
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701660]
+          ]
+        }
+      },
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["one", "a"],
+              "note": "#n1"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": []
+        }
+      },
+      {
+        "legacy_json": {
+          "notetypes": {
+            "Pair": {
+              "css": ".card { margin: 9px; }",
+              "did": null,
+              "flds": [
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1001,
+                  "name": "Front",
+                  "ord": 0,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                },
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1002,
+                  "name": "Back",
+                  "ord": 1,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                }
+              ],
+              "id": 1894701600006,
+              "latexPost": "\\end{document}",
+              "latexPre": "\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage[utf8]{inputenc}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}\n",
+              "latexsvg": false,
+              "mod": 1894701660,
+              "name": "Pair",
+              "originalStockKind": 1,
+              "req": [
+                [
+                  0,
+                  "any",
+                  [0]
+                ]
+              ],
+              "sortf": 0,
+              "tmpls": [
+                {
+                  "afmt": "{{Back}}",
+                  "bafmt": "",
+                  "bfont": "",
+                  "bqfmt": "",
+                  "bsize": 0,
+                  "did": null,
+                  "id": 2001,
+                  "name": "Forward",
+                  "ord": 0,
+                  "qfmt": "{{Front}}"
+                }
+              ],
+              "type": 0,
+              "usn": -1
+            }
+          }
+        }
+      },
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["one", "a"],
+              "note": "#n1"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": []
+        }
+      },
+      {
+        "legacy_json": {
+          "notetypes": {
+            "Pair": {
+              "css": ".card { margin: 1px; }",
+              "did": null,
+              "flds": [
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1001,
+                  "name": "Front",
+                  "ord": 0,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                },
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1002,
+                  "name": "Back",
+                  "ord": 1,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                }
+              ],
+              "id": 1894701600006,
+              "latexPost": "\\end{document}",
+              "latexPre": "\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage[utf8]{inputenc}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}\n",
+              "latexsvg": false,
+              "mod": 1894701660,
+              "name": "Pair",
+              "originalId": 1894701600006,
+              "originalStockKind": 1,
+              "req": [
+                [
+                  0,
+                  "any",
+                  [0]
+                ]
+              ],
+              "sortf": 0,
+              "tmpls": [
+                {
+                  "afmt": "{{Back}}",
+                  "bafmt": "",
+                  "bfont": "",
+                  "bqfmt": "",
+                  "bsize": 0,
+                  "did": null,
+                  "id": 2001,
+                  "name": "Forward",
+                  "ord": 0,
+                  "qfmt": "{{Front}}"
+                }
+              ],
+              "type": 0,
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/notetype-merge/update-always-equal",
+  "scenario_sha256": "26f0b456ab010affee9dd931992bb29de8a88545d172a272cc088dd0c713ff1d",
+  "tz": "UTC"
+}

@@ -1,0 +1,496 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_dump": {
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1788235200,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1788681600013,
+              "models": "",
+              "scm": 1788249600208,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "config": {
+            "_deck_1788249600212_lastNotetype": {
+              "KEY": "_deck_1788249600212_lastNotetype",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4f0225d7a91b9e90fc42f6b14244dd110ab326f1a5e4f453adcf2c61f4f941ac"
+              }
+            },
+            "_deck_1788249600214_lastNotetype": {
+              "KEY": "_deck_1788249600214_lastNotetype",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4f0225d7a91b9e90fc42f6b14244dd110ab326f1a5e4f453adcf2c61f4f941ac"
+              }
+            },
+            "_nt_1788249600186_lastDeck": {
+              "KEY": "_nt_1788249600186_lastDeck",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "8680d5ce27d1e0df70711f913b70b9a978f5e8cce07f24d0f7a5aea9c0bcfe93"
+              }
+            },
+            "_nt_1788249600189_lastDeck": {
+              "KEY": "_nt_1788249600189_lastDeck",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "8680d5ce27d1e0df70711f913b70b9a978f5e8cce07f24d0f7a5aea9c0bcfe93"
+              }
+            },
+            "activeDecks": {
+              "KEY": "activeDecks",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "080a9ed428559ef602668b4c00f114f1a11c3f6b02a435f0bdc154578e4d7f22"
+              }
+            },
+            "addToCur": {
+              "KEY": "addToCur",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "collapseTime": {
+              "KEY": "collapseTime",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "15197cf7214b58e67cae565e573ffd9aa44bcb81f8ee5d7185dfe8da0a16ef43"
+              }
+            },
+            "creationOffset": {
+              "KEY": "creationOffset",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "curDeck": {
+              "KEY": "curDeck",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "5263f71e201b62d6c2bac0ada0e93a3714d401f3721a08f75af1558b5152582c"
+              }
+            },
+            "curModel": {
+              "KEY": "curModel",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4f0225d7a91b9e90fc42f6b14244dd110ab326f1a5e4f453adcf2c61f4f941ac"
+              }
+            },
+            "dayLearnFirst": {
+              "KEY": "dayLearnFirst",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "dueCounts": {
+              "KEY": "dueCounts",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "estTimes": {
+              "KEY": "estTimes",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "meguriFixture": {
+              "KEY": "meguriFixture",
+              "mtime_secs": 1788681600,
+              "usn": 0,
+              "val": {
+                "sha256": "241399751c39cc872fc2ade0d23dd37ae426649594e336609f58a0d95d0774c6"
+              }
+            },
+            "meguriWide": {
+              "KEY": "meguriWide",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "81abfe4b74e2eb17e21908a867e639d3a846a6928ecbb681697ebdc618625afb"
+              }
+            },
+            "newSpread": {
+              "KEY": "newSpread",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "nextPos": {
+              "KEY": "nextPos",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "2c624232cdd221771294dfbb310aca000a0df6ac8b66b696d90ef06fdefb64a3"
+              }
+            },
+            "rollover": {
+              "KEY": "rollover",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+              }
+            },
+            "sched2021": {
+              "KEY": "sched2021",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "schedVer": {
+              "KEY": "schedVer",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+              }
+            },
+            "sortBackwards": {
+              "KEY": "sortBackwards",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "sortType": {
+              "KEY": "sortType",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "1c19b6eac0880ca94f71879df838392e837aef4738f4d1000e15e48e65df61dc"
+              }
+            },
+            "timeLim": {
+              "KEY": "timeLim",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            }
+          }
+        }
+      },
+      {
+        "schema11_copy": {
+          "error": "invalid_json"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "schema11_copy": {
+          "error": "invalid_json"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "file_col": {
+          "conf": {
+            "_deck_1788249600212_lastNotetype": 1788249600186,
+            "_deck_1788249600214_lastNotetype": 1788249600186,
+            "_nt_1788249600186_lastDeck": 1788249600212,
+            "_nt_1788249600189_lastDeck": 1788249600212,
+            "activeDecks": [1],
+            "addToCur": true,
+            "collapseTime": 1200,
+            "creationOffset": 0,
+            "curDeck": 1788249600254,
+            "curModel": 1788249600186,
+            "dayLearnFirst": false,
+            "dueCounts": true,
+            "estTimes": true,
+            "meguriFixture": {
+              "a": 2.5,
+              "b": 1,
+              "c": [1.0, 2, 100.0, -0.0, 1e-06, 1e+16, 12345678901234567890, 1.2345678901234567e+20],
+              "d": "a/bé\u0001\""
+            },
+            "meguriWide": {
+              "zz": [1, 1e+300]
+            },
+            "newSpread": 0,
+            "nextPos": 8,
+            "rollover": 4,
+            "sched2021": true,
+            "schedVer": 2,
+            "sortBackwards": false,
+            "sortType": "noteFld",
+            "timeLim": 0
+          },
+          "ver": 11
+        }
+      },
+      {
+        "db_dump": {
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1788235200,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1788681600013,
+              "models": "",
+              "scm": 1788249600208,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "config": {
+            "_deck_1788249600212_lastNotetype": {
+              "KEY": "_deck_1788249600212_lastNotetype",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4f0225d7a91b9e90fc42f6b14244dd110ab326f1a5e4f453adcf2c61f4f941ac"
+              }
+            },
+            "_deck_1788249600214_lastNotetype": {
+              "KEY": "_deck_1788249600214_lastNotetype",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4f0225d7a91b9e90fc42f6b14244dd110ab326f1a5e4f453adcf2c61f4f941ac"
+              }
+            },
+            "_nt_1788249600186_lastDeck": {
+              "KEY": "_nt_1788249600186_lastDeck",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "8680d5ce27d1e0df70711f913b70b9a978f5e8cce07f24d0f7a5aea9c0bcfe93"
+              }
+            },
+            "_nt_1788249600189_lastDeck": {
+              "KEY": "_nt_1788249600189_lastDeck",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "8680d5ce27d1e0df70711f913b70b9a978f5e8cce07f24d0f7a5aea9c0bcfe93"
+              }
+            },
+            "activeDecks": {
+              "KEY": "activeDecks",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "080a9ed428559ef602668b4c00f114f1a11c3f6b02a435f0bdc154578e4d7f22"
+              }
+            },
+            "addToCur": {
+              "KEY": "addToCur",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "collapseTime": {
+              "KEY": "collapseTime",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "15197cf7214b58e67cae565e573ffd9aa44bcb81f8ee5d7185dfe8da0a16ef43"
+              }
+            },
+            "creationOffset": {
+              "KEY": "creationOffset",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "curDeck": {
+              "KEY": "curDeck",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "5263f71e201b62d6c2bac0ada0e93a3714d401f3721a08f75af1558b5152582c"
+              }
+            },
+            "curModel": {
+              "KEY": "curModel",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4f0225d7a91b9e90fc42f6b14244dd110ab326f1a5e4f453adcf2c61f4f941ac"
+              }
+            },
+            "dayLearnFirst": {
+              "KEY": "dayLearnFirst",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "dueCounts": {
+              "KEY": "dueCounts",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "estTimes": {
+              "KEY": "estTimes",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "meguriFixture": {
+              "KEY": "meguriFixture",
+              "mtime_secs": 1788681600,
+              "usn": 0,
+              "val": {
+                "sha256": "241399751c39cc872fc2ade0d23dd37ae426649594e336609f58a0d95d0774c6"
+              }
+            },
+            "meguriWide": {
+              "KEY": "meguriWide",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "8660a80ec22db0dcb367bf6a564ed591fa1476f58feeea8fdbcea7627ae83a28"
+              }
+            },
+            "newSpread": {
+              "KEY": "newSpread",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "nextPos": {
+              "KEY": "nextPos",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "2c624232cdd221771294dfbb310aca000a0df6ac8b66b696d90ef06fdefb64a3"
+              }
+            },
+            "rollover": {
+              "KEY": "rollover",
+              "mtime_secs": 1788249600,
+              "usn": -1,
+              "val": {
+                "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+              }
+            },
+            "sched2021": {
+              "KEY": "sched2021",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "schedVer": {
+              "KEY": "schedVer",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+              }
+            },
+            "sortBackwards": {
+              "KEY": "sortBackwards",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "sortType": {
+              "KEY": "sortType",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "1c19b6eac0880ca94f71879df838392e837aef4738f4d1000e15e48e65df61dc"
+              }
+            },
+            "timeLim": {
+              "KEY": "timeLim",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "ec5a18c8d331a0ab0edb2091fcb6a14d8b83674a30dac7abb018f33a563650e6",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "storage/downgrade/config-invalid",
+  "scenario_sha256": "2bffe9945703537bef761f4d7cc97299aa667df2630f5775d8dfa60cd405938f",
+  "tz": "UTC"
+}

@@ -340,7 +340,7 @@ The UI takes these strings only from this table (role: `docs/process/roles/spec-
 
 ## C15. Scenarios
 
-Observation: `browser_rows` (`specs/conformance/browser-ops.md` B3, B4). Each scenario needs its golden (browser-ops B6).
+Observation: `browser_rows` (`specs/conformance/browser-ops.md` B3, B4). Every scenario has its golden (browser-ops B6).
 
 | Scenario | Covers |
 |---|---|
@@ -351,7 +351,7 @@ Observation: `browser_rows` (`specs/conformance/browser-ops.md` B3, B4). Each sc
 | `browser/columns/aggregates` | C13: the 16-bit ease sum and the 32-bit interval product |
 | `browser/columns/row-errors` | C3.1 in both modes: a deleted card, a deleted note, a note without cards (notes mode `damaged`), a card whose deck is missing |
 
-- These six scenarios and their goldens are not on this branch yet: they need the `browser_rows` observation, which neither the oracle driver nor Meguri's runner implements here (browser-ops B6). They come back with that observation, their goldens checked against the scenarios as ported (or re-recorded when a scenario changed).
+- The oracle driver implements `browser_rows`; Meguri's runner does not yet (browser-ops B6). `question-answer` names the cards that `edit_note` adds with `adopt` (browser-ops B5).
 - The cards-mode Question and Deck cells (C7.2, C7.4, C10 steps 1 to 3) and the cards-mode row errors also have the `card_excerpts` scenarios of C16.6, which are active now: `question-deck/browser-format`, `media-line`, `cloze` and `deck` for the cells; `question-deck/missing` for `deleted` (the excerpt's `missing`); `question-deck/damaged` and `damaged-notetype` for `damaged` (a missing deck, home deck, note, note type or template). `row-errors` adds what only Browse rows show: the notes-mode errors (a deleted note, a note without cards).
 
 Not covered by scenarios yet: browser answer formats (`bafmt`) and fonts (`bfont`, `bsize`), which `update_notetype` template edits can set (`notetype-ops.md` T5) but no active observation reads; RTL sort fields (field config); template errors and blank cloze cards in Question and Answer (Anki's cells hold localized messages, R1887). U84's unit tests cover them from this text.

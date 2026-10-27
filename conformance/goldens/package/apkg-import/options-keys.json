@@ -1,0 +1,127 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 1
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["one", "a"],
+              "note": "#n1"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["mergeNotetypes", "true", -1, 1894701720],
+            ["updateNotes", "\"Always\"", -1, 1894701720],
+            ["updateNotetypes", "\"Never\"", -1, 1894701720],
+            ["withDeckConfigs", "true", -1, 1894701720],
+            ["withScheduling", "true", -1, 1894701720]
+          ]
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["one", "a"],
+              "note": "#n1"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["mergeNotetypes", "false", -1, 1894701780],
+            ["updateNotes", "\"Never\"", -1, 1894701780],
+            ["updateNotetypes", "\"Always\"", -1, 1894701780],
+            ["withDeckConfigs", "false", -1, 1894701780],
+            ["withScheduling", "false", -1, 1894701780]
+          ]
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["one", "a"],
+              "note": "#n1"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["mergeNotetypes", "false", -1, 1894701780],
+            ["updateNotes", "\"IfNewer\"", -1, 1894701840],
+            ["updateNotetypes", "\"IfNewer\"", -1, 1894701840],
+            ["withDeckConfigs", "false", -1, 1894701780],
+            ["withScheduling", "false", -1, 1894701780]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/options-keys",
+  "scenario_sha256": "60a257e18e0c77aa22990be5ce6dbac1a3c0630657e044906013ca93aef3d734",
+  "tz": "UTC"
+}

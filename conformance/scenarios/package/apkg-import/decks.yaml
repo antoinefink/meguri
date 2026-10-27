@@ -1,0 +1,45 @@
+# Decks on import (specs/package/apkg-import.md I10.2, I11.2; package-ops.md
+# E6). The package holds japanese with japanese::verbs, Kanji with
+# Kanji::N5, and Lang with today's new limit 3. After the export the target
+# loses japanese::verbs and renames japanese to Japanese; it loses Kanji and
+# its child and gets a filtered deck Kanji (fixed id 900); and its crt moves
+# a day earlier, so the target's today is one day after the package's. The
+# import maps japanese to Japanese and adds Japanese::verbs under the
+# target's spelling; the normal Kanji meets the filtered one, so it and its
+# child are added as "Kanji <now>" and "Kanji <now>::N5"; Lang's today limit
+# moves to the target's today.
+id: package/apkg-import/decks
+description: Decks match by name ignoring case; a kind clash renames with the time suffix; today limits move.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [japanese, "japanese::verbs", Kanji, "Kanji::N5", Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: japanese, fields: [one, a]}
+    - {notetype: Pair, deck: "japanese::verbs", fields: [two, b]}
+    - {notetype: Pair, deck: Kanji, fields: [three, c]}
+    - {notetype: Pair, deck: "Kanji::N5", fields: [four, d]}
+    - {notetype: Pair, deck: Lang, fields: [five, e]}
+steps:
+  - observe: [timing]
+  - save_deck_options: {deck: Lang, limits: {new_today: 3}}
+  - advance: 1m
+  - export: {format: apkg, name: decks.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - delete_decks: {decks: ["japanese::verbs", Kanji]}
+  - rename_deck: {deck: japanese, name: Japanese}
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Kanji', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  - db_exec: {sql: "UPDATE col SET crt = crt - 86400"}
+  - reopen: {}
+  - advance: 1m
+  - observe: [timing]
+  - import: {format: apkg, name: decks.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - decks
+      - deck_tree
+  - db_exec: {sql: "SELECT name, hex(kind) FROM decks WHERE name = 'Lang'"}
+  - db_exec: {sql: "SELECT n.sfld, d.name FROM cards c JOIN notes n ON n.id = c.nid JOIN decks d ON d.id = c.did ORDER BY n.id"}

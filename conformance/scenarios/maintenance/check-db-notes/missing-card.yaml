@@ -1,0 +1,27 @@
+# N6.6 of specs/maintenance/check-database-notes.md: a note of a two-template
+# note type whose ord 1 card was deleted by db_exec gets that card again, in
+# its sibling's deck and at its new sibling's position
+# (notes/deck-placement-and-position P2 item 1), with local stamps; nextPos
+# unchanged, nothing counted, scm stays. A second run finds nothing.
+id: maintenance/check-db-notes/missing-card
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Duo
+      fields: [Front, Back]
+      templates:
+        - {name: Fwd, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Rev, front: "{{Back}}", back: "{{Front}}"}
+  decks: [Side, Inbox]
+  notes:
+    - {notetype: Duo, deck: Side, fields: [one, uno]}
+    - {notetype: Duo, deck: Inbox, fields: [two, dos]}
+steps:
+  - db_exec: {sql: "DELETE FROM cards WHERE ord = 1 AND nid = (SELECT id FROM notes WHERE sfld = 'one')"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.type, c.queue, c.due, c.mod, c.usn, (SELECT name FROM decks WHERE id = c.did) FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld, c.ord"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

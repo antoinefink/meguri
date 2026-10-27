@@ -1,0 +1,25 @@
+# C8.6 of specs/maintenance/check-database.md: the only card of a
+# one-template note set to ord 40,000 is clamped to 30,000 (card_properties
+# 1), then removed by the notes stage (cards_without_template 1, scm set);
+# check-database-notes N6.6 generates the note's ord 0 card again: a new id,
+# local stamps, its deck and position observed, with nextPos. A second run
+# finds nothing.
+id: maintenance/check-db/card-ord
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox, Other]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Other, fields: [two, dos]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET ord = 40000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'one')"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, c.id, c.ord, c.type, c.queue, c.due, c.mod, c.usn, (SELECT name FROM decks WHERE id = c.did) FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

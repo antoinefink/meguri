@@ -1,0 +1,17 @@
+# C6 step 4 of specs/maintenance/check-media.md: a field naming a:b.jpg, whose
+# transformed name ab.jpg is present, is rewritten to ab.jpg.
+id: maintenance/check-media/refs/transform-repair
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"a:b.jpg\">", ""]}
+  media_files:
+    - {name: ab.jpg, text: "colon image"}
+steps:
+  - advance: 1h
+  - check_media: {}
+  - observe: [media_dir, {db_dump: {tables: [notes]}}]

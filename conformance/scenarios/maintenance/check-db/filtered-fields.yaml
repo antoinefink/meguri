@@ -1,0 +1,21 @@
+# C9.3 of specs/maintenance/check-database.md: a card in a normal deck with
+# odid 1 and odue 7 gets odid 0 and odue 0; its mod, usn and data stay (the
+# data as Anki's add stored it, which is its canonical form): card_properties
+# 1, scm set. A second run finds nothing.
+id: maintenance/check-db/filtered-fields
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - db_exec: {sql: "UPDATE cards SET odid = 1, odue = 7, usn = 5"}
+  - db_exec: {sql: "SELECT data FROM cards"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT odid, odue, mod, usn, data FROM cards"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

@@ -1,0 +1,25 @@
+# A note limit (specs/package/apkg-export.md A2, A3, A6; package-ops.md E7,
+# E11). Three notes across A::B and A::C are exported without scheduling;
+# n4 in D stays out: exactly those notes and their cards, their decks and
+# the ancestor A.
+id: package/apkg-export/note-selection
+description: Three notes across two subdecks export exactly those notes, their decks and ancestors.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: ["A::B", "A::C", D]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: "A::B", fields: [one, a]}
+    - {notetype: Pair, deck: "A::C", fields: [two, b]}
+    - {notetype: Pair, deck: "A::B", fields: [three, c]}
+    - {notetype: Pair, deck: D, fields: [four, d]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: notes.apkg, limit: {notes: ["#n1", "#n2", "#n3"]}, scheduling: false, presets: false, media: false}
+  - observe:
+      - package_db_dump: {name: notes.apkg, tables: [notes, cards, decks]}

@@ -1,0 +1,38 @@
+# Text and blob values in card columns (the Terms of
+# specs/maintenance/check-database.md): a new card due 'abc' and a new card
+# due the blob x'3132' fold to 1,000,000 and 1,000,012 (C8.1,
+# new_positions_too_high 2); a review card due 'abc' becomes due today (C8.2);
+# an ord 'abc' becomes 30,000 (C8.6); an ivl '12abc' becomes 12 (C8.4) and a
+# mod '12abc' becomes 12 (C8.5, not stamped): card_properties 4. The ord
+# 30,000 card, the only card of its note, is then removed by the notes stage
+# (cards_without_template 1, scm set) and that note's ord 0 card is generated
+# again (check-database-notes N6.6: new id, local stamps). A second run finds
+# nothing.
+id: maintenance/check-db/card-text-values
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+    - {notetype: Single, deck: Inbox, fields: [three, tres]}
+    - {notetype: Single, deck: Inbox, fields: [four, cuatro]}
+    - {notetype: Single, deck: Inbox, fields: [five, fiveb]}
+    - {notetype: Single, deck: Inbox, fields: [six, sixb]}
+steps:
+  - advance: 2d
+  - db_exec: {sql: "UPDATE cards SET due = 'abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'one')"}
+  - db_exec: {sql: "UPDATE cards SET due = x'3132', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'two')"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 'abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'three')"}
+  - db_exec: {sql: "UPDATE cards SET ord = 'abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'four')"}
+  - db_exec: {sql: "UPDATE cards SET ivl = '12abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'five')"}
+  - db_exec: {sql: "UPDATE cards SET mod = '12abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'six')"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, c.id, c.ord, typeof(c.due), c.due, typeof(c.ivl), c.ivl, typeof(c.mod), c.mod, c.usn, (SELECT name FROM decks WHERE id = c.did) FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

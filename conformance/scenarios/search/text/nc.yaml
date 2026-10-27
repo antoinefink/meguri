@@ -1,0 +1,60 @@
+# R1042; specs/search/text-matching.md T8: nc: matches with the
+# combining-free transform on both sides: NFKD, combining marks removed, then
+# the extra replacement table (T8.2). Characters NFKD turns into `%`, `_` or a
+# backslash act as pattern characters. All-fields searches ignore the nc:
+# mode (fields.md F7).
+id: search/text/nc
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: ["über", x]}
+    - {notetype: Single, fields: ["Über", x]}
+    - {notetype: Single, fields: [uber, x]}
+    - {notetype: Single, fields: ["ば", x]}
+    - {notetype: Single, fields: ["ぱ", x]}
+    - {notetype: Single, fields: ["ﾊﾞ", x]}
+    - {notetype: Single, fields: ["Straße", x]}
+    - {notetype: Single, fields: ["ÆON", x]}
+    - {notetype: Single, fields: ["Øre Łódź Œuvre", x]}
+    - {notetype: Single, fields: ["þaw ayakkabı €xit", x]}
+    - {notetype: Single, fields: ["ｄｏｇ", x]}
+    - {notetype: Single, fields: ["a％b", x]}
+    - {notetype: Single, fields: ["ﬁne", x]}
+    - {notetype: Single, fields: ["İzmir", x]}
+    - {notetype: Single, fields: [azb, x]}
+steps:
+  - observe:
+      - search:
+          - {query: 'nc:uber'}
+          - {query: 'nc:über'}
+          - {query: 'nc:ÜBER'}
+          - {query: 'nc:は'}
+          - {query: 'nc:ハ'}
+          - {query: 'nc:ﾊ'}
+          - {query: 'nc:strasse'}
+          - {query: 'nc:strase'}
+          - {query: 'nc:straße'}
+          - {query: 'nc:aeon'}
+          - {query: 'nc:"ore lodz oeuvre"'}
+          - {query: 'nc:"thaw ayakkabi exit"'}
+          - {query: 'nc:dog'}
+          - {query: 'nc:ｄｏｇ'}
+          - {query: 'nc:a％b'}
+          - {query: 'nc:a＿b'}
+          - {query: 'nc:a%b'}
+          - {query: 'nc:fine'}
+          - {query: 'nc:izmir'}
+          - {query: 'nc:u_er'}
+          - {query: 'nc:*ber'}
+          - {query: 'nc:'}
+          - {query: 'front:nc:uber'}
+          - {query: 'front:nc:ÜBER'}
+          - {query: 'front:nc:ub*'}
+          - {query: '*:nc:uber'}
+          - {query: '-nc:uber'}

@@ -1,0 +1,26 @@
+# N6.2 of specs/maintenance/check-database-notes.md: a card copied by db_exec
+# with a new, higher id and the note's same nid and ord is deleted with no
+# grave (duplicate_card_ords 1, scm set); the original keeps its row. A second
+# run finds nothing.
+id: maintenance/check-db-notes/duplicate-ords
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - db_exec:
+      sql: >-
+        INSERT INTO cards
+        SELECT id + 1000, nid, did, ord, mod, 5, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data
+        FROM cards
+  - db_exec: {sql: "SELECT count(*) FROM cards"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT id, ord, mod, usn FROM cards"}
+  - db_exec: {sql: "SELECT count(*) FROM graves"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

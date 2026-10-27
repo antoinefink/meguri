@@ -1,0 +1,27 @@
+# C8.2 of specs/maintenance/check-database.md: a new card due 2.5 is rounded
+# to 3, a review card (queue 2) due 200,000 becomes due today (day 3) and a
+# learning card due 3,000,000,000 is clamped to 2,147,483,647, each stamped
+# (usn -1, mod now) and counted in card_properties; scm stays. A second run
+# finds nothing.
+id: maintenance/check-db/card-due
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+    - {notetype: Single, deck: Inbox, fields: [three, tres]}
+steps:
+  - advance: 3d
+  - db_exec: {sql: "UPDATE cards SET due = 2.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'one')"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 200000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'two')"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, left = 1001, due = 3000000000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'three')"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, c.type, c.queue, typeof(c.due), c.due, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

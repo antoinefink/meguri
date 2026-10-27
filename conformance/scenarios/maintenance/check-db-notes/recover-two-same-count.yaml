@@ -1,0 +1,31 @@
+# N4 of specs/maintenance/check-database-notes.md: two missing note types
+# whose first notes have two fields each are recovered in ascending mid order
+# as db-check-<ms>-2 and db-check-<ms>-2+ (the unique-name rule). A second run
+# finds nothing. No undo_status.
+id: maintenance/check-db-notes/recover-two-same-count
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: PairA
+      fields: [Left, Right]
+      templates: [{name: One, front: "{{Left}}", back: "{{Right}}"}]
+    - name: PairB
+      fields: [Up, Down]
+      templates: [{name: One, front: "{{Up}}", back: "{{Down}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: PairA, deck: Inbox, fields: [aa, ab]}
+    - {notetype: PairB, deck: Inbox, fields: [ba, bb]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 5"}
+  - db_exec: {sql: "DELETE FROM fields WHERE ntid IN (SELECT id FROM notetypes WHERE name IN ('PairA', 'PairB'))"}
+  - db_exec: {sql: "DELETE FROM templates WHERE ntid IN (SELECT id FROM notetypes WHERE name IN ('PairA', 'PairB'))"}
+  - db_exec: {sql: "DELETE FROM notetypes WHERE name IN ('PairA', 'PairB')"}
+  - reopen: {}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, (SELECT name FROM notetypes WHERE id = n.mid) FROM notes n ORDER BY n.sfld"}
+  - observe:
+      - notetype_structure: {notetypes: [db-check-1894705200000-2, db-check-1894705200000-2+]}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

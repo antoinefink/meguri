@@ -1,0 +1,32 @@
+# Restore to Default with a given kind (specs/notetypes/restore-to-default.md
+# D2 to D5). A Basic note type restored as Basic (and reversed card) takes
+# that kind's stored value (2), fields and two templates; the new template
+# generates its cards (at each note's sibling position). Meguri sets col.scm,
+# since the template count changed; Anki does not when a restore only adds
+# templates (deviation restore-template-add-schema, step 7). Restored as
+# Cloze next, the note type becomes a cloze one with Text and Back Extra; the
+# notes keep their values by position; the second template's cards are
+# removed with graves; no cloze number means no new card. That one sets
+# col.scm on both.
+id: notetypes/structure/restore-forced-kind
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_stock_notetype: {kind: basic, name: Plain}
+  - add_note: {notetype: Plain, fields: [a, b]}
+  - add_note: {notetype: Plain, fields: ["", y]}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 5
+  - restore_notetype: {notetype: Plain, kind: basic_and_reversed}
+  - observe:
+      - {notetype_structure: {notetypes: [Plain]}}
+      - {db_dump: {tables: [notes, cards]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 10
+  - restore_notetype: {notetype: Plain, kind: cloze}
+  - observe:
+      - {notetype_structure: {notetypes: [Plain]}}
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}

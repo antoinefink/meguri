@@ -1,0 +1,87 @@
+# Every damage of specs/maintenance/check-database.md C18.2 except
+# future-ids-cards, in one collection: one report whose counts are the sums of
+# the single scenarios' counts. future-ids-cards stays out: the cards the
+# notes stage generates (card-ord, card-text-values) take ids from now_ms up,
+# which C10.4 would then need for the future card. No undo_status (C14). A
+# second run finds nothing.
+id: maintenance/check-db/all-records
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [recovered4242, Pdeck, Qdeck, Rdeck, Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [orphan, a]}
+    - {notetype: Single, deck: Inbox, fields: [duenew, a]}
+    - {notetype: Single, deck: Inbox, fields: [duereview, a]}
+    - {notetype: Single, deck: Inbox, fields: [duelearn, a]}
+    - {notetype: Single, deck: Inbox, fields: [folda, a]}
+    - {notetype: Single, deck: Inbox, fields: [foldb, a]}
+    - {notetype: Single, deck: Inbox, fields: [foldc, a]}
+    - {notetype: Single, deck: Inbox, fields: [foldd, a]}
+    - {notetype: Single, deck: Inbox, fields: [oduea, a]}
+    - {notetype: Single, deck: Inbox, fields: [odueb, a]}
+    - {notetype: Single, deck: Inbox, fields: [ivla, a]}
+    - {notetype: Single, deck: Inbox, fields: [ivlb, a]}
+    - {notetype: Single, deck: Inbox, fields: [ivlc, a]}
+    - {notetype: Single, deck: Inbox, fields: [texta, a]}
+    - {notetype: Single, deck: Inbox, fields: [textb, a]}
+    - {notetype: Single, deck: Inbox, fields: [textc, a]}
+    - {notetype: Single, deck: Inbox, fields: [textd, a]}
+    - {notetype: Single, deck: Inbox, fields: [texte, a]}
+    - {notetype: Single, deck: Inbox, fields: [textf, a]}
+    - {notetype: Single, deck: Inbox, fields: [modq, a]}
+    - {notetype: Single, deck: Inbox, fields: [orda, a]}
+    - {notetype: Single, deck: Inbox, fields: [lost, a]}
+    - {notetype: Single, deck: Inbox, fields: [filt, a]}
+    - {notetype: Single, deck: Pdeck, fields: [parents, a]}
+steps:
+  - answer: {card: "#c1", rating: good}
+  - answer: {card: "#c2", rating: good}
+  - advance: 3d
+  - set_config: {key: nextPos, value: 99}
+  - db_exec: {sql: "UPDATE config SET usn = 5 WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "UPDATE cards SET usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'orphan')"}
+  - db_exec: {sql: "DELETE FROM notes WHERE sfld = 'orphan'"}
+  - db_exec: {sql: "UPDATE cards SET type = 0, queue = 0, due = 2.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'duenew')"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 200000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'duereview')"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, left = 1001, due = 3000000000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'duelearn')"}
+  - db_exec: {sql: "UPDATE cards SET due = 2500000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'folda')"}
+  - db_exec: {sql: "UPDATE cards SET due = 1999999, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'foldb')"}
+  - db_exec: {sql: "UPDATE cards SET due = 1500000.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'foldc')"}
+  - db_exec: {sql: "UPDATE cards SET queue = 4, due = 2500000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'foldd')"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 5, odue = 10, odid = 0, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'oduea')"}
+  - db_exec: {sql: "UPDATE cards SET odue = 1.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'odueb')"}
+  - db_exec: {sql: "UPDATE cards SET ivl = -5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'ivla')"}
+  - db_exec: {sql: "UPDATE cards SET ivl = 1.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'ivlb')"}
+  - db_exec: {sql: "UPDATE cards SET ivl = 3000000000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'ivlc')"}
+  - db_exec: {sql: "UPDATE cards SET due = 'abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'texta')"}
+  - db_exec: {sql: "UPDATE cards SET due = x'3132', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'textb')"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 'abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'textc')"}
+  - db_exec: {sql: "UPDATE cards SET ord = 'abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'textd')"}
+  - db_exec: {sql: "UPDATE cards SET ivl = '12abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'texte')"}
+  - db_exec: {sql: "UPDATE cards SET mod = '12abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'textf')"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1894701600.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'modq')"}
+  - db_exec: {sql: "UPDATE cards SET ord = 40000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'orda')"}
+  - db_exec: {sql: "UPDATE cards SET did = 4242, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'lost')"}
+  - db_exec: {sql: "UPDATE cards SET odid = 1, odue = 7, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'filt')"}
+  - db_exec: {sql: "UPDATE decks SET name = 'A' || char(31) || 'B' || char(31) || 'C', usn = 5 WHERE name = 'Pdeck'"}
+  - db_exec: {sql: "UPDATE decks SET name = 'X' || char(31) || 'Y', usn = 5 WHERE name = 'Qdeck'"}
+  - db_exec: {sql: "UPDATE decks SET name = 'X' || char(31) || 'Z', usn = 5 WHERE name = 'Rdeck'"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500001, 7, 5, 3, 1.5, 1, 2500, 4000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500002, 7, 5, 3, 4, -2.5, 2500, 4000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500003, 7, 5, 3, 4, 2, 2500, -5, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500004, 7, 5, 3, 4, 2, 2500, 3000000000, 1)"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.type, c.queue, typeof(c.due), c.due, typeof(c.ivl), c.ivl, c.odid, c.odue, typeof(c.mod), c.mod, c.usn, (SELECT replace(name, char(31), '::') FROM decks WHERE id = c.did) FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT id FROM cards WHERE nid IN (SELECT id FROM notes WHERE sfld IN ('orda', 'textd')) ORDER BY id"}
+  - db_exec: {sql: "SELECT count(*) FROM cards WHERE nid NOT IN (SELECT id FROM notes)"}
+  - db_exec: {sql: "SELECT id, replace(name, char(31), '::'), mtime_secs, usn FROM decks ORDER BY name"}
+  - db_exec: {sql: "SELECT id, cid, usn, ivl, lastIvl, time, type FROM revlog ORDER BY id"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT count(*) FROM graves"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

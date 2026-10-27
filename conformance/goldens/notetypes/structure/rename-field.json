@@ -1,0 +1,230 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "update_notetype": {
+          "name": "Vocab"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Vocab"
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600003": {
+              "data": "{}",
+              "did": 1,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600003,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1700000000,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 2402928189,
+              "data": "",
+              "flags": 0,
+              "flds": "gato\u001fcat\u001ffeline",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1700000000,
+              "sfld": "gato",
+              "tags": "",
+              "usn": 5
+            },
+            "1894701600001": {
+              "csum": 1631174082,
+              "data": "",
+              "flags": 0,
+              "flds": "perro\u001fdog\u001f",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1700000000,
+              "sfld": "perro",
+              "tags": "",
+              "usn": 5
+            }
+          }
+        },
+        "notetype_templates": {
+          "Vocab": [
+            {
+              "back": "{{FrontSide}}<hr id=answer>{{#Question}}{{Back}}{{/Question}}{{^Question}}-{{/Question}}<!-- {{Front}} -->",
+              "browser_back": "{{#Question}}{{Back}}{{/Question}}",
+              "browser_front": "[{{Question}}]",
+              "front": "{{Question}}<br>{{text:Question}}",
+              "name": "Forward"
+            },
+            {
+              "back": "{{Question}} {{hint:Extra}}",
+              "browser_back": "{{^Question}}?{{/Question}}{{Question}}",
+              "browser_front": "{{Back}} {{Extra}}",
+              "front": "{{Back}}",
+              "name": "Reverse"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701660, -1, 0]
+          ]
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Vocab"
+        }
+      },
+      {
+        "notetype_templates": {
+          "Vocab": [
+            {
+              "back": "{{FrontSide}}<hr id=answer>{{#Extra}}{{Back}}{{/Extra}}{{^Extra}}-{{/Extra}}<!-- {{Front}} -->",
+              "browser_back": "{{#Extra}}{{Back}}{{/Extra}}",
+              "browser_front": "[{{Extra}}]",
+              "front": "{{Extra}}<br>{{text:Extra}}",
+              "name": "Forward"
+            },
+            {
+              "back": "{{Extra}} {{hint:Question}}",
+              "browser_back": "{{^Extra}}?{{/Extra}}{{Extra}}",
+              "browser_front": "{{Back}} {{Question}}",
+              "front": "{{Back}}",
+              "name": "Reverse"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Extra"],
+            [1, "Back"],
+            [2, "Question"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/structure/rename-field",
+  "scenario_sha256": "d3dce2a364d288e69f79502a56780f3c63e064eda990f2cc74c082e9609ee909",
+  "tz": "UTC"
+}

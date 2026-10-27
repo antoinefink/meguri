@@ -1,0 +1,49 @@
+# stats/studied-today T2, T5.1: the Home line for given counts and summed
+# times, with no review-log rows. Covers the switch from seconds to minutes
+# at 60 s, singular and plural, two-decimal rounding of the amount and of the
+# seconds per card in 32-bit floats (59.995 s shows as 60 seconds; 8.855 s
+# per card shows as 8.85, where the Stats screen shows 8.86), no digit
+# grouping, 0 cards, negative totals that another client's negative times can
+# produce, a total far above any answer-time limit, and AE53's line.
+id: stats/studied-today/format-table
+clock: {tz: UTC, start: "2026-10-12T12:00:00"}
+steps:
+  - observe:
+      - studied_today_format:
+          inputs:
+            - [0, 0]
+            - [1, 0]
+            - [1, 1000]
+            - [2, 1000]
+            - [3, 13000]
+            - [1, 59000]
+            - [1, 59994]
+            - [1, 59995]
+            - [1, 59999]
+            - [1, 60000]
+            - [1, 61000]
+            - [2, 90000]
+            - [1, 90500]
+            - [1, 119999]
+            - [1, 3540000]
+            - [1, 3600000]
+            - [300, 5400000]
+            - [10, 18000000]
+            - [1, 900000]
+            - [1, 999]
+            - [1, 4]
+            - [1, 5]
+            - [1, 125]
+            - [8, 1000]
+            - [1, 1005]
+            - [1, 8855]
+            - [7, 100000]
+            - [1000, 1000000]
+            - [1234, 1234500]
+            - [0, 5000]
+            - [1, -1]
+            - [1, -1000]
+            - [1, -5000]
+            - [1, -90000]
+            - [1, 131072125]
+            - [50, 400000]

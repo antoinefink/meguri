@@ -1,0 +1,41 @@
+# A template renamed on one side (specs/package/notetype-merge.md J3, J4.2;
+# package-ops.md E6). After the export the target renames Forward to Front
+# side (same id 2001, so the target is newer). The merge matches the
+# templates by id and adds no second one: with Update note types never the
+# target's name stays, with Always the incoming Forward governs.
+id: package/notetype-merge/template-renamed
+description: Templates match by id across a rename; the governing record gives the name.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - advance: 1m
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{rename_template: {from: Forward, to: Front side}}]}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: never, update_notetypes: never, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: never, update_notetypes: always, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}

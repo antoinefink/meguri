@@ -1,0 +1,36 @@
+# Update notes (specs/package/apkg-import.md I9 step 5; package-ops.md E6).
+# The package holds n1, n2 and n3 with mod 1894701600. Before each import the
+# target's three notes get another back and the mods 1894701500 (older),
+# 1894701600 (equal) and 1894701700 (newer). If newer updates only n1; Always
+# updates n1 and n3 (the mods differ) and leaves n2 a duplicate; Never
+# updates none. An updated note takes the incoming fields and mod.
+id: package/apkg-import/update-matrix
+description: Update notes if newer, always and never against older, equal and newer target notes.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [older, a]}
+    - {notetype: Pair, deck: Lang, fields: [equal, b]}
+    - {notetype: Pair, deck: Lang, fields: [newer, c]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: notes.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - db_exec:
+      sql: "UPDATE notes SET flds = sfld || char(31) || 'target', mod = CASE sfld WHEN 'older' THEN 1894701500 WHEN 'equal' THEN 1894701600 ELSE 1894701700 END"
+  - import: {format: apkg, name: notes.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT sfld, flds, mod, usn FROM notes ORDER BY id"}
+  - db_exec:
+      sql: "UPDATE notes SET flds = sfld || char(31) || 'target', mod = CASE sfld WHEN 'older' THEN 1894701500 WHEN 'equal' THEN 1894701600 ELSE 1894701700 END"
+  - import: {format: apkg, name: notes.apkg, merge_notetypes: false, update_notes: always, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT sfld, flds, mod, usn FROM notes ORDER BY id"}
+  - db_exec:
+      sql: "UPDATE notes SET flds = sfld || char(31) || 'target', mod = CASE sfld WHEN 'older' THEN 1894701500 WHEN 'equal' THEN 1894701600 ELSE 1894701700 END"
+  - import: {format: apkg, name: notes.apkg, merge_notetypes: false, update_notes: never, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT sfld, flds, mod, usn FROM notes ORDER BY id"}

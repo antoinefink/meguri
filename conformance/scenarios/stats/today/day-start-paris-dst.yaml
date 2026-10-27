@@ -1,0 +1,21 @@
+# stats/studied-today T2.1, T3.1 across the time zone matrix: Europe/Paris on
+# the 23-hour day of 2026-03-29, rollover 0: Anki's day 0 is the 86,400 s
+# before the next day starts at 2026-03-30 00:00 +02:00, so it starts at 23:00
+# +01:00 the evening before. The Home line counts rows strictly after the
+# start of Anki's day 0; the Today section also counts the row stamped exactly
+# at the start. Neither has an upper bound, so rows at and after the next day
+# start count too.
+id: stats/today/day-start-paris-dst
+clock: {tz: Europe/Paris, start: "2026-03-27T12:00:00"}
+steps:
+  - set_config: {key: rollover, value: 0}
+  - set_clock: "2026-03-29T12:00:00"
+  # Answers (ease 3, type 1) on card id 1000, which no card has:
+  #   2026-03-28T22:59:59+01:00 (one second before the day starts): time 1000 ms
+  #   2026-03-28T22:59:59.999+01:00 (1 ms before): time 2000 ms
+  #   2026-03-28T23:00:00+01:00 (exactly at the start): time 4000 ms
+  #   2026-03-28T23:00:00.001+01:00 (1 ms after): time 8000 ms
+  #   2026-03-30T00:00:00+02:00 (when the next day starts): time 16000 ms
+  #   2026-03-30T01:00:00+02:00 (an hour after that, a future row): time 32000 ms
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1774735199000, 1000, -1, 3, 10, 5, 2500, 1000, 1), (1774735199999, 1000, -1, 3, 10, 5, 2500, 2000, 1), (1774735200000, 1000, -1, 3, 10, 5, 2500, 4000, 1), (1774735200001, 1000, -1, 3, 10, 5, 2500, 8000, 1), (1774821600000, 1000, -1, 3, 10, 5, 2500, 16000, 1), (1774825200000, 1000, -1, 3, 10, 5, 2500, 32000, 1)"}
+  - observe: [studied_today_text, studied_today_raw, {today_stats: [collection]}]

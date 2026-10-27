@@ -1,0 +1,37 @@
+# Presets on import (specs/package/apkg-import.md I10.1, I6; package-ops.md
+# E6). The package holds Slow (FSRS parameters set, on Lang) and Fast (on
+# Other). After the export Slow is removed and Fast's new limit changed in
+# the target. With presets off nothing is added and the decks keep their
+# presets. With presets on and no scheduling, Slow comes back under its id
+# with its FSRS parameters emptied, Fast is skipped (the target's kept), and
+# Lang moves to Slow.
+id: package/apkg-import/presets
+description: Presets off add none; on add only absent ids, with FSRS parameters emptied without scheduling.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  presets:
+    - {name: Slow, new_per_day: 5, fsrs_params: [0.4, 1.2, 3.1, 15.6, 7.2, 0.5, 1.4, 0.005, 1.5, 0.12, 1.0, 1.9, 0.11, 0.3, 2.3, 0.23, 2.9, 0.5, 0.67, 0.1, 0.2]}
+    - {name: Fast, new_per_day: 50}
+  decks: [{name: Lang, preset: Slow}, {name: Other, preset: Fast}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Other, fields: [two, b]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: presets.apkg, limit: collection, scheduling: true, presets: true, media: false}
+  - remove_preset: {preset: Slow, fallback: Default}
+  - save_deck_options: {deck: Other, options: {new_per_day: 60}}
+  - advance: 1m
+  - import: {format: apkg, name: presets.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - db_dump: {tables: [decks, deck_config]}
+  - advance: 1m
+  - import: {format: apkg, name: presets.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: false, with_deck_configs: true}
+  - observe:
+      - db_dump: {tables: [decks, deck_config]}

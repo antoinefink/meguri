@@ -1,0 +1,83 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "update_notetype": {
+          "name": "Styled"
+        }
+      },
+      {
+        "notetype_templates": {
+          "Styled": [
+            {
+              "back": "{{# Front }}x{{/ Front }}{{Back}}",
+              "browser_back": "",
+              "browser_front": "",
+              "front": "{{ Front }} {{{Back}}} {{ text:Extra }}",
+              "name": "Spaced"
+            },
+            {
+              "back": "{{=<% %>=}}<%Front%>",
+              "browser_back": "",
+              "browser_front": "",
+              "front": "{{=<% %>=}}<%Back%> {{x}} <% Extra %>",
+              "name": "Alt"
+            },
+            {
+              "back": "{{#Extra}}{{Back}}",
+              "browser_back": "",
+              "browser_front": "",
+              "front": "{{Extra}}{{Front}}",
+              "name": "Broken"
+            }
+          ]
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Styled"
+        }
+      },
+      {
+        "notetype_templates": {
+          "Styled": [
+            {
+              "back": "{{#Front}}x{{/Front}}{{Back}}",
+              "browser_back": "",
+              "browser_front": "{{Front}}",
+              "front": "{{Front}} {{Back}}} {{text:Note}}",
+              "name": "Spaced"
+            },
+            {
+              "back": "{{Front}}",
+              "browser_back": "",
+              "browser_front": "{{Front}}",
+              "front": "{{Back}} {{x}} {{Note}}",
+              "name": "Alt"
+            },
+            {
+              "back": "{{#Extra}}{{Back}}",
+              "browser_back": "",
+              "browser_front": "{{Front}}",
+              "front": "{{Note}}{{Front}}",
+              "name": "Broken"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/structure/rewrite-format",
+  "scenario_sha256": "e1d74edcb6d58c96f3fddb11c25070925f3b521d0e7c97568e99bbe7f31e680a",
+  "tz": "UTC"
+}

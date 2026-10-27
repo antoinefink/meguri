@@ -1,0 +1,195 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "change_notetype_info": {
+          "card_counts": [
+            [0, 1],
+            [1, 1],
+            [2, 1]
+          ],
+          "discarded_fields": [],
+          "dropped_templates": null,
+          "field_content": [1, 0],
+          "fields": [0, 1],
+          "new_fields": ["A", "B"],
+          "new_notetype": "Two",
+          "new_templates": ["T1", "T2"],
+          "old_fields": ["Text", "Back Extra"],
+          "old_notetype": "Cloze Text",
+          "old_templates": ["Cloze"],
+          "removed_cards": 1,
+          "schema": 1894701600000,
+          "templates": null
+        }
+      },
+      {
+        "change_notetype": {
+          "notes": 1
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Geography",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "Geography",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c3": null
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["{{c1::Paris}} is in {{c2::France}}, in {{c3::Europe}}", "Two", "{{c1::Paris}} is in {{c2::France}}, in {{c3::Europe}}|", 1894705200, -1],
+            ["{{c1::Qorvin}} and {{c3::Tesk}}", "Two", "{{c1::Qorvin}} and {{c3::Tesk}}|b", 1894701600, -1]
+          ]
+        }
+      },
+      {},
+      {
+        "change_notetype_info": {
+          "card_counts": [
+            [0, 1],
+            [1, 1]
+          ],
+          "discarded_fields": [],
+          "dropped_templates": null,
+          "field_content": [1, 1],
+          "fields": [0, 1],
+          "new_fields": ["Text", "Back Extra"],
+          "new_notetype": "Cloze Text",
+          "new_templates": ["Cloze"],
+          "old_fields": ["A", "B"],
+          "old_notetype": "Two",
+          "old_templates": ["T1", "T2"],
+          "removed_cards": 0,
+          "schema": 1894705200000,
+          "templates": null
+        }
+      },
+      {
+        "change_notetype": {
+          "notes": 1
+        }
+      },
+      {
+        "card": {
+          "#c4": {
+            "data": {},
+            "did": "Geography",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c5": {
+            "data": {},
+            "did": "Geography",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["{{c1::Paris}} is in {{c2::France}}, in {{c3::Europe}}", 0, "Geography", 0, 1, 1894701600, -1],
+            ["{{c1::Paris}} is in {{c2::France}}, in {{c3::Europe}}", 1, "Geography", 0, 1, 1894701600, -1],
+            ["{{c1::Qorvin}} and {{c3::Tesk}}", 0, "Geography", 0, 2, 1894701600, -1],
+            ["{{c1::Qorvin}} and {{c3::Tesk}}", 1, "Geography", 0, 2, 1894701600, -1],
+            ["{{c1::Qorvin}} and {{c3::Tesk}}", 2, "Geography", 0, 2, 1894708800, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/change/cloze",
+  "scenario_sha256": "41df5320f8ec5b997d466e24d52551e68fe71e9be6eede408236943f147619d5",
+  "tz": "UTC"
+}

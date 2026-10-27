@@ -1,0 +1,159 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "change_notetype_info": {
+          "card_counts": [
+            [0, 2]
+          ],
+          "discarded_fields": [],
+          "dropped_templates": [],
+          "field_content": [2, 2],
+          "fields": [0, 1],
+          "new_fields": ["Front", "Back"],
+          "new_notetype": "Pair Reverse",
+          "new_templates": ["Card 1", "Card 2"],
+          "old_fields": ["Front", "Back"],
+          "old_notetype": "Pair",
+          "old_templates": ["Card 1"],
+          "removed_cards": 0,
+          "schema": 1894701600000,
+          "templates": [0, null]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "change_notetype": {
+          "error": "schema_changed"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["vexo", "Pair", 1894701600, -1],
+            ["zwei", "Pair", 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [2]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701601000, 1894701600000]
+          ]
+        }
+      },
+      {
+        "change_notetype_info": {
+          "card_counts": [
+            [0, 2]
+          ],
+          "discarded_fields": [],
+          "dropped_templates": [],
+          "field_content": [2, 2],
+          "fields": [0, 1],
+          "new_fields": ["Front", "Back"],
+          "new_notetype": "Pair Reverse",
+          "new_templates": ["Card 1", "Card 2"],
+          "old_fields": ["Front", "Back"],
+          "old_notetype": "Pair",
+          "old_templates": ["Card 1"],
+          "removed_cards": 0,
+          "schema": 1894701601000,
+          "templates": [0, null]
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "change_notetype": {
+          "error": "not_found"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["vexo", "Pair", 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701601000, 1894701720000]
+          ]
+        }
+      },
+      {
+        "change_notetype_info": {
+          "card_counts": [
+            [0, 1]
+          ],
+          "discarded_fields": [],
+          "dropped_templates": [],
+          "field_content": [1, 1],
+          "fields": [0, 1],
+          "new_fields": ["Front", "Back"],
+          "new_notetype": "Pair Reverse",
+          "new_templates": ["Card 1", "Card 2"],
+          "old_fields": ["Front", "Back"],
+          "old_notetype": "Pair",
+          "old_templates": ["Card 1"],
+          "removed_cards": 0,
+          "schema": 1894701601000,
+          "templates": [0, null]
+        }
+      },
+      {
+        "change_notetype": {
+          "notes": 1
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["vexo", "Pair Reverse", 1894701780, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701780000, 1894701780000]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/change/refusals",
+  "scenario_sha256": "9a96dc552ba180ede103465f7faf3f09b5fbeaab9d761d0b752ec5e2f6b51bce",
+  "tz": "UTC"
+}

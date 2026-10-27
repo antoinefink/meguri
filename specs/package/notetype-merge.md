@@ -3,7 +3,7 @@
 Spec: package/notetype-merge
 Requirements: R1605, R1606; R1475 and R1476 for the import-merge case; R2008 for the import-merge case (core side); supports R2053
 Anki: 26.09.3
-Scenarios: conformance/scenarios/package/notetype-merge/ (none recorded yet; J15 lists them)
+Scenarios: conformance/scenarios/package/notetype-merge/ (J15.1 lists them and which are recorded)
 
 What a deck package import (`package/apkg-import`, U120) does with Merge note types on (U121): which note types merge (J1, J2), how fields and templates match (J3), the merged note type (J4), the two stages that merge by id and by note GUID (J5, J6), the maps the import applies to incoming notes and cards (J7), the removal of emptied note types (J8), the schema stamp, safety backup and structure report (J9), the preview of destructive mappings (J10), the `mod` the note update compares (J11), the write phase and undo (J12), errors (J13), the differences from Anki (J14) and the scenarios (J15).
 
@@ -197,7 +197,7 @@ R1605's "by ids then names": a name is compared only when one side has no id; tw
 
 ### J15.1 Scenarios to record
 
-None can be recorded yet: they need the deck-package `import` form with `merge_notetypes`, the latest deck-package `export` and the fixture packages that `package/apkg-import#I18.1` asks the oracle maintainer for. Each scenario defines its own note types with field and template ids (R1959), builds or loads the package, imports it with Merge note types on, and observes `db_dump` (note types with fields and templates, notes, cards, config `curModel` and `_nt_` keys), `col.scm` through `db_exec` (`conformance/notetype-ops#T9`) and the import log. On Meguri the adapter accepts every preview (it calls `apply` again with the token), as schema ops run accepted (T9); J10's preview is tested by Meguri's own tests.
+Status (2026-10-27): recorded except `two-new-fields`, `guid-conflict` and `template-moved` (each needs its J14 deviation entry with the recording) and `by-name` (an old-client fixture). Each scenario defines its own note types with field and template ids (R1959), builds or loads the package, imports it with Merge note types on, and observes its note types with `notetype_structure` and `db_exec` (field and template rows of its own note types), `db_dump` of `notes`, `cards`, `decks` and `config` (`curModel` and `_nt_` keys) but never of `notetypes`, `fields` or `templates` (stock rows, `conformance/package-ops#E6.2`), `col.scm` through `db_exec` (`conformance/notetype-ops#T9`) and the import log. On Meguri the adapter accepts every preview (it calls `apply` again with the token), as schema ops run accepted (T9); J10's preview is tested by Meguri's own tests.
 
 | Scenario | Shows |
 |---|---|

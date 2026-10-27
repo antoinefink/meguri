@@ -356,7 +356,7 @@ No ported scenario observes any of them. A scenario that dumps the package colle
 
 ## A17. Scenarios and tests
 
-No `apkg-export` scenario can be recorded yet. The forms and observations they use are fixed, as drafts, in `specs/conformance/package-ops.md`; neither the oracle driver nor Meguri's executor implements them yet, so what remains is the driver work and the recording:
+Status (2026-10-27): the oracle driver implements E6, E7, E10 and E11 of `specs/conformance/package-ops.md`, and every scenario of the table below is recorded except `colpkg/export-with-media` (E9 is still draft); Meguri's executor implements none of them yet. The forms and observations they use:
 
 - `export`, deck-package form: `conformance/package-ops#E7` (capability `export.apkg`; output `{notes: <count>}`; rejections `invalid_ids` and `media_check_required`; a `{deck: <name>}` limit that names no deck is `unknown_ref`).
 - `export`, collection-package options: `conformance/package-ops#E9` (U124).
@@ -380,7 +380,7 @@ Scenarios to record (`conformance/scenarios/package/apkg-export/`):
 | `default-name-clash` | deck 1 renamed `Inbox`, another deck named `Default` with notes, one of them with a second card in deck 1; export of `Default` without scheduling: `package_db_dump` equals Anki's (no row with id 1, the second card's `did` 1) (A4) |
 | `media-selection` | fields `[sound:a.mp3]`, `<img src="b&amp;c.jpg">`, a remote image, a missing file, `[latex]x^2[/latex]` with its image present; CSS `url(_f.woff)`, `@import "_base.css"`, `@import "_t.CSS"`; template `"_x.js"`; an unused `c.png`: `package_media` equals Anki's set (sizes and SHA-1; order not compared) |
 | `media-unnormalized` | a field references an existing `con.jpg`: both refuse, `media_check_required` |
-| `future-ids` | a note id three days ahead: both refuse, `invalid_ids`; no file in the session directory |
+| `future-ids` | a note id three days ahead: both refuse, `invalid_ids`; an export of another deck succeeds. That a refused export writes no file is not observable with the current kinds: Meguri's own A8 test checks it |
 | `empty-selection` | a deck whose notes all moved away: `{notes: 0}`, package listing equal |
 | `colpkg/export-with-media` (live, T1, U124) | Meguri's `.colpkg` with media; Anki imports it; collection dump and media folder equal the source's |
 

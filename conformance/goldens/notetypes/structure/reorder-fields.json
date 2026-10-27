@@ -1,0 +1,510 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Quad"
+        }
+      },
+      {
+        "db_dump": {
+          "notes": {
+            "1894701600000": {
+              "csum": 355756889,
+              "data": "",
+              "flags": 0,
+              "flds": "007\u001f<b>私</b>\u001fかきく\u001fplain text",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": "私",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 671741281,
+              "data": "",
+              "flags": 0,
+              "flds": "12abc\u001f私\u001f\u001f",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": "私",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600002": {
+              "csum": 3661210606,
+              "data": "",
+              "flags": 0,
+              "flds": "\u001f\u001f<i>x</i>\u001fonly notes",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": "",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        },
+        "notetype_structure": {
+          "Quad": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Number",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Word",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Reading",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Notes",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": null,
+            "original_stock_kind": 1,
+            "sort_field": 1,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Recall",
+                "requirement": {
+                  "fields": [1],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1, 1894701660000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Quad"
+        }
+      },
+      {
+        "db_dump": {
+          "notes": {
+            "1894701600000": {
+              "csum": 355756889,
+              "data": "",
+              "flags": 0,
+              "flds": "007\u001f<b>私</b>\u001fかきく\u001fplain text",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701720,
+              "sfld": 7,
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 671741281,
+              "data": "",
+              "flags": 0,
+              "flds": "12abc\u001f私\u001f\u001f",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701720,
+              "sfld": "12abc",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600002": {
+              "csum": 3661210606,
+              "data": "",
+              "flags": 0,
+              "flds": "\u001f\u001f<i>x</i>\u001fonly notes",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1894701720,
+              "sfld": "",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        },
+        "notetype_structure": {
+          "Quad": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Number",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Word",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Reading",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Notes",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": null,
+            "original_stock_kind": 1,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Recall",
+                "requirement": {
+                  "fields": [1],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1, 1894701720000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Quad"
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600002,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 355756889,
+              "data": "",
+              "flags": 0,
+              "flds": "007\u001fplain text\u001fかきく\u001f<b>私</b>",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701780,
+              "sfld": 7,
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 671741281,
+              "data": "",
+              "flags": 0,
+              "flds": "12abc\u001f\u001f\u001f私",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701780,
+              "sfld": "12abc",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600002": {
+              "csum": 3661210606,
+              "data": "",
+              "flags": 0,
+              "flds": "\u001fonly notes\u001f<i>x</i>\u001f",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1894701780,
+              "sfld": "",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        },
+        "notetype_structure": {
+          "Quad": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Number",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Notes",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Reading",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Word",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": null,
+            "original_stock_kind": 1,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Recall",
+                "requirement": {
+                  "fields": [3],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1, 1894701780000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Number"],
+            [1, "Notes"],
+            [2, "Reading"],
+            [3, "Word"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/structure/reorder-fields",
+  "scenario_sha256": "169c14bfba588a8fd3403cef00b307788ab9a577ef0ede1d8098de336af2c327",
+  "tz": "UTC"
+}
