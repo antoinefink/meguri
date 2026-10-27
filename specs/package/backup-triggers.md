@@ -178,7 +178,7 @@ A safety backup becomes a byte copy when the lifecycle is `Failed` (`Corrupt`, o
 9. **Result**: the restored name, safety backup name (or none), new generation and `cloudPublicationPending` true. R6 preserves the publication fence until U113/U114 resolve an explicit cloud/local choice. Manual Anki transfers remain separate.
 
 - **Cancel or failure before the rename**: the lifecycle returns to the state it had (Ready, or `Failed`) with the same generation; publication recovery follows `engine/collection-replace#R6`; the safety backup stays.
-- **States**: allowed from Ready, from `Failed{Corrupt}` (`engine/lifecycle#L4`) and from NoCollection (no safety backup then).
+- **States**: allowed from Ready, from `Failed{Corrupt}` (`engine/lifecycle#L4`) and from NoCollection. No existing collection file means no safety backup; an existing file requires T7. A retained nonempty old WAL uses `engine/collection-replace#R6.5`, without weakening `LiveWalNotEmpty`.
 - After it, the restored collection's `col.mod` (the restore instant) differs from the reference, so the scheduler arms a deadline (T3.3) from the safety backup's creation time.
 - Anki, for comparison: its restore is its `.colpkg` import (the same stamps, `engine/collection-replace#R7`), with no forced backup first and automatic sync off until the restored profile closes (T4.1).
 

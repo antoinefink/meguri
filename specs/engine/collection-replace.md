@@ -50,7 +50,7 @@ The result is one self-contained file: everything committed is in it, and it nee
 Runs as the swap of `engine/lifecycle#L8` (step 2), after L8 step 1 has set the phase to `Replacing` and closed every connection to the live collection: every reader (U107's snapshot reader and its stage attachment and the derived-store attachments included, after their read transactions end), then the writer with its checkpoint (`storage/open-and-connections#C10`).
 
 1. The live `collection.anki2-wal` must be absent or empty (0 bytes). If not, nothing is changed and the replace fails with `LiveWalNotEmpty`: L8 reopens the old file and keeps the generation.
-2. For `Restore` and `ColpkgImport`, durably record the replacement intent and publication fence (R6.2).
+2. For `Restore` and `ColpkgImport`, durably record the replacement intent and publication fence (R6.2); R6.5 continues its already-recorded intent for the same operation.
 3. Remove the live `collection.anki2-shm` and `collection.anki2-wal`. They hold nothing (step 1); a stale `-wal` left next to the new file would be applied to it by SQLite.
 4. Rename the staged file over `collection.anki2`: one `rename`, on one file system.
 5. A full sync of the collection directory.
@@ -183,6 +183,56 @@ Include manual Import from prior-clear and prior-pending decisions, explicitly u
 old file, with the same identical-time/bytes and journal fault cases. A successful collection/media transfer
 cannot clear the imported generation's pending fence.
 
+### R6.5 Damaged-file Restore with retained WAL bytes
+
+For T8 Restore from Failed or NoCollection with an existing main file, T7 may
+leave a nonempty old WAL that cannot be checkpointed. A durable raw backup alone
+does not waive `LiveWalNotEmpty`. Before changing that WAL, bind the verified
+T7 main/WAL copies, their durable identities and the original WAL's native
+identity, length, digest and disposition to this operation's existing R6 intent.
+Use exact no-follow root/name bindings and independent regular files; refuse
+aliases, hard links, changed or missing evidence. Recheck source/copy bindings
+under the same advisory/exclusive ownership. A name or callback alone is no proof.
+
+Save the WAL recovery state before its first move. Put this state in a required
+field whose value existing main-only R6 readers reject. New optional WAL, version
+or feature fields give no protection when those readers ignore them. Old readers
+must stop before treating the intent as valid, opening the collection, rewriting
+or clearing the intent. Keep this value until all WAL handling, recovery and
+directory sync work is durably complete, including after main rename or
+activation. Matching main-file bytes alone never ends this protection. Existing
+intents keep their readable format.
+
+Retire only the identified WAL into operation-owned recovery storage, without
+overwrite or truncation, and synchronize the affected directories. The intent
+must preserve recoverable bytes across the filesystem-action/metadata-update
+crash window; retired bytes are not swept before R6 resolves them. Continue the
+same intent and require R5's ordinary absent-or-empty WAL check before candidate
+rename. Never leave old WAL beside a candidate when opening it.
+
+First prove which main file is present using recorded bytes, native bindings and
+valid phase evidence. Equal bytes or times do not prove the old file; keep an
+unresolved equal result blocked. Then compare both WAL paths with the state saved
+before the move. Recovery must safely handle a WAL still at its old path, a
+completed move not yet saved in metadata, and an old-WAL move back that stopped
+part way through. If both paths exist, neither exists, either binding changed or
+their states conflict, preserve evidence and refuse any removal or replacement
+that is not proven safe. Running recovery again must preserve a correct result.
+
+Before candidate main rename, cancellation/failure restores the prior WAL view;
+proven old-file recovery does so before any old open or checkpoint. A proven
+candidate never receives old WAL, even with equal main bytes. Keep the T7 copies
+and existing publication decisions. Complete WAL reconciliation before opening,
+mutating checks, legacy-format conversion or intent cleanup. This is the same
+R6 operation, not another journal or a waiver of the ordinary WAL guard.
+
+Test process kills between each file action and its metadata update: save intent,
+move old WAL, move it back, rename main and finish. Include equal main-file proof
+that cannot select a branch, changed source/copy/root bindings, missing or corrupt
+retained evidence, and refusal by old readers before activation and after rename
+while WAL work is pending. Check exact old main/WAL recovery or keep old WAL away
+from the candidate. Keep the existing nonempty-WAL and publication-fence tests.
+
 ## R7. What a replacement from a collection package stamps (Anki 26.9.3)
 
 - Anki's restore of a backup and its `.colpkg` import are one operation. On its copy of the incoming collection, after the copy has opened (upgraded when older) and before the swap, it sets `col.scm` and `col.mod` to the current time in epoch milliseconds. Nothing else in the file changes: no `usn`, no `ls`, no row of any other table.
@@ -207,7 +257,7 @@ cannot clear the imported generation's pending fence.
 | `StagingCorrupt` | R3 step 2 or R4 step 4 |
 | `CallerChangeFailed{source}` | R3 step 3 |
 | `StagingNotFinalised` | R4 step 3 |
-| `LiveWalNotEmpty` | R5 step 1 |
+| `LiveWalNotEmpty` | R5 step 1 still refuses after a raw T7 copy unless R6.5 has safely retired the identified WAL |
 | `Io` | any other file-system failure |
 
 The lifecycle's own errors (`CollectionUnavailable`, `StaleGeneration`, `engine/lifecycle#L5`, `#L7`) pass through unchanged.
