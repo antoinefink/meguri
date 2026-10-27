@@ -1,11 +1,11 @@
 # Editing and week-start config keys
 
 Spec: editor/config-keys
-Requirements: R115, R138, R139, R140, R149, R798, R800, R803, R804, R852, R866, R867, R868, R1381
+Requirements: R115, R138, R139, R140, R149, R798, R800, R803, R804, R852, R866, R867, R868, R1381, R840, R848
 Anki: 26.09.3
 Scenarios: conformance/scenarios/editor/config-keys/
 
-Four collection config keys that the Settings pages (U160) show and that the editor, the Add screen and the stats read: `pasteImagesAsPng`, `pasteStripsFormatting`, `addToCur` and `firstDayOfWeek`. Storage rules are `storage/config-table`; this file adds each key's type, default and meaning.
+Four collection config keys that the Settings pages (U160) show and that the editor, the Add screen and the stats read: `pasteImagesAsPng`, `pasteStripsFormatting`, `addToCur` and `firstDayOfWeek`. Storage rules are `storage/config-table`; this file adds each key's type, default and meaning. K8 and K9 add the editor's keys `shrinkEditorImages`, `closeHTMLTags` and `customColorPickerPalette` (U192).
 
 ## K1. Rules shared by the four keys
 
@@ -100,3 +100,54 @@ Requested from the oracle maintainer, in `conformance/scenarios/editor/config-ke
 | `add-defaults-by-notetype` | K4.1 with `false`: last deck normal, filtered, deleted and missing; `curModel` naming a deleted note type |
 | `first-notetype-fallback` | K4.1: `curModel` missing, with note types whose name order differs from id order |
 | `notetype-change` | K4.2: the deck after a note type change, both values of `addToCur`, with and without a usable last deck |
+
+## K8. Editor option keys: `shrinkEditorImages` and `closeHTMLTags` (R848, U192)
+
+| Key | JSON type | Default | Read by |
+|---|---|---|---|
+| `shrinkEditorImages` | boolean | `true` | image display in the editor (`editor/paste` P18, R878) |
+| `closeHTMLTags` | boolean | `true` | typing in a field's HTML mode (`editor/formatting` F12) |
+
+- K1's rules hold for these two keys as for its four: strict typed reads with the default for a missing or unreadable value, whole-value compact writes, a write only when the user picks a value different from the one read, never on open or close, no removal, one skip-undo write of source `UserNonUndoable` with no undo entry, and sync as collection config.
+- The only writer is the editor's options menu (`editor/formatting` F12): choosing an item writes the opposite of the value read.
+- The editor reads both when it loads a note (`editor/field-html` B3 `options`) and again after each write and after a change from a sync or another device (`engine/change-stream`), and passes the new values to every open editor (`editor/formatting` F13 `setOptions`).
+- A new collection does not store them, so both read `true` until the user changes one.
+
+## K9. `customColorPickerPalette` (R840, U192)
+
+The custom colour swatches of the editor's colour pickers, shared with the image occlusion editor's fill colours (U206), which read and write the key by the same rules.
+
+- **Shape.** A JSON array of colour strings, one per slot. The palette has 16 slots, as Anki's colour dialog has 16 custom colours; slot i is entry i.
+- **Reading.** A typed read (`storage/config-table` C3). Entry i, for i from 0 to 15, holds a colour when it is a string `#` followed by 6 or 3 hexadecimal digits in either case; it reads as that colour, written as lower-case `#rrggbb` (`#F0a` reads `#ff00aa`). Any other entry, an entry `#ffffff`, and a missing entry read as an empty slot. Entries after entry 16 are not read. A missing key, a value that is not an array and an empty array read as 16 empty slots.
+- **Shown.** The swatches are the colours of the non-empty slots, in slot order. Decided 2026-10-27: `#ffffff` counts as empty, because Anki writes every slot of its colour dialog and fills the slots the user never set with that dialog's default, white. White stays available in every picker.
+- **Writing.** Only when the user adds or removes a swatch (`editor/formatting` F12), never when a colour is picked or applied, and never on open or close. Adding puts the colour in the lowest empty slot; when there is none, slots 1 to 15 move down to 0 to 14 and the colour takes slot 15. A colour already shown is not added again. Removing makes its slot empty. The value written is always 16 strings: each slot's colour, lower-case `#rrggbb`, and `#ffffff` for an empty slot, as a whole-value compact write (C4, C5). Entries Meguri could not read are replaced by `#ffffff` and entries after entry 16 are dropped; Anki's writes do the same to the slots it could not read.
+- The write is one skip-undo write of source `UserNonUndoable` (K1) and syncs as collection config (K1).
+
+| Stored | Swatches shown |
+|---|---|
+| missing, `[]`, `{}`, `"#ff0000"` | none |
+| `["#ff0000","#ffffff","#00FF00"]` | `#ff0000`, `#00ff00` |
+| `["red","#12345","#abc",7]` | `#aabbcc` |
+| 16 times `"#ffffff"` | none |
+
+Example: with the stored value `["#ff0000","#ffffff","#00FF00"]`, adding `#0000ff` writes `["#ff0000","#0000ff","#00ff00","#ffffff",…]` with thirteen `"#ffffff"` at the end.
+
+## K10. Differences from Anki for K8 and K9
+
+- Anki's editor reads `shrinkEditorImages` and `closeHTMLTags` as a script value's truthiness after a fallback: `null` and a missing key take the default `true`; `0`, `""` and `false` read as off; `1`, `"false"`, arrays and objects read as on. Meguri reads only `true` and `false` and takes the default `true` for everything else (K1). With values Anki writes, which are always booleans, both read the same.
+- Anki records toggling either option as an undoable config change; Meguri records no undo step (K8, R115).
+- Anki writes all 16 palette slots each time its colour picker opens or a colour is chosen, from its colour dialog's state, and accepts any colour name its toolkit reads (such as `red` or `#aarrggbb`) when loading the palette. Meguri writes only when the user changes the palette and reads only the forms of K9; other entries show as empty slots and are rewritten only by such a change.
+- The last text and highlight colours are not collection keys in either app: Anki keeps them in its profile, Meguri in device-local preferences (`editor/formatting` F7).
+
+## K11. Scenarios for K8 and K9
+
+Requested from the oracle maintainer, in `conformance/scenarios/editor/config-keys/`, with the ops K7 asks for (an `editor_config_set` that also covers these keys, and an `editor_config` observation that adds them); none is recorded yet.
+
+| Scenario | Covers |
+|---|---|
+| `option-bool-defaults` | K8: each key missing, stored `true`, `false`, `1`, `0`, `"false"`, `null` and as TEXT; the value read |
+| `option-write` | K8: writing each key over a missing key, over the same value and over a value of another type; stored bytes, `usn`, `mtime_secs`, `col.mod` |
+| `palette-read` | K9: the table's stored values; the slots read |
+| `palette-write` | K9: a Meguri write after an add and after a removal; the stored bytes and that the oracle's config read returns the 16 strings |
+
+In the quarantined editor image (`editor/field-html` E2), the oracle maintainer also records Anki's palette value after a colour is picked in a fresh profile (the default slots of K9) and after loading `["red","#12345","#abc"]`.

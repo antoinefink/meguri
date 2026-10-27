@@ -21,3 +21,81 @@ odid
 did
 # Collation
 unicase
+# editor/field-html: note type field options, note columns and config keys
+# the editor page reads (repeated from notetypes and notes where used)
+font_name
+font_size
+rtl
+plain_text
+original_stock_kind
+flds
+mid
+usn
+closeHTMLTags
+shrinkEditorImages
+# editor/field-html: web platform input event names the runtime handles
+beforeinput
+insertParagraph
+insertLineBreak
+# editor/paste: media file extensions (R850) and the extensions added from
+# a download's media type
+jpg
+jpeg
+png
+gif
+svg
+webp
+ico
+avif
+3gp
+aac
+avi
+flac
+flv
+m4a
+mkv
+mov
+mp3
+mp4
+mpeg
+mpg
+oga
+ogg
+ogv
+ogx
+opus
+spx
+swf
+wav
+webm
+weba
+# editor/paste: HTML tags, attributes and CSS properties the paste filters
+# keep or remove
+blockquote
+iframe
+rp
+rt
+dd
+dl
+dt
+colspan
+rowspan
+href
+src
+alt
+font-weight
+font-style
+text-decoration-line
+background-color
+font-size
+font-family
+max-width
+max-height
+vertical-align
+# editor/formatting, editor/cloze-wrap, editor/config-keys K8 to K11: the
+# palette key and the inline style properties the formatting commands read
+# and write that the paste lines above do not list (CSS interface names)
+customColorPickerPalette
+keygen
+text-align
+text-decoration
