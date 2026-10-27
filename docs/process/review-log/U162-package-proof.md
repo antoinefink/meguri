@@ -657,3 +657,25 @@ reference. No production naming, content comparison, timing or filesystem
 safety requirement changes. Existing Rust R6 artifact/recovery checks remain
 required. Independent spec review is clear; privacy
 `20261027T004717Z-84387` passes. The proof repair and fresh combined run remain.
+
+## R6 reference proof repair
+
+Start `158484b3`; filtered `cleanroom/20261027T004824Z-85043` changes the
+receipt proof only. It requires a present safe R6 component and exact native
+activation continuity across all four phases. It no longer compares independent
+operations' temporary names. All other proof checks remain intact. Independent
+R1 review is clear. Focused selftest passes all 10 tests; similarity passes.
+Privacy fails only within the added generated test; preserve that scan.
+
+The second export, `cleanroom/20261027T005327Z-88573`, replaces the new
+test with generated typed facts. All R6 checks remain enabled, with four other
+negative cases. Production is unchanged from R1. Its 16 MiB reader check does
+not test the separate 128 KiB native phase/transport limit; existing native
+tests still cover that limit.
+
+`selftest/20261027T005627Z-90196` passes all 10 focused tests. Privacy
+`20261027T005627Z-90199` and similarity `20261027T005627Z-90462` pass.
+The original R12 error stays retained. A fresh combined native run is required;
+no unit or integration acceptance follows from these focused checks.
+
+Independent R2 review is clear; required coverage and the production proof stay.

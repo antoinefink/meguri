@@ -2380,6 +2380,165 @@ PY
   [ "$status" -eq 0 ]
 }
 
+@test "native review full receipt proof binds one native R6 activation across four phases" {
+  run python3 - "$SB" <<'PY'
+import importlib.util
+import sys
+from copy import deepcopy
+from pathlib import Path
+from unittest.mock import patch
+from uuid import UUID
+
+root = Path(sys.argv[1])
+module = importlib.util.spec_from_file_location('receipt_fixture', root / 'tools/scripts/native-media-review-capture.py')
+helper = importlib.util.module_from_spec(module)
+module.loader.exec_module(helper)
+
+def uuid(number):
+    return str(UUID(int=number, version=4)).upper()
+
+# DTO-shaped generated data; proof reads, hashes and writes remain real.
+counts = {'incoming': 3, 'added': 3, 'reused': 0, 'trashed': 0, 'decodedBytes': 96}
+media_files = {'collection.media/' + name: {'sha256': format(n, '064x'), 'bytes': 32}
+               for n, name in enumerate(helper.MEDIA, 41)}
+answer = {'owner': uuid(31), 'coordinator': uuid(32), 'session': 29, 'generation': 7,
+          'deck': 41, 'card': 43, 'rating': 'easy', 'elapsed': 1000,
+          'wall': 2000000000000, 'cap': 60, 'token': list(range(32))}
+visit = {key: answer[key] for key in ('coordinator', 'session', 'generation', 'card')}
+visit.update(update=3, side='answer', document=uuid(33))
+journal = {'generation': 7, 'root': '/fixture/collection/collection.media',
+           'names': [{'name': name, 'caseKey': name.lower()} for name in helper.MEDIA]}
+activation = {'generation': 7, 'media': counts, 'backup': None, 'retention': 'r6-' + uuid(35)}
+template = {
+    'version': 1, 'platform': 'mac', 'failure': None, 'collection': '/fixture/collection',
+    'inspection': {'sha256': 'f' * 64, 'notes': 1, 'cards': 1, 'reviews': 2,
+                   'schema': 18, 'replacing': False, 'mediaCount': 3, 'mediaBytes': 96},
+    'activation': activation, 'prepared': counts, 'journal': journal,
+    'owner': uuid(31), 'admission': answer, 'completion': 'accepted', 'ended': False,
+    'selectedDeck': 41, 'selectedDeckName': 'Deck 41', 'selectionCalls': 1,
+    'image': {'binding': visit, 'name': 'meguri-review.png', 'width': 4, 'height': 4,
+              'x': 0, 'y': 0, 'displayWidth': 4, 'displayHeight': 4},
+    'audio': {'binding': visit, 'name': 'meguri-review.wav', 'index': 0,
+              'success': True, 'samples': 24, 'duration': 2,
+              'firstPosition': .1, 'lastPosition': 1.9,
+              'firstObservedAt': 20, 'lastObservedAt': 21.8, 'completedAt': 22},
+    'closedFiles': None, 'seeds': {'inspection_and_initial_activation': 103}}
+phases = {phase: deepcopy(template) for phase in helper.PHASES}
+for phase, receipt in phases.items():
+    receipt['phase'] = 'activated' if phase == 'import' else phase
+phases['import'].update(admission=None, completion=None, image=None, audio=None,
+                        selectedDeck=None, selectedDeckName=None, selectionCalls=0)
+phases['closed'].update(ended=True, closedFiles={
+    **media_files, 'collection.anki2': {'sha256': 'e' * 64, 'bytes': 768}})
+phases['reopened'].update(ended=True, owner=uuid(34), reopenedJournal=deepcopy(journal),
+                          seeds={'inspection_and_initial_activation': 103, 'reopen': 104})
+
+scenarios = []
+def add(label, succeeds, change=lambda records: None, replay='r6-' + uuid(36)):
+    records = deepcopy(phases)
+    change(records)
+    scenarios.append((label, succeeds, records, replay))
+
+def references(records, reference):
+    for receipt in records.values():
+        receipt['activation']['retention'] = reference
+
+add('replay-differs', True)
+add('replay-equals', True, replay=activation['retention'])
+# R6 suffixes are opaque; these are components, never filesystem paths.
+for number, reference in enumerate(('r6-', 'r6-λ 47.\n', 'r6-' + 'z' * 4096)):
+    add('component-valid-' + str(number), True,
+        lambda records, ref=reference: references(records, ref))
+for number, reference in enumerate((None, True, 47, [], {}, '', '.', '..', uuid(37),
+                                     'r6-/47', 'r6-\\47', 'r6-\0' + '47', '../r6-47')):
+    add('component-invalid-' + str(number), False,
+        lambda records, ref=reference: references(records, ref))
+
+def remove_references(records):
+    for receipt in records.values():
+        del receipt['activation']['retention']
+add('reference-absent', False, remove_references)
+
+for phase in helper.PHASES[1:]:
+    def replace_reference(records, target=phase):
+        records[target]['activation']['retention'] = 'r6-' + uuid(38)
+    def remove_reference(records, target=phase):
+        del records[target]['activation']['retention']
+    def replace_generation(records, target=phase):
+        # Keep the local journal valid so continuity must reject this activation.
+        records[target]['activation']['generation'] += 1
+        records[target]['journal']['generation'] += 1
+    add(phase + '-reference-changed', False, replace_reference)
+    add(phase + '-reference-absent', False, remove_reference)
+    add(phase + '-generation-changed', False, replace_generation)
+
+# Four existing proof boundaries suffice alongside the new R6 coverage.
+add('phase-owner', False, lambda records: records['closed'].update(owner=uuid(39)))
+add('reopen-seed', False, lambda records: records['reopened']['seeds'].update(reopen=105))
+add('media-hash', False, lambda records: records['closed']['closedFiles'][
+    'collection.media/meguri-review.png'].update(sha256='d' * 64))
+def audio_incomplete(records):
+    for phase in helper.PHASES[1:]:
+        evidence = records[phase]['audio']
+        evidence['completedAt'] = evidence['lastObservedAt']
+add('audio-completion', False, audio_incomplete)
+
+# Shared JSON reader bound only (16 MiB). Native phase/transport has its
+# separate 128 KiB ceiling, covered by the existing native tests.
+def oversized_record(records):
+    records['import']['activation']['retention'] = 'r6-' + 'z' * (16 * 1024 * 1024)
+add('json-reader-bound', False, oversized_record)
+
+for number, (label, succeeds, records, replay) in enumerate(scenarios):
+    run = root / 'receipt-fixture' / str(number)
+    output = run / 'native-review-export'
+    frozen = run / 'expected-replay'
+    for directory in (output, frozen, run / 'source-preparation'):
+        directory.mkdir(parents=True, mode=0o700)
+    inputs = {'run': 'fixture/' + str(number), 'platform': 'mac',
+              'package': {'identity': {'sha256': 'f' * 64}}, 'prepared_files': media_files,
+              'chosen': {'deck_id': 41, 'card_id': 43, 'deck_name': 'Deck 41'},
+              'wall': {'now_ms': 2000000000000}, 'answer': {'preset_cap_answer_time_secs': 60}}
+    helper.write(frozen / 'input.json', inputs)
+    helper.write(frozen / 'replay.json', {'media_retention_reference': replay})
+    helper.write(frozen / 'freeze.json', {'files': {
+        name: helper.identity(frozen / name) for name in ('input.json', 'replay.json')}})
+    frozen_before = {path: helper.identity(path) for path in frozen.iterdir()}
+    binding = {'freeze': frozen_before[frozen / 'freeze.json'],
+               'input': frozen_before[frozen / 'input.json'],
+               'native_filename': 'Meguri-Media-' + UUID(uuid(40)).hex + '.colpkg'}
+    helper.write(run / 'source-preparation/preparation.json', {
+        'source_facts': {'row_counts': {'revlog': 2}, 'media_bytes': 96}})
+    helper.write(run / 'native-review-binding.json', binding)
+    helper.write(output / 'native-review-app.json', binding)
+    (output / binding['native_filename']).write_bytes(b'fixture 40')
+    for phase, receipt in records.items():
+        receipt.update(run=inputs['run'], freezeIdentity=binding['freeze'], input=binding['input'])
+        helper.write(output / ('native-review-' + phase + '.json'), receipt)
+    phase_before = {phase: helper.identity(output / ('native-review-' + phase + '.json'))
+                    for phase in helper.PHASES}
+    try:
+        # Only unrelated frozen-source/build authority is replaced.
+        with patch.object(helper, 'recheck', return_value=(inputs, binding)):
+            helper.proof_receipts(run)
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        assert not succeeds, (label, str(error))
+        assert not (run / 'native-review-capture.json').exists(), label
+        if label == 'json-reader-bound':
+            assert str(error) == 'record too large', str(error)
+    else:
+        assert succeeds, label
+        proof = helper.read(run / 'native-review-capture.json')
+        assert proof['receipts'] == phase_before, label
+        assert proof['package'] == helper.identity(output / binding['native_filename']), label
+        assert proof['external_content_client_proof'] == 'pending', label
+    assert {path: helper.identity(path) for path in frozen.iterdir()} == frozen_before, label
+    assert {phase: helper.identity(output / ('native-review-' + phase + '.json'))
+            for phase in helper.PHASES} == phase_before, label
+PY
+  [ "$status" -eq 0 ]
+}
+
 @test "native review frozen helper accepts retained Rust work but keeps expected inputs exact" {
   run python3 - "$SB" <<'PY'
 import importlib.util

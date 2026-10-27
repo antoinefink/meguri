@@ -440,6 +440,12 @@ def proof_receipts(run):
     require(read(output / "native-review-app.json") == binding, "actual built app attestation")
     receipts = {p: read(output / ("native-review-" + p + ".json")) for p in PHASES}
     imported, accepted, closed, reopened = (receipts[p] for p in PHASES)
+    retention = imported["activation"].get("retention")
+    # F11.2: R6 is opaque, execution-local metadata. Check delivery continuity;
+    # Rust's artifact/recovery tests establish filesystem safety independently.
+    require(isinstance(retention, str) and retention and retention not in (".", "..")
+            and not any(c in retention for c in ("/", "\\", "\0"))
+            and retention.startswith("r6-"), "actual committed R6 reference")
     for phase, record in receipts.items():
         require(record["version"] == 1 and record["run"] == value["run"] and record["platform"] == value["platform"]
                 and record["freezeIdentity"] == binding["freeze"] and record["input"] == binding["input"]
@@ -455,7 +461,7 @@ def proof_receipts(run):
         media = record["activation"]["media"]
         require(media == {"incoming": 3, "added": 3, "reused": 0, "trashed": 0, "decodedBytes": source_facts["media_bytes"]}
                 and record["prepared"] == media and record["activation"].get("backup") is None
-                and record["activation"].get("retention") == read(run / "expected-replay/replay.json").get("media_retention_reference"), "actual P16 outcome")
+                and record["activation"] == imported["activation"], "actual P16 outcome")
         journal = record["journal"]
         require(journal["generation"] == record["activation"]["generation"] and journal["generation"] > 0
                 and journal["root"] == record["collection"] + "/collection.media"
