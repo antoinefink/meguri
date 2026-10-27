@@ -38,7 +38,8 @@
 
 - U28 owns `exec/decks.rs` and the full new collection in `exec/storage.rs` (`storage/new-collection` B11): no note-type bootstrap stand-in. Setup deck aliases retain their ids, but add_note resolves a live stored human name first (K1, K15). `exec/model.rs` supplies legacy JSON reads/patches and `exec/cards.rs` the raw card observation needed by deck deletions. Undo still needs U38's engine session (undo-ops V6); never register a no-op undo adapter.
 
-- The default executor keeps CoreHost's real or unavailable backup provider. Explicit `fixture_harness` / `Registry::fixture_backup_witness` uses a counted hook-only witness on isolated fixture copies, except scenarios requiring `force_backup` retain CoreHost's production provider from session creation, including actors. The witness never proves backup safety or satisfies U127. `Registry::record_changes` records exact events and pre-delete checks without enabling the witness. Normal runs retain no event trace. U127 must revisit the harness override.
+- The default executor keeps CoreHost's production provider. `fixture_harness` / `Registry::fixture_backup_witness` selects a counted hook-only witness on fixture copies, except scenarios requiring `backup` or `force_backup` keep the real provider from session creation, actors included. The witness proves no backup safety. `Registry::record_changes` records events and pre-delete checks without selecting the witness; normal runs keep no event trace. Test backup adapters through both executors.
+
 - After a hosted sync replaces the generation, refresh with `Session::engine_collection` before observations (U117); it rebinds the cached reader handle and backup witness.
 
 - New observation kinds also change the CLI capability contract in `core/tools/meguri-cli/tests/cli.rs`. Include that test in focused verification; provider-only tests do not cover this separate consumer.
