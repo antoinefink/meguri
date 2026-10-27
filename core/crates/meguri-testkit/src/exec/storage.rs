@@ -976,6 +976,43 @@ pub(super) fn actor_dump(session: &mut Session<'_>) -> Result<Value, ExecError> 
     })
 }
 
+pub(super) fn package_sqlite_listing(
+    raw: &Path,
+    scratch: &Path,
+    header: &[u8; 100],
+    clock: &dyn meguri_model::clock::Clock,
+    random: &dyn meguri_model::rng::RandomSource,
+) -> Result<Value, ExecError> {
+    let db = rusqlite::Connection::open_with_flags(raw, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(core)?;
+    let (ver, notes, cards, revlog): (i64, i64, i64, i64) = db.query_row(
+        "SELECT ver, (SELECT count(*) FROM notes), (SELECT count(*) FROM cards), (SELECT count(*) FROM revlog) FROM col",
+        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).map_err(core)?;
+    drop(db);
+    let probe = tempfile::Builder::new()
+        .prefix("open-")
+        .tempdir_in(scratch)
+        .map_err(core)?;
+    let candidate = probe.path().join("collection.anki2");
+    fs::copy(raw, &candidate).map_err(core)?;
+    let opens = match open_collection(&candidate, &OpenOptions::new(clock, random)) {
+        Ok(opened) => {
+            let checked = meguri_storage::integrity::integrity_check(&candidate)
+                .map(|report| report.is_ok())
+                .unwrap_or(false);
+            let closed = opened.close().is_ok();
+            checked && closed
+        }
+        Err(_) => false,
+    };
+    let journal = match &header[18..20] {
+        [1, 1] => "rollback",
+        [2, 2] => "wal",
+        _ => "other",
+    };
+    Ok(json!({"ver": ver, "notes": notes, "cards": cards, "revlog": revlog, "journal": journal, "opens": opens}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1133,41 +1170,4 @@ mod tests {
         assert_eq!(strip_field(&[0x00, 0x01], 9), None);
         assert_eq!(strip_field(&[0x0b], 9), None);
     }
-}
-
-pub(super) fn package_sqlite_listing(
-    raw: &Path,
-    scratch: &Path,
-    header: &[u8; 100],
-    clock: &dyn meguri_model::clock::Clock,
-    random: &dyn meguri_model::rng::RandomSource,
-) -> Result<Value, ExecError> {
-    let db = rusqlite::Connection::open_with_flags(raw, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(core)?;
-    let (ver, notes, cards, revlog): (i64, i64, i64, i64) = db.query_row(
-        "SELECT ver, (SELECT count(*) FROM notes), (SELECT count(*) FROM cards), (SELECT count(*) FROM revlog) FROM col",
-        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-    ).map_err(core)?;
-    drop(db);
-    let probe = tempfile::Builder::new()
-        .prefix("open-")
-        .tempdir_in(scratch)
-        .map_err(core)?;
-    let candidate = probe.path().join("collection.anki2");
-    fs::copy(raw, &candidate).map_err(core)?;
-    let opens = match open_collection(&candidate, &OpenOptions::new(clock, random)) {
-        Ok(opened) => {
-            let checked = meguri_storage::integrity::integrity_check(&candidate)
-                .map(|report| report.is_ok())
-                .unwrap_or(false);
-            let closed = opened.close().is_ok();
-            checked && closed
-        }
-        Err(_) => false,
-    };
-    let journal = match &header[18..20] {
-        [1, 1] => "rollback",
-        [2, 2] => "wal",
-        _ => "other",
-    };
-    Ok(json!({"ver": ver, "notes": notes, "cards": cards, "revlog": revlog, "journal": journal, "opens": opens}))
 }

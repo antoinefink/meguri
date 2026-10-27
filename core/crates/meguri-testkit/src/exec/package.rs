@@ -153,7 +153,12 @@ fn listing(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Va
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(error)?;
         let name = entry.name().map_err(error)?.into_owned();
-        entries.push(json!({"name": name, "method": entry.compression().to_u16()}));
+        let method = match entry.compression() {
+            zip::CompressionMethod::Stored => 0,
+            zip::CompressionMethod::Deflated => 8,
+            _ => return Err(ExecError::new("package_error", "unsupported ZIP compression method")),
+        };
+        entries.push(json!({"name": name, "method": method}));
         if name == "meta" {
             let mut bytes = Vec::new();
             meta = match entry.by_ref().take(64 * 1024 + 1).read_to_end(&mut bytes) {
