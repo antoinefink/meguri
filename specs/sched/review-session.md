@@ -171,7 +171,7 @@ C18 owns execution of this mapping. It is separate from scenario activation and 
 
 Result: `Started{sessionId, generation, head, counts, validUntil, timeLim}` or `Refused{PresetUnsupported{presetIds} | FsrsPolicyPending}`.
 
-0. **Submission.** On submission, before the start is queued for the writer: request cancellation of a running optimizer commit op without waiting (`sched/optimizer#O10`). It fires for every submitted start, also one that admission then refuses. It marks nothing and cancels no training; step 2 does that.
+0. **Submission.** On submission, before the start is queued for the writer: request cancellation of a queued or running optimizer commit op, with reason `sessionActive`, without waiting (`sched/optimizer#O10`). It fires for every submitted start, also one that admission then refuses. It marks nothing and cancels no training; step 2 does that.
 1. **Admission.** On the writer, atomically check and reserve the collection-owned admission state shared with `enableFsrs` (`sched/fsrs-policy#S3`). No session is exposed before this succeeds. Refusals, in order, write nothing, fire no step-2 hook (the step 0 request has already been made) and reserve nothing:
    - policy status is not `ok`: `FsrsPolicyPending`;
    - any card in the selected deck tree has an unsupported home preset under the shared U45 check: `PresetUnsupported` with distinct preset ids ascending. Inspect all represented homes, including suspended, buried, future and otherwise ungathered cards, not only queue entries;
