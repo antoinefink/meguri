@@ -11,6 +11,7 @@ file made, never from the driver."""
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import sqlite3
@@ -121,9 +122,38 @@ class Export(Apkg):
             with self.subTest(args=args):
                 err = self.error([{"advance": "1m"}, {"export": args}], notes=self.NOTES)
                 self.assertEqual((err["kind"], err.get("step")), ("invalid_scenario", 1), err)
-        # E8, the legacy deck form, is a draft.
-        err = self.error([{"advance": "1m"}, {"export": dict(export()["export"], legacy=True)}])
-        self.assertEqual(err, {"kind": "unsupported_op", "op": "export", "step": 1})
+        # E8 has legacy: true only.
+        for value in (False, 1, "true", None):
+            with self.subTest(legacy=value):
+                err = self.error([{"advance": "1m"}, {"export": dict(export()["export"], legacy=value)}], notes=self.NOTES)
+                self.assertEqual((err["kind"], err.get("step")), ("invalid_scenario", 1), err)
+
+    def test_legacy_form_writes_the_legacy_layout_of_the_selection(self):
+        # E8 (legacy-export.md L3, L5): E7's selection and options in the
+        # legacy 2 layout; output and media as E7's.
+        steps = [
+            export("l.apkg", {"deck": "A"}, legacy=True, media=True),
+            export("all.apkg", legacy=True),
+        ]
+        out, observed = self.handed(steps, notes=self.NOTES + [("A", ["<img src=\"p.png\">", "w"])],
+                                    media=[("p.png", "png bytes"), ("unused.png", "u")])
+        self.assertEqual(observed, [{"export": {"notes": 3}}, {"export": {"notes": 4}}])
+        with zipfile.ZipFile(os.path.join(out, "l.apkg")) as z:
+            entries = z.infolist()
+            self.assertEqual([e.filename for e in entries], ["meta", "collection.anki21", "collection.anki2", "0", "media"])
+            self.assertEqual([e.compress_type for e in entries], [0, 8, 0, 0, 0])
+            self.assertEqual(z.read("meta"), b"\x08\x02")
+            self.assertEqual(json.loads(z.read("media")), {"0": "p.png"})
+            self.assertEqual(z.read("0"), b"png bytes")
+            col = os.path.join(self.root, "legacy-col")
+            with open(col, "wb") as f:
+                f.write(z.read("collection.anki21"))
+        con = sqlite3.connect(col)
+        try:
+            self.assertEqual(con.execute("SELECT ver FROM col").fetchall(), [(11,)])
+            self.assertEqual(con.execute("SELECT count() FROM notes").fetchall(), [(3,)])
+        finally:
+            con.close()
 
     def test_future_ids_refused_and_no_file(self):
         # apkg-export.md A8 rule 1: a note id three days ahead.

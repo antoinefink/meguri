@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Collection packages (specs/conformance/package-ops.md E1, E2).
 
-export, collection package form {format: colpkg, name} (ops/package.py
-    dispatches here) -> none. Anki's collection package export, media and the
-    option for older clients off, to <session dir>/<name>, replacing a file of
-    that name. Anki's export closes the collection itself; the driver reopens
-    it afterwards, as the desktop does (also after a failure). Session.hand_off
-    copies the session directory, so the package crosses a handoff.
+export, collection package form {format: colpkg, name} (E1) and its options
+    form {format: colpkg, name, media?, legacy?} (E9; ops/package.py dispatches
+    both here) -> none. Anki's collection package export with Include media and
+    the option for older clients as given (both off in E1, false when missing),
+    to <session dir>/<name>, replacing a file of that name. Anki's export closes
+    the collection itself (a legacy one downgrades it in place first); the
+    driver reopens it afterwards, as the desktop does (also after a failure),
+    which upgrades it again. Session.hand_off copies the session directory, so
+    the package crosses a handoff.
 import, {format: colpkg, fixture} or {format: colpkg, name} -> none;
     rejections too_new, corrupt (the deck package form, with the rejection
     notetype_kind_conflict too, is ops/apkg.py). The driver closes the
@@ -118,10 +121,10 @@ def check_import_steps(scenario: dict) -> None:
                           "(package-ops.md E2.4)", step=index)
 
 
-def export(session, name: str) -> None:
+def export(session, name: str, media: bool = False, legacy: bool = False) -> None:
     col = session.col
     try:
-        col.export_collection_package(os.path.join(session.dir, name), include_media=False, legacy=False)
+        col.export_collection_package(os.path.join(session.dir, name), include_media=media, legacy=legacy)
     finally:
         col.reopen()
 

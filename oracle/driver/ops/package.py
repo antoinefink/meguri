@@ -3,19 +3,20 @@
 
 export (op): the legacy package form {format: "apkg", name, legacy: true}
     -> {notes: <count>}; the collection package form {format: "colpkg", name}
-    -> none (package-ops.md E1, ops/colpkg.py); the deck package form
-    {format: "apkg", name, limit, scheduling, presets, media} -> {notes}
-    (package-ops.md E7, ops/apkg.py)
+    and its options form {format: "colpkg", name, media?, legacy?} -> none
+    (package-ops.md E1, E9, ops/colpkg.py); the deck package form
+    {format: "apkg", name, limit, scheduling, presets, media}, and the same
+    with legacy: true, -> {notes} (package-ops.md E7, E8, ops/apkg.py)
 package_col (observation): {name, columns: [ver | conf | models | decks | dconf | tags]}
     -> {<column>: value}
 
 The legacy form writes the whole collection (limit none) with Anki's package
 exporter, scheduling and presets in, media out, in the legacy layout, to
 <session dir>/<name>: Session.hand_off copies that directory, so the package
-crosses a handoff. The other export forms (package-ops.md E8, E9) are the
-package area's drafts (dsl.md D7.2): a scenario that uses one fails with
-unsupported_op before any collection exists, as it did when the driver had no
-export.
+crosses a handoff. The forms are told apart by their keys: legacy with
+format, name and nothing else is this form, legacy with E7's keys E8's. Any
+other format (csv, ...) fails with unsupported_op before any collection
+exists, as it did when the driver had no export.
 
 package_col never opens the package's collection with Anki (opening upgrades it
 to schema 18, which empties the JSON columns). It picks the entry by the meta
@@ -63,23 +64,27 @@ def _package_name(value: Any, what: str) -> str:
 
 def _export_form(args: Any) -> tuple[str, str]:
     """('legacy' | 'colpkg' | 'apkg', file name) of a form the driver has;
-    unsupported_op for a draft form."""
+    unsupported_op for another format."""
     if isinstance(args, dict) and args.get("format") == "colpkg":
         options = set(args) - {"format", "name"}
         if "name" not in args or not options <= {"media", "legacy"}:
             raise invalid("the collection package export form is {format: colpkg, name}, "
                           "or with media and legacy options (package-ops.md E9)")
         name = colpkg.colpkg_name(args["name"], "export name")
-        if not options:
-            return "colpkg", name
         if not all(isinstance(args[key], bool) for key in options):
             raise invalid("export media and legacy are true or false")
-        # E9, the collection package options, is a draft.
-        raise DriverError("unsupported_op", op="export")
-    if isinstance(args, dict) and args.get("format") == "apkg" and "legacy" not in args:
+        return "colpkg", name
+    if isinstance(args, dict) and args.get("format") == "apkg" and (
+        "legacy" not in args or set(args) - {"legacy"} == apkg.EXPORT_KEYS
+    ):
+        # E7, or E8: E7's keys and legacy (true; check_export_form refuses
+        # any other value).
         return "apkg", apkg.check_export_form(args)
-    if isinstance(args, dict) and ("legacy" not in args or set(args) == apkg.EXPORT_KEYS | {"legacy"}):
-        # The legacy deck form (E8, E7's keys and legacy) is a draft.
+    if isinstance(args, dict) and "format" in args and args["format"] not in ("apkg", "colpkg"):
+        # A format name the driver lacks (csv) is unsupported; any other value
+        # (null, a number) breaks the schema's enum (dsl.md D10).
+        if not isinstance(args["format"], str):
+            raise invalid("export format is apkg or colpkg")
         raise DriverError("unsupported_op", op="export")
     if (
         not isinstance(args, dict)
@@ -107,7 +112,7 @@ def check_export_steps(scenario: dict) -> None:
 def export(session, args):
     form, name = _export_form(args)
     if form == "colpkg":
-        colpkg.export(session, name)
+        colpkg.export(session, name, media=args.get("media", False), legacy=args.get("legacy", False))
         return None
     if form == "apkg":
         return apkg.export(session, args)

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Collection packages (specs/conformance/package-ops.md E1-E3) through real
-workers: the collection package form of export, the collection package forms
+"""Collection packages (specs/conformance/package-ops.md E1-E3, E9) through
+real workers: the collection package forms of export, the collection package forms
 of import with their rejections, the scenario rules of E2.4 and the
 package_listing observation. Packages are Anki's own exports, made here with
 the anki library, and packages this file writes itself (zip entries and
@@ -12,6 +12,7 @@ driver."""
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import sqlite3
@@ -264,17 +265,58 @@ class Export(Packages):
             with self.subTest(name=name):
                 self.assertEqual(self.ok([OPEN, {"export": {"format": "colpkg", "name": name}}]), [{}, {}])
 
-    def test_other_export_forms_stay_unsupported(self):
-        # E8, the legacy deck form, and E9, the collection package options,
-        # are drafts (E7's form is test_apkg.py).
-        e8 = {"format": "apkg", "name": "x.apkg", "limit": "collection", "scheduling": True, "presets": True,
-              "media": False, "legacy": True}
-        e9 = [{"format": "colpkg", "name": "x.colpkg", **opts}
-              for opts in ({"media": True}, {"legacy": True}, {"media": True, "legacy": False})]
-        for args in (e8, *e9, {"format": "csv", "name": "x.csv"}):
-            err = self.error([{"advance": "1m"}, {"export": args}])
-            with self.subTest(args=args):
-                self.assertEqual(err, {"kind": "unsupported_op", "op": "export", "step": 1})
+    def test_options_forms_write_their_layouts_and_reopen(self):
+        # package-ops.md E9 (legacy-export.md L3, L5; container.md P3, P15):
+        # media and legacy as given, false when missing; the collection is
+        # open again after each export and its media folder unchanged.
+        files = [{"name": "a.txt", "text": "aa"}, {"name": "b.txt", "text": "bbb"}]
+        exports = [
+            ("m.colpkg", {"media": True}), ("l.colpkg", {"legacy": True}),
+            ("lm.colpkg", {"legacy": True, "media": True}), ("f.colpkg", {"media": False}),
+        ]
+        steps = [OPEN, {"media_outside": files}, {"observe": ["media_dir"]}]
+        for name, options in exports:
+            steps += [{"export": {"format": "colpkg", "name": name, **options}}, {"db_exec": {"sql": "SELECT ver FROM col"}}]
+        steps.append({"observe": ["media_dir"]})
+        out, resp = self.handed(steps)
+        observed = resp["observations"]["steps"]
+        for k in range(len(exports)):
+            self.assertEqual(observed[3 + 2 * k:5 + 2 * k], [{}, {"db_exec": {"rows": [[18]]}}])
+        self.assertEqual(observed[2], observed[-1])
+        content = {f["name"]: f["text"].encode() for f in files}
+
+        def entries(name):
+            with zipfile.ZipFile(os.path.join(out, name)) as z:
+                return [(i.filename, i.compress_type, z.read(i)) for i in z.infolist()]
+
+        latest = entries("m.colpkg")
+        self.assertEqual(latest[0][2], b"\x08\x03")
+        self.assertEqual(sorted(n for n, _, _ in latest), sorted(LATEST_ENTRIES + ["0", "1"]))
+        self.assertTrue(all(method == zipfile.ZIP_STORED for _, method, _ in latest))
+        self.assertEqual([n for n, _, _ in entries("f.colpkg")], LATEST_ENTRIES)
+        for name, media in (("l.colpkg", {}), ("lm.colpkg", content)):
+            got = entries(name)
+            numbered = [str(i) for i in range(len(media))]
+            self.assertEqual([n for n, _, _ in got], ["meta", "collection.anki21", "collection.anki2", *numbered, "media"])
+            self.assertEqual([m for _, m, _ in got], [0, 8] + [0] * (len(media) + 2))
+            self.assertEqual(got[0][2], b"\x08\x02")
+            mapping = json.loads(got[-1][2])
+            data = {n: d for n, _, d in got}
+            self.assertEqual({mapping[i]: data[i] for i in numbered}, media)
+            placeholder = os.path.join(self.root, "legacy-col")
+            with open(placeholder, "wb") as f:
+                f.write(data["collection.anki21"])
+            self.assertEqual(sql_facts(placeholder)["ver"], 11)
+
+    def test_other_export_formats_stay_unsupported(self):
+        err = self.error([{"advance": "1m"}, {"export": {"format": "csv", "name": "x.csv"}}])
+        self.assertEqual(err, {"kind": "unsupported_op", "op": "export", "step": 1})
+
+    def test_a_format_that_is_not_a_name_is_invalid(self):
+        for value in (None, 3, True):
+            with self.subTest(format=value):
+                err = self.error([{"advance": "1m"}, {"export": {"format": value, "name": "x.colpkg"}}])
+                self.assertEqual((err["kind"], err.get("step")), ("invalid_scenario", 1), err)
 
 
 def import_fixture(rel):

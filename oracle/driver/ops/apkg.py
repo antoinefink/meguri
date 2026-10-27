@@ -14,9 +14,10 @@ import, deck package form {format: apkg, fixture | name, merge_notetypes,
     id as an integer, and conflicting and missing_notetype entries by the
     package note's id (E6.3).
 export, deck package form {format: apkg, name, limit, scheduling, presets,
-    media} (ops/package.py dispatches here) -> {notes: <count>}; rejections
-    invalid_ids, media_check_required. Anki's deck package export with that
-    limit and those options, older-client support off, to <session dir>/<name>,
+    media} (E7), and with legacy: true its legacy form (E8; ops/package.py
+    dispatches both here) -> {notes: <count>}; rejections invalid_ids,
+    media_check_required. Anki's deck package export with that limit and those
+    options, older-client support off (E7) or on (E8), to <session dir>/<name>,
     replacing a file of that name (Anki's own atomic rename); the collection
     stays open. limit: collection | {deck: <stored name>} | {notes: [#nN...]} |
     {cards: [#cN...]}.
@@ -180,9 +181,13 @@ def _limit(session, value: Any):
 
 
 def check_export_form(args: dict) -> str:
-    """The file name of a deck package export (E7); invalid_scenario otherwise."""
-    if set(args) != EXPORT_KEYS or args["format"] != "apkg":
-        raise invalid("the deck package export is exactly {format: apkg, name, limit, scheduling, presets, media}")
+    """The file name of a deck package export (E7, or E8 with legacy: true);
+    invalid_scenario otherwise."""
+    if set(args) - {"legacy"} != EXPORT_KEYS or args["format"] != "apkg":
+        raise invalid("the deck package export is exactly {format: apkg, name, limit, scheduling, presets, media}, "
+                      "with legacy: true for its legacy form")
+    if "legacy" in args and args["legacy"] is not True:
+        raise invalid("the legacy deck package export has legacy: true (package-ops.md E8)")
     for key in ("scheduling", "presets", "media"):
         _flag(args, key)
     limit = args["limit"]
@@ -204,7 +209,8 @@ def export(session, args) -> dict:
     name = check_export_form(args)
     limit = _limit(session, args["limit"])
     options = ExportAnkiPackageOptions(
-        with_scheduling=args["scheduling"], with_deck_configs=args["presets"], with_media=args["media"], legacy=False
+        with_scheduling=args["scheduling"], with_deck_configs=args["presets"], with_media=args["media"],
+        legacy="legacy" in args,
     )
     col = session.col
     backend = col._backend
