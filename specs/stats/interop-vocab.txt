@@ -93,3 +93,28 @@ newCards
 decay
 prop
 rated
+# Card graphs (specs/stats/graphs-cards.md, U101): protobuf fields of
+# Anki's card graph data the stats observation reads.
+future_due
+have_backlog
+daily_load
+eases
+sum_by_card
+sum_by_note
+# Review-log graphs (specs/stats/graphs-revlog.md, U99): the review-log
+# column the cram rule reads and protobuf fields of Anki's graph data the
+# stats observation reads.
+factor
+true_retention
+young_passed
+young_failed
+mature_passed
+mature_failed
+one_month
+three_months
+one_year
+all_time
+# Graph presentation (specs/stats/graph-presentation.md, U226): the search
+# keyword of Added bar queries and the draft observation kind.
+added
+stats_presentation
