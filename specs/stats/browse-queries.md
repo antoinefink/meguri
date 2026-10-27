@@ -13,12 +13,14 @@ Decided 2026-10-27: U88's `join` writes canonical text (`search/join-and-replace
 
 | Part | Built by | Rule |
 |---|---|---|
-| scope text | U225's `StatsBrowseLink` | Q2 |
+| scope text | the core (U98's `stats_browse_scope`), from the request's snapshot, in the Data result (`stats/graphs-common` G8.2) | Q2 |
 | item text of a fixed item (Card Counts label, Calendar cell) | the core, in the graph's record (`stats/graphs-common` G6) | Q4 |
 | item text of a histogram bar | U226 | `stats/graph-presentation` |
 | joined text | U225's `StatsBrowseLink`, the only place that joins | Q3 |
 
-Hand-written concatenation elsewhere is a review finding. Every text here is Anki search syntax only, so it also works when the user saves it and opens it in Anki (R1420).
+Decided 2026-10-27: the core writes the scope text, because Q2.2 needs what only the core holds: the ids of G2.1's deck set under its simple case folding, and the stored levels (U+001F-separated), which the `::`-joined display name cannot show (a level holding `::`). The scope text is one of: none (Collection, Q2.1), a text S (Q2.2, Q2.3), or `unavailable` (Q2.2: no item of the scope is clickable). `StatsBrowseLink` only wraps and joins (Q3); it never inspects deck names. Rust tests of `stats_browse_scope` (U98, `browse_queries.rs`) cover every case of Q2.
+
+Hand-written concatenation elsewhere is a review finding, with one exception: the test-only join of Q6. Every text here is Anki search syntax only, so it also works when the user saves it and opens it in Anki (R1420).
 
 ## Q2. Scope text
 
@@ -43,32 +45,36 @@ Some names cannot be matched that way:
 
 - The full name is exactly `current` or `filtered`, which `deck:` reads as special values (`search/names-and-ids` N3.2). The scope text is `deck:"Current"` or `deck:"Filtered"`: N3.2 reads those as ordinary names, and letter case folds, so they match that deck and its subdecks only. This is `search/join-and-replace` J3.1's form for the same names.
 
-For the other names the scope text is `did:` + the ids of the scope's decks (G2.1, read when the link is built), in ascending order, joined by `,`, because no `deck:` text gives back the stored name:
+For the other names the scope text is `did:` + the ids of the scope's decks (G2.1, read from the request's snapshot), in ascending order, joined by `,`, because no `deck:` text gives back the stored name:
 
 - a level holds a White_Space character other than U+0020, which the search turns into a space (`search/grammar` G1);
 - a level is not in NFC, holds an ASCII control character, or starts or ends with White_Space or `:` (the value's levels are normalized before matching, N3.3 step 2, and the stored name's are not);
 - a level is empty, which the value's normalization turns into `blank` (N3.3 step 2);
 - a level holds `::`, which the value splits into two levels (N3.3 step 2).
 
-`did:` matches `did` or a non-zero `odid` in the list, as the Deck scope does (`search/names-and-ids` N3.5). Decided 2026-10-27: the id list keeps the Browser's cards equal to the graph's for these names, at the cost of a text that a later rename does not follow. `current` and `filtered` take the capitalized name instead, because a `deck:` text matches them exactly and stays readable. `search/join-and-replace` J3 writes the `did:` cases' names by its own rules (J3, J10), not as an id list; the Stats link differs because its text must give exactly the graph's cards (R1417), and its Deck scope is an id (G2.1).
+`did:` matches `did` or a non-zero `odid` in the list, as the Deck scope does (`search/names-and-ids` N3.5).
+
+`did:` takes only digit runs (`search/grammar` G8), so a negative id cannot be written. Decided 2026-10-27: when the name needs the `did:` form and any id of the scope's decks is negative (an imported or hand-built collection), the scope text is `unavailable`: no item of that scope is clickable, as for an invalid search (Q2.3). A `deck:` text instead would give other cards than the graph's (R1417), and an id list without those decks would too. A negative id with a name that `deck:` matches exactly changes nothing. Decided 2026-10-27: the id list keeps the Browser's cards equal to the graph's for these names, at the cost of a text that a later rename does not follow. `current` and `filtered` take the capitalized name instead, because a `deck:` text matches them exactly and stays readable. `search/join-and-replace` J3 writes the `did:` cases' names by its own rules (J3, J10), not as an id list; the Stats link differs because its text must give exactly the graph's cards (R1417), and its Deck scope is an id (G2.1).
 
 ### Q2.3 Search
 
-The typed text with leading and trailing White_Space removed; nothing else changes. The text has parsed already: an invalid search shows its error and makes no graph clickable (`stats/graphs-common` G8.2). A text that is empty after the trim is the Collection scope (Q2.1).
+The text the core received with leading and trailing White_Space removed; nothing else changes. That text is the field's after `search/join-and-replace` J2 (U+001C to U+001F already U+0020, `stats/graphs-common` G2), so the Browser's own J2 pass on the handed search (Q5) changes nothing and its cards are the graph's. The text has parsed already: an invalid search shows its error and makes no graph clickable (`stats/graphs-common` G8.2). A text that is empty after the trim is the Collection scope (Q2.1).
 
 ## Q3. The join
 
 With scope text S and item text I:
 
-- Collection: I.
-- Deck or Search: `(` + S + `) AND ` + I.
-- When I has an `OR` at its top level (outside every group), it is written `(` + I + `)` in the join. None of Q4's items has one.
+- Collection: I, unchanged, even when it has a top-level `OR`.
+- Deck or Search: `(` + S + `) AND ` + I, where I is written `(` + I + `)` when it has an `OR` at its top level (outside every group). None of Q4's items has one.
+- Scope text `unavailable` (Q2.2): no joined text; the item is not clickable.
 
 Nothing else is added, removed or rewritten: the joined text is not put into canonical form (`search/canonical-form`), so AE60's text stays exact. Wrapping a text that parses in a group never changes its meaning (`search/grammar` G2, G5): the joined text matches exactly the cards the scope's search matches that also match I (R1417).
 
 | Scope | Item | Joined text |
 |---|---|---|
 | Collection | `"is:new"` | `"is:new"` |
+| Collection | `"is:new" OR "is:due"` | `"is:new" OR "is:due"` |
+| Deck `Lang` | `"is:new" OR "is:due"` | `(deck:"Lang") AND ("is:new" OR "is:due")` |
 | Deck `Japanese`, Young, separate on (AE60) | `("is:review" AND -"is:learn") AND "prop:ivl<21" AND -("is:buried" OR "is:suspended")` | `(deck:"Japanese") AND ("is:review" AND -"is:learn") AND "prop:ivl<21" AND -("is:buried" OR "is:suspended")` |
 | Deck `a_b*` | `"is:new"` | `(deck:"a\_b\*") AND "is:new"` |
 | Deck `x "y"` | `"is:buried"` | `(deck:"x \"y\"") AND "is:buried"` |
@@ -79,6 +85,7 @@ Nothing else is added, removed or rewritten: the joined text is not put into can
 | Search `tag:a or tag:b` | `"is:buried"` | `(tag:a or tag:b) AND "is:buried"` |
 | Search `  is:due  ` | `"is:new"` | `(is:due) AND "is:new"` |
 | Search of spaces only | `"is:new"` | `"is:new"` |
+| Deck `a` + U+00A0 + `b` (id −5) | `"is:new"` | none (`unavailable`) |
 
 ## Q4. Fixed-item queries
 
@@ -118,6 +125,7 @@ With X = ` AND -("is:buried" OR "is:suspended")` when `cardCountsSeparateInactiv
 - Every item text of Q4, joined with each scope kind and with the deck names `a_b`, `a*b`, `a"b`, `a\b`, `(x)`, `-x`, `x::current`, `Filtered`, `current`, `filtered`, `日本語::子`, `a b`, a name holding U+00A0, a name with an empty level and a level holding `::`, parses with the core's parser (U80) without error (R1420).
 - Each of those texts round-trips through the canonical writer (`search/canonical-form`, U80): its canonical text parses again to the same query, and the canonical text of that is the same text. The joined text itself is not replaced by its canonical form (Q3).
 - Its card set equals the scope's cards (`stats/graphs-common` G2) that match the item, on the fixture collection (property test, U98).
+- Decided 2026-10-27, where the joined texts of these tests come from: U98's Rust tests may hold one test-only join in the test code, never in shipped code, built from the scope text of `stats_browse_scope`. A test asserts that it gives every row of Q3's table byte for byte, and U225's Swift tests assert the same table for `StatsBrowseLink`, so both joins are pinned to one table.
 - U226's bar queries meet the same two checks through this join.
 
 ## Q7. Differences from Anki
@@ -142,4 +150,4 @@ Anki hands its Browser the text: a space, the scope search, a space, the item te
 | `calendar-cells` | Q4.2 | answers at `N` − 86,400 s exactly, at `N` − 86,400 s + 1 s and two days back, plus a Manual row with `ease` 0 today: `"prop:rated=0"`, `"prop:rated=-1"` and `"prop:rated=-2"` find the cards H8 gives; the `reviews` day counts are B3's |
 | `parse-all` | Q6 | `canonical_search` of every joined text of Q3's table and of the separated and plain label texts for Deck `Lang`: each parses |
 
-Meguri-only tests: the `did:` form, with a name of each Q2.2 case (an empty level and a level holding `::` included), and `deck:"Current"` for decks `current` and `current::a` (Q2.2), future cells without a query (Q4.2), the top-level-OR wrap of an item (Q3), and the hand-off to the Browser (Q5, U225's UI tests).
+Meguri-only tests: the `did:` form, with a name of each Q2.2 case (an empty level and a level holding `::` included), `deck:"Current"` for decks `current` and `current::a`, and `unavailable` for a `did:` case with a negative deck id (Q2.2), all as `stats_browse_scope` returns them (Q1); `deck:"\_\*"` for a deck named `_*` finding only that deck's cards (`stats/graphs-common` G13); future cells without a query (Q4.2); the top-level-OR wrap of an item in a Deck scope and its absence in Collection (Q3); a Stats search holding U+001F, whose graph scope and Browser cards are equal (Q2.3); Q3's table for both joins (Q6); and the hand-off to the Browser (Q5, U225's UI tests).

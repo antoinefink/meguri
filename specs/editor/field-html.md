@@ -15,7 +15,7 @@ Meguri's editor page is Meguri's own: no Anki editor script, style or asset is u
 - **Display HTML**: the stored HTML with local media names percent-encoded for the web view (`text/media-references` M6, R988). The page only ever receives display HTML.
 - **Rich mode** and **HTML mode**: the two ways a field is edited, a rich-text editable area or a plain source text area (R827). A field shows one of them at a time.
 - **Content**: what the field holds in the page now: the editable area's DOM in rich mode, the text area's text in HTML mode.
-- **Serialization**: the HTML fragment serialization algorithm of the HTML Standard, as the page's web engine applies it to the editable area's children.
+- **Serialization**: the HTML fragment serialization algorithm of the HTML Standard, as the page's web engine applies it to the editable area's children (in HTML mode, to the nodes parsed from the text, H3 step 1).
 - **Block element**: an element whose tag is one of `address`, `article`, `aside`, `blockquote`, `details`, `dialog`, `dd`, `div`, `dl`, `dt`, `fieldset`, `figcaption`, `figure`, `footer`, `form`, `h1` to `h6`, `header`, `hgroup`, `hr`, `li`, `main`, `nav`, `ol`, `p`, `pre`, `section`, `table`, `ul`, or any element with a `block` attribute whose value is not `false`.
 - **Inline-only**: content in which no element, at any depth, is a block element. Empty content is inline-only.
 - **Input**: a change of a field's content made by the user: typing, deleting, Return, an undo or redo inside the field (F5), a formatting or cloze command (U192), an insertion (U194), a paste or drop (U197). Focus, caret and selection moves, scrolling, collapsing or expanding, and switching between rich and HTML mode are not inputs.
@@ -25,23 +25,25 @@ Meguri's editor page is Meguri's own: no Anki editor script, style or asset is u
 Decided 2026-10-27, for every editor spec: editor behaviour that the Python-library oracle cannot observe is specified from Anki 26.09.3 in this file's own words. Its goldens are observed by an oracle maintainer who runs Anki 26.09.3's own editor page inside a quarantined oracle image, as `stats/graphs-common` G12 decision 2 does for the graphs page. The page and its assets never leave that image; goldens hold observed values only; Meguri's tests and app never load any of it (R1960). This replaces the plan's U190 note that a spec writer records the editor goldens once by hand.
 
 - The page runs in the web engine of the pinned Anki desktop build (its QtWebEngine), because Return and space handling are that engine's defaults. Key presses reach it as native key events, never as script edits of the DOM. Each golden records the engine and its version.
+- Anki 26.09.3 has two editors, which save differently. Goldens come from its default editor, as `editor/paste` P1 follows: the experimental editor option off, and Edit Current and Add opened without Shift held (Shift opens the other editor). Each golden records that it did.
 - Goldens are authoritative for the markup that keystrokes produce (H4, H5). Every other rule in this file is normative as written, and a golden that contradicts one is a finding against this file.
 - Automated Meguri tests compare Meguri's runtime, in WKWebView on macOS and the iOS simulator, only with these goldens and with this file.
 
 ## H1. Loading a field
 
 1. The host gives the page each shown field's display HTML (B4).
-2. Rich mode: the page parses the display HTML as an HTML fragment with a body-like context (as setting `innerHTML` on a `div` does). When the parsed content is inline-only, the page appends one `<br>` element after it. This makes a final line break of the stored HTML show as an empty last line on which the caret can sit, and gives an empty field a line to type on. H3 step 1 takes it out again.
+2. Rich mode: the page parses the display HTML as an HTML fragment with a body-like context (as setting `innerHTML` on a `div` does). When the parsed content is inline-only, the page appends one `<br>` element after it. This makes a final line break of the stored HTML show as an empty last line on which the caret can sit, and gives an empty field a line to type on. H3 step 1 takes it out again. This parse with the appended `<br>` is the **load parse**; H2 and H6 use it too.
 3. HTML mode: the text area holds the display HTML verbatim, unparsed.
 4. MathJax (`\(…\)`, `\[…\]`), sound tags (`[sound:…]`), cloze markup and template-like text are ordinary text in both modes: nothing is typeset, replaced or decorated (R563, R2017).
 5. Nothing in field content runs (F6). Relative `src` names load from the collection's media folder.
 6. Loading writes nothing. A field that receives no input is never serialized, so opening a note and closing it without input writes nothing (R823, AE40).
+7. Decided 2026-10-27: a note whose stored row holds a different number of field values than its note type has fields (`notes/note-records` N1; a row that only F1 repairs, for example one synced from another client) is not loaded into the page, since S2 would refuse every patch to it. In place of its fields the editor shows that the note needs Check Database (U128), with a button that starts it, and writes nothing.
 
 ## H2. Changed and unchanged fields
 
 - A field's **baseline** is a stored HTML value: the one the field was loaded with, until the host's `setField` (B3) replaces it with the value that message carries. The page holds it as display HTML: B4's `baselineHtml` when the load gives one, otherwise the loaded `html`.
 - A field loaded without `baselineHtml` and with no input since is **unchanged**. A field loaded with `baselineHtml` (F7) starts **changed**, and so does any field after an input; it stays changed until a commit (S1) finds it equal to its baseline again:
-  - in rich mode, when H3 steps 1 and 2 of its content equal the same steps applied to the baseline's display HTML parsed as H1 step 2 parses it (the page may compute the baseline's value just before applying the first input);
+  - in rich mode, when H3 steps 1 and 2 of its content equal the same steps applied to the load parse (H1 step 2) of the baseline's display HTML (the page may compute the baseline's value just before applying the first input);
   - in HTML mode, when the text area's text equals the baseline's display HTML.
 - The page alone decides whether a field is unchanged, always against its baseline, and reports it with each commit (`unchanged`, B2, B3).
 - A field's **target** is the value the editor would store: for an unchanged field its baseline's stored HTML, byte for byte (R823); for a changed field the result of H3.
@@ -51,11 +53,11 @@ Decided 2026-10-27, for every editor spec: editor behaviour that the Python-libr
 
 The steps, in this order, on the field's content:
 
-1. Rich mode: serialization of the content. When the content is inline-only and its last child node is a `<br>` element, that `<br>` is left out. HTML mode: the text as it is.
+1. Rich mode: serialization of the content. When the content is inline-only and its last child node is a `<br>` element, that `<br>` is left out. HTML mode: the text is parsed as an HTML fragment as H1 step 2 parses display HTML, but in an inert document (nothing in it runs or loads, F6) and with no `<br>` appended, and the parsed nodes are serialized. Decided 2026-10-27: HTML-mode text is stored parsed, as Anki's HTML input stores it, so `<b>x` is written `<b>x</b>`, a stray end tag is dropped, and a field never stores markup that is not balanced; only `<script>` and `<link>` differ (X1).
 2. Rich mode: every `data-meguri-editor` attribute is removed. It is the only attribute the runtime may add to elements inside field content (U194 keeps an image's display size state in it), and the runtime adds no element other than H1's `<br>`.
 3. Every U+0000 is removed.
 4. Local media names are decoded (`text/media-references` M7), undoing H1's display encoding.
-5. A result that is exactly `<br>` or exactly `<div><br></div>` becomes the empty string (R830). No other form is emptied here: `<div></div>`, `<br><br>`, ` ` and `&nbsp;` stay as they are. Whether a field counts as empty for the Add checks is `text/field-emptiness` and `notes/field-check` K3.
+5. When step 2's result is exactly `<br>` or exactly `<div><br></div>`, the result is the empty string (R830). The test is made on step 2's result, before steps 3 and 4, in Anki's default editor's order: `<br>` followed by U+0000 is stored as `<br>`. No other form is emptied here: `<div></div>`, `<br><br>`, ` ` and `&nbsp;` stay as they are. Whether a field counts as empty for the Add checks is `text/field-emptiness` and `notes/field-check` K3.
 
 The core's save normalization (`notes/note-records` N2) then runs on every field of the note.
 
@@ -71,7 +73,7 @@ Step 1's serialization rewrites the whole field, the parts the user did not edit
 | `a` CR LF `b` | `a` LF `b` |
 | `<!-- c -->`, `onerror="…"` | kept as they are |
 
-Meguri also keeps `<script>…</script>` and `<link>` elements as they are through step 1. Anki does not: it removes them from every field when the note loads (X1, R831).
+Meguri also keeps `<script>…</script>` and `<link>` elements as they are through step 1, in both modes. Anki does not: it removes them from every field when the note loads and from HTML-mode text at each change (X1, R831).
 
 Where WebKit's serializer and the pinned engine's write a scenario's input differently, Meguri's runtime corrects its output to the golden; a difference it cannot correct becomes a deviation entry.
 
@@ -93,7 +95,7 @@ Where WebKit's serializer and the pinned engine's write a scenario's input diffe
 
 - ⇧⌘X, or the field's mode button, switches the focused field between rich and HTML mode.
 - Entering HTML mode, the text area gets its baseline's display HTML verbatim when the field is unchanged, and otherwise H3 steps 1 and 2 of the rich content, so the names stay display-encoded as in H1 and the same steps 3 to 5 apply to both modes.
-- Leaving HTML mode, the rich content is parsed from the text as H1 step 2 parses display HTML.
+- Leaving HTML mode, the rich content is the load parse (H1 step 2) of the text, the appended `<br>` included, so a final `<br>` of the text survives H3 step 1: `a<br>` gives `a<br><br>` in the page and is written `a<br>`.
 - A switch is not an input: switching an unchanged field back and forth leaves it unchanged. A pending commit of the field is made first (S1).
 - The text area has autocorrect, spell checking, auto-capitalization, smart quotes and smart dashes off: typing `"` stores U+0022 and `--` stores two hyphens, on Mac and on iOS.
 - The "Close HTML tags" option (`closeHTMLTags`, U192) closes a tag as it is typed; U192 specifies it.
@@ -105,13 +107,17 @@ A commit is the page handing one field's H3 steps 1 and 2 result to the host, wi
 
 - **idle**: 600 ms after its last input. Each input restarts that field's timer. Every field has its own timer, so a commit of one field never cancels another field's pending commit.
 - **blur**: at once when focus leaves the field.
-- **flush**: at once, with every other field that has a pending commit and with the tag editor's pending edit (U193). The host flushes, and waits for the reply, before any toolbar, menu or keyboard command that acts on the note or leaves it (U192's commands, Cards…, Fields…, preview, Add), before it loads another note into the page, before it closes the editor, and when the scene moves to the background or resigns active (U151). A mode switch (H6) and collapsing a focused field (F3) first commit that field.
+- **flush**: at once, with every other field that has a pending commit and with the tag editor's pending edit (U193). The host flushes, and waits for the reply, before any toolbar, menu or keyboard command that acts on the note or leaves it (U192's commands, Cards…, Fields…, preview, Add), before it loads another note into the page and before it closes the editor (these two with `hold`, B3), and when the scene moves to the background or resigns active (U151). A mode switch (H6) and collapsing a focused field (F3) first commit that field.
 
 A field with no input since its last commit commits nothing on blur, flush, a mode switch or a collapse.
 
 The page sends each commit except a flush's as B2's `commit` message, whose `reason` names its trigger: `idle`, `blur`, `modeSwitch` (H6) or `collapse` (F3). A flush's commits come back only in the `flush` reply (B3), never as `commit` messages.
 
-For each commit the host computes the field's target (H2) and compares it with the value it last sent for that field, which starts as its baseline's stored HTML and is reset to it by `setField` (B3). When they are equal nothing is sent; otherwise the field goes into a patch (S2) in edit and Browse modes, or into the session's draft in Add mode.
+For each commit the host computes the field's target (H2), which becomes the field's session target. Then, by mode:
+
+- Edit and Browse: the host compares the target with the value it last sent for that field, which starts as its baseline's stored HTML and is reset to it by `setField` (B3). When they are equal nothing is sent; otherwise the field goes into a patch (S2).
+- Add: the target replaces the field's value in the session's draft, with no comparison, so a field edited back to its baseline (empty, or its sticky value) holds that value in the draft again.
+- Content (U220): the target replaces the session's value of its one field. Content mode's result is that value, or its baseline's stored HTML when no commit happened.
 
 ## S2. The field patch (R821, R823, R1834)
 
@@ -127,18 +133,24 @@ In edit and Browse modes each commit, and each flush reply as a whole, is sent a
 
 A patch with neither fields nor tags is not sent.
 
-- Decided 2026-10-27: the patch is a second input form of U27's note update (`notes/note-records` U1), not a new op: same catalog entry and undo class (`engine/op-model` O9), same step name. U190 adds it to U27's note update in the engine crate and exposes it through the FFI crate with the whole-note form; emulating it in Swift (read the note, then send the whole note) is not allowed, since that is two transactions and loses another writer's change. D1 records the follow-ups.
+- Decided 2026-10-27: the patch is a second input form of U27's note update (`notes/note-records` U1), not a new op: the same plain op (not listed in `engine/op-model` O9, which lists only long writes and maintenance tasks), with source `UserUndoable` and recorded as an undoable step (`engine/undo` M1), and the same step name. U190 adds it to U27's note update in the engine crate and exposes it through the FFI crate with the whole-note form; emulating it in Swift (read the note, then send the whole note) is not allowed, since that is two transactions and loses another writer's change. D1 records the follow-ups.
 - The op applies a patch in its own write transaction, reading the live rows there (`engine/op-model` O7, re-derived). It refuses and writes nothing:
   - with `NotFound` when the note no longer exists (the kind U1 gives a deleted note);
   - with `Stale` when the note's `mid` is not the patch's note type id, or when the note type's field layout (its fields' names and `id`s in ordinal order, so their count too) differs from the patch's. A reorder, an added or removed field and a rename all refuse, so a patch never writes a field by an ordinal that now means another field;
   - with `InvalidArgument` when a listed ordinal is outside the layout, or when the stored row's field count differs from the note type's (a row only `notes/note-records` F1 repairs), as U1 refuses a whole-note input of the wrong count.
 - Otherwise it replaces the listed fields, keeps every other field and, without a tags member, the stored tags. It then saves as `notes/note-records` U1 to U3 say: N2 for every field, nothing written when the result equals the stored row (U2), stamps and card generation (U3). A field the patch does not list therefore keeps what another writer stored after the editor loaded it.
 - The op's source is `UserUndoable`, its step name "Update Note", and it names no review session, from every host (the review panel U184, Browse U221, the edit flows U196). Consecutive patches of one note thus merge into one undo step as `engine/undo` M1 and A3 say: only while each changes that note row and nothing else, within 60 seconds of the step's first op, and while the step is still local. A patch that registers a tag or generates a card records a step of its own, and no later patch merges into it (R821, R396).
-- Patches go to the interactive queue (`engine/op-model` O2) in commit order and the host does not wait for them, so typing never waits on a save (R1834). The host waits only for the patches of a background flush, which must commit before the app suspends (R820, U151).
+- Patches go to the interactive queue (`engine/op-model` O2) in commit order and the host does not wait for them, so typing never waits on a save (R1834). The host waits only for the patches of a background flush, which must commit before the app suspends (R820, U151), and of the flush it makes before loading another note or closing the editor (below).
+- The patch op asks to be refused, never parked, while the collection is unavailable (`engine/lifecycle` L4), so it never runs on another generation; it then fails with `CollectionUnavailable`.
 - Decided 2026-10-27: a field's last sent value becomes its target when the host submits the patch, so a later commit, made while that patch is still queued, is compared with the queued value. A field that later becomes unchanged again sends its baseline's stored HTML, so the stored bytes come back.
-- When a patch is refused (`NotFound` or `Stale`), each of its fields gets back, as its last sent value, the target of that field's last patch that committed, or its baseline's stored HTML when none did; its target stays in the session. The refusal is reported to the host's owner: U196 closes the editor for a deleted note and reloads for a changed note type, saving pending edits first (R822). A refused patch is never sent again for another note.
+- Decided 2026-10-27: when a patch fails, whatever its result (`NotFound`, `Stale`, `InvalidArgument`, `CollectionUnavailable`, `StaleGeneration`, a storage error such as a full disk, or a panic), each of its fields gets back, as its last sent value, its **last committed value**: the target of that field's last patch that committed, or its baseline's stored HTML when none did. Its session target and its content on screen stay.
+- Every failure is shown to the user at once, never silently, in U196's wording: `NotFound` says the note was deleted, and U196 then closes the editor (R822); `InvalidArgument` says the note needs Check Database (U128); `Stale` is handled as below; any other failure says the change was not saved and keeps the text in the editor.
+- Each flush also puts into its patch every field whose session target differs from its last sent value, even with no input since its last commit, so a field whose patch failed is sent again at the next flush.
+- When a patch of the flush made before loading another note or closing the editor fails, the host neither loads nor closes, except for a deleted note: it reports the failure, sends `release` (B3) and keeps the note and its text in the editor. A background flush's failure is reported when the scene is active again.
+- After `Stale`, the host reads the note and its note type again and reloads the editor without losing text (R822). Each field whose session target differs from its last committed value is matched to a field of the new layout: the one with the same `id`, or the one with the same name when the old field had no `id`, and none when the note's `mid` is no longer the patch's note type id. Each matched field loads with its session target as `html` and the newly stored value as `baselineHtml` (B4), so it starts changed (H2), and its last sent value is the newly stored value. The host then sends at once one patch on the new layout with those targets; when it fails, it is handled as any failure above, with no further automatic retry. A field with no match is shown to the user with its text, which can be copied, and is never dropped silently. A rename alone is therefore saved with no text lost.
+- A refused patch is never sent again for another note.
 - The `Changes` events of the editor's own patches (`engine/change-stream` S3, matched by op seq) do not reload the editor; U196 specifies the matching.
-- Add mode sends no op: the draft keeps the targets and U195's add op takes them. Content mode (U220) binds no note, has one field and no tags, and never sends an op; its flush returns that field's target.
+- Add mode sends no op: the draft holds the targets (S1) and U195's add op takes them. Content mode (U220) binds no note, has one field and no tags, and never sends an op; after its flush, its result is the value S1 keeps.
 
 ## S3. Field check updates (R807, R812)
 
@@ -149,7 +161,7 @@ A patch with neither fields nor tags is not sent.
 ## F1. The field list (R825, R833)
 
 - One entry per field, in note type field order, then the tag editor (U193), which content mode leaves out.
-- In a note type whose `original_stock_kind` is Image Occlusion, the fields whose `tag` is 0 (Occlusion) and 1 (Image) are not shown (`notetypes/stock-kinds` K4, R833); a note type without such tags hides nothing. Hidden fields are never loaded into the page, committed or patched; the mask editor writes them (U206).
+- In a note type whose `original_stock_kind` is Image Occlusion, two fields are not shown (`notetypes/stock-kinds` K4, R833), found as Anki finds them: when fields with `tag` 0, 1, 2 and 3 (Occlusion, Image, Header, Back Extra) all exist, the fields whose `tag` is 0 and 1; otherwise, when the note type has at least four fields, ordinals 0 and 1; otherwise ordinal 0 only. Decided 2026-10-27: Meguri follows Anki here, so a note type that lost its tags (Check Database restores them) still never shows the occlusion data as an editable field. Hidden fields are never loaded into the page, committed or patched; the mask editor writes them (U206).
 - Each entry has the field name as its label, the input, and a mode button (H6). Accessibility identifiers: `editor.field.<ord>`, `editor.field.<ord>.label`, `editor.field.<ord>.htmlToggle`.
 - The field's `description` is its placeholder: shown as plain text (never parsed as HTML), in rich mode only, while the field's target would be empty, in the field's font size, in the secondary label color, on one line truncated at its end.
 
@@ -174,7 +186,7 @@ A patch with neither fields nor tags is not sent.
 
 ## F5. Undo inside a field (R832)
 
-Each field keeps its own edit history, apart from WebKit's: snapshots at edit boundaries, with consecutive typing grouped. ⌘Z and ⇧⌘Z with a field focused undo and redo that field only, and each is an input (S1). With no field focused they go to the collection undo (U159). Loading a note or `setField` clears the field's history.
+Each field keeps its own edit history, apart from WebKit's: snapshots at edit boundaries, with consecutive typing grouped. ⌘Z and ⇧⌘Z with a field focused undo and redo that field only, and each is an input (S1). With no field focused they go to the collection undo (U159). Loading a note or `setField` clears the field's history. Decided 2026-10-27: the history holds snapshots of the content in the field's current mode, and a mode switch (H6) clears it, since the two modes edit different things; the page then sends `historyState`.
 
 ## F6. Scripts in fields (R831)
 
@@ -185,13 +197,17 @@ While a field is edited, in either mode, no script element in it runs, no event 
 - The session (targets, last sent values, baselines, selections, collapsed states and modes) lives above the layout. A layout switch moves the existing web view and never reloads it, so unsaved text and the caret survive (R5).
 - When the page's web content process ends, input not yet committed is lost: at most one field's last 600 ms. The host reloads the page from the session. Each field whose last commit was changed gets that commit's target as `html` and its baseline as `baselineHtml` (B4), both as display HTML, so it starts changed and is still compared with its baseline (H2). Example: stored `A`, the user types to `AB`, the patch commits, the process ends; after the reload the user types `C` and deletes it, the commit is changed with target `AB`, equal to the last sent value, so nothing is sent; reverting to `A` makes the field unchanged and sends `A`.
 
+## F8. Styles in fields (R831)
+
+Decided 2026-10-27: in rich mode each field's editable area is the content of its own shadow root, as in Anki's editor. A `<style>` element in field content, or a `<link rel="stylesheet">` that Meguri keeps and Anki removes (X1), styles that field's content only; it never affects the page chrome (labels, placeholders, mode buttons, the tag editor) or other fields. F2's font, size and direction are set on the shadow root's host. In HTML mode the text area shows the markup as text, so it styles nothing. Nothing of this changes what is stored (H2, H3).
+
 ## B1. Bridge messages
 
 The page and its host exchange JSON objects through one message handler with replies, each with a `type` member naming one of the messages below. This is a data contract, version 1.
 
-- The host rejects a message of another type, or one whose members do not match the tables, and logs it; the page does the same and answers the host's message with an error.
-- `openNote` carries a `loadId`, increasing for the life of the web view. Every page message after it carries that `loadId`, and the host ignores messages of an older one. Since the host flushes before each load (S1), no edit is lost by this.
-- Page messages arrive in the order the page sent them.
+- The host rejects a message of another type, or one whose members do not match the tables (besides `seq`, below), and logs it; the page does the same and answers the host's message with an error.
+- `openNote` carries a `loadId`, increasing for the life of the web view. Every page message after it carries that `loadId`, and the host ignores messages of an older one. Since the host flushes with `hold` before each load (S1, B3), no input falls between that flush and the load, and no edit is lost by this.
+- Every page message after `openNote` and every `flush` reply also carries `seq`, an integer that starts at 1 for each `loadId` and increases by one with each. The host handles them in `seq` order and holds one that arrives before its predecessor, so a `flush` reply is never handled before a `commit` the page sent earlier.
 - `ord` is a field's ordinal in its note type.
 
 ## B2. Page to host
@@ -221,7 +237,8 @@ U192 adds the format state message, U193 the tag messages and U194 the image mes
 | `setFieldState` | `loadId`, `ord`, and `collapsed`, `mode` or both | done |
 | `setFocus` | `loadId`, `ord` | done; the selection is restored as F4 says |
 | `setMarks` | `loadId`, `duplicate` (boolean), `hint` (string or null) | done (S3) |
-| `flush` | `loadId` | `commits`: one `{ord, html, unchanged}` per field committed (S1), in field order, and the tag editor's pending tags (U193) |
+| `flush` | `loadId`, `hold` (boolean) | `commits`: one `{ord, html, unchanged}` per field committed (S1), in field order, and the tag editor's pending tags (U193). With `hold` true the page, once it has answered, accepts no input (keys, paste, drop, commands) until the next `openNote` or `release` |
+| `release` | `loadId` | done; ends a flush's hold (S2) |
 | `undo`, `redo` | `loadId`, `ord` | `applied` (boolean) |
 | `setTheme` | `theme` | done |
 
@@ -234,7 +251,7 @@ U192 adds the command messages and U194 the insertion messages. A content change
 | `ord` | the field's ordinal |
 | `name` | the field name, the label and accessibility label |
 | `html` | the display HTML (H1) |
-| `baselineHtml` | the baseline's display HTML (H2), present only when it differs from `html`: F7's reload of a changed field. The field then starts changed |
+| `baselineHtml` | the baseline's display HTML (H2), present only when it differs from `html`: F7's reload of a changed field, and S2's reload after `Stale`. The field then starts changed |
 | `description` | F1 |
 | `fontFamily`, `fontSize`, `rtl` | F2, already resolved |
 | `collapsed`, `mode` | F3, already resolved |
@@ -244,21 +261,20 @@ U192 adds the command messages and U194 the insertion messages. A content change
 
 - **Writes on open.** Anki's editor parses and serializes every field as it loads the note, passes every field through its HTML-mode input (always present, hidden while unused), which removes `<script>` and `<link>` elements, and its per-field timers then send the note back about 600 ms later. A field whose serialization differs from its stored bytes, or whose whole value is `<br>` or `<div><br></div>`, can so be rewritten without any typing. Meguri serializes only fields with an input (H1, H2; R823, AE40). Scenario `open-close-untouched` shows Anki's result; when its golden records a rewrite, it needs the deviation entry `editor-open-rewrites-fields`.
 - **Whole-note saves.** Anki sends every field's current value with each save; Meguri sends only the fields whose targets changed (S2). With nothing else writing the note the stored results are the same; when another writer changed a field meanwhile, Meguri keeps that change.
-- **Scripts.** Anki's editor removes `<script>` and `<link>` elements from every field when the note loads, and its timers then save the result; Meguri keeps them (H3, F6; R831).
-- **MathJax.** Anki shows MathJax as typeset previews and, when such a field is saved, turns each `<br>` inside a MathJax span into a line feed and removes line feeds at the span's ends. Meguri leaves MathJax as text (H1; R563, R2017).
-- **HTML mode.** Anki can show both inputs of a field at once and shows parsed, re-serialized source in its HTML input. Meguri shows one input at a time, and the stored bytes in HTML mode while the field is unchanged (H6).
+- **Scripts.** Anki's editor removes `<script>` and `<link>` elements from every field when the note loads, and from HTML-mode text at each change, and its timers then save the result; Meguri keeps them in both modes (H3, F6; R831). Scenario `script-untouched` shows Anki's result; when its golden records the removal, it needs the deviation entry `editor-keeps-scripts`.
+- **MathJax.** While Anki's MathJax preview setting is on (its default), its editor shows MathJax as typeset previews. On load each `\(…\)` and `\[…\]` becomes an element, each `<br>` inside it becomes a line feed and line feeds at its ends are removed, so `<br>`s at the ends of math are gone; the save writes the math back as text in that form. A display `\[…\]` element counts as a block element (E1), so a field holding one is not inline-only in Anki: no `<br>` is appended on load and no final `<br>` is dropped on save (H1 step 2, H3 step 1). With the setting off, Anki leaves math as text, as Meguri always does (H1; R563, R2017). Scenario `mathjax-touched` runs with the setting at its default; where its golden differs from Meguri's result, it needs the deviation entry `editor-mathjax-as-text`.
+- **HTML mode.** Anki can show both inputs of a field at once and shows parsed, re-serialized source in its HTML input. Meguri shows one input at a time, and the stored bytes in HTML mode while the field is unchanged (H6). Both store HTML-mode text parsed and re-serialized (H3 step 1); Anki parses it as a whole document's body, Meguri as a fragment.
 - **Remembered states.** Anki remembers collapsed states and modes per note type in each editor window, and reuses collapsed states even when the field count changed. Meguri's memory spans the app session and needs an equal field count (F3).
-- **Hints.** Anki keeps a cloze hint shown, even after the problem is fixed and across notes loaded into the same editor, until the editor is reopened; Meguri clears it at the next `normal` check (S3).
-- **Font size 0.** Anki shows a field whose stored `font_size` is 0 at 0 px, and uses 16 px only when the field's options are missing; Meguri shows a stored 0 at 20 px (F2).
+- **Font size 0.** Anki's default editor shows a field whose stored `font_size` is 0 at 0 px; Meguri shows it at 20 px (F2).
 - **Descriptions.** Anki drops backslashes from a field description when showing it; Meguri shows the description as stored (F1).
 
 ## T1. Scenarios for the oracle maintainer
 
 Requested in `conformance/scenarios/editor/field-html/`, with goldens in `conformance/goldens/editor/field-html/` marked `source: observed`. None is written or recorded yet: no runner step and no oracle driver op drives an editor page today. The oracle maintainer builds the quarantined image (E2) and the scenario vocabulary from this list.
 
-**Setup.** One note type `Pair` defined by the scenario (R1959), standard, fields `Front` and `Back`, empty CSS, field options as each row says (default: N5.2's). One note, with the stored fields given; `Back` is empty unless given. Every probe reads the note's `flds` bytes and whether `mod` or `usn` changed since setup.
+**Setup.** One note type `Pair` defined by the scenario (R1959), standard, fields `Front` and `Back`, empty CSS, field options as each row says (default: N5.2's). `closeHTMLTags` is `false` in every scenario, so typed tags are not completed (U192). One note, with the stored fields given; `Back` is empty unless given. Every probe reads the note's `flds` bytes and whether `mod` or `usn` changed since setup.
 
-**Actions**, all as native key events on Anki desktop's Edit Current editor unless a row says Add: `open`; `caret F end|start|after "x"`; `type "…"`; `Return`; `Shift+Return`; `Backspace`; `select-all`; `toggle-html F`; `blur` (focus moves to the tag editor); `wait N` (ms); `probe`; `close`.
+**Actions**, all as native key events on Anki desktop's Edit Current editor unless a row says Add: `open`; `caret F end|start|after "x"`; `type "…"`; `Return`; `Shift+Return`; `Backspace`; `select-all`; `toggle-html F` (in Anki both of F's inputs then show and focus is in its HTML input; a `caret F …` after it, and the keys that follow, act in that HTML input); `blur` (focus moves to the tag editor); `wait N` (ms); `probe`; `close`.
 
 Return group (H4):
 
@@ -338,6 +354,8 @@ HTML mode group (H6), with Front's "Use HTML editor by default" set:
 | `html-quotes-dashes` | (empty) | caret Front end, type `"a" -- b`, blur, probe |
 | `html-toggle-no-edit` | `<span  class="x">a</span>` | toggle-html Front, toggle-html Front, blur, close, probe |
 | `html-edit` | `<b>a</b>` | caret Front end, type `<i>c</i>`, blur, probe |
+| `html-unclosed` | (empty) | caret Front end, type `<b>x`, blur, probe |
+| `html-stray-end` | `a` | caret Front end, type `</i>b`, blur, probe |
 
 Timing and undo group (S1, S2):
 
@@ -351,12 +369,12 @@ Timing and undo group (S1, S2):
 
 ## T2. Meguri tests without goldens
 
-The plan's U190 test scenarios cover what no editor golden shows: AE40's row checks (no op on open and close; an untouched field byte-identical after another field's save), F6 with a handler that would post to the bridge, F4's Tab order and caret restore, F3's session memory and relaunch, H6's quotes and dashes on Mac and iOS, F2's `rtl` with the rendered card unchanged, F1's hidden Image Occlusion fields, F5's routing, S1's timings and background flush, S2's merge at 20 s and split at 61 s, F7's layout switch without reload and its reload after the web content process ends (`baselineHtml`, the example in F7), S2's refusals and the restored last sent values, `setField`'s new baseline, R1833's open time, and content mode. Each runs on macOS and on the iOS simulator.
+The plan's U190 test scenarios cover what no editor golden shows: AE40's row checks (no op on open and close; an untouched field byte-identical after another field's save), F6 with a handler that would post to the bridge, F4's Tab order and caret restore, F3's session memory and relaunch, H6's quotes and dashes on Mac and iOS, F2's `rtl` with the rendered card unchanged, F1's hidden Image Occlusion fields, F5's routing, S1's timings and background flush, S2's merge at 20 s and split at 61 s, F7's layout switch without reload and its reload after the web content process ends (`baselineHtml`, the example in F7), S2's refusals and failures (`NotFound`, `Stale`, `InvalidArgument`, `CollectionUnavailable`, a storage error) with the restored last sent values, the report and the resend at the next flush, S2's `Stale` reload after a field rename and after a reorder (text kept, matched by `id`) and with a removed field (its text shown), a close or load refused after a failed flush patch, H1 step 7's notice for a row whose field count differs, S1's Add-mode draft when a field is edited back to its baseline (empty `a` then deleted; sticky `x` to `xy` and back), B1's `seq` order and B3's `hold` (input after a held flush is refused until `release`), F5's history cleared by a mode switch, F8 with a field holding `<style>div{display:none}</style>x` (the other fields, labels and tag editor unchanged), `setField`'s new baseline, R1833's open time, and content mode. Each runs on macOS and on the iOS simulator.
 
 ## D1. Follow-ups in files this spec does not own
 
 Decided 2026-10-27: these are owed by the owners of the named files and change nothing above.
 
-- `notes/note-records` U1: add S2's field-patch input form next to the whole-note form, with S2's refusals (`NotFound`, `Stale`, `InvalidArgument`) and the same catalog entry and step name.
+- `notes/note-records` U1: add S2's field-patch input form next to the whole-note form, with S2's refusals (`NotFound`, `Stale`, `InvalidArgument`) and the same op and step name.
 - The plan's U190 Files list: add the patch form to U27's note update module in the engine crate and to the FFI crate's note ops, with engine tests for each S2 refusal (a reorder that keeps the field count included) and for an unlisted field that another writer changed.
 - `editor/paste` P1 still names the oracle by its package directory; it should say "the Python-library oracle", as E2 does.

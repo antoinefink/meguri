@@ -134,13 +134,13 @@ Example: four cards with equal `mod` sorted by Card Modified are one equal-key r
 
 ## S9. Rows of a sorted search
 
-- In cards mode, a sort on Sort Field, Card Type, Created, Note Modified, Note Type or Tags tests only cards whose note row exists, as a query that reads note columns does (`search/query-model` Q5): a card without a note, which only a damaged collection holds, is left out of such a sorted result, while an unsorted search or any other sort returns it. In notes mode the result set never changes; a note without cards gets NULL keys where S5 says so.
+- In cards mode, a sort on Sort Field, Card Type, Created, Note Modified, Note Type or Tags tests only cards whose note row exists, as a query that reads note columns does (`search/query-model` Q5): a card without a note, which only a damaged collection holds, is left out of such a sorted result, while an unsorted search or any other sort returns it. A Browse handle keeps such cards aside rather than forgetting them, so a resort or toggle lists them again under a sort that returns them (`browser/result-sets` H5, H8, H11). In notes mode the result set never changes; a note without cards gets NULL keys where S5 says so.
 - Keys over a note's cards (S5, S5.1, the first card) use every card of the note, also cards the search did not match: notes mode sorted by Due with the search `is:new` still orders a note with one new and one review card by its review card.
 
 ## S10. Meguri constraints
 
 - No TEMP table or other object is created for a sort: reader connections are `query_only` (`storage/open-and-connections`) and nothing may be added to the collection (R2016). Ranks and per-note aggregates are subqueries, joins or window functions inside the statement, or keys computed in memory over the result. They are computed afresh for each sort, so a deck rename or a new note type is seen at once.
-- Due and Retrievability read now and today from the search context (`search/query-model` Q8) once, when the search starts, for every row.
+- Due and Retrievability read now and today from the search context (`search/query-model` Q8) once, when the search or resort starts (`browser/result-sets` H8), for every row.
 - A sort change shows its first page within R1083's budget on the 150k-card fixture (U90).
 
 ## S11. Scenarios
@@ -162,7 +162,7 @@ Observation: `search` with `order` (`specs/conformance/browser-ops.md` B1, B2). 
 | `browser/sort/tags` | binary order of stored tags: capitals before small letters, non-ASCII last, untagged first |
 | `browser/sort/position` | S5.1: `pos`, new positions, review cards without `pos`, a filtered new card, a note whose first card is ordinal 1 |
 | `browser/sort/fsrs` | Stability, Difficulty, Retrievability in cards mode: NULLs, `s` without `d`, cards with and without `lrt`; notes mode refuses all three |
-| `browser/sort/unsortable` | S1: Question and Answer in both modes, unknown and empty keys; parse and regex errors win over `unsortable` |
+| `browser/sort/unsortable` | S1: Question and Answer in both modes, unknown and empty keys; parse errors win over `unsortable`, and `unsortable` wins over run errors such as an invalid regex (browser-ops B1) |
 | `browser/sort/damaged` | S9: a card without a note dropped by note-column sorts only; a note without cards first ascending |
 | `browser/sort/subset` | S9: aggregates over all of a note's cards under a restricting search |
 

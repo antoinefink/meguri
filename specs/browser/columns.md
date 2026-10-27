@@ -108,7 +108,7 @@ So a card flagged red (1) whose note is marked and which is suspended has the re
 ## C6. Font and direction
 
 - **Font**: the browser font name and size of the card's template (C1): note type template config `browser_font_name` and `browser_font_size`, schema-11 `bfont` and `bsize`. An empty name or a size of 0 means "no font set". The UI applies it to the cell-font columns (R1150).
-- **Sort field direction**: right to left when the note type's sort field (index `sortf`) has the field option `rtl` set; the Sort Field cell is then laid out right to left (R1118). No other cell carries a direction.
+- **Sort field direction**: right to left when the note type's sort field (index `sortf`) has the field option `rtl` set; the Sort Field cell is then laid out right to left (R1118). Left to right when the note type has no field at index `sortf` (Decided 2026-10-27, as C7.1). No other cell carries a direction.
 
 ## C7. Cells in cards mode
 
@@ -116,7 +116,7 @@ The row's card is "the card". Each cell has one of the typed values of C9; "empt
 
 ### C7.1 Sort Field (`noteFld`, R1118)
 
-Text: `text/strip-html` H6 with media names kept, applied to the note's field at the note type's sort field index, as the note stores it (not the `sfld` column). An index past the last field gives empty text. Examples: `<b>Dog</b>` → `Dog`; `front [sound:a.mp3] <b>bold</b>` → `front a.mp3 bold`; `one<br>two` → `one two`; `<img src="cat.png">` → `cat.png`.
+Text: `text/strip-html` H6 with media names kept, applied to the note's field at the note type's sort field index, as the note stores it (not the `sfld` column). Decided 2026-10-27: when the note has no field at that index (a `sortf` past the note's fields, which only a damaged collection holds), the cell is the empty text and the row stays a row record, not a row error. Anki's lookup fails there and its table shows an error row and stops updating, which no golden records; Meguri keeps the row so that the user can open and repair the note. Examples: `<b>Dog</b>` → `Dog`; `front [sound:a.mp3] <b>bold</b>` → `front a.mp3 bold`; `one<br>two` → `one two`; `<img src="cat.png">` → `cat.png`.
 
 ### C7.2 Question and Answer (`question`, `answer`, R1119, R1120)
 
@@ -226,6 +226,7 @@ Example: a note with a review card (`factor` 2,500, `ivl` 10) and a learning car
 | time span | seconds as an `f32` | Interval, Stability |
 | empty | nothing | any column |
 | render outcome | C10 | Question, Answer |
+| deferred | nothing: the cell is not computed yet; `qa_cells` gives it (`browser/result-sets` H7). Distinct from empty and from a row error | Question, Answer, only in a row page |
 
 The Due values instant, new position and filtered carry the wrapped flag of C7.5.
 
@@ -240,7 +241,7 @@ Steps 1 to 3, 5, 6 and 7 make the Question cell, and step 4 the Answer cell; ste
 5. **Blank**: the Question cell is the blank outcome with the H6 line of P(Q); the Answer cell is the blank outcome with no text. Keep the missing-cloze metadata. Browse adds no separate blank-card notice (`render/card-render-pipeline` K12, R976).
 6. **Template error**: both cells are the error (kind and side); the UI shows Meguri's wording (`render/template-syntax` T9). A browser format with an error the review templates do not have shows the error here only.
 7. Rendering runs only for rows whose request includes Question or Answer (R1119, R1242), never on the main thread, and never writes anything (`render/card-render-pipeline` K7).
-8. **Cache** (Meguri, R1242, U85): rendered cells may be kept in an in-memory LRU keyed by everything that can change them: card id, ordinal, `did` and that deck's mtime, `odid` and that deck's mtime, `flags`, note id and note mtime, note type id and mtime. So Change Deck, a flag change, a deck rename (a parent's rename changes each child's mtime), a note edit and a note type edit all miss the cache (R960).
+8. **Cache** (Meguri, R1242, U85): rendered cells may be kept in an in-memory LRU keyed by card id, each entry with its card's note id. Decided 2026-10-27: entries are dropped by change sets, not keyed on mtimes, since mtimes are whole seconds and two edits in one second would keep an equal key. An in-core observer (`engine/change-stream` S2), which runs before the change set is published, drops the entries of every card the change set lists and of every card whose note it lists, and every entry when it lists any note type or deck (as `browser/result-sets` H10 refetches); a generation change drops them all. A cell rendered in a read transaction is stored only when the cache has applied no change set newer than that transaction's change seq (`browser/result-sets` H1). So Change Deck, a flag change, a deck rename, a note edit and a note type edit are never served from the cache (R960), however close together.
 
 Examples of Question cells (each from a stored card, browser question format empty unless said):
 

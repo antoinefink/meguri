@@ -69,7 +69,8 @@ The collection inside the package is a new file built in staging, never a copy o
   No other source config key is copied: the package has no `rollover`, `localOffset` or `nextPos` of the source (its `nextPos` is B4's `1`).
 - Then the rows of A3, after A5, A6 and A7: decks, notes, cards, note types (with their fields and templates), review log and presets. A source row keeps its `id`, `mod`/`mtime_secs` and `usn`; the export stamps nothing.
 - Every record is written by its owner's codec: protobuf blobs per `model/protobuf-records` P5 (an unchanged record keeps its exact bytes; a changed one is encoded per P3 and keeps unknown fields per P4), card `data` per `model/card-data-json` C4 (unknown keys kept, deviation `card-data-unknown-keys`), note `tags` as in A5.
-- A deck row of the source with id 1 (with scheduling, when A3 put it in the set) replaces the new collection's default deck. Otherwise B6's default deck stays, so cards whose `did` is 1 still name a deck. The default preset of B5 stays unless A7 adds the source's preset 1.
+- A deck row of the source with id 1 (with scheduling, when A3 put it in the set) replaces the new collection's default deck. Otherwise B6's default deck stays, with B6's bytes (A5 and A6 change source decks only, so its `common` stays `08 01 10 01`), so cards whose `did` is 1 still name a deck. The default preset of B5 stays unless A7 adds the source's preset 1.
+- Decided 2026-10-27: when B6's default deck would stay and a package deck with another id has its name `Default` under `unicase` (`decks/decks#D2`: the source's deck 1 was renamed, for example to `Default+` by `decks/decks#D8`, and another deck took the name), B6's row is left out, since the unique `decks` name index holds only one of them. This is Anki's result: its deck writer replaces B6's row with the source deck. A package card whose `did` is 1 (only without scheduling: with scheduling, such a card puts the source's deck 1 in the set) then names no package deck, the one unresolved reference a package may hold; both importers keep its `did` 1, the target's default deck, which every collection has (`package/apkg-import#I11.1`). Writing B6's row under another name was rejected: an import with scheduling would take that deck by its new name and add a stray deck to the target.
 - Schema 18. Closed as `package/container#P11` requires of a snapshot: header bytes 18 and 19 are 2, no `-wal` or `-shm` file.
 
 Why `crt` and `creationOffset`: an importer computes the package's "today" from them (with its default rollover) and shifts day-based due dates by the difference with its own today (R1609). Copying anything else would change what Anki's importer does with Meguri's package.
@@ -78,12 +79,12 @@ Why `crt` and `creationOffset`: an importer computes the package's "today" from 
 
 With "Include scheduling information" on, rows are copied as A4 says, unchanged in content, with one exception for filtered decks.
 
-- Note `tags`: the stored text split at tag separators (`tags/tags#T1`) with empty pieces dropped, then written as `tags/tags#T4` step 5 writes a list, in the same order and without dropping repeats or normalizing: `"  b a  a "` is written ` b a a `. Every other note column is copied as stored.
+- Note `tags`: the stored text split at tag separators (`tags/tags#T1`) with empty pieces dropped, then written as `tags/tags#T4` step 5 writes a list, in the same order and without dropping repeats or normalizing: `"  b a  a "` is written ` b a a `. Note `flags` is written 0 and note `data` the empty string, as Anki 26.9.3 writes them whatever the source holds (no importer reads either; `package/apkg-import#I9` writes the same). Every other note column is copied as stored.
 - **Filtered decks** stay filtered decks, with their cards in them and the cards' home decks in the package (A3 step 2), when every selected card meets one of:
   - its `odid` is 0 and its `did` names a deck of the package that is not filtered;
   - its `odid` is 1, or names a deck of the package.
 
-  Otherwise (a card whose `odid` names no existing deck, or one with `odid` 0 sitting in a filtered deck) every selected card with a non-zero `odid` is returned home in place: it stays in the deck its `did` names, `odid` becomes 0, `due` becomes `odue` when `odue` is not 0, `queue` is set from the type and the restored `due` as `sched/card-data#K3` says when it is 0 or above (a negative queue stays), and `odue` becomes 0. Every filtered deck in the package then becomes a normal deck: its `kind` is a new normal deck with preset 1 and every other field at its default (`0a 02 08 01`, as `storage/new-collection#B6`); its `common` is kept.
+  Otherwise (a card whose non-zero `odid` names no deck of the package, or one with `odid` 0 sitting in a filtered deck) every selected card whose `odid` is above 0 is returned home in place (a card with a negative `odid`, only possible in a damaged row, is copied as stored, as Anki does): it stays in the deck its `did` names, `odid` becomes 0, `due` becomes `odue` when `odue` is not 0, `queue` is set from the type and the restored `due` as `sched/card-data#K3` says when it is 0 or above (a negative queue stays), and `odue` becomes 0. Every filtered deck in the package then becomes a normal deck: its `kind` is a new normal deck with preset 1 and every other field at its default (`0a 02 08 01`, as `storage/new-collection#B6`); its `common` is kept.
 
 ## A6. Scheduling removed (R1621)
 
@@ -93,11 +94,11 @@ With "Include scheduling information" off, the copies change as below. The live 
 
 | Column | Value |
 |---|---|
-| `due` | the card's last position when it has one: for a card of type 0, `odue` when `odid` is not 0, else `due`, read as unsigned 32-bit; for another type, its `pos` key when present. A card without a last position gets `P`, and `P` moves on by one (from 4,294,967,295 to 0). Stored as a signed 32-bit value (K7). |
+| `due` | the card's last position when it has one: for a card of type 0, `odue` when `odid` is above 0, else `due` (also for a damaged negative `odid`), read as unsigned 32-bit; for another type, its `pos` key when present. A card without a last position gets `P`, and `P` moves on by one (from 4,294,967,295 to 0). Stored as a signed 32-bit value (K7). |
 | `type`, `queue` | 0, 0 (suspended and buried cards become plain new cards) |
 | `ivl`, `factor`, `reps`, `lapses` | 0 |
 | `did` | unchanged: a card in a filtered deck stays in it, and that deck becomes a normal deck (decks, below) |
-| `odid`, `odue` | 0, 0 |
+| `odid`, `odue` | `odid` 0; `odue` 0 when `odid` was not 0, else unchanged (a damaged card with `odid` 0 and `odue` 4 keeps 4, as in Anki) |
 | `flags` | 0 (the whole column, not only the user flag bits) |
 | `data` | `s`, `d` and `pos` removed; `dr`, `decay`, `lrt`, `cd` and unknown keys kept (C4) |
 | `left`, `nid`, `ord`, `mod`, `usn` | unchanged |
@@ -115,14 +116,14 @@ Example, derived from these rules (cards by ascending id, source `nextPos` 7):
 | new held by a filtered deck, `odue` 5 | 5, in the filtered deck, now normal |
 | learning, `pos` 4, `left` 1002 | 4, `left` still 1002 |
 
-**Notes.** The tags `marked` and `leech` are removed, compared with the whole tag and ignoring ASCII case only (`Marked` and `LEECH` go; `leech::x` and `marked2` stay). The tags are written as in A5. Nothing else changes, `mod` and `usn` included.
+**Notes.** The tags `marked` and `leech` are removed, compared with the whole tag and ignoring ASCII case only (`Marked` and `LEECH` go; `leech::x` and `marked2` stay). The tags, `flags` and `data` are written as in A5. Nothing else changes, `mod` and `usn` included.
 
-**Decks.** Every deck in the package:
+**Decks.** Every source deck in the package (B6's default deck, when A4 keeps it, keeps B6's bytes):
 
 - `common` becomes an empty message: collapse states, the studied-today counters and their day, and any unknown field or `other` content are gone (`model/protobuf-records#P6.4`).
 - A normal deck: `extend_new` and `extend_review` become 0; `review_limit`, `new_limit`, `review_limit_today` and `new_limit_today` become absent; `config_id` becomes 1 unless deck presets are included. `description`, `markdown_description`, `desired_retention` and unknown fields stay (P4).
 - A filtered deck becomes a new normal deck with preset 1, every other field at its default (`0a 02 08 01`).
-- The deck with id 1 is not exported (A3 step 4); B6's default deck takes its place.
+- The deck with id 1 is not exported (A3 step 4); B6's default deck takes its place, unless A4 leaves it out for a name clash.
 
 **Review log.** None (A3).
 
@@ -139,6 +140,7 @@ On the snapshot, before staging exists (A11 step 3):
 1. **Future ids** (R1623). When any selected card id or note id, or with scheduling any selected review-log id, is greater than the export instant in milliseconds plus 86,400,000: `InvalidIds`. An id equal to that bound passes. The message suggests Check Database (wording U160). Deck, note type and preset ids are not checked.
 2. **Broken references** (Meguri's rule, data safety): a selected note whose `mid` names no note type, or a selected card whose `did` names no deck: `NeedsCheckDatabase{reason: MissingNotetype | MissingDeck}`. Anki writes such a package and its importer then fails or guesses; Meguri never writes a package its own importer would refuse. Check Database repairs both (U128, U129).
 3. A7's missing-preset check.
+4. **Unreadable records** (data safety): every row the export reads as a record must read under `model/row-records#R10` (its blobs under `model/protobuf-records#P9`, including a deck `kind` with one member): the `decks` rows of A3's set, ancestors included, whose `kind` tells A3, A5 and A7 whether a deck is filtered and which preset it uses; the `notetypes` rows of the selected notes with their `fields` and `templates` rows (A9.3 reads `latex_svg`, A9.4 and A9.5 the CSS and templates); and with "Include deck presets" the `deck_config` rows A7 exports. Otherwise: `NeedsCheckDatabase{reason: UnreadableRecord{table, id}}`, naming the first such row in that order of tables, then by ascending id. Anki fails on these too. Notes, cards and review-log rows are copied as SQLite values and are not checked here.
 
 Nothing is created before these checks pass: no staging directory, no temporary file, no artifact.
 
@@ -152,13 +154,13 @@ With "Include media" on, the package holds the files that the exported notes and
 2. **LaTeX.** For every field of every exported note, the names of the generated LaTeX images (A9.3). Fields are scanned as stored; cloze markers are not expanded first.
 3. **Note types.** For every exported note type, the `_` names of its `css` (A9.4) and of the `q_format` and `a_format` of each of its templates (A9.5). Only names starting with `_` come from note types; the browser templates are not scanned.
 
-The candidates form a set: a name found several times counts once.
+Each candidate is taken in NFC as it is found, and the NFC names form a set compared byte for byte: a name found several times, or in spellings that differ only in Unicode normalization (an NFC `é.png` in one field and an NFD `e` + U+0301 `.png` in another), counts once. Case variants stay distinct (A9.2 step 6).
 
 ### A9.2 From candidates to files
 
 For each candidate, in any order:
 
-1. Take the name in NFC.
+1. The name is already in NFC (A9.1), so no two candidates give the same entry name.
 2. Drop it when it is empty, contains `/`, or is `.` or `..` (it cannot be one plain file name; remote URLs fall here).
 3. When the media folder's entry with exactly that name is a directory, a symbolic link or another non-regular entry: `MediaUnreadable{name}` (Anki follows links and fails on directories; Meguri never reads through a link, as `package/file-export#E7.1`).
 4. Resolve it with `media/media-files#M5`. Not found: drop it silently (Anki ignores missing files too).
@@ -193,7 +195,7 @@ Meguri never generates these images (`render/card-render-pipeline`); it exports 
 
 ### A9.4 `_` names in a note type's CSS
 
-Scan the CSS left to right (rules of `text/strip-html#H1`: leftmost match wins, alternatives tried in the order listed at the same position; "white space" is Unicode white space; "a character" is any character except LF). Keywords are case-insensitive. A match consumes its text. The name is the part shown in bold:
+Scan the CSS left to right (rules of `text/strip-html#H1`: leftmost match wins, alternatives tried in the order listed at the same position; "white space" is Unicode white space; "a character" is any character except LF). The whole scan is case-insensitive under Unicode simple case folding: every literal of forms 1 to 5 (`@import`, `url(`, `css`) matches in any case, so `@IMPORT "_a.CSS"` is form 1 and `'_x.Css'` form 2. A match consumes its text. The name is the part shown in bold:
 
 1. `@import`, one or more white-space characters, `"`, **`_`, any run without `"`, one character, `css`**, `"`.
 2. `'`, **`_`, any run without `'`, one character, `css`**, `'`.
@@ -204,6 +206,7 @@ Scan the CSS left to right (rules of `text/strip-html#H1`: leftmost match wins, 
 | CSS | Names |
 |---|---|
 | `@import "_base.css";` | `_base.css` |
+| `@import "_a.CSS";` | `_a.CSS` |
 | `@font-face { src: url(_f.woff); }` | `_f.woff` |
 | `src: url("_g.ttf")`, `src: url('_h.ttf')` | `_g.ttf`, `_h.ttf` |
 | `url( _x.png )` | `_x.png` |
@@ -237,7 +240,7 @@ The package is the latest format of `package/container#P15`, used as it is:
 - entries `meta` (`08 03`), `collection.anki21b` (the A4 file), `collection.anki2` (the placeholder of P7), the numbered media entries `0`, `1`, ... in A9 order, then `media`, all stored, each payload one zstd frame at level 3 with its content size and checksum;
 - the media map of P5 with each entry's NFC name, exact size and SHA-1;
 - with "Include media" off, or no file selected: no numbered entry, and `media` is the zstd encoding of zero bytes, as in P11;
-- the P8 limits: at most 400,000 zip entries (so at most 399,996 media files), 64 MiB of decoded map, 8 GiB decoded collection, 16 GiB of decoded data in all. Past one: `LimitExceeded{what}`, found from the file sizes before any media is copied.
+- the P8 limits: at most 400,000 zip entries (so at most 399,996 media files), 64 MiB of decoded map, 8 GiB decoded collection, 16 GiB of decoded data in all. Past one: `LimitExceeded{what}`, found from the file sizes before any media is copied. P8's ratio rule (the decoded `collection.anki21b`, and the decoded `media`, each at most the larger of 16 MiB and 1,000 times its compressed entry) can only be checked after compressing: the writer checks it as each of the two entries is written, before A11 step 9's reread, with the same `LimitExceeded{what}`, as `package/legacy-export#L6` does. Only a collection made almost entirely of repeated bytes can fail it.
 - Large entries may be compressed with several threads; the frame format does not change.
 
 Anki 26.9.3 writes the same entries in the same order, stored, its frames at the library's default level without size or checksum.
@@ -254,7 +257,14 @@ Input: the limit and options of A2. Output: the owned artifact of `package/file-
 4. **Preflight 1** (R2015): on the collection's file system, the size of `collection.anki2` plus its `-wal` plus 4 MiB, the bound for the built collection (`package/container#P10`).
 5. **Build.** In a fresh P9 staging directory, build `snapshot.anki2` as A4 says with U23's storage-only builder (`Raw` stamping), streaming rows from the snapshot with A5 to A7 applied to the copies only. Collect A9's candidates while the notes are copied. End the read transaction. Close the file as A4 says.
 6. **Media.** A9.2 to an inventory of names, files and sizes; its refusals and A10's limits apply here.
-7. **Preflight 2**: P15's capacity checks for the built collection and the inventory: their staging copies on the collection's file system, the archive on the output's.
+7. **Preflight 2** (R2015), before capture creates a file: one check per file system, with checked arithmetic (an overflow refuses with `InsufficientSpace`); when the two file systems are one, the sums add up. Decided 2026-10-27: this table replaces P15's capacity checks for a deck package, since the built collection already exists and preflight 1 covered it. Let `C` be the built collection's size, `M` the sum of the inventory's sizes, `n` their number, `J` the encoded size of the P5 map (known from the names and sizes), `H` the placeholder's size, and `z(x)` = `x` + `x`/128 + 1 KiB the bound for one zstd frame of `x` bytes (above zstd's worst case, with its frame header and checksum):
+
+   | File system | `needed` in bytes |
+   |---|---|
+   | the collection's (staging) | `M` (the media copies; the built file is not counted again) |
+   | the output's (temporary package file) | `z(C)` + the sum of `z(s)` over the inventory's sizes `s` + `z(J)` + `z(H)` + 512 × (`n` + 4) + 64 KiB (`meta`, headers, central directory, zip64 records) |
+
+   Once it has passed, a write that still fails for space is `DiskFull` (P10).
 8. **Capture and write.** Capture the inventory's files as immutable staging copies with the per-file rules of `package/file-export#E7.2` (open the exact entry without following links, require a regular file, record identity, length and modification metadata, check them around the copy and again before Ready; a changed, vanished or replaced file: `MediaChanged{name}`). The protected-tree walk of E7.2 does not apply: only the named files are read. Then P15's writer writes the package into the temporary package file (P9, purpose `export`).
 9. **Verify and publish.** P15's reread of the closed file (collection length and SHA-256, every map record and numbered entry, frames, SHA-1, limits), then U32's atomic publication with `ExclusiveCreate` into the operation's output directory (`package/file-export#E3`), and the generation recheck of E2 before Ready.
 
@@ -277,12 +287,13 @@ Input: the limit and options of A2. Output: the owned artifact of `package/file-
 | `NoCollection`, `CollectionUnavailable` | A1: no open `Ready` collection, or an exclusive phase |
 | `DeckNotFound` | A2 |
 | `InvalidIds` | A8 rule 1 (R1623) |
-| `NeedsCheckDatabase{reason}` | A8 rule 2, A7 (`MissingNotetype`, `MissingDeck`, `MissingPreset`) |
+| `NeedsCheckDatabase{reason}` | A8 rules 2 and 4, A7 (`MissingNotetype`, `MissingDeck`, `MissingPreset`, `UnreadableRecord{table, id}`) |
 | `MediaNeedsCheck{name}` | A9.2 rule 5 |
 | `MediaUnreadable{name}` | A9.2 rule 3; a file that cannot be opened or read |
 | `MediaTooLarge{name}` | A9.2 |
 | `MediaChanged{name}` | A11 step 8 |
-| `LimitExceeded{what}` | A10 |
+| `LimitExceeded{what}` | A10, the ratio rule included |
+| `VerificationFailed{check}` | A11 step 9: P15's reread refuses the closed package; `check` names what failed (entries, collection length or SHA-256, a map record, a frame, a SHA-1, a limit). Meguri never publishes a package its own reader refuses. The legacy writer uses the same kind (`package/legacy-export#L10`). |
 | `InsufficientSpace{needed, available}` | A11 steps 4 and 7 |
 | `DiskFull` | a write failed for lack of space after a preflight passed (P10) |
 | `Stale` | A11 |
@@ -337,18 +348,20 @@ The facts Meguri's package must hold for Anki 26.9.3's importer and for Meguri's
 | Frames carry size and checksum (P15) | the bytes only |
 | A referenced media entry that is a symbolic link, a directory or another non-regular entry gives `MediaUnreadable` (A9.2 rule 3); Anki follows links and fails with an I/O error on a directory | synthetic tests only |
 | A media file that changes, vanishes or is replaced during capture gives `MediaChanged` (A11 step 8); Anki has no such check | synthetic tests only |
+| Media names equal after NFC count once (A9.1); Anki on Apple platforms writes one map record and entry for each spelling, all with the same NFC name | `package_media` of a source whose fields reference one file in NFC and NFD spellings |
 | A9.5 form 4 ends an unquoted `src=`/`data=` value at white space; Anki's runs to `>`, so it can miss a referenced `_` file and Meguri exports it | a template with an unquoted `_` value followed by another attribute; no ported scenario has one |
 
 No ported scenario observes any of them. A scenario that dumps the package collection directly needs a `conformance/deviations.yaml` entry for the first row, and one whose template has an unquoted `_` value followed by another attribute needs one for the A9.5 row.
 
 ## A17. Scenarios and tests
 
-No `apkg-export` scenario can be recorded yet: the oracle driver has the legacy (`model-ops.md` L6) and collection-package (`package-ops.md` E1) forms of `export` only, no deck-package `import` form, and no observation of a deck package's collection or media map. The oracle maintainer adds, with the package-ops owner fixing their shapes in `specs/conformance/package-ops.md`:
+No `apkg-export` scenario can be recorded yet. The forms and observations they use are fixed, as drafts, in `specs/conformance/package-ops.md`; neither the oracle driver nor Meguri's executor implements them yet, so what remains is the driver work and the recording:
 
-- `export`, latest deck-package form: `{format: apkg, name, limit, scheduling, presets, media}` with `limit` one of `collection`, `{deck: <name>}`, `{notes: [#nN, ...]}`, `{cards: [#cN, ...]}`; output `{notes: <count>}`; rejection kinds `invalid_ids` and `media_check_required`. Oracle: Anki's deck-package export with those options and the option for older clients off. Capability `export.apkg`.
-- `import`, deck-package form (U120's, needed for the live chains): `{format: apkg, name | fixture, ...import options}`.
-- Observation `package_media`: the media map of a package in the session directory as `[{name, size, sha1}]` in map order, plus the numbered entries' decoded sizes.
-- Observation `package_db_dump`: the normalized dump (`specs/conformance/normalized-dump.md`) of the decoded `collection.anki21b`, read from a scratch copy with plain SQLite, without opening it as a collection.
+- `export`, deck-package form: `conformance/package-ops#E7` (capability `export.apkg`; output `{notes: <count>}`; rejections `invalid_ids` and `media_check_required`; a `{deck: <name>}` limit that names no deck is `unknown_ref`).
+- `export`, collection-package options: `conformance/package-ops#E9` (U124).
+- `import`, deck-package form, for the live chains: `conformance/package-ops#E6`.
+- Observation `package_media`: `conformance/package-ops#E10`, `[{name, size, sha1, entry_size}]` in map order, `entry_size` the decoded size of the numbered entry; scenarios compare it under `compare.set`.
+- Observation `package_db_dump`: `conformance/package-ops#E11`, the normalized dump of the decoded `collection.anki21b` read with plain SQLite.
 
 Scenarios to record (`conformance/scenarios/package/apkg-export/`):
 
@@ -356,14 +369,15 @@ Scenarios to record (`conformance/scenarios/package/apkg-export/`):
 |---|---|
 | `deck-with-subdecks` (live, T1) | Meguri exports deck `A` (`A`, `A::B`, empty `A::C`, `A::B::D`) with scheduling and presets; Anki imports it into a new collection; the dump equals Anki's own export and import of the same deck. The source's `crt` differs from the importer's, so day-based dues shift (A4). |
 | `listing` | `package_listing` of Meguri's package equals Anki's: entry names, order, methods, `meta_version` 3, the placeholder (A10) |
-| `no-scheduling` | `package_db_dump` of Meguri's and Anki's packages without scheduling: A6's card table (every type and queue, suspended, buried, learning with `left`, review with and without `pos`, new in a filtered deck, flags), `nextPos` 7, the tags `marked`, `Leech`, `leech::x`, deck limits, today counters, collapse states, filtered deck converted, default deck left out |
+| `no-scheduling` | `package_db_dump` of Meguri's and Anki's packages without scheduling: A6's card table (every type and queue, suspended, buried, learning with `left`, review with and without `pos`, new in a filtered deck, flags), `nextPos` 7, the tags `marked`, `Leech`, `leech::x`, deck limits, today counters, collapse states, filtered deck converted, source deck 1 left out and B6's default deck row in its place with B6's bytes (`common` `08 01 10 01`), note `flags` and `data` written 0 and empty |
 | `with-scheduling` | the same source with scheduling: rows unchanged, review log present, filtered deck kept with its home decks |
 | `filtered-home-missing` | with scheduling, a card whose `odid` names a deleted deck: every filtered card returned home in place, filtered deck converted (A5) |
 | `presets` | presets off (every `config_id` 1, only the default preset), on with scheduling (FSRS lists kept), on without (lists emptied), a deck on preset 1 (A7) |
 | `card-selection` | one card of a two-card note whose cards sit in two decks: both cards, both decks and their ancestors (A3) |
 | `note-selection` | three notes across two subdecks: exactly those notes, their decks and ancestors |
 | `deck-limit-reach` | a note with cards in `A` and `B`, export `A`: `B` comes too; a card of `A` held by a filtered deck outside `A` does not select its note (A2) |
-| `media-selection` | fields `[sound:a.mp3]`, `<img src="b&amp;c.jpg">`, a remote image, a missing file, `[latex]x^2[/latex]` with its image present; CSS `url(_f.woff)`, `@import "_base.css"`; template `"_x.js"`; an unused `c.png`: `package_media` equals Anki's set (sizes and SHA-1; order not compared) |
+| `default-name-clash` | deck 1 renamed `Inbox`, another deck named `Default` with notes, one of them with a second card in deck 1; export of `Default` without scheduling: `package_db_dump` equals Anki's (no row with id 1, the second card's `did` 1) (A4) |
+| `media-selection` | fields `[sound:a.mp3]`, `<img src="b&amp;c.jpg">`, a remote image, a missing file, `[latex]x^2[/latex]` with its image present; CSS `url(_f.woff)`, `@import "_base.css"`, `@import "_t.CSS"`; template `"_x.js"`; an unused `c.png`: `package_media` equals Anki's set (sizes and SHA-1; order not compared) |
 | `media-unnormalized` | a field references an existing `con.jpg`: both refuse, `media_check_required` |
 | `future-ids` | a note id three days ahead: both refuse, `invalid_ids`; no file in the session directory |
 | `empty-selection` | a deck whose notes all moved away: `{notes: 0}`, package listing equal |
@@ -374,7 +388,10 @@ Goldens are recorded with `tools/mg oracle record package/apkg-export` at the pi
 Meguri's own tests (`core/crates/meguri-package/tests/apkg_export.rs`, U122):
 
 - A whole-collection export with scheduling imported into a new Meguri collection: the normalized dump equals the source's, except the documented fields (R1936).
-- A8: a card id three days ahead gives `InvalidIds` and creates no staging directory, temporary file or artifact; each broken-reference case gives its reason.
+- A8: a card id three days ahead gives `InvalidIds` and creates no staging directory, temporary file or artifact; each broken-reference case gives its reason; a truncated deck `kind` blob, a deck `kind` with neither member, a truncated note type `config` and, with presets, a truncated preset `config` give `UnreadableRecord` with their table and id, before staging.
+- A4's name clash, with and without scheduling: no row with id 1, the export succeeds, and Meguri's importer puts a `did` 1 card in the target's default deck.
+- A9.1: one file referenced as NFC `é.png` and as NFD `e` + U+0301 `.png` gives one entry, in the latest and the legacy format (where P17 rereads the map).
+- A10 and A11 step 9: a collection of repeated bytes larger than 16 MiB that compresses past 1,000 times gives `LimitExceeded`; a corrupted entry injected before the reread gives `VerificationFailed`; both leave no artifact.
 - Cancel at 50% of media capture: `Cancelled`, no artifact, staging and temporary file removed. A disk-full failpoint during writing: `DiskFull`, the same cleanup. Injected low space before each preflight: `InsufficientSpace` and nothing written.
 - A media file rewritten in place (same length) during capture, and one replaced by another file: `MediaChanged`. A referenced symbolic link and a directory: `MediaUnreadable`.
 - Export of a 150k-card synthetic collection while the interactive lane commits answers: no answer waits on the export; the package holds the snapshot taken at step 2. Bench `benches/export.rs` against U12's baselines.

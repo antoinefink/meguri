@@ -12,8 +12,8 @@ What Check Media finds and fixes, and the four actions its report offers: Tag Mi
 - **Store, journal, tracked file, syncable file, case key, case variants, transform, normalized, lookup, trash**: `media/media-files` M2, M5, M7.1, M10. **Lease**: the media-job lease (`media/media-journal#J5`), shared with Anki media sync.
 - **Limit**: 104,857,600 bytes (100 MiB). A file is **oversize** when its size is above the limit, **empty** when its size is 0.
 - **Reference**: one match of `text/media-references#M4` in a note field that is not remote (M5 there), resolved by C6. Its **name** is the resolved name. References in templates (C9) are kept apart: they protect files but are never missing.
-- **Renamed map**: the old exact name → new name pairs that C4 and C5 produce in one run. Its keys are exact names as the folder lists them.
-- **Report**: C12. One run produces one report; a new run, or closing the collection, replaces it.
+- **Renamed map**: the old exact name → new name pairs that C4 and C5 produce in one run, with T5's NFC renames (C2 step 2). Its keys are exact names as the folder lists them. T5's pairs serve C6 and the report only; only C4's and C5's old names are trashed (C10 step 5).
+- **Report**: C12. One run that finishes produces one report and replaces the earlier one. A cancelled or failed run keeps the earlier report (C2); closing the collection drops it.
 
 ## C2. The run
 
@@ -21,18 +21,20 @@ Check Media is a job (`engine/jobs#J1`): it returns a handle with a cancel token
 
 Steps, in order:
 
-1. **Lease.** Take the lease. While media sync holds it, wait (phase `waiting_for_media`). Holding it keeps media sync out until the run ends, so no Anki download or upload overlaps a rename. CloudKit media work takes no lease and may run meanwhile (`media/media-journal#J5`); C14 and C10 step 5 check each name again for that reason.
-2. **Registration.** A full comparison of the folder (`media/media-files#M7.3`, `sync/media-tracking#T4`, T5), hashing only files whose size or time changed (R1573, R1651). It renames non-NFC names to NFC (T5); these renames go into the renamed map. Phase `registering`.
+1. **Lease.** Take the lease. While media sync holds it, wait (phase `waiting_for_media`). Holding it keeps media sync out until the run ends, so no Anki download or upload overlaps a rename. CloudKit media work takes no lease and may run meanwhile (`media/media-journal#J5`); C14 and C10 step 5 check each name again for that reason (C24).
+2. **Registration.** A full comparison of the folder (`media/media-files#M7.3`, `sync/media-tracking#T4`, T5), hashing only files whose size or time changed (R1573, R1651). It renames non-NFC names to NFC (T5). Decided 2026-10-27: for Check Media the full comparison also returns T5's old → new pairs and the non-NFC names that T5 step 4 skipped, an extension of T6's report (which gives only counts) that U31 provides. The pairs go into the renamed map, for C6 and the report only: a T5 rename is made in place, so its old name has no file of its own and is never trashed. C3 classifies the skipped names. Phase `registering`.
 3. **Classify** the folder's entries (C3).
 4. **File fixes** (phase `fixing_files`): renames of untracked names (C4), then case merges (C5). Each new name is written by the add path; no old file is trashed yet.
-5. **Note scan** on a collection snapshot (phase `scanning_notes`, done and total notes): every note in ascending id order, its references resolved (C6), inline images extracted (C7), LaTeX names collected (C8). The scan records, per note, the planned substitutions.
-6. **Fix op** (C10), when step 5 planned at least one substitution. Phase `Committing`.
-7. **Trash the old names** of the renamed map (C10 step 5).
-8. **Report** (C11, C12). Then release the lease.
+5. **Note scan** on a collection snapshot, taken after the run subscribes to the change stream (C24 step 1) (phase `scanning_notes`, done and total notes): every note in ascending id order, its references resolved (C6), inline images extracted (C7), LaTeX names collected (C8). The scan records, per note, the planned substitutions.
+6. **Fix op** (C10), when step 5 planned at least one substitution. Phase `committing`.
+7. **Trash the old names** of C4 and C5 (C10 step 5).
+8. **Report** (C11, C12).
 
-Cancellation (`engine/jobs#J4`) is honoured until the fix op is submitted: during the wait, the registration (whose committed batches stay, T7), the file fixes and the note scan. A cancelled run produces no report, changes no note and trashes nothing. Files already written by step 4 or by C7 stay; they hold bytes that exist under another name too, and the next run finds them by content (M3 row a, M6 step 2) and ends exactly as an uncancelled run would. From step 6 on the run is not cancellable.
+The lease is released at every exit: the end, a cancel, an error. `JobFinished` carries the report id, `Cancelled` or the error.
 
-Errors: an I/O error on one entry ends the run with an error naming the file and the system error. Before step 6 nothing in the collection has changed; after it the run still trashes what step 7 can and reports the error with the names it skipped.
+Cancellation (`engine/jobs#J4`) is honoured until the fix op is submitted: during the wait, the registration (whose committed batches stay, T7), the file fixes and the note scan. A cancelled run changes no note, makes no trash of C10 step 5 and produces no report; the earlier report stays (C1). Files already written by step 4 or by C7 stay; they hold bytes that exist under another name too, and the next run finds them by content (M3 row a, M6 step 2) and ends exactly as an uncancelled run would. A file that the store's own rules replaced during those steps (`media/media-files#M4` step 4, M6 step 3) stays in the trash, as every store replacement does. From step 6 on the run is not cancellable.
+
+Errors: an I/O error on one entry before step 6 ends the run with an error naming the file and the system error; nothing in the collection has changed. A fix op that fails (C10 step 2's refusal, a write error) is rolled back and ends the run with its error; step 7 does not run, so no old name is trashed, and files written by step 4 or C7 stay, as after a cancel. A run that ends with an error produces no report and keeps the earlier one. In step 7 an error on one old name does not end the run: the name is listed under `fix_skipped` with the reason `error` and the system error, and the run ends with its report.
 
 Decided 2026-10-27: Check Media runs only on the user's request (U163). It never runs at open, on a timer or after a sync.
 
@@ -78,13 +80,15 @@ Case variants of tracked files exist only on a case-sensitive volume (the Linux 
 
 `Cat.jpg` and `cat.jpg` with the same bytes: `cat.jpg` stays, `Cat.jpg` → `cat.jpg`, references spelled `Cat.jpg` are rewritten (C6). With different bytes: both stay, both are listed.
 
+After C5 the map is resolved: a value that is itself a key takes that key's final value. C4's add can reuse a present case variant that C5 then maps away (M3 row a takes the smallest by UTF-8 bytes, C5 keeps the greatest): renamable `CAT[.jpg`, `Cat.jpg` and `cAT.jpg` with the same bytes give `CAT[.jpg` → `Cat.jpg` and `Cat.jpg` → `cAT.jpg`, so `CAT[.jpg` → `cAT.jpg`. C6, C10 and the report use the resolved map.
+
 ## C6. References in notes (R1645, R989)
 
 For each note (ascending id), each field (in order), each reference of `text/media-references#M4` (media tags, then sound tags) whose raw name is not remote (M5 there):
 
 1. n0 = the decoded name. If n0 is an inline image (C7), n1 = the name C7 gives; otherwise n1 = n0.
 2. n2 = n1 in NFC.
-3. If the renamed map has the key n1 (exact), n3 = its value; otherwise, if it has the key n2 (exact), n3 = its value. The keys are the folder's exact names (C1), so a non-NFC name that C4 renamed (C3) is found by its own spelling before its NFC form: a field that spells it exactly gets that file's new name, not the name of its NFC sibling.
+3. If the renamed map has the key n1 (exact), n3 = its value; otherwise, if it has the key n2 (exact), n3 = its value. The keys are the folder's exact names (C1), so a non-NFC name that C4 renamed (C3) is found by its own spelling before its NFC form: a field that spells it exactly gets that file's new name, not the name of its NFC sibling. Otherwise, decided 2026-10-27 (R1645): if one or more keys have the case key of n2, n3 is the value of the one M5 step 3's rule picks (the key equal to that case key, else the smallest by UTF-8 bytes). So `Foo[.jpg`, which names the file `foo[.jpg` on a case-insensitive volume, follows that file's rename and never falls to step 4, which could pick another file.
 4. Otherwise, if n2 = n0 (steps 1 to 3 changed nothing): let T be the transform of n2 (`text/media-filenames#F1`). If T differs from n2 and lookup (`media/media-files#M5`) finds a file for T, n3 = T. This repairs fields that still name a file under the name it had before an earlier rename. Otherwise n3 = n2.
 5. If n3 differs from n0, plan a substitution in the field: R is n3, with `&`, `<`, `>`, `"` and `'` written as `&amp;`, `&lt;`, `&gt;`, `&quot;` and `&#x27;` when the raw name differs from the decoded name (the raw name used entities), and n3 as is otherwise. In the match text (from its `<` to its `>`, or the whole sound tag), every occurrence of the raw name is replaced by R, left to right; then every occurrence of the old match text in the field is replaced by the new match text. Later references of the same note work on the field as already changed; a reference whose match text is no longer in the field changes nothing.
 6. The note references n3.
@@ -94,6 +98,7 @@ Examples, with the renamed map `foo[.jpg` → `foo.jpg`:
 | Field before | Field after | Name |
 |---|---|---|
 | `<img src="foo[.jpg">` | `<img src="foo.jpg">` | `foo.jpg` |
+| `<img src="Foo[.jpg">` | `<img src="foo.jpg">` (by case key, step 3) | `foo.jpg` |
 | `<img src="a&amp;[b].jpg">`, renamed `a&[b].jpg` → `a&b.jpg` | `<img src="a&amp;b.jpg">` | `a&b.jpg` |
 | `[sound:cafe` U+0301 `.mp3]` | `[sound:café.mp3]` | `café.mp3` |
 | `<img src="a:b.jpg">`, `ab.jpg` present | `<img src="ab.jpg">` | `ab.jpg` |
@@ -128,7 +133,7 @@ These names are references of the note (C11): never rewritten, never in NFC, and
 
 - **Underscore files.** A tracked file whose name starts with `_` is never unused (R1645): the convention for files that templates and CSS use, such as fonts and scripts. Fields can still reference it, and a missing one is reported missing like any other.
 - **Literal template references.** Decided 2026-10-27 (data safety first): the references of each template's front and back text by `text/media-references#M4`, not remote, whose decoded name contains no `{{`, protect the file they name, by case key, from being unused. They never make a file missing and never tag a note. Anki does not read templates here: it reports such a file unused (C20). CSS is not read; `_` files cover it.
-- **Field references in media tags.** A template side is listed under `field_templates` when it has a media tag or sound tag (`text/media-references#M2`, M3) whose raw name contains `{{`, then at least one character other than LF, then `}}`, or a LaTeX match (C8) whose run contains that. Such references depend on note content that Check Media cannot see (R989); the report says so. Each entry is the note type's name, the template's name and the side (`front` or `back`), ordered by note type name (`unicase`), template ordinal, front before back.
+- **Field references in media tags.** A template side is listed under `field_templates` when it has a media tag or sound tag (`text/media-references#M2`, M3) whose raw name contains `{{`, then one or more characters, none of them LF, then `}}` (the pair on one line), or a LaTeX match (C8) whose run contains the same. `[$]{{` LF `Front}}[/$]` does not count. Such references depend on note content that Check Media cannot see (R989); the report says so. Each entry is the note type's name, the template's name and the side (`front` or `back`), ordered by note type name (`unicase`), template ordinal, front before back.
 
 ## C10. The fix op
 
@@ -140,14 +145,14 @@ The note writes of one run are one op:
 Steps:
 
 1. **Re-derive** (`engine/op-model#O7`). For each planned note, read the live row and apply the note's planned substitutions to its live fields, in the planned order. A substitution whose old match text is not in the live field changes nothing. References added since the snapshot are left for the next run.
-2. Write each note whose `flds` changed: `flds`, `sfld` and `csum` recomputed (`text/checksum-and-sort-field` C3, C4), `mod` now in seconds, `usn` -1. Tags, `guid`, `mid`, `flags` and `data` stay; fields are not otherwise normalized (`notes/note-records#N2` does not run), and no card is generated. `col.mod` becomes now in milliseconds.
+2. Write each note whose fields a substitution changed; no other note is written, whatever its fields hold. Every field of such a note then loses its control characters by `text/checksum-and-sort-field` C1 step 1 (CR included, so CR LF becomes LF); NFC (C1 step 2) does not apply, whatever `normalize_note_text` says, as in Anki. `flds` is the result, `sfld` and `csum` are computed from it (C2 to C4 there), `mod` is now in seconds, `usn` -1. Tags, `guid`, `mid`, `flags` and `data` stay, and no card is generated. `col.mod` becomes now in milliseconds. A note to write whose field count differs from its note type's (at least 1) makes the fix op fail with an error naming the note, as Anki's whole run fails: nothing is written, and Check Database repairs the note (`notes/note-records#F1`). The scan (C2 step 5) ends with the same kind of error at a note whose note type does not exist (C8 needs it), as Anki's does.
 3. The change set lists the notes; CloudKit and the views see a local change like any other op's.
 4. After the commit, the report's note references are the planned names (step 5 of C2), not a new scan.
-5. **Trash the old names** (C2 step 7), each on its own, by its exact name: the directory entry the folder listed, never put in NFC and never resolved to a case variant (`media/media-files#M5` steps 1 and 3 do not apply). The move is that of `media/media-files#M10.1` for that one entry: a new trash entry with the exact name, its content hash, size and the time, and a pending deletion only when the journal records that exact name as a live syncable file (C5's old names; C4's old names are untracked and get none). Before the move the name is checked again (`media/media-journal#J5`), in the same journal-serialized step as the move. It is skipped, and listed under `fix_skipped` with the reason, when:
+5. **Trash the old names** of C4 and C5 (C2 step 7), never T5's (C2 step 2): C4's first, then C5's, each in UTF-8 byte order. Each goes by its exact name: the directory entry the folder listed, never put in NFC and never resolved to a case variant (`media/media-files#M5` steps 1 and 3 do not apply). The move is that of `media/media-files#M10.1` for that one entry (`trash_exact`): a new trash entry with the exact name, its content hash, size and the time, and a pending deletion only when the journal records that exact name as a live syncable file (C5's old names; C4's old names are untracked and get none). Every old name is hashed first, away from the writer (the journal holds no facts for C4's untracked old names). Then the names are checked again and moved in batches of 25, each batch in one writer step (C24), each name's check in the same journal-serialized step as its move. A name is skipped, and listed under `fix_skipped` with the reason, when:
    - no directory entry has exactly that name: `gone`;
-   - the file under that exact name, hashed now, does not have the content hash that C4 read or that C5's group has: `changed` (the journal holds no facts for C4's untracked old names, so every old name is hashed);
-   - the new name, taken exactly, no longer holds a file with that content hash: `target_changed` (its journal facts are trusted while its size and modification time still match, as in M6);
-   - a live note now has a reference whose name, after NFC, is exactly that spelling: `referenced`. A non-NFC old name never matches: a reference spelled that way and added after the scan resolves to the NFC sibling by M5, never to the old file.
+   - the file under that exact name does not have the content hash that C4 read or that C5's group has, or its size or modification time changed since it was hashed: `changed`;
+   - the new name (the resolved value, C5), taken exactly, no longer holds a file with that content hash: `target_changed` (its journal facts are trusted while its size and modification time still match, as in M6);
+   - a reference of a live note (C24) or a literal template reference (C9) names the old name as the volume compares names: after NFC, exactly on a case-sensitive volume, by case key on a case-insensitive one: `referenced`. On a case-insensitive volume a reference spelled `Foo[.jpg` reaches the file `foo[.jpg` by M5 step 2, so it protects it; a template that names `logo[1].png` literally keeps that file, since templates are never rewritten. C5 runs only on case-sensitive volumes, so the kept name never matches its old names. A non-NFC old name never matches: a reference spelled that way resolves to the NFC sibling by M5 step 1, never to the old file.
 
    A skipped old file stays in the folder; the next run handles it again. Decided 2026-10-27 (data safety first): this exact-name form of M10.1 is a store call that U31 provides next to `trash(names)`. Resolving an old name by lookup could pick the kept file itself (a non-NFC name resolves to its NFC sibling, a `Cat.jpg` removed from outside to the kept `cat.jpg`), pass the bytes check and trash referenced bytes with a CloudKit tombstone; the exact-name move cannot.
 
@@ -162,9 +167,9 @@ After the fixes, from the journal and the planned references:
 - **Unused**: present names of 1 byte to the limit, not starting with `_`, not in the renamed map's keys, whose case key no note reference and no literal template reference (C9) has.
 - **Missing**: every distinct reference name (as C6 step 6 or C8 gives it, exact spelling) that is not satisfied, except names that are pending downloads:
   - names the Anki media-sync state holds `awaiting` (`sync/media-tracking#T9`; R1584);
-  - names that CloudKit tracking holds as a live media-name entity whose blob is not installed yet (`sync/cloudkit-records#K9.3`).
+  - names whose case key is that of a live media-name entity of the active CloudKit binding whose local file does not hold the entity's content (the download candidates of `sync/cloudkit-records#K9.3`; tracking keys these entities by case key, K9.4). Decided 2026-10-27: U114 provides this as a read-only query on its tracking store (K10.3 `entities`), which returns those case keys; U130 depends on it for this list only. Without iCloud sync the list is empty.
 
-  These are listed under `pending_download` instead, and their notes are not tagged.
+  These are listed under `pending_download` instead, and their notes are not tagged (C20).
 - **Missing notes**: the notes with at least one missing reference.
 
 Check Media never records a deletion for a missing file and never removes a journal record for one. Registration in step 2 drops the facts of files that vanished from outside with the cause `missing` (`media/media-journal#J6`), which is never a deletion for CloudKit.
@@ -184,17 +189,18 @@ Check Media never records a deletion for a missing file and never removes a jour
 | `non_utf8` | count | |
 | `extracted` | count of inline images extracted (C7) | |
 | `field_templates` | C9 entries | C9 |
-| `fix_skipped` | old names C10 step 5 skipped, with the reason (`gone`, `changed`, `target_changed`, `referenced`) | UTF-8 bytes |
+| `fix_skipped` | old names C10 step 5 skipped, with the reason (`gone`, `changed`, `target_changed`, `referenced`, or `error` with the system error, C2) | UTF-8 bytes |
 | `notes_changed` | count of notes the fix op wrote | |
 | `trash` | entry count and total bytes (`media/media-files#M10.3` `summary`) | |
 | `hashed` | files hashed by the registration (`sync/media-tracking#T6`) | |
 
-- The engine keeps the report until the next run or the collection closes, under a report id. U133 pages each list (`page(report, list, offset, limit)`); counts come with the summary. The UI offers Delete Unused only when `unused` is not empty, Tag Missing only when `missing_notes` is not empty, and Restore Deleted and Empty Trash only when the trash is not empty.
+- The engine keeps the report until the next run that finishes or the collection closes (C1), under a report id. U133 pages each list (`page(report, list, offset, limit)`); counts come with the summary. The UI offers Delete Unused only when `unused` is not empty, Tag Missing only when `missing_notes` is not empty, and Restore Deleted and Empty Trash only when the trash is not empty.
 - The tag Tag Missing adds is `missing-media` (exact). All other wording is Meguri's own (U163).
 
 ## C13. Tag Missing (R1649)
 
 - Input: the report id. Output: the number of notes written.
+- A report that a finished run replaced, or that closing the collection dropped (C1), is refused with `StaleReport`; nothing changes.
 - Adds the tag `missing-media` to the report's `missing_notes` with `tags/tags#T10` Add: one undoable op, step name "Update Tag" (`conformance/undo-ops` V4 `update_tag`), as Anki's tag add is. Notes deleted since the report are skipped; a note that already has the tag is not written. Undo removes the tag from exactly the notes it was added to.
 - It needs no lease and no confirmation.
 
@@ -205,11 +211,11 @@ Check Media never records a deletion for a missing file and never removes a jour
 
 Steps:
 
-1. Take the lease. A report replaced by a newer run is refused with `StaleReport`; nothing changes.
-2. Check each name again (`media/media-journal#J5`): skipped as `changed` when the journal's facts for it differ from the report's `sha1` and `size`, as `gone` when it has none; skipped as `referenced` when a live note references its case key (C15's index, current for a snapshot taken now, or a scan of every note) or a literal template reference (C9) does.
+1. Take the lease. A report that a finished run replaced, or that closing the collection dropped (C1), is refused with `StaleReport`; nothing changes.
+2. Preflight (`media/media-journal#J5`): subscribe to the change stream and read the base references (C24 step 1), then check each name as step 4 does. A name that fails is skipped now with its reason. This check only spares the backup when nothing remains; step 4 checks every name again.
 3. When at least one name remains, take the safety backup (`package/backup-triggers#T6.1`, "Delete Unused media"). `SafetyBackupFailed` ends the action; nothing is trashed. A collection backup holds no media: it protects the collection; the files are protected by the trash.
-4. Trash the remaining names with `media/media-files#M10.1`, 25 per call, in report order. Progress: names done and total. Cancel is honoured between calls; what was trashed stays trashed and restorable.
-5. Each trashed name is a pending Anki media-sync deletion when the journal recorded it live (M10.1) and a feed item with the cause `removed` (`media/media-journal#J6`): CloudKit sends a media-name tombstone (`sync/cloudkit-records#K9.4`), and other devices move their copy to their own trash.
+4. Trash the remaining names in batches of 25, in report order, each batch in one writer step (C24), so a reference committed during the backup or between batches is seen. In it, each name is checked in the same journal-serialized step as its move: skipped as `changed` when the journal's facts for it differ from the report's `sha1` and `size`, as `gone` when it has none; skipped as `referenced` when a live note's reference (C24) or a literal template reference (C9) has its case key; otherwise moved by `media/media-files#M10.1`. Progress: names done and total. Cancel is honoured between batches; what was trashed stays trashed and restorable.
+5. Each trashed name is a pending Anki media-sync deletion when the journal recorded it live (M10.1) and a feed item with the cause `removed` (`media/media-journal#J6`): CloudKit sends a media-name tombstone (`sync/cloudkit-records#K9.4`), unless a present name of the same case key remains (C18), and other devices move their copy to their own trash.
 
 Delete Unused changes no collection row and leaves the undo history as it is. It is destructive and not undoable as a file action, so it is confirmed first and preceded by a backup (R2020).
 
@@ -218,8 +224,8 @@ Delete Unused changes no collection row and leaves the undo history as it is. It
 The derived-store component of U130 (`storage/derived-store#D4`), name `media_refs`, version 1:
 
 - One row per note reference: the case key of its name, the name, and the note id. The names are those of C6 steps 1 and 2 (decoded, NFC; an inline image counts as its data string) and the LaTeX names of C8. Remote references are left out.
-- Capture: the notes of each commit's change set (added, changed, removed). Build and catch-up: from a snapshot, every note.
-- Delete Unused (C14 step 2) and the fix trash (C10 step 5) read it only when it is current for their snapshot (`storage/derived-store#D8`); otherwise they scan the notes. Check Media's own scan (C2 step 5) always reads the notes, since it rewrites them.
+- Capture: the notes of each commit's change set (added, changed, removed). A change set that lists a note type whose `latexsvg` changed (before-image against after-image) answers "rebuild": the LaTeX names of all its notes change (C8 step 5). Build and catch-up: from a snapshot, every note.
+- Delete Unused reads it for its base references (C24 step 1) only when it is current for that snapshot (`storage/derived-store#D8`); otherwise it scans the notes. Check Media's own scan (C2 step 5) always reads the notes, since it rewrites them.
 
 ## C16. Restore Deleted (R1649)
 
@@ -244,14 +250,16 @@ The derived-store component of U130 (`storage/derived-store#D4`), name `media_re
 | Registration (C2 step 2) | none | T4.3 | facts of new and changed files; vanished files absent, cause `missing` | uploads; a vanished file is a missing local file, never a tombstone |
 | T5 NFC rename | none | the NFC name registered | the NFC name present | a local change of that name |
 | C4 rename, C7 extraction | none | the new name pending | the new name present | upload of the new name |
-| C5 merge, C4 old name trashed (C10 step 5) | none | a tracked old name: pending deletion | a tracked old name: absent, cause `removed`; an untracked one has no record | a tracked old name: tombstone |
+| C5 merge, C4 old name trashed (C10 step 5) | none | a tracked old name: pending deletion of that exact name | a tracked old name: absent, cause `removed`; an untracked one has no record | a C5 old name: no tombstone, the entity stays live with K's spelling (below); a tracked old name whose case key no present name holds: tombstone |
 | Fix op | notes rewritten | none | none | note changes |
 | Tag Missing | tags | none | none | note changes |
-| Delete Unused | none (backup taken) | pending deletions | absent, cause `removed` | tombstones |
+| Delete Unused | none (backup taken) | pending deletions | absent, cause `removed` | tombstones, except for a case key a present name still holds (below) |
 | Restore Deleted | none | pending live entries | present again | a local change; upload if needed |
 | Empty Trash | none | none | none | none |
 
 A file that disappears from the folder outside Meguri is never a deletion, whatever Check Media reports about it: it is `missing` in the feed and in the report.
+
+Decided 2026-10-27 (data safety first): tracking keys media-name entities by case key, and the name that is present gives the entity's spelling (`sync/cloudkit-records#K9.4`). So a `removed` item for one spelling makes no tombstone while another present name holds the same case key: the entity stays live with that name's spelling and content. A C5 old name always shares its case key with the kept name K, which stays present with the same bytes, so a merge never sends a tombstone; another device that holds K keeps it. The same holds for Delete Unused (C14 step 5) when it trashes one of two case variants. K9.4 does not yet say this in so many words; that spec takes the sentence with U114.
 
 ## C19. Budgets (R1651)
 
@@ -273,8 +281,10 @@ Anki 26.09.3 on Linux (the oracle that records goldens) matches references to fi
 | Case variants with different content (case-sensitive volume) | keeps the greatest name by UTF-8 bytes and adds each other one under its lowercase form: under that name when no file has it exactly (`CAT.jpg` next to `Cat.jpg` becomes `cat.jpg`), under a hash name when one does; references are rewritten to those names | keeps them all, lists them in `case_conflicts` | `check-media-case-variant-kept` (needs case-variant setup, C21) |
 | Identical case variants without a member equal to the case key | keeps the greatest name and writes a lowercase copy for the others | keeps the greatest name only | `check-media-case-variant-merge-name` (same) |
 | A reference whose case differs from the file's name (case-sensitive volume) | the reference is missing and the file unused | the reference is satisfied | `check-media-case-insensitive-references` |
+| A reference whose case differs from a renamed file's old name (`Foo[.jpg` for the file `foo[.jpg`, case-sensitive volume) | not rewritten, missing | rewritten to the file's new name (C6 step 3) | `check-media-case-insensitive-references` (same) |
+| A referenced name not yet downloaded (Anki-sync `awaiting`, or a CloudKit blob not installed) | missing, its note tagged | listed under `pending_download`, not tagged (C11) | `check-media-pending-not-missing` |
 | An inline image just extracted | reported missing in the same run | present | `check-media-extracted-not-missing` |
-| A file named only by a literal template reference | unused | not unused | `check-media-template-references` |
+| A file named only by a literal template reference | unused; when renamed, its old name is deleted | not unused; when renamed, its old name stays (`fix_skipped` `referenced`, C10 step 5) | `check-media-template-references` |
 | A referenced empty or oversize file | missing | present (listed under `empty` or `oversize`) | `check-media-empty-oversize-present` |
 | `thumbs.db` and other ignored names besides `.DS_Store` | unused | not listed | `check-media-ignored-names` |
 | A run that changes nothing | moves `col.mod` and empties the undo history | changes nothing | `check-media-no-change-no-mod` |
@@ -292,14 +302,10 @@ Anki 26.09.3 on Linux (the oracle that records goldens) matches references to fi
 
 Restore conflicts follow `media/media-files#M14` (`media-restore-case-variant`, `media-trash-keeps-versions`).
 
-## C21. Scenario vocabulary (to add to `conformance/media-ops`)
+## C21. Scenario vocabulary (`conformance/media-ops#F14`)
 
-The vocabulary below does not exist yet in the runner or the oracle driver; the oracle maintainer adds it with the scenarios (U4 contract, plan U130 execution note). The existing setup `media_files`, ops `media_outside`, `trash_media`, `restore_media_trash`, `empty_media_trash` and observations `media_dir`, `media_trash`, `media_pending` are reused.
+The ops `check_media`, `delete_unused_media` and `tag_missing_media`, their outputs, the scenario rule for the steps between `check_media` and `delete_unused_media`, and the case-variant setup (the tag `media-case-variants`) are defined only in `conformance/media-ops#F14` (F14.1 to F14.4); this file gives no shapes of its own. The existing setup `media_files`, ops `media_outside`, `trash_media`, `restore_media_trash`, `empty_media_trash` and observations `media_dir`, `media_trash`, `media_pending` are reused.
 
-- **Op `check_media`** `{}`. Output `{check_media: {unused, missing, missing_notes, renamed, dirs, oversize, extracted, trash_count, field_templates}}`: lists sorted by UTF-8 bytes, `missing_notes` as `#nN` in ascending order, `renamed` an object, `field_templates` a list of `{notetype, template, side}`. The Meguri-only fields of C12 are not part of the output. Oracle: Anki's Check Media call; the driver reads `renamed`, `dirs`, `oversize`, `extracted`, `trash_count` and the template list from the report text through the backend's own translations, as `conformance/undo-ops` V2 maps step names.
-- **Op `delete_unused_media`** `{}`: trashes the `unused` list of the scenario's last `check_media` output. Output `{count}`. Oracle: the trash call in chunks of 25, as Anki's dialog does. Without an earlier `check_media` in the scenario: `invalid_scenario`.
-- **Op `tag_missing_media`** `{}`: adds `missing-media` to the last output's `missing_notes`. Output `{count}` of notes written. Oracle: the collection's bulk tag add.
-- **Case-variant setup.** `media_files` refuses case variants (`conformance/media-ops#F3`) so that every scenario runs on case-insensitive volumes. C5's scenarios need a scenario-level marker that allows them and that only a case-sensitive executor runs (the Linux container; macOS reports them skipped with a note).
 - Note fields are observed with `db_dump` (`conformance/observations` O8) or the notes observation.
 - Goldens come from the Linux oracle only (`conformance/media-ops#F13`).
 
@@ -335,7 +341,12 @@ Under `conformance/scenarios/maintenance/check-media/`, each with its own note t
 In `core/crates/meguri-engine/tests/check_media.rs`:
 
 - the lease: a media sync started during a run waits, then runs; no name is both renamed and downloaded;
-- cancellation at each phase before the fix op: no note changes, no trash, no report; a rerun ends as an uncancelled run;
+- cancellation at each phase before the fix op: no note changes, no trash of C10 step 5, no report, the earlier report kept and usable, the lease released; a store replacement made by M6 step 3 during the scan stays in the trash; a rerun ends as an uncancelled run;
+- C10 step 2: a rewritten note's other field holding CR LF is stored with LF and NFC is not applied; a note not rewritten keeps its control characters; a planned note with a wrong field count fails the fix op, nothing is written and no old name is trashed;
+- C2 step 2: an NFC rename by T5 is in `renamed` and is never trashed or listed under `fix_skipped` (APFS and Linux);
+- C5's resolved map: the `CAT[.jpg`, `Cat.jpg`, `cAT.jpg` chain ends with every field naming `cAT.jpg` and nothing under `fix_skipped`;
+- C6 step 3 by case key: `Foo[.jpg` next to `foo[.jpg` (content B) and `foo.jpg` (content A) is rewritten to B's new name, never to `foo.jpg`;
+- C24: a reference committed during Delete Unused's backup, between two batches, or between the fix op and C10 step 5 (a note edit and a `CloudIncoming` apply) makes the name `referenced`; a literal template reference does too;
 - a crash after C4's copies, after the fix op and after step 7 (the U250 fault hooks): every byte reachable, the rerun converges;
 - C10 step 1: a note edited between the scan and the op keeps the edit and gets the substitutions that still apply; a CloudKit apply that adds a reference to an old name during the run makes C10 step 5 skip it;
 - C10 step 5's exact names (Linux): a non-NFC file merged into its NFC sibling trashes only the non-NFC entry, and the sibling keeps its file, facts and feed state; a merged `Cat.jpg` removed from outside before step 7 gives `gone` and leaves the kept `cat.jpg` in place; each `fix_skipped` reason;
@@ -346,5 +357,16 @@ In `core/crates/meguri-engine/tests/check_media.rs`:
 - C3: symbolic links, non-UTF-8 names (Linux), `invalid` refusals;
 - C15: the index matches a full scan after random edits, and Delete Unused falls back to a scan while it is not current;
 - R2018's enumeration: every path that removes a media file (Check Media fixes, Delete Unused, server deletions in media sync, incoming CloudKit tombstones and conflicts, AnkiConnect `deleteMediaFile`, the store's replacements, staging recovery) leaves the bytes in the trash;
-- C18's feed causes: Delete Unused and a merge give `removed`, a file removed outside gives `missing`;
+- C18's feed causes: Delete Unused and a merge give `removed`, a file removed outside gives `missing`; a merge makes no CloudKit tombstone and the entity stays live with K's spelling;
+- C15: a `latexsvg` change makes the index rebuild;
 - C19's bench.
+
+## C24. Checking names again at the move (`media/media-journal#J5`)
+
+Decided 2026-10-27 (data safety first): Delete Unused (C14 step 4) and the fix trash (C10 step 5) check each name in the same step as its move, against every commit made before that step. A reference that a note edit or a `CloudIncoming` apply commits before the move is always seen; a journal-serialized check alone orders the check against journal writes, not against collection commits.
+
+1. **Base.** The action subscribes to the change stream (`engine/change-stream` S3), then takes one collection snapshot P and holds, per note, the references at P: for the fix trash, P is the note scan's snapshot (C2 step 5) and the references are the planned ones (C10 step 4); for Delete Unused, they come from `media_refs` (C15) when it is current for P (`storage/derived-store#D8`), otherwise from a scan of every note (C6 steps 1 and 2 without the renamed map, and C8). The literal template references (C9) are read at P too.
+2. **Writer step.** Each batch of 25 names runs on the collection writer as one op that writes no collection row: a plain op of source `Maintenance` with no catalog entry, as the barriers of `engine/op-model#O1.1` are. It changes nothing, so it leaves the undo history alone (`engine/undo` M2) and publishes no event. No commit lands while it runs.
+3. **Catch-up.** First in that step, every change set waiting in the subscription is taken. Every op committed before the step has published its change set by then, since the writer runs the observers and publishes before it starts its next op (`engine/change-stream` S2, S3); U130 tests this. Each note listed as added or changed is read through the writer's connection, and its references replace its base ones; a removed note drops its own. A note type listed there has its templates read again (C9); when its `latexsvg` changed, every note of that type is read again (C8 step 5).
+4. **Per name.** Then each name is checked (C10 step 5, C14 step 4) and moved in one journal-serialized step. The order is always the writer, then the journal; a journal step never waits for the collection writer (U31's store calls and U114's installs keep it so), so the two cannot deadlock.
+5. **Bound.** A step targets the 200 ms of an op without a declared write (`engine/op-model#O6`): no file is hashed in it (C10 step 5 hashes first; in the step it compares size and modification time). A note type whose `latexsvg` changed can make one step longer; that is rare.

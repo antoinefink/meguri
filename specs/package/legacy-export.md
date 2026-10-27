@@ -65,7 +65,7 @@ Each file is captured as an immutable staging copy first (A11 step 8 for `.apkg`
 **Map.** The `media` entry holds one JSON object (RFC 8259) in UTF-8, written compact (no white space), with one member per media entry, in ascending entry number:
 
 - key: the entry number in decimal without leading zeros, as a JSON string;
-- value: the file's name as a JSON string, the NFC name of the media list (A9.2 rule 6, E7.1), which is always a safe name (P6).
+- value: the file's name as a JSON string, the NFC name of the media list (A9.2 rule 6, E7.1), which is always a safe name (P6). No two members have the same name: A9.1 counts names equal after NFC once, and E7.1 refuses duplicates after NFC, so P17's reread (L10 check 4) never meets two equal kept names.
 
 Strings are written with only `"`, `\` and the characters U+0000 to U+001F escaped (`\"`, `\\`, `\b`, `\f`, `\n`, `\r`, `\t`, else `\u00XX` with lower-case hex); every other character, `/` and non-ASCII included, is written as itself in UTF-8. This is how Anki 26.9.3 writes a JSON string.
 
@@ -92,7 +92,7 @@ The writer checks these before any media file is copied (the copy's own size onc
 
 - **Steps 1 to 5** unchanged: admission, snapshot and selection, A8's checks, preflight 1, build.
 - **Step 6, media**: A9.2 to an inventory, then L6's limits.
-- **Step 7, preflight 2**: L9's check 1 instead of P15's checks.
+- **Step 7, preflight 2**: L9's check 1 instead of A11's preflight 2 table.
 - **Step 7a, convert** (new): `storage/schema11-downgrade` from the closed built file to `legacy.anki2` in the same staging directory. Step 7 covers its space (D2 step 3). Once D8 has verified the copy, the built file may be removed; then L6's copy limits and L9's check 2.
 - **Step 8, capture and write**: capture as A11 says, then the legacy writer (L3 to L5) writes the package into the temporary package file (P9, purpose `export`).
 - **Step 9, verify and publish**: L10, then A11's publication (`ExclusiveCreate` into the operation's output directory) and E2's generation recheck.
@@ -112,7 +112,7 @@ The whole-collection export of `package/file-export` with the option on:
 6. **Write**: the legacy writer (L3 to L5) into the temporary package file (P9, purpose `export`).
 7. **Verify and publish**: L10, then E3's owned artifact (`ExclusiveCreate`) and E2's generation recheck, with E7.2's final inventory check before Ready.
 
-- Progress: E2's stages, with `converting` (indeterminate) after `snapshot`; `snapshot` covers D2.
+- Progress: E2's stages, with `converting` (indeterminate) in place of `snapshot`, one stage for the whole downgrade call (D2 to D8, step 4): the downgrade reports no stage of its own (D10 has only cancellation checks), so the operation needs no callback from it.
 - The E2 to E6 job, artifact, destination, cancel and restart rules apply unchanged; so does E3's suggested `.colpkg` name.
 - The collection stays open and usable throughout. Nothing closes it, and no undo history is lost.
 - Like every `.colpkg`, it is the whole collection as it is: scheduling, presets, review log, graves, the default deck, every config key (A14). A6 never applies.
@@ -156,12 +156,12 @@ Any failure: `VerificationFailed{check}` and the failure path of A12. Meguri nev
 
 ## L11. Errors
 
-The errors of `package/apkg-export#A12` (`.apkg`), or for `.colpkg` the outcomes `package/file-export` states, under A12's names: `NoCollection` and `CollectionUnavailable` (E1: no open Ready collection, a failed or exclusive-busy state); `InsufficientSpace{needed, available}` (here L9's checks) and `DiskFull` (E2, P10); `Stale` (E2's generation recheck before Ready); `Cancelled` (E2, E5); `MediaChanged{name}` (E7.2's changed-source result, including the final inventory check); `MediaUnreadable{name}` (E7.2's unreadable entry, link, special file or changed binding); `LimitExceeded{what}` and `MediaTooLarge{name}` (E7.2's walk limits, E7.3); `Io` (any other file-system failure). Plus:
+The errors of `package/apkg-export#A12` (`.apkg`), or for `.colpkg` the outcomes `package/file-export` states, under A12's names: `NoCollection` and `CollectionUnavailable` (E1: no open Ready collection, a failed or exclusive-busy state); `InsufficientSpace{needed, available}` (here L9's checks) and `DiskFull` (E2, P10); `Stale` (E2's generation recheck before Ready); `Cancelled` (E2, E5); `MediaChanged{name}` (E7.2's changed-source result, including the final inventory check); `MediaUnreadable{name}` (E7.2's unreadable entry, link, special file or changed binding); E7.1's refusals: `MediaNeedsCheck{name}` for a name that cannot be represented safely (invalid UTF-8, with `name` its bytes decoded with U+FFFD for each invalid sequence; an unsafe name under P6; a non-NFC name off Apple platforms; two names equal after NFC), whose message suggests Check Media (U130), and `MediaUnreadable{name}` with `name` `collection.media` for a media folder that is a link, is replaced during capture or cannot be safely inventoried; `LimitExceeded{what}` and `MediaTooLarge{name}` (E7.2's walk limits, E7.3); `Io` (any other file-system failure). Plus:
 
 | Error | When |
 |---|---|
-| `LegacyConversion{error}` | the downgrade refused the collection: `UnconvertibleConfig` (with the key) or `UnreadableRecord` (with the table and key) of `storage/schema11-downgrade#D8`. The message suggests exporting without "Support older Anki versions" and running Check Database (wording U160/U162). |
-| `VerificationFailed{check}` | L10, or D8's own `VerificationFailed` |
+| `LegacyConversion{error}` | the downgrade refused the collection: `UnconvertibleConfig` (with the key) or `UnreadableRecord` (with the table and key) of `storage/schema11-downgrade#D8`. The message suggests exporting without "Support older Anki versions" and running Check Database (wording U160/U162). For `.apkg`, an unreadable source record is refused before this, by `package/apkg-export#A8` rule 4 (`NeedsCheckDatabase{reason: UnreadableRecord{table, id}}`), as with the option off, so both formats agree; there `UnreadableRecord` from D8 means a fault in the built file. |
+| `VerificationFailed{check}` | A12's kind: L10, or D8's own `VerificationFailed` |
 | `LimitExceeded{what}`, `MediaTooLarge{name}` | L6 |
 
 The downgrade's other errors map as follows: `InsufficientSpace` during the call is `DiskFull` (the preflight passed, P10); `Cancelled` is `Cancelled`; `Io`, `SourceNotSchema18` and `DestinationIsSource` are `Io` with their detail (the operation never passes such a source or destination, so they mean a fault).
@@ -192,13 +192,13 @@ No ported scenario observes any of them. A scenario that observes `conf` of a le
 
 Verification of U123 also includes `conformance/scenarios/model/schema11/apkg-notetypes` (recorded; `export` legacy form `conformance/model-ops#L6` and `package_col` `conformance/model-ops#L7`), on Meguri's executor on the macOS and Linux lanes.
 
-No `legacy-export` scenario is recorded yet. Two of them use only ops and observations that exist in the runner and the oracle driver today (`export` legacy form, `conformance/model-ops#L6`; `package_col`, `conformance/model-ops#L7`; `package_listing`, `conformance/package-ops#E3`), so they need recording only. The others need, from the oracle maintainer with the package-ops owner fixing their shapes in `specs/conformance/package-ops.md`:
+No `legacy-export` scenario is recorded yet. Two of them use only ops and observations that exist in the runner and the oracle driver today (`export` legacy form, `conformance/model-ops#L6`; `package_col`, `conformance/model-ops#L7`; `package_listing`, `conformance/package-ops#E3`), so they need recording only. The others use forms fixed, as drafts, in `specs/conformance/package-ops.md`, which neither executor implements yet; they need the driver work and the recording:
 
-- `export`, deck-package form with `legacy: true` (A17's form plus the key; oracle: Anki's deck-package export with the option for older clients on). Capability `export.apkg.legacy`.
-- `export`, collection-package form `{format: colpkg, name, media, legacy}`, extending E1; `media` and `legacy` default to false. Oracle: Anki's collection package export with those options (it closes and reopens the collection, E1).
-- `import`, deck-package form (A17), and the E2 `colpkg` import of a session package (exists) for the live chains.
-- `package_media` (A17) for legacy packages: the JSON map's `[{name, size, sha1}]` in entry-number order, with `size` and `sha1` computed from each numbered entry.
-- `package_db_dump` (A17) for legacy packages: the normalized dump of the raw `collection.anki21`, read from a scratch copy with plain SQLite.
+- `export`, deck-package form with `legacy: true`: `conformance/package-ops#E8` (capabilities `export.apkg` and `export.apkg.legacy`).
+- `export`, collection-package options `{format: colpkg, name, media?, legacy?}`: `conformance/package-ops#E9` (capability `export.colpkg.legacy`, and `export.colpkg.media` with media).
+- `import`, deck-package form `conformance/package-ops#E6`, and E2's `colpkg` import of a session package (exists), for the live chains.
+- `package_media`: `conformance/package-ops#E10`; for a legacy package, the JSON map's members in ascending number, `size` and `sha1` computed from each numbered entry, `entry_size` equal to `size`.
+- `package_db_dump`: `conformance/package-ops#E11`; for a legacy package, the raw `collection.anki21`.
 
 Scenarios to record (`conformance/scenarios/package/legacy-export/`):
 
