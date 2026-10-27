@@ -804,7 +804,7 @@ repair and integration verification remain pending. No unit acceptance changes.
 
 ## Compression dependency repair
 
-Work starts at `6fef4051`. Filtered implementation
+Integration starts at `6fef4051`. Filtered implementation
 `20261027T023233Z-69456` and fix `20261027T023704Z-73919` update the compression
 requirement and add a narrow Docker dependency-update command. Review found
 and resolved its missing utility classification and incorrect test placement
@@ -820,3 +820,42 @@ Package suite `20261027T024012Z-76959` passes all 71 tests without skips.
 `gate/20261027T023927Z-76093` validates the plan only. It supplies no integration
 pass. Native proofs retain their original build bindings; rebuilt integration
 verification remains required. No unit or milestone acceptance changes.
+
+## Full integration result and native Home repair
+
+Gate `20261027T025217Z-82936` ran at `2110be40` from the retained base
+`1416a520542a8c5daa38a23bfe398da704c3d6c9`. It finished with 34 passing,
+three failing and ten skipped stages. Rust passed all 3,127 executed tests;
+dependency, lint, durability, dual-lane conformance, Swift, accessibility,
+navigation, Mac UI and performance checks passed. T1 was skipped after earlier
+failures and still needs its separate active-scope run. This is a failed gate.
+
+Independent scope review identifies the three tooling selftest failures as
+frozen server-actor setup. Later assertions those setup failures prevented
+remain unrun. No server repair or passing result is inferred. Xcode and snapshot
+failures retain existing pixel comparisons and the frozen server credential
+test's ad-hoc Keychain failure. No baseline or entitlement check was weakened.
+
+Review of the captured Home screens found two P2 defects: a separate mobile
+disclosure control compressed its deck label, and count numerals had lost their
+semantic colours. Filtered fix `20261027T044128Z-27386`, committed as
+`7d543333`, bounds only the disclosure control's layout width and colours the
+localized count numerals. Native controls, independent actions and existing
+accessibility identifiers remain. Source review, privacy and similarity pass.
+
+Focused render `20261027T053511Z-70075` retains baseline comparison failures;
+independent review of all 20 retained Home actuals closes both P2 findings
+without further findings. It covers standard and AX5 iPhone/iPad views and
+standard Mac views, with light and dark appearances. Unviewed widths and states
+remain outside that review. No baseline approval is inferred.
+
+Focused native interaction checks at `7d543333` pass one case each, with no
+skips: iPhone `20261027T055009Z-91639`, iPad `20261027T055143Z-94038` and
+Mac `20261027T055302Z-96812`. They exercise real disclosure and selection;
+Mac also covers both outlines and child menus. The first restricted-environment
+attempt `20261027T054847Z-86641` failed before testing and remains retained.
+The subsequent authorized readiness check confirms Docker and the VM work.
+
+The current dependency and layout changes still need rebuilt combined-workflow
+evidence with the pending package foundation changes. U124/U162 and the full
+integration batch remain unaccepted. Server work stays frozen.
