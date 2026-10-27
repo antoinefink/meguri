@@ -300,7 +300,7 @@ fn force_backup(session: &mut Session<'_>, step: &Step) -> Result<OpResult, Exec
         // Copy the produced bytes, never synthesize an equivalent export.
         fs::copy(directory.join(&receipt.name), session.storage.dir()?.join(name)).map_err(error)?;
     }
-    Ok(OpResult::Output(json!({"force_backup": {"name": receipt.name}})))
+    Ok(OpResult::Output(json!({"name": receipt.name})))
 }
 
 fn save_backup_settings(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {

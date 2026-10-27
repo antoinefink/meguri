@@ -951,7 +951,7 @@ fn replace_backup_snapshot(from: Option<&Path>, to: &Path, owned: bool) -> std::
             Err(e) => Err(e),
         }
     };
-    let source_exists = from.map(&directory).transpose()?.unwrap_or(false);
+    let source_exists = from.map(directory).transpose()?.unwrap_or(false);
     let destination_exists = directory(to)?;
     if destination_exists && !owned {
         return Err(std::io::Error::new(
