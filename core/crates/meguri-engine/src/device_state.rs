@@ -243,6 +243,168 @@ fn sidecar_path(live: &Path) -> PathBuf {
     live.parent().unwrap_or(Path::new(".")).join("meguri-sidecar.json")
 }
 
+/// Device-only maintenance records. Times and snapshot_mod are signed epoch
+/// milliseconds, matching the collection's signed col.mod representation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LastBackup {
+    pub snapshot_mod: i64,
+    pub instant: i64,
+    pub name: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LastQuickCheck {
+    pub instant: i64,
+    pub passed: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckDatabaseProblems {
+    pub card_properties: u64,
+    pub new_positions_too_high: u64,
+    pub card_last_review_time: u64,
+    pub cards_without_note: u64,
+    pub decks_missing: u64,
+    pub field_counts: u64,
+    pub duplicate_card_ords: u64,
+    pub cards_without_template: u64,
+    pub revlog_properties: u64,
+    pub notes_invalid_utf8: u64,
+    pub future_ids: u64,
+    pub notetypes_recovered: u64,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CheckDatabaseResult {
+    Problems(CheckDatabaseProblems),
+    Corrupt,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LastCheckDatabase {
+    pub instant: i64,
+    pub result: CheckDatabaseResult,
+}
+const PROBLEM_KEYS: [&str; 12] = [
+    "card_properties",
+    "new_positions_too_high",
+    "card_last_review_time",
+    "cards_without_note",
+    "decks_missing",
+    "field_counts",
+    "duplicate_card_ords",
+    "cards_without_template",
+    "revlog_properties",
+    "notes_invalid_utf8",
+    "future_ids",
+    "notetypes_recovered",
+];
+fn typed<T: serde::de::DeserializeOwned>(value: &Value) -> Result<T, StorageError> {
+    serde_json::from_value(value.clone()).map_err(|_| failure("invalid maintenance record"))
+}
+fn check_record(value: &Value) -> Result<LastCheckDatabase, StorageError> {
+    let record = value
+        .as_object()
+        .ok_or_else(|| failure("invalid database check record"))?;
+    let instant = record
+        .get("instant")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| failure("invalid database check instant"))?;
+    let result = record
+        .get("result")
+        .and_then(Value::as_object)
+        .ok_or_else(|| failure("invalid database check result"))?;
+    let result = if let Some(error) = result.get("error") {
+        if error.as_str() != Some("corrupt") || PROBLEM_KEYS.iter().any(|key| result.contains_key(*key)) {
+            return Err(failure("invalid database check error variant"));
+        }
+        CheckDatabaseResult::Corrupt
+    } else {
+        CheckDatabaseResult::Problems(typed(&Value::Object(result.clone()))?)
+    };
+    Ok(LastCheckDatabase { instant, result })
+}
+/// Validate without rewriting. Metadata-only documents are allowed, but the
+/// presence of R6 fields requires the existing complete, consistent R6 state.
+fn maintenance_state(doc: Option<&Map<String, Value>>) -> Result<Option<&Map<String, Value>>, StorageError> {
+    let Some(value) = doc.and_then(|doc| doc.get("deviceState")) else {
+        return Ok(None);
+    };
+    let state = value.as_object().ok_or_else(|| failure("invalid device state"))?;
+    if ["active", "intent", "replacements", "lastReplacement"]
+        .iter()
+        .any(|key| state.contains_key(*key))
+    {
+        // Serde defaults a missing Option to None; R6 requires an explicit key.
+        if !state.contains_key("intent") {
+            return Err(failure("missing replacement intent field"));
+        }
+        // Publication's decoder is strict. Validate its known fields while
+        // retaining the original document, including future publication members.
+        let mut checked = state.clone();
+        fn publication(value: &mut Value) {
+            if let Some(object) = value.as_object_mut() {
+                object.retain(|key, _| matches!(key.as_str(), "identity" | "binding" | "decision"));
+            }
+        }
+        if let Some(active) = checked.get_mut("active") {
+            publication(active);
+        }
+        if let Some(intent) = checked.get_mut("intent").and_then(Value::as_object_mut) {
+            for key in ["prior", "candidate"] {
+                if let Some(value) = intent.get_mut(key) {
+                    publication(value);
+                }
+            }
+        }
+        if let Some(records) = checked.get_mut("replacements").and_then(Value::as_array_mut) {
+            for record in records {
+                for key in ["prior", "candidate"] {
+                    if let Some(value) = record.get_mut(key) {
+                        publication(value);
+                    }
+                }
+            }
+        }
+        if let Some(record) = checked.get_mut("lastReplacement") {
+            for key in ["prior", "candidate"] {
+                if let Some(value) = record.get_mut(key) {
+                    publication(value);
+                }
+            }
+            typed::<ReplacementEvidence>(record)?;
+        }
+        let decoded: State = typed(&Value::Object(checked))?;
+        bound(&decoded, &decoded.active.binding)?;
+    }
+    for (key, value) in state {
+        match key.as_str() {
+            "lastBackup" => {
+                typed::<LastBackup>(value)?;
+            }
+            "lastCheckDatabase" => {
+                check_record(value)?;
+            }
+            "lastOptimize" => {
+                value.as_i64().ok_or_else(|| failure("invalid optimize instant"))?;
+            }
+            "lastQuickCheck" => {
+                typed::<LastQuickCheck>(value)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(Some(state))
+}
+fn merge_fields(target: &mut Map<String, Value>, fields: Map<String, Value>) {
+    for (key, value) in fields {
+        if let Value::Object(fields) = value {
+            let record = target.entry(key).or_insert_with(|| Value::Object(Map::new()));
+            // Existing records were validated by maintenance_state.
+            merge_fields(record.as_object_mut().expect("validated record object"), fields);
+        } else {
+            target.insert(key, value);
+        }
+    }
+}
+
 /// Durable local-activation evidence, retained after R6 intent cleanup. This
 /// proves a local replacement only, never remote upload acceptance/equality.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -283,6 +445,85 @@ impl DeviceState {
             path: sidecar_path(live),
             live: live.to_owned(),
         }
+    }
+    fn maintenance_read<T>(
+        &self,
+        key: &str,
+        parse: impl FnOnce(&Value) -> Result<T, StorageError>,
+    ) -> Result<Option<T>, StorageError> {
+        sidecar::read_document(&self.path, |doc| {
+            maintenance_state(doc)?
+                .and_then(|state| state.get(key))
+                .map(parse)
+                .transpose()
+        })
+    }
+    // Preserve the existing backup precondition: lifecycle initialization owns
+    // the publication identity. Maintenance never creates or resets it.
+    fn maintenance_write(&self, key: &str, value: Value) -> Result<(), StorageError> {
+        sidecar::update_document(&self.path, |doc| {
+            let existing = maintenance_state(Some(doc))?;
+            if !existing.is_some_and(|state| state.contains_key("active")) {
+                return Err(failure("maintenance write requires existing publication identity"));
+            }
+            let state = doc
+                .get_mut("deviceState")
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| failure("invalid device state"))?;
+            if key == "lastCheckDatabase"
+                && let Some(result) = state
+                    .get_mut(key)
+                    .and_then(|v| v.get_mut("result"))
+                    .and_then(Value::as_object_mut)
+            {
+                // Only the old variant's known fields may be removed.
+                if value["result"].get("error").is_some() {
+                    for field in PROBLEM_KEYS {
+                        result.remove(field);
+                    }
+                } else {
+                    result.remove("error");
+                }
+            }
+            merge_fields(state, Map::from_iter([(key.to_owned(), value)]));
+            Ok(())
+        })
+    }
+    pub fn last_backup(&self) -> Result<Option<LastBackup>, StorageError> {
+        self.maintenance_read("lastBackup", typed)
+    }
+    pub fn set_last_backup(&self, record: &LastBackup) -> Result<(), StorageError> {
+        self.maintenance_write("lastBackup", serde_json::to_value(record).map_err(failure)?)
+    }
+    pub fn last_check_database(&self) -> Result<Option<LastCheckDatabase>, StorageError> {
+        self.maintenance_read("lastCheckDatabase", check_record)
+    }
+    pub fn set_last_check_database(&self, record: &LastCheckDatabase) -> Result<(), StorageError> {
+        let result = match &record.result {
+            CheckDatabaseResult::Problems(problems) => serde_json::to_value(problems).map_err(failure)?,
+            CheckDatabaseResult::Corrupt => serde_json::json!({"error": "corrupt"}),
+        };
+        self.maintenance_write(
+            "lastCheckDatabase",
+            serde_json::json!({"instant": record.instant, "result": result}),
+        )
+    }
+    pub fn last_optimize(&self) -> Result<Option<meguri_model::time::EpochMillis>, StorageError> {
+        self.maintenance_read("lastOptimize", |value| {
+            value
+                .as_i64()
+                .map(meguri_model::time::EpochMillis)
+                .ok_or_else(|| failure("invalid optimize instant"))
+        })
+    }
+    pub fn set_last_optimize(&self, instant: meguri_model::time::EpochMillis) -> Result<(), StorageError> {
+        self.maintenance_write("lastOptimize", instant.0.into())
+    }
+    pub fn last_quick_check(&self) -> Result<Option<LastQuickCheck>, StorageError> {
+        self.maintenance_read("lastQuickCheck", typed)
+    }
+    pub fn set_last_quick_check(&self, record: &LastQuickCheck) -> Result<(), StorageError> {
+        self.maintenance_write("lastQuickCheck", serde_json::to_value(record).map_err(failure)?)
     }
     pub fn replacement_evidence(&self) -> Result<Option<ReplacementEvidence>, StorageError> {
         sidecar::read_document(&self.path, |doc| {
@@ -848,4 +1089,396 @@ fn complete(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
     })?;
     meguri_model::faultpoint!("replace.media.after_completion")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod maintenance_tests {
+    use super::*;
+    use meguri_model::{rng::SeededRandom, time::EpochMillis};
+    use serde_json::json;
+
+    fn owner() -> (tempfile::TempDir, DeviceState) {
+        let dir = tempfile::tempdir().unwrap();
+        let state = DeviceState::for_collection(&dir.path().join("collection.anki2"));
+        (dir, state)
+    }
+    fn initialized() -> (tempfile::TempDir, DeviceState) {
+        let (dir, state) = owner();
+        ensure(
+            &dir.path().join("collection.anki2"),
+            &AccountBinding::LocalOnly,
+            &SeededRandom::new(1),
+        )
+        .unwrap();
+        (dir, state)
+    }
+    fn save(state: &DeviceState, doc: Value) {
+        std::fs::write(&state.path, serde_json::to_vec(&doc).unwrap()).unwrap();
+    }
+    fn document(state: &DeviceState) -> Value {
+        serde_json::from_slice(&std::fs::read(&state.path).unwrap()).unwrap()
+    }
+    fn backup() -> LastBackup {
+        LastBackup {
+            snapshot_mod: -11,
+            instant: i64::MIN,
+            name: "synthetic.colpkg".into(),
+        }
+    }
+    fn problems() -> Value {
+        json!({
+            "card_properties": 0, "new_positions_too_high": 1,
+            "card_last_review_time": 2, "cards_without_note": 3,
+            "decks_missing": 4, "field_counts": 5, "duplicate_card_ords": 6,
+            "cards_without_template": 7, "revlog_properties": 8,
+            "notes_invalid_utf8": 9, "future_ids": 10, "notetypes_recovered": u64::MAX,
+        })
+    }
+
+    #[test]
+    fn absent_records_are_optional_and_metadata_does_not_create_publication_identity() {
+        let (_dir, state) = owner();
+        assert_eq!(state.last_backup().unwrap(), None);
+        assert_eq!(state.last_check_database().unwrap(), None);
+        assert_eq!(state.last_optimize().unwrap(), None);
+        assert_eq!(state.last_quick_check().unwrap(), None);
+        assert!(!state.path.exists(), "reads do not create a sidecar");
+        save(&state, json!({"other": 7}));
+        assert_eq!(state.last_backup().unwrap(), None);
+        assert!(
+            state.set_last_backup(&backup()).is_err(),
+            "only lifecycle initialization creates identity"
+        );
+        assert_eq!(document(&state), json!({"other": 7}));
+        save(&state, json!({"deviceState": {}}));
+        assert_eq!(state.last_backup().unwrap(), None);
+        assert!(state.set_last_optimize(EpochMillis(0)).is_err());
+        assert_eq!(document(&state), json!({"deviceState": {}}));
+        std::fs::remove_file(&state.path).unwrap();
+        ensure(&state.live, &AccountBinding::LocalOnly, &SeededRandom::new(1)).unwrap();
+        let publication = document(&state)["deviceState"]["active"].clone();
+        state.set_last_backup(&backup()).unwrap();
+        state.set_last_optimize(EpochMillis(i64::MAX)).unwrap();
+        state
+            .set_last_quick_check(&LastQuickCheck {
+                instant: -1,
+                passed: false,
+            })
+            .unwrap();
+        assert_eq!(state.last_backup().unwrap(), Some(backup()));
+        assert_eq!(state.last_optimize().unwrap(), Some(EpochMillis(i64::MAX)));
+        assert_eq!(
+            state.last_quick_check().unwrap(),
+            Some(LastQuickCheck {
+                instant: -1,
+                passed: false
+            })
+        );
+        assert_eq!(document(&state)["deviceState"]["active"], publication);
+    }
+
+    #[test]
+    fn valid_active_without_intent_is_rejected_and_preserves_bytes() {
+        let (_dir, state) = initialized();
+        let mut doc = document(&state);
+        doc["deviceState"].as_object_mut().unwrap().remove("intent");
+        save(&state, doc);
+        let before = std::fs::read(&state.path).unwrap();
+
+        assert!(state.last_backup().is_err());
+        assert!(state.last_check_database().is_err());
+        assert!(state.last_optimize().is_err());
+        assert!(state.last_quick_check().is_err());
+        assert_eq!(std::fs::read(&state.path).unwrap(), before);
+
+        assert!(state.set_last_backup(&backup()).is_err());
+        assert!(
+            state
+                .set_last_check_database(&LastCheckDatabase {
+                    instant: 1,
+                    result: CheckDatabaseResult::Corrupt,
+                })
+                .is_err()
+        );
+        assert!(state.set_last_optimize(EpochMillis(1)).is_err());
+        assert!(
+            state
+                .set_last_quick_check(&LastQuickCheck {
+                    instant: 1,
+                    passed: true
+                })
+                .is_err()
+        );
+        assert_eq!(std::fs::read(&state.path).unwrap(), before);
+    }
+
+    #[test]
+    fn malformed_document_state_and_records_are_errors_and_setters_preserve_bytes() {
+        let (_dir, state) = owner();
+        let mut bad = vec![
+            json!(null),
+            json!([]),
+            json!({"deviceState": null}),
+            json!({"deviceState": 1}),
+            json!({"deviceState": {"active": null}}),
+        ];
+        for record in [
+            json!(null),
+            json!(false),
+            json!({}),
+            json!({"snapshotMod": 1, "instant": 2}),
+            json!({"snapshotMod": true, "instant": 2, "name": "x"}),
+            json!({"snapshotMod": 1, "instant": 2.0, "name": "x"}),
+            json!({"snapshotMod": 1, "instant": u64::MAX, "name": "x"}),
+            json!({"snapshotMod": 1, "instant": 2, "name": false}),
+        ] {
+            bad.push(json!({"deviceState": {"lastBackup": record}}));
+        }
+        for record in [
+            json!(null),
+            json!({}),
+            json!({"instant": 0}),
+            json!({"instant": 0, "passed": 0}),
+            json!({"instant": 0, "passed": "true"}),
+            json!({"instant": true, "passed": false}),
+        ] {
+            bad.push(json!({"deviceState": {"lastQuickCheck": record}}));
+        }
+        for value in [json!(null), json!(true), json!(1.5), json!(u64::MAX)] {
+            bad.push(json!({"deviceState": {"lastOptimize": value}}));
+        }
+        for doc in bad {
+            save(&state, doc);
+            let bytes = std::fs::read(&state.path).unwrap();
+            assert!(state.last_backup().is_err());
+            assert!(state.last_check_database().is_err());
+            assert!(state.last_optimize().is_err());
+            assert!(state.last_quick_check().is_err());
+            assert!(state.set_last_backup(&backup()).is_err());
+            assert!(state.set_last_optimize(EpochMillis(1)).is_err());
+            assert!(
+                state
+                    .set_last_quick_check(&LastQuickCheck {
+                        instant: 1,
+                        passed: true
+                    })
+                    .is_err()
+            );
+            assert_eq!(std::fs::read(&state.path).unwrap(), bytes);
+        }
+        std::fs::write(&state.path, b"{truncated").unwrap();
+        assert!(state.last_backup().is_err());
+        assert!(state.set_last_backup(&backup()).is_err());
+        assert_eq!(std::fs::read(&state.path).unwrap(), b"{truncated");
+        std::fs::remove_file(&state.path).unwrap();
+        std::fs::create_dir(&state.path).unwrap();
+        assert!(state.last_backup().is_err(), "unreadable is not absent");
+    }
+
+    #[test]
+    fn database_check_variants_require_all_counts_and_exact_types() {
+        let (_dir, state) = owner();
+        let mut invalid_results = vec![
+            json!(null),
+            json!({}),
+            json!({"error": null}),
+            json!({"error": "other"}),
+            json!({"error": "corrupt", "card_properties": 0}),
+        ];
+        for value in [json!(-1), json!(true), json!(1.0), json!(null), json!("2")] {
+            let mut result = problems();
+            result["future_ids"] = value;
+            invalid_results.push(result);
+        }
+        let mut incomplete = problems();
+        incomplete.as_object_mut().unwrap().remove("field_counts");
+        invalid_results.push(incomplete);
+        for result in invalid_results {
+            save(
+                &state,
+                json!({"deviceState": {"lastCheckDatabase": {"instant": 0, "result": result}}}),
+            );
+            let before = std::fs::read(&state.path).unwrap();
+            assert!(state.last_check_database().is_err());
+            assert!(
+                state
+                    .set_last_check_database(&LastCheckDatabase {
+                        instant: 3,
+                        result: CheckDatabaseResult::Corrupt,
+                    })
+                    .is_err()
+            );
+            assert_eq!(std::fs::read(&state.path).unwrap(), before);
+        }
+        for record in [
+            json!(null),
+            json!({"result": {"error": "corrupt"}}),
+            json!({"instant": true, "result": {"error": "corrupt"}}),
+            json!({"instant": u64::MAX, "result": {"error": "corrupt"}}),
+        ] {
+            save(&state, json!({"deviceState": {"lastCheckDatabase": record}}));
+            assert!(state.last_check_database().is_err());
+        }
+    }
+
+    #[test]
+    fn variant_changes_preserve_unknown_record_result_and_document_members() {
+        let (_dir, state) = initialized();
+        let mut result = problems();
+        result["futureProblem"] = json!({"opaque": [1, null]});
+        let additions = json!({"futureDocument": [7], "deviceState": {
+            "futureState": {"a": 8},
+            "lastBackup": {"snapshotMod": 0, "instant": 0, "name": "old", "futureBackup": 9},
+            "lastQuickCheck": {"instant": 0, "passed": true, "futureQuick": 11},
+            "lastCheckDatabase": {"instant": 0, "result": result, "futureCheck": 10}
+        }});
+        let mut initial = document(&state);
+        initial["futureDocument"] = additions["futureDocument"].clone();
+        initial["deviceState"]
+            .as_object_mut()
+            .unwrap()
+            .extend(additions["deviceState"].as_object().unwrap().clone());
+        save(&state, initial);
+        let counts = state.last_check_database().unwrap().unwrap().result;
+        if let CheckDatabaseResult::Problems(ref counts) = counts {
+            assert_eq!(counts.notetypes_recovered, u64::MAX);
+        } else {
+            panic!("expected problem summary");
+        }
+        for variant in [CheckDatabaseResult::Corrupt, counts] {
+            let record = LastCheckDatabase {
+                instant: -5,
+                result: variant,
+            };
+            state.set_last_check_database(&record).unwrap();
+            assert_eq!(state.last_check_database().unwrap(), Some(record));
+            let doc = document(&state);
+            assert_eq!(
+                doc["deviceState"]["lastCheckDatabase"]["result"]["futureProblem"],
+                json!({"opaque": [1, null]})
+            );
+            assert_eq!(doc["deviceState"]["lastCheckDatabase"]["futureCheck"], 10);
+        }
+        state.set_last_backup(&backup()).unwrap();
+        state
+            .set_last_quick_check(&LastQuickCheck {
+                instant: 1,
+                passed: false,
+            })
+            .unwrap();
+        let doc = document(&state);
+        assert_eq!(doc["futureDocument"], json!([7]));
+        assert_eq!(doc["deviceState"]["futureState"], json!({"a": 8}));
+        assert_eq!(doc["deviceState"]["lastBackup"]["futureBackup"], 9);
+        assert_eq!(doc["deviceState"]["lastQuickCheck"]["futureQuick"], 11);
+        assert!(doc["deviceState"]["lastCheckDatabase"]["result"].get("error").is_none());
+    }
+
+    #[test]
+    fn updates_preserve_pending_replacement_intent_and_publication_unknowns() {
+        let (dir, state) = owner();
+        let live = dir.path().join("collection.anki2");
+        let candidate = dir.path().join("candidate.anki2");
+        std::fs::write(&live, b"old synthetic closed file").unwrap();
+        std::fs::write(&candidate, b"candidate synthetic closed file").unwrap();
+        begin(
+            (&live, &candidate),
+            crate::replace::ReplaceReason::Restore,
+            &AccountBinding::LocalOnly,
+            &SeededRandom::new(4),
+            None,
+            &|| false,
+            || {},
+        )
+        .unwrap();
+        let mut before = document(&state);
+        before["deviceState"]["active"]["futurePublication"] = json!([1, 2]);
+        before["deviceState"]["intent"]["futureIntent"] = json!(7);
+        save(&state, before.clone());
+        state.set_last_backup(&backup()).unwrap();
+        state.set_last_optimize(EpochMillis(7)).unwrap();
+        let mut after = document(&state);
+        for key in ["lastBackup", "lastOptimize"] {
+            after["deviceState"].as_object_mut().unwrap().remove(key);
+        }
+        assert_eq!(after, before, "maintenance cannot change a publication fence or intent");
+        let mut invalid = before;
+        invalid["deviceState"]["active"]["decision"] = json!("Pending");
+        save(&state, invalid);
+        let bytes = std::fs::read(&state.path).unwrap();
+        assert!(
+            state.set_last_backup(&backup()).is_err(),
+            "inconsistent R6 remains an error"
+        );
+        assert_eq!(std::fs::read(&state.path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn independent_sidecar_writers_share_the_durable_lock() {
+        let (_dir, state) = initialized();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(4));
+        std::thread::scope(|scope| {
+            for lane in 0..4 {
+                let state = state.clone();
+                let barrier = barrier.clone();
+                scope.spawn(move || {
+                    barrier.wait();
+                    for instant in 0..16 {
+                        match lane {
+                            0 => state.set_last_backup(&backup()).unwrap(),
+                            1 => state.set_last_optimize(EpochMillis(instant)).unwrap(),
+                            2 => state
+                                .set_last_quick_check(&LastQuickCheck { instant, passed: true })
+                                .unwrap(),
+                            _ => sidecar::update_document(&state.path, |doc| {
+                                doc.insert("independent".into(), instant.into());
+                                Ok(())
+                            })
+                            .unwrap(),
+                        }
+                    }
+                });
+            }
+        });
+        assert_eq!(state.last_backup().unwrap(), Some(backup()));
+        assert_eq!(state.last_optimize().unwrap(), Some(EpochMillis(15)));
+        assert_eq!(state.last_quick_check().unwrap().unwrap().instant, 15);
+        assert_eq!(document(&state)["independent"], 15);
+    }
+
+    #[test]
+    fn failed_durable_publication_is_reported_and_retains_prior_record() {
+        use meguri_model::faultpoint::{self, Fault};
+        let (_dir, state) = initialized();
+        state.set_last_backup(&backup()).unwrap();
+        let before = std::fs::read(&state.path).unwrap();
+        thread_local! {
+            static DESTINATION: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+        }
+        fn replace_destination_with_directory() {
+            DESTINATION.with(|slot| {
+                if let Some(path) = slot.borrow_mut().take() {
+                    std::fs::rename(&path, path.with_extension("saved")).unwrap();
+                    std::fs::create_dir(path).unwrap();
+                }
+            });
+        }
+        DESTINATION.with(|slot| *slot.borrow_mut() = Some(state.path.clone()));
+        faultpoint::arm(
+            "storage.atomic.before_rename",
+            Fault::Callback(replace_destination_with_directory),
+        );
+        let result = state.set_last_backup(&LastBackup {
+            instant: 17,
+            ..backup()
+        });
+        faultpoint::disarm("storage.atomic.before_rename");
+        let saved = state.path.with_extension("saved");
+        assert_eq!(std::fs::read(&saved).unwrap(), before);
+        std::fs::remove_dir(&state.path).unwrap();
+        std::fs::rename(saved, &state.path).unwrap();
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&state.path).unwrap(), before);
+        assert_eq!(state.last_backup().unwrap(), Some(backup()));
+    }
 }

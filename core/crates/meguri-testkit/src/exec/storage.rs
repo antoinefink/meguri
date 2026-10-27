@@ -235,6 +235,18 @@ impl Storage {
         }
     }
 
+    /// Adopt the already-reopened hosted generation and its imported schema.
+    /// Never close/reopen it as a raw writer after a verified replacement.
+    pub(super) fn adopt_replacement(&mut self, reopened: Collection) -> Result<(), ExecError> {
+        let Some(SessionCollection::Hosted { collection, .. }) = self.collection.as_mut() else {
+            return Err(invalid("replacement requires a hosted collection"));
+        };
+        *collection = reopened;
+        self.backup.bind(collection.clone());
+        self.baseline = object_set(self.collection.as_ref().expect("hosted collection"))?;
+        Ok(())
+    }
+
     /// Number of pre-delete backup hooks reached by this conformance run.
     pub fn backup_calls(&self) -> usize {
         self.backup.calls()
@@ -280,7 +292,7 @@ impl Storage {
         std::mem::take(&mut self.changes)
     }
 
-    fn dir(&mut self) -> Result<PathBuf, ExecError> {
+    pub(super) fn dir(&mut self) -> Result<PathBuf, ExecError> {
         if self.dir.is_none() {
             let dir = tempfile::Builder::new()
                 .prefix("meguri-session-")
@@ -379,7 +391,7 @@ fn collection<'s>(session: &'s Session<'_>) -> Result<&'s SessionCollection, Exe
 
 /// `conformance/fixtures/` of the checkout the scenario file is in: the
 /// file is `<conformance>/scenarios/<id>.<ext>`.
-fn fixtures_dir(loaded: &LoadedScenario) -> Option<PathBuf> {
+pub(super) fn fixtures_dir(loaded: &LoadedScenario) -> Option<PathBuf> {
     let mut dir = loaded.path.parent()?;
     for _ in 1..loaded.scenario.id.split('/').count() {
         dir = dir.parent()?;
@@ -1121,4 +1133,41 @@ mod tests {
         assert_eq!(strip_field(&[0x00, 0x01], 9), None);
         assert_eq!(strip_field(&[0x0b], 9), None);
     }
+}
+
+pub(super) fn package_sqlite_listing(
+    raw: &Path,
+    scratch: &Path,
+    header: &[u8; 100],
+    clock: &dyn meguri_model::clock::Clock,
+    random: &dyn meguri_model::rng::RandomSource,
+) -> Result<Value, ExecError> {
+    let db = rusqlite::Connection::open_with_flags(raw, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(core)?;
+    let (ver, notes, cards, revlog): (i64, i64, i64, i64) = db.query_row(
+        "SELECT ver, (SELECT count(*) FROM notes), (SELECT count(*) FROM cards), (SELECT count(*) FROM revlog) FROM col",
+        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).map_err(core)?;
+    drop(db);
+    let probe = tempfile::Builder::new()
+        .prefix("open-")
+        .tempdir_in(scratch)
+        .map_err(core)?;
+    let candidate = probe.path().join("collection.anki2");
+    fs::copy(raw, &candidate).map_err(core)?;
+    let opens = match open_collection(&candidate, &OpenOptions::new(clock, random)) {
+        Ok(opened) => {
+            let checked = meguri_storage::integrity::integrity_check(&candidate)
+                .map(|report| report.is_ok())
+                .unwrap_or(false);
+            let closed = opened.close().is_ok();
+            checked && closed
+        }
+        Err(_) => false,
+    };
+    let journal = match &header[18..20] {
+        [1, 1] => "rollback",
+        [2, 2] => "wal",
+        _ => "other",
+    };
+    Ok(json!({"ver": ver, "notes": notes, "cards": cards, "revlog": revlog, "journal": journal, "opens": opens}))
 }

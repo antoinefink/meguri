@@ -330,3 +330,82 @@ fn atomic_faults_preserve_before_publication_and_report_honestly_after_it() {
         assert_eq!(listing(directory.path()), before);
     }
 }
+
+#[test]
+fn missing_media_map_reads_as_empty() {
+    use meguri_package::{CollectionPackageInspectContext, inspect_collection_package};
+    use meguri_storage::{OpenOptions, ReadRows, ReaderRole, open_collection};
+    use std::io::{Cursor, Write};
+    use zip::{ZipWriter, write::SimpleFileOptions};
+
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("synthetic.anki2");
+    let clock = FixedClock::new(1_894_701_600_000, UtcOffset::UTC);
+    let random = SeededRandom::new(124);
+    meguri_engine::bootstrap::create(&source, &clock, &random).unwrap();
+    let collection = fs::read(&source).unwrap();
+    let encoded = zstd::stream::encode_all(collection.as_slice(), 3).unwrap();
+    let package = directory.path().join("synthetic.colpkg");
+    let make = |media: Option<&[u8]>| {
+        let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
+        let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        archive.start_file("meta", options).unwrap();
+        archive.write_all(&[8, 3]).unwrap();
+        archive.start_file("collection.anki21b", options).unwrap();
+        archive.write_all(&encoded).unwrap();
+        if let Some(media) = media {
+            archive.start_file("media", options).unwrap();
+            archive.write_all(&zstd::stream::encode_all(media, 3).unwrap()).unwrap();
+        }
+        archive.finish().unwrap().into_inner()
+    };
+    let context = CollectionPackageInspectContext {
+        collection_directory: directory.path(),
+        live_collection_size: 0,
+        reserved_space_bytes: 0,
+        clock: &clock,
+        random: &random,
+        space: &StatvfsSpace,
+        is_cancelled: &|| false,
+    };
+    let bytes = make(None);
+    fs::write(&package, &bytes).unwrap();
+    let before = listing(directory.path());
+    let inspected = inspect_collection_package(&package, &context).expect("absent map is empty");
+    assert_eq!(inspected.media_count(), 0);
+    assert_eq!(inspected.media_bytes(), 0);
+    assert_eq!(inspected.facts().media_count, 0);
+    assert_eq!(
+        (
+            inspected.facts().notes,
+            inspected.facts().cards,
+            inspected.facts().revlog
+        ),
+        (0, 0, 0)
+    );
+    assert_eq!(inspected.facts().ver_found, 18);
+    let opened = open_collection(&inspected.collection_path(), &OpenOptions::new(&clock, &random)).unwrap();
+    let reader = opened.reader_factory().open(ReaderRole::Query).unwrap();
+    assert!(reader.quick_check().unwrap().is_ok());
+    assert!(
+        reader.deck(meguri_model::ids::DeckId(1)).unwrap().is_some(),
+        "expected bootstrap collection"
+    );
+    drop(reader);
+    opened.close().unwrap();
+    drop(inspected);
+    assert_eq!(listing(directory.path()), before);
+    assert_eq!(fs::read(&package).unwrap(), bytes);
+    assert_eq!(fs::read(&source).unwrap(), collection);
+
+    // A present, valid zstd frame with an invalid protobuf map is Corrupt.
+    let malformed = make(Some(&[0xff]));
+    fs::write(&package, &malformed).unwrap();
+    assert!(matches!(
+        inspect_collection_package(&package, &context),
+        Err(Error::Corrupt { .. })
+    ));
+    assert_eq!(fs::read(&package).unwrap(), malformed);
+    assert_eq!(fs::read(source).unwrap(), collection);
+    assert_eq!(listing(directory.path()), before);
+}

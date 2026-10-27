@@ -17,6 +17,7 @@ mod model;
 mod notes;
 mod notetypes;
 mod oracle;
+mod package;
 pub mod parties;
 mod parties_edge;
 mod render;

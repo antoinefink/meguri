@@ -8,11 +8,11 @@ use std::{
 
 use meguri_engine::{
     CancelToken, Collection, Engine, EngineError,
-    device_state::Publication,
+    device_state::{DeviceState, LastBackup},
     ports::{BackupFailureCause, BackupPublication, BackupReceipt, BackupService, SafetyBackupFailure},
 };
 use meguri_model::{clock::Clock, rng::RandomSource, time::EpochMillis};
-use meguri_storage::{ReaderRole, StorageError, atomic_file::Purpose, sidecar, space::SpaceProvider};
+use meguri_storage::{ReaderRole, StorageError, atomic_file::Purpose, space::SpaceProvider};
 
 use crate::{CollectionPackageWriteContext, CollectionPackageWriteError as WriteError, Finalisation};
 
@@ -286,37 +286,10 @@ pub(crate) fn create_backup_directory(directory: &Path) -> Result<(), StorageErr
 }
 
 fn record(directory: &Path, receipt: &BackupReceipt) -> Result<(), StorageError> {
-    sidecar::update_document(&directory.join("meguri-sidecar.json"), |doc| {
-        let invalid = || StorageError::Io {
-            detail: "backup metadata requires existing device identity and journal".into(),
-        };
-        let state = doc
-            .get_mut("deviceState")
-            .and_then(serde_json::Value::as_object_mut)
-            .ok_or_else(invalid)?;
-        // Validate only the required active fields with the strict typed decoder.
-        // Keep the full original object, including unknown members, untouched.
-        let active = state
-            .get("active")
-            .and_then(serde_json::Value::as_object)
-            .ok_or_else(invalid)?;
-        let mut known = serde_json::Map::new();
-        for field in ["identity", "binding", "decision"] {
-            known.insert(field.into(), active.get(field).cloned().ok_or_else(invalid)?);
-        }
-        serde_json::from_value::<Publication>(serde_json::Value::Object(known)).map_err(|_| invalid())?;
-        if !state.get("intent").is_some_and(|v| v.is_null() || v.is_object()) {
-            return Err(invalid());
-        }
-        let record = state
-            .entry("lastBackup")
-            .or_insert_with(|| serde_json::json!({}))
-            .as_object_mut()
-            .ok_or_else(invalid)?;
-        record.insert("snapshotMod".into(), receipt.snapshot_modified.0.into());
-        record.insert("instant".into(), receipt.instant.0.into());
-        record.insert("name".into(), receipt.name.clone().into());
-        Ok(())
+    DeviceState::for_collection(&directory.join("collection.anki2")).set_last_backup(&LastBackup {
+        snapshot_mod: receipt.snapshot_modified.0,
+        instant: receipt.instant.0,
+        name: receipt.name.clone(),
     })
 }
 

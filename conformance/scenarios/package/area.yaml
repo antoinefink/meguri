@@ -1,7 +1,4 @@
-# specs/conformance/dsl.md D9.1. None active yet: the scenarios need the
-# package adapters (meguri-testkit exec/package.rs: export.colpkg,
-# import.colpkg, package_listing; specs/conformance/package-ops.md E5), which
-# U124a lands, activating "collection-package/*" here once their goldens exist
-# and Meguri passes them (export-import-roundtrip in T1).
+# Collection-only foundation: conformance/package-ops E1-E5.
+# Backup operations and triggers remain pending.
 area: package
-active: []
+active: ["collection-package/*"]

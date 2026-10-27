@@ -18,11 +18,14 @@ cargo-fuzz = true
 libfuzzer-sys = "=0.4.13"
 meguri-engine = { path = "../crates/meguri-engine" }
 meguri-model = { path = "../crates/meguri-model" }
+meguri-package = { path = "../crates/meguri-package" }
+meguri-storage = { path = "../crates/meguri-storage" }
 meguri-search = { path = "../crates/meguri-search" }
 meguri-sync = { path = "../crates/meguri-sync" }
 meguri-template = { path = "../crates/meguri-template" }
 meguri-text = { path = "../crates/meguri-text" }
 tempfile = "=3.27.0"
+zstd = { version = "0.14.3", default-features = false }
 zip = { version = "~9.0.2", default-features = false, features = ["deflate"] }
 
 [workspace]
@@ -80,6 +83,13 @@ bench = false
 [[bin]]
 name = "io_parse"
 path = "fuzz_targets/io_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "package_reader"
+path = "fuzz_targets/package_reader.rs"
 test = false
 doc = false
 bench = false
