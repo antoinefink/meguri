@@ -19,6 +19,7 @@ The `config` table holds the collection's synced settings: Anki's own keys, keys
 - The DDL is `storage/schema-18` S2. Files that releases at schemas 14 to 16 created spell the key column `key`, and the upgrade keeps that text; SQLite matches column names in any letter case, so statements naming `KEY` work on both, but code that reads column names from the schema must not expect `KEY`.
 - Keys compare byte for byte: `curDeck` and `curdeck` are two keys. A key appears once.
 - A key's name says who owns it. Anki's keys include `curDeck`, `curModel`, `activeDecks`, `lastUnburied`, `nextPos` and `creationOffset`. Per-object families are `_nt_<note type id>_<name>` (for example `_nt_<id>_lastDeck`, the deck a note of that type was last added to) and `_deck_<deck id>_<name>` (for example `_deck_<id>_lastNotetype`, the note type last used in that deck), with the id in decimal. Meguri's keys are in C8. Every other key belongs to someone else (C7).
+- The types, defaults and meanings of `pasteImagesAsPng`, `pasteStripsFormatting`, `addToCur` and `firstDayOfWeek` are `editor/config-keys`; those keys hold scalars and are written whole (C4), never through C6.
 
 ## C2. Values
 

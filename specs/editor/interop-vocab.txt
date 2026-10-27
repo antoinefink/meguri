@@ -1,0 +1,23 @@
+# Interface names the editor specs use that are not ordinary words: the
+# collection config keys the editor, the Add screen and the week-start
+# readers use, and the card columns the Add screen's review deck comes from.
+# Names already listed by other areas (storage, decks) are repeated where
+# these specs depend on them.
+# Config keys
+pasteImagesAsPng
+pasteStripsFormatting
+addToCur
+firstDayOfWeek
+curDeck
+curModel
+lastDeck
+lastNotetype
+heatmap
+defaultSearchText
+ignoreAccentsInSearch
+renderLatex
+# Card columns
+odid
+did
+# Collation
+unicase
