@@ -54,7 +54,7 @@ fn roots(path: &Path) -> Result<Vec<RootBinding>, StorageError> {
 }
 
 /// Constructed only by verifying synchronized independent T7 copies against
-/// their still-owned sources. The initial Restore consumes this value once.
+/// their still-owned sources. A Restore consumes this value once.
 #[derive(Clone, Debug)]
 pub struct RawRestoreAuthority(RawPair);
 #[derive(Clone, Debug, Serialize, Deserialize)]

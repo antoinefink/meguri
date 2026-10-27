@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
     thread::JoinHandle,
@@ -242,8 +242,10 @@ fn create(path: &Path, header: &Header, replace: bool) -> Result<(), EngineError
 /// Archives are permanent evidence, outside the temporary sweep namespace.
 pub(crate) struct RecoveryJournal {
     path: PathBuf,
-    original: Vec<u8>,
-    marker: Vec<u8>,
+    collection: PathBuf,
+    native: (u64, u64),
+    original: RecoveryBinding,
+    marker: RecoveryBinding,
 }
 impl RecoveryJournal {
     pub(crate) fn prepare(collection: &Path) -> Result<Option<Self>, EngineError> {
@@ -272,8 +274,8 @@ impl RecoveryJournal {
             incarnation: [0, 0],
             next_event: 1,
         };
-        let original = recovery_bytes(&path)?;
-        let (loaded, _, _) = read_bytes(&original, &expected)?;
+        let original = RecoveryBinding::read(&path)?;
+        let (loaded, _, _) = read_bytes(&original.bytes, &expected)?;
         // Even a retired file must bind to this old main in this recovery path.
         if loaded.header.native != expected.native {
             return Err(error("unexpected recovery journal native identity; evidence retained"));
@@ -281,18 +283,18 @@ impl RecoveryJournal {
         if loaded.retired {
             return Ok(None);
         }
-        let digest = Sha256::digest(&original);
+        let digest = Sha256::digest(&original.bytes);
         let name: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
         let archive = collection.with_file_name(format!("meguri-pending-answers.{name}.recovery.jsonl"));
         if archive.try_exists().map_err(error)? {
-            if recovery_bytes(&archive)? != original {
+            if recovery_bytes(&archive)? != original.bytes {
                 return Err(error("recovery journal archive differs; evidence retained"));
             }
             full_sync(&recovery_file(&archive)?)?;
             meguri_storage::atomic_file::sync_directory(archive.parent().unwrap())?;
         } else {
             let mut copy = AtomicFile::new(&archive, Purpose::Sidecar)?;
-            copy.file_mut().write_all(&original).map_err(error)?;
+            copy.file_mut().write_all(&original.bytes).map_err(error)?;
             copy.publish_new(|_| Ok(()))?;
         }
         let unresolved = loaded.events.values().filter(|e| e.terminal.is_none()).count();
@@ -304,18 +306,115 @@ impl RecoveryJournal {
         if !current.is_file() || (current.dev(), current.ino()) != expected.native {
             return Err(error("recovery main identity changed; evidence retained"));
         }
-        replace_recovery_bytes(&path, &original, &marker)?;
+        let mut publication = AtomicFile::new(&path, Purpose::Sidecar)?;
+        publication.file_mut().write_all(&marker).map_err(error)?;
+        // Retain both inode and byte authorities before publication. An Err
+        // from AtomicFile may follow rename or directory publication.
+        let guard = Self {
+            path,
+            collection: collection.to_owned(),
+            native: expected.native,
+            original,
+            marker: RecoveryBinding {
+                file: publication.file_mut().try_clone().map_err(error)?,
+                bytes: marker,
+            },
+        };
+        let published = publication
+            .publish(|_| guard.original.require(&guard.path))
+            .and_then(|()| guard.marker.require(&guard.path));
+        if let Err(publication_error) = published {
+            return match guard.finish(false) {
+                Ok(()) => Err(publication_error.into()),
+                Err(rollback_error) => Err(error(format!(
+                    "recovery marker publication failed: {publication_error}; rollback failed or uncertain: {rollback_error}; archive retained"
+                ))),
+            };
+        }
         tracing::warn!(path = %archive.display(), unresolved, "old pending-answer evidence archived for recovery replacement; not replayed");
-        Ok(Some(Self { path, original, marker }))
+        Ok(Some(guard))
     }
 
     /// A proven preactivation failure restores the exact old active file. The
     /// archive remains durable across failures/crashes. Never roll back after
     /// activation or an uncertain activation.
     pub(crate) fn finish(self, activated: bool) -> Result<(), EngineError> {
-        if !activated {
-            replace_recovery_bytes(&self.path, &self.marker, &self.original)?;
+        if activated {
+            return Ok(());
         }
+        if recovery_identity(&self.collection)? != self.native {
+            return Err(error(
+                "recovery main binding is uncertain; retired marker and archive retained",
+            ));
+        }
+        if self.original.matches(&self.path)? {
+            return self.original.sync(&self.path);
+        }
+        self.marker.require(&self.path)?;
+        let mut rollback = AtomicFile::new(&self.path, Purpose::Sidecar)?;
+        rollback.file_mut().write_all(&self.original.bytes).map_err(error)?;
+        let restored = RecoveryBinding {
+            file: rollback.file_mut().try_clone().map_err(error)?,
+            bytes: self.original.bytes,
+        };
+        match rollback.publish(|_| self.marker.require(&self.path)) {
+            Ok(()) => Ok(()),
+            Err(publication_error) => {
+                // A post-rename error can still be completed durably, but an
+                // unknown binding must never be overwritten with old answers.
+                restored.require(&self.path).map_err(|proof_error| {
+                    error(format!(
+                        "journal rollback publication failed: {publication_error}; binding uncertain: {proof_error}; archive retained"
+                    ))
+                })?;
+                restored.sync(&self.path)
+            }
+        }
+    }
+}
+
+struct RecoveryBinding {
+    file: File,
+    bytes: Vec<u8>,
+}
+impl RecoveryBinding {
+    fn read(path: &Path) -> Result<Self, EngineError> {
+        let mut file = recovery_file(path)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(error)?;
+        let binding = Self { file, bytes };
+        binding.require(path)?;
+        Ok(binding)
+    }
+    fn matches(&self, path: &Path) -> Result<bool, EngineError> {
+        use std::os::unix::fs::MetadataExt;
+        let mut current = recovery_file(path)?;
+        let expected = self.file.metadata().map_err(error)?;
+        let named = current.metadata().map_err(error)?;
+        if (named.dev(), named.ino()) != (expected.dev(), expected.ino()) {
+            return Ok(false);
+        }
+        let mut bytes = Vec::new();
+        current.read_to_end(&mut bytes).map_err(error)?;
+        let named = std::fs::symlink_metadata(path).map_err(error)?;
+        Ok(named.is_file()
+            && named.nlink() == 1
+            && (named.dev(), named.ino()) == (expected.dev(), expected.ino())
+            && bytes == self.bytes)
+    }
+    fn require(&self, path: &Path) -> Result<(), meguri_storage::StorageError> {
+        match self.matches(path) {
+            Ok(true) => Ok(()),
+            result => Err(meguri_storage::StorageError::Io {
+                detail: format!("recovery journal binding changed ({result:?}); evidence retained"),
+            }),
+        }
+    }
+    fn sync(&self, path: &Path) -> Result<(), EngineError> {
+        self.require(path)?;
+        full_sync(&self.file)?;
+        meguri_storage::atomic_file::sync_directory(path.parent().unwrap())?;
+        self.require(path)?;
         Ok(())
     }
 }
@@ -343,23 +442,9 @@ fn recovery_file(path: &Path) -> Result<File, EngineError> {
     Ok(file)
 }
 fn recovery_bytes(path: &Path) -> Result<Vec<u8>, EngineError> {
-    use std::io::Read;
     let mut bytes = Vec::new();
     recovery_file(path)?.read_to_end(&mut bytes).map_err(error)?;
     Ok(bytes)
-}
-fn replace_recovery_bytes(path: &Path, expected: &[u8], bytes: &[u8]) -> Result<(), EngineError> {
-    let mut replacement = AtomicFile::new(path, Purpose::Sidecar)?;
-    replacement.file_mut().write_all(bytes).map_err(error)?;
-    replacement.publish(|_| {
-        if recovery_bytes(path).map_err(|e| meguri_storage::StorageError::Io { detail: e.to_string() })? != expected {
-            return Err(meguri_storage::StorageError::Io {
-                detail: "recovery journal changed; evidence retained".into(),
-            });
-        }
-        Ok(())
-    })?;
-    Ok(())
 }
 
 impl Journal {

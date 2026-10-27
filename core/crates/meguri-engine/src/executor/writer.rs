@@ -803,7 +803,9 @@ impl TaskBody for ReplaceTask {
                 reopened: false,
                 error: Some(error),
                 generation: None,
-                factory: None,
+                // No swap began. Keep the recorded-corrupt owner and its
+                // diagnostic access even when marker publication was refused.
+                factory: recovery_only.then(|| ReaderFactory::recovery(&shared.path, &env.reopen.initializers)),
             });
             return;
         }
@@ -838,17 +840,6 @@ impl TaskBody for ReplaceTask {
         let replacing = activated
             .as_ref()
             .map_or(swapped.is_ok() || changed, |a| a.load(Ordering::Acquire));
-        if let Some(journal) = recovery_journal
-            && let Err(error) = journal.finish(replacing || changed)
-        {
-            let _ = reply.send(Replaced {
-                reopened: false,
-                error: Some(error),
-                generation: None,
-                factory: None,
-            });
-            return;
-        }
         if replacing {
             // The steps describe the file the swap replaced; dropped before
             // any op of the new generation, also when the reopen fails
@@ -874,6 +865,18 @@ impl TaskBody for ReplaceTask {
                 error: Some(error.into()),
                 generation: None,
                 factory: None,
+            });
+            return;
+        }
+        if let Some(journal) = recovery_journal
+            && let Err(error) = journal.finish(replacing)
+        {
+            let _ = reply.send(Replaced {
+                reopened: false,
+                error: Some(error),
+                generation: None,
+                factory: (recovery_only && !replacing)
+                    .then(|| ReaderFactory::recovery(&shared.path, &reopen.initializers)),
             });
             return;
         }

@@ -470,7 +470,8 @@ fn process_kill_in_vacuum_reopens_with_committed_rows_and_integrity() {
 fn real_restore_clears_recorded_corruption_in_new_generation_and_survives_reopen() {
     use meguri_storage::space::StatvfsSpace;
     let (dir, path) = common::copy_fixture("schema-18.anki2");
-    let backups = dir.path().join("backups");
+    let backup_dir = common::backup_directory(&path);
+    let backups = backup_dir.path().to_path_buf();
     let clock = Arc::new(StepClock::new(NOW_MS, UtcOffset::UTC, "UTC"));
     let host =
         meguri_testkit::backup_support::open_restore_host(&path, &backups, clock.clone(), Arc::new(StatvfsSpace))
@@ -549,15 +550,12 @@ fn stop_before_vacuum() {
 #[test]
 fn quick_check_then_real_backup_finish_before_trigger_return_while_optimizer_continues() {
     use meguri_storage::space::StatvfsSpace;
-    let (dir, path) = common::copy_fixture("schema-18.anki2");
+    let (_dir, path) = common::copy_fixture("schema-18.anki2");
     let clock = Arc::new(StepClock::new(NOW_MS, UtcOffset::UTC, "UTC"));
-    let host = meguri_testkit::backup_support::open_restore_host(
-        &path,
-        &dir.path().join("backups"),
-        clock,
-        Arc::new(StatvfsSpace),
-    )
-    .unwrap();
+    let backup_dir = common::backup_directory(&path);
+    let host =
+        meguri_testkit::backup_support::open_restore_host(&path, backup_dir.path(), clock, Arc::new(StatvfsSpace))
+            .unwrap();
     let device = DeviceState::for_collection(&path);
     device
         .set_optimize_cadence_start(EpochMillis(NOW_MS - 1_209_600_000))
@@ -633,15 +631,12 @@ fn pending_quick_check_does_not_hold_the_interactive_reader_or_writer() {
 #[test]
 fn session_start_cancels_a_pending_check_and_idle_triggers_skip_an_active_session() {
     use meguri_storage::space::StatvfsSpace;
-    let (dir, path) = common::copy_fixture("schema-18.anki2");
+    let (_dir, path) = common::copy_fixture("schema-18.anki2");
     let clock = Arc::new(StepClock::new(NOW_MS, UtcOffset::UTC, "UTC"));
-    let host = meguri_testkit::backup_support::open_restore_host(
-        &path,
-        &dir.path().join("backups"),
-        clock,
-        Arc::new(StatvfsSpace),
-    )
-    .unwrap();
+    let backup_dir = common::backup_directory(&path);
+    let host =
+        meguri_testkit::backup_support::open_restore_host(&path, backup_dir.path(), clock, Arc::new(StatvfsSpace))
+            .unwrap();
     let (entered, recv) = mpsc::channel();
     let (release, wait) = mpsc::channel();
     *QUICK_BARRIER.lock().unwrap() = Some((entered, wait));
@@ -702,12 +697,18 @@ fn record_corrupt(path: &std::path::Path) {
 #[test]
 fn recorded_corruption_preserves_upgrade_mode_hot_journal_and_live_wal() {
     for case in ["upgrade", "delete", "hot", "wal"] {
-        let (dir, path) = common::copy_fixture(if case == "upgrade" {
-            "schema-17.anki2"
+        let (dir, path) = common::copy_fixture("schema-18.anki2");
+        let clock = Arc::new(StepClock::new(NOW_MS, UtcOffset::UTC, "UTC"));
+        let publisher = Engine::new(EngineConfig::default()).unwrap();
+        publisher.open_raw(&path, common::open_config(&clock)).unwrap();
+        publisher.close().unwrap();
+        drop(publisher);
+        // Publication belongs to the place. Install the recovery bytes only
+        // after its real lifecycle initialized that identity; do not upgrade
+        // the schema-17 evidence before the recorded-corrupt no-write open.
+        if case == "upgrade" {
+            std::fs::copy(common::fixture("schema-17.anki2"), &path).unwrap();
         } else {
-            "schema-18.anki2"
-        });
-        if case != "upgrade" {
             let (_source_dir, source) = common::copy_fixture("schema-18.anki2");
             let db = meguri_storage::raw::PlainDatabase::open(&source).unwrap();
             if case == "wal" {
@@ -808,8 +809,8 @@ fn live_corrupt_close_suspend_and_drop_preserve_nonempty_wal_and_release_locks()
         damage_root(&harness.collection, &harness.path, "revlog");
         raw_writer(&harness.collection, "PRAGMA wal_autocheckpoint=0");
         raw_writer(&harness.collection, "UPDATE col SET mod=987654321");
-        std::fs::write(sibling(&harness.path, "-journal"), b"retained rollback evidence").unwrap();
         trigger(&harness, Trigger::Background);
+        std::fs::write(sibling(&harness.path, "-journal"), b"retained rollback evidence").unwrap();
         assert!(matches!(
             harness.engine.state(),
             LifecycleState::Failed {
@@ -941,8 +942,9 @@ fn corruption_rejects_active_and_queued_writes_without_publishing_changes() {
 #[test]
 fn fresh_corrupt_host_refused_restore_close_and_drop_keep_recovery_ownership() {
     use meguri_storage::space::StatvfsSpace;
-    let (dir, path) = common::copy_fixture("schema-18.anki2");
-    let backups = dir.path().join("backups");
+    let (_dir, path) = common::copy_fixture("schema-18.anki2");
+    let backup_dir = common::backup_directory(&path);
+    let backups = backup_dir.path().to_path_buf();
     let clock = Arc::new(StepClock::new(NOW_MS, UtcOffset::UTC, "UTC"));
     let host =
         meguri_testkit::backup_support::open_restore_host(&path, &backups, clock.clone(), Arc::new(StatvfsSpace))
@@ -1039,7 +1041,8 @@ fn restore_remedy_filters_raw_and_unverified_entries_but_accepts_local_backup_an
     use meguri_engine::maintenance::status::Remedy;
     use meguri_storage::space::StatvfsSpace;
     let (dir, path) = common::copy_fixture("schema-18.anki2");
-    let backups = dir.path().join("backups");
+    let backup_dir = common::backup_directory(&path);
+    let backups = backup_dir.path().to_path_buf();
     let clock = Arc::new(StepClock::new(NOW_MS, UtcOffset::UTC, "UTC"));
     let host =
         meguri_testkit::backup_support::open_restore_host(&path, &backups, clock.clone(), Arc::new(StatvfsSpace))
@@ -1153,12 +1156,13 @@ fn automatic_optimizer_queued_and_active_session_and_suspend_cancellation_is_sco
     use meguri_storage::space::StatvfsSpace;
     for queued in [true, false] {
         for suspend in [false, true] {
-            let (dir, path) = common::copy_fixture("schema-18.anki2");
+            let (_dir, path) = common::copy_fixture("schema-18.anki2");
             let clock = Arc::new(StepClock::new(NOW_MS, UtcOffset::UTC, "UTC"));
+            let backup_dir = common::backup_directory(&path);
             let host = Arc::new(
                 meguri_testkit::backup_support::open_restore_host(
                     &path,
-                    &dir.path().join("backups"),
+                    backup_dir.path(),
                     clock,
                     Arc::new(StatvfsSpace),
                 )
@@ -1285,8 +1289,9 @@ fn count_corrupt_optimize() {
 #[test]
 fn live_corrupt_verdict_prevents_due_periodic_backup_and_optimizer_on_production_host() {
     use meguri_storage::space::StatvfsSpace;
-    let (dir, path) = common::copy_fixture("schema-18.anki2");
-    let backups = dir.path().join("backups");
+    let (_dir, path) = common::copy_fixture("schema-18.anki2");
+    let backup_dir = common::backup_directory(&path);
+    let backups = backup_dir.path().to_path_buf();
     let clock = Arc::new(StepClock::new(NOW_MS, UtcOffset::UTC, "UTC"));
     let host =
         meguri_testkit::backup_support::open_restore_host(&path, &backups, clock, Arc::new(StatvfsSpace)).unwrap();

@@ -1007,8 +1007,109 @@ fn c12_recovery_allows_unrelated_mtime_opaque_counters_and_admitted_fsrs_off() {
     }
 }
 
+// These are synchronous I/O-boundary regressions. Child-process termination
+// at the recovery-journal boundaries remains execution-pending (R3 P2).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RecoveryFailure {
+    BeforeSwap,
+    RetainedWal,
+    MarkerPublication,
+    ForeignBinding,
+    Activated,
+}
+
+static MARKER_FAILURE_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
+fn fail_marker_after_archive_rename() {
+    use meguri_model::faultpoint::{self, Fault};
+    let mut root = MARKER_FAILURE_ROOT.lock().unwrap();
+    let Some(path) = root.as_ref() else {
+        return;
+    };
+    if recovery_archives(path).is_empty() {
+        return;
+    }
+    // This callback runs after archive rename; AtomicFile still syncs its
+    // directory before prepare starts marker publication. The next rename is
+    // the marker. Leave the error armed across rollback too, exercising its
+    // own reported post-rename failure and exact installed-original proof.
+    root.take();
+    faultpoint::arm("storage.atomic.after_rename", Fault::IoError(std::io::ErrorKind::Other));
+}
+type ForeignJournal = (PathBuf, Vec<u8>, (u64, u64));
+static FOREIGN_JOURNAL: Mutex<Option<ForeignJournal>> = Mutex::new(None);
+fn substitute_retired_marker() {
+    use meguri_model::faultpoint::{self, Fault};
+    let mut foreign = FOREIGN_JOURNAL.lock().unwrap();
+    let (path, bytes, identity) = foreign.as_mut().unwrap();
+    *bytes = fs::read(&*path).unwrap();
+    assert!(String::from_utf8_lossy(bytes).contains("Retired"));
+    let replacement = path.with_file_name("foreign-journal.jsonl");
+    fs::write(&replacement, &*bytes).unwrap();
+    fs::rename(&replacement, &*path).unwrap();
+    *identity = native(path);
+    // The exact marker bytes on a foreign inode are still an unknown binding.
+    // Stop before activation so R6 proves old, then require rollback to refuse
+    // that foreign inode without destroying either it or the archived answers.
+    faultpoint::arm(
+        "replace.media.after_final_database_verification",
+        Fault::IoError(std::io::ErrorKind::Other),
+    );
+}
+fn recovery_archives(collection: &Path) -> Vec<PathBuf> {
+    fs::read_dir(collection.parent().unwrap())
+        .unwrap()
+        .map(Result::unwrap)
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".recovery.jsonl"))
+        .map(|e| e.path())
+        .collect()
+}
+fn native(path: &Path) -> (u64, u64) {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = fs::symlink_metadata(path).unwrap();
+    (metadata.dev(), metadata.ino())
+}
+fn wal_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push("-wal");
+    name.into()
+}
+fn install_real_retained_wal(path: &Path) {
+    // Capture a real SQLite WAL on an independent disposable copy. Closing
+    // that connection only cleans the source; no live owner of path is opened
+    // or moved, and the captured journal's native main binding stays intact.
+    let source_dir = tempfile::tempdir().unwrap();
+    let source = source_dir.path().join("collection.anki2");
+    fs::copy(path, &source).unwrap();
+    let db = meguri_storage::raw::PlainDatabase::open(&source).unwrap();
+    db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; UPDATE col SET mod=987654321;")
+        .unwrap();
+    fs::copy(&source, path).unwrap();
+    fs::copy(wal_path(&source), wal_path(path)).unwrap();
+    assert!(fs::metadata(wal_path(path)).unwrap().len() > 32);
+    db.close().unwrap();
+}
+
 #[test]
 fn recovery_restore_archives_real_unresolved_answers_and_preserves_preactivation_failure() {
+    recovery_restore_failure(RecoveryFailure::BeforeSwap);
+}
+#[test]
+fn recovery_restore_retained_wal_refusal_restores_original_journal_and_publication() {
+    recovery_restore_failure(RecoveryFailure::RetainedWal);
+}
+#[test]
+fn recovery_restore_marker_postrename_failure_restores_original_journal_before_swap() {
+    recovery_restore_failure(RecoveryFailure::MarkerPublication);
+}
+#[test]
+fn recovery_restore_retained_wal_activation_never_replays_retired_answers() {
+    recovery_restore_failure(RecoveryFailure::Activated);
+}
+#[test]
+fn recovery_restore_refuses_to_overwrite_foreign_marker_even_with_identical_bytes() {
+    recovery_restore_failure(RecoveryFailure::ForeignBinding);
+}
+fn recovery_restore_failure(failure: RecoveryFailure) {
     use meguri_engine::{
         FailedReason, ProgressSink,
         device_state::{DeviceState, LastQuickCheck, PublicationDecision},
@@ -1016,21 +1117,25 @@ fn recovery_restore_archives_real_unresolved_answers_and_preserves_preactivation
     use meguri_model::faultpoint::{self, Fault};
     use meguri_storage::space::StatvfsSpace;
 
-    // Capture real production Intent and Prepared prefixes, including native
-    // binding/checksums. Never synthesize a successful answer or rebind result.
     for prepared in [false, true] {
+        // Real production Intent/Prepared prefixes retain native binding and
+        // checksums. The whole original, including its torn tail, is evidence.
         let captured = capture_answer(|_| {});
         restore_uncommitted(&captured, &captured.intent);
-        let old = if prepared { &captured.prepared } else { &captured.intent };
-        // Make a good backup of the pre-answer database with a valid empty
-        // journal. Reinstall the captured unresolved evidence after closing.
+        let mut old = if prepared {
+            captured.prepared.clone()
+        } else {
+            captured.intent.clone()
+        };
+        old.extend_from_slice(b"torn recovery tail");
         let header_end = captured.intent.iter().position(|b| *b == b'\n').unwrap() + 1;
         fs::write(journal_path(&captured.path), &captured.intent[..header_end]).unwrap();
-        let backups = captured._dir.path().join("backups");
+        let backup_dir = common::backup_directory(&captured.path);
+        let backups = backup_dir.path();
         let clock = Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC"));
         let host = meguri_testkit::backup_support::open_restore_host(
             &captured.path,
-            &backups,
+            backups,
             clock.clone(),
             Arc::new(StatvfsSpace),
         )
@@ -1039,9 +1144,18 @@ fn recovery_restore_archives_real_unresolved_answers_and_preserves_preactivation
         let backup = host.engine().back_up_now(&Default::default()).unwrap().receipt;
         host.close().unwrap();
         drop(host);
-        fs::write(journal_path(&captured.path), old).unwrap();
+        fs::write(journal_path(&captured.path), &old).unwrap();
+        // All new boundaries include real retained WAL bytes, including the
+        // marker publication error before a swap has even begun.
+        if failure != RecoveryFailure::BeforeSwap {
+            install_real_retained_wal(&captured.path);
+        }
         fs::write(&captured.path, b"unreadable main retaining real unresolved journal").unwrap();
         let damaged = fs::read(&captured.path).unwrap();
+        let main_native = native(&captured.path);
+        let journal_native = native(&journal_path(&captured.path));
+        let old_wal = fs::read(wal_path(&captured.path)).ok();
+        let wal_native = old_wal.as_ref().map(|_| native(&wal_path(&captured.path)));
         let device = DeviceState::for_collection(&captured.path);
         device
             .set_last_quick_check(&LastQuickCheck {
@@ -1049,46 +1163,142 @@ fn recovery_restore_archives_real_unresolved_answers_and_preserves_preactivation
                 passed: false,
             })
             .unwrap();
+        let prior = device.publication().unwrap().unwrap();
         let host = meguri_testkit::backup_support::open_restore_host(
             &captured.path,
-            &backups,
+            backups,
             clock.clone(),
             Arc::new(StatvfsSpace),
         )
         .unwrap();
         let generation = host.engine().generation();
-        faultpoint::arm(
-            "replace.before_live_wal_check",
-            Fault::IoError(std::io::ErrorKind::Other),
-        );
-        let refused = host.restore_backup(&backup.name, &Default::default(), &ProgressSink::new());
-        faultpoint::disarm("replace.before_live_wal_check");
-        assert!(refused.is_err());
-        assert_eq!(host.engine().generation(), generation);
-        assert!(matches!(
-            host.engine().state(),
-            LifecycleState::Failed {
-                reason: FailedReason::Corrupt { .. }
+        let point = match failure {
+            RecoveryFailure::BeforeSwap => "replace.before_live_wal_check",
+            RecoveryFailure::RetainedWal => "replace.after_live_wal_removed",
+            RecoveryFailure::MarkerPublication => {
+                *MARKER_FAILURE_ROOT.lock().unwrap() = Some(captured.path.clone());
+                "storage.atomic.after_rename"
             }
-        ));
-        assert_eq!(fs::read(journal_path(&captured.path)).unwrap(), *old);
-        assert_eq!(fs::read(&captured.path).unwrap(), damaged);
+            RecoveryFailure::ForeignBinding => {
+                *FOREIGN_JOURNAL.lock().unwrap() = Some((journal_path(&captured.path), Vec::new(), (0, 0)));
+                "replace.after_live_wal_removed"
+            }
+            RecoveryFailure::Activated => "replace.after_rename",
+        };
+        let fault = if failure == RecoveryFailure::MarkerPublication {
+            Fault::Callback(fail_marker_after_archive_rename)
+        } else if failure == RecoveryFailure::ForeignBinding {
+            Fault::Callback(substitute_retired_marker)
+        } else {
+            Fault::IoError(std::io::ErrorKind::Other)
+        };
+        faultpoint::arm(point, fault);
+        let refused = host.restore_backup(&backup.name, &Default::default(), &ProgressSink::new());
+        faultpoint::disarm(point);
+        faultpoint::disarm("replace.media.after_final_database_verification");
+        let foreign = if failure == RecoveryFailure::ForeignBinding {
+            Some(FOREIGN_JOURNAL.lock().unwrap().take().unwrap())
+        } else {
+            None
+        };
+        let expected_journal = foreign.as_ref().map_or(&old, |(_, bytes, _)| bytes);
+        let refusal = refused.unwrap_err();
+        if foreign.is_some() {
+            assert!(refusal.to_string().contains("binding changed"), "{refusal}");
+        } else {
+            assert!(refusal.to_string().contains(point), "{refusal}");
+        }
+        assert_eq!(refusal.candidate_active(), failure == RecoveryFailure::Activated);
+        if failure == RecoveryFailure::Activated {
+            // The post-activation error keeps the candidate, new generation,
+            // pending publication fence, and retired old-answer evidence.
+            assert_eq!(host.engine().generation().0, generation.0 + 1);
+            assert!(matches!(host.engine().state(), LifecycleState::Ready { .. }));
+            assert_ne!(native(&captured.path), main_native);
+            assert_ne!(device.publication().unwrap().unwrap().identity, prior.identity);
+            assert_eq!(
+                device.publication().unwrap().unwrap().decision,
+                PublicationDecision::Pending
+            );
+            host.review().flush_for_background().unwrap();
+            assert_eq!(logs(&host.collection().unwrap()), expected_logs);
+            let archives = recovery_archives(&captured.path);
+            assert_eq!(archives.len(), 1);
+            assert_eq!(fs::read(&archives[0]).unwrap(), old);
+            // The live WAL belongs to the candidate; original WAL bytes must
+            // remain fenced at R6.5's retired location, never on the candidate.
+            let retired = fs::read_dir(captured.path.parent().unwrap())
+                .unwrap()
+                .map(Result::unwrap)
+                .filter(|e| e.file_name().to_string_lossy().starts_with(".meguri-restore-wal-"))
+                .collect::<Vec<_>>();
+            assert_eq!(retired.len(), 1);
+            assert_eq!(fs::read(retired[0].path()).unwrap(), old_wal.clone().unwrap());
+            assert_ne!(fs::read(wal_path(&captured.path)).ok(), old_wal);
+        } else {
+            assert_eq!(host.engine().generation(), generation);
+            assert!(matches!(
+                host.engine().state(),
+                LifecycleState::Failed {
+                    reason: FailedReason::Corrupt { .. }
+                }
+            ));
+            assert_eq!(&fs::read(journal_path(&captured.path)).unwrap(), expected_journal);
+            if let Some((_, _, identity)) = &foreign {
+                assert_eq!(native(&journal_path(&captured.path)), *identity);
+            }
+            assert_eq!(fs::read(&captured.path).unwrap(), damaged);
+            assert_eq!(native(&captured.path), main_native);
+            assert_eq!(fs::read(wal_path(&captured.path)).ok(), old_wal);
+            assert_eq!(old_wal.as_ref().map(|_| native(&wal_path(&captured.path))), wal_native);
+            assert_eq!(device.publication().unwrap().unwrap(), prior);
+            assert!(meguri_storage::lockfile::CollectionLock::acquire(captured.path.parent().unwrap()).is_err());
+            let archives = recovery_archives(&captured.path);
+            assert_eq!(archives.len(), 1);
+            assert_eq!(fs::read(&archives[0]).unwrap(), old);
+            if failure == RecoveryFailure::MarkerPublication {
+                assert!(
+                    MARKER_FAILURE_ROOT.lock().unwrap().is_none(),
+                    "marker fault was armed after archive rename"
+                );
+                assert_ne!(
+                    native(&journal_path(&captured.path)),
+                    journal_native,
+                    "marker and rollback both published before reporting their post-rename errors"
+                );
+            }
+        }
         host.close().unwrap();
         drop(host);
-        // Reopen the damaged owner before a new, separately requested Restore.
         let host = meguri_testkit::backup_support::open_restore_host(
             &captured.path,
-            &backups,
+            backups,
             clock.clone(),
             Arc::new(StatvfsSpace),
         )
         .unwrap();
-        let generation = host.engine().generation();
-        clock.step_ms(1000);
-        let restored = host
-            .restore_backup(&backup.name, &Default::default(), &ProgressSink::new())
-            .unwrap();
-        assert_eq!(restored.generation.0, generation.0 + 1);
+        if failure != RecoveryFailure::Activated {
+            // Closing/reopening the damaged owner must be no-write as well.
+            assert_eq!(fs::read(&captured.path).unwrap(), damaged);
+            assert_eq!(fs::read(wal_path(&captured.path)).ok(), old_wal);
+            assert_eq!(&fs::read(journal_path(&captured.path)).unwrap(), expected_journal);
+            if let Some((_, _, identity)) = &foreign {
+                assert_eq!(native(&journal_path(&captured.path)), *identity);
+            }
+            assert_eq!(device.publication().unwrap().unwrap(), prior);
+            let generation = host.engine().generation();
+            clock.step_ms(1000);
+            let restored = host
+                .restore_backup(&backup.name, &Default::default(), &ProgressSink::new())
+                .unwrap();
+            assert_eq!(restored.generation.0, generation.0 + 1);
+            assert!(restored.cloud_publication_pending);
+            let safety = restored.safety_backup.as_ref().unwrap();
+            assert_eq!(fs::read(backups.join(safety)).unwrap(), damaged);
+            if let Some(wal) = &old_wal {
+                assert_eq!(fs::read(backups.join(format!("{safety}-wal"))).unwrap(), *wal);
+            }
+        }
         assert!(matches!(host.engine().state(), LifecycleState::Ready { .. }));
         host.review().flush_for_background().unwrap();
         assert_eq!(
@@ -1096,30 +1306,21 @@ fn recovery_restore_archives_real_unresolved_answers_and_preserves_preactivation
             expected_logs,
             "old answers must not replay"
         );
-        assert!(restored.cloud_publication_pending);
         assert_eq!(
             device.publication().unwrap().unwrap().decision,
             PublicationDecision::Pending
         );
-        assert_eq!(
-            fs::read(backups.join(restored.safety_backup.as_ref().unwrap())).unwrap(),
-            damaged
-        );
-        let archives = fs::read_dir(captured._dir.path())
-            .unwrap()
-            .map(Result::unwrap)
-            .filter(|e| e.file_name().to_string_lossy().ends_with(".recovery.jsonl"))
-            .collect::<Vec<_>>();
+        let archives = recovery_archives(&captured.path);
         assert_eq!(archives.len(), 1);
-        assert_eq!(fs::read(archives[0].path()).unwrap(), *old);
+        assert_eq!(fs::read(&archives[0]).unwrap(), old);
         host.close().unwrap();
         drop(host);
         let reopened =
-            meguri_testkit::backup_support::open_restore_host(&captured.path, &backups, clock, Arc::new(StatvfsSpace))
+            meguri_testkit::backup_support::open_restore_host(&captured.path, backups, clock, Arc::new(StatvfsSpace))
                 .unwrap();
         assert!(matches!(reopened.engine().state(), LifecycleState::Ready { .. }));
         assert_eq!(logs(&reopened.collection().unwrap()), expected_logs);
-        assert_eq!(fs::read(archives[0].path()).unwrap(), *old);
+        assert_eq!(fs::read(&archives[0]).unwrap(), old);
         assert_eq!(
             device.publication().unwrap().unwrap().decision,
             PublicationDecision::Pending

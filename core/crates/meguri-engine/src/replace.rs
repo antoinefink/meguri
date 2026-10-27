@@ -121,6 +121,26 @@ impl Exclusive<'_> {
         change: impl FnOnce(&mut WriteScope<'_>) -> Result<(), StorageError>,
         before_commit: impl FnOnce() -> Result<(), EngineError>,
     ) -> Result<Collection, ReplaceError> {
+        self.replace_verified_with_raw(stage, reason, change, || before_commit().map(|()| None))
+    }
+
+    /// A retained corrupt owner consumes the same verified T7 raw-pair
+    /// authority as initial Restore. Other replacement reasons cannot use it.
+    pub fn restore_verified_before_commit(
+        &mut self,
+        stage: ReplacementStage,
+        before_commit: impl FnOnce() -> Result<Option<device_state::RawRestoreAuthority>, EngineError>,
+    ) -> Result<Collection, ReplaceError> {
+        self.replace_verified_with_raw(stage, ReplaceReason::Restore, |_| Ok(()), before_commit)
+    }
+
+    fn replace_verified_with_raw(
+        &mut self,
+        stage: ReplacementStage,
+        reason: ReplaceReason,
+        change: impl FnOnce(&mut WriteScope<'_>) -> Result<(), StorageError>,
+        before_commit: impl FnOnce() -> Result<Option<device_state::RawRestoreAuthority>, EngineError>,
+    ) -> Result<Collection, ReplaceError> {
         let environment = self.verified_environment(reason)?;
         let live = self.collection().path().to_owned();
         let options = OpenOptions::new(environment.clock.as_ref(), environment.random.as_ref())
@@ -149,7 +169,7 @@ impl Exclusive<'_> {
         self.activate_finalised(
             artifact.stage,
             ReplaceReason::FullUpload,
-            before_commit,
+            || before_commit().map(|()| None),
             Some(artifact.identity),
         )
     }
@@ -158,7 +178,7 @@ impl Exclusive<'_> {
         &mut self,
         mut stage: ReplacementStage,
         reason: ReplaceReason,
-        before_commit: impl FnOnce() -> Result<(), EngineError>,
+        before_commit: impl FnOnce() -> Result<Option<device_state::RawRestoreAuthority>, EngineError>,
         identity: Option<crate::device_state::FileIdentity>,
     ) -> Result<Collection, ReplaceError> {
         let environment = self.verified_environment(reason)?;
@@ -189,15 +209,29 @@ impl Exclusive<'_> {
         } else {
             None
         };
-        if let Err(error) = before_commit()
-            .map_err(ReplaceError::from)
-            .and_then(|()| self.verified_environment(reason).map(|_| ()))
-        {
-            return Err(match media {
-                Some(media) => media.abort(error),
-                None => error,
-            });
-        }
+        let raw = match before_commit().map_err(ReplaceError::from).and_then(|raw| {
+            self.verified_environment(reason)?;
+            if raw.is_some()
+                && (reason != ReplaceReason::Restore
+                    || !self
+                        .collection()
+                        .core
+                        .exec
+                        .corrupt
+                        .load(std::sync::atomic::Ordering::Acquire))
+            {
+                return Err(EngineError::unavailable("retained WAL authority requires a corrupt Restore owner").into());
+            }
+            Ok(raw)
+        }) {
+            Ok(raw) => raw,
+            Err(error) => {
+                return Err(match media {
+                    Some(media) => media.abort(error),
+                    None => error,
+                });
+            }
+        };
         let media_cleanup = media.as_ref().map(|m| m.cleanup_error.clone());
         let media_recovered = media.as_ref().map(|m| m.recovered.clone());
         let threads = self.replacement_threads();
@@ -238,7 +272,7 @@ impl Exclusive<'_> {
                     tracked,
                     media,
                     threads,
-                    None,
+                    raw,
                 )
                 .map_err(|e| {
                     *record.lock().unwrap() = Some(e.clone());

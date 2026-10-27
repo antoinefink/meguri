@@ -8,7 +8,7 @@ use crate::{
 use meguri_engine::{
     CancelToken, Engine, EngineError, Generation, LifecycleState, LongOp, OpenConfig, ProgressPhase, ProgressSink,
     ports::{BackupService, GuardedTransferBackup, TransferBackup},
-    replace::{ReplaceError, ReplaceReason},
+    replace::ReplaceError,
 };
 use meguri_storage::{StorageError, paths::CollectionPaths};
 use std::{fs, path::Path, sync::Arc};
@@ -195,16 +195,11 @@ pub fn restore_backup(
         safety = Some(backup.before_restore(Some(exclusive.collection()), damaged, cancel)?);
         let safety_backup = safety.as_ref().and_then(|s| safety_name(&s.backup));
         exclusive
-            .replace_verified_before_commit(
-                stage,
-                ReplaceReason::Restore,
-                |_| Ok(()),
-                || {
-                    cancel.check()?;
-                    progress.set_phase(ProgressPhase::Committing);
-                    Ok(())
-                },
-            )
+            .restore_verified_before_commit(stage, || {
+                cancel.check()?;
+                progress.set_phase(ProgressPhase::Committing);
+                Ok(safety.as_mut().and_then(|s| s.raw_restore.take()))
+            })
             .map_err(|error| RestoreError::Replacement { error, safety_backup })
     } else {
         // Initial replacement acquires advisory ownership before this hook.

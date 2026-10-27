@@ -53,6 +53,15 @@ pub fn copy_fixture(name: &str) -> (TempDir, PathBuf) {
     (dir, path)
 }
 
+/// Independent sibling of the collection root, retained for the host's full
+/// lifetime. A backup directory nested under the collection is inadmissible.
+pub fn backup_directory(collection: &Path) -> TempDir {
+    tempfile::Builder::new()
+        .prefix("meguri-backups-")
+        .tempdir_in(collection.parent().unwrap().parent().unwrap())
+        .unwrap()
+}
+
 /// An engine with one collection open.
 pub struct Harness {
     pub dir: TempDir,
