@@ -367,6 +367,22 @@ fn exec_prints_observations_and_reports_pending_scenarios() {
 }
 
 #[test]
+fn exec_forced_backup_uses_the_fixture_harness_and_preserves_exact_output() {
+    let root = conformance();
+    let path = root.join("scenarios/package/backups/foreign-files.yaml");
+    let out = cli(&["conformance", "exec", path.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert!(out.stderr.is_empty(), "{}", text(&out.stderr));
+    let golden: Value =
+        serde_json::from_slice(&std::fs::read(root.join("goldens/package/backups/foreign-files.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        text(&out.stdout),
+        meguri_testkit::observe::golden_text(&golden["observations"])
+    );
+}
+
+#[test]
 fn diff_and_run_compare_with_the_goldens() {
     let dir = conformance();
     let empty = dir.join("scenarios/smoke/runner-empty.yaml");

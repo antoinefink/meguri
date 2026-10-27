@@ -80,6 +80,7 @@ pub struct Registry {
 impl Registry {
     /// Use a counted test witness on isolated fixture copies, never user data.
     /// This proves hook invocation, not production backup safety (host H6).
+    /// Scenarios requiring `force_backup` retain CoreHost's production provider.
     pub fn fixture_backup_witness(&mut self) {
         self.fixture_backup_witness = true;
     }
@@ -396,13 +397,19 @@ impl MeguriExecutor {
             sync: Default::default(),
             review_session: None,
         };
-        if self.registry.fixture_backup_witness {
+        self.configure_storage(&mut session);
+        Ok(session)
+    }
+
+    /// Choose before setup can promote the writer. F3 needs actual publication;
+    /// other fixture scenarios keep the hook-only witness they requested.
+    fn configure_storage(&self, session: &mut Session<'_>) {
+        if self.registry.fixture_backup_witness && !session.scenario.scenario.needs().ops.contains("force_backup") {
             session.storage.fixture_backup_witness();
         }
         if self.registry.record_changes {
             session.storage.record_changes();
         }
-        Ok(session)
     }
 
     /// D8: the new collection, when the scenario starts from one and an
@@ -573,12 +580,7 @@ impl MeguriExecutor {
                 sync: Default::default(),
                 review_session: None,
             };
-            if self.registry.fixture_backup_witness {
-                session.storage.fixture_backup_witness();
-            }
-            if self.registry.record_changes {
-                session.storage.record_changes();
-            }
+            self.configure_storage(&mut session);
             self.new_collection(&mut session)?;
             sessions.insert(name.clone(), session);
         }
@@ -769,6 +771,7 @@ fn merge(out: &mut Map<String, Value>, kind: &str, value: Value) -> Result<(), E
 mod host_tests {
     use super::*;
     use meguri_engine::UndoScope;
+    use meguri_storage::ReadRows;
 
     #[test]
     fn backup_adapters_share_the_disjoint_directory_before_and_after_promotion() {
@@ -780,8 +783,12 @@ mod host_tests {
         fs::write(
             &path,
             concat!(
-                "id: host/backup-adapters\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsteps:\n",
-                "  - add_backup_files: {names: ['foreign seed', 'é']}\n",
+                "id: host/backup-adapters\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\n",
+                "setup:\n",
+                "  config: {backups: {daily: 0, weekly: 0, monthly: 0, minimum_interval_mins: 30}}\n",
+                "  notes: [{notetype: Basic, fields: [current front, current back]}]\n",
+                "steps:\n",
+                "  - add_backup_files: {names: ['backup-2029-01-01-00.00.00.colpkg', 'foreign seed', 'é']}\n",
                 "  - observe: [backup_files]\n",
                 "  - force_backup: {copy_as: copy.colpkg}\n",
                 "  - observe: [backup_files]\n",
@@ -789,7 +796,7 @@ mod host_tests {
         )
         .unwrap();
         let loaded = crate::scenario::load(&path).unwrap();
-        let executor = MeguriExecutor::new();
+        let executor = MeguriExecutor::fixture_harness();
         let mut session = executor.session(&loaded, None).unwrap();
         executor.new_collection(&mut session).unwrap();
         assert!(matches!(session.storage.collection(), Some(SessionCollection::Raw(_))));
@@ -803,11 +810,23 @@ mod host_tests {
         assert_eq!(fs::read(backups.join("é")).unwrap(), b"");
         assert_eq!(
             executor.step(&mut session, &loaded.scenario.steps[1]).unwrap(),
-            json!({"backup_files": ["foreign seed", "é"]})
+            json!({"backup_files": ["backup-2029-01-01-00.00.00.colpkg", "foreign seed", "é"]})
         );
 
-        // F3 promotes the raw writer and must publish through the actual host
-        // provider into the folder F2 seeded; F5 must see that same publication.
+        // Note setup promotes before F3: provider selection cannot wait until
+        // the force_backup adapter runs. F2's directory must survive promotion.
+        executor.run_setup(&mut session).unwrap();
+        let current_rows = |reader: &meguri_storage::Reader| {
+            ["notes", "cards", "decks", "config"].map(|table| {
+                reader
+                    .execute_raw(&format!("SELECT * FROM {table} ORDER BY 1"), &[])
+                    .unwrap()
+            })
+        };
+        let (before, snapshot_mod) = {
+            let reader = session.storage.collection().unwrap().reader().unwrap();
+            (current_rows(&reader), reader.col().unwrap().modified)
+        };
         let name = "backup-2030-01-15-10.00.00.colpkg";
         assert_eq!(
             executor.step(&mut session, &loaded.scenario.steps[2]).unwrap(),
@@ -825,6 +844,39 @@ mod host_tests {
         let produced = fs::read(backups.join(name)).unwrap();
         assert!(!produced.is_empty());
         assert_eq!(fs::read(live.join("copy.colpkg")).unwrap(), produced);
+        assert!(!backups.join("backup-2029-01-01-00.00.00.colpkg").exists());
+        assert_eq!(session.storage.backup_calls(), 0);
+        let metadata =
+            crate::observe::parse_json(&fs::read_to_string(live.join("meguri-sidecar.json")).unwrap()).unwrap();
+        assert_eq!(
+            metadata["deviceState"]["lastBackup"],
+            json!({"name": name, "snapshotMod": snapshot_mod.0, "instant": session.clock.now_secs() * 1000})
+        );
+        let captured = meguri_package::inspect_collection_package(
+            &live.join("copy.colpkg"),
+            &meguri_package::CollectionPackageInspectContext {
+                collection_directory: dir.path(),
+                live_collection_size: 0,
+                reserved_space_bytes: 0,
+                clock: &*session.clock,
+                random: &*session.random,
+                space: &meguri_storage::space::StatvfsSpace,
+                is_cancelled: &|| false,
+            },
+        )
+        .unwrap();
+        assert_eq!((captured.facts().notes, captured.facts().cards), (1, 1));
+        let recovered = meguri_storage::open_collection(
+            &captured.collection_path(),
+            &meguri_storage::OpenOptions::new(&*session.clock, &*session.random),
+        )
+        .unwrap();
+        {
+            let reader = recovered.open_reader(meguri_storage::ReaderRole::Query).unwrap();
+            assert_eq!(current_rows(&reader), before);
+            assert_eq!(reader.col().unwrap().modified, snapshot_mod);
+        }
+        recovered.close().unwrap();
         assert_eq!(fs::read(backups.join("foreign seed")).unwrap(), b"");
         assert_eq!(fs::read(backups.join("é")).unwrap(), b"");
         assert_eq!(
@@ -833,6 +885,46 @@ mod host_tests {
         );
         assert!(!live.join("backups").exists());
         executor.finish(&mut session).unwrap();
+    }
+
+    #[test]
+    fn fixture_actor_sessions_select_real_forced_backups_and_keep_hook_only_witnesses() {
+        for forced in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("actor-backup.yaml");
+            let op = if forced {
+                "force_backup: {}"
+            } else {
+                "delete_decks: {decks: [Protected]}"
+            };
+            std::fs::write(
+                &path,
+                format!(
+                    "id: host/actor-backup\nclock: {{tz: UTC, start: '2030-01-15T10:00:00'}}\n\
+                     actors: [meguri]\nsetup: {{decks: [Protected]}}\nsteps:\n  - {op}\n"
+                ),
+            )
+            .unwrap();
+            let loaded = crate::scenario::load(&path).unwrap();
+            let executor = MeguriExecutor::fixture_harness();
+            let actor = loaded.scenario.actors()[0].clone();
+            let mut actors = executor.actors(&loaded, std::slice::from_ref(&actor)).unwrap();
+            let ids = actors.setup(&actor).unwrap();
+            let (output, _) = actors.step(&actor, &loaded.scenario.steps[0], &ids).unwrap();
+            let session = actors.session(&actor).unwrap();
+            let backups = session.storage.backup_directory_for_testing();
+            if forced {
+                let name = "backup-2030-01-15-10.00.00.colpkg";
+                assert_eq!(output, json!({"force_backup": {"name": name}}));
+                assert!(!std::fs::read(backups.join(name)).unwrap().is_empty());
+                assert_eq!(session.storage.backup_calls(), 0);
+            } else {
+                assert_eq!(output, json!({"delete_decks": {"count": 1}}));
+                assert_eq!(session.storage.backup_calls(), 1);
+                assert_eq!(std::fs::read_dir(backups).unwrap().count(), 0);
+            }
+            executor.finish(session).unwrap();
+        }
     }
 
     #[test]
