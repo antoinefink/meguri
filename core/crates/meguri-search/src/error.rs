@@ -83,6 +83,18 @@ pub enum SearchFailure {
     IdList { context: String },
     /// The database refused the statement built for the search.
     DatabaseRefusal,
+    /// A text pattern exceeds T3.3's byte limit.
+    PatternTooLong,
+    /// T12.1's compiled expression limit; `pattern` is T16's user text.
+    ExpressionTooLarge { pattern: String },
+    /// Every note type excludes every field (T7.2).
+    NoSearchableField,
+    /// An `sc:` term without any cloze note type (T9.1).
+    NoClozeNoteType,
+    /// A `re:` or `w:` term; T16 selects the first excluded note type.
+    AllFieldsExcluded { notetype: String },
+    /// A non-finite property operand (P14); the whole term as E7 defines it.
+    NumberOutOfRange { term: String },
 }
 
 impl ErrorKind {
@@ -220,7 +232,7 @@ impl ErrorKind {
             ErrorKind::InvalidDupe => "`dupe:` takes a note type id, then a comma, then the text.".to_owned(),
             ErrorKind::Malformed => "This search could not be read. Look for a typing slip.".to_owned(),
             ErrorKind::InvalidRegex { pattern, reason } => {
-                format!("`{pattern}` is not a valid regular expression: {reason}")
+                format!("`{}` is not a valid regular expression: {}", p(pattern), p(reason))
             }
             ErrorKind::SearchFailed(SearchFailure::NegatedOperator) => {
                 r#"A `-` cannot negate `and` or `or`. To leave out the word itself, quote it: `-"and"`."#.to_owned()
@@ -231,6 +243,27 @@ impl ErrorKind {
             ErrorKind::SearchFailed(SearchFailure::DatabaseRefusal) => {
                 "This search is too large to run. Split it into smaller searches.".to_owned()
             }
+            ErrorKind::SearchFailed(SearchFailure::PatternTooLong) => {
+                "This search term is too long. Shorten it.".to_owned()
+            }
+            ErrorKind::SearchFailed(SearchFailure::ExpressionTooLarge { pattern }) => format!(
+                "The regular expression `{}` is too large to search with. Make it shorter.",
+                p(pattern)
+            ),
+            ErrorKind::SearchFailed(SearchFailure::NoSearchableField) => {
+                "Every note type leaves all its fields out of searches without a field name. Search a named field instead, as in `front:text`.".to_owned()
+            }
+            ErrorKind::SearchFailed(SearchFailure::NoClozeNoteType) => {
+                "`sc:` searches cloze note types, and this collection has none.".to_owned()
+            }
+            ErrorKind::SearchFailed(SearchFailure::AllFieldsExcluded { notetype }) => format!(
+                "The note type `{}` leaves all its fields out of searches without a field name, so `re:` and `w:` cannot run. Search a named field instead, as in `front:re:text`.",
+                p(notetype)
+            ),
+            ErrorKind::SearchFailed(SearchFailure::NumberOutOfRange { term }) => format!(
+                "`{}` needs a finite number, and this one is out of range or not a number.",
+                p(term)
+            ),
         }
     }
 }

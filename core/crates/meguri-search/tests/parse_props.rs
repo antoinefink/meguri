@@ -595,6 +595,9 @@ fn plan_error(text: &str) -> SearchError {
 #[test]
 fn every_message_is_the_spec_text() {
     use meguri_search::SearchFailure;
+    let pattern = "a`{1000}{1000}";
+    let notetype = "Basic`excluded";
+    let term = "\"prop:s>inf\"";
     // (label, error, provided, context): the texts from E2's rules.
     let cases: Vec<(&str, SearchError, &str, &str)> = vec![
         ("misplaced_and", error("and a"), "", ""),
@@ -631,17 +634,69 @@ fn every_message_is_the_spec_text() {
             "",
             "",
         ),
+        (
+            "search_failed (pattern too long)",
+            SearchError::new(ErrorKind::SearchFailed(SearchFailure::PatternTooLong), 0..1),
+            "",
+            "",
+        ),
+        (
+            "search_failed (expression too large)",
+            SearchError::new(
+                ErrorKind::SearchFailed(SearchFailure::ExpressionTooLarge {
+                    pattern: pattern.into(),
+                }),
+                0..1,
+            ),
+            "",
+            "",
+        ),
+        (
+            "search_failed (no searchable field)",
+            SearchError::new(ErrorKind::SearchFailed(SearchFailure::NoSearchableField), 0..1),
+            "",
+            "",
+        ),
+        (
+            "search_failed (no cloze note type)",
+            SearchError::new(ErrorKind::SearchFailed(SearchFailure::NoClozeNoteType), 0..1),
+            "",
+            "",
+        ),
+        (
+            "search_failed (all fields excluded)",
+            SearchError::new(
+                ErrorKind::SearchFailed(SearchFailure::AllFieldsExcluded {
+                    notetype: notetype.into(),
+                }),
+                0..1,
+            ),
+            "",
+            "",
+        ),
+        (
+            "search_failed (number out of range)",
+            SearchError::new(
+                ErrorKind::SearchFailed(SearchFailure::NumberOutOfRange { term: term.into() }),
+                0..1,
+            ),
+            "",
+            "",
+        ),
     ];
     let spec = spec_messages();
     let mut labels: Vec<&str> = spec.iter().map(|(label, _)| label.as_str()).collect();
-    // `{pattern}` and `{reason}` belong to text-matching.md (U81).
+    // The regex case below checks its separate pattern/reason template.
     labels.retain(|label| *label != "invalid_regex");
     assert_eq!(labels, cases.iter().map(|case| case.0).collect::<Vec<_>>());
     for (label, error, provided, context) in cases {
         let (_, text) = spec.iter().find(|(l, _)| l == label).unwrap();
         let expected = text
             .replace("{provided}", &provided.replace('`', "'"))
-            .replace("{context}", &context.replace('`', "'"));
+            .replace("{context}", &context.replace('`', "'"))
+            .replace("{pattern}", &pattern.replace('`', "'"))
+            .replace("{notetype}", &notetype.replace('`', "'"))
+            .replace("{term}", &term.replace('`', "'"));
         assert_eq!(error.message(), expected, "{label}");
         assert_eq!(error.to_string(), expected, "{label}");
     }
@@ -658,6 +713,18 @@ fn every_message_is_the_spec_text() {
         text.replace("{pattern}", "a(")
             .replace("{reason}", "the group is not closed")
     );
+    let regex = SearchError::new(
+        ErrorKind::InvalidRegex {
+            pattern: "a`(".into(),
+            reason: "unclosed group near `(".into(),
+        },
+        0..5,
+    );
+    let expected = text
+        .replace("{pattern}", "a'(")
+        .replace("{reason}", "unclosed group near '(");
+    assert_eq!(regex.message(), expected);
+    assert_eq!(regex.to_string(), expected);
 }
 
 // R1025, E6: no depth or length exhausts the stack.
