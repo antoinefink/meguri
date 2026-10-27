@@ -1,0 +1,44 @@
+# Equal layouts, incoming newer (specs/package/notetype-merge.md J4.2, J4.5,
+# J9; package-ops.md E6). The package's Pair has other CSS: the edit was
+# exported and undone, so the target's Pair is older. The merge writes the
+# incoming record (its CSS) stamped now, leaves the notes untouched and does
+# not set col.scm.
+id: package/notetype-merge/same-schema
+description: A merge of equal layouts replaces the target's record without a schema change.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  # A raw write first: the undo history then holds only this scenario's steps.
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{css: ".card { margin: 2px; }"}]}
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - undo: {}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM notetypes WHERE name = 'Pair'"}
+  - db_exec: {sql: "SELECT id, flds, mod, usn FROM notes ORDER BY id"}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM notetypes WHERE name = 'Pair'"}
+  - observe:
+      - legacy_json: {notetypes: [Pair]}
+  - db_exec: {sql: "SELECT id, flds, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}

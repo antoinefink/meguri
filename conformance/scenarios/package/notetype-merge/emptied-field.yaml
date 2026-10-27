@@ -1,0 +1,43 @@
+# Fields the incoming note type lacks (specs/package/notetype-merge.md J7,
+# J9, J10; package-ops.md E6). The package's Pair is Front, Back; the
+# target's gains Notes after the export, and n1 a Notes value. With Merge
+# note types and Update notes Always,
+# the merged layout is the target's, the updated notes lose their Notes
+# values and col.scm is not set (the merge has no structural effect; Meguri
+# shows J10's preview first, run here as accepted).
+id: package/notetype-merge/emptied-field
+description: Updated notes lose the values of fields the incoming note type lacks.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - advance: 1m
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{add_field: Notes}]}
+  - edit_note: {note: "#n1", fields: {Notes: "local note"}}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: always, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}
+  - db_exec: {sql: "SELECT flds, mod FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}

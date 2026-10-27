@@ -1,0 +1,55 @@
+# A standard and a cloze note type would merge (specs/package/
+# notetype-merge.md J2, J13; apkg-import.md I8; package-ops.md E6.4).
+# Stage 1: the package's Pair is cloze (protobuf field 1 appended with
+# db_exec before the export, appended again as standard after it), the
+# target's standard, same id: notetype_kind_conflict. Stage 2: the package's
+# note g in the cloze Gap, the target's g moved to the standard Pair with
+# db_exec: notetype_kind_conflict again. Each time the target is unchanged.
+id: package/notetype-merge/kind-conflict
+description: Merging note types of different kinds is refused, by id and through a GUID match.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates: [{name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}} {{Extra}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Gap, deck: Lang, fields: ["{{c1::two}}", b]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - db_exec: {sql: "UPDATE notetypes SET config = CAST(config || X'0801' AS BLOB) WHERE name = 'Pair'"}
+  - reopen: {}
+  - advance: 1m
+  - export: {format: apkg, name: cloze.apkg, limit: {notes: ["#n1"]}, scheduling: true, presets: false, media: false}
+  - export: {format: apkg, name: gap.apkg, limit: {notes: ["#n2"]}, scheduling: true, presets: false, media: false}
+  - db_exec: {sql: "UPDATE notetypes SET config = CAST(config || X'0800' AS BLOB) WHERE name = 'Pair'"}
+  - reopen: {}
+  - advance: 1m
+  - observe:
+      - db_dump: {tables: [notes, cards, decks, config]}
+  - import: {format: apkg, name: cloze.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - db_dump: {tables: [notes, cards, decks, config]}
+  - db_exec: {sql: "UPDATE notes SET mid = (SELECT id FROM notetypes WHERE name = 'Pair') WHERE id = (SELECT max(id) FROM notes)"}
+  - observe:
+      - db_dump: {tables: [notes, cards, decks, config]}
+  - import: {format: apkg, name: gap.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - db_dump: {tables: [notes, cards, decks, config]}

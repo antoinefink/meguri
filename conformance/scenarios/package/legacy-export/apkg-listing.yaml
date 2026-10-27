@@ -1,0 +1,42 @@
+# The layout of a legacy package (specs/package/legacy-export.md L2, L3, L12;
+# model-ops.md L6; package-ops.md E3). Notes of a standard and a cloze note
+# type in two decks, a filtered deck and a review-log row, exported with the
+# whole-collection legacy form: entries meta (stored), collection.anki21
+# (deflated), the placeholder collection.anki2 and media (stored);
+# meta_version 2; collection.anki21 at schema 11 in rollback mode with the
+# collection's counts, which Anki opens; the placeholder.
+id: package/legacy-export/apkg-listing
+description: A legacy package's entries, methods, meta version and schema-11 collection.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  presets:
+    - {name: Slow, new_per_day: 5}
+  decks: [Lang, {name: Other, preset: Slow}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates: [{name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}} {{Extra}}"}]
+      css: ".card { margin: 1px; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Other, fields: [two, b]}
+    - {notetype: Gap, deck: Lang, fields: ["{{c1::three}}", c]}
+steps:
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good}
+  # A filtered deck Cram (fixed id 900) holds c2, its home deck Other.
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  - db_exec:
+      sql: "UPDATE cards SET odid = did, did = 900, odue = due, due = -100000 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
+  - reopen: {}
+  - advance: 1m
+  - export: {format: apkg, name: legacy.apkg, legacy: true}
+  - observe:
+      - package_listing: {name: legacy.apkg}
