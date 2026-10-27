@@ -210,8 +210,8 @@ impl WalRecovery {
         let original = fingerprint_native(&self.authority.source_wal.path)?;
         let retired = fingerprint_native(&self.retired)?;
         match (original, retired) {
-            (Some(pair), None) if Some(pair) == expected => Ok(false),
-            (None, Some(pair)) if Some(pair) == expected => Ok(true),
+            (Some(pair), None) if Some(&pair) == expected.as_ref() => Ok(false),
+            (None, Some(pair)) if Some(&pair) == expected.as_ref() => Ok(true),
             _ => Err(failure("WAL locations are missing, substituted or ambiguous")),
         }
     }
