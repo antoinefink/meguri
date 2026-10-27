@@ -1509,3 +1509,24 @@ screens:
   home.deckName:
     status: sketch
     fix_rounds: 0
+  settings.accountSync:
+    status: sketch
+    fix_rounds: 0
+  sync.status:
+    status: sketch
+    fix_rounds: 0
+  sync.connect:
+    status: sketch
+    fix_rounds: 0
+  sync.publicationChoice:
+    status: sketch
+    fix_rounds: 0
+  sync.replaceLocal:
+    status: sketch
+    fix_rounds: 0
+  sync.replaceCloud:
+    status: sketch
+    fix_rounds: 0
+  sync.reviewConflicts:
+    status: sketch
+    fix_rounds: 0
