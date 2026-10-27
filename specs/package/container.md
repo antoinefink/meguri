@@ -18,7 +18,7 @@ A package is a zip archive (PKWARE APPNOTE 6.3.x, zip64 included). Three formats
 | latest | version 3 | `collection.anki21b` | zstd (P4) | 18 | protobuf in zstd (P5) | zstd (U122) |
 
 - "Raw" means the bytes of a SQLite database file, which start with the 16 bytes `SQLite format 3` and a NUL.
-- `.colpkg` and `.apkg` files use the same container. Which flow imports a file (R1596) is U120's and U124's.
+- `.colpkg` and `.apkg` files use the same container. Which flow imports a file (R1596) is U120's and U124's: P18 classifies it. The legacy formats are read as P17 says; a deck package is imported as `package/apkg-import` says.
 - A **collection-only package** is a latest-format package whose media map lists no file. Anki's periodic backups are such packages, and so is its collection export with media turned off.
 - Entry names are compared byte for byte, letter case included. All names this spec uses are ASCII.
 
@@ -47,7 +47,7 @@ A package is a zip archive (PKWARE APPNOTE 6.3.x, zip64 included). Three formats
   | anything else: 0, 4, any negative value | refused as `TooNew`, "made by a newer version" (R1597) |
 
 - No `meta` entry: legacy 2 when the archive has an entry `collection.anki21`, else legacy 1.
-- Until U120 adds the legacy reader, a legacy package is refused with `UnsupportedFormat` and nothing is written.
+- Until U120 adds the legacy reader, a legacy package is refused with `UnsupportedFormat` and nothing is written. That reader is P17.
 - Writer: the entry holds exactly the two bytes `08 03`.
 
 Examples: `08 03` is the latest format; `08 04` and the empty entry are `TooNew`; `08 83 80 80 80 10` (field 1 = 2^32 + 3) reads as 3, the latest format; `0a 01 33` (field 1 length-delimited) and `ff` (a truncated varint) are `Corrupt`.
@@ -231,7 +231,7 @@ Checks a collection package before a restore (U127), and later before a `.colpkg
 | Error | When |
 |---|---|
 | `TooNew` | the `meta` version is not 1, 2 or 3 (P3) |
-| `UnsupportedFormat` | a legacy package, until U120 |
+| `UnsupportedFormat` | a legacy package, until U120 (P17) |
 | `SchemaUnsupported{gate}` | the open gate refused the collection inside as `TooOld`, `TooNew` (version 12, 13 or above 18) or `V1Scheduler`; `gate` is that error, so the message can say which (U153) |
 | `Corrupt{detail}` | everything else that is wrong with the package: P2, P3, P4, P5, P8, the gate's `NotACollection`, `UpgradeFailed` and `Corrupt`, a failed integrity check; `detail` names the check for logs |
 | `InsufficientSpace{needed, available}` | P10 |
@@ -272,7 +272,9 @@ Checks a collection package before a restore (U127), and later before a `.colpkg
 
 This extension implements `package/file-export#E7`. P11 remains the explicit
 collection-only writer for backups and retained server copies. Its layout and
-verification do not change. No legacy or deck-subset behavior is added here.
+verification do not change. The writer itself has no legacy or deck-subset
+behavior; deck packages (`.apkg`) reuse it and its verification unchanged, with
+their own collection file and selected media (`package/apkg-export#A10`).
 
 The media-capable writer takes the closed collection snapshot and the immutable
 captured media inventory of E7. Reuse P11's `meta`, collection and placeholder
@@ -373,3 +375,36 @@ Until this entire path is implemented and verified, retain the explicit media-in
 | Native chain | Mac, iPhone and iPad: Files/native import of generated media, rendered image/audio, accepted answer, relaunch without fixture reseed, native export with all media, then independent package comparison of saved reviews, media names and bytes. |
 
 Keep `package/file-export` E7.4 and `fixtures/synthetic-collections` F11.1 independent expected-source rules. Freeze the generated input and any declared pre-launch preparation before the app runs. Derive expected post-import stamps and accepted review facts from their existing contracts and recorded inputs. Never make the app's later state or decoded export its own expected baseline. Existing local focused, kill and native checks remain required; neither this addendum nor export proof closes full U124/U162 or any milestone.
+
+## P17. Legacy formats (U120)
+
+Added for U120. The reader of the legacy formats of P1 (legacy 1 and legacy 2), used by U120's deck package import (`package/apkg-import#I3`) and by U124's collection package import. Writing them is U123's. P2, P3 and P8 apply unchanged; P4, P5 and P6 are replaced by the rules below. Anki 26.9.3 reads these formats the same way except where a bullet says otherwise.
+
+- **Collection entry.** `collection.anki2` for legacy 1, `collection.anki21` for legacy 2; no other entry is read as the collection (a legacy 2 package may also hold a `collection.anki2`, which is then ignored). Method 0 or 8. Missing: `Corrupt`. Its content after the zip method is the collection file itself, not zstd: content that does not start with the SQLite header (P1) is `Corrupt`. It is extracted into the staging directory as `collection.anki2` (P9), counted against P8's collection limits (for a stored member the compressed size is the decoded size), and then goes through the open gate as P12 step 3 says (or `package/apkg-import#I3` step 3), which upgrades schema 11 on the staging copy.
+- **Media map.** Entry `media`, method 0 or 8, not zstd, at most P8's 64 MiB. Its content is UTF-8 JSON: one object whose members map a zip member number, as a string, to a media file name.
+  - Not valid UTF-8 or JSON, not an object, a member value that is not a string, or two members with the same key: `Corrupt` (Anki keeps the last of two equal keys).
+  - A key is ASCII digits only, read as a decimal number (leading zeros allowed: `007` names member `7`, as in Anki); any other key is `Corrupt` (Anki also takes a leading `+`).
+  - A name that is empty, is `.` or `..`, or contains `/`: `Corrupt`. Any other name is kept as `text/media-filenames#F1` transforms it (Anki normalizes legacy names instead of refusing them, unlike P6); a name the transform leaves empty: `Corrupt`. Two members whose kept names are equal: `Corrupt` (Meguri; Anki keeps one).
+  - Entries are listed in ascending member number. They carry no size and no SHA-1: a reader that needs them hashes the payload.
+  - No `media` entry: a map with no entry (as Anki).
+- **Media files.** The member named by the key's number in decimal without leading zeros; method 0 or 8; its content is the file's bytes, not zstd. Every decoded byte counts toward P8's 16 GiB. A missing or unreadable member is `Corrupt` when a reader needs its bytes (`package/apkg-import#I12.4`; U124 for collection packages); a member no reader needs is never opened.
+- **Preflight.** P10's inspect row with E the collection member's uncompressed size from the zip directory, then the pre-upgrade row (the file is at schema 11).
+
+## P18. Classifying a file (R1595, R1596)
+
+Added for U120. One pure function used by U162's file intake and by the local servers: it maps a file to `Apkg`, `Colpkg` or `Unsupported`.
+
+1. **Name first.** The file's name (its last path component) in Unicode default lowercase (`media/media-files#M2`'s case key):
+   - ends with `.colpkg`, is exactly `collection.apkg`, or starts with `backup-` and ends with `.apkg`: `Colpkg`;
+   - otherwise ends with `.apkg` or `.zip`: `Apkg`.
+   Nothing is read for these names. Anki's desktop routes the same names the same way.
+2. **Content otherwise** (R1595: renamed packages): the central directory is read as P2 says, within P8's entry limit. When it reads and holds an entry named `meta`, `collection.anki21b`, `collection.anki21` or `collection.anki2`: `Apkg`. Anything else, an unreadable file included: `Unsupported`. Anki does not look at the content of other names.
+
+| Name | Class |
+|---|---|
+| `deck.apkg`, `Deck.APKG`, `deck.zip` (whatever its content) | `Apkg` |
+| `collection.apkg`, `COLLECTION.APKG`, `backup-2026-01-01-10.00.00.apkg`, `x.colpkg` | `Colpkg` |
+| `deck` (no extension) holding a package | `Apkg` |
+| `notes.txt` holding text | `Unsupported` |
+
+A file classified `Apkg` or `Colpkg` that is not a valid package fails later, at inspect, with `Corrupt` or `TooNew`.

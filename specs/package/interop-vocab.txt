@@ -77,3 +77,46 @@ minimum_interval_mins
 quick_check
 SQLITE_CORRUPT
 SQLITE_NOTADB
+# Deck package export (apkg-export.md, U122/U124): config keys, card data keys,
+# deck, preset and note type record fields, the LaTeX image name parts and the
+# CSS and template forms the media selection reads.
+creationOffset
+localOffset
+rollover
+fsrs_params_4
+fsrs_params_5
+fsrs_params_6
+config_id
+extend_new
+extend_review
+review_limit
+new_limit
+review_limit_today
+new_limit_today
+desired_retention
+markdown_description
+latex_svg
+q_format
+a_format
+mtime_secs
+notetypes
+lrt
+displaymath
+# Deck package import (apkg-import.md, U120): the synced import option keys
+# and their stored value, the import log members, and the record fields the
+# import and its scheduler conversion read.
+mergeNotetypes
+updateNotes
+updateNotetypes
+withScheduling
+withDeckConfigs
+IfNewer
+found_notes
+missing_notetype
+missing_deck
+first_field_match
+empty_first_field
+original_id
+sort_field_idx
+learn_steps
+relearn_steps
