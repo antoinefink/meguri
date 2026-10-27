@@ -5,4 +5,6 @@
 usn
 mod
 unicase
+# Anki's tag completion request field (tags/complete C4)
+match_limit
 flagLabels

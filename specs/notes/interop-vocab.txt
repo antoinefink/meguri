@@ -26,6 +26,9 @@ tags
 flags
 nextPos
 curModel
+curDeck
+addToCur
+guiAddCards
 lastDeck
 lastNotetype
 normalize_note_text

@@ -5,7 +5,7 @@ Requirements: R807, R808; supports R774, R809, R810, R811, R812; AE34
 Anki: 26.09.3
 Scenarios: conformance/scenarios/notes/fields-check/
 
-The check the editor runs on a note draft while the user types (R807, R812): whether its first field is empty, whether its cloze markup fits its note type, and whether another note already has the same first field. It reads the collection and writes nothing. U27 provides it; the editor services (U191) and the Add and Edit flows (U195, U196) call it and decide what each state means for the user, with their own wording. Shared with U191, which may add to this file.
+The check the editor runs on a note draft while the user types (R807, R812): whether its first field is empty, whether its cloze markup fits its note type, and whether another note already has the same first field. It reads the collection and writes nothing. U27 provides it; the editor services (U191) and the Add and Edit flows (U195, U196) call it and decide what each state means for the user, with their own wording. Shared with U191, which may add to this file. U191's other editor services are `notes/add-defaults` (the starting deck and note type) and `tags/complete` (tag suggestions).
 
 ## K1. Input and output
 
