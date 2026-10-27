@@ -521,6 +521,10 @@ fn production_backup_registration_allows_fallback_drop_and_reopen_without_close(
         })
         .unwrap();
 
+    // Settle prior finite work to isolate the registered provider's ownership.
+    assert!(host.derived().wait_idle(std::time::Duration::from_secs(5)));
+    engine.maintenance().wait_idle_for_testing();
+
     // This deterministic handoff refuses CoreHost's best-effort drop close.
     // The last engine owner must still shut down the writer on its own.
     let handoff = engine.reserve_collection_export_handoff().unwrap();

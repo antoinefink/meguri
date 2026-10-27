@@ -145,3 +145,32 @@ Final focused receipts on the repaired source:
 
 The original batch base, frozen-server dispositions and U127 escalation remain
 unchanged. No Unit trailer or integration acceptance is added by these repairs.
+
+## Fallback-drop test preparation
+
+`gate/20261027T220106Z-19754` ran on clean `85b9ebc0`. Static checks,
+canaries, lint and dependency policy passed. Its Rust stage captured
+`meguri-host::lifecycle::production_backup_registration_allows_fallback_drop_and_reopen_without_close`
+failing the immediate weak-engine assertion. The orchestrator stopped the gate
+after capturing that active failure, avoiding remaining verification of the
+known-bad test. Its terminal result is cancelled/incomplete, not pass; the
+remaining T0/T1 checks were not supplied.
+
+Independent source diagnosis found two finite engine owners: derived builders
+and scheduled maintenance. Both can temporarily hold an engine reference.
+The production backup provider remains weak.
+This regression deliberately refuses normal close using an export handoff; it
+does not prove successful close's provider-join guarantee. D7 permits refresh to
+stop at its next batch. The filtered fixer prepares this provider-cycle test by
+waiting on the existing derived and maintenance idle barriers before taking the
+handoff. Every immediate final weak-engine, writer, reader, retained-provider
+and reopen assertion stays unchanged. No sleep, polling, retry, production
+change or timing-limit change was introduced.
+
+The first filtered export omitted a type qualifier. Independent review and
+`core-test/20261027T221436Z-52539` both caught the compile error; retain that
+failed receipt. The corrected export from `cleanroom/20261027T221515Z-53151`
+uses the file's existing fully qualified duration convention. The scoped final
+review is clear. `core-test/20261027T221606Z-53831` passed all 21 lifecycle
+tests with zero skips. `private/20261027T221616Z-54249` passed. These are scoped
+integration repairs and do not add another whole-unit review round or acceptance.
