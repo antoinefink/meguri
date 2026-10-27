@@ -1065,7 +1065,15 @@ fn forced_empty_unchanged_backups_keep_every_file_and_preserve_r6_and_unknown_me
         active["futureIdentityMember"] = serde_json::json!(["opaque"]);
         state.insert("oneWayChoicePending".into(), true.into());
         state.insert("futureState".into(), serde_json::json!({"nested": 92}));
-        state.insert("lastBackup".into(), serde_json::json!({"futureBackup": "preserve"}));
+        state.insert(
+            "lastBackup".into(),
+            serde_json::json!({
+                "snapshotMod": 0_i64,
+                "instant": 1_894_701_599_i64,
+                "name": "backup-2030-01-15-09.59.59.colpkg",
+                "futureBackup": "preserve"
+            }),
+        );
         Ok(())
     })
     .unwrap();
@@ -1228,7 +1236,7 @@ fn invalid_required_backup_identity_metadata_retains_the_durable_file_without_re
             meguri_engine::ports::BackupFailureCause::Engine(ref error)
                 if matches!(error.as_ref(),
                     meguri_engine::EngineError::Storage(meguri_storage::StorageError::Io { detail })
-                        if detail == "backup metadata requires existing device identity and journal")
+                        if detail == "publication recovery blocked: invalid maintenance record")
         ));
         let meguri_engine::ports::BackupPublication::Durable(receipt) = failure.publication else {
             panic!("published file must be reported for {field}")
