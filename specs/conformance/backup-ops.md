@@ -9,9 +9,11 @@ The scenario vocabulary for backups (U126): the ops `add_backup_files`, `force_b
 
 ## F1. The backups folder of a scenario
 
-- Every scenario has one backups folder: the directory `backups` in its session directory, empty when the scenario starts. Each executor creates it before the first step that needs it.
-- Meguri passes that path to the core as the collection's backups folder (`package/backups#B1`).
-- The folder is part of the session directory, so it crosses a handoff (`dsl.md` D9.2).
+- Every scenario has one logical backups folder, `backups` under its session root, initially empty. Create it before the first step that needs it.
+- The handoff layout remains `<root>/backups` (`dsl.md` D9.2). The collection stays at `<root>/collection.anki2`, and exported or `copy_as` package names remain directly under that root.
+- Meguri may keep the runtime backups folder in separate session-owned storage outside the live collection root. Pass that actual folder to the core (`package/backups#B1`). F2 seeding, F3 backup creation, F5 listing and raw-to-hosted promotion must use the same stable folder for the session.
+- At hand-out, map that folder's contents to `<root>/backups`; at hand-in, map `<root>/backups` back to the session's runtime folder. This changes location only: preserve backup filenames and bytes and the existing handoff copy/refusal rules. Do not rewrite packages or change observations, retention or other backup behavior. On hand-in, `<root>/backups` replaces the prior runtime snapshot (absence means empty); on hand-out, the published snapshot keeps no earlier backup entries, with removal confined to operation/session-owned destination data.
+- The logical handoff layout never permits nesting the runtime backups folder under the live collection root or weakening the host's path-separation checks.
 
 ## F2. `add_backup_files`
 
