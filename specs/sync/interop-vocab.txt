@@ -74,3 +74,20 @@ timeToday
 lastUnburied
 curDeck
 normalize_note_text
+# CloudKit records (cloudkit-records.md K6, K13 to K15, K24; U113): config keys,
+# card and field/template columns, the unique name indexes of decks and
+# notetypes, and the per-deck and per-notetype config key prefixes
+# (the scan reads `_deck_` as `deck` and `_nt_` as `nt`)
+nextPos
+activeDecks
+curModel
+localOffset
+lastDeck
+lastNotetype
+odue
+odid
+ntid
+idx_decks_name
+idx_notetypes_name
+_deck_
+_nt_
