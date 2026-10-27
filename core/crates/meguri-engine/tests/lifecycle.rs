@@ -342,18 +342,21 @@ fn a_corrupt_collection_refuses_ops_and_lets_only_restore_and_one_way_sync_take_
         .collection
         .run(OpSpec::named("edit", OpSource::UserUndoable), |_| Ok(()))
         .unwrap_err();
-    assert!(matches!(refused, EngineError::CollectionUnavailable { .. }));
+    assert_eq!(refused, EngineError::CollectionCorrupt);
     assert!(matches!(
         h.engine.acquire_slot(LongOp::CheckDatabase),
         Err(EngineError::CollectionUnavailable { .. })
     ));
     let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
     let exclusive = slot.enter_exclusive(false).unwrap();
-    // The restore's own ops are admitted.
-    exclusive
+    let refused = exclusive
         .collection()
-        .run(OpSpec::named("restore_step", OpSource::Maintenance), |_| Ok(()))
-        .unwrap();
+        .run(
+            OpSpec::named("restore_step", OpSource::Maintenance),
+            |_| -> Result<(), EngineError> { panic!("corrupt collection must refuse restore_step") },
+        )
+        .unwrap_err();
+    assert_eq!(refused, EngineError::CollectionCorrupt);
     drop(exclusive);
     assert!(
         matches!(h.engine.state(), LifecycleState::Failed { .. }),
