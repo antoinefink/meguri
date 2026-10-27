@@ -94,9 +94,65 @@ mg_conf__cleanup() {
   mg__remove_unreserved_run_containers
 }
 
+mg_conf__scratch() {
+  python3 -I -B "$MG_ROOT/tools/mg.d/conformance-scratch.py" \
+    --root "$MG_ROOT" --run "$MG_RUN_ID" --run-dir "$MG_RUN_DIR" \
+    --owner "${MG_CONF_NATIVE_OWNER:-}" "$@"
+}
+
+mg_conf__native_error() {
+  MG_CONF_NATIVE_ERROR=true
+  mg_failure native/scratch "native scratch failed; see log.txt"
+  mg_status error
+}
+
+mg_conf__native_cleanup() {
+  [ -n "${MG_CONF_NATIVE_OWNER:-}" ] || return 0
+  mg_conf__scratch cleanup || { mg_conf__native_error; return 1; }
+}
+
 # mg_conf__cli_native <args...>: meguri-cli on the host (macOS).
+# Only scenario execution inherits scratch TMPDIR; Cargo and metadata commands
+# retain the host environment. This also covers the T0 freshness replay and
+# native offline segments of T1 chains.
 mg_conf__cli_native() {
-  (cd "$MG_ROOT/core" && cargo run -q -p meguri-cli -- "$@")
+  local selected rc executable
+  case "${1:-}/${2:-}" in
+    conformance/run|conformance/exec|conformance/diff)
+      selected="$(mg_conf__scratch selected "$@")" || { mg_conf__native_error; return 2; }
+      ;;
+    *) selected=false ;;
+  esac
+  if [ "$selected" != true ]; then
+    (cd "$MG_ROOT/core" && cargo run -q -p meguri-cli -- "$@")
+    return $?
+  fi
+  [ "${MG_CONF_NATIVE_ERROR:-false}" = false ] || return 2
+  # Register in the job shell, before any allocation (never in $(...)).
+  if [ -z "${MG_CONF_NATIVE_TMPDIR:-}" ]; then
+    MG_CONF_NATIVE_OWNER="$(python3 -I -B -c 'import uuid; print(uuid.uuid4().hex)')" || return 2
+    mg_on_exit mg_conf__native_cleanup
+  fi
+  (cd "$MG_ROOT/core" && cargo build -q -p meguri-cli --message-format=json) \
+    >"$MG_RUN_DIR/native-build.jsonl" || { MG_CONF_NATIVE_ERROR=true; mg_status error; return 2; }
+  if ! executable="$(jq -ers '[.[] | select(.reason=="compiler-artifact" and .target.name=="meguri-cli" and .executable!=null) | .executable]
+    | if length==1 then .[0] else error("expected one meguri-cli executable") end' "$MG_RUN_DIR/native-build.jsonl")"; then
+    executable=""
+  fi
+  if [ -z "$executable" ] || [ ! -x "$executable" ]; then
+    mg_failure native/build "Cargo did not report an executable meguri-cli; see log.txt"
+    mg_status error
+    MG_CONF_NATIVE_ERROR=true
+    return 2
+  fi
+  if [ -z "${MG_CONF_NATIVE_TMPDIR:-}" ]; then
+    mg_conf__scratch prepare || { mg_conf__native_error; return 2; }
+    MG_CONF_NATIVE_TMPDIR="$MG_RUN_DIR/native-scratch/mount/tmp"
+  fi
+  mg_conf__scratch check || { mg_conf__native_error; return 2; }
+  (cd "$MG_ROOT/core" && TMPDIR="$MG_CONF_NATIVE_TMPDIR" "$executable" "$@")
+  rc=$?
+  return "$rc"
 }
 
 # mg_conf__quote <args...>: one shell word list for a bash -c script.
@@ -225,7 +281,10 @@ mg_conformance() {
   elif [ "$live" = true ]; then
     tiers="T0 and T1"
   fi
-  if [ "$failed" = true ] || [ -s "$MG_STATE/failures.jsonl" ]; then
+  if [ "${MG_CONF_NATIVE_ERROR:-false}" = true ]; then
+    mg_message "conformance: native scratch environment error; see log.txt"
+    mg_status error
+  elif [ "$failed" = true ] || [ -s "$MG_STATE/failures.jsonl" ]; then
     mg_message "conformance: $tiers failed ($summary)"
     mg_status fail
   else

@@ -45,6 +45,7 @@ mg_conf__dev() {
   mg_json_array "$@" >>"$CALLS.docker-args"
   fixture_report t0 "$MG_RUN_DIR/t0-docker.json" pass
 }
+eval "$(declare -f mg_conf__cli_native | sed '1s/mg_conf__cli_native/mg_fixture__real_native/')"
 mg_conf__cli_native() {
   local tier=t0 report="" prev="" arg
   for arg in "$@"; do
@@ -66,6 +67,149 @@ EOF
 mg() {
   run --separate-stderr "$SB/tools/mg" "$@"
   result="${lines[${#lines[@]} - 1]:-}"
+}
+
+native_scratch_stubs() {
+  export STUB_CLI="$SB/core/stub-cli" CLI_EXIT=0 CLI_WAIT=no
+  cat >"$SB/stubs/cargo" <<'EOF'
+#!/bin/sh
+printf '%s\n' "${TMPDIR-unset}" >>"$CALLS.build-tmp"
+printf '%s\n' "$PWD" >>"$CALLS.build-cwd"
+printf '%s\n' "$*" >>"$CALLS.build-args"
+if [ "$1" = build ]; then
+  jq -nc --arg exe "$STUB_CLI" '{reason:"compiler-artifact",target:{name:"meguri-cli"},executable:$exe}'
+fi
+EOF
+  cat >"$STUB_CLI" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$TMPDIR" >>"$CALLS.child-tmp"
+printf '%s\n' "$PWD" >>"$CALLS.child-cwd"
+prev= tier=t0 report=
+for arg in "$@"; do
+  [ "$arg" != --live ] || tier=t1
+  [ "$prev" != --report ] || report="$arg"
+  prev="$arg"
+done
+if [ "$CLI_WAIT" = yes ]; then
+  echo "$$" >"$CALLS.ready"
+  exec sleep 300
+fi
+jq -n --arg tier "$tier" '{tier:$tier,totals:{pending:0,reference:0,pass:1},failed:0,wall_ms:1,
+  scenarios:[{scenario:"smoke/fixture",status:"pass",fails:false,message:"fixture",repro:"fixture"}]}' >"$report"
+exit "$CLI_EXIT"
+EOF
+  chmod +x "$SB/stubs/cargo" "$STUB_CLI"
+  cat >>"$SB/tools/mg.d/zz-conformance-fixture.sh" <<'EOF'
+eval "$(declare -f mg_fixture__real_native | sed '1s/mg_fixture__real_native/mg_conf__cli_native/')"
+mg_conf__scratch() {
+  echo "$1" >>"$CALLS.scratch"
+  [ "${SCRATCH_FAIL:-}" != "$1" ] || return 1
+  case "$1" in
+    selected) echo "${SCRATCH_SELECTED:-true}" ;;
+    prepare) mkdir -p "$MG_RUN_DIR/native-scratch/mount/tmp" ;;
+    check) [ -d "$MG_RUN_DIR/native-scratch/mount/tmp" ] ;;
+    cleanup)
+      [ -d "$MG_RUN_DIR/native-scratch" ] || return 0
+      rmdir "$MG_RUN_DIR/native-scratch/mount/tmp" "$MG_RUN_DIR/native-scratch/mount" "$MG_RUN_DIR/native-scratch"
+      ;;
+  esac
+}
+mg_conf__record_stale() {
+  mg_conf__cli_native conformance run --lane plan --report "$MG_RUN_DIR/stale-before.json" "$@"
+}
+EOF
+}
+
+@test "native scenario children alone inherit exact run TMPDIR including freshness and offline live replay" {
+  native_scratch_stubs
+  local inherited="${TMPDIR-unset}"
+  mg conformance --live --lane all smoke/fixture
+  [ "$status" -eq 0 ]
+  local run_dir="$(dirname "$result")"
+  [ "$(grep -cx prepare "$CALLS.scratch")" -eq 1 ]
+  [ "$(grep -cx check "$CALLS.scratch")" -eq 3 ]
+  [ "$(grep -Fxc -- "$run_dir/native-scratch/mount/tmp" "$CALLS.child-tmp")" -eq 3 ]
+  [ "$(grep -Fxc -- "$inherited" "$CALLS.build-tmp")" -eq 3 ]
+  [ "$(grep -Fxc -- "$SB/core" "$CALLS.build-cwd")" -eq 3 ]
+  [ "$(grep -Fxc -- "$SB/core" "$CALLS.child-cwd")" -eq 3 ]
+  ! grep -q TMPDIR "$CALLS.docker-args"
+  grep -qx docker-t0 "$CALLS"
+  [ ! -e "$run_dir/native-scratch" ]
+}
+
+@test "native process failure cleans scratch and preserves failure" {
+  native_scratch_stubs
+  export CLI_EXIT=7
+  mg conformance --lane native smoke/fixture
+  [ "$status" -eq 1 ]
+  [ ! -e "$(dirname "$result")/native-scratch" ]
+  grep -qx cleanup "$CALLS.scratch"
+}
+
+@test "native scratch setup error stays error without fallback or repeat allocation" {
+  native_scratch_stubs
+  export SCRATCH_FAIL=prepare
+  mg conformance --live --lane native smoke/fixture
+  [ "$status" -eq 2 ]
+  jq -e '.status=="error" and any(.failures[]; .id=="native/scratch")' "$result"
+  [ "$(grep -cx prepare "$CALLS.scratch")" -eq 1 ]
+  [ ! -e "$CALLS.child-tmp" ]
+}
+
+@test "MG cancellation cleans native scratch after its scenario process stops" {
+  native_scratch_stubs
+  export CLI_WAIT=yes
+  local out="$BATS_TEST_TMPDIR/out" pid rc=0 ready=
+  "$SB/tools/mg" conformance --lane native smoke/fixture >"$out" 2>"$BATS_TEST_TMPDIR/err" 3>&- &
+  pid=$!
+  for _ in $(seq 100); do
+    ready="$(cat "$CALLS.ready" 2>/dev/null)" && [ -n "$ready" ] && break
+    sleep 0.1
+  done
+  [ -n "$ready" ]
+  kill -TERM "$pid"
+  wait "$pid" || rc=$?
+  [ "$rc" -eq 2 ]
+  result="$(cat "$out")"
+  jq -e '.status=="error" and any(.failures[]; .id=="cancelled")' "$result"
+  ! kill -0 "$ready" 2>/dev/null
+  [ ! -e "$(dirname "$result")/native-scratch" ]
+  grep -qx cleanup "$CALLS.scratch"
+}
+
+@test "Docker-only and dry native conformance never allocate native scratch" {
+  native_scratch_stubs
+  mg conformance --lane docker smoke/fixture
+  [ "$status" -eq 0 ]
+  [ ! -e "$CALLS.scratch" ]
+  [ ! -e "$CALLS.build-tmp" ]
+  mg conformance --dry-run --lane native smoke/fixture
+  [ "$status" -eq 0 ]
+  [ ! -e "$CALLS.scratch" ]
+  [ ! -e "$CALLS.child-tmp" ]
+}
+
+@test "empty native selection and metadata commands allocate no scratch" {
+  native_scratch_stubs
+  export SCRATCH_SELECTED=false
+  mg conformance --lane native nonexistent
+  # Empty selections need no scratch.
+  ! grep -Eq '^(prepare|check|cleanup)$' "$CALLS.scratch"
+  [ ! -e "$CALLS.child-tmp" ]
+  cat >>"$SB/tools/mg.d/zz-conformance-fixture.sh" <<'EOF'
+mg_job fx-native-metadata host fx_native_metadata "fixture metadata"
+fx_native_metadata() { mg_conf__cli_native conformance to-json missing.yaml; }
+EOF
+  rm "$CALLS.scratch"
+  mg fx-native-metadata
+  [ "$status" -eq 0 ]
+  [ ! -e "$CALLS.scratch" ]
+}
+
+@test "native scratch helper ownership and hdiutil lifecycle stubs" {
+  run python3 -I -B -m unittest discover -s "$REPO_ROOT/tools/tests/conformance_scratch" -v
+  printf '%s\n' "$output"
+  [ "$status" -eq 0 ]
 }
 
 @test "conformance live-only runs fresh T1 without T0 tests or replays" {
