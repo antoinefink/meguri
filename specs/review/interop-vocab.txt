@@ -1,0 +1,8 @@
+# Interface names the review specs use that are not ordinary words: the
+# collection config key the timebox reads, and the congratulations
+# compatibility members (sched/counts C7) they compare with.
+timeLim
+secs_until_next_learn
+learning_remaining
+review_remaining
+new_remaining

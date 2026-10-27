@@ -397,8 +397,28 @@ For every committed change set that is not the session's own answer, undo or red
 - Whatever the class, the session computes the tokens and render keys of the head items the change set touched (card, note, note type, deck, preset or config key) and reports changes in a head diff: `restate` when the token changed, `rerender` when the render key changed.
 - Recompute C5/C6 fingerprints for affected note/type/home-deck/config dependencies even when their timestamps are equal. Shared-note/type edits and resolved ancestor-deck renames refresh every dependent head. Unrelated entries retain their identities/pages; memory-only changes keep C6. Complete R330 head values still refresh when their settings change with equal keys, through the existing complete-item head diff/event.
 - The current card: `CurrentCardChanged{eligible}` when it is still presented and its token or render key changed (the side on screen is rendered again, R456); `{memoryOnly}` when its only change is the memory state in `data` (`s`, `d`, `dr`, `decay`, `lrt`; the change set's memory-only flag, U24): new labels and token, no new page; `{removed}` when it is no longer presented: the UI moves to the new head with "This card was changed elsewhere" (R456).
-- An op the user starts from the review screen (U48's bury, suspend, flag, forget, set due date, and editing, R1812) names the session and returns a head diff in its result: the head of a fresh build at its commit instant, with the current-card rule, computed by patching or rebuilding (C18 checks it against a fresh build).
+- An op the user starts from the review screen (U48's bury, suspend, flag, forget, set due date, U30's mark, Delete Note, and editing, R1812) names the session and returns a head diff in its result: the head of a fresh build at its commit instant, with the current-card rule, computed by patching or rebuilding (C18 checks it against a fresh build).
 - A memory-state change of other cards keeps their render keys and changes their tokens.
+
+### C13.1 Mark and Delete Note from the review screen (R381, R387, R392, R393)
+
+Neither op emits `CurrentCardChanged` for its own commit, and neither shows the changed-elsewhere notice (`review/reviewer-strings#S10`); the result's head diff carries the change. As `sched/manual-ops#M9` does for its ops, each takes an optional review-session id: with one, the step records the session (`engine/undo` M1) and the result carries the head diff; without one, an open session reacts to the change set as to any other change. `tags/flags-and-marked#M2` and `notes/note-records#D1` own the ops and do not list that input and output yet; this section is the contract until they do.
+
+**Mark Note** (mark or unmark, `tags/flags-and-marked#M2`, with the session id):
+
+- Class patch (a `notes` entry, `sched/queue-building#B10`): no rebuild. The head holds the same items in the same order; counts, `validUntil` and every `stateToken` are unchanged (the note is not a C5 input).
+- Every head item of the marked note: `marked` flipped and a new `renderKey` (the note's `mod` and tag tokens are C6 inputs), so it is marked `rerender`. Items of other notes carry no mark.
+- The current card stays item 0 on the same side. The UI redraws the ★ indicator in place and does not render the side on screen again (R381); that one page stays shown under its old key, the only exception to C6 and to B10's "render the current card again", until the side changes or the card is presented again. Every prepared page that is not on screen follows C6: the current card's unrevealed answer side and the pages of the note's other cards are discarded and prepared again for their new keys. Decided 2026-10-27: a template that prints the tags shows the new tags from the next side rendered (the answer side revealed after the mark), as in Anki.
+- Undo of the step ("Update Tag" for a mark, "Remove Tag" for an unmark) gives the same kind of diff with `marked` back; redo gives the op's diff again. The current card stays where it is.
+- Example: head [A1, B1, A2] with A1 and A2 cards of note A; mark A → diff [A1 `rerender`, B1, A2 `rerender`], `marked` true on A1 and A2, tokens and counts as before.
+
+**Delete Note** (`notes/note-records#D1`, with the session id):
+
+- Class rebuild (removed `cards` entries). The result's head is a fresh build at the commit instant; none of the note's cards is in it, so the current-card rule does not keep the current card.
+- The diff lists every head item of that note among the ids that left, the current card first, and the new items as `added` (with `restate`/`rerender` for items whose token or key changed). Counts drop by the deleted cards the queue counted.
+- The new item 0 is presented on its question side, from its prepared page when its `(cardId, stateToken, renderKey)` is unchanged. Deleting on the answer side records no answer (R392). An empty head ends in `WaitingUntil` or `Finished` (C17).
+- Undo ("Delete Note", R393): the note and its cards come back (D1), the session builds afresh and puts the restored card that was current first, as C15 does for an answer's undo; it is shown on its question side. The other restored cards take their places in the queue's order. Redo deletes again with the same diff as the first time.
+- Example: four new cards A1, B1, A2, A3 (A3 beyond the head), head [A1, B1, A2], New 4; delete note A (A1, A2, A3) → items [B1], left [A1, A2], New 1. Undo → head [A1, B1, A2], New 4.
 
 ## C14. A new day (R459 to R463, R600, AE13)
 

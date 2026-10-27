@@ -203,10 +203,12 @@ The tree that Home and the sidebars show (counts are U41's):
 | delete (D8) | "Delete Deck" | removed cards, processed decks |
 | collapse (D10) | "Expand/Collapse" (Meguri only) | |
 | select (D11) | none (skip-undo) | |
+| set description (below) | "Update Deck" (none when nothing changes) | |
 
+- **Set description** (R81, R84, R69): input a deck id, the text and the Markdown flag. The text is any string and is stored exactly as given: no trimming, no line-ending change, no Unicode normalization; an empty text with the flag set is valid. Refusals: `NotFound`, and `filtered_deck` for a filtered deck (it has no description; Anki does not open the editor for one). It writes the normal deck's `description` and `markdown_description` (legacy `desc` and `md`) through D13's write path: everything else is kept, an equal record writes nothing and records no step, otherwise the deck is stamped. The change set lists the deck, so an open review session rebuilds (`sched/queue-building#B10`). Step "Update Deck" (`specs/conformance/undo-ops.md` V4 `update_deck`), source `UserUndoable`, kind `Other`; undo puts both fields back. The editor calls it only when the text or the flag changed (R84); Anki's dialog saves on OK whatever changed.
 - None of them is a schema change (`notetypes/schema-changes` G2).
 - Each is one operation of the engine (U24): one transaction, one change set (decks added, changed and removed, cards changed and removed, notes removed, config keys, graves), and an undo step as listed (U25). An operation that changes nothing records no step but, like every operation, empties the redo history (`engine/undo` A2).
-- Refusals write nothing and record no step: `filtered_parent`, `too_deep`, `under_descendant`, `NotFound`.
+- Refusals write nothing and record no step: `filtered_parent`, `too_deep`, `under_descendant`, `filtered_deck`, `NotFound`.
 
 ## D15. Differences from Anki
 
