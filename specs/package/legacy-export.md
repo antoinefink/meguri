@@ -3,7 +3,7 @@
 Spec: package/legacy-export
 Requirements: R1619 (legacy part), R1625 (legacy option), R1618 (the legacy option of `.apkg` export), R1481 (caller side); supports R1464, R1466, R1922, R2004, R2013, R2015
 Anki: 26.09.3
-Scenarios: conformance/scenarios/package/legacy-export/ (none recorded yet; L14 lists them)
+Scenarios: conformance/scenarios/package/legacy-export/ (all recorded; L14 lists them)
 
 What Meguri writes when the user turns on "Support older Anki versions" for a deck package (`.apkg`, U123) or a collection package (`.colpkg`, U124): the legacy 2 container, a schema-11 collection in it, raw media entries and a JSON media map. The selection, scrub and media list of a deck package are `package/apkg-export` A2 to A9; the whole-collection media inventory is `package/file-export#E7`; the schema-11 copy is `storage/schema11-downgrade` (D1 to D11); reading these packages is `package/container#P17`. This spec adds the container, the order of steps around the downgrade, the preflight, the verification and the errors. The scenario vocabulary is `specs/conformance/package-ops.md` and `specs/conformance/model-ops.md` L6 and L7.
 
@@ -192,7 +192,7 @@ No ported scenario observes any of them. A scenario that observes `conf` of a le
 
 Verification of U123 also includes `conformance/scenarios/model/schema11/apkg-notetypes` (recorded; `export` legacy form `conformance/model-ops#L6` and `package_col` `conformance/model-ops#L7`), on Meguri's executor on the macOS and Linux lanes.
 
-Status (2026-10-27): `apkg-listing` and `apkg-columns` are recorded; the others wait for E8 and E9, still draft. Two of them use only ops and observations that exist in the runner and the oracle driver today (`export` legacy form, `conformance/model-ops#L6`; `package_col`, `conformance/model-ops#L7`; `package_listing`, `conformance/package-ops#E3`), so they need recording only. The others use forms fixed, as drafts, in `specs/conformance/package-ops.md`, which neither executor implements yet; they need the driver work and the recording:
+Status (2026-10-27): every scenario of the table below is recorded; the oracle driver implements E8 and E9, which stay draft until Meguri's typed model reads them (`conformance/dsl#D7.2`). `apkg-listing` and `apkg-columns` use only ops and observations that exist in the runner and the oracle driver (`export` legacy form, `conformance/model-ops#L6`; `package_col`, `conformance/model-ops#L7`; `package_listing`, `conformance/package-ops#E3`). The others use these forms of `specs/conformance/package-ops.md`, which the oracle implements and Meguri's executor does not yet:
 
 - `export`, deck-package form with `legacy: true`: `conformance/package-ops#E8` (capabilities `export.apkg` and `export.apkg.legacy`).
 - `export`, collection-package options `{format: colpkg, name, media?, legacy?}`: `conformance/package-ops#E9` (capability `export.colpkg.legacy`, and `export.colpkg.media` with media).
@@ -206,11 +206,11 @@ Scenarios to record (`conformance/scenarios/package/legacy-export/`):
 |---|---|---|
 | `apkg-listing` | a collection with notes of two note types, decks, a filtered deck and review log, exported with `conformance/model-ops#L6`'s legacy form: `package_listing` equals Anki's (entries `meta` 0, `collection.anki21` 8, `collection.anki2` 0, `media` 0; `meta_version` 2; `collection.anki21` `ver` 11, rollback, the counts, `opens` true; the placeholder) | existing ops; recording |
 | `apkg-columns` | the same export: `package_col` of `ver`, `decks`, `dconf` and `tags` equals Anki's (D3.1 through A3 to A7: the default deck, a filtered deck, both presets, `tags` `{}`) | existing ops; recording. Adding `conf` needs the `curModel` deviation (L13) |
-| `apkg-options` | legacy deck export of one deck without scheduling, presets on: `package_db_dump` equals Anki's (A6's scrub in the schema-11 file) | new `export` form, `package_db_dump` |
-| `apkg-media` | A17's `media-selection` source, legacy: `package_media` equals Anki's set (names, sizes, SHA-1), entries stored | new `export` form, `package_media` |
-| `apkg-oracle-import` (live, T1) | Meguri's legacy deck package of a deck with subdecks, scheduling and presets; Anki imports it into a new collection; the dump equals Anki's own legacy export and import of the same deck | new `export` and `import` forms |
+| `apkg-options` | legacy deck export of one deck without scheduling, presets on: `package_db_dump` of `notes`, `cards`, `revlog` and `graves` equals Anki's (A6's scrub in the schema-11 file), and `package_col` of `ver`, `decks`, `dconf` and `tags` | new `export` form, `package_db_dump` |
+| `apkg-media` | A17's `media-selection` source, legacy: `package_media` equals Anki's set (names, sizes, SHA-1), and `package_listing` shows the entries stored | new `export` form, `package_media` |
+| `apkg-oracle-import` (live, T1) | Meguri exports the legacy deck package of deck `A` with subdecks, scheduling and presets, then deletes `A` and its subdecks; after the handoff Anki imports the package into that collection with scheduling and presets; the dump (graves of the deletion included) equals Anki's own legacy export, deletion and import of the same deck | new `export` and `import` forms |
 | `colpkg-listing` | legacy `.colpkg` with media off, then with media on and two files: `package_listing` equals Anki's (raw media entries, `media` stored) | new `colpkg` form |
-| `colpkg-oracle-import` (live, T1) | Meguri's legacy `.colpkg` with media; Anki imports it; collection dump and media folder equal the source's, except D7's documented fields and `col.scm` and `col.mod`, which the import sets to its own instant (`conformance/package-ops#E2.2`, R1626) | new `colpkg` form |
+| `colpkg-oracle-import` (live, T1) | Meguri's legacy `.colpkg` with media; Anki removes the two files, imports the package; collection dump and media folder equal the source's, except D7's documented fields (here every `config` row's `usn` and `mtime_secs` 0 and `val` in compact form) and `col.scm` and `col.mod`, which the import sets to its own instant (`conformance/package-ops#E2.2`, R1626) | new `colpkg` form |
 
 Goldens are recorded with `tools/mg oracle record package/legacy-export` at the pin of `conformance/oracle.json`. A scenario that observes the collection after a legacy `.colpkg` export observes nothing but the package (L13), or carries the deviation.
 

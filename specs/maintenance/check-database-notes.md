@@ -106,7 +106,7 @@ Each is a deviation entry in `conformance/deviations.yaml`, added with the scena
 |---|---|---|
 | `check-db-tags-keep-rows` | empties the tag registry and rebuilds it from the notes (N2) | keeps the rows, adds the notes' new tags, then removes only rows no note uses as a tag or an ancestor |
 | `check-db-tags-keep-rows-tree` | after the rebuild (N2) the registry has no row for the implicit parent `a`, and `tag_tree` shows `a` collapsed (`tag-rebuild`) | the kept row keeps `a`'s collapse state: expanded |
-| `check-db-io-unchanged-skip` (held with `io-field-tags`, N10.2) | writes every Image Occlusion note type with notes on every run (N5) | writes it only when a field's config changes |
+| `check-db-io-unchanged-skip` | writes every Image Occlusion note type with notes on every run (N5) | writes it only when a field's config changes |
 | `check-db-recover-invalid-utf8` | stops with an error when the first note of a missing note type is not valid UTF-8 (N4) | counts the fields from the bytes and recovers |
 | `check-db-basic-stamped` | adds the fallback Basic note type with `mtime_secs` 0 and `usn` 0 (N7) | local stamps (`usn` -1, `mtime_secs` `now_s`) |
 | `check-db-default-deck-restored` | stops with an error when a card it generates has no usable deck because deck 1 is missing or filtered (N6.6) | creates deck 1 as `Default` and counts it in `decks_missing`; with deck 1 filtered, skips that card |
@@ -143,13 +143,13 @@ Decided 2026-10-27: a scenario whose `db_exec` writes `notetypes`, `fields`, `te
 | `io-field-tags` | `ensure_io_notetype`, one note, the Header field's `prevent_deletion` cleared and its `tag` removed by an `update_notetype` `field_options` edit (`conformance/notetype-ops#T5.1`, draft): tag 2 and protection back; the note type's `mtime_secs` and `usn` (deviation `check-db-io-unchanged-skip` on the second run) |
 | `tag-rebuild` | rows `a` (expanded), `a::b` (used, collapsed), `old` (unused, expanded), a note tagged `a::b` and `New` with no row: `tag_tree` and the `tags` rows (deviations `check-db-tags-keep-rows` for the rows, `check-db-tags-keep-rows-tree` for `tag_tree`, where Anki shows `a` collapsed and Meguri expanded). The rows and the note's tags are written by `db_exec`: Anki's note add registers a new tag collapsed and makes no row for an implicit parent such as `a` |
 | `no-card-note` | a note whose only card was deleted by `db_exec`, its note type's last deck (`_nt_<id>_lastDeck`) set to a second deck by `db_exec`: card 0 generated in that deck, at the counter's position, `nextPos` moved, not counted |
-| `all-notes` | every damage above with C18.2's card damage of `maintenance/check-database` in one collection, `future-ids-cards` left out: one report. The cards N6.6 generates take ids from `now_ms` up, which C10.4 would then need for a future card, and Anki stops on a taken id (C10.4). Also left out: `no-notetypes` (it deletes every note), `default-deck-missing` (Anki fails, below) and `io-field-tags`' damage (held, below); the tag rows are not observed (`tag-rebuild` shows them) |
+| `all-notes` | every damage above with C18.2's card damage of `maintenance/check-database` in one collection, `future-ids-cards` left out: one report. The cards N6.6 generates take ids from `now_ms` up, which C10.4 would then need for a future card, and Anki stops on a taken id (C10.4). Also left out: `no-notetypes` (it deletes every note), `default-deck-missing` (Anki fails, below) and `io-field-tags`' damage (below); the tag rows are not observed (`tag-rebuild` shows them) |
 
 Recorded with the rejection `failed` of `conformance/collection-check` K10 on Anki's side, with no second `check_db`:
 
 - `default-deck-missing`: deck 1 deleted by `db_exec` while no card is in it, and a note whose only card was deleted, its note type with no last deck. Anki `failed`; Meguri creates deck 1 `Default` (`decks_missing` 1) and generates the card there. Deviation `check-db-default-deck-restored`.
 
-Decided 2026-10-27: `io-field-tags` changes the Header field's `prevent_deletion` and `tag` with the `field_options` options of `conformance/notetype-ops#T5.1`. They are draft, so the oracle maintainer holds the scenario, and with it the deviation `check-db-io-unchanged-skip` (N9), until the oracle driver supports them (T5.1); `all-notes` may add its damage then.
+Decided 2026-10-27: `io-field-tags` changes the Header field's `prevent_deletion` and `tag` with the `field_options` options of `conformance/notetype-ops#T5.1`. They are draft (T5.1); the oracle driver supports them, and the scenario is recorded with the deviation `check-db-io-unchanged-skip` (N9) on its second run. `all-notes` leaves that damage out.
 
 ### N10.3 Meguri tests (`core/crates/meguri-engine/tests/check_db.rs`)
 

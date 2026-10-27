@@ -3,7 +3,7 @@
 Spec: package/apkg-import
 Requirements: R1595 (core side), R1596 (with U124), R1597, R1598, R1599 (the legacy and `.apkg` parts), R1600 (data; the sheet is U162), R1601, R1602, R1603, R1604, R1607, R1608, R1609, R1610, R1611, R1612, R1613, R1614, R1615, R1616 (core side), R2004, R2015; AE67; test-enforces R1846 and R1852 for import; the interface for R1605 and R1606 (U121)
 Anki: 26.09.3
-Scenarios: conformance/scenarios/package/apkg-import/ (none recorded yet; I18 lists them)
+Scenarios: conformance/scenarios/package/apkg-import/ (I18 lists them)
 
 How Meguri imports a deck package (`.apkg`, U120) into the open collection: the session that reads and checks the package (I2 to I4), the options (I5), what is taken from the package (I6), note types without a merge (I7), the port that note type merging plugs into (I8, U121), notes (I9), decks and presets (I10), cards and review log (I11), media (I12), the import log (I13), and Meguri's operation with its preview, progress, cancellation, errors, temporary files and undo class (I14 to I16). The container, its limits and staging are `package/container` (P1 to P10, P12; the legacy formats P17, classification P18). The UI that drives it is U162 through U133. Importing a whole collection (`.colpkg`) is U124's (`package/container#P16`, `engine/collection-replace`).
 
@@ -377,12 +377,12 @@ Decided 2026-10-27: Meguri differs where Anki fails, guesses, can overwrite a fi
 
 ### I18.1 What the oracle maintainer adds
 
-Status (2026-10-27): the oracle driver has the deck-package `import` form (`specs/conformance/package-ops.md` E6) and the latest deck-package `export` (E7); the refusal fixtures are under `conformance/fixtures/package/apkg/` (`oracle/fixtures/package/apkg.py`). The fixtures made with old clients (legacy 1, v1 scheduler, ids past the cutoff, a map member past P8's ratio) do not exist yet, so `legacy-1`, `v1-scheduler` and I3.1's card-id repair are not recorded. What I18.1 asked for:
+Status (2026-10-27): the oracle driver has the deck-package `import` form (`specs/conformance/package-ops.md` E6) and the latest deck-package `export` (E7); the refusal fixtures are under `conformance/fixtures/package/apkg/` (`oracle/fixtures/package/apkg.py`). The old-client fixtures `apkg/legacy-1.apkg` and `apkg/v1-scheduler.apkg` (Anki 2.1.26's own exports of one v1-scheduler collection, without and with scheduling, both in the legacy 1 layout; `oracle/fixtures/package/oldclient.py`) and the crafted `apkg/card-ids-ahead.apkg` and `apkg/deck-tree.apkg` (`apkg.py`, from `storage/schema-11.anki2`) exist, and `legacy-1`, `v1-scheduler`, `ids-cutoff`, `deck-tree` (this spec) and `package/notetype-merge/by-name` are recorded. Still missing: a package with a member that decodes past P8's ratio (I18.3 covers it on Meguri's side). What I18.1 asked for:
 
 - `import`, deck-package form: `{format: apkg, fixture | name, merge_notetypes, update_notes: if_newer | always | never, update_notetypes: ..., with_scheduling, with_deck_configs}`, every option required. Output: the I13 log with logical ids (`#nN` for target notes, package ids where I13 says so), each list's fields, and `found_notes`. Rejections `too_new`, `corrupt`, `notetype_kind_conflict`. Oracle: Anki's deck-package import with those options into the session collection, its media folder and media database. Capability `import.apkg`.
 - The latest deck-package form of `export` (A17), so a scenario can export its own collection, change it, and import the package back.
 - Fixture packages under `conformance/fixtures/package/apkg/`, made by the maker of `package-ops.md` E4 from scenario-style collections (own note types, R1959) with Anki 26.9.3: a latest-format export with media, the same exported with "Support older Anki versions" (legacy 2), and a legacy 1 package (`collection.anki2`, a JSON map, no `meta`) from the storage maker's old wheels; a v1-scheduler package with learning cards, a relearning card and cards in a filtered deck with and without rescheduling; packages with ids past the cutoff; and crafted variants (an unsafe legacy name `../x.jpg`, `meta` version 4, a legacy map that is not JSON, a member that decodes past P8's ratio).
-- Crafted deck-package fixtures for the parts of I18.2 that no export can make, since an export always adds the ancestors of the decks it takes (`package/apkg-export#A3`) and refuses ids more than a day ahead (`package/apkg-export#A8`). Decided 2026-10-27, the list: for `decks`, a package whose normal deck `A::B` comes without `A` (the missing parent created, I10.2 step 5), and one whose normal deck `F::x` comes without `F`, imported into a target that has a filtered deck `F` (the filtered ancestor: a normal deck `F` plus the suffix `S` added first and `F::x` placed under it, I10.2 step 5); for `ids`, a package whose card ids are three days ahead (I3.1's card repair; one of the cutoff packages above, which must be crafted for the same reason). Until they exist, those parts of `decks` and `ids` are not recorded, and the recorded scenarios cover the rest of each row.
+- Crafted deck-package fixtures for the parts of I18.2 that no export can make, since an export always adds the ancestors of the decks it takes (`package/apkg-export#A3`) and refuses ids more than a day ahead (`package/apkg-export#A8`). Decided 2026-10-27, the list: for `decks`, a package whose normal deck `A::B` comes without `A` (the missing parent created, I10.2 step 5), and one whose normal deck `F::x` comes without `F`, imported into a target that has a filtered deck `F` (the filtered ancestor: a normal deck `F` plus the suffix `S` added first and `F::x` placed under it, I10.2 step 5); for `ids`, a package whose card ids are three days ahead (I3.1's card repair; one of the cutoff packages above, which must be crafted for the same reason). They are `deck-tree` and `ids-cutoff` (I18.2), recorded apart from `decks` and `ids`, which cover the rest of each row.
 
 ### I18.2 Scenarios to record
 
@@ -393,15 +393,18 @@ Status (2026-10-27): the oracle driver has the deck-package `import` form (`spec
 | `conflicting` | same GUID, target note moved to another note type, merge off: logged, target note byte-identical |
 | `notetypes` | I7: new id added; same schema newer updated with `IfNewer`; different schema copy added and notes remapped; re-import reuses the copy; `curModel` after a copy; a name collision gets `+`; a newer same-schema update with a changed front adds the missing cards to target notes (deck, each at the position of its note's new card, target `nextPos` unchanged, `scm` unchanged) and an incoming card for such a pair is then skipped |
 | `notetype-sort-field` | I7: an update with another sort field rewrites target notes' `sfld`, `mod`, and sets `scm`; then `IfNewer` notes compare against the new `mod` |
-| `decks` | I10.2: case match `japanese`/`Japanese`; normal vs filtered renamed with the suffix (the clock frozen) and its child; missing parent created; a filtered ancestor; today limits remapped |
+| `decks` | I10.2: case match `japanese`/`Japanese`; normal vs filtered renamed with the suffix (the clock frozen) and its child; today limits remapped |
+| `deck-tree` | I10.2 step 5, with the crafted `apkg/deck-tree.apkg`: `A::B` without `A` creates the normal parent `A`; `F::x` without `F` into a target with a filtered `F` adds the normal `F <now>` and places `F::x` under it |
 | `cards-existing-pairs` | I11.1: existing (`nid`, `ord`) pairs skipped, existing card rows unchanged; a duplicate note gains its missing card |
 | `scheduling-on` | I11.2 and I11.3: package and target days 7 apart, review, suspended review, learning and filtered cards, revlog added, card `data` kept |
 | `scheduling-off` | I6: new cards at the package's positions, flags 0, `leech`/`marked` removed, filtered decks normal, default deck not taken, target `nextPos` unchanged |
 | `presets` | I10.1: off none; on only absent ids; FSRS parameters emptied without scheduling |
 | `media-rules` | I12: identical content reused, a `_font.woff` present with other content kept, unreferenced entries not copied, a static entry copied unreferenced, entities in a name |
-| `ids` | I3.1 and I9: a note id equal to a target id shifted by 999; card ids 3 days ahead repaired |
-| `legacy-1`, `legacy-2` | P17: both formats import and match |
-| `v1-scheduler` | I3.2: conversion of revlog, relearning and filtered cards |
+| `ids` | I9: a note id equal to a target id shifted by 999 |
+| `ids-cutoff` | I3.1, with the crafted `apkg/card-ids-ahead.apkg`: card ids 3 days ahead repaired to ids from `now_ms` upward in ascending order, review-log `cid` following |
+| `legacy-1` | P17: Anki 2.1.26's legacy 1 export (`apkg/legacy-1.apkg`, all cards new, a JSON map with one file) imports with its media; its decks map by name |
+| `legacy-2` | P17: both formats import and match |
+| `v1-scheduler` | I3.2, with Anki 2.1.26's export `apkg/v1-scheduler.apkg`: conversion of revlog, relearning and filtered cards (with and without rescheduling, with delays) |
 | `refusals` | `meta` 4 → `too_new`; `../x.jpg` in a legacy map, a malformed map, a non-zip `.apkg` → `corrupt`; target unchanged |
 | `undo` | import, `undo_status` "Import", undo → dump equals the pre-import dump, redo → equals the import's |
 | `options-keys` | I5: the five keys after imports with each value |

@@ -1467,30 +1467,52 @@
           }
         },
         "export": {
-          "description": "Draft (package), except the legacy package form {format: apkg, name, legacy: true} (model-ops.md L6), the collection package form {format: colpkg, name} (package-ops.md E1) and the deck package form {format: apkg, name, limit, scheduling, presets, media} (package-ops.md E7).",
+          "description": "Stable (package): the legacy package form {format: apkg, name, legacy: true} (model-ops.md L6), the collection package form {format: colpkg, name} (package-ops.md E1) and the deck package form {format: apkg, name, limit, scheduling, presets, media} (E7). Draft until the typed model reads them (dsl.md D7.2): the collection package options form with media and legacy (E9) and the deck package form with legacy: true (E8).",
           "allOf": [
             { "$ref": "#/$defs/draft_args" },
             { "required": ["format", "name"], "properties": { "format": { "enum": ["apkg", "colpkg"] }, "name": { "type": "string" } } },
             {
-              "if": { "required": ["legacy"] },
+              "if": { "required": ["legacy"], "not": { "properties": { "format": { "const": "colpkg" } } } },
               "then": {
-                "required": ["format", "name", "legacy"],
-                "additionalProperties": false,
-                "properties": {
-                  "format": { "const": "apkg" },
-                  "name": { "$ref": "#/$defs/package_name" },
-                  "legacy": { "const": true }
-                }
+                "oneOf": [
+                  {
+                    "description": "model-ops.md L6: the whole-collection legacy form.",
+                    "required": ["format", "name", "legacy"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "format": { "const": "apkg" },
+                      "name": { "$ref": "#/$defs/package_name" },
+                      "legacy": { "const": true }
+                    }
+                  },
+                  {
+                    "description": "package-ops.md E8: the deck package form, every key, with legacy: true.",
+                    "required": ["format", "name", "limit", "scheduling", "presets", "media", "legacy"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "format": { "const": "apkg" },
+                      "name": { "$ref": "#/$defs/package_name" },
+                      "limit": { "$ref": "#/$defs/export_limit" },
+                      "scheduling": { "type": "boolean" },
+                      "presets": { "type": "boolean" },
+                      "media": { "type": "boolean" },
+                      "legacy": { "const": true }
+                    }
+                  }
+                ]
               }
             },
             {
               "if": { "required": ["format"], "properties": { "format": { "const": "colpkg" } } },
               "then": {
+                "description": "package-ops.md E1, and E9 with media or legacy (booleans, false when missing).",
                 "required": ["format", "name"],
                 "additionalProperties": false,
                 "properties": {
                   "format": { "const": "colpkg" },
-                  "name": { "$ref": "#/$defs/colpkg_name" }
+                  "name": { "$ref": "#/$defs/colpkg_name" },
+                  "media": { "type": "boolean" },
+                  "legacy": { "type": "boolean" }
                 }
               }
             },
@@ -1921,7 +1943,12 @@
             "description": { "type": "string" },
             "plain_text": { "type": "boolean" },
             "collapsed": { "type": "boolean" },
-            "exclude_from_search": { "type": "boolean" }
+            "exclude_from_search": { "type": "boolean" },
+            "tag": {
+              "description": "Draft (notetype-ops.md T5.1): null removes the tag.",
+              "oneOf": [{ "type": "integer", "minimum": 0, "maximum": 4294967295 }, { "type": "null" }]
+            },
+            "prevent_deletion": { "description": "Draft (notetype-ops.md T5.1).", "type": "boolean" }
           }
         },
         "add_template": {

@@ -842,6 +842,61 @@ deviations:
     scenarios: [package/collection-package/missing-media-map]
     pointer: /steps/2
     transform: {replace: {}}
+  # specs/package/notetype-merge.md J4.1, J7, J14 (apkg-merge-layout): the
+  # target's fields keep their positions and new fields follow in the
+  # incoming order; Anki 26.9.3 appends two new fields placed before a field
+  # the target has in reverse order, and the updated note's values with them.
+  - id: apkg-merge-layout
+    requirement: R1605
+    summary: A merge appends the incoming note type's new fields in its own order (Hint, Source); Anki appends them reversed.
+    test: package/notetype-merge/two-new-fields
+    scenarios: [package/notetype-merge/two-new-fields]
+    pointer: /steps/14/db_exec/rows
+    transform: {replace: [[Front, 0], [Back, 1], [Hint, 2], [Source, 3]]}
+  - id: apkg-merge-layout-notes
+    requirement: R1605
+    summary: The updated note's values follow the merged order of apkg-merge-layout (field map 0, 3, 1, 2).
+    test: package/notetype-merge/two-new-fields
+    scenarios: [package/notetype-merge/two-new-fields]
+    pointer: /steps/15/db_exec/rows
+    transform: {replace: [["one\x1fa\x1fhint\x1fsource", one]]}
+  - id: apkg-merge-layout-log
+    requirement: R1605
+    summary: The import log lists the updated note's fields as written, in the merged order of apkg-merge-layout (apkg-import.md I13).
+    test: package/notetype-merge/two-new-fields
+    scenarios: [package/notetype-merge/two-new-fields]
+    pointer: /steps/13/import/updated/0/fields
+    transform: {replace: [one, a, hint, source]}
+  # notetype-merge.md J6 step 3, J14 (apkg-merge-conflict-remap): in stage 2
+  # the package's note type keeps its own notes' values at their positions;
+  # Anki 26.9.3 remaps them with the other note type's maps, which swaps
+  # Front and Back of note two (and so its sort field).
+  - id: apkg-merge-conflict-remap
+    requirement: R1605
+    summary: Stage 2 leaves the package note type's own notes' values in place (two, b); Anki remaps them with the other note type's field map (b, two).
+    test: package/notetype-merge/guid-conflict
+    scenarios: [package/notetype-merge/guid-conflict]
+    pointer: /steps/12/db_exec/rows
+    transform: {replace: [[Pair, "one\x1fa\x1fmore", one], [Pair, "two\x1fb\x1f", two]]}
+  - id: apkg-merge-conflict-remap-cards
+    requirement: R1605
+    summary: Note two's sort field stays two after stage 2 (apkg-merge-conflict-remap).
+    test: package/notetype-merge/guid-conflict
+    scenarios: [package/notetype-merge/guid-conflict]
+    pointer: /steps/15/db_exec/rows
+    transform: {replace: [[0, one], [0, two]]}
+  # notetype-merge.md J7, apkg-import.md I11.1, J14 (apkg-merge-card-ordinal):
+  # an incoming card's ordinal is mapped by its package note's note type and
+  # "pair exists" is tested on the mapped ordinal; Anki 26.9.3 tests the
+  # package ordinal and looks the map up by the target note's id, so for a
+  # note whose target id differs it adds the Card 2 card at ordinal 0.
+  - id: apkg-merge-card-ordinal
+    requirement: R1608
+    summary: Note two's incoming cards map to ordinals 1 and 2, whose pairs exist, and are skipped; Anki adds one at the package ordinal 0.
+    test: package/notetype-merge/template-moved
+    scenarios: [package/notetype-merge/template-moved]
+    pointer: /steps/14/db_exec/rows
+    transform: {replace: [[one, 0], [one, 1], [one, 2], [two, 1], [two, 2]]}
   # fields, a year of any length or sign, a space before a number, second 60)
   # and thins such files; Meguri recognises only the exact names a writer
   # produces, so they are foreign files and stay.
@@ -1080,6 +1135,13 @@ deviations:
       replace:
         - {name: a, collapsed: false, children: [{name: b, collapsed: true, children: []}]}
         - {name: New, collapsed: true, children: []}
+  - id: check-db-io-unchanged-skip
+    requirement: R1644
+    summary: The second Check Database finds every Image Occlusion field config as the first run left it and does not write the note type, so it keeps the first run's mtime_secs and the usn 5 set before the run; Anki writes every such note type on every run (specs/maintenance/check-database-notes.md N5).
+    test: maintenance/check-db-notes/io-field-tags
+    scenarios: [maintenance/check-db-notes/io-field-tags]
+    pointer: /steps/15/db_exec/rows
+    transform: {replace: [[1894705200, 5]]}
   - id: check-db-basic-stamped
     requirement: R1644
     summary: The fallback Basic note type added when none is left gets local stamps (mtime_secs now, usn -1); Anki writes mtime_secs 0 and usn 0 (specs/maintenance/check-database-notes.md N7).
@@ -1173,6 +1235,34 @@ deviations:
     scenarios: [maintenance/check-media/case/same-content]
     pointer: /steps/3/media_trash
     transform: {replace: [{"name": "Cat.jpg", "sha1": "9677cf2e659a266f741aaeea3b6da206c1ccd546", "size": 9}]}
+  - id: check-media-case-variant-merge-greatest
+    requirement: R1648
+    summary: Identical case variants Cat.jpg and CAT.jpg, neither equal to the case key, merge into the greatest name by UTF-8 bytes, Cat.jpg, and CAT.jpg goes to the trash; Anki keeps Cat.jpg and writes a lowercase copy cat.jpg for CAT.jpg (specs/maintenance/check-media.md C5 step 2, C20).
+    test: maintenance/check-media/case/same-content-no-key
+    scenarios: [maintenance/check-media/case/same-content-no-key]
+    pointer: /steps/2/check_media
+    transform: {replace: {"unused": [], "missing": [], "missing_notes": [], "renamed": {"CAT.jpg": "Cat.jpg"}, "dirs": [], "oversize": [], "extracted": 0, "trash_count": 1, "field_templates": []}}
+  - id: check-media-case-variant-merge-greatest-trash
+    requirement: R2018
+    summary: The merged name CAT.jpg is in the trash with its bytes; Anki deletes it permanently (specs/maintenance/check-media.md C5, C10 step 5).
+    test: maintenance/check-media/case/same-content-no-key
+    scenarios: [maintenance/check-media/case/same-content-no-key]
+    pointer: /steps/3/media_trash
+    transform: {replace: [{"name": "CAT.jpg", "sha1": "9677cf2e659a266f741aaeea3b6da206c1ccd546", "size": 9}]}
+  - id: check-media-case-variant-merge-greatest-dir
+    requirement: R1648
+    summary: The folder holds only Cat.jpg; Anki's holds Cat.jpg and its copy cat.jpg (specs/maintenance/check-media.md C5 step 2).
+    test: maintenance/check-media/case/same-content-no-key
+    scenarios: [maintenance/check-media/case/same-content-no-key]
+    pointer: /steps/3/media_dir
+    transform: {replace: {"Cat.jpg": {"sha1": "9677cf2e659a266f741aaeea3b6da206c1ccd546", "size": 9}}}
+  - id: check-media-case-variant-merge-greatest-note
+    requirement: R1648
+    summary: The reference CAT.jpg is rewritten to Cat.jpg; Anki rewrites it to cat.jpg (specs/maintenance/check-media.md C5, C6).
+    test: maintenance/check-media/case/same-content-no-key
+    scenarios: [maintenance/check-media/case/same-content-no-key]
+    pointer: /steps/4/db_exec/rows
+    transform: {replace: [["<img src=\"Cat.jpg\">|<img src=\"Cat.jpg\">", 1894705200, -1]]}
   - id: check-media-case-variant-kept
     requirement: R1648
     summary: Case variants Cat.jpg and cat.jpg with different bytes both stay (listed as a case conflict) and both references are satisfied, so nothing is renamed, missing or unused; Anki adds Cat.jpg's bytes under a hash name and rewrites its reference (specs/maintenance/check-media.md C5).

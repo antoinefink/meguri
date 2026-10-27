@@ -356,7 +356,7 @@ No ported scenario observes any of them. A scenario that dumps the package colle
 
 ## A17. Scenarios and tests
 
-Status (2026-10-27): the oracle driver implements E6, E7, E10 and E11 of `specs/conformance/package-ops.md`, and every scenario of the table below is recorded except `colpkg/export-with-media` (E9 is still draft); Meguri's executor implements none of them yet. The forms and observations they use:
+Status (2026-10-27): the oracle driver implements E6 to E11 of `specs/conformance/package-ops.md`, and every scenario of the table below is recorded; Meguri's executor implements none of them yet. The forms and observations they use:
 
 - `export`, deck-package form: `conformance/package-ops#E7` (capability `export.apkg`; output `{notes: <count>}`; rejections `invalid_ids` and `media_check_required`; a `{deck: <name>}` limit that names no deck is `unknown_ref`).
 - `export`, collection-package options: `conformance/package-ops#E9` (U124).
@@ -368,7 +368,7 @@ Scenarios to record (`conformance/scenarios/package/apkg-export/`):
 
 | Scenario | Shows |
 |---|---|
-| `deck-with-subdecks` (live, T1) | Meguri exports deck `A` (`A`, `A::B`, empty `A::C`, `A::B::D`) with scheduling and presets; Anki imports it into a new collection; the dump equals Anki's own export and import of the same deck. The source's `crt` differs from the importer's, so day-based dues shift (A4). |
+| `deck-with-subdecks` (live, T1) | Meguri exports deck `A` (`A`, `A::B`, empty `A::C`, `A::B::D`) with scheduling and presets, then deletes `A` and its subdecks; after the handoff Anki imports the package into that collection with scheduling and presets; the dump (graves of the deletion included) equals Anki's own export, deletion and import of the same deck. The package's `crt` is the importing collection's own (A4). |
 | `listing` | `package_listing` of Meguri's package equals Anki's: entry names, order, methods, `meta_version` 3, the placeholder (A10) |
 | `no-scheduling` | `package_db_dump` of Meguri's and Anki's packages without scheduling: A6's card table (every type and queue, suspended, buried, learning with `left`, review with and without `pos`, new in a filtered deck, flags), `nextPos` 7, the tags `marked`, `Leech`, `leech::x`, deck limits, today counters, collapse states, filtered deck converted, source deck 1 left out and B6's default deck row in its place with B6's bytes (`common` `08 01 10 01`), note `flags` and `data` written 0 and empty |
 | `with-scheduling` | the same source with scheduling: rows unchanged, review log present, filtered deck kept with its home decks |
@@ -382,7 +382,7 @@ Scenarios to record (`conformance/scenarios/package/apkg-export/`):
 | `media-unnormalized` | a field references an existing `con.jpg`: both refuse, `media_check_required` |
 | `future-ids` | a note id three days ahead: both refuse, `invalid_ids`; an export of another deck succeeds. That a refused export writes no file is not observable with the current kinds: Meguri's own A8 test checks it |
 | `empty-selection` | a deck whose notes all moved away: `{notes: 0}`, package listing equal |
-| `colpkg/export-with-media` (live, T1, U124) | Meguri's `.colpkg` with media; Anki imports it; collection dump and media folder equal the source's |
+| `colpkg/export-with-media` (live, T1, U124) | Meguri's `.colpkg` with media from the standard collection and two files; Anki removes the files and imports it; collection dump and media folder equal the source's (`col.scm` and `col.mod` the import instant), and `package_listing` shows the latest layout with two numbered entries |
 
 Goldens are recorded with `tools/mg oracle record package/apkg-export` at the pin of `conformance/oracle.json`.
 

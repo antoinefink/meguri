@@ -76,7 +76,7 @@ Decided 2026-10-27, for `maintenance/check-database-notes` N10.2's `io-field-tag
 - `tag`: a non-negative integer that fits 32 bits, or `null`, which removes the tag (the field then has none, `tag: null` in T8).
 - `prevent_deletion`: a boolean.
 - The save is T5's, with its checks unless `skip_checks`; a scenario sets them on a note type that `ensure_io_notetype` made (T6) to damage what Check Database repairs (N5).
-- Draft (`dsl.md` D7.2): neither executor has them yet. The oracle maintainer adds them to the driver's field options, the schema and the typed model together, and may fix a detail here then. A `field_options` edit that sets either needs the capability `update_notetype.field_options.io` besides `update_notetype.field_options` (T10.1), so Meguri reports such a scenario `pending` until its notetypes adapter declares it.
+- Draft (`dsl.md` D7.2): the oracle driver and `scenario.schema.json` have them (`tag` an integer from 0 to 4294967295 or `null`; any other JSON type is `invalid_scenario`); Meguri's typed model and executor do not yet. A `field_options` edit that sets either needs the capability `update_notetype.field_options.io` besides `update_notetype.field_options` (T10.1), so Meguri reports such a scenario `pending` until its notetypes adapter declares it.
 
 ## T6. `ensure_io_notetype` (op)
 
